@@ -232,6 +232,120 @@ function ClubActionModal({ club, onSetUp, onClose }) {
   )
 }
 
+// Shown when a registered club whose trial has ended is clicked: its public
+// page is paused, so instead of that dead end we take a trial extension request
+// (emailed to the team by the server). Every field is required.
+function ExtensionRequestModal({ club, onClose }) {
+  const [form, setForm] = useState({ name: '', email: '', phone: '', role: '', message: '' })
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState(false)
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev }
+  }, [onClose])
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const missing = Object.values(form).some((v) => !v.trim())
+    if (missing) { setError('Please fill in every field.'); return }
+    setSubmitting(true)
+    setError('')
+    try {
+      await api.publicRequestTrialExtension({
+        club_name: orgName(club),
+        club_org_id: club.id,
+        club_slug: club.already_registered_slug,
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim(),
+        role: form.role.trim(),
+        message: form.message.trim(),
+        visitor_id: getVisitorId(),
+      })
+      setDone(true)
+    } catch (err) {
+      setError(err?.message || 'Could not send that just now. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Request trial extension"
+        className="w-full max-w-md max-h-[90vh] overflow-y-auto pb-card p-6 relative bg-pb-bg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute top-3 right-3 text-pb-faint hover:text-pb-text text-lg leading-none"
+        >
+          ✕
+        </button>
+        <div className="flex items-center gap-3 mb-4 pr-6">
+          <ClubLogo club={club} size="w-11 h-11" />
+          <div className="min-w-0">
+            <h3 className="font-display font-bold text-lg leading-tight">Request trial extension</h3>
+            <p className="text-sm text-pb-dim truncate">{orgName(club)}</p>
+          </div>
+        </div>
+
+        {done ? (
+          <>
+            <p className="font-mono text-[12px] text-emerald-300" data-testid="trial-extension-done">
+              Thanks. We have your request and will be in touch shortly.
+            </p>
+            <button
+              onClick={onClose}
+              className="mt-4 w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
+            >
+              Close
+            </button>
+          </>
+        ) : (
+          <form onSubmit={submit} className="space-y-2" data-testid="trial-extension-form">
+            <p className="text-sm text-pb-dim mb-1">
+              {orgName(club)}&rsquo;s trial has ended. Tell us a bit about who you are and why
+              you would like more time, and we&rsquo;ll get back to you.
+            </p>
+            <input value={form.name} onChange={set('name')} placeholder="Your name" autoComplete="name" className={FIELD_CLS} />
+            <input value={form.email} onChange={set('email')} type="email" placeholder="Your email" autoComplete="email" className={FIELD_CLS} />
+            <input value={form.phone} onChange={set('phone')} type="tel" placeholder="Your phone number" autoComplete="tel" className={FIELD_CLS} />
+            <input value={form.role} onChange={set('role')} placeholder="Your role at the club (e.g. Secretary)" className={FIELD_CLS} />
+            <textarea
+              value={form.message}
+              onChange={set('message')}
+              rows={4}
+              maxLength={2000}
+              placeholder="Why are you requesting a trial extension?"
+              className={`${FIELD_CLS} resize-none`}
+            />
+            {error && <p className="text-xs text-red-400" role="alert">{error}</p>}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90 disabled:opacity-50"
+              style={{ background: 'var(--pb-accent)' }}
+            >
+              {submitting ? 'Sending…' : 'Request trial extension'}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function Trial() {
   usePageMeta({
     title: 'Find your cricket club | BetterCricket',
@@ -249,6 +363,7 @@ export default function Trial() {
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardClub, setWizardClub] = useState(null)
   const [actionClub, setActionClub] = useState(null)   // club whose choose-modal is open
+  const [extensionClub, setExtensionClub] = useState(null)   // paused club asking for more trial time
 
   // Search-first hero state.
   const [query, setQuery] = useState('')
@@ -347,6 +462,12 @@ export default function Trial() {
     api.publicSelfServeTrackStep('club_prepared', getVisitorId(), {
       name: orgName(club), org_id: club.id,
     }).catch(() => {})
+    // A registered club whose trial has ended has a paused page; offer an
+    // extension request rather than sending them to it.
+    if (club.already_registered && club.already_registered_paused) {
+      setExtensionClub(club)
+      return
+    }
     if (club.already_registered && club.already_registered_slug) {
       navigate(`/${club.already_registered_slug}`)
       return
@@ -573,6 +694,10 @@ export default function Trial() {
         </section>
       </div>
       <MarketingFooter />
+
+      {extensionClub && (
+        <ExtensionRequestModal club={extensionClub} onClose={() => setExtensionClub(null)} />
+      )}
 
       {actionClub && (
         <ClubActionModal

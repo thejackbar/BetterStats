@@ -1486,3 +1486,14 @@ a new table:
   which now wins over the first-touch snapshot whenever present.
 
 <!-- END original CLAUDE.md L15510-15559 -->
+
+## v9.110.10: trial extension request on /trial
+
+A registered club whose public page is paused (inactive, or BetterStats/Core not live, so `clubs._public_blocked`) used to be sent to `ClubInactive` ("Club page paused") when picked on `/trial`.
+
+- `self_serve_trial.search_clubs` adds `already_registered_paused` per result via `_public_page_paused`, which re-reads the club with `module_subscriptions` loaded (`org_core_live` fails open on unloaded rows). The internal super-admin search shares the function and just carries the extra key.
+- `Trial.jsx` `handleClubClick`: registered and paused opens `ExtensionRequestModal`; registered and live still navigates to the slug; unregistered still opens `ClubActionModal`. Paused wins over the slug check.
+- `POST /public/self-serve/request-trial-extension` (same flag-gated router, 10 per hour per IP counting rejected posts). Requires club, name, email shape, phone of 8 to 15 digits, role and message. Saves a `club_onboarding_requests` row (`source = trial_extension_request`, no migration, no CRM deal since the club already has one) BEFORE emailing, then sends one email per address in `TRIAL_EXTENSION_NOTIFY` (jack@ and elton@bettersports.com.au), reply-to the requester, all fields HTML-escaped.
+- No live provider (console) or every send failing returns 503 with the support address; the saved row stays for staff. Not a thank-you (rule 26).
+- Not covered: a club locked by `password_protect_reason = trial_ended` (the 423 PIN page) keeps its own `request-unpause` form.
+- Proof: `backend/verification/verify_trial_extension_request.py` (real Postgres, shipped route bodies; control run against the previous commit reports the flag MISSING and the endpoint absent). UI driven in Chromium with the API stubbed: exact request body, live and unregistered paths unchanged, 390px no overflow.

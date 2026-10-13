@@ -2265,6 +2265,9 @@ export const api = {
   // wizard, no super-admin session. 404s while the platform flag is off.
   publicSelfServeStatus: () => request('/public/self-serve/status'),
   publicSelfServeSearch: (q) => request(`/public/self-serve/search?q=${encodeURIComponent(q)}`),
+  // /trial: a registered club whose trial has ended asks for more time. Emailed to staff.
+  publicRequestTrialExtension: (data) =>
+    request('/public/self-serve/request-trial-extension', { method: 'POST', body: JSON.stringify(data) }),
   publicSelfServePrepare: (data) =>
     request('/public/self-serve/prepare', { method: 'POST', body: JSON.stringify(data) }),
   publicSelfServeValidateAdmin: (data) =>

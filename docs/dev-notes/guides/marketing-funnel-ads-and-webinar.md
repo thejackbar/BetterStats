@@ -55,6 +55,7 @@
 33. `prepare` fires a server Lead; `submit` fires CompleteRegistration (browser plus CAPI, one event id), GA4 `sign_up`. Modal prop is `publicMode`, not `public`.
 34. `/club-admin/meta-ads/ad-signups` reads the CACHED `marketing_clubs.engagement_score`, never a live score.
 35. Launch needs a real `email_provider` (default `console` never sends OTP) and the flag on.
+35a. A registered club whose page is paused (`already_registered_paused` on the search result) opens the Request trial extension modal, not its page. The request is saved as a `trial_extension_request` onboarding row, then emailed to `TRIAL_EXTENSION_NOTIFY`; no live email provider is a 503, never a thank-you.
 
 **Club page call to action (v9.91.0, v9.92.1)**
 36. The bar is for PROSPECTS only: a session from a Meta click (utm_source meta/facebook/fb/instagram/ig, medium paid_social, fbclid/igshid) or that passed `/trial`. Never a club's members or signed-in users. Dismiss minimises to a pill. The club shown is already registered, so copy sells the visitor's OWN club.

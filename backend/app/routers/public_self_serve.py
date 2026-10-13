@@ -33,7 +33,9 @@ surface). Everything here still sits behind the
 ``self_serve_registration_enabled`` platform flag — the whole router 404s
 until a super admin flips it on, so this can merge ahead of the campaign.
 """
+import html
 import logging
+import re
 import time
 import uuid as _uuid
 from typing import Optional
@@ -42,12 +44,13 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, get_db
+from app.config.settings import settings
+from app.models.db import ClubOnboardingRequest, Organisation, get_db
 from app.routers.auth import (
     create_session_token, require_self_serve_registration_enabled, set_session_cookie,
 )
 from app.routers import self_serve_trial as sst
-from app.services import meta_capi
+from app.services import email_service, meta_capi
 from app.services import platform_settings as ps
 from app.services import rate_limit
 from app.services.login_audit import client_ip
@@ -136,6 +139,127 @@ class TrackStepRequest(BaseModel):
     # the Meta Ads page tell a search that identified ONE club from a guess —
     # see meta_ads.get_searched_clubs.
     result_count: Optional[int] = None
+
+
+# ─── Trial extension request ─────────────────────────────────────────────────
+# A previously registered club whose trial has ended lands on "Club page paused"
+# when it finds itself on /trial. The page offers this request instead. It is
+# stored as a club_onboarding_requests row (so a failed email never loses it)
+# and emailed to these two people.
+TRIAL_EXTENSION_NOTIFY = ("jack@bettersports.com.au", "elton@bettersports.com.au")
+EXTENSION_LIMIT, EXTENSION_WINDOW = 10, 3600
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class TrialExtensionRequest(BaseModel):
+    club_name: str = ""
+    club_org_id: Optional[str] = None
+    club_slug: Optional[str] = None
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    role: str = ""
+    message: str = ""
+    visitor_id: Optional[str] = None
+
+
+def _clean(value: Optional[str], limit: int) -> str:
+    return (value or "").strip()[:limit]
+
+
+async def _send_extension_emails(*, club: str, slug: str, name: str, email: str,
+                                 phone: str, role: str, message: str) -> bool:
+    """One email per recipient. True when at least one went. The console
+    provider only logs, so it counts as not sent (the caller tells the person)."""
+    provider = email_service.get_email_provider()
+    if provider.name == "console":
+        logger.warning("Trial extension request for %s not emailed: no live email provider is configured", club)
+        return False
+    esc = html.escape
+    rows = [("Club", club), ("Club page", f"/{slug}" if slug else ""), ("Name", name),
+            ("Email", email), ("Phone", phone), ("Role at the club", role)]
+    table = "".join(
+        f'<tr><td style="padding:2px 14px 2px 0;color:#64748b">{esc(k)}</td><td>{esc(v)}</td></tr>'
+        for k, v in rows if v
+    )
+    body_html = (
+        f"<p><strong>{esc(club)}</strong> has asked for a trial extension.</p>"
+        f'<table role="presentation" style="font-size:15px;line-height:1.5">{table}</table>'
+        f'<p style="white-space:pre-wrap">{esc(message)}</p>'
+    )
+    body_text = (
+        f"{club} has asked for a trial extension.\n\n"
+        + "".join(f"{k}: {v}\n" for k, v in rows if v)
+        + f"\n{message}\n"
+    )
+    sent = 0
+    for to in TRIAL_EXTENSION_NOTIFY:
+        try:
+            result = await provider.send(email_service.EmailMessage(
+                to_email=to,
+                subject=f"Trial extension request: {club}",
+                html=body_html, text=body_text,
+                from_email=settings.email_from_address, from_name=settings.email_from_name,
+                reply_to=email,
+            ))
+            if result.ok:
+                sent += 1
+            else:
+                logger.error("Trial extension email to %s failed: %s", to, result.error)
+        except Exception:
+            logger.exception("Trial extension email to %s failed", to)
+    return sent > 0
+
+
+@router.post("/request-trial-extension")
+async def request_trial_extension(data: TrialExtensionRequest, request: Request,
+                                  db: AsyncSession = Depends(get_db)):
+    """The "Request trial extension" modal on /trial. Every field is required.
+    Stored first, then emailed to TRIAL_EXTENSION_NOTIFY; if nothing could be
+    emailed the person is told so (and given the support address) rather than
+    shown a thank-you, but the row is still there for staff."""
+    rate_limit.enforce(
+        f"pubss:extension:{client_ip(request)}", EXTENSION_LIMIT, EXTENSION_WINDOW,
+        detail="Too many requests. Please try again later.",
+    )
+    club = _clean(data.club_name, 200)
+    name = _clean(data.name, 200)
+    email = _clean(data.email, 320).lower()
+    phone = _clean(data.phone, 50)
+    role = _clean(data.role, 120)
+    message = _clean(data.message, 2000)
+    if not club:
+        raise HTTPException(status_code=422, detail="Pick your club first.")
+    if not name:
+        raise HTTPException(status_code=422, detail="Add your name.")
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address.")
+    if not 8 <= len(re.sub(r"\D", "", phone)) <= 15:
+        raise HTTPException(status_code=422, detail="Enter a phone number we can reach you on.")
+    if not role:
+        raise HTTPException(status_code=422, detail="Add your role at the club.")
+    if not message:
+        raise HTTPException(status_code=422, detail="Tell us why you would like an extension.")
+
+    slug = _clean(data.club_slug, 120)
+    db.add(ClubOnboardingRequest(
+        name=name, club=club, email=email, phone=phone, role=role, message=message,
+        source="trial_extension_request",
+        user_agent=_clean(request.headers.get("user-agent"), 500) or None,
+        visitor_id=_clean(data.visitor_id, 64) or None,
+        club_org_id=_clean(data.club_org_id, 64) or None,
+        club_source="search" if data.club_org_id else None,
+    ))
+    await db.commit()
+
+    sent = await _send_extension_emails(
+        club=club, slug=slug, name=name, email=email, phone=phone, role=role, message=message)
+    if not sent:
+        raise HTTPException(
+            status_code=503,
+            detail=f"We could not send that just now. Please email {settings.email_reply_to} and we will sort it out.",
+        )
+    return {"ok": True}
 
 
 @router.post("/track-step")
