@@ -85,7 +85,13 @@ _SYSTEM = (
     "Upcoming games and the opposition:\n"
     "- For any question about an upcoming match ('who should we pick for the 1st XI "
     "game', 'who do we play next', 'how do we beat them'), start with "
-    "upcoming_fixtures to find the fixture, its team/grade and opponent. Then use "
+    "upcoming_fixtures to find the fixture, its team/grade and opponent. The club has "
+    "many fixtures and that list is capped, so when the user names an opponent, a "
+    "side or a date, pass it as opponent, grade or from_date/to_date rather than "
+    "reading the first page; and never call a capped list 'all' the club's "
+    "fixtures. If nothing matches but the result lists a cancelled game, tell the "
+    "user it is marked cancelled (Cricket Australia no longer lists it) instead of "
+    "saying it does not exist. Then use "
     "opposition_report for our head-to-head and which of OUR players bat/bowl well "
     "against them, current_squad for the side in question, and "
     "opponent_danger_players for their in-form threats.\n"
@@ -109,7 +115,6 @@ _SYSTEM = (
     "all is in_this_grade_band (their record in this grade and the one beside it, "
     "last three seasons): lead with it, then mention more_in_another_grade where "
     "present. A player whose figures are from 'their other "
-    "whose figures are from 'their other "
     "grades and formats' is not a read on this grade, so say so. If they have not "
     "named a side, say that and offer the opposition_report instead.\n"
     "- If a fixture's opponent has no linked history (has_history false), say the "
@@ -233,8 +238,17 @@ TOOLS = [
     },
     {
         "name": "upcoming_fixtures",
-        "description": "The club's upcoming fixtures: date, team/grade, opponent, venue, home/away, plus a fixture_id and whether we hold history against that opponent (has_history). Use this FIRST for any question about an upcoming game ('who should we pick for the 1st XI game', 'who do we play next') to identify the fixture, its team and its opponent, then feed the fixture_id into opposition_report / opponent_danger_players.",
-        "input_schema": {"type": "object", "properties": {}},
+        "description": "The club's upcoming fixtures, soonest first: date, team/grade, opponent, venue, home/away, plus a fixture_id and whether we hold history against that opponent (has_history). Use this FIRST for any question about an upcoming game ('who should we pick for the 1st XI game', 'who do we play next') to identify the fixture, its team and its opponent, then feed the fixture_id into opposition_report / opponent_danger_players. A club has many fixtures, so the list is capped: the result gives total_matching and a note when it is partial. To find one game, pass opponent (part of the club name), grade (a grade or team name such as '1st XI' or 'PSWL A') and/or from_date and to_date (YYYY-MM-DD) instead of reading the whole list.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "opponent": {"type": "string", "description": "Part of the opposition club name, e.g. 'Cockburn'."},
+                "grade": {"type": "string", "description": "Part of a grade or team name, e.g. '1st XI' or 'PSWL A'."},
+                "from_date": {"type": "string", "description": "Earliest game date, YYYY-MM-DD."},
+                "to_date": {"type": "string", "description": "Latest game date, YYYY-MM-DD."},
+                "limit": {"type": "integer", "description": "How many to return (default 15, max 40)."},
+            },
+        },
     },
     {
         "name": "opposition_report",
@@ -568,27 +582,82 @@ async def _tool_grades(session, org_id):
     return {"grades": names}
 
 
-async def _tool_upcoming_fixtures(session, org_id):
-    data = await iq_service.list_opponents(session, org_id)
-    fixtures = (data.get("upcoming") or [])[:10]
+_UPCOMING_DEFAULT_LIMIT = 15
+_UPCOMING_MAX_LIMIT = 40
+
+
+def _iso_date(v):
+    """A model-supplied YYYY-MM-DD as a date, or None when absent or unreadable."""
+    from datetime import date
+    try:
+        return date.fromisoformat(str(v)[:10]) if v else None
+    except ValueError:
+        return None
+
+
+async def _tool_upcoming_fixtures(
+    session, org_id, opponent=None, grade=None, from_date=None, to_date=None, limit=None,
+):
+    try:
+        limit = min(max(int(limit or _UPCOMING_DEFAULT_LIMIT), 1), _UPCOMING_MAX_LIMIT)
+    except (TypeError, ValueError):
+        limit = _UPCOMING_DEFAULT_LIMIT
+    filtered = bool(opponent or grade or from_date or to_date)
+    data = await iq_service.list_opponents(
+        session, org_id,
+        upcoming_limit=limit,
+        upcoming_opponent=opponent,
+        upcoming_grade=grade,
+        upcoming_from=_iso_date(from_date),
+        upcoming_to=_iso_date(to_date),
+    )
+    fixtures = data.get("upcoming") or []
+    total = int(data.get("upcoming_total") or 0)
+    cancelled = data.get("upcoming_cancelled") or []
     if not fixtures:
-        return {
-            "count": 0,
-            "note": "No upcoming fixtures held. Fixtures sync from the BetterSelect Fixtures screen (or can be added manually there).",
-        }
-    return {"count": len(fixtures), "fixtures": [
-        {
-            "fixture_id": f["fixture_id"],
-            "date": f.get("played_on"),
-            "team": f.get("team_name"),
-            "grade": f.get("grade_name"),
-            "opponent": f.get("opponent_name"),
-            "home_away": f.get("home_away"),
-            "venue": f.get("venue"),
-            "has_history": bool(f.get("opp_key")),
-        }
-        for f in fixtures
-    ]}
+        out = {"count": 0, "total_matching": 0}
+        if filtered:
+            out["note"] = "No upcoming fixture matches that filter. Try a different spelling, a wider date range, or no filter."
+        else:
+            out["note"] = "No upcoming fixtures held. Fixtures sync from the BetterSelect Fixtures screen (or can be added manually there)."
+        if cancelled:
+            out["cancelled"] = cancelled
+            out["cancelled_note"] = (
+                "These games are marked cancelled: Cricket Australia no longer lists them but the club "
+                "had picked a team or recorded votes on them, so they are kept. Say so rather than "
+                "claiming the game never existed."
+            )
+        return out
+    out = {
+        "count": len(fixtures),
+        "total_matching": total,
+        "fixtures": [
+            {
+                "fixture_id": f["fixture_id"],
+                "date": f.get("played_on"),
+                "team": f.get("team_name"),
+                "grade": f.get("grade_name"),
+                "opponent": f.get("opponent_name"),
+                "home_away": f.get("home_away"),
+                "venue": f.get("venue"),
+                "has_history": bool(f.get("opp_key")),
+            }
+            for f in fixtures
+        ],
+    }
+    if total > len(fixtures):
+        out["note"] = (
+            f"Showing the first {len(fixtures)} of {total} matching fixtures, soonest first. This is NOT the whole "
+            "draw: never say these are all the club's fixtures. To find a specific game, call again with "
+            "opponent, grade or a from_date/to_date window."
+        )
+    if cancelled:
+        out["cancelled"] = cancelled
+        out["cancelled_note"] = (
+            "These matching games are marked cancelled: Cricket Australia no longer lists them but the club "
+            "had picked a team or recorded votes on them. Mention them if relevant."
+        )
+    return out
 
 
 async def _resolve_opp_arg(session, org_id: str, opponent: str | None):
