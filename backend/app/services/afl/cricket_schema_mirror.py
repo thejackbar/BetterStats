@@ -94,6 +94,9 @@ SHARED_DDL_MODULES = (
     # Migration 322. `club_links`: the shared `/auth/me` reads it for a Club
     # Admin, so the football database needs the (empty) table.
     ("app.services.club_link_ddl", "STATEMENTS"),
+    # Migration 328. `import_batches.through_year` / `.through_label`, on the shared
+    # ORM ImportBatch model football's result imports also write through.
+    ("app.services.import_through_ddl", "STATEMENTS"),
 )
 
 

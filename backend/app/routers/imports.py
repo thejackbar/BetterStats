@@ -22,7 +22,7 @@ from __future__ import annotations
 import io
 import csv
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from typing import Optional
 
@@ -42,6 +42,7 @@ from app.services import import_cleanup as cleanup
 from app.services import import_ingest as ingest
 from app.services import import_reconcile as recon
 from app.services.grade_labels import suggest_categories, suggest_category
+from app.services.season_resolve import season_start_year, season_year_for_date
 
 router = APIRouter(prefix="/club-admin/imports", tags=["imports"])
 
@@ -61,6 +62,10 @@ class ResolveRequest(BaseModel):
     player_overrides: dict = {}         # raw_name -> player_id | "__new__" | "__skip__"
     season_overrides: dict = {}         # raw_label -> season_id | "__prior__"
     grade_overrides: dict = {}          # raw_label -> grade_name | "__none__"
+    # A historical summary that stops at a season: the LAST season the sheet
+    # covers, written as the club writes it ("2004/05"). Empty = the sheet is
+    # the whole career as at today (the ordinary import). See _through().
+    through_season: Optional[str] = None
 
 
 class CommitRequest(ResolveRequest):
@@ -84,6 +89,36 @@ def _row_values(row: dict, mapping: dict) -> dict:
         if col is not None and col in row:
             out[field] = row[col]
     return out
+
+
+def _through(req: ResolveRequest) -> tuple:
+    """(start year, label) of the last season a historical summary covers, or
+    (None, None) for an ordinary import.
+
+    Only a consecutive pair ("2004/05") is read: a bare year is ambiguous (the
+    book that ends "2005" may mean the season that finished in 2005, or the
+    one that began in it), and a wrong guess either drops a season of the
+    book or adds one the online data already holds. The preview echoes the
+    label back so the person importing can see what was understood.
+    """
+    raw = (req.through_season or "").strip()
+    if not raw:
+        return None, None
+    year = season_start_year(raw)
+    if year is None or not (1850 <= year <= date.today().year + 1):
+        raise HTTPException(
+            422,
+            f"“{raw}” is not a season. Write the last season your book covers as two years, like 2004/05.")
+    return year, recon.through_label_for(year)
+
+
+def _label_start_year(label: str) -> Optional[int]:
+    """The year a sheet's season label starts in ("2004/05" -> 2004, "2005" -> 2005)."""
+    year = season_start_year(label)
+    if year is not None:
+        return year
+    years = ingest._season_years(label)
+    return min(years) if years else None
 
 
 def _truth_metrics(truth: dict) -> dict:
@@ -345,16 +380,23 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         + [recon._grade_key(it.get("grade_label"))
            for its in list(items_by_player.values()) + list(new_items_by_name.values()) for it in its]
     )
+    # A sheet that stops at a season is compared against the online record up
+    # to that season only, and as a whole book (the commit does the same: see
+    # recon.reconcile_imported_totals), so a grade label never narrows it.
+    cut, cut_label = _through(req)
     items_by_player_grade: dict = {}
     for pid_str, items in items_by_player.items():
         for it in items:
-            grade = None if team_labelled else recon._grade_key(it.get("grade_label"))
+            grade = None if (team_labelled or cut is not None) else recon._grade_key(it.get("grade_label"))
             items_by_player_grade.setdefault((pid_str, grade), []).append(it)
     year_by_season = await recon.season_years(db, org_id)
 
     ungraded_pids = [uuid.UUID(pid) for pid, grade in items_by_player_grade if grade is None]
     grade_labels = sorted({grade for _pid, grade in items_by_player_grade if grade is not None})
-    gr_by_player = await recon.fetch_gr_by_player(db, org_id, ungraded_pids)
+    gr_by_player = await recon.fetch_gr_by_player(db, org_id, ungraded_pids, through_year=cut)
+    # Everything the online sources hold, for the part after the cut-off.
+    gr_all_by_player = (await recon.fetch_gr_by_player(db, org_id, ungraded_pids)
+                        if cut is not None else gr_by_player)
     gr_by_grade: dict = {}
     for grade in grade_labels:
         grade_pids = [uuid.UUID(pid) for pid, g in items_by_player_grade if g == grade]
@@ -371,16 +413,25 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         agg = preview_by_player.setdefault(pid_str, {
             "player_id": pid_str, "player_name": name_by_pid.get(pid_str), "new": False,
             "club_games": 0, "club_runs": 0, "gr_games": 0, "gr_runs": 0,
-            "residual_games": 0, "final_games": 0, "final_runs": 0,
+            "residual_games": 0, "residual_runs": 0, "final_games": 0, "final_runs": 0,
+            "online_after_games": 0, "online_after_runs": 0,
             "season_deltas": 0, "gr_exceeds": False,
         })
+        # What online holds beyond the sheet's cut-off is added to the final
+        # untouched (the reconciler never subtracts from it).
+        gr_all = (gr_all_by_player.get(uuid.UUID(pid_str)) or {}).get("totals") or recon._blank()
+        after_games = max(0, gr_all["matches"] - s["gr"]["matches"]) if cut is not None else 0
+        after_runs = max(0, gr_all["runs"] - s["gr"]["runs"]) if cut is not None else 0
         agg["club_games"] += club.get("matches", 0)
         agg["club_runs"] += club.get("runs", 0)
         agg["gr_games"] += s["gr"]["matches"]
         agg["gr_runs"] += s["gr"]["runs"]
         agg["residual_games"] += (s["residual"] or {}).get("matches", 0)
-        agg["final_games"] += s["final"]["matches"]
-        agg["final_runs"] += s["final"]["runs"]
+        agg["residual_runs"] += (s["residual"] or {}).get("runs", 0)
+        agg["online_after_games"] += after_games
+        agg["online_after_runs"] += after_runs
+        agg["final_games"] += s["final"]["matches"] + after_games
+        agg["final_runs"] += s["final"]["runs"] + after_runs
         agg["season_deltas"] += s["season_delta_count"]
         agg["gr_exceeds"] = agg["gr_exceeds"] or s["gr_exceeds"]
 
@@ -392,7 +443,8 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             "player_id": None, "player_name": nm, "new": True,
             "club_games": club.get("matches", 0), "club_runs": club.get("runs", 0),
             "gr_games": 0, "gr_runs": 0,
-            "residual_games": club.get("matches", 0),
+            "residual_games": club.get("matches", 0), "residual_runs": club.get("runs", 0),
+            "online_after_games": 0, "online_after_runs": 0,
             "final_games": club.get("matches", 0), "final_runs": club.get("runs", 0),
             "season_deltas": len(import_seasons), "gr_exceeds": False,
         })
@@ -467,7 +519,26 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
               "‘no online equivalent’ if the grade genuinely predates online records."
         )
 
+    if cut is not None:
+        if cut >= season_year_for_date(date.today()):
+            warnings.append(
+                f"{cut_label} is the current season. A summary that runs up to today is an ordinary "
+                "import: leave the cut-off blank so the online data is not compared against a book that has no end.")
+        if season_col:
+            past = sorted({lb for lb in labels if (_label_start_year(lb) or 0) > cut})
+            if past:
+                warnings.append(
+                    f"{len(past)} season(s) in your sheet come after {cut_label}: " + ", ".join(past[:8])
+                    + ("…" if len(past) > 8 else "")
+                    + ". A summary that stops at "
+                      f"{cut_label} should not hold them. Any the online data already has are dropped; the rest are added as they stand.")
+        if grade_col:
+            warnings.append(
+                f"A summary that stops at {cut_label} is compared against each player's whole online record "
+                "up to that season, so its grade labels are kept on the rows but never narrow the comparison.")
+
     return {
+        "through": ({"year": cut, "label": cut_label} if cut is not None else None),
         "granularity": "season" if is_season else "career",
         "columns_used": {f: _col(req.mapping, f) for f in ingest.ALL_FIELDS if _col(req.mapping, f)},
         "players": [{"raw_name": n, **m} for n, m in pmatch.items()],
@@ -559,6 +630,8 @@ async def commit(
         column_mapping={f: _col(req.mapping, f) for f in ingest.ALL_FIELDS if _col(req.mapping, f)},
         row_count=len(req.rows), created_by_user_id=current_user.id,
         committed_at=datetime.now(timezone.utc),
+        through_year=(resolved["through"] or {}).get("year"),
+        through_label=(resolved["through"] or {}).get("label"),
     )
     db.add(batch)
     await db.flush()
@@ -672,9 +745,11 @@ async def commit(
         target_table="imported_stats",
         target_id=f"batch:{batch.id}",
         summary=f"BetterImport — {len(items_by_player)} players, {inserted} rows "
-                f"({created_players} new players created)",
+                f"({created_players} new players created)"
+                + (f", historical summary to {batch.through_label}" if batch.through_label else ""),
         before=None,
-        after={"batch_id": str(batch.id), "players": len(items_by_player), "rows": inserted},
+        after={"batch_id": str(batch.id), "players": len(items_by_player), "rows": inserted,
+               "through": batch.through_label},
     )
     await db.commit()
 
@@ -688,6 +763,7 @@ async def commit(
         "players_created": created_players,
         "deltas_written": written,
         "rows_skipped": resolved["totals"]["rows_skipped"],
+        "through": resolved["through"],
         "preview": resolved["preview"][:50],
     }
 
@@ -808,6 +884,7 @@ async def list_imports(
         out.append({
             "id": str(b.id), "filename": b.filename, "status": b.status,
             "granularity": b.granularity, "row_count": b.row_count,
+            "through_label": b.through_label,
             "stats_rows": len(n),
             "created_at": b.created_at.isoformat() if b.created_at else None,
             "undone_at": b.undone_at.isoformat() if b.undone_at else None,
@@ -1026,4 +1103,28 @@ async def template(
         io.BytesIO(buf.getvalue().encode("utf-8-sig")),
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="betterimport_template.csv"'},
+    )
+
+
+@router.get("/summary-template.csv")
+async def summary_template(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    """A starter sheet for a club history book: one row per player, career
+    figures up to the season the book stops at. The headings are the ones a
+    printed record book uses, so what is typed from the page maps on its own.
+    Bowling runs get their own heading because the page prints "Total Runs"
+    twice. Leave a cell empty when the book does not give it."""
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Name", "Games Played", "No Innings", "Total Runs", "NO", "Highest Score", "No 50's",
+                "No 100's", "Overs Bowled", "Maidens", "Bowling Runs", "Total Wickets", "No 5wkt Inns",
+                "Best Bowling Inn", "Catches"])
+    w.writerow(["SMITH J", 120, 150, 3210, 14, "112*", 18, 2, 640.2, 95, 2100, 88, 1, "5-31", 60])
+    w.writerow(["JONES R", 35, 40, 410, 9, 48, 0, 0, "", "", "", "", "", "", 12])
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8-sig")),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="betterimport_history_book_template.csv"'},
     )

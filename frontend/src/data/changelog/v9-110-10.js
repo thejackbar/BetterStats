@@ -2,10 +2,12 @@ export default {
   version: 'v9.110.10',
   date: '2026-10-13',
   sortKey: '2026-10-13T12:00:00Z',
-  title: 'Clubs with an ended trial can ask for an extension from /trial',
+  title: 'Import a club history book that stops at a season',
   items: [
-    'On /trial, picking a club that is already registered but whose page is paused used to land on a "Club page paused" screen with nowhere to go. It now opens a Request trial extension form instead.',
-    'The form asks for a name, email, phone number, role at the club and a short message about why they want more time. All five are required. The request is emailed to Jack and Elton, with the sender as the reply-to address, and is also saved in the Onboarding list as a trial_extension_request.',
-    'If the email cannot be sent, the person sees a plain message with the support address rather than a thank-you. Clubs with a live page still open it, and clubs not yet registered still get the set-up choice.',
+    'Import historical stats now handles a history book that ends at a point in time, like a century book that finishes with 2004/05. On the Columns step choose "Only up to a season" and type the last season the book covers.',
+    'The book is compared with each player\'s online record up to that season only. Where the two overlap, the online figures stay and the book adds just the part online is missing. Everything online after that season is kept and added on top, so a player whose online record starts in 2012 no longer has their book swallowed.',
+    'The review shows the book, the online record to that season, what the book adds and the online record after it, side by side. A cut-off that is not two years (2004/05) is refused, and a sheet row dated after the cut-off is named before anything is saved.',
+    'The upload step has a history book template with the headings a printed record book uses (Games Played, No Innings, Total Runs, NO, No 50\'s, No 100\'s, Highest Score, Overs Bowled, Total Wickets, Best Bowling Inn, Catches), and those headings now map on their own.',
+    'Past imports show which ones stop at a season.',
   ],
 }

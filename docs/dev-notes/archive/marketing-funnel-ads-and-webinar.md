@@ -1487,7 +1487,7 @@ a new table:
 
 <!-- END original CLAUDE.md L15510-15559 -->
 
-## v9.110.10: trial extension request on /trial
+## v9.110.11: trial extension request on /trial
 
 A registered club whose public page is paused (inactive, or BetterStats/Core not live, so `clubs._public_blocked`) used to be sent to `ClubInactive` ("Club page paused") when picked on `/trial`.
 
