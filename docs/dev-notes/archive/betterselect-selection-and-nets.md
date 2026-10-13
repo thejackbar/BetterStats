@@ -1338,3 +1338,11 @@ Requested: the draft carried into the next round should also drop anyone who had
 UI. `AdminSelection.jsx` keeps `leftOut` on `draftInfo` and the Draft strip lists those names.
 
 Verification: `verify_selection_next_round_draft.py` is now 47 checks (seed time, period vs explicit answer, MAYBE, another date, a later no, stored row unchanged, selector's own draft, everyone said no). Control on the v9.110.4 code fails 7, all on the unavailable behaviour; `verify_selection_draft.py` still 55.
+
+## Availability filter judges the selected column (v9.110.12)
+
+Report: filtering the Availability matrix for "Available" listed players free in a later week but out for the upcoming game. `AdminAvailability.matchesResponse` matched a status on ANY shown date, so widening the date range changed who the filter returned.
+
+Now the response facet is judged on `filterDates`: the weeks ticked in the "Availability for" row (state `filterCols`) that are still shown, else the selected week (`selDate`, which opens on the first shown date, the next game). A header click sets `selDate` and clears `filterCols`. With two or more weeks, `colMatch` combines them: `all` (default) or `any`. No response is judged per column the same way (absent row reads as `NO_RESPONSE`). The scope row only draws while the availability facet has a value. The date range panel still narrows columns and scopes bulk fill, and no longer affects the filter except by hiding a ticked week.
+
+Verification: `frontend/verification/verify_availability_column_filter_browser.mjs` (11 checks, stubbed matrix with Ann out now and free in three weeks). Control on the v9.110.11 screen fails the default, click-a-column and scope-row checks, then times out on the week chips that do not exist.

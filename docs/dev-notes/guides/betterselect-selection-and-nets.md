@@ -60,6 +60,8 @@
 
 68. A game that has started leaves availability: `squad_next_game.fixture_has_started` (status in progress or final, or the viewer's local time at or past `played_on` + `start_time`; no start time keeps it for its date). The app has no per-club timezone, so the matrix and `/public/availability/{token}/me` take the browser's `?tz=` (`api.js tzQuery`, `availability.local_now`); no or bad `tz` keeps the old date-only behaviour. A new read built on `upcoming_fixtures_by_date` that should hide started games must pass `now_local`. Check: `verify_squad_next_game.py`.
 
+69a. The Availability matrix's response filter judges the SELECTED column (`filterDates`: ticked weeks still shown, else `selDate`), never "any shown date". Several ticked weeks combine as every or any. The date range only changes which columns draw. Check: `verify_availability_column_filter_browser.mjs`.
+
 **Association rules**
 32. One table `selection_rules` (`kind`, `scope`, `config`); `services/selection_rules.py` is the only reader/writer. Kinds: `age`, `overseas`, `bowling_workload`, `finals_qualification`, `grade_cap`, `fees`, `training`, `registration`, `rest`, `custom`. No table per kind.
 33. Age is measured on a setting: `age_basis` (month, day, which END of the season gives the year) or `fixed_date` (does not move with the season). Cutoff resolves against the SEASON. `season_start_month` (default 7) is the fallback. Operators per end: `min_op` gte/gt, `max_op` lt/lte (none reads gte/lt). `_min_phrase`/`_max_phrase` are the one wording. Ladder runs to 23.
