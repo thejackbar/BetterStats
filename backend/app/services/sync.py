@@ -2182,6 +2182,16 @@ async def sync_grassroots_game_level_data(
         # per-game error.
         if run_id and processed % 25 == 0:
             await _check_sync_control(run_id, stats)
+            # Progress is reported HERE, ahead of every `continue` below. It used
+            # to sit at the bottom of the loop, which a game that is already
+            # stored (the common case on a re-sync) skips, so the bar sat at
+            # "0 / N" for a run that was working through hundreds of games.
+            # Scorecards own 55→99% of the overall bar, the long phase.
+            _progress(stats, "Saving scorecards",
+                      55 + 44 * (processed - 1) / max(len(seen_match_ids), 1),
+                      processed - 1, len(seen_match_ids))
+            await update_sync_run(run_id, stats)
+            logger.info(f"GR-sync: processed {processed - 1}/{len(seen_match_ids)} games, stats={stats}")
         try:
             match_uuid = uuid.UUID(match_id_str)
         except ValueError:
@@ -2790,14 +2800,6 @@ async def sync_grassroots_game_level_data(
         except Exception as e:
             logger.error(f"GR-sync: per-game exception for {match_id_str}: {e}")
             # session has already auto-closed; just move on
-
-        if run_id and processed % 25 == 0:
-            # Scorecards own 55→99% of the overall bar — the long phase.
-            _progress(stats, "Saving scorecards",
-                      55 + 44 * processed / max(len(seen_match_ids), 1),
-                      processed, len(seen_match_ids))
-            await update_sync_run(run_id, stats)
-            logger.info(f"GR-sync: processed {processed}/{len(seen_match_ids)} games, stats={stats}")
 
     logger.info(f"GR-sync complete: {stats} for org {org_uuid}")
     return stats
