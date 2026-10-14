@@ -233,13 +233,14 @@ function ClubActionModal({ club, onSetUp, onClose }) {
 }
 
 // Shown when a registered club whose trial has ended is clicked: its public
-// page is paused, so instead of that dead end we take a trial extension request
-// (emailed to the team by the server). Every field is required.
-function ExtensionRequestModal({ club, onClose }) {
+// page is paused, so instead of that dead end we take a trial extension request.
+// The server gives a first request a short extension straight away (`extended`
+// in the reply) and emails the team either way. Every field is required.
+function ExtensionRequestModal({ club, days = 7, onClose }) {
   const [form, setForm] = useState({ name: '', email: '', phone: '', role: '', message: '' })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [done, setDone] = useState(false)
+  const [done, setDone] = useState(null)   // the server's reply once sent
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
   useEffect(() => {
@@ -257,7 +258,7 @@ function ExtensionRequestModal({ club, onClose }) {
     setSubmitting(true)
     setError('')
     try {
-      await api.publicRequestTrialExtension({
+      const reply = await api.publicRequestTrialExtension({
         club_name: orgName(club),
         club_org_id: club.id,
         club_slug: club.already_registered_slug,
@@ -268,7 +269,7 @@ function ExtensionRequestModal({ club, onClose }) {
         message: form.message.trim(),
         visitor_id: getVisitorId(),
       })
-      setDone(true)
+      setDone(reply || {})
     } catch (err) {
       setError(err?.message || 'Could not send that just now. Please try again.')
     } finally {
@@ -302,21 +303,41 @@ function ExtensionRequestModal({ club, onClose }) {
 
         {done ? (
           <>
-            <p className="font-mono text-[12px] text-emerald-300" data-testid="trial-extension-done">
-              Thanks. We have your request and will be in touch shortly.
-            </p>
-            <button
-              onClick={onClose}
-              className="mt-4 w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
-            >
-              Close
-            </button>
+            {done.extended ? (
+              <p className="text-sm text-pb-text" data-testid="trial-extension-done">
+                Your trial has been extended by {done.extension_days || days} days, so
+                {' '}{orgName(club)} is live again. We have your details and will be in touch
+                to help you get set up.
+              </p>
+            ) : (
+              <p className="font-mono text-[12px] text-emerald-300" data-testid="trial-extension-done">
+                Thanks. We have your request and will be in touch shortly.
+              </p>
+            )}
+            {done.extended && done.club_slug ? (
+              <Link
+                to={`/${done.club_slug}`}
+                data-testid="trial-extension-open-club"
+                className="mt-4 block w-full text-center px-4 py-2.5 rounded-lg font-display font-semibold text-sm text-pb-bg transition hover:opacity-90"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                Open {orgName(club)}
+              </Link>
+            ) : (
+              <button
+                onClick={onClose}
+                className="mt-4 w-full px-4 py-2.5 rounded-lg font-display font-semibold text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 transition"
+              >
+                Close
+              </button>
+            )}
           </>
         ) : (
           <form onSubmit={submit} className="space-y-2" data-testid="trial-extension-form">
             <p className="text-sm text-pb-dim mb-1">
-              {orgName(club)}&rsquo;s trial has ended. Tell us a bit about who you are and why
-              you would like more time, and we&rsquo;ll get back to you.
+              {orgName(club)}&rsquo;s trial has ended. Tell us who you are and why you would
+              like more time. If this is your first request, your club goes live again for{' '}
+              {days} days straight away, and we&rsquo;ll be in touch to help you get set up.
             </p>
             <input value={form.name} onChange={set('name')} placeholder="Your name" autoComplete="name" className={FIELD_CLS} />
             <input value={form.email} onChange={set('email')} type="email" placeholder="Your email" autoComplete="email" className={FIELD_CLS} />
@@ -696,7 +717,7 @@ export default function Trial() {
       <MarketingFooter />
 
       {extensionClub && (
-        <ExtensionRequestModal club={extensionClub} onClose={() => setExtensionClub(null)} />
+        <ExtensionRequestModal club={extensionClub} days={status?.trial_extension_days || 7} onClose={() => setExtensionClub(null)} />
       )}
 
       {actionClub && (

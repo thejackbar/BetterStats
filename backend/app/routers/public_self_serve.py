@@ -38,10 +38,12 @@ import logging
 import re
 import time
 import uuid as _uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
@@ -51,6 +53,7 @@ from app.routers.auth import (
 )
 from app.routers import self_serve_trial as sst
 from app.services import email_service, meta_capi
+from app.services import module_subscriptions as mod_subs
 from app.services import platform_settings as ps
 from app.services import rate_limit
 from app.services.login_audit import client_ip
@@ -104,6 +107,7 @@ async def get_status(db: AsyncSession = Depends(get_db)):
     return {
         "enabled": True,
         "default_trial_days": await ps.get_default_trial_days(db),
+        "trial_extension_days": TRIAL_EXTENSION_DAYS,
     }
 
 
@@ -147,6 +151,12 @@ class TrackStepRequest(BaseModel):
 # stored as a club_onboarding_requests row (so a failed email never loses it)
 # and emailed to these two people.
 TRIAL_EXTENSION_NOTIFY = ("jack@bettersports.com.au", "elton@bettersports.com.au")
+# A paused club that asks gets this many days straight away, ONCE per club. The
+# row is saved with source 'trial_extension_granted' (a later ask is saved as a
+# plain 'trial_extension_request' and left for staff), which is also how "once"
+# is remembered, so no new table or column.
+TRIAL_EXTENSION_DAYS = 7
+SOURCE_REQUEST, SOURCE_GRANTED = "trial_extension_request", "trial_extension_granted"
 EXTENSION_LIMIT, EXTENSION_WINDOW = 10, 3600
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -168,7 +178,8 @@ def _clean(value: Optional[str], limit: int) -> str:
 
 
 async def _send_extension_emails(*, club: str, slug: str, name: str, email: str,
-                                 phone: str, role: str, message: str) -> bool:
+                                 phone: str, role: str, message: str, outcome: str,
+                                 granted: bool) -> bool:
     """One email per recipient. True when at least one went. The console
     provider only logs, so it counts as not sent (the caller tells the person)."""
     provider = email_service.get_email_provider()
@@ -176,19 +187,19 @@ async def _send_extension_emails(*, club: str, slug: str, name: str, email: str,
         logger.warning("Trial extension request for %s not emailed: no live email provider is configured", club)
         return False
     esc = html.escape
-    rows = [("Club", club), ("Club page", f"/{slug}" if slug else ""), ("Name", name),
+    rows = [("Outcome", outcome), ("Club", club), ("Club page", f"/{slug}" if slug else ""), ("Name", name),
             ("Email", email), ("Phone", phone), ("Role at the club", role)]
     table = "".join(
         f'<tr><td style="padding:2px 14px 2px 0;color:#64748b">{esc(k)}</td><td>{esc(v)}</td></tr>'
         for k, v in rows if v
     )
     body_html = (
-        f"<p><strong>{esc(club)}</strong> has asked for a trial extension.</p>"
+        f"<p><strong>{esc(club)}</strong> {'asked for a trial extension and was given one' if granted else 'has asked for a trial extension'}.</p>"
         f'<table role="presentation" style="font-size:15px;line-height:1.5">{table}</table>'
         f'<p style="white-space:pre-wrap">{esc(message)}</p>'
     )
     body_text = (
-        f"{club} has asked for a trial extension.\n\n"
+        f"{club} {'asked for a trial extension and was given one' if granted else 'has asked for a trial extension'}.\n\n"
         + "".join(f"{k}: {v}\n" for k, v in rows if v)
         + f"\n{message}\n"
     )
@@ -197,7 +208,7 @@ async def _send_extension_emails(*, club: str, slug: str, name: str, email: str,
         try:
             result = await provider.send(email_service.EmailMessage(
                 to_email=to,
-                subject=f"Trial extension request: {club}",
+                subject=f"{'Trial extended ' + str(TRIAL_EXTENSION_DAYS) + ' days' if granted else 'Trial extension request'}: {club}",
                 html=body_html, text=body_text,
                 from_email=settings.email_from_address, from_name=settings.email_from_name,
                 reply_to=email,
@@ -209,6 +220,45 @@ async def _send_extension_emails(*, club: str, slug: str, name: str, email: str,
         except Exception:
             logger.exception("Trial extension email to %s failed", to)
     return sent > 0
+
+
+async def _grant_extension(db: AsyncSession, *, club: str, client_org_id: Optional[str]):
+    """Work out which registered club this is and, when it qualifies, give it
+    TRIAL_EXTENSION_DAYS. Returns ``(org, granted, outcome, new_end)``; the
+    caller commits. The club is resolved here by the same match the /trial
+    search used, never from a slug or id the browser sends. It qualifies when
+    its page is paused, an admin has not switched it off, its BetterStats row is
+    still a trial that ran out (a cancelled or paused subscription is a
+    conversation, not an extension), and it has not had one before."""
+    from app.auth.modules import MODULE_CORE, STATUS_TRIAL, org_subscription_active
+    from app.services.sync import _parse_uuid, find_matching_organisation
+
+    existing = await sst._reclaimable_existing(
+        db, await find_matching_organisation(
+            db, _parse_uuid(client_org_id or ""), club, include_archived=False))
+    if existing is None:
+        return None, False, "Club not found among registered clubs, nothing extended.", None
+    org = await sst._paused_org(db, existing)
+    if org is None:
+        return existing, False, "Club page is not paused, nothing extended.", None
+    if not org.is_active:
+        return org, False, "Page was switched off by an admin, not extended automatically.", None
+    core = next((x for x in (org.module_subscriptions or []) if x.module_key == MODULE_CORE), None)
+    if core is None or core.status != STATUS_TRIAL or not org_subscription_active(org):
+        return org, False, "BetterStats is not on a trial that ran out (cancelled, paused or paid), not extended automatically.", None
+    prior = (await db.execute(
+        select(ClubOnboardingRequest.id)
+        .where(ClubOnboardingRequest.source == SOURCE_GRANTED, ClubOnboardingRequest.club_org_id == str(org.id))
+        .limit(1)
+    )).first()
+    if prior:
+        return org, False, "Already had a self-serve extension, not extended again. Needs a person.", None
+    now = datetime.now(timezone.utc)
+    touched = mod_subs.extend_trial_for_org(org, days=TRIAL_EXTENSION_DAYS, reset_start=True, now=now)
+    if not touched:
+        return org, False, "No module on trial, nothing extended.", None
+    new_end = core.trial_ends_at
+    return org, True, f"Trial extended {TRIAL_EXTENSION_DAYS} days automatically, to {new_end.date().isoformat()}. Page is live again.", new_end
 
 
 @router.post("/request-trial-extension")
@@ -241,25 +291,36 @@ async def request_trial_extension(data: TrialExtensionRequest, request: Request,
     if not message:
         raise HTTPException(status_code=422, detail="Tell us why you would like an extension.")
 
-    slug = _clean(data.club_slug, 120)
+    org, granted, outcome, new_end = await _grant_extension(
+        db, club=club, client_org_id=_clean(data.club_org_id, 64) or None)
+    slug = (org.slug if org is not None else "") if granted else _clean(data.club_slug, 120)
     db.add(ClubOnboardingRequest(
         name=name, club=club, email=email, phone=phone, role=role, message=message,
-        source="trial_extension_request",
+        source=SOURCE_GRANTED if granted else SOURCE_REQUEST,
         user_agent=_clean(request.headers.get("user-agent"), 500) or None,
         visitor_id=_clean(data.visitor_id, 64) or None,
-        club_org_id=_clean(data.club_org_id, 64) or None,
+        club_org_id=str(org.id) if org is not None else (_clean(data.club_org_id, 64) or None),
         club_source="search" if data.club_org_id else None,
     ))
+    # The extension and its record land together: the record is also what stops
+    # a second automatic extension for the same club.
     await db.commit()
 
-    sent = await _send_extension_emails(
-        club=club, slug=slug, name=name, email=email, phone=phone, role=role, message=message)
-    if not sent:
+    notified = await _send_extension_emails(
+        club=club, slug=slug, name=name, email=email, phone=phone, role=role,
+        message=message, outcome=outcome, granted=granted)
+    if not notified and not granted:
         raise HTTPException(
             status_code=503,
             detail=f"We could not send that just now. Please email {settings.email_reply_to} and we will sort it out.",
         )
-    return {"ok": True}
+    # A granted extension is real whether or not the heads-up email went, so the
+    # person is told what happened; the saved row is what staff pick up if it did not.
+    return {
+        "ok": True, "extended": granted, "extension_days": TRIAL_EXTENSION_DAYS if granted else None,
+        "trial_ends_at": new_end.isoformat() if granted and new_end else None,
+        "club_slug": slug if granted else None,
+    }
 
 
 @router.post("/track-step")

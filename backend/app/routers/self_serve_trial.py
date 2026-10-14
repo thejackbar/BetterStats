@@ -120,19 +120,23 @@ async def _reclaimable_existing(db: AsyncSession, existing):
     return None
 
 
-async def _public_page_paused(db: AsyncSession, existing) -> bool:
-    """Whether the registered club's public page shows the "Club page paused"
-    screen: the same test the public club routes apply (``clubs._public_blocked``,
-    inactive or BetterStats/Core not live, which is what an ended trial does).
-    ``org_core_live`` fails open unless the subscription rows are loaded, so the
-    club is re-read with them here."""
+async def _paused_org(db: AsyncSession, existing):
+    """The registered club loaded WITH its subscription rows when its public page
+    shows "Club page paused" (the test the public club routes apply, see
+    ``clubs._public_blocked``: inactive, or BetterStats/Core not live, which is
+    what an ended trial does), else None. ``org_core_live`` fails open unless the
+    subscription rows are loaded, so the club is re-read with them here."""
     from sqlalchemy.orm import selectinload
     from app.routers.clubs import _public_blocked
     org = (await db.execute(
         select(Organisation).where(Organisation.id == existing.id)
         .options(selectinload(Organisation.module_subscriptions))
     )).scalar_one_or_none()
-    return org is not None and _public_blocked(org)
+    return org if org is not None and _public_blocked(org) else None
+
+
+async def _public_page_paused(db: AsyncSession, existing) -> bool:
+    return (await _paused_org(db, existing)) is not None
 
 
 async def _primary_admin_label(db: AsyncSession, club_id) -> str | None:

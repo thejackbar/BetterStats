@@ -1497,3 +1497,14 @@ A registered club whose public page is paused (inactive, or BetterStats/Core not
 - No live provider (console) or every send failing returns 503 with the support address; the saved row stays for staff. Not a thank-you (rule 26).
 - Not covered: a club locked by `password_protect_reason = trial_ended` (the 423 PIN page) keeps its own `request-unpause` form.
 - Proof: `backend/verification/verify_trial_extension_request.py` (real Postgres, shipped route bodies; control run against the previous commit reports the flag MISSING and the endpoint absent). UI driven in Chromium with the API stubbed: exact request body, live and unregistered paths unchanged, 390px no overflow.
+
+## v9.112.1: the extension request grants 7 days once
+
+Follow-up to v9.110.11. A first request from a paused club now extends it straight away instead of only notifying.
+
+- `public_self_serve._grant_extension` resolves the club on the server (`find_matching_organisation` plus `_reclaimable_existing`, then `self_serve_trial._paused_org`), never from the slug or id the browser sends. It grants only when: page paused, `is_active`, the Core row is status `trial` and the master `subscription_status` is live, and no earlier `trial_extension_granted` row exists for that club. Then `module_subscriptions.extend_trial_for_org(days=TRIAL_EXTENSION_DAYS, reset_start=True)`, the same function the sales "Extend Trial" uses, so every module on trial moves together.
+- "Once" is remembered by the row's `source` (`trial_extension_granted` against the resolved org id; anything else is `trial_extension_request`). No migration. The extension and its row commit together, before the email.
+- The reply carries `extended`, `extension_days`, `trial_ends_at` and the club's own `club_slug`; the modal shows the right thank-you and a link to the club page. `GET /public/self-serve/status` returns `trial_extension_days` for the intro copy.
+- A granted extension with no live email provider still answers ok (it is true and saved); a request that was NOT granted and could not be emailed is still a 503.
+- Accepted risk: the form is unauthenticated, so anyone who types a paused club's name gets that club one 7 day extension. The cap is once per club plus the 10 per hour IP limit. Change `TRIAL_EXTENSION_DAYS` in one place.
+- Proof: `backend/verification/verify_trial_extension_request.py` (37 checks; the control run on the previous code fails the 15 new-behaviour ones with no crash). UI in Chromium: both replies, exact link target, 390px.
