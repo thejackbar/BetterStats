@@ -12,6 +12,7 @@ from app.models.db import Game, Grade, Season, Organisation, BattingInnings, Bow
 from app.routers.auth import get_optional_user, public_junior_hiding
 from app.services import dismissal, grade_scope, participant_names
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
+from app.services.club_match import fixture_side
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
 from app.services import rate_coverage as rc
 
@@ -687,12 +688,74 @@ _GENERIC_SIDE_WORDS = {
 }
 
 
+async def _viewing_club(db: AsyncSession, game, hint: str) -> Optional[Organisation]:
+    """The club named by ``hint`` (organisation id or slug) when it played in
+    this synced game, else None.
+
+    Played in it means the game names the club as its home or away organisation,
+    or, for a row written before those columns were filled, the club's name is on
+    a side AND one of the club's own players has an appearance in it. A club that
+    merely shares a word with a team ("North" for "North Beach") never qualifies.
+    """
+    club = None
+    try:
+        club = await db.get(Organisation, uuid.UUID(hint))
+    except (ValueError, TypeError):
+        club = (await db.execute(
+            select(Organisation).where(Organisation.slug == hint.lower())
+        )).scalar_one_or_none()
+    if club is None:
+        return None
+    if club.id in (game.home_org_id, game.away_org_id):
+        return club
+    side = fixture_side(club, game.home_team, game.away_team, game.home_org_id, game.away_org_id)
+    if side is None:
+        return None
+    played = await db.scalar(text(
+        "SELECT 1 FROM game_appearances ga JOIN players p ON p.id = ga.player_id "
+        "WHERE ga.game_id = :gid AND p.organisation_id = :org LIMIT 1"
+    ), {"gid": game.id, "org": club.id})
+    return club if played else None
+
+
+def _result_for_club(game, club: Organisation) -> Optional[str]:
+    """WIN / LOSS / DRAW as ``club`` saw it. ``games.result`` is the verdict of
+    whichever club synced the fixture first, so the other club reads it
+    backwards. The winning team's name is neutral and is judged against this
+    club's own side; the stored result is flipped only when that is not enough."""
+    side = fixture_side(club, game.home_team, game.away_team, game.home_org_id, game.away_org_id)
+    won = (game.winning_team or "").strip()
+    if won and side:
+        ours = game.home_team if side == "home" else game.away_team
+        theirs = game.away_team if side == "home" else game.home_team
+        if won == (ours or "").strip():
+            return "WIN"
+        if won == (theirs or "").strip():
+            return "LOSS"
+    if game.result in ("WIN", "LOSS") and club.id not in (game.home_org_id, game.away_org_id) \
+            and (game.home_org_id or game.away_org_id):
+        return "LOSS" if game.result == "WIN" else "WIN"
+    return game.result
+
+
 @router.get("/{game_id}/scorecard")
 async def get_scorecard(
     game_id: str,
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
+    org_param: Optional[str] = Query(
+        None, alias="org",
+        description=(
+            "The club the visitor is browsing from (organisation id or slug). A "
+            "fixture between two synced clubs is one row filed under whichever "
+            "club synced it first, so without this the page is always read from "
+            "that club's side. Honoured only for a club that played in the game."
+        ),
+    ),
 ):
+    # A route body called directly (the verification suites do) is handed the
+    # Query default object, not a value.
+    org_hint = org_param.strip() if isinstance(org_param, str) and org_param.strip() else None
     game = await db.get(Game, uuid.UUID(game_id))
     is_manual = False
     if not game:
@@ -728,6 +791,19 @@ async def get_scorecard(
         hiding = await public_junior_hiding(db, viewer, org.id, with_players=False)
         if hiding.active and game.grade_id in hiding.grade_ids:
             raise HTTPException(status_code=404, detail="Game not found")
+
+    # Read the card from the side of the club the visitor came from. The owning
+    # club (above) is only whoever synced a shared fixture first; the junior
+    # hiding check ran against it on purpose, so the other club cannot be used
+    # to look at a match the owner hides.
+    viewing_org = None
+    if org_hint and not is_manual:
+        viewing_org = await _viewing_club(db, game, org_hint)
+        if viewing_org is not None and (org is None or viewing_org.id != org.id):
+            org = viewing_org
+            include_fillins_stats = bool(org.include_fill_ins_in_stats)
+        else:
+            viewing_org = None
 
     # Manual and synced child models share the same field names, so we just
     # pick which model to query against based on the game's provenance.
@@ -1096,8 +1172,20 @@ async def get_scorecard(
                 _our_logo = org.logo_url or (f"/images/organisations/{org.id}/logo" if org.logo_data else None)
 
             # Pass 2: decide which team id is ours, org name first.
+            # The team's owning organisation id is the exact answer (our
+            # organisations.id is the CA org GUID); the first word of the club
+            # name is not ("north" is in "North Beach" as well as "North
+            # Perth"), so it only decides when no team names an owner.
             _our_tid = None
-            if org_word:
+            if org:
+                _our_tid = next(
+                    (str(_t.get("id") or "").lower() for _t in _teams_raw
+                     if str(((_t.get("owningOrganisation") or {}).get("id")) or "").lower() == str(org.id).lower()
+                     and _t.get("id")),
+                    None,
+                )
+            _owners_named = any(((_t.get("owningOrganisation") or {}).get("id")) for _t in _teams_raw)
+            if _our_tid is None and org_word and not _owners_named:
                 _our_tid = next(
                     (tid for tid, nm in gr_team_name_by_id.items() if org_word in nm.lower()),
                     None,
@@ -1125,7 +1213,11 @@ async def get_scorecard(
             summary_teams = (gr_data.get("matchSummary") or {}).get("teams") or []
             home_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "") or game.home_team or ""
             away_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "") or game.away_team or ""
-            we_are_home = bool(org_word and game.home_team and org_word in game.home_team.lower())
+            _home_tid_gr = next((str(_t.get("id") or "").lower() for _t in _teams_raw if _t.get("isHome") is True), None)
+            if _our_tid is not None and _home_tid_gr is not None:
+                we_are_home = _our_tid == _home_tid_gr
+            else:
+                we_are_home = bool(org_word and game.home_team and org_word in game.home_team.lower())
             our_display_name = home_name if we_are_home else away_name
             opp_display_name = away_name if we_are_home else home_name
 
@@ -1382,7 +1474,7 @@ async def get_scorecard(
         # a margin in wickets depends on who batted last.
         "innings_order_known": getattr(game, "innings_order_known", None) is not False,
         "played_at": game.played_at.isoformat() if game.played_at else None,
-        "result": game.result,
+        "result": _result_for_club(game, viewing_org) if viewing_org is not None else game.result,
         "winning_team": game.winning_team,
         # Lets the scorecard page fetch the owning club and wear its theme
         # (colours + fonts) without needing an ?org= query param on the link.

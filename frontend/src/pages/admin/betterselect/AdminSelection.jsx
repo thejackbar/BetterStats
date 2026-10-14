@@ -31,6 +31,7 @@ import SelectionFilters from './SelectionFilters'
 import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
 import { AddPlayersSheet, SlotSheet, MobileBar } from './SelectionMobile'
+import SendSide from './SendSide'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
 import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank } from './selectionMeta'
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
@@ -257,6 +258,7 @@ export default function AdminSelection() {
   const [addOpen, setAddOpen] = useState(false)
   const [slotOpen, setSlotOpen] = useState(null)
   const [showSheet, setShowSheet] = useState(false)
+  const [showSend, setShowSend] = useState(false)
   const [copied, setCopied] = useState(false)
   // How the team sheet lists the XI: the saved batting order, or A to Z by first
   // name for a team announcement. Display only: the batting order itself is not
@@ -886,6 +888,7 @@ export default function AdminSelection() {
         <Icon name={theme === 'light' ? 'moon' : 'sun'} size={16} />
       </button>
       <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}><span className="hidden sm:inline">Share</span></Btn>
+      {canEdit && <Btn variant="soft" sm icon="share" onClick={() => setShowSend(true)} title="Email the confirmed side to the captain or the players"><span className="hidden sm:inline">Email</span></Btn>}
       {/* Below `lg` Confirm lives in the bar pinned to the bottom of the screen. */}
       {canEdit && <Btn variant="primary" sm icon="check" className="max-lg:hidden" onClick={save} disabled={saving || !dirty}>{confirmLabel}</Btn>}
     </div>
@@ -952,6 +955,10 @@ export default function AdminSelection() {
       {availEdit && (
         <QuickAvailModal player={availEdit} dateLabel={fx?.played_on} current={availEdit.availability}
           onPick={pickAvail} onClose={() => setAvailEdit(null)} />
+      )}
+
+      {showSend && (
+        <SendSide fixtureId={fixtureId} title={title} dirty={dirty} count={count} onClose={() => setShowSend(false)} />
       )}
 
       {showSheet && (

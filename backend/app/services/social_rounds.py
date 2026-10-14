@@ -35,7 +35,7 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import grassroots_scores_client as gr
-from app.services.club_match import club_match_keys
+from app.services.club_match import club_match_keys, fixture_side, fixture_involves_club, team_is_club
 from app.services.fixtures_source import _current_grade_rows, org_grassroots_fixtures
 from app.services.social_match_lookup import parse_reference
 from app.services.sync import strip_team_suffix
@@ -300,13 +300,9 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
     summary_teams = ms.get("teams") or []
     teams_raw = sc.get("teams") or []
     innings = sc.get("innings") or []
-    org_id = str(org.id).lower()
 
     def is_ours(t: dict) -> bool:
-        if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id:
-            return True
-        dn = (t.get("displayName") or "").lower()
-        return any(k in dn for k in keys)
+        return team_is_club(org, t)
 
     our_team = next((t for t in teams_raw if is_ours(t)), None)
     if not our_team:
@@ -366,15 +362,13 @@ async def social_fixtures(db: AsyncSession, org) -> dict:
     """Upcoming/live fixtures for the org, grouped by match-day, shaped for the
     Fixtures roundup posts."""
     fixtures = await org_grassroots_fixtures(db, org)
-    keys = club_match_keys(org)
     grade_orders = await _grade_display_orders(db, org.id)
     season = next((fx.get("season_name") for fx in fixtures if fx.get("season_name")), None)
     by_date: dict[str, dict] = {}
     for fx in fixtures:
         home = fx.get("home_team") or ""
         away = fx.get("away_team") or ""
-        hl, al = home.lower(), away.lower()
-        if any(k in al for k in keys) and not any(k in hl for k in keys):
+        if fixture_side(org, home, away, fx.get("home_org_id"), fx.get("away_org_id")) == "away":
             ha, opp = "A", home
         else:
             ha, opp = "H", away
@@ -428,9 +422,7 @@ async def _recent_club_matches(db: AsyncSession, org) -> dict | None:
         if not isinstance(lst, list):
             continue
         for m in lst:
-            home = (m.get("home_team") or "").lower()
-            away = (m.get("away_team") or "").lower()
-            if any(k in home or k in away for k in keys):
+            if fixture_involves_club(org, m):
                 club_matches.append(m)
 
     # De-dup by match id, newest first, then keep only the most-recent few
@@ -617,7 +609,8 @@ async def _reference_round(db: AsyncSession, org, raw: str):
 
     keys = club_match_keys(org)
     anchor_home, anchor_away = _match_home_away(anchor)
-    if not any(k in anchor_home.lower() or k in anchor_away.lower() for k in keys):
+    _a_home_oid, _, _a_away_oid, _ = _match_logos(anchor)
+    if fixture_side(org, anchor_home, anchor_away, _a_home_oid, _a_away_oid) is None:
         # A real match, in one of our grades, but not one of our sides — a
         # grade is a whole competition, not club-exclusive.
         return {"kind": "not_found", "message": _NOT_FOUND_MESSAGE}, None
@@ -652,7 +645,8 @@ async def _reference_round(db: AsyncSession, org, raw: str):
     seen: set = set()
     for guid, m in all_matches:
         home, away = _match_home_away(m)
-        if not any(k in home.lower() or k in away.lower() for k in keys):
+        _h_oid, _, _a_oid, _ = _match_logos(m)
+        if fixture_side(org, home, away, _h_oid, _a_oid) is None:
             continue
         day, _tm = _match_day_time(m)
         in_window = False
@@ -708,13 +702,11 @@ async def social_fixtures_for_reference(db: AsyncSession, org, raw: str) -> dict
     rows = []
     for guid, m in ctx["matches"]:
         home, away = _match_home_away(m)
-        hl, al = home.lower(), away.lower()
-        keys = ctx["keys"]
-        if any(k in al for k in keys) and not any(k in hl for k in keys):
+        home_org_id, home_logo, away_org_id, away_logo = _match_logos(m)
+        if fixture_side(org, home, away, home_org_id, away_org_id) == "away":
             ha, opp = "A", home
         else:
             ha, opp = "H", away
-        home_org_id, home_logo, away_org_id, away_logo = _match_logos(m)
         opp_org_id, opp_logo_raw = (away_org_id, away_logo) if ha == "H" else (home_org_id, home_logo)
         day, tm = _match_day_time(m)
         rows.append((day, tm, {
@@ -828,16 +820,11 @@ async def _rank_our_side(db: AsyncSession, org, raw: dict) -> dict:
     ms = raw.get("matchSummary") or {}
     teams_raw = raw.get("teams") or []
     innings = raw.get("innings") or []
-    keys = club_match_keys(org)
-    org_id = str(org.id).lower()
 
     # Identify our team exactly like _result_row: owning org id first, then the
     # club-name keys.
     def is_ours(t: dict) -> bool:
-        if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id:
-            return True
-        dn = (t.get("displayName") or "").lower()
-        return any(k in dn for k in keys)
+        return team_is_club(org, t)
 
     our_team = next((t for t in teams_raw if is_ours(t)), None)
     if not our_team:

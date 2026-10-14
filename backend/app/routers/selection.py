@@ -19,7 +19,7 @@ import uuid
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +28,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
-from app.services import selection_clash, selection_seed
+from app.services import selection_clash, selection_notify, selection_rules, selection_seed
 from app.services.selection_pool import assemble_selection, rule_context
 
 router = APIRouter(prefix="/selection", tags=["selection"])
@@ -521,6 +521,8 @@ async def set_selection(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    # Last, so a caller that passes db, club and user positionally is unaffected.
+    background_tasks: BackgroundTasks = None,
 ):
     """Replace a fixture's lineup with the given set of players.
 
@@ -721,4 +723,45 @@ async def set_selection(
         wicket_keeper_id=next((s.player_id for s in ordered if s.is_wicket_keeper), None),
     )
     await db.commit()
+    # A club that asked for it has the confirmed side emailed to its captain.
+    # After the commit, on its own session, never part of the confirm itself.
+    if slots and background_tasks is not None \
+            and selection_rules.club_config(club).get("notify_captain_on_confirm"):
+        background_tasks.add_task(selection_notify.auto_send_captain, club.id, fx.id, user.id)
     return {"status": "ok", "count": len(slots)}
+
+
+class NotifyBody(BaseModel):
+    to: str = "captain"                 # captain | players
+    message: Optional[str] = None       # an extra note for the players' email
+
+
+@router.post("/{fixture_id}/notify")
+async def notify_selection(
+    fixture_id: str,
+    body: NotifyBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Email the CONFIRMED side: to its captain (with every player's mobile) or
+    to each selected player. A draft is never sent. See services/selection_notify."""
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    if body.to == "captain":
+        return await selection_notify.send_to_captain(db, club, fx.id, user_id=user.id)
+    if body.to == "players":
+        note = (body.message or "")[:1000]
+        return await selection_notify.send_to_players(db, club, fx.id, user_id=user.id, message=note)
+    raise HTTPException(status_code=400, detail="Send to the captain or the players.")
+
+
+@router.get("/{fixture_id}/notices")
+async def selection_notices(
+    fixture_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """What has been emailed about this fixture's confirmed side, newest first."""
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    return {"notices": await selection_notify.list_notices(db, club, fx.id)}

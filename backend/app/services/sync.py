@@ -2249,8 +2249,17 @@ async def sync_grassroots_game_level_data(
         summary_teams = (scorecard.get("matchSummary") or {}).get("teams") or []
         home_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "")
         away_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "")
-        our_is_home = bool(our_team_name) and our_team_name == home_team_name
-        our_is_away = bool(our_team_name) and our_team_name == away_team_name
+        # Which side is ours: by team id first (the names on `teams[]` and on
+        # `matchSummary.teams` are not always spelled the same, and a miss here
+        # leaves home_org_id/away_org_id unset, so a fixture another club synced
+        # first never counts as ours in our stats), then by exact name.
+        _our_tid = str((our_team or {}).get("id") or "").lower()
+        _home_tid = next((str(t.get("id") or "").lower() for t in summary_teams if t.get("isHome") is True), "")
+        _away_tid = next((str(t.get("id") or "").lower() for t in summary_teams if t.get("isHome") is False), "")
+        our_is_home = bool(our_team_name) and (
+            our_team_name == home_team_name or (bool(_our_tid) and _our_tid == _home_tid))
+        our_is_away = bool(our_team_name) and not our_is_home and (
+            our_team_name == away_team_name or (bool(_our_tid) and _our_tid == _away_tid))
 
         # Open a fresh per-game session.
         try:

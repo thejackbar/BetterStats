@@ -465,7 +465,11 @@ export const api = {
     if (competitions) params.set('competitions', competitions)
     return request(`/organisations/${orgId}/results?${params}`)
   },
-  getScorecard: (gameId) => request(`/games/${gameId}/scorecard`),
+  // `org` is the club the visitor is browsing from (id or slug). A fixture between
+  // two synced clubs is one record filed under whichever synced first, so the
+  // page needs to be told whose side to read it from.
+  getScorecard: (gameId, org) =>
+    request(`/games/${gameId}/scorecard${org ? `?org=${encodeURIComponent(org)}` : ''}`),
 
   // Admin / merge tools
   getMergeCandidates: (orgId) => request(`/admin/merge-candidates?org_id=${orgId}`),
@@ -3418,6 +3422,11 @@ export const api = {
     request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players, demotions }) }),
   // Autosaved, unconfirmed side for a fixture. `opts` goes to fetch, so a
   // leaving page can pass { keepalive: true }.
+  // Email the CONFIRMED side: `to` is 'captain' (team sheet with every player's
+  // mobile) or 'players' (each selected player their selection, plus `message`).
+  bsNotifySelection: (fixtureId, to, message) =>
+    request(`/selection/${fixtureId}/notify`, { method: 'POST', body: JSON.stringify({ to, message: message || null }) }),
+  bsSelectionNotices: (fixtureId) => request(`/selection/${fixtureId}/notices`),
   bsGetSelectionDraft: (fixtureId) => request(`/selection/${fixtureId}/draft`),
   bsSaveSelectionDraft: (fixtureId, draft, opts = {}) =>
     request(`/selection/${fixtureId}/draft`, { method: 'PUT', body: JSON.stringify(draft), ...opts }),

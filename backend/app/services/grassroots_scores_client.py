@@ -20,6 +20,7 @@ from typing import Optional
 import httpx
 
 from app.config.settings import settings
+from app.services import club_match
 
 logger = logging.getLogger(__name__)
 
@@ -373,12 +374,16 @@ async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> li
         if since and day < since:
             continue
         teams = m.get("teams") or []
-        home = next((t.get("displayName") for t in teams if t.get("isHome")), None)
-        away = next((t.get("displayName") for t in teams if not t.get("isHome")), None)
+        home_t = next((t for t in teams if t.get("isHome")), None)
+        away_t = next((t for t in teams if not t.get("isHome")), None)
         out.append({
             "id": m.get("id"),
-            "home_team": home,
-            "away_team": away,
+            "home_team": (home_t or {}).get("displayName"),
+            "away_team": (away_t or {}).get("displayName"),
+            # The owning clubs, so "is this our match" can be answered by id
+            # rather than by a word the team name may share with another club.
+            "home_org_id": ((home_t or {}).get("owningOrganisation") or {}).get("id"),
+            "away_org_id": ((away_t or {}).get("owningOrganisation") or {}).get("id"),
             "played_at": day,
             "round": (m.get("round") or {}).get("name"),
             "venue": (m.get("venue") or {}).get("name"),
@@ -461,15 +466,22 @@ async def get_grades_fixtures(
     grade_ids: list[str],
     match_keys: Optional[list[str]] = None,
     *,
+    club=None,
     include_live: bool = True,
     force: bool = False,
 ) -> list[dict]:
     """Aggregate ``get_grade_fixtures`` across grades, de-duplicated and sorted.
 
-    ``match_keys`` (lowercased club name keys, e.g. from ``club_match_keys``)
-    optionally restricts results to fixtures involving that club (substring match
-    on either side). Grades are fetched concurrently; the underlying per-grade
-    cache makes repeat calls cheap.
+    ``club`` (the Organisation) restricts results to fixtures involving that
+    club: by the owning organisation id on each side, falling back to the club's
+    name only for a fixture whose payload carries no organisation id
+    (``services.club_match.fixture_involves_club``). A grade is a whole
+    competition, so without this a club sees every other club's games in it.
+
+    ``match_keys`` (lowercased club name keys) is the older name-only form, kept
+    for a caller with no Organisation to hand: a whole-word match on either side.
+    Grades are fetched concurrently; the underlying per-grade cache makes repeat
+    calls cheap.
     """
     results = await asyncio.gather(
         *[get_grade_fixtures(g, include_live=include_live, force=force) for g in grade_ids],
@@ -486,10 +498,11 @@ async def get_grades_fixtures(
             fid = fx.get("id")
             if not fid or fid in seen:
                 continue
-            if match_keys:
-                hl = (fx.get("home_team") or "").lower()
-                al = (fx.get("away_team") or "").lower()
-                if not any(k in hl or k in al for k in match_keys):
+            if club is not None:
+                if not club_match.fixture_involves_club(club, fx):
+                    continue
+            elif match_keys:
+                if not club_match.keys_match_any(match_keys, fx.get("home_team"), fx.get("away_team")):
                     continue
             seen.add(fid)
             out.append(fx)

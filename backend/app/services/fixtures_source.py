@@ -9,7 +9,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import grassroots_scores_client as gr
-from app.services.club_match import club_match_keys
 from app.services.grade_labels import category_for_name, category_label, org_grade_categories
 
 
@@ -76,7 +75,7 @@ async def org_grassroots_fixtures_checked(
     meta = {guid: (grade_id, gname, sname) for guid, grade_id, gname, sname in rows}
     categories = await org_grade_categories(db, org.id)
     fixtures = await gr.get_grades_fixtures(
-        [guid for guid, _, _, _ in rows], club_match_keys(org), force=force
+        [guid for guid, _, _, _ in rows], club=org, force=force
     )
     for guid, grade_id, _, _ in rows:
         matches = gr.cached_grade_matches(guid)

@@ -625,6 +625,7 @@ function BoardSettingsCard({ settings, onSave, canEdit }) {
         default_team_size: Number(form.default_team_size),
         show_fees: form.show_fees !== false,
         show_training: form.show_training !== false,
+        notify_captain_on_confirm: !!form.notify_captain_on_confirm,
       })
     } finally { setSaving(false) }
   }
@@ -683,6 +684,21 @@ function BoardSettingsCard({ settings, onSave, canEdit }) {
             Switching one off takes its badge and its pool filter with it. A rule you've set for
             fees or training still shows, because that one you asked for.
           </p>
+        </div>
+        <div className="pt-4 pb-hairline-t">
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" className="accent-pb-accent mt-0.5 shrink-0" checked={!!form.notify_captain_on_confirm}
+              onChange={(e) => setForm((f) => ({ ...f, notify_captain_on_confirm: e.target.checked }))} />
+            <span className="leading-tight">
+              <span className="text-pb-text text-[13.5px]">Email the captain when a side is confirmed</span>
+              <span className={`${HINT} block mt-0.5`}>
+                The captain gets the side in batting order with each player's mobile from their profile.
+                It needs a captain flagged in the side and an email address on the captain's profile.
+                A side the captain already has is not sent twice. You can also send it, or email the
+                players, yourself from the Email button on the Selection board.
+              </span>
+            </span>
+          </label>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 pt-4 pb-hairline-t">
           <div>

@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_FIXTURES, require_cap
 from app.models.db import Fixture, Grade, Organisation, Season, Team, User, get_db
 from app.routers.auth import get_current_club
-from app.services.club_match import club_match_keys
+from app.services.club_match import fixture_side
 from app.services.fixtures_reconcile import reconcile
 from app.services.fixtures_source import org_grassroots_fixtures_checked
 
@@ -74,11 +74,13 @@ def _derive_sides(g: dict, club: Organisation) -> tuple[Optional[str], Optional[
     """Best-effort (home_away, opponent_name) from the club's perspective."""
     home = g.get("home_team") or ""
     away = g.get("away_team") or ""
-    keys = club_match_keys(club)
-    hl, al = home.lower(), away.lower()
-    if any(k in hl for k in keys):
+    # By owning organisation id first, then by name. A first-word test alone
+    # filed "North Beach v North Perth" as a HOME game for North Perth, with
+    # North Perth itself as the opponent.
+    side = fixture_side(club, home, away, g.get("home_org_id"), g.get("away_org_id"))
+    if side == "home":
         return "HOME", away
-    if any(k in al for k in keys):
+    if side == "away":
         return "AWAY", home
     return None, None
 

@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import Organisation
 from app.services import grassroots_scores_client
 from app.services import scouting_intel
-from app.services.club_match import club_match_keys
+from app.services.club_match import side_is_club
 from app.services import rate_coverage as rc
 from app.services.iq_filters import (
     grade_canonical_label, grade_match_clause, grade_scope_fragment,
@@ -1371,12 +1371,12 @@ async def opponent_ladder(session: AsyncSession, org_id: str, *, opponent: str |
         return {**base, "available": False, "note": "No ladder published for this grade yet."}
 
     org = await session.get(Organisation, uuid.UUID(org_id))
-    club_keys = club_match_keys(org) if org else []
 
     def _hay(r):
         return " ".join(str(x).lower() for x in [r["team_name"], r["org"].get("name"), r["org"].get("shortName")] if x)
     for r in rows:
-        r["is_club"] = any(k and k in _hay(r) for k in club_keys)
+        # Owning organisation id first; the name only for a row without one.
+        r["is_club"] = bool(org) and side_is_club(org, _hay(r), (r["org"] or {}).get("id"))
 
     our_row = next((r for r in rows if r["is_club"]), None)
     nm = (name or "").strip().lower()
