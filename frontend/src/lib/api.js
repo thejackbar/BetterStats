@@ -3436,6 +3436,10 @@ export const api = {
     request(`/selection/${fixtureId}/draft${baseVersion ? `?base_version=${baseVersion}` : ''}`, { method: 'DELETE', ...opts }),
   bsSetDefaultTeamSize: (size) =>
     request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size }) }),
+  // How many THIS fixture's team names. Kept on the team, so it holds for every
+  // round and leaves other grades alone; null puts the team back on the club default.
+  bsSetTeamSize: (fixtureId, size) =>
+    request(`/selection/${fixtureId}/team-size`, { method: 'POST', body: JSON.stringify({ size }) }),
   // The previous fixture's named XI (for Selection's "fill from last week").
   bsPreviousXI: (fixtureId) => request(`/selection/${fixtureId}/previous-xi`),
   // Player ids named in any saved XI for the round containing `on` (a date) —

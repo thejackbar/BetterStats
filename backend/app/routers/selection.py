@@ -28,7 +28,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
-from app.services import selection_clash, selection_notify, selection_rules, selection_seed
+from app.services import selection_clash, selection_notify, selection_rules, selection_seed, team_size
 from app.services.selection_pool import assemble_selection, rule_context
 
 router = APIRouter(prefix="/selection", tags=["selection"])
@@ -117,6 +117,7 @@ async def selection_overview(
     teams = tm_res.scalars().all()
     team_names = {str(t.id): (t.short_name or t.name) for t in teams}
     team_seqs = {str(t.id): t.sequence for t in teams}
+    team_sizes = {str(t.id): team_size.effective_size(club, t) for t in teams}
 
     # Grade label per fixture (drives the small grade badge).
     grade_ids = {f.grade_id for f in fixtures if f.grade_id}
@@ -205,6 +206,7 @@ async def selection_overview(
             "venue": f.venue,
             "team_name": team_names.get(str(f.team_id)) if f.team_id else None,
             "team_sequence": team_seqs.get(str(f.team_id)) if f.team_id else None,
+            "team_size": team_sizes.get(str(f.team_id), team_size.club_size(club)) if f.team_id else team_size.club_size(club),
             "grade_name": grade_names.get(str(f.grade_id)) if f.grade_id else None,
             "lineup": lineup,
             "has_draft": str(f.id) in drafts,
@@ -325,6 +327,43 @@ async def previous_xi(
         }
 
     return {"source_fixture_id": None, "player_ids": [], "captain_id": None, "wicket_keeper_id": None}
+
+
+class FixtureTeamSizeSet(BaseModel):
+    size: Optional[int] = None    # null puts the team back on the club default
+
+
+@router.post("/{fixture_id}/team-size")
+async def set_fixture_team_size(
+    fixture_id: str,
+    body: FixtureTeamSizeSet,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Set how many players THIS fixture's team names. It is stored on the team
+    (so it holds for every round and every other grade is left alone); null
+    clears it back to the club default. A fixture with no team has nowhere to
+    keep one, so it is refused and the board falls back to the club default."""
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    if not fx.team_id:
+        raise HTTPException(status_code=409, detail="This fixture has no team to keep a size for")
+    team = await db.get(Team, fx.team_id)
+    if not team or team.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Team not found")
+    try:
+        team.team_size = team_size.clean_team_size(body.size)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return {
+        "status": "ok",
+        "team_size": team_size.effective_size(club, team),
+        "team_size_info": {
+            "team_id": str(team.id), "team_name": team.short_name or team.name,
+            "own": team.team_size, "club": team_size.club_size(club),
+        },
+    }
 
 
 @router.post("/default-team-size")

@@ -97,15 +97,42 @@ function AvailMini({ players }) {
 }
 
 /* ── Shared fixture / balance / size chrome ──────────────────────────────── */
-function SizePicker({ value, onChange }) {
-  const opts = [[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']]
+function SizePicker({ value, onChange, options, title }) {
+  const opts = options || [[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']]
   return (
-    <div className="inline-flex p-[3px] gap-0.5 bg-pb-surface2 rounded-lg border border-pb-hairline whitespace-nowrap">
+    <div className="inline-flex p-[3px] gap-0.5 bg-pb-surface2 rounded-lg border border-pb-hairline whitespace-nowrap" title={title}>
       {opts.map(([v, l]) => (
-        <button key={v} type="button" onClick={() => onChange(v)}
+        <button key={v} type="button" onClick={() => onChange(v)} data-size={v}
           className={`rounded-md font-display font-semibold text-xs px-2.5 py-1 transition ${v === value ? 'bg-pb-accent/15 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
       ))}
     </div>
+  )
+}
+
+// The side-size picker, aware of whose size it sets. A fixture with a team saves
+// the size for THAT team (a women's grade names ten, OD6s twelve) and leaves every
+// other grade alone; a fixture with no team can only change the club default.
+// A team that has its own size gets a way back to the club's.
+const SIZE_BASE = [10, 11, 12, 13]
+function SizeControl({ vm }) {
+  const info = vm.sizeInfo
+  const team = !!info?.team_id
+  const own = team ? info.own : null
+  const base = team ? SIZE_BASE : SIZE_BASE.filter((n) => n !== 10)
+  const vals = [...new Set([...base, ...(vm.format > 0 && !base.includes(vm.format) ? [vm.format] : [])])].sort((a, b) => a - b)
+  const options = [...vals.map((n) => [n, String(n)]), [0, 'No limit']]
+  const clubWord = info?.club === 0 ? 'no limit' : `${info?.club ?? 11}`
+  const title = team
+    ? (own != null ? `Saved for ${info.team_name} only. The club default is ${clubWord}.` : `Changing this saves it for ${info.team_name} only. The club default is ${clubWord}.`)
+    : 'This fixture has no team, so changing this changes the club default.'
+  return (
+    <span className="inline-flex items-center gap-1.5" data-size-control={team ? (own != null ? 'team' : 'inherited') : 'club'}>
+      <SizePicker value={vm.format} onChange={vm.changeFormat} options={options} title={title} />
+      {team && own != null && (
+        <button type="button" onClick={vm.resetSize} title={`Back to the club default (${clubWord})`} data-size-reset
+          className="font-display font-semibold text-[11.5px] text-pb-faint hover:text-pb-accent whitespace-nowrap">Reset</button>
+      )}
+    </span>
   )
 }
 function PickPill({ count, target }) {
@@ -132,7 +159,7 @@ export function FixtureBar({ vm, compact = false }) {
         </div>
         {vm.canEdit && (
           <div className="flex flex-wrap items-center gap-2">
-            <SizePicker value={vm.format} onChange={vm.changeFormat} />
+            <SizeControl vm={vm} />
             <PickPill count={vm.count} target={vm.target} />
           </div>
         )}
@@ -151,7 +178,7 @@ export function FixtureBar({ vm, compact = false }) {
         </div>
         {vm.canEdit && (
           <div className="flex flex-wrap items-center gap-2.5">
-            <SizePicker value={vm.format} onChange={vm.changeFormat} />
+            <SizeControl vm={vm} />
             <PickPill count={vm.count} target={vm.target} />
           </div>
         )}
@@ -160,13 +187,13 @@ export function FixtureBar({ vm, compact = false }) {
   )
 }
 
-export function BalanceStrip({ vm }) {
+export function BalanceStrip({ vm, compact = false }) {
   const fmt = useAdminNameFormat()
   const b = vm.balance
   const cap = vm.capId && vm.filledSet.has(vm.capId) ? fmt(vm.poolById[vm.capId]?.display_name) : null
   const wk = vm.wkId && vm.filledSet.has(vm.wkId) ? fmt(vm.poolById[vm.wkId]?.display_name) : null
   return (
-    <div className="pb-card rounded-xl px-4 py-2 mb-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px]">
+    <div className={`pb-card rounded-xl px-4 ${compact ? 'py-1 mb-2' : 'py-2 mb-2.5'} flex flex-wrap items-center gap-x-5 gap-y-1 text-[13px]`}>
       {ROLE_CODES.map((c) => {
         const low = (c === 'BWL' && b.lightBowling) || (c === 'WKT' && !b.hasKeeper)
         return (
@@ -193,14 +220,14 @@ export function BalanceStrip({ vm }) {
  * has written none sees the board it has always seen. Blocking breaches read
  * red because the save will refuse them; warnings read amber because they are
  * the selector's to weigh. */
-export function RuleStrip({ vm }) {
+export function RuleStrip({ vm, compact = false }) {
   const rules = vm.rules
   if (!rules?.active) return null
   const { blocking, warnings } = xiCompliance(rules, vm.poolById, vm.slots)
   const problems = [...blocking, ...warnings]
   const tone = blocking.length ? 'var(--pb-red)' : warnings.length ? 'var(--pb-amber)' : 'var(--pb-positive)'
   return (
-    <div className="pb-card rounded-xl px-4 py-2 mb-2.5 text-[13px]"
+    <div className={`pb-card rounded-xl px-4 ${compact ? 'py-1 mb-2' : 'py-2 mb-2.5'} text-[13px]`}
       style={{ borderColor: `color-mix(in srgb, ${tone} 34%, transparent)` }}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest">Club rules</span>
@@ -264,19 +291,20 @@ function AvatarAvail({ p, vm, size = 34, dotSize = 10 }) {
 }
 
 /* ── Captain / keeper / remove control cluster ───────────────────────────── */
-function SlotControls({ vm, id, idx }) {
+function SlotControls({ vm, id, idx, small = false }) {
   if (!vm.canEdit) return null
+  const bs = small ? 'w-[22px] h-[22px]' : 'w-[26px] h-[26px]'
   return (
     <>
       {/* Desk: three small buttons. Below `lg` they were 26px each, which a
           thumb cannot hit one at a time, so a phone gets the cluster below. */}
       <div className="hidden lg:flex items-center gap-1 shrink-0">
         <button onClick={(e) => { e.stopPropagation(); vm.toggleCap(id) }} title="Captain"
-          className={`w-[26px] h-[26px] rounded-md text-[10px] font-bold font-mono ${id === vm.capId ? 'bg-pb-accent text-pb-bg' : 'bg-pb-surface text-pb-faint hover:text-pb-text'}`}>C</button>
+          className={`${bs} rounded-md text-[10px] font-bold font-mono ${id === vm.capId ? 'bg-pb-accent text-pb-bg' : 'bg-pb-surface text-pb-faint hover:text-pb-text'}`}>C</button>
         <button onClick={(e) => { e.stopPropagation(); vm.toggleWk(id) }} title="Wicket-keeper"
-          className={`w-[26px] h-[26px] rounded-md text-[10px] font-bold font-mono ${id === vm.wkId ? 'bg-pb-amber text-pb-bg' : 'bg-pb-surface text-pb-faint hover:text-pb-text'}`}>WK</button>
+          className={`${bs} rounded-md text-[10px] font-bold font-mono ${id === vm.wkId ? 'bg-pb-amber text-pb-bg' : 'bg-pb-surface text-pb-faint hover:text-pb-text'}`}>WK</button>
         <button onClick={(e) => { e.stopPropagation(); vm.removeAt(idx) }} title="Remove"
-          className="w-[26px] h-[26px] rounded-md flex items-center justify-center text-pb-faintest hover:text-pb-red hover:bg-pb-red/10"><Icon name="close" size={14} /></button>
+          className={`${bs} rounded-md flex items-center justify-center text-pb-faintest hover:text-pb-red hover:bg-pb-red/10`}><Icon name="close" size={14} /></button>
       </div>
       {/* Phone: move up, move down, and one "more" button that opens everything
           else (captain, keeper, availability, remove) as large buttons. */}
@@ -379,7 +407,7 @@ function DualCard({ p, kind, idx, vm, drag, density = 'full' }) {
       ) : !tight && <span className="max-sm:hidden"><FormBars p={p} h={dense ? 12 : 16} /></span>}
       {kind === 'pool'
         ? (!blocked && <span className="text-pb-faintest shrink-0 group-hover:text-pb-accent"><Icon name="arrow" size={16} /></span>)
-        : <SlotControls vm={vm} id={p.id} idx={idx} />}
+        : <SlotControls vm={vm} id={p.id} idx={idx} small={tight} />}
     </div>
   )
 }
@@ -426,8 +454,8 @@ export function DualRailView({ vm }) {
   return (
     <div>
       <FixtureBar vm={vm} compact={!vm.isPhone && shortWindow} />
-      <BalanceStrip vm={vm} />
-      <RuleStrip vm={vm} />
+      <BalanceStrip vm={vm} compact={!vm.isPhone && shortWindow} />
+      <RuleStrip vm={vm} compact={!vm.isPhone && shortWindow} />
 
       <div className="grid items-start gap-3.5 lg:gap-0 lg:grid-cols-[minmax(0,1fr)_56px_minmax(0,1fr)]">
         {/* Pool */}
@@ -474,7 +502,7 @@ export function DualRailView({ vm }) {
               </button>
             </div>
           )}
-          <div ref={xiListRef} data-xi-list className={`flex flex-col ${fit ? 'gap-1 flex-1 min-h-0 p-1.5' : 'gap-1.5 lg:max-h-[calc(100vh-300px)] p-2'} overflow-auto pb-scroll max-h-none`}>
+          <div ref={xiListRef} data-xi-list className={`flex flex-col ${fit ? `${density === 'tight' ? 'gap-0.5' : 'gap-1'} flex-1 min-h-0 p-1.5` : 'gap-1.5 lg:max-h-[calc(100vh-300px)] p-2'} overflow-auto pb-scroll max-h-none`}>
             {vm.slots.map((id, i) => <DualSlot key={i} i={i} id={id} vm={vm} drag={drag} fit={fit} density={density} />)}
             {vm.format === 0 && <div className="px-4 py-3 rounded-xl border border-dashed border-pb-hairline2 text-center text-[12px] text-pb-faintest">Tap a player to add to the order</div>}
           </div>
@@ -584,7 +612,7 @@ export function TeamSheetView({ vm }) {
           {vm.sub && <div className="text-[13px] text-pb-dim">{vm.sub}</div>}
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          {vm.canEdit && <SizePicker value={vm.format} onChange={vm.changeFormat} />}
+          {vm.canEdit && <SizeControl vm={vm} />}
           <div className="font-display flex items-baseline gap-1"><b className="text-[38px] leading-none text-pb-accent font-bold pb-num">{vm.count}</b><span className="text-[17px] text-pb-faint">/ {vm.target || '∞'}</span></div>
           <div className="hidden sm:flex gap-3.5 font-display">
             {ROLE_CODES.map((c) => {

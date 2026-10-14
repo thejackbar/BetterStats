@@ -26,6 +26,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Game, GameAppearance, Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import months_ago
+from app.services.team_size import clean_team_size
 from app.services.squad_membership import (
     add_squad_memberships,
     clear_all_squad_memberships,
@@ -53,6 +54,7 @@ def _serialize(t: Team, grades: Optional[dict] = None) -> dict:
         "grade_id": str(t.grade_id) if t.grade_id else None,
         "grade_name": (grades or {}).get(str(t.grade_id)) if t.grade_id else None,
         "default_formation": t.default_formation,
+        "team_size": t.team_size,
         "is_active": t.is_active,
         "source": t.source,
     }
@@ -172,6 +174,7 @@ class TeamCreate(BaseModel):
     sequence: Optional[int] = None
     grade_id: Optional[str] = None
     default_formation: Optional[str] = None
+    team_size: Optional[int] = None
     is_active: Optional[bool] = True
 
 
@@ -181,6 +184,7 @@ class TeamUpdate(BaseModel):
     sequence: Optional[int] = None
     grade_id: Optional[str] = None
     default_formation: Optional[str] = None
+    team_size: Optional[int] = None     # explicit null clears it back to the club default
     is_active: Optional[bool] = None
 
 
@@ -240,6 +244,10 @@ async def create_team(
         raise HTTPException(status_code=400, detail="Team name is required")
     grade_uuid = uuid.UUID(body.grade_id) if body.grade_id else None
     await _assert_grade_in_club(db, grade_uuid, club.id)
+    try:
+        size = clean_team_size(body.team_size)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     t = Team(
         id=uuid.uuid4(),
         organisation_id=club.id,
@@ -248,6 +256,7 @@ async def create_team(
         sequence=body.sequence if body.sequence is not None else _guess_sequence(name),
         grade_id=grade_uuid,
         default_formation=body.default_formation,
+        team_size=size,
         is_active=True if body.is_active is None else body.is_active,
         source="manual",
     )
@@ -273,6 +282,11 @@ async def update_team(
         data["grade_id"] = grade_uuid
     if data.get("name"):
         data["name"] = data["name"].strip()
+    if "team_size" in data:
+        try:
+            data["team_size"] = clean_team_size(data["team_size"])
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     was_active = t.is_active
     for key, value in data.items():
         setattr(t, key, value)

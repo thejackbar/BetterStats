@@ -110,7 +110,7 @@ async def _team_map(db: AsyncSession, club_id) -> dict:
     """{team_id_str: {name, short_name}} for the club — used to enrich fixtures
     with the playing team's name without an async lazy-load on f.team."""
     res = await db.execute(select(Team).where(Team.organisation_id == club_id))
-    return {str(t.id): {"name": t.name, "short_name": t.short_name, "sequence": t.sequence} for t in res.scalars().all()}
+    return {str(t.id): {"name": t.name, "short_name": t.short_name, "sequence": t.sequence, "team_size": t.team_size} for t in res.scalars().all()}
 
 
 def _norm(s: Optional[str]) -> str:
@@ -216,7 +216,9 @@ async def list_fixtures(
         d["lineup_count"] = counts.get(str(f.id), 0)
         # Club lineup size (0 = no limit) so the list can derive the 3-state
         # "Completed XI" facet: none / in progress / complete.
-        d["format_size"] = club.default_team_size if club.default_team_size is not None else 11
+        # A team's own size when it has one (a women's grade names ten).
+        own = (teams.get(str(f.team_id)) or {}).get("team_size") if f.team_id else None
+        d["format_size"] = own if own is not None else (club.default_team_size if club.default_team_size is not None else 11)
         out.append(d)
     return out
 

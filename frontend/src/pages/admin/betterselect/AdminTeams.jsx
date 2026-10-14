@@ -86,7 +86,12 @@ const UNASSIGNED_TINT = 'var(--pb-faintest)'
 // accent, not the semantic availability green).
 const COLUMN_TINTS = ['#3b82f6', '#a855f7', '#f5b542', '#06b6d4', '#84cc16', '#f97316', '#ef5b5b', '#e879f9', '#22d3ee', '#fb7185']
 
-const EMPTY_TEAM = { name: '', short_name: '', sequence: 0, default_formation: '', is_active: true, grade_id: '' }
+const EMPTY_TEAM = { name: '', short_name: '', sequence: 0, default_formation: '', is_active: true, grade_id: '', team_size: '' }
+
+// Players this squad names per game. Blank follows the club's default; the board's
+// 11/12/13 picker saves here for the squad being picked, so one grade at twelve
+// leaves the rest alone.
+const SQUAD_SIZES = [8, 9, 10, 11, 12, 13]
 
 function isKeeper(p) { return (p.skill_positions || []).includes('WKT') }
 
@@ -114,7 +119,7 @@ function nextGameInfo(col, squadNext, firstDate) {
 /* ── Team create/edit modal (grade linking preserved) ─────────────────────── */
 function TeamModal({ team, onClose, onSaved }) {
   const toast = useToast()
-  const [form, setForm] = useState(() => ({ ...EMPTY_TEAM, ...(team || {}), grade_id: team?.grade_id || '' }))
+  const [form, setForm] = useState(() => ({ ...EMPTY_TEAM, ...(team || {}), grade_id: team?.grade_id || '', team_size: team?.team_size ?? '' }))
   const [saving, setSaving] = useState(false)
   const [gradeSeasons, setGradeSeasons] = useState([])
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
@@ -132,6 +137,8 @@ function TeamModal({ team, onClose, onSaved }) {
         name: form.name.trim(), short_name: form.short_name || null,
         sequence: Number(form.sequence) || 0, default_formation: form.default_formation || null,
         is_active: !!form.is_active, grade_id: form.grade_id || null,
+        // Always sent: blank is an explicit "back to the club default", not "unchanged".
+        team_size: form.team_size === '' || form.team_size == null ? null : Number(form.team_size),
       }
       const saved = team ? await api.bsUpdateTeam(team.id, payload) : await api.bsCreateTeam(payload)
       toast.success(team ? 'Squad updated' : 'Squad added')
@@ -153,6 +160,14 @@ function TeamModal({ team, onClose, onSaved }) {
             <Field label="Short name"><Input value={form.short_name || ''} onChange={set('short_name')} placeholder="e.g. 1s" /></Field>
             <Field label="Order (1 = top)"><Input type="number" value={form.sequence} onChange={set('sequence')} /></Field>
           </div>
+          <Field label="Players per side">
+            <Select value={form.team_size === null ? '' : String(form.team_size)} onChange={set('team_size')} data-team-size>
+              <option value="">Club default</option>
+              {SQUAD_SIZES.concat(form.team_size !== '' && form.team_size != null && Number(form.team_size) > 0 && !SQUAD_SIZES.includes(Number(form.team_size)) ? [Number(form.team_size)] : [])
+                .sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n}</option>)}
+              <option value="0">No limit</option>
+            </Select>
+          </Field>
           <Field label="Default formation (optional)"><Input value={form.default_formation || ''} onChange={set('default_formation')} placeholder="e.g. Traditional" /></Field>
           <Field label="Grade (for ladder — auto-linked, override here)">
             <Select value={form.grade_id || ''} onChange={set('grade_id')}>

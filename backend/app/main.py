@@ -4382,6 +4382,12 @@ async def lifespan(app: FastAPI):
         for _stmt in _SELECTION_NOTICE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 330: a team's own number of players. Same one-copy rule: this
+        # list and alembic's 330 both run services/team_size_ddl.STATEMENTS.
+        from app.services.team_size_ddl import STATEMENTS as _TEAM_SIZE_DDL
+        for _stmt in _TEAM_SIZE_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 285: importing a club's history from its own public
         # CricketStatz site. Same one-copy rule — this list and alembic's 285
         # both run services/cricketstatz_ddl.STATEMENTS.

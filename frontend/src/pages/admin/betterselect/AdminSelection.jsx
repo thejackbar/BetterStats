@@ -174,6 +174,9 @@ export default function AdminSelection() {
   const [wkId, setWkId] = useState(null)
   const [focus, setFocus] = useState(null)
   const [format, setFormat] = useState(11)
+  // Whose size the picker sets: { team_id, team_name, own, club }. A fixture with
+  // a team keeps its size on the team, so one grade at twelve leaves the rest alone.
+  const [sizeInfo, setSizeInfo] = useState(null)
   const [saving, setSaving] = useState(false)
   // The confirmed XI as loaded; "unconfirmed changes" is the board differing
   // from it. Derived, so putting someone back where they were reads as clean.
@@ -200,6 +203,8 @@ export default function AdminSelection() {
   // Phone only. `panel` is which of Pool / XI the bottom bar has up; the two
   // sheets are the "add players" search and one batting-order row's actions.
   const isPhone = useMediaQuery('(max-width: 1023px)')
+  // A short window needs every pixel above the XI: the draft strip says less.
+  const shortWindow = useMediaQuery('(max-height: 899px)') && !isPhone
   const [panel, setPanel] = useState('xi')
   const [addOpen, setAddOpen] = useState(false)
   const [slotOpen, setSlotOpen] = useState(null)
@@ -275,6 +280,7 @@ export default function AdminSelection() {
         setCapId(cap)
         setWkId(wk)
         setFormat(size)
+        setSizeInfo(d.team_size_info || null)
         setFocus(slotsInit.findIndex((x) => x == null))
         setDemotions(demo)
         setDraftStatus('idle')
@@ -677,7 +683,8 @@ export default function AdminSelection() {
     }
   }
 
-  const changeFormat = async (size) => {
+  // The board's slots follow the size straight away; saving it is separate.
+  const applySize = (size) => {
     setFormat(size)
     setSlots((prev) => {
       if (size === 0) return prev.filter(Boolean)
@@ -688,7 +695,26 @@ export default function AdminSelection() {
       if (wkId && !kept.has(wkId)) setWkId(null)
       return next
     })
-    if (canEdit) { try { await api.bsSetDefaultTeamSize(size) } catch (e) { toast.error('Could not save side size: ' + e.message) } }
+  }
+  const changeFormat = async (size) => {
+    applySize(size)
+    if (!canEdit) return
+    try {
+      if (sizeInfo?.team_id) {
+        // This team only. Every other grade keeps the size it had.
+        const r = await api.bsSetTeamSize(fixtureId, size)
+        setSizeInfo(r.team_size_info)
+      } else await api.bsSetDefaultTeamSize(size)
+    } catch (e) { toast.error('Could not save side size: ' + e.message) }
+  }
+  // Put this team back on the club's default.
+  const resetSize = async () => {
+    if (!canEdit || !sizeInfo?.team_id) return
+    try {
+      const r = await api.bsSetTeamSize(fixtureId, null)
+      setSizeInfo(r.team_size_info)
+      applySize(r.team_size)
+    } catch (e) { toast.error('Could not reset side size: ' + e.message) }
   }
 
   const pickAvail = async (status) => {
@@ -821,7 +847,7 @@ export default function AdminSelection() {
     available, view, isPhone, panel, setPanel,
     openAdd: (i) => { if (i != null) setFocus(i); setAddOpen(true) },
     openSlot: (i) => setSlotOpen(i),
-    changeFormat, tapPlayer, placeInSlot, removeAt, swapSlots, setFocus, toggleCap, toggleWk,
+    changeFormat, resetSize, sizeInfo, tapPlayer, placeInSlot, removeAt, swapSlots, setFocus, toggleCap, toggleWk,
     autofill: () => fillEmpty(false), fillLastWeek: () => fillEmpty(true), clearXI, setAvailEdit,
   }
 
@@ -861,7 +887,7 @@ export default function AdminSelection() {
         </div>
       )}
       {canEdit && dirty && !draftConflict && (
-        <div role="status" className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-pb-hairline bg-pb-surface px-3 py-2 text-[12px] text-pb-dim">
+        <div role="status" data-draft-strip className={`${shortWindow ? 'mb-2 py-1' : 'mb-3 py-2'} flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-pb-hairline bg-pb-surface px-3 text-[12px] text-pb-dim`}>
           <span className="min-w-0 flex-1 basis-60">
             <span className="font-semibold text-pb-text">Draft.</span>{' '}
             {draftStatus === 'error'
@@ -875,7 +901,7 @@ export default function AdminSelection() {
               const names = (draftInfo.leftOut || []).map((id) => poolById[id]).filter(Boolean).map((p) => fmt(p.display_name))
               return names.length ? ` Left out because they said unavailable: ${names.join(', ')}.` : null
             })()}
-            <span className="max-sm:hidden">
+            <span className={shortWindow ? 'hidden' : 'max-sm:hidden'}>
               {' '}The confirmed XI stays as it was until you press Confirm.
               {draftInfo?.by && draftInfo.at && !draftInfo.carried && !saving ? ` Last saved by ${draftInfo.by}.` : ''}
             </span>

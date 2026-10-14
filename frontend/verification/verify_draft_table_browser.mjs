@@ -14,8 +14,11 @@
 //   * 390px: a short note instead of a cramped table, no horizontal overflow
 //
 //   Selection board (Dual rail)
-//   * the Selected XI shows all eleven without scrolling at common laptop heights,
-//     and falls back to scrolling (not crushed rows) on a very short window
+//   * the Selected XI shows all eleven or twelve without scrolling at common laptop
+//     heights, and falls back to scrolling (not crushed rows) on a very short window
+//   * the side-size picker saves for THAT team only (a women's grade names ten, OD6s
+//     twelve): one POST /selection/:id/team-size, never the club default, the other
+//     teams keep their size, and Reset puts the team back on the club's
 //
 //   npx vite preview --outDir <dist> --port 5199 &   then   node verify_draft_table_browser.mjs
 //   CONTROL=1 node verify_draft_table_browser.mjs     (previous build: the fit checks must fail)
@@ -84,8 +87,12 @@ const run = async () => {
   const server = {
     confirmed: { [F1]: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(pid), [F2]: [12, 13, 14, 15].map(pid), [F3]: [], [F4]: [] },
     drafts: {},   // fid -> { draft, version, by }
+    sizes: { [F1]: null, [F2]: null, [F3]: 10, [F4]: null },   // each team's own size (null = club default)
+    club: 11,
   }
-  const wire = { draftPuts: [], draftDeletes: [], confirms: [], conflicts: 0 }
+  const wire = { draftPuts: [], draftDeletes: [], confirms: [], conflicts: 0, sizeSets: [], clubSets: [] }
+  const sizeOf = (fid) => (server.sizes[fid] ?? server.club)
+  const sizeInfo = (fid) => ({ team_id: `t-${fid}`, team_name: FX.find((f) => f.id === fid).team_name, own: server.sizes[fid], club: server.club })
   const json = (r, body, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
   const seqOf = (fid) => FX.find((f) => f.id === fid).team_sequence
   const dayOf = (fid) => FX.find((f) => f.id === fid).played_on
@@ -94,21 +101,33 @@ const run = async () => {
     return {
       fixture: { ...f, end_on: null, home_team: 'Club', away_team: f.opponent_name, team_id: `t-${fid}`, grade_id: `g-${fid}` },
       lineup: server.confirmed[fid].map((p, i) => ({ player_id: p, batting_order: i + 1, is_captain: false, is_wicket_keeper: false })),
-      pool: POOL, default_team_size: 11, rules: { active: false, applied: [], team: [] }, flags: {},
+      pool: POOL, default_team_size: sizeOf(fid), team_size_info: sizeInfo(fid), rules: { active: false, applied: [], team: [] }, flags: {},
     }
   }
 
   await page.route('**/api/**', (r) => json(r, {}))
   await page.route('**/api/auth/me', (r) => json(r, ME))
   await page.route('**/api/selection/overview', (r) => json(r, {
-    default_team_size: 11,
+    default_team_size: server.club,
     fixtures: FX.map((f) => ({
-      ...f, lineup: server.confirmed[f.id].map((p, i) => ({ player_id: p, display_name: 'x', batting_order: i + 1, skill_positions: [], availability: 'AVAILABLE' })),
+      ...f, team_size: sizeOf(f.id), lineup: server.confirmed[f.id].map((p, i) => ({ player_id: p, display_name: 'x', batting_order: i + 1, skill_positions: [], availability: 'AVAILABLE' })),
       has_draft: !!server.drafts[f.id],
     })),
   }))
   await page.route(/\/api\/selection\/[^/]+\/previous-xi/, (r) => json(r, { source_fixture_id: null, player_ids: [], captain_id: null, wicket_keeper_id: null }))
   await page.route(/\/api\/selection\/selected-players/, (r) => json(r, { player_ids: [] }))
+  await page.route(/\/api\/selection\/default-team-size/, (r) => {
+    const b = JSON.parse(r.request().postData())
+    wire.clubSets.push(b.size); server.club = b.size
+    return json(r, { status: 'ok', default_team_size: b.size })
+  })
+  await page.route(/\/api\/selection\/([0-9a-f-]{36})\/team-size$/, (r) => {
+    const fid = r.request().url().match(/selection\/([0-9a-f-]{36})\/team-size/)[1]
+    const b = JSON.parse(r.request().postData())
+    wire.sizeSets.push({ fid, size: b.size })
+    server.sizes[fid] = b.size
+    return json(r, { status: 'ok', team_size: sizeOf(fid), team_size_info: sizeInfo(fid) })
+  })
   await page.route(/\/api\/selection\/([0-9a-f-]{36})\/draft(\?.*)?$/, async (r) => {
     const fid = r.request().url().match(/selection\/([0-9a-f-]{36})\/draft/)[1]
     const m = r.request().method()
@@ -192,6 +211,7 @@ const run = async () => {
     ok('top team first', (await page.locator('[data-team-col]').first().getAttribute('data-team-col')) === F1)
     ok('1st XI reads 11/11', (await countOf(F1)) === '11/11', await countOf(F1))
     ok('2nd XI reads 4/11', (await countOf(F2)) === '4/11', await countOf(F2))
+    ok('3rd XI (size 10) reads 0/10 and has 10 slots', (await countOf(F3)) === '0/10' && (await col(F3).locator('[data-slot-row]').count()) === 10, await countOf(F3))
     ok('pool lists everyone unpicked except the inactive player', (await page.locator('[data-pool-col] [data-player-card]').count()) === 24 - 15 - 1,
       String(await page.locator('[data-pool-col] [data-player-card]').count()))
     ok('inactive player is not in the pool', (await poolCard(24).count()) === 0)
@@ -220,7 +240,7 @@ const run = async () => {
     console.log('\n# pool to a team, and back')
     ok('drag a pool player onto the empty 3rd XI', await dragTo(poolCard(16), col(F3).locator('[data-slot-row="0"]')))
     ok('3rd XI now has that player in slot 1', (await slotIn(F3, 0).locator(`[data-player-card="${pid(16)}"]`).count()) === 1)
-    ok('3rd XI reads 1/11', (await countOf(F3)) === '1/11', await countOf(F3))
+    ok('3rd XI has its own size: 10 slots, reads 1/10', (await countOf(F3)) === '1/10' && (await col(F3).locator('[data-slot-row]').count()) === 10, await countOf(F3))
     ok('the player left the pool', (await poolCard(16).count()) === 0)
     ok('drag a pool player onto the team body (first open slot)', await dragTo(poolCard(17), col(F3).locator('[data-slot-row="5"]')))
     ok('they land where dropped', (await slotIn(F3, 5).locator(`[data-player-card="${pid(17)}"]`).count()) === 1)
@@ -338,6 +358,51 @@ const run = async () => {
     return p ? Math.round(p.getBoundingClientRect().bottom) <= window.innerHeight : null
   })
   ok('the Available pool ends inside the window too', poolFit === true, String(poolFit))
+
+  // ═══════════════ Side size belongs to the team ═══════════════
+  console.log('\n# Side size belongs to the team')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const openBoard = async (fid) => {
+    await page.goto(`${BASE}/admin/betterselect/select/${fid}`, { waitUntil: 'domcontentloaded' })
+    await page.getByText('Selected XI').first().waitFor({ timeout: 20000 })
+    await page.waitForTimeout(700)
+  }
+  const rowsNow = async () => (await xi())?.rows
+  server.drafts = {}
+  await openBoard(F2)
+  ok('2nd XI starts on the club default: 11 rows', (await rowsNow()) === 11, String(await rowsNow()))
+  ok('a team offers a 10-a-side', (await page.locator('[data-size="10"]').count()) === 1)
+  ok('on the club default there is no Reset', (await page.locator('[data-size-reset]').count()) === 0)
+  await page.locator('[data-size="12"]').first().click()
+  await page.waitForTimeout(500)
+  ok('12 is saved for the 2nd XI alone (one team-size POST)', JSON.stringify(wire.sizeSets) === JSON.stringify([{ fid: F2, size: 12 }]), JSON.stringify(wire.sizeSets))
+  ok('the club default was not written', wire.clubSets.length === 0, JSON.stringify(wire.clubSets))
+  ok('the board now has 12 rows', (await rowsNow()) === 12, String(await rowsNow()))
+  ok('the 2nd XI now has a Reset', (await page.locator('[data-size-reset]').count()) === 1)
+  await openBoard(F1)
+  ok('the 1st XI is still 11 (the reported bug: it turned to 12)', (await rowsNow()) === 11, String(await rowsNow()))
+  await openBoard(F3)
+  ok('the 3rd XI keeps its own 10', (await rowsNow()) === 10, String(await rowsNow()))
+  ok('and shows a Reset because the size is its own', (await page.locator('[data-size-reset]').count()) === 1)
+  await page.locator('[data-size-reset]').click()
+  await page.waitForTimeout(500)
+  ok('Reset sends null for that team', JSON.stringify(wire.sizeSets[wire.sizeSets.length - 1]) === JSON.stringify({ fid: F3, size: null }), JSON.stringify(wire.sizeSets))
+  ok('the 3rd XI is back on the club 11', (await rowsNow()) === 11, String(await rowsNow()))
+  ok('the other teams kept their sizes', server.sizes[F2] === 12 && server.sizes[F1] === null)
+
+  console.log('\n# A 12-a-side XI, with a draft strip showing, fits without scrolling')
+  await openBoard(F2)
+  await page.locator('section', { hasText: 'Available pool' }).locator('div.group.relative').first().click()
+  await page.waitForTimeout(400)
+  ok('the draft strip is showing', (await page.locator('[data-draft-strip]').count()) === 1)
+  for (const [w, h] of [[1440, 780], [1366, 700], [1280, 720], [1440, 900]]) {
+    await page.setViewportSize({ width: w, height: h })
+    await page.waitForTimeout(600)
+    const m = await xi()
+    ok(`${w}x${h}: 12 slots, none scrolls, last one on screen`, !!m && m.rows === 12 && m.scroll <= m.client + 1 && m.lastBottom <= m.vh, JSON.stringify(m))
+    if (m) console.log(`       density ${m.density}  (${m.client}px list)`)
+    if (w === 1366) await page.screenshot({ path: join(SHOTS, 'selection_xi_12_1366x700.png') })
+  }
 
   // ═══════════════ Phone ═══════════════
   console.log('\n# 390px')

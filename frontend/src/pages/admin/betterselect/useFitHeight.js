@@ -66,7 +66,7 @@ export function useBoxHeight() {
 // board has always drawn (two or three lines); `compact` keeps the name and one
 // line; `tight` is a single line. Rows never go below the `tight` height: past
 // that the list scrolls rather than crushing the names.
-export const ROW_MIN = 30
+export const ROW_MIN = 26
 export function rowDensity(listHeight, rows, { gap = 4, pad = 12, full = 56, compact = 40 } = {}) {
   if (!listHeight || !rows) return 'full'
   const per = (listHeight - pad - gap * Math.max(0, rows - 1)) / rows

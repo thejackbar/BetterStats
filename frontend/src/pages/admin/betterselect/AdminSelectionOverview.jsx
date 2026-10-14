@@ -50,7 +50,8 @@ function gradeBadge(fx) {
 
 function summarize(fx, defaultTarget) {
   const players = fx.lineup || []
-  const target = defaultTarget || 11
+  // The team's own size when it has one (a women's grade names ten); 0 is no limit.
+  const target = fx.team_size || defaultTarget || 11
   const has = (p, c) => (p.skill_positions || []).includes(c)
   const count = players.length
   const bal = { BAT: 0, ALL: 0, BWL: 0, WKT: 0 }

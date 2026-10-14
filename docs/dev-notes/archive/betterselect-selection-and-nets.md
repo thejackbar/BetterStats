@@ -1377,3 +1377,17 @@ Verification: `verify_draft_table_browser.mjs` (84 checks: columns, drags in all
 
 Not done: the draft table does not poll for another selector's changes (a 409 on the next save is the first sign); demotions from a call-up are carried through a loaded draft but the table never creates them; past matchdays are not offered (the overview is upcoming only).
 
+## v9.113.0: side size per team, and the Selected XI box fits twelve
+
+Reported: "if I change it to 12 it changes all grades to 12". Women's grades are ten a side, OD6s twelve. The board's 11/12/13 picker called `POST /selection/default-team-size`, which sets `organisations.default_team_size`, so one change moved every grade.
+
+Cause and fix: there was only a club-wide value. Migration 330 adds `teams.team_size` (nullable; NULL follows the club, 0 is no limit) through `services/team_size_ddl.py`, mirrored in the lifespan, mapped on `Team`. `services/team_size.py` holds `effective_size`, `club_size` and `clean_team_size` (0 or 6 to 15). New `POST /selection/{fixture_id}/team-size` writes the fixture's team (null clears; no team is a 409; foreign club 404). `assemble_selection` now returns the effective size as `default_team_size` and a `team_size_info`; the Selection overview carries `team_size` per fixture and `GET /fixtures` `format_size` is per team. The Teams create/PATCH take `team_size` (explicit null clears). Frontend: `SizeControl` in `SelectionViews.jsx` (10 offered only when the fixture has a team, a Reset link only when the team has its own), `AdminSelection.changeFormat`/`resetSize`, a "Players per side" select in the Squads modal, overview `summarize` counts against the fixture's own size (0 still reads as 11 there, as it did).
+
+Why the team and not the grade: a `grades` row belongs to a season, so a size kept there would vanish at rollover. Teams persist. A club with no teams keeps the old behaviour (the picker changes the club default).
+
+Selected XI box, second pass: the first pass fitted eleven at 780px high but not twelve, nor with the draft strip showing. Changes: `ROW_MIN` 30 to 26, `tight` rows use a 2px gap and 22px controls, `BalanceStrip`, `RuleStrip` and the draft strip shrink to one tight row below 900px of window height. A 12-a-side with the draft strip fits at 1366x700 and 1280x720.
+
+Verification: `verify_team_size.py` 42 checks against Postgres (DDL idempotent, nothing backfilled, set one team leaves the others, moving the club default moves only teams without a size, 0 is not NULL, null clears, 3/40/-1 refused, no team 409, foreign club 404, overview, board payload, fixtures list, Teams PATCH absent/null/refused). Control on the previous commit: 31 fail, including the reported one (OD6s and women's stay on the club's number). `verify_draft_table_browser.mjs` now 103 checks (picker posts one team-size for that team only and never the club default, other teams keep theirs, Reset sends null, a team of 10 has 10 slots in the draft table, 12 slots fit at four laptop sizes with the strip showing). Existing suites unchanged: draft 54, same-day 16, alpha order 20 pass; `verify_mobile_admin_browser.mjs` has the same 7 failures as before.
+
+Not done: no bulk "set for every grade matching ..." and no per-grade key; BetterIQ's team-size target now follows the team via `default_team_size` but was not exercised.
+

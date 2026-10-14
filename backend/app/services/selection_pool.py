@@ -17,6 +17,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import FixtureLineup, Grade, Player, Season, Team
+from app.services import team_size
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 from app.auth.modules import org_has_module
 from app.services import player_age, selection_clash, selection_rules
@@ -608,6 +609,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     # board can show (and switch between) which of our teams is being picked.
     fx_team_seq: int | None = None
     fx_team_name: str | None = None
+    fx_team_obj = None
     if fx.team_id:
         fx_team_obj = await db.get(Team, fx.team_id)
         if fx_team_obj:
@@ -906,5 +908,13 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "age_basis_label": selection_rules.age_basis_label(rules.age_basis),
         },
         "dormancy_months": months,
-        "default_team_size": club.default_team_size if club.default_team_size is not None else 11,
+        # How many this fixture names: its team's own size when it has one, else
+        # the club's. BetterIQ reads this key too, so it judges the same target.
+        "default_team_size": team_size.effective_size(club, fx_team_obj),
+        "team_size_info": {
+            "team_id": str(fx_team_obj.id) if fx_team_obj else None,
+            "team_name": (fx_team_obj.short_name or fx_team_obj.name) if fx_team_obj else None,
+            "own": fx_team_obj.team_size if fx_team_obj else None,
+            "club": team_size.club_size(club),
+        },
     }
