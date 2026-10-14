@@ -225,6 +225,23 @@ async def main():
     check("Ladder highlights North Perth (a sponsor-named row), not North Beach",
           (marked.get("North Beach 1sts"), marked.get("Fieldmasters 1st Grade")), (False, True))
 
+    # ── 4: the winner is recorded even before CA flags it ─────────────────────
+    print("\n[4] Recording who won")
+    from app.services import sync as sync_mod
+    winner_fn = getattr(sync_mod, "winning_team_name", None)
+    flagged = {"matchSummary": {"teams": [
+        {"displayName": "Applecross T20 Div 1", "isWinner": False, "resultType": "LOST"},
+        {"displayName": "North Perth T20 Div 1", "isWinner": True, "resultType": "WON"}]}}
+    unflagged = {"matchSummary": {"teams": [
+        {"displayName": "Applecross T20 Div 1", "resultType": "LOST"},
+        {"displayName": "North Perth T20 Div 1", "resultType": None}]}}
+    drawn = {"matchSummary": {"teams": [
+        {"displayName": "A", "resultType": "DRAWN"}, {"displayName": "B", "resultType": "DRAWN"}]}}
+    check("a flagged winner is the winner", winner_fn and winner_fn(flagged), "North Perth T20 Div 1")
+    check("an unflagged result still names the winner from the other side's LOST",
+          winner_fn and winner_fn(unflagged), "North Perth T20 Div 1")
+    check("a draw has no winner", winner_fn and winner_fn(drawn) is None, True)
+
     # ── data for the DB-backed checks ────────────────────────────────────────
     user_id, u2 = uuid.uuid4(), uuid.uuid4()
     np_season, app_season, g_np, g_app = (uuid.uuid4() for _ in range(4))

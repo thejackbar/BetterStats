@@ -76,6 +76,27 @@ def classify_match_result(scorecard: dict, our_org_id_str: str) -> Optional[str]
     return None
 
 
+def winning_team_name(scorecard: dict) -> Optional[str]:
+    """The winning side's display name, or None for a draw, tie or no result.
+
+    ``isWinner`` on a team is the answer when Cricket Australia has flagged it.
+    Before the flag arrives (a result entered late) a team's ``resultType``
+    still says WON, or LOST for the other side of a two-team match.
+    """
+    teams = scorecard.get("teams") or []
+    summary = (scorecard.get("matchSummary") or {}).get("teams") or []
+    for t in teams + summary:
+        if t.get("isWinner"):
+            return t.get("displayName")
+    for st in summary:
+        if (st.get("resultType") or "").upper().startswith("WON"):
+            return st.get("displayName")
+    lost = [st for st in summary if (st.get("resultType") or "").upper().startswith("LOST")]
+    if len(lost) == 1 and len(summary) == 2:
+        return next(st for st in summary if st is not lost[0]).get("displayName")
+    return None
+
+
 def _parse_uuid(val: str) -> Optional[uuid.UUID]:
     try:
         return uuid.UUID(val)
@@ -2297,7 +2318,7 @@ async def sync_grassroots_game_level_data(
                         logger.warning(f"GR-sync: identity adoption for {match_id_str} failed: {_e}")
 
                 existing = await session.execute(
-                    text("SELECT venue, result, innings_totals FROM games WHERE id=:gid LIMIT 1"),
+                    text("SELECT venue, result, innings_totals, winning_team FROM games WHERE id=:gid LIMIT 1"),
                     {"gid": match_id_str},
                 )
                 existing_row = existing.fetchone()
@@ -2335,7 +2356,7 @@ async def sync_grassroots_game_level_data(
                     our_appearances_done = our_appear_check.first() is not None
 
                 if game_exists:
-                    existing_venue, existing_result, existing_innings_totals = existing_row
+                    existing_venue, existing_result, existing_innings_totals, existing_winner = existing_row
                     updates: dict[str, str] = {}
                     if existing_venue is None:
                         venue_name = (scorecard.get("venue") or {}).get("name")
@@ -2350,6 +2371,16 @@ async def sync_grassroots_game_level_data(
                         new_result = classify_match_result(scorecard, org_id_str)
                         if new_result:
                             updates["result"] = new_result
+                    if existing_winner is None:
+                        # The row can be created before the result is in, and
+                        # then only `result` was ever filled (above), from
+                        # whichever club's sync revisited it first, so it reads
+                        # as that club's verdict. The winner's NAME is neutral:
+                        # every club's page, list and stats read the result
+                        # against its own side from it.
+                        _winner = winning_team_name(scorecard)
+                        if _winner:
+                            updates["winning_team"] = _winner
                     if existing_innings_totals is None:
                         # Prospective-only self-heal, same idiom as venue/result
                         # above: a pre-migration-230 game has no stored totals,
@@ -2467,7 +2498,7 @@ async def sync_grassroots_game_level_data(
 
                 # (summary_teams / home_team_name / away_team_name computed
                 # earlier, before the game-exists check)
-                winner_name = next((t.get("displayName") for t in (teams_data or []) + summary_teams if t.get("isWinner")), None)
+                winner_name = winning_team_name(scorecard)
                 result_text = classify_match_result(scorecard, org_id_str)
 
                 # Game — only create the row the first time; when it already
