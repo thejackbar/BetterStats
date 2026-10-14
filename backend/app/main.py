@@ -4425,6 +4425,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _MILESTONE_SCHEME_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 330: milestone increments per grade, and club-wide matches
+        # and catches steps. Same one-copy rule: this list and alembic's 330
+        # both run services/milestone_grade_scheme_ddl.STATEMENTS.
+        from app.services.milestone_grade_scheme_ddl import STATEMENTS as _MILESTONE_GRADE_DDL
+        for _stmt in _MILESTONE_GRADE_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 322: linked clubs. Same one-copy rule: this list and
         # alembic's 322 both run services/club_link_ddl.STATEMENTS.
         from app.services.club_link_ddl import STATEMENTS as _CLUB_LINK_DDL

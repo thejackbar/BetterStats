@@ -3200,6 +3200,10 @@ async def get_recently_achieved_milestones_for_org(
         WICKET_MILESTONES = list(range(_scheme.wickets_step, 5001, _scheme.wickets_step))
     MATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000]
     CATCH_MILESTONES = [10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2000]
+    if _scheme.matches_step != milestone_rules.DEFAULT_MATCHES_STEP:
+        MATCH_MILESTONES = list(range(_scheme.matches_step, 5001, _scheme.matches_step))
+    if _scheme.catches_step != milestone_rules.DEFAULT_CATCHES_STEP:
+        CATCH_MILESTONES = list(range(_scheme.catches_step, 5001, _scheme.catches_step))
 
     CATEGORY_MAP = {
         "runs": "batting",

@@ -381,6 +381,10 @@ class Organisation(Base):
     # the default scheme. Read through services/milestone_rules.load_scheme.
     milestone_runs_step = Column(Integer, nullable=True)
     milestone_wickets_step = Column(Integer, nullable=True)
+    # Matches and catches steps (migration 330), and the per-grade table that
+    # sits beside them (services/grade_milestone_schemes).
+    milestone_matches_step = Column(Integer, nullable=True)
+    milestone_catches_step = Column(Integer, nullable=True)
     # ─── AFL — optional public leaderboard categories (migration 217) ────────
     # Games and Goals are always shown; a club decides whether Best on Ground
     # and its two vote-tally leaderboards (Club/Competition Best & Fairest —

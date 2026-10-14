@@ -41,8 +41,9 @@ from app.services.aggregations import (
     _club_game_clause,
 )
 from app.services.milestone_rules import (
-    crossed_thresholds, is_displayable, load_scheme, next_threshold, reach_window,
+    crossed_thresholds, is_displayable, next_threshold, reach_window,
 )
+from app.services.grade_milestone_schemes import load_book
 from app.services import iq_teammates
 from app.services.session_safety import rollback_keeping
 from app.services import milestone_totals
@@ -722,10 +723,10 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
     rows = await get_player_milestones(db, player_id)
     # Filter out pre-existing rows that don't match the club's threshold scheme
     # (10/25 matches, 100/250 runs, etc.) — they stay in the DB, just hidden.
-    scheme = await load_scheme(db, player.organisation_id)
+    book = await load_book(db, player.organisation_id)
     milestones = [
         _str_keys(r) for r in rows
-        if is_displayable(r["milestone_type"], r["milestone_value"], scheme)
+        if is_displayable(r["milestone_type"], r["milestone_value"], book.club)
     ]
 
     # Append computed per-grade match milestones (not stored in DB).
@@ -737,7 +738,8 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
         grade_name = row.get("grade_name")
         if not grade_name:
             continue
-        for threshold in crossed_thresholds("grade_matches", matches_in_grade):
+        for threshold in crossed_thresholds("grade_matches", matches_in_grade,
+                                            book.for_grade(grade_name)):
             milestones.append({
                 "id": None,
                 "milestone_type": "grade_matches",
@@ -786,6 +788,7 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     # hand-entered match — a milestone card reading 197 wickets on a profile
     # whose header says 478. See services/milestone_totals.py.
     from app.services import milestone_scan
+    book = await load_book(db, player.organisation_id)
     upcoming = []
     if player.organisation_id:
         got = await milestone_totals.profile_totals(db, player.organisation_id, [str(player.id)],
@@ -797,8 +800,7 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
         }
         for stat, _cat, col in milestone_scan.STAT_DEFS:
             row[col] = int((t.get("totals") or {}).get(stat) or 0)
-        for m in milestone_scan.upcoming_from_totals(
-                [row], await load_scheme(db, player.organisation_id)):
+        for m in milestone_scan.upcoming_from_totals([row], book.club):
             upcoming.append({k: m[k] for k in (
                 "type", "current", "target", "needed", "junior_split", "counts", "variant",
             ) if k in m})
@@ -812,11 +814,12 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
         grade_name = row.get("grade_name")
         if not grade_name or matches_in_grade <= 0:
             continue
-        target = next_threshold("grade_matches", matches_in_grade)
+        grade_scheme = book.for_grade(grade_name)
+        target = next_threshold("grade_matches", matches_in_grade, grade_scheme)
         if target is None:
             continue
         needed = target - matches_in_grade
-        if needed > reach_window("grade_matches", target):
+        if needed > reach_window("grade_matches", target, grade_scheme):
             continue
         upcoming.append({
             "type": "matches",

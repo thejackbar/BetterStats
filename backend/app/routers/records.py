@@ -1761,11 +1761,15 @@ async def get_records_milestones(
     themselves are not.
     """
     from app.services.milestone_rules import (
-        next_threshold, reach_window, crossed_thresholds, is_displayable, load_scheme,
+        next_threshold, reach_window, crossed_thresholds, is_displayable,
     )
+    from app.services.grade_milestone_schemes import load_book
     from app.services import milestone_scan
 
-    scheme = await load_scheme(db, org_id)
+    book = await load_book(db, org_id)
+    # Career figures follow the club's scheme; a grade's own follow that
+    # grade's, where the club set one.
+    scheme = book.for_grade(grade_name) if grade_name else book.club
 
     _CAT = {
         "runs": "batting", "wickets": "bowling", "catches": "fielding", "matches": "matches",
