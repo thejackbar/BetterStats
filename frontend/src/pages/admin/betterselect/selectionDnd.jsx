@@ -3,8 +3,10 @@
 // the old HTML5 `draggable` board, whose right→left drag was broken and which
 // didn't work on touch at all.
 //
-// Drop zones tag themselves with `data-drop-kind` ("slot" | "pool") and, for
-// slots, `data-drop-idx`. Draggables spread `useDrag().bind(item)` where item is
+// Drop zones tag themselves with `data-drop-kind` ("slot" | "pool" | "col") and,
+// for slots, `data-drop-idx`. A board with several sides (the draft table) also
+// sets `data-drop-col` to say which one; without it the hit is exactly what it
+// always was. Draggables spread `useDrag().bind(item)` where item is
 // `{ kind:'pool', player }` or `{ kind:'slot', idx, player }`. A 6px threshold
 // distinguishes a drag from a tap so tap-to-place (the primary mobile gesture)
 // still fires. Only grip handles set `touch-action:none`, so the pool lists
@@ -29,7 +31,8 @@ export function DnD({ onDrop, children }) {
       if (!z) return null
       const kind = z.getAttribute('data-drop-kind')
       const idx = z.getAttribute('data-drop-idx')
-      return { kind, idx: idx == null ? null : Number(idx), key: kind + (idx == null ? '' : ':' + idx) }
+      const col = z.getAttribute('data-drop-col')
+      return { kind, idx: idx == null ? null : Number(idx), col, key: kind + (col ? ':' + col : '') + (idx == null ? '' : ':' + idx) }
     }
     const move = (e) => {
       const r = ref.current

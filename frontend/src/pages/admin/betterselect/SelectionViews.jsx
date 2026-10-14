@@ -14,6 +14,8 @@ import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useDrag } from './selectionDnd'
 import { roleLine, formMeta, spark, alsoInLine, dropInLine, inDraftLine } from './selectionMeta'
 import { hasRuleFlag, ruleNotes, isBlocked, xiCompliance } from './selectionRules'
+import { useFitHeight, useBoxHeight, rowDensity, ROW_MIN } from './useFitHeight'
+import { useMediaQuery } from '../../../hooks/useMediaQuery'
 
 const ROLE_CODES = ['BAT', 'ALL', 'BWL', 'WKT']
 const ROLE_LBL = { BAT: 'BAT', ALL: 'ALL', BWL: 'BWL', WKT: 'WK' }
@@ -116,7 +118,27 @@ function PickPill({ count, target }) {
   )
 }
 
-export function FixtureBar({ vm }) {
+export function FixtureBar({ vm, compact = false }) {
+  // On a short window the board's height is what is scarce, so the bar becomes
+  // one row: team switcher, the match, and the side size.
+  if (compact) {
+    return (
+      <div data-fixture-bar="compact" className="rounded-xl px-4 py-2 mb-2 border flex flex-wrap items-center gap-x-4 gap-y-1"
+        style={{ background: 'color-mix(in srgb, var(--pb-accent) 9%, var(--pb-surface))', borderColor: 'color-mix(in srgb, var(--pb-accent) 26%, transparent)' }}>
+        <div className="flex items-center gap-3 min-w-0">{vm.contextLeft}</div>
+        <div className="min-w-0 flex-1 basis-[240px]">
+          <h2 className="font-display font-bold text-[16px] leading-tight truncate" title={vm.title}>{vm.title}</h2>
+          {vm.sub && <div className="text-[12px] text-pb-dim truncate" title={vm.sub}>{vm.sub}</div>}
+        </div>
+        {vm.canEdit && (
+          <div className="flex flex-wrap items-center gap-2">
+            <SizePicker value={vm.format} onChange={vm.changeFormat} />
+            <PickPill count={vm.count} target={vm.target} />
+          </div>
+        )}
+      </div>
+    )
+  }
   return (
     <div className="rounded-xl px-4 py-2.5 mb-2.5 border"
       style={{ background: 'color-mix(in srgb, var(--pb-accent) 9%, var(--pb-surface))', borderColor: 'color-mix(in srgb, var(--pb-accent) 26%, transparent)' }}>
@@ -280,7 +302,7 @@ function SlotControls({ vm, id, idx }) {
 }
 
 /* ══ Dual rail ══════════════════════════════════════════════════════════════ */
-function DualCard({ p, kind, idx, vm, drag }) {
+function DualCard({ p, kind, idx, vm, drag, density = 'full' }) {
   const fmt = useAdminNameFormat()
   const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
   const clash = p.clash?.length > 0
@@ -295,25 +317,48 @@ function DualCard({ p, kind, idx, vm, drag }) {
   // A player a club rule bars stays pickable — the save is where it bites, and
   // a selector may be about to grant a permit — but the card says so.
   const barred = isBlocked(p)
+  // A slot in a XI that is being fitted to the screen draws less as the rows get
+  // shorter. The pool always draws in full.
+  const dense = kind === 'slot' && density !== 'full'
+  const tight = kind === 'slot' && density === 'tight'
+  const warnLine = clash
+    ? (callUp
+        ? <span className="text-pb-amber">↑ Call-up from {p.clash.join(', ')}</span>
+        : <span className="text-pb-red">⛔ Picked for {p.clash.join(', ')}</span>)
+    : alsoInLine(p)
+      ? <span className="text-pb-amber" title={`Also in ${alsoInLine(p)}`}>Also in {alsoInLine(p)}</span>
+      : inDraftLine(p)
+        ? <span className="text-pb-amber" data-in-draft>{inDraftLine(p)}</span>
+        : null
   return (
-    <div className={`group relative shrink-0 flex items-center gap-2.5 pl-3.5 pr-3 py-1.5 rounded-xl border bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''} ${barred ? 'border-pb-red/45' : 'border-pb-hairline'}`}
+    <div data-density={kind === 'slot' ? density : undefined}
+      className={`group relative flex items-center gap-2.5 pl-3.5 pr-3 ${dense ? 'py-0.5 min-h-0 h-full' : 'py-1.5 shrink-0'} rounded-xl border bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''} ${barred ? 'border-pb-red/45' : 'border-pb-hairline'}`}
       {...(kind === 'pool' && interactive ? drag.bind(dragItem) : {})}
       onClick={kind === 'pool' && interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
       <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       {kind === 'slot' && vm.canEdit && (
         <span {...drag.bind(dragItem)} className="max-sm:hidden cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={14} /></span>
       )}
-      <AvatarAvail p={p} vm={vm} dotSize={10} />
+      <AvatarAvail p={p} vm={vm} size={tight ? 22 : dense ? 28 : 34} dotSize={tight ? 8 : 10} />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[14px] font-semibold truncate">{fmt(p.display_name)}</span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className={`${tight ? 'text-[13px]' : 'text-[14px]'} font-semibold truncate`}>{fmt(p.display_name)}</span>
           {p.id === vm.capId && <Tag>C</Tag>}{p.id === vm.wkId && <Tag tone="amber">WK</Tag>}
           {p.squads?.[0] && (kind === 'pool') && <Tag tone={p.squad_match ? 'accent' : 'faint'}>{vm.squadShort(p.squads[0])}</Tag>}
-          <AgeTag p={p} />
+          {!tight && <AgeTag p={p} />}
           <FlagTags p={p} />
+          {tight && (
+            <span className="ml-auto text-[11.5px] text-pb-dim truncate min-w-0 pl-1" title={roleLine(p)}>
+              {warnLine ? <>{warnLine}</> : roleLine(p)}
+            </span>
+          )}
         </div>
-        <div className="text-[12px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>
-        {clash
+        {dense ? (!tight && (
+          <div className="text-[11.5px] mt-px truncate leading-tight" title={roleLine(p)}>
+            {warnLine || <span className="text-pb-dim">{roleLine(p)}</span>}
+          </div>
+        )) : <div className="text-[12px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>}
+        {!dense && (clash
           ? (callUp
               ? <div className="text-[11px] text-pb-amber mt-0.5 truncate">↑ Call-up from {p.clash.join(', ')}</div>
               : <div className="text-[11px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>)
@@ -323,15 +368,15 @@ function DualCard({ p, kind, idx, vm, drag }) {
               ? <div className="text-[11px] text-pb-amber mt-0.5 truncate" data-in-draft>{inDraftLine(p)}</div>
             : dropInLine(p)
               ? <div className="text-[11px] text-pb-accent mt-0.5 truncate" data-drop-in>↓ {dropInLine(p)}</div>
-              : p.availability_reason && <div className="text-[11px] text-pb-faint mt-0.5 truncate">{p.availability_reason}</div>}
-        <RuleNotes p={p} />
+              : p.availability_reason && <div className="text-[11px] text-pb-faint mt-0.5 truncate">{p.availability_reason}</div>)}
+        {!dense && <RuleNotes p={p} />}
       </div>
       {kind === 'pool' ? (
         <div className="flex flex-col items-end gap-0.5 shrink-0">
           <FormBars p={p} h={16} />
           <FormWord p={p} />
         </div>
-      ) : <span className="max-sm:hidden"><FormBars p={p} h={16} /></span>}
+      ) : !tight && <span className="max-sm:hidden"><FormBars p={p} h={dense ? 12 : 16} /></span>}
       {kind === 'pool'
         ? (!blocked && <span className="text-pb-faintest shrink-0 group-hover:text-pb-accent"><Icon name="arrow" size={16} /></span>)
         : <SlotControls vm={vm} id={p.id} idx={idx} />}
@@ -339,18 +384,21 @@ function DualCard({ p, kind, idx, vm, drag }) {
   )
 }
 
-function DualSlot({ i, id, vm, drag }) {
+function DualSlot({ i, id, vm, drag, fit = false, density = 'full' }) {
   const p = id ? vm.poolById[id] : null
   const isFocus = vm.focus === i
   const hovered = drag.hover === 'slot:' + i
+  // Fitted to the screen: every row takes an equal share of the list, never
+  // shorter than ROW_MIN (below that the list scrolls) or taller than a card.
+  const rowStyle = fit ? { flex: '1 1 0', minHeight: ROW_MIN, maxHeight: density === 'full' ? 76 : undefined } : undefined
   return (
-    <div className="flex items-stretch gap-2 shrink-0">
-      <span className="font-display font-bold text-[18px] text-pb-faintest w-[22px] flex items-center justify-center shrink-0 pb-num">{i + 1}</span>
+    <div className={`flex items-stretch gap-2 ${fit ? '' : 'shrink-0'}`} style={rowStyle}>
+      <span className={`font-display font-bold ${fit && density !== 'full' ? 'text-[14px]' : 'text-[18px]'} text-pb-faintest w-[22px] flex items-center justify-center shrink-0 pb-num`}>{i + 1}</span>
       <div className="flex-1 min-w-0" data-drop-kind="slot" data-drop-idx={i} onClick={() => !p && vm.canEdit && (vm.isPhone ? vm.openAdd(i) : vm.setFocus(i))}>
         {p
-          ? <DualCard p={p} kind="slot" idx={i} vm={vm} drag={drag} />
+          ? <DualCard p={p} kind="slot" idx={i} vm={vm} drag={drag} density={fit ? density : 'full'} />
           : (
-            <div className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-dashed min-h-[50px] max-lg:min-h-[56px] text-[13px] transition-colors ${hovered ? 'border-pb-accent text-pb-accent bg-pb-accent/10 border-solid' : isFocus ? 'border-pb-accent text-pb-accent bg-pb-accent/[0.06]' : 'border-pb-hairline2 text-pb-faintest'}`}>
+            <div className={`flex items-center gap-2 px-3.5 ${fit ? 'h-full min-h-0' : 'py-2.5 min-h-[50px] max-lg:min-h-[56px]'} rounded-xl border border-dashed text-[13px] transition-colors ${hovered ? 'border-pb-accent text-pb-accent bg-pb-accent/10 border-solid' : isFocus ? 'border-pb-accent text-pb-accent bg-pb-accent/[0.06]' : 'border-pb-hairline2 text-pb-faintest'}`}>
               <Icon name="plus" size={15} /><span>{vm.isPhone ? 'Tap to add a player' : isFocus ? 'Tap a player in the pool' : hovered ? 'Drop here' : 'Open slot'}</span>
             </div>
           )}
@@ -365,16 +413,25 @@ export function DualRailView({ vm }) {
   // so a pick made from the Add sheet and the bar's counts agree with this.
   const mpanel = vm.panel
   const poolHover = drag.hover === 'pool'
+  // Desktop: both panels run from where they start to the bottom of the screen,
+  // and the XI divides that height between its slots, so a full side shows
+  // without scrolling. A phone keeps its own bottom-bar layout.
+  const shortWindow = useMediaQuery('(max-height: 899px)')
+  const [fitRef, fitH] = useFitHeight({ enabled: !vm.isPhone })
+  const [xiListRef, xiListH] = useBoxHeight()
+  const fit = fitH != null
+  const density = fit ? rowDensity(xiListH, vm.slots.length) : 'full'
+  const panelStyle = fit ? { height: fitH } : undefined
 
   return (
     <div>
-      <FixtureBar vm={vm} />
+      <FixtureBar vm={vm} compact={!vm.isPhone && shortWindow} />
       <BalanceStrip vm={vm} />
       <RuleStrip vm={vm} />
 
       <div className="grid items-start gap-3.5 lg:gap-0 lg:grid-cols-[minmax(0,1fr)_56px_minmax(0,1fr)]">
         {/* Pool */}
-        <section className={`pb-card rounded-xl flex flex-col min-h-0 min-w-0 ${mpanel === 'pool' ? '' : 'hidden'} lg:flex`}>
+        <section style={panelStyle} className={`pb-card rounded-xl flex flex-col min-h-0 min-w-0 ${mpanel === 'pool' ? '' : 'hidden'} lg:flex`}>
           <header className="px-4 py-3 border-b pb-hairline flex flex-col gap-2.5">
             <div className="flex items-center justify-between gap-2.5">
               <h3 className="font-display font-bold text-[15px]">Available pool</h3>
@@ -383,7 +440,7 @@ export function DualRailView({ vm }) {
             {vm.filterBar}
           </header>
           <div data-drop-kind="pool"
-            className={`flex flex-col gap-1.5 p-2 overflow-auto pb-scroll max-h-none lg:max-h-[calc(100vh-300px)] rounded-b-xl ${poolHover ? 'bg-pb-red/[0.06] shadow-[inset_0_0_0_2px_color-mix(in_srgb,var(--pb-red)_35%,transparent)]' : ''}`}>
+            className={`flex flex-col gap-1.5 p-2 overflow-auto pb-scroll max-h-none ${fit ? 'flex-1 min-h-0' : 'lg:max-h-[calc(100vh-300px)]'} rounded-b-xl ${poolHover ? 'bg-pb-red/[0.06] shadow-[inset_0_0_0_2px_color-mix(in_srgb,var(--pb-red)_35%,transparent)]' : ''}`}>
             {vm.pool.map((p) => <DualCard key={p.id} p={p} kind="pool" vm={vm} drag={drag} />)}
             {vm.pool.length === 0 && <div className="p-4 text-pb-faint text-sm">No players match.</div>}
             {poolHover && <div className="sticky bottom-1.5 mx-auto mt-1.5 px-3.5 py-1.5 rounded-full text-xs text-pb-red bg-pb-surface border border-dashed border-pb-red/40">Drop here to remove from XI</div>}
@@ -398,8 +455,8 @@ export function DualRailView({ vm }) {
         </div>
 
         {/* XI */}
-        <section className={`pb-card rounded-xl flex flex-col min-h-0 min-w-0 ${mpanel === 'xi' ? '' : 'hidden'} lg:flex`}>
-          <header className="px-4 py-3 border-b pb-hairline flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <section ref={fitRef} style={panelStyle} data-xi-panel data-fit={fit ? 'on' : 'off'} className={`pb-card rounded-xl flex flex-col min-h-0 min-w-0 ${mpanel === 'xi' ? '' : 'hidden'} lg:flex`}>
+          <header className={`px-4 ${fit ? 'py-2' : 'py-3'} border-b pb-hairline flex flex-wrap items-center justify-between gap-x-3 gap-y-2`}>
             <h3 className="font-display font-bold text-[15px]">Selected XI <span className="text-pb-faint font-medium text-[13px]">· batting order</span></h3>
             {vm.canEdit && (
               <div className="flex items-center gap-2">
@@ -417,8 +474,8 @@ export function DualRailView({ vm }) {
               </button>
             </div>
           )}
-          <div className="flex flex-col gap-1.5 p-2 overflow-auto pb-scroll max-h-none lg:max-h-[calc(100vh-300px)]">
-            {vm.slots.map((id, i) => <DualSlot key={i} i={i} id={id} vm={vm} drag={drag} />)}
+          <div ref={xiListRef} data-xi-list className={`flex flex-col ${fit ? 'gap-1 flex-1 min-h-0 p-1.5' : 'gap-1.5 lg:max-h-[calc(100vh-300px)] p-2'} overflow-auto pb-scroll max-h-none`}>
+            {vm.slots.map((id, i) => <DualSlot key={i} i={i} id={id} vm={vm} drag={drag} fit={fit} density={density} />)}
             {vm.format === 0 && <div className="px-4 py-3 rounded-xl border border-dashed border-pb-hairline2 text-center text-[12px] text-pb-faintest">Tap a player to add to the order</div>}
           </div>
         </section>

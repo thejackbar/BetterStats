@@ -333,6 +333,9 @@ export default function AdminSelectionOverview() {
     return [...map.entries()].map(([day, items]) => ({ day, items, attention: items.filter((i) => i.status === 'attention').length }))
   }, [visible])
 
+  // The first matchday with more than one team: where the draft table is worth opening.
+  const draftDay = useMemo(() => groups.find((g) => g.day !== 'tbc' && g.items.length > 1)?.day || null, [groups])
+
   const allOpen = visible.length > 0 && visible.every((v) => openKeys.has(v.fx.id))
   const toggleAll = () => setOpenKeys(allOpen ? new Set() : new Set(visible.map((v) => v.fx.id)))
 
@@ -391,6 +394,13 @@ export default function AdminSelectionOverview() {
           })}
         </div>
         <span className="flex-1" />
+        {draftDay && (
+          <Link to={`/admin/betterselect/selection/draft-table?date=${draftDay}`}
+            title="Every team for the day side by side, drag players between them"
+            className="max-lg:hidden inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-pb-hairline2 text-pb-dim hover:text-pb-accent hover:border-pb-accent/50 font-display font-semibold text-[12.5px] whitespace-nowrap">
+            <Icon name="cols" size={14} />Draft table
+          </Link>
+        )}
         <button onClick={toggleAll} className="inline-flex items-center gap-1.5 text-pb-faint hover:text-pb-accent font-display font-semibold text-[12.5px] whitespace-nowrap">
           <Icon name={allOpen ? 'cols' : 'sheet'} size={14} />{allOpen ? 'Collapse all' : 'Expand all'}
         </button>
@@ -410,6 +420,13 @@ export default function AdminSelectionOverview() {
             <span className="font-mono text-[11px] text-pb-faint whitespace-nowrap">{g.items.length} {g.items.length === 1 ? 'team' : 'teams'}</span>
             {g.attention > 0 && <span className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-red font-semibold whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-current" />{g.attention} need attention</span>}
             <span className="flex-1 h-px bg-pb-hairline min-w-[16px]" />
+            {g.day !== 'tbc' && g.items.length > 1 && (
+              <Link to={`/admin/betterselect/selection/draft-table?date=${g.day}`} data-draft-table-link
+                title="Every team for this day side by side, drag players between them"
+                className="hidden lg:inline-flex items-center gap-1.5 text-[12px] font-display font-semibold text-pb-faint hover:text-pb-accent whitespace-nowrap">
+                <Icon name="cols" size={13} />Draft table
+              </Link>
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             {g.items.map(({ fx }) => (

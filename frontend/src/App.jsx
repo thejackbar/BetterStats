@@ -197,6 +197,7 @@ const BsTeams = lazy(() => import('./pages/admin/betterselect/AdminTeams'))
 const BsAvailability = lazy(() => import('./pages/admin/betterselect/AdminAvailability'))
 const BsSelection = lazy(() => import('./pages/admin/betterselect/AdminSelection'))
 const BsSelectionOverview = lazy(() => import('./pages/admin/betterselect/AdminSelectionOverview'))
+const BsSelectionDraftTable = lazy(() => import('./pages/admin/betterselect/AdminSelectionDraftTable'))
 const BsLadders = lazy(() => import('./pages/admin/betterselect/AdminLadders'))
 const BsNets = lazy(() => import('./pages/admin/betterselect/Nets'))
 const BsNetSession = lazy(() => import('./pages/admin/betterselect/NetSession'))
@@ -576,6 +577,7 @@ export default function App() {
           <Route path="/admin/betterselect/teams" element={<ProtectedRoute requireModule="select"><BsTeams /></ProtectedRoute>} />
           <Route path="/admin/betterselect/availability" element={<ProtectedRoute requireModule="select"><BsAvailability /></ProtectedRoute>} />
           <Route path="/admin/betterselect/selection" element={<ProtectedRoute requireModule="select"><BsSelectionOverview /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/selection/draft-table" element={<ProtectedRoute requireModule="select"><BsSelectionDraftTable /></ProtectedRoute>} />
           <Route path="/admin/betterselect/select/:fixtureId" element={<ProtectedRoute requireModule="select"><BsSelection /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets" element={<ProtectedRoute requireModule="select"><BsNets /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets/:id" element={<ProtectedRoute requireModule="select"><BsNetSession /></ProtectedRoute>} />

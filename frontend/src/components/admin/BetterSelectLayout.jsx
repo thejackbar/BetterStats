@@ -124,7 +124,7 @@ export const NAV = [
   ]),
 ]
 
-export default function BetterSelectLayout({ children, title, caption, actions, headerLeft }) {
+export default function BetterSelectLayout({ children, title, caption, actions, headerLeft, wide = false }) {
   const { user, logout, hasCapability } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
@@ -256,7 +256,7 @@ export default function BetterSelectLayout({ children, title, caption, actions, 
             </div>
           </div>
         </header>
-        <main className="flex-1 p-4 md:p-6 max-w-[1400px] w-full mx-auto">{children}</main>
+        <main className={`flex-1 p-4 md:p-6 w-full mx-auto ${wide ? 'max-w-none min-w-0' : 'max-w-[1400px]'}`}>{children}</main>
       </div>
     </div>
   )
