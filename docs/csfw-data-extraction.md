@@ -85,7 +85,7 @@ reads the active profile's format table, and a final's format is measured only
 where the profile names BOTH a one-day and a two-day type (Payneham names only
 Limited Over, so its finals stay blank: an ATCA Final is a turf final).
 
-Verification: `tools/verify_csfw_extract.py` (52 checks) builds archives in a
+Verification: `tools/verify_csfw_extract.py` (62 checks) builds archives in a
 layout the extractor was never written against (every table moved and resized,
 every field shifted), with two databases, a bye, an unprofiled club and two
 layouts in one folder, and runs the shipped code over them.
@@ -142,21 +142,36 @@ corroborated by 4, 6, 7, 10 in this file and 8 and 11 in the junior databases.
 - **Dismissal codes 5, 6, 8, 9, 16, 24 and 30** appear 1 to 6 times each and are
   unnamed; they import blank.
 
-**Still needed from Payneham (the CSFW Teams list is installation-wide, so one
-list answers all of it):**
+**Payneham's answers (Oct 2026, a workbook: the sheet plus CSFW's own Teams and
+Match Types tabs).** Applied in `tools/csfw_profiles/payneham.json`:
 
-  1. The full **Teams** list (User Preferences > Teams, every entry with its
-     position), so every database/team pair can be named. The analyser lists 73
-     that are not (e.g. `Payneham S R` 42, 43, 51; `Payneham W` 46, 50;
-     `Payneham S J 12` 39, 40, 45, 55, 56). Named so far: `Payneham` 1 to 5 (proved
-     against CSFW's screen) and `Payneham.` 6 (the club's own "6th XI" report titles).
-  2. The full **Match types** list beyond position 11 (codes 12 to 29 appear).
-  3. Is **Adelaide Turf** two-day? Left blank: the data is multi-innings but that
-     is not the club's word for it.
-  4. What do **result codes 5, 6 and 7** mean?
-  5. Is code 29 **absent out** or **did not bat** in their competition (`--absent`)?
-  6. The 37 `.csv` reports are season totals for old seasons. They are not read yet
-     (Shoalwater's C2 reader is specific to its own file names).
+- **The team number is CSFW's own list ID, the same in every database** (1 = 1st
+  XI ... 9 = 9th XI, 10 = Under 11 ... 56 = U12 White; 46 = 1st IX and 50 = 2nd
+  IX are the women's nine-a-side sides). The first design, per-database names,
+  was wrong about that; the profile now holds one `team_names` list and
+  `databases` only for exceptions. The match-type list is likewise CSFW's, 0 to
+  29. `--answers` reads the workbook directly; its Teams tab wins over the sheet's
+  per-row answers (a different spelling of the same name is reported).
+- **Two names collide across competitions**, and a team's database says which
+  competition it is: `Payneham W` team 1 is the WOMEN'S side but CSFW names it
+  "1st XI", the men's name. Loaded as is, women's games would go into the men's
+  1st XI grade. Profile `databases` renames it `Women's 1st XI` and the five
+  `Payneham G` (girls) teams get " (Girls)". These names are ours, not the
+  club's: confirm them.
+- **Result codes**: 5 = Cancelled (loads with no result), 6 = Tied on first
+  innings and 7 = Winning draw (both load as DRAW; our reading of the club's
+  words, to confirm). `result_labels` and `import_results` hold them.
+- **Code 29 absent batter = did not bat** (`absent` in the profile).
+- **Byes left out; the 37 printed `.csv` reports ignored.**
+- **Formats**: the club said C1 to C9 are all two-day. The data supports that for
+  Adelaide Turf (second innings in 54% of matches) and the ATCA Final (24%), which
+  are applied. It does NOT for the ATCA T20 Final, Ltd Overs Final, Brock Cup (0%)
+  or NE Jnr CA (8%), so those and 14 later types (21 rows) go back to the club
+  on a follow-up sheet (`--questions --open-only`). Until answered ~3,000 games
+  carry no format. Never apply a blanket answer the data contradicts.
+
+Result for the whole archive: 8,852 games, 1928/29 to 2025/26, 55 grades, 75
+games for `DATA2025` as CSFW shows. One game (1932) has team 0, no team recorded.
 
 # Part 1: the `.AV` binary format
 

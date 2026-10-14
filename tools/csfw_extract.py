@@ -1749,6 +1749,14 @@ class Profile:
     # the club's name in BetterStats. The header's club field is a database
     # label ("Payneham W") where a club keeps several, so it cannot serve.
     club_name: str = ""
+    # how the club scores a code 29 absent batter: "out" or "did-not-bat". Empty
+    # means unanswered, which reads as Shoalwater Bay's "out".
+    absent: str = ""
+    # what a result code the format itself does not name means, as the club
+    # answered: its words (`result_labels`) and the app's stored vocabulary
+    # (`import_results`: WIN, LOSS, DRAW, TIE, or "" for no result)
+    result_labels: dict = field(default_factory=dict)
+    import_results: dict = field(default_factory=dict)
     notes: list | None = None            # the Notes sheet, where a club has its own
 
 
@@ -1759,7 +1767,8 @@ SHOALWATER = Profile(
 BUILTIN_PROFILES = [SHOALWATER]
 
 _PROFILE_KEYS = {"name", "club", "team_names", "legacy_team_names", "match_types",
-                 "finals_types", "format_by_type", "databases", "byes", "club_name"}
+                 "finals_types", "format_by_type", "databases", "byes", "club_name",
+                 "absent", "result_labels", "import_results"}
 
 
 def _int_keys(d: dict) -> dict:
@@ -1778,7 +1787,9 @@ def load_profile(path: Path) -> Profile:
         _int_keys(d.get("format_by_type", {})),
         {label.strip(): _int_keys(names) for label, names in d.get("databases", {}).items()},
         byes=tuple(x.strip().lower() for x in d.get("byes", [])),
-        club_name=d.get("club_name", ""))
+        club_name=d.get("club_name", ""), absent=d.get("absent", ""),
+        result_labels=_int_keys(d.get("result_labels", {})),
+        import_results=_int_keys(d.get("import_results", {})))
 
 
 PROFILE_DIR = Path(__file__).resolve().parent / "csfw_profiles"
@@ -1800,6 +1811,8 @@ def choose_profile(club: str, path: Path | None) -> Profile:
 
 
 ACTIVE: Profile = Profile("unprofiled")
+_BASE_RESULT_LABELS = dict(RESULT_LABELS)
+_BASE_IMPORT_RESULTS = dict(IMPORT_RESULTS)
 
 
 def activate(profile: Profile) -> None:
@@ -1815,6 +1828,12 @@ def activate(profile: Profile) -> None:
     FORMAT_BY_TYPE.clear()
     FORMAT_BY_TYPE.update(profile.format_by_type)
     FINALS_TYPES = profile.finals_types
+    RESULT_LABELS.clear()
+    RESULT_LABELS.update(_BASE_RESULT_LABELS)
+    RESULT_LABELS.update(profile.result_labels)
+    IMPORT_RESULTS.clear()
+    IMPORT_RESULTS.update(_BASE_IMPORT_RESULTS)
+    IMPORT_RESULTS.update(profile.import_results)
 
 
 def use_season(season: dict) -> None:
@@ -1824,7 +1843,11 @@ def use_season(season: dict) -> None:
     against the names of the database it was written in.
     """
     GRADE_NAMES.clear()
-    GRADE_NAMES.update(ACTIVE.databases.get(season["club"].strip(), ACTIVE.team_names))
+    GRADE_NAMES.update(ACTIVE.team_names)
+    # a database's own entries win: where one competition's team 1 has the same
+    # name as another's (Payneham W's "1st XI" and the men's) it is renamed here,
+    # or its games would load into the other's grade
+    GRADE_NAMES.update(ACTIVE.databases.get(season["club"].strip(), {}))
 
 
 def is_bye(match: dict, byes: tuple) -> bool:
@@ -2004,8 +2027,13 @@ def _example(date, opponent, extra=""):
     return f"{when} v {opponent.strip()}" + (f" ({extra})" if extra else "")
 
 
-def build_questions(seasons: list, profile: Profile, source: Path | None = None) -> list:
-    """The answer sheet's rows. Drops byes first, as the extraction will."""
+def build_questions(seasons: list, profile: Profile, source: Path | None = None,
+                    open_only: bool = False) -> list:
+    """The answer sheet's rows. Drops byes first, as the extraction will.
+
+    `open_only` is the follow-up sheet: only what the profile still lacks, so a
+    club that has answered is not asked to confirm its own answers again.
+    """
     teams = defaultdict(lambda: [0, 9999, 0, None])        # n, first, last, latest match
     types = defaultdict(lambda: [0, 9999, 0, None, 0])     # ... and with a 2nd innings
     results = defaultdict(lambda: [0, 9999, 0, None])
@@ -2048,11 +2076,13 @@ def build_questions(seasons: list, profile: Profile, source: Path | None = None)
             continue
         use_season({"club": db})
         name = grade_label(team)
+        if open_only and "(unmapped)" not in name:
+            continue
         add("A", "Team", Database=db, Number=team, Matches=r[0], Years=span(r),
             **{"Example match": _example(r[3][0], r[3][1]),
                "What we have": "" if "(unmapped)" in name else name})
     for code, r in sorted(types.items()):
-        if code == 255:
+        if code == 255 or (open_only and code in MATCH_TYPES):
             continue
         add("B", "Match type", Number=code, Matches=r[0], Years=span(r),
             **{"Example match": _example(r[3][0], r[3][1], r[3][2]),
@@ -2063,14 +2093,14 @@ def build_questions(seasons: list, profile: Profile, source: Path | None = None)
                 **{"Example match": f"Second innings recorded in {r[4]} of {r[0]} matches",
                    "What we have": f"{MATCH_TYPES[code]} (no format yet)"})
     for code, r in sorted(results.items()):
-        if code in (5, 6, 7) or (code not in RESULT_LABELS and code != 255):
+        if code not in RESULT_LABELS and code != 255:
             add("C", "Result code", Number=code, Matches=r[0], Years=span(r),
                 **{"Example match": _example(r[3][0], r[3][1], r[3][2])})
-    if absent:
+    if absent and not (open_only and profile.absent):
         add("C", "Absent batter", Matches=absent)
-    if byes:
+    if byes and not open_only:
         add("C", "Bye", Matches=byes)
-    if source and any(p.suffix.lower() == ".csv" for p in source.iterdir()):
+    if source and not open_only and any(p.suffix.lower() == ".csv" for p in source.iterdir()):
         add("C", "Printed reports",
             Matches=sum(1 for p in source.iterdir() if p.suffix.lower() == ".csv"))
     return rows
@@ -2087,26 +2117,76 @@ _ANSWER_HELP = {
 }
 
 
+def _read_answer_file(path: Path) -> tuple:
+    """(sheet rows, {team id: name} from a Teams tab, {type id: name} from a Match
+    Types tab). A CSV has the sheet only; a workbook may add the two tabs, which
+    is how Payneham sent back CSFW's own lists."""
+    if path.suffix.lower() != ".xlsx":
+        return list(csv.DictReader(path.open(encoding="utf-8-sig", newline=""))), {}, {}
+    from openpyxl import load_workbook
+    wb = load_workbook(path, data_only=True, read_only=True)
+
+    def table(ws):
+        it = ws.iter_rows(values_only=True)
+        head = [str(h).strip() if h is not None else "" for h in next(it, [])]
+        return [{h: ("" if v is None else str(v).strip()) for h, v in zip(head, row) if h}
+                for row in it if any(v not in (None, "") for v in row)]
+
+    def idmap(name, col):
+        ws = next((wb[n] for n in wb.sheetnames if n.strip().lower() == name), None)
+        out = {}
+        for r in (table(ws) if ws else []):
+            ident = (r.get("ID") or "").split(".")[0]
+            if ident.isdigit() and r.get(col):
+                out[int(ident)] = r[col]
+        return out
+
+    first = wb[next(n for n in wb.sheetnames if n.strip().lower() not in ("teams", "match types"))]
+    return table(first), idmap("teams", "Team"), idmap("match types", "Match Type")
+
+
+def _same_name(a: str, b: str) -> bool:
+    """The same name up to case and spaces: 'U 12 Knights' is 'U12 Knights'."""
+    return re.sub(r"\s+", "", a).lower() == re.sub(r"\s+", "", b).lower()
+
+
 def apply_answers(profile: Profile, path: Path) -> tuple:
     """(profile with the club's answers applied, absent reading or None, notes).
 
-    Reads the filled sheet. A blank answer changes nothing. What no profile field
-    can hold (what a result code means, whether to load the printed reports) is
-    handed back as a note for a person, never guessed at.
+    Reads the filled sheet (CSV, or a workbook with Teams and Match Types tabs). A
+    blank answer changes nothing. What no profile field can hold (what a result
+    code means, whether to load the printed reports) is handed back as a note for
+    a person, never guessed at.
+
+    A Teams tab is CSFW's own list, so it names the teams for every database and
+    wins over the sheet's per-row answers; a row answer is kept only where it is
+    the same name in different case or spelling of the tab's ("2nd XI" for "2nd
+    Xi"), or fills a number the tab lacks. A disagreement is reported, because two
+    spellings of one team would load as two grades.
     """
-    rows = list(csv.DictReader(path.open(encoding="utf-8-sig", newline="")))
+    rows, teams_tab, types_tab = _read_answer_file(path)
     prof = replace(profile, databases={k: dict(v) for k, v in profile.databases.items()},
+                   team_names=dict(profile.team_names),
                    match_types=dict(profile.match_types),
                    format_by_type=dict(profile.format_by_type),
                    finals_types=frozenset(profile.finals_types))
-    absent, notes = None, []
+    prof.team_names.update(teams_tab)
+    for code, name in types_tab.items():
+        prof.match_types[code] = name
+        if re.search(r"final", name, re.I):
+            prof.finals_types = prof.finals_types | {code}
+    absent, notes, spellings = None, [], {}
     for r in rows:
         ans = (r.get("Your answer") or "").strip()
         item, num = (r.get("Item") or "").strip(), (r.get("Number") or "").strip()
         if not ans:
             continue
         if item == "Team" and num.isdigit():
-            prof.databases.setdefault((r["Database"] or "").strip(), {})[int(num)] = ans
+            tab = teams_tab.get(int(num))
+            if tab and _same_name(ans, tab):
+                spellings.setdefault(int(num), Counter()).update([ans])
+            elif not tab:
+                prof.databases.setdefault((r["Database"] or "").strip(), {})[int(num)] = ans
         elif item == "Match type" and num.isdigit():
             prof.match_types[int(num)] = ans
             if re.search(r"final", ans, re.I):
@@ -2125,6 +2205,18 @@ def apply_answers(profile: Profile, path: Path) -> tuple:
                 prof.byes = ()
         else:
             notes.append(f"{r.get('Ref')} {item} {num}: {ans!r} (needs a person, nothing applied)")
+    # the same name spelt more than one way across the club's rows: the spelling
+    # it used most, and the tab's own where that is a tie
+    for number, seen in spellings.items():
+        top = seen.most_common()
+        best = [name for name, n in top if n == top[0][1]]
+        prof.team_names[number] = teams_tab[number] if teams_tab[number] in best else best[0]
+    for r in rows:
+        ans, num = (r.get("Your answer") or "").strip(), (r.get("Number") or "").strip()
+        if (r.get("Item") or "").strip() == "Team" and ans and num.isdigit() and int(num) in teams_tab \
+                and not _same_name(ans, teams_tab[int(num)]):
+            notes.append(f"{r.get('Ref')}: team {num} answered {ans!r}, but the Teams tab says "
+                         f"{teams_tab[int(num)]!r}; {prof.team_names[int(num)]!r} is used")
     return prof, absent, notes
 
 
@@ -2297,8 +2389,12 @@ def main() -> None:
     ap.add_argument("--questions", type=Path, metavar="FILE.csv",
                     help="write the club's fill-in answer sheet (team and match-type "
                          "names, formats, result codes) from the files, and stop")
-    ap.add_argument("--answers", type=Path, metavar="FILE.csv",
-                    help="read the club's filled-in answer sheet onto the profile")
+    ap.add_argument("--open-only", action="store_true",
+                    help="with --questions: only what the profile still lacks (the "
+                         "follow-up sheet)")
+    ap.add_argument("--answers", type=Path, metavar="FILE",
+                    help="read the club's filled-in answer sheet (CSV, or a workbook with "
+                         "Teams and Match Types tabs) onto the profile")
     ap.add_argument("--team-names", metavar="N=NAME,...",
                     help="the club's own names for its team numbers, e.g. "
                          "'1=1st XI,2=2nd XI,3=3rd XI'. Overrides the profile's team "
@@ -2336,10 +2432,10 @@ def main() -> None:
         for note in notes:
             print(f"ANSWER NOT APPLIED: {note}")
     # the --absent flag wins, then the club's answer, then Shoalwater's reading
-    absent_is_out = (args.absent or answered_absent or "out") == "out"
+    absent_is_out = (args.absent or answered_absent or profile.absent or "out") == "out"
     if args.questions:
         activate(profile)
-        rows = build_questions(all_seasons, profile, args.source)
+        rows = build_questions(all_seasons, profile, args.source, args.open_only)
         with args.questions.open("w", newline="", encoding="utf-8-sig") as fh:
             w = csv.DictWriter(fh, fieldnames=QUESTION_COLUMNS)
             w.writeheader()

@@ -325,8 +325,8 @@ with tempfile.TemporaryDirectory() as td:
     check("and a club with no profile is not given another club's names",
           "team   1 = Grade #1 (unmapped)" in other_out, True)
 
-    code, text_out = run("--layout", td / "layout.json", src, "-o", out)
-    check("extraction without a profile still runs and says what is unnamed",
+    code, text_out = run("--layout", td / "layout.json", td / "other", "-o", td / "out_other")
+    check("extraction for a club with no profile still runs and says what is unnamed",
           (code, "NO NAME GIVEN FOR" in text_out), (0, True))
     code, text_out = run("--layout", td / "layout.json", "--profile", td / "profile.json",
                          src, "-o", out)
@@ -497,6 +497,96 @@ with tempfile.TemporaryDirectory() as td:
         else:
             check("the answer sheet can be read back", "no apply_answers", "apply_answers")
 
+
+# ---------------------------------------------------------------------------
+# 8. What a club answers: result codes, absent batters, layered team names, and
+#    a workbook with CSFW's own Teams and Match Types tabs
+# ---------------------------------------------------------------------------
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    src = td / "src"
+    src.mkdir()
+    fx = [(0, datetime.date(2025, 10, 11), 1, "Fulham"), (1, datetime.date(2025, 10, 18), 1, "Glenunga"),
+          (2, datetime.date(2025, 10, 25), 1, "Goodwood"), (3, datetime.date(2025, 11, 1), 1, "Unley")]
+    mt = {
+        0: dict(type=4, result=5, us=(100, 10), them=(90, 10), bat=[(0, 0, 10, 11)]),
+        1: dict(type=4, result=6, us=(100, 10), them=(100, 10), bat=[(0, 0, 10, 11)]),
+        2: dict(type=4, result=7, us=(120, 10), them=(100, 10), bat=[(0, 0, 10, 11)]),
+        3: dict(type=4, result=0, us=(120, 10), them=(100, 10), bat=[(0, 0, 0, 29), (1, 1, 12, 11)]),
+    }
+    if lay2 is not None:
+        (src / "DATA2025.AV").write_bytes(build_av(lay2, "Newtown", 2025, fx, mt, PLAYERS))
+        (src / "DAT12025.AV").write_bytes(build_av(lay2, "Newtown W", 2025, fx[:1], {0: mt[0]}, PLAYERS))
+    (td / "layout.json").write_text(json.dumps(V2))
+    base = {"name": "t", "club": "newtown", "team_names": {"1": "1st XI"}, "byes": ["Bye"],
+            "databases": {"Newtown W": {"1": "Women's 1st XI"}}}
+    (td / "plain.json").write_text(json.dumps(base))
+    (td / "answered.json").write_text(json.dumps({
+        **base, "absent": "did-not-bat",
+        "result_labels": {"5": "Cancelled", "6": "Tied on first innings", "7": "Winning draw"},
+        "import_results": {"5": "", "6": "DRAW", "7": "DRAW"}}))
+
+    def extract(profile):
+        out = td / ("out_" + profile.stem)
+        code, text_out = run("--layout", td / "layout.json", "--profile", profile, src, "-o", out)
+        return code, (read_csv(out / "manual_games_scorecards.csv") if code == 0 else [])
+
+    code, rows = extract(td / "plain.json")
+    by = {(r["game_key"][:4], r["opposition"]): r for r in rows}
+    check("a result code nobody has named loads with no result (never a guessed one)",
+          [by.get(("data", o), {}).get("result") for o in ("Fulham", "Glenunga", "Goodwood")], ["", "", ""])
+    check("layered names: the global list names every database, a database's own entry wins",
+          (by.get(("data", "Fulham"), {}).get("grade_name"), by.get(("dat1", "Fulham"), {}).get("grade_name")),
+          ("1st XI", "Women's 1st XI"))
+    check("an absent batter reads as 'absent out' until the club says otherwise",
+          [r["did_not_bat"] for r in rows if r["opposition"] == "Unley" and r["player_name"] == "Smith, Alan"],
+          ["false"])
+    code, rows = extract(td / "answered.json")
+    by = {(r["game_key"][:4], r["opposition"]): r for r in rows}
+    check("the club's answers set what a result means: cancelled blank, tied-on-first-innings and winning draw are draws",
+          [by.get(("data", o), {}).get("result") for o in ("Fulham", "Glenunga", "Goodwood", "Unley")],
+          ["", "DRAW", "DRAW", "WIN"])
+    check("the club's answer that an absent batter did not bat is applied",
+          [r["did_not_bat"] for r in rows if r["opposition"] == "Unley" and r["player_name"] == "Smith, Alan"],
+          ["true"])
+    if hasattr(m, "apply_answers"):
+        # the follow-up sheet asks only what is still open
+        code, _ = run("--layout", td / "layout.json", "--profile", td / "answered.json",
+                      "--questions", td / "open.csv", "--open-only", src)
+        open_rows = read_csv(td / "open.csv") if (td / "open.csv").exists() else []
+        check("the follow-up sheet leaves out teams and results the profile has, and keeps a type still unnamed",
+              sorted({r["Item"] for r in open_rows}), ["Match type"])
+        # a workbook with CSFW's own tabs
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Answer sheet"
+        ws.append(["Section", "Ref", "Item", "Database", "Number", "Your answer"])
+        ws.append(["A", "A1", "Team", "Newtown", 1, "1st xi"])
+        ws.append(["A", "A2", "Team", "Newtown", 2, "Seconds"])
+        ws.append(["A", "A3", "Team", "Newtown", 3, "Under 11"])
+        ws.append(["A", "A4", "Team", "Newtown W", 9, "Women's 9th"])
+        ws.append(["A", "A5", "Team", "Newtown", 7, ""])
+        t = wb.create_sheet("Teams")
+        t.append(["ID", "Team"])
+        for i, n in ((1, "1st XI"), (2, "2nd Xi"), (3, "U 11 Blue")):
+            t.append([i, n])
+        mtab = wb.create_sheet("Match Types")
+        mtab.append(["ID", "Match Type"])
+        for i, n in ((0, "Friendly"), (3, "Cup Final"), (4, "Limited Over")):
+            mtab.append([i, n])
+        wb.save(td / "back.xlsx")
+        prof, absent, notes = m.apply_answers(m.Profile("t"), td / "back.xlsx")
+        check("a Teams tab names the teams for every database; the club's own spelling of the same name is kept",
+              (prof.team_names[1], prof.team_names[2], prof.team_names[3]),
+              ("1st xi", "2nd Xi", "U 11 Blue"))
+        check("a row answer that disagrees with the tab is reported, and the tab is used",
+              ([n for n in notes if "team 3" in n] != [], prof.team_names[3]), (True, "U 11 Blue"))
+        check("a row for a number the tab lacks is kept against its own database",
+              prof.databases.get("Newtown W"), {9: "Women's 9th"})
+        check("a Match Types tab names the types, and a name with Final in it is a final",
+              (prof.match_types, sorted(prof.finals_types)),
+              ({0: "Friendly", 3: "Cup Final", 4: "Limited Over"}, [3]))
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
