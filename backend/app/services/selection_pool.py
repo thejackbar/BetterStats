@@ -205,12 +205,14 @@ def _tier_for(fx_seq: int | None, sq_seq: int | None) -> int | None:
 
 
 def _pool_rank(tier: int | None, drop_in: bool) -> int:
-    """Where a player sorts on the board's default (Squad order): a player from
-    the squad ABOVE who has not been picked anywhere that day first, then the
-    fixture's own squad (1), the squad below (2), the rest of the squad above
-    (3), everyone else (99). The browser applies the same order."""
-    if drop_in:
+    """Where a player sorts on the board's default (Squad order): the fixture's
+    own squad first (0), then players from the squad ABOVE who have not been
+    picked anywhere that day (1), the squad below (2), the rest of the squad
+    above (3), everyone else (99). The browser applies the same order."""
+    if tier == 1:
         return 0
+    if drop_in:
+        return 1
     return tier if tier is not None else 99
 
 

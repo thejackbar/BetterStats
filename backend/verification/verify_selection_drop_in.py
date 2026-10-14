@@ -1,16 +1,17 @@
-"""Verification: a player the squad above has not picked is offered, first, to the
-grade below, against a real Postgres.
+"""Verification: a player the squad above has not picked is offered to the grade
+below, after that grade's own squad, against a real Postgres.
 
 Reported: a 3rd XI squad player who had not been picked in the 3rds did not show
 as a choice for the 4ths. He WAS in the pool, but as "tier 3" (one grade up),
 which sorts behind every 4th and 5th squad player, so on a long list he was never
-seen. The board's default order now puts a player the squad above has not taken
-that day first, and labels him.
+seen. v9.109.2 put him first; selectors then saw other squads' players ahead of
+their own, so the order is now: own squad, unpicked players from the squad above
+(labelled), the squad below, the rest of the squad above.
 
 This drives the SHIPPED `assemble_selection` (the board's pool), never a
 re-implementation:
 
-  * 3rd XI squad, named in no XI that day     -> `drop_in_from` = "3rd XI", sorts FIRST in the 4ths
+  * 3rd XI squad, named in no XI that day     -> `drop_in_from` = "3rd XI", sorts after the 4ths squad, before the 5ths
   * same player, named in the 3rds XI          -> no label (he is in the 3rds)
   * same player, marked unavailable            -> no label (marked out, shown as before)
   * same player, marked inactive               -> no label
@@ -158,8 +159,9 @@ async def main():
     check("Jaimin is one grade up (tier 3)", row("Jaimin Major").get("tier"), 3)
     check("Jaimin is labelled as not picked in the 3rd XI", row("Jaimin Major").get("drop_in_from"), "3rd XI")
     order = [r["display_name"] for r in await pool(fx4)]
-    check("Jaimin sorts ahead of the 4ths' own squad", order.index("Jaimin Major") < order.index("Fours Regular"), True)
-    check("Jaimin sorts ahead of the 5ths squad", order.index("Jaimin Major") < order.index("Fives Regular"), True)
+    check("the 4ths' own squad sorts ahead of Jaimin", order.index("Fours Regular") < order.index("Jaimin Major"), True)
+    check("Jaimin (squad above, unpicked) sorts ahead of the 5ths squad", order.index("Jaimin Major") < order.index("Fives Regular"), True)
+    check("the 5ths squad sorts ahead of two grades up", order.index("Fives Regular") < order.index("Seconds Regular"), True)
 
     print("\n# B. Not labelled when there is a reason not to")
     check("named in the 3rds XI: no label", row("Picked In Threes").get("drop_in_from"), None)

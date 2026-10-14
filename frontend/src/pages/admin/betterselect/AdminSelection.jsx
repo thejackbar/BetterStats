@@ -409,8 +409,9 @@ export default function AdminSelection() {
   }, [data])
   const usedIds = useMemo(() => new Set(slots.filter(Boolean)), [slots])
 
-  // Default (Squad order) comparator: players the squad above has not picked
-  // first, then tier → form score → availability → name.
+  // Default (Squad order) comparator: own squad, then players the squad above
+  // has not picked, then the squad below, then the rest → form score →
+  // availability → name.
   const cmp = useCallback((a, b) => {
     const at = poolRank(a), bt = poolRank(b)
     if (at !== bt) return at - bt
