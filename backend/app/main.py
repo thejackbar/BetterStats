@@ -4382,6 +4382,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _SELECTION_NOTICE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 331: the club's switch for counting winter and summer as one
+        # season per year. Same one-copy rule: this list and alembic's 331 both
+        # run services/amalgamate_seasons_ddl.STATEMENTS.
+        from app.services.amalgamate_seasons_ddl import STATEMENTS as _AMALGAMATE_SEASONS_DDL
+        for _stmt in _AMALGAMATE_SEASONS_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 285: importing a club's history from its own public
         # CricketStatz site. Same one-copy rule — this list and alembic's 285
         # both run services/cricketstatz_ddl.STATEMENTS.

@@ -45,6 +45,7 @@ from app.services.milestone_rules import (
 )
 from app.services.grade_milestone_schemes import load_book
 from app.services import iq_teammates
+from app.services import player_form
 from app.services.session_safety import rollback_keeping
 from app.services import milestone_totals
 from app.services import grade_scope, junior_hiding, player_privacy
@@ -1225,65 +1226,25 @@ async def _snapshot(db: AsyncSession, player: Player) -> dict:
     except Exception:
         snap["availability_next"] = []
 
-    # recent_batting — last 5 scores, most-recent-first (by game date).
-    try:
-        b_res = await db.execute(
-            select(BattingInnings.runs)
-            .join(Game, Game.id == BattingInnings.game_id)
-            .where(BattingInnings.player_id == player.id)
-            .order_by(Game.played_at.desc().nullslast(), BattingInnings.id.desc())
-            .limit(5)
-        )
-        snap["recent_batting"] = [int(r or 0) for (r,) in b_res.all()]
-    except Exception:
-        snap["recent_batting"] = []
-
-    # recent_bowling — last 5 {wickets, runs}, most-recent-first.
-    try:
-        bw_res = await db.execute(
-            select(BowlingSpell.wickets, BowlingSpell.runs)
-            .join(Game, Game.id == BowlingSpell.game_id)
-            .where(BowlingSpell.player_id == player.id)
-            .order_by(Game.played_at.desc().nullslast(), BowlingSpell.id.desc())
-            .limit(5)
-        )
-        snap["recent_bowling"] = [
-            {"wickets": int(w or 0), "runs": int(r or 0)} for (w, r) in bw_res.all()
-        ]
-    except Exception:
-        snap["recent_bowling"] = []
-
-    # season_catches — catches in the club's latest season only (the profile
-    # labels this "this season"; an unfiltered sum would be career catches).
-    try:
-        latest_season = (await db.execute(
-            select(Season.id)
-            .where(Season.organisation_id == player.organisation_id)
-            .order_by(Season.year.desc().nullslast(), Season.name.desc())
-            .limit(1)
-        )).scalar()
-        catches = catches_wk = 0
-        if latest_season:
-            c_res = await db.execute(
-                select(
-                    func.coalesce(func.sum(FieldingStat.catches), 0),
-                    func.coalesce(func.sum(FieldingStat.catches_wk), 0),
-                )
-                .join(Game, Game.id == FieldingStat.game_id)
-                .join(Grade, Grade.id == Game.grade_id)
-                .where(
-                    FieldingStat.player_id == player.id,
-                    Grade.season_id == latest_season,
-                )
-            )
-            row = c_res.first()
-            catches = int((row and row[0]) or 0)
-            catches_wk = int((row and row[1]) or 0)
-        snap["season_catches"] = catches
-        snap["season_catches_wk"] = catches_wk
-    except Exception:
-        snap["season_catches"] = 0
-        snap["season_catches_wk"] = 0
+    # Recent form: last 5 batting innings, last 5 bowling spells, and the club's
+    # current season of fielding. Read from the effective views and the club's
+    # own games, like the public profile (services/player_form.py). `recent_batting`
+    # stays a plain list of runs for older clients; `recent_batting_detail` carries
+    # the not-out flag and the date.
+    form = await player_form.recent_form(db, str(player.id), player)
+    snap["recent_batting_detail"] = form["batting"]
+    snap["recent_batting"] = [b["runs"] for b in form["batting"]]
+    snap["recent_bowling"] = [
+        {"wickets": b["wickets"], "runs": b["runs"], "overs": b["overs"]}
+        for b in form["bowling"]
+    ]
+    fielding = form["fielding"] or {}
+    snap["season_fielding"] = fielding or None
+    snap["season_name"] = fielding.get("season_name")
+    snap["season_catches"] = int(fielding.get("catches") or 0)
+    snap["season_catches_wk"] = int(fielding.get("catches_wk") or 0)
+    snap["season_run_outs"] = int(fielding.get("run_outs") or 0)
+    snap["season_stumpings"] = int(fielding.get("stumpings") or 0)
 
     # last_picked — most recent fixture this player was named in.
     try:

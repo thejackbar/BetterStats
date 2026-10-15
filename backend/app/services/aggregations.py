@@ -29,6 +29,8 @@ _SIDES = sides_sql("g", "SELECT o.name FROM organisations o WHERE o.id = s.organ
 # several different functions and a per-function local would be four copies of
 # the same line. The alias is `ga` at every site that uses it.
 _APPEARANCE_PLAYED = appearance_counts_as_match("ga")
+from app.services.season_kind import season_kind, season_kind_sql
+from app.services import held_topup
 from app.services.season_aliases import (
     load_reverse_alias_map,
     resolve_season_filter,
@@ -267,6 +269,18 @@ async def _game_season_clause(session: AsyncSession, season_id, params: dict) ->
         return ""
     params["career_season_ids"] = season_ids
     return " AND g.season_id = ANY(:career_season_ids)"
+
+async def _club_amalgamates(session: AsyncSession, org_id) -> bool:
+    """True when the club counts winter and summer of one year as ONE season
+    (`organisations.amalgamate_seasons`). No club, or no row, is False."""
+    if not org_id:
+        return False
+    res = await session.execute(
+        text("SELECT amalgamate_seasons FROM organisations WHERE id = CAST(:o AS UUID)"),
+        {"o": str(org_id)},
+    )
+    return bool(res.scalar())
+
 
 async def _player_org_id(session: AsyncSession, player_id: str) -> Optional[str]:
     """The club a player belongs to, for `_SEASON_FOLD_CTE`'s `:fold_org`.
@@ -591,6 +605,7 @@ async def get_career_batting(
                 COALESCE(SUM(pss.fours), 0) AS total_fours,
                 COALESCE(SUM(pss.sixes), 0) AS total_sixes,
                 COALESCE(SUM(pss.ducks), 0) AS ducks,
+                COALESCE(SUM(pss.not_outs), 0) AS not_outs,
                 COALESCE(SUM(pss.matches), 0) AS games
             FROM players p
             LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id{season_clause}
@@ -602,7 +617,12 @@ async def get_career_batting(
     row = result.mappings().first()
     if not row:
         return None
-    return {**dict(row), **await _batting_rate_from_innings(session, player_id, season_id, row["innings"])}
+    career = {**dict(row), **await _batting_rate_from_innings(session, player_id, season_id, row["innings"])}
+    topped = held_topup.add_to_batting(
+        career, await held_topup.season_topups(session, player_id, row["organisation_id"], season_ids))
+    if topped:
+        career["topped_up"] = topped
+    return career
 
 
 async def _batting_rate_from_innings(
@@ -743,10 +763,15 @@ async def get_career_bowling(
     row = result.mappings().first()
     if not row:
         return None
-    return {
+    career = {
         **dict(row),
         **await _bowling_rate_from_spells(session, player_id, season_id, row["bowling_innings"]),
     }
+    topped = held_topup.add_to_bowling(
+        career, await held_topup.season_topups(session, player_id, row["organisation_id"], season_ids))
+    if topped:
+        career["topped_up"] = topped
+    return career
 
 
 async def get_career_fielding(
@@ -806,7 +831,14 @@ async def get_career_fielding(
         params,
     )
     row = result.mappings().first()
-    return dict(row) if row else None
+    if not row:
+        return None
+    career = dict(row)
+    topped = held_topup.add_to_fielding(
+        career, await held_topup.season_topups(session, player_id, row["organisation_id"], season_ids))
+    if topped:
+        career["topped_up"] = topped
+    return career
 
 
 def _build_recent_games_cte(
@@ -2034,25 +2066,30 @@ async def get_player_team_breakdown(
     alias_rev = await load_reverse_alias_map(session, org_id) if org_id else {}
     # Years for EVERY season, ours or not: a shared fixture carries the other
     # club's season, and it still belongs in our row for that year.
+    # "Per year" is per (year, kind): Winter 2026 and Summer 2026/27 are two
+    # rows unless the club amalgamates them (services/season_kind.py).
+    amalgamate = await _club_amalgamates(session, org_id)
     all_seasons = await session.execute(
-        text("SELECT id, year, organisation_id FROM seasons WHERE year IS NOT NULL"))
-    year_by_season: dict[str, int] = {}
-    season_by_year: dict[int, str] = {}
+        text("SELECT id, year, name, organisation_id FROM seasons WHERE year IS NOT NULL"))
+    year_by_season: dict[str, tuple] = {}
+    season_by_year: dict[tuple, tuple] = {}
     for r in all_seasons.mappings():
-        sid, yr = str(r["id"]), r["year"]
-        year_by_season[sid] = yr
+        sid = str(r["id"])
+        key = (r["year"], "" if amalgamate else season_kind(r["name"]))
+        year_by_season[sid] = key
         if org_id and str(r["organisation_id"]) == str(org_id):
             # Deterministic pick, so the row a year folds onto is stable across
             # requests. Any member works for a deep link — resolve_season_filter
             # expands whichever one it is back to the whole year.
-            if yr not in season_by_year or sid < season_by_year[yr]:
-                season_by_year[yr] = sid
+            rank = (season_kind(r["name"]) != "", sid)
+            if key not in season_by_year or rank < season_by_year[key][0]:
+                season_by_year[key] = (rank, sid)
 
     def _canonical_season(raw) -> str:
         sid = alias_rev.get(str(raw), str(raw))
-        year = year_by_season.get(sid)
-        if year is not None:
-            sid = season_by_year.get(year, sid)
+        key = year_by_season.get(sid)
+        if key is not None:
+            sid = season_by_year[key][1] if key in season_by_year else sid
         return alias_rev.get(sid, sid)
 
     season_grade_games: dict = {}  # season_id -> {grade_name: count}
@@ -2422,12 +2459,29 @@ async def raise_games_to_grid_total(
 # unknown year, or a year it never played) folds to itself and still draws its
 # own row, so a player's record can never go missing for want of a club season
 # to file it under.
+#
+# "Per year" means per (year, kind): a club's "Winter 2026" and "Summer 2026/27"
+# both carry year 2026 and are two seasons (services/season_kind.py), unless the
+# club has switched on `organisations.amalgamate_seasons`, which makes the kind
+# '' for every row and so restores one season per year.
 _SEASON_FOLD_CTE = """
+    fold_cfg AS (
+        SELECT COALESCE(
+            (SELECT amalgamate_seasons FROM organisations
+              WHERE id = CAST(:fold_org AS UUID)), FALSE) AS amalgamate
+    ),
     club_season_by_year AS (
-        SELECT DISTINCT ON (year) year, id
-        FROM seasons
-        WHERE organisation_id = CAST(:fold_org AS UUID) AND year IS NOT NULL
-        ORDER BY year, id
+        SELECT DISTINCT ON (x.year, x.kind) x.year, x.kind, x.id
+        FROM (
+            SELECT se.year, se.id,
+                   """ + season_kind_sql("se.name") + """ AS real_kind,
+                   CASE WHEN (SELECT amalgamate FROM fold_cfg) THEN ''
+                        ELSE """ + season_kind_sql("se.name") + """ END AS kind
+            FROM seasons se
+            WHERE se.organisation_id = CAST(:fold_org AS UUID) AND se.year IS NOT NULL
+        ) x
+        -- Amalgamated, the summer row stands for the year (as the season list does).
+        ORDER BY x.year, x.kind, (x.real_kind <> ''), x.id
     ),
     season_fold AS (
         SELECT
@@ -2437,6 +2491,8 @@ _SEASON_FOLD_CTE = """
         LEFT JOIN season_aliases sa
           ON sa.alias_season_id = s.id AND sa.undone_at IS NULL
         LEFT JOIN club_season_by_year cs ON cs.year = s.year
+          AND cs.kind = CASE WHEN (SELECT amalgamate FROM fold_cfg) THEN ''
+                             ELSE """ + season_kind_sql("s.name") + """ END
         CROSS JOIN LATERAL (
             SELECT COALESCE(cs.id, sa.canonical_season_id, s.id) AS id
         ) base
@@ -2698,6 +2754,47 @@ def _with_rate_coverage(row: dict) -> dict:
     return rc.with_coverage(row)
 
 
+_BLANK_SEASON_ROW = {
+    "matches": 0, "batting_innings": 0, "total_runs": 0, "high_score": None,
+    "batting_average": None, "strike_rate": None, "sr_counted": 0, "sr_of": 0,
+    "fifties": 0, "hundreds": 0, "not_outs": 0, "ducks": 0, "total_fours": 0,
+    "total_sixes": 0, "total_wickets": 0, "bowling_runs_conceded": 0,
+    "total_overs": 0, "bowling_average": None, "economy": None, "econ_counted": 0,
+    "econ_of": 0, "best_bowling_wickets": None, "best_bowling_figures": None,
+    "five_fors": 0, "total_maidens": 0, "total_catches": 0, "total_catches_wk": 0,
+    "total_catches_non_wk": 0, "total_run_outs": 0, "total_stumpings": 0,
+}
+
+
+async def _topped_up_season_rows(session: AsyncSession, player_id: str, rows: list[dict]) -> list[dict]:
+    """Raise season rows to the scorecards we hold where CA's season total is behind.
+
+    See services/held_topup.py. A season CA has no row for yet (a player's first
+    game of a new season, before CA's totals catch up) gets a row of its own, so
+    the table keeps adding up to the career header above it.
+    """
+    org_id = await _player_org_id(session, player_id)
+    topups = await held_topup.season_topups(session, player_id, org_id)
+    if not topups:
+        return rows
+    by_sid = {str(r["season_id"]): r for r in rows}
+    added = False
+    for sid, t in topups.items():
+        row = by_sid.get(sid)
+        if row is None:
+            row = {"season_id": uuid.UUID(sid), "season_name": t["season_name"], "year": t["year"],
+                   **_BLANK_SEASON_ROW, "matches": t.get("held_matches") or 0}
+            rows.append(row)
+            by_sid[sid] = row
+            added = True
+        held_topup.add_to_season_row(row, t)
+        row["topped_up"] = {k: v for k, v in t.items() if k in ("bat", "bowl", "field")}
+        _with_rate_coverage(row)
+    if added:
+        rows.sort(key=lambda r: (r.get("year") is None, -(r.get("year") or 0), r.get("season_name") or ""))
+    return rows
+
+
 async def get_season_by_season(
     session: AsyncSession,
     player_id: str,
@@ -2823,6 +2920,7 @@ async def get_season_by_season(
         },
     )
     rows = [_with_rate_coverage(dict(r)) for r in result.mappings()]
+    rows = await _topped_up_season_rows(session, player_id, rows)
 
     # Pull out CA's pre-migration "bundle" seasons (cumulative career totals dumped
     # on the earliest season — see _HISTORICAL_BUNDLE_MATCH_CAP). They aren't real

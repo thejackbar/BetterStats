@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.game_status import appearance_counts_as_match
 from app.services.grade_scope import GradeScope
+from app.services.season_kind import season_key_sql
 
 _APPEARANCE_PLAYED = appearance_counts_as_match("ga")
 
@@ -49,6 +50,9 @@ def held_years_cte(games_where: str, player_pred) -> str:
     """CTEs `held_games` and `held_years`: which calendar years a player has an
     in-scope SCORECARD in, as (player_id, year).
 
+    The (year, kind) pair as one integer (`season_key_sql`), so a Winter 2026
+    scorecard does not stand in for Summer 2026/27's season total.
+
     The year, not the season id, because a fixture shared between two clubs
     carries whichever club's season synced it first, and one real season is
     routinely several `seasons` rows. `player_pred(alias)` narrows the per-game
@@ -74,7 +78,7 @@ def held_years_cte(games_where: str, player_pred) -> str:
     held_ids = "ANY(ARRAY(SELECT id FROM held_games))"
     return f"""
         held_games AS MATERIALIZED (
-            SELECT g.id, hs.year
+            SELECT g.id, {season_key_sql('hs.year', 'hs.name')} AS year
             FROM v_effective_games g
             JOIN seasons hs ON hs.id = g.season_id
             WHERE {games_where}
@@ -126,7 +130,7 @@ def summary_only_seasons_clause(scope: GradeScope, pss: str = "pss") -> str:
         AND COALESCE({pss}.matches, 0) <= {HISTORICAL_BUNDLE_MATCH_CAP}
         AND EXISTS (SELECT 1 FROM seasons ys
                      WHERE ys.id = {pss}.season_id AND ys.year IS NOT NULL
-                       AND ({pss}.player_id, ys.year) NOT IN
+                       AND ({pss}.player_id, {season_key_sql('ys.year', 'ys.name')}) NOT IN
                            (SELECT hy.player_id, hy.year FROM held_years hy))
         AND NOT EXISTS (SELECT 1 FROM player_season_grade_stats sg
                          WHERE sg.player_id = {pss}.player_id

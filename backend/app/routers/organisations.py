@@ -12,6 +12,7 @@ from app.models.db import Organisation, Season, Grade, User, ClubMembership, Mar
 from app.services import playhq_client
 from app.services import fonts as font_service
 from app.services import grade_scope
+from app.services.season_kind import season_kind
 from app.services import game_sides
 from app.services import player_visibility
 from app.services.sync import sync_organisation, upsert_organisation
@@ -234,7 +235,23 @@ async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
 
     # Hide rows that are currently merged into another season.
     canonical_seasons = [s for s in all_seasons if str(s.id) not in reverse_map]
-    canonical_seasons.sort(key=lambda s: (-_year_from_name(s.name), s.name or ''))
+    # Newest first. Within one year the summer season (which starts in October)
+    # comes before the winter one (which ended that September), as the dropdown
+    # reads best newest to oldest.
+    canonical_seasons.sort(key=lambda s: (
+        -_year_from_name(s.name), season_kind(s.name) != "", s.name or ''))
+    # A club that counts winter and summer as one season lists one row per year:
+    # picking either returns the whole year (resolve_season_filter), so two
+    # entries would be the same answer twice. The summer row stands for the year,
+    # the same row the season table folds onto (aggregations._SEASON_FOLD_CTE).
+    org_row = await db.get(Organisation, uuid.UUID(org_id))
+    if org_row is not None and org_row.amalgamate_seasons:
+        picked: dict = {}
+        for s in sorted(canonical_seasons, key=lambda x: (season_kind(x.name) != "", str(x.id))):
+            if s.year is not None and s.year not in picked:
+                picked[s.year] = s.id
+        canonical_seasons = [s for s in canonical_seasons
+                             if s.year is None or picked.get(s.year) == s.id]
 
     out = []
     for s in canonical_seasons:

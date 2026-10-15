@@ -2406,7 +2406,12 @@ async def sync_grassroots_game_level_data(
                         # sheet names whom the club holds now.
                         try:
                             from app.services import participant_relink
-                            _fixed = await participant_relink.repair_stored_game(
+                            # A game from the last two weeks is checked for any
+                            # missing ROW; an older one only for missing PLAYERS.
+                            _repair = (participant_relink.reread_stored_game
+                                       if participant_relink.played_within(scorecard)
+                                       else participant_relink.repair_stored_game)
+                            _fixed = await _repair(
                                 session, org_uuid, match_uuid, scorecard,
                                 lambda g: _team_pid(_parse_uuid(g)))
                             if _fixed:

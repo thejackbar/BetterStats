@@ -197,3 +197,32 @@ export function GradeTotalNote({ rows = [], unattributed = 0, coverage = null,
     </div>
   )
 }
+
+/**
+ * One line saying the career figures include scorecards Cricket Australia's own
+ * season totals have not counted yet (the backend raises a total to the cards we
+ * hold, never lowers it: services/held_topup.py). Drawn only when something was
+ * added; the backend sends `topped_up` on a career block only then.
+ */
+export function TopUpNote({ batting, bowling, fielding, className = '' }) {
+  const parts = []
+  const b = batting?.topped_up
+  if (b && (b.innings || b.runs)) {
+    parts.push(`${b.innings} batting innings (${b.runs} ${b.runs === 1 ? 'run' : 'runs'})`)
+  }
+  const w = bowling?.topped_up
+  if (w && (w.spells || w.wickets)) {
+    parts.push(`${w.spells} bowling ${w.spells === 1 ? 'spell' : 'spells'} (${w.wickets} ${w.wickets === 1 ? 'wicket' : 'wickets'})`)
+  }
+  const f = fielding?.topped_up
+  const dismissals = f ? (f.catches || 0) + (f.run_outs || 0) + (f.stumpings || 0) : 0
+  if (dismissals > 0) {
+    parts.push(`${dismissals} fielding ${dismissals === 1 ? 'dismissal' : 'dismissals'}`)
+  }
+  if (!parts.length) return null
+  return (
+    <p className={`font-mono text-[10px] text-pb-dim ${className}`}>
+      Includes {parts.join(', ')} from scorecards we hold that Cricket Australia's season totals have not counted yet.
+    </p>
+  )
+}

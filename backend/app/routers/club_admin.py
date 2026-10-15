@@ -921,6 +921,9 @@ class SettingsPatch(BaseModel):
     # junior-only players and every game in a competition tagged junior. Off by
     # default; club admins still see everything. See services/junior_hiding.py.
     hide_juniors: Optional[bool] = None
+    # Count a club's winter and summer seasons of one year as ONE season
+    # (migration 331). Off by default: Winter 2026 and Summer 2026/27 stay two.
+    amalgamate_seasons: Optional[bool] = None
     # Who may open a committee document the club uploaded (migration 218).
     # True = the uploader, current Office Bearers and the Main Admin only.
     # False = any committee member who can reach the register.
@@ -1078,6 +1081,7 @@ async def get_settings(
         "public_header_logo": bool(club.public_header_logo),
         "show_competition_filters": bool(club.show_competition_filters),
         "hide_juniors": bool(club.hide_juniors),
+        "amalgamate_seasons": bool(club.amalgamate_seasons),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "diary_start_month": club.diary_start_month or 7,
         "socials_style": club.socials_style,
@@ -1164,6 +1168,8 @@ async def patch_settings(
         # The cached answer is per club and would otherwise serve the old
         # switch for up to its TTL.
         junior_hiding.forget(club.id)
+    if data.amalgamate_seasons is not None:
+        club.amalgamate_seasons = bool(data.amalgamate_seasons)
     if data.committee_docs_office_bearer_only is not None:
         club.committee_docs_office_bearer_only = bool(data.committee_docs_office_bearer_only)
     if data.diary_start_month is not None:

@@ -56,6 +56,12 @@
 32. Competition pill order is `display_order` (`POST /admin/competitions/reorder` sends the whole list).
 32a. Grade axis (v9.106.29): `resolve_scope(grades=)` takes grade NAMES as `/organisations/{org}/grades` lists them (rename, merge canonical, own), resolves them to ids once via `club_grade_rows` and emits `column = ANY(:ids)` from `clause()`: an INCLUSION like competitions (grade-less manual games and residuals without a grade drop out; `AND FALSE` when no name is the club's). A picked grade builds no CATEGORY exclusion (hidden juniors stay hidden); format and competition stay. Wire form is a repeated `?grades=`, never comma-split. A new per-game reader needs nothing if it routes through `clause()`; an ORM-side filter (`_fetch_manual_games_as_list`) needs its own branch. Check: `verify_player_grade_filter.py`, `verify_player_grade_filter_browser.mjs`.
 
+**Seasons and held scorecards (v9.113.0)**
+- A season's identity is (year, kind), never the year: `services/season_kind.py` reads winter, spring or autumn from the NAME (else summer or unlabelled). Anything that folds or expands seasons by year (`resolve_season_filter`, `_SEASON_FOLD_CTE`, the team-breakdown fold, `held_years_cte`) must key on `season_key_sql` or `season_kind`. `organisations.amalgamate_seasons` (default off, Admin > Seasons) makes the kind '' and restores one season per year; the public season list then shows one row per year.
+- `formatSeason` keeps "Winter 2026" and names the summer one ("Summer 2026/27") only after `registerSeasons` has seen a non-summer season in that year (`api.js` calls it as season lists arrive). Never print a season as a bare `YYYY/YY` when a winter row shares its year.
+- The unscoped header and season table are CA's totals RAISED to the scorecards we hold (`services/held_topup.py`): batting and bowling only when the held cards are a superset of CA's block, fielding per figure, never lowered, club-owned seasons only, through the season fold. A new unscoped reader of `v_effective_player_season_stats` for a profile figure needs the same; leaderboards and Records do not (yet).
+- "This season" is the season of the club's newest played game, as (year, kind). Never `ORDER BY year DESC, name DESC` (Winter sorts after Summer). Recent form is `services/player_form.py`: effective views, club games only, DNB rows excluded.
+
 **Milestones (`services/milestone_totals.profile_totals`)**
 33. `profile_totals` is the ONE definition (profile default scope, junior auto-widen, ids as an array); every milestone surface reads it. Entries carry `junior_split`, `counts`, `variant` (dedupe key carries the basis). "Without junior" is `judge_primary=True`.
 34. `sync._compute_milestones(reconcile=True)` removes thresholds no longer reached, keeps dates, runs at the END of sync; `match_pull_failed` only adds. Reached = `max(profile figure, whole unscoped career)`. Catch-up adds are undated (`achieved_at` NULL) unless the player has a game within `notification_scan.LOOKBACK_DAYS` (21), else `_src_milestone_achieved` emails "just reached".
@@ -118,6 +124,7 @@
 
 ## Open follow-ups
 
+- `ORDER BY year DESC, name DESC` still picks Winter as the latest season in `fees`, `selection_pool`, `comms_segments`, `teams`, `selection_rules`; BetterIQ (`iq_team`) still scopes a season by year alone. Leaderboards and Records do not read `held_topup`.
 - Records: `/records/{org}/milestones` still reads the per-innings views directly; the views' anti-join estimate is still wrong for every reader that is not `get_records`; `_club_pss` (0.6 to 1s) is the largest cost left; nothing cached or concurrent (cache on last sync; separate sessions, never `asyncio.gather` on one `AsyncSession`)
 - Scout screens and `iq._their_key_players` not marked aggregate-basis; `iq_team._role_ratings`, `iq_trends._similar_players` use aggregates on purpose.
 - `player_season_stats.batting_average` is a second stored copy.

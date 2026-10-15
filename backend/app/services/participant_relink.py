@@ -292,6 +292,61 @@ async def repair_stored_game(db: AsyncSession, org_id, game_id, scorecard: dict,
     return n
 
 
+# A game played this recently is checked for missing rows on every sync that
+# reads it, not just for missing PLAYERS. CA fills a scorecard in over a few days
+# (a scorer finishing the second innings, a batter's line added late), and a
+# game stored at the first pull stays as it was: once any of the club's players
+# has an appearance on it, sync called it done. That left one innings of a
+# two-match weekend out of a player's totals while its game page was complete.
+REREAD_DAYS = 14
+
+
+def played_within(scorecard: dict, days: int = REREAD_DAYS, today: Optional[date] = None) -> bool:
+    """True when the scorecard's start date is within `days` of today (never for an unknown date)."""
+    for sched in (scorecard.get("matchSchedule") or []):
+        iso = (sched.get("startDateTime") or "")[:10]
+        if iso:
+            try:
+                d = date.fromisoformat(iso)
+            except ValueError:
+                continue
+            return 0 <= ((today or date.today()) - d).days <= days
+    return False
+
+
+async def reread_stored_game(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> Optional[dict]:
+    """Add any batting, bowling, fielding or appearance row a RECENT stored game lacks, for every
+    club player its team sheet names (not only ones with no appearance, as `repair_stored_game`).
+
+    Same rules as `attach`: rows only, a row already there is left alone (so a figure is never
+    overwritten, only filled in), nothing is deleted, and no extra request is made because the
+    scorecard is already in hand. Returns the counts added, or None when nothing was missing.
+    Commits its own work; the caller catches anything it raises.
+    """
+    team = _our_team(scorecard, org_id)
+    if not team:
+        return None
+    gid = game_id if isinstance(game_id, uuid.UUID) else uuid.UUID(str(game_id))
+    wanted: dict = {}
+    taken: set = set()
+    for p in team.get("players") or []:
+        guid = p.get("participantId") or ""
+        pid = resolve(guid) if guid else None
+        if pid is None or pid in taken:
+            continue
+        wanted[guid] = pid
+        taken.add(pid)
+    if not wanted:
+        return None
+    n = await attach(db, org_id, gid, scorecard, wanted)
+    if not sum(n.values()):
+        await db.rollback()
+        return None
+    await db.commit()
+    logger.info("GR-sync: re-read %s: added %s", gid, n)
+    return n
+
+
 async def adopt_identity(db: AsyncSession, org_id, adopt: dict) -> int:
     """Give a hand-added player the Cricket Australia id sync just matched them to.
 

@@ -1,6 +1,8 @@
 // BASE_URL is Vite's build base ('/' for cricket; '/afl/' for a silo built to
 // live under a path prefix — see docs/afl-betterstats-plan.md's domain
 // topology). '/' + 'api' keeps cricket byte-identical at '/api'.
+import { registerSeasons } from './cricketFormat'
+
 const BASE = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
 
 // Shown while the backend is briefly unavailable (e.g. during a deploy, when
@@ -17,6 +19,16 @@ export function rebaseApiUrl(url) {
   return `${BASE}${url.slice(4)}`
 }
 const rebaseAsset = a => (a && typeof a === 'object' ? { ...a, url: rebaseApiUrl(a.url) } : a)
+
+// Tell the season labels which seasons a club has (see cricketFormat.formatSeason)
+// as the list passes through, and hand it on unchanged. A row from the season
+// table names its season `season_name`, a season list says `name`.
+function noteSeasons(list) {
+  try {
+    registerSeasons(Array.isArray(list) ? list.map(s => (s && typeof s === 'object' ? { name: s.name ?? s.season_name, year: s.year } : s)) : list)
+  } catch { /* labels are cosmetic; never fail a request over them */ }
+  return list
+}
 
 const BACKEND_DOWN_MESSAGE = 'System refreshing. Please wait a moment…'
 
@@ -271,7 +283,7 @@ export const api = {
     request('/organisations/onboard', { method: 'POST', body: JSON.stringify({ org_id: orgId, org_name: orgName }) }),
   listOrgs: () => request('/organisations'),
   getOrg: (orgId) => request(`/organisations/${orgId}`),
-  getOrgSeasons: (orgId) => request(`/organisations/${orgId}/seasons`),
+  getOrgSeasons: (orgId) => request(`/organisations/${orgId}/seasons`).then(noteSeasons),
   orgGradeCategories: (orgId) => request(`/organisations/${orgId}/grade-categories`),
   // The club's record in each competition it has played, plus every grade
   // listed under its own competition. One request for both halves.
@@ -429,7 +441,7 @@ export const api = {
     return request(`/players/${playerId}/team-breakdown${qs ? `?${qs}` : ''}`)
   },
   getPlayerSeasons: (playerId, scope) =>
-    request(`/players/${playerId}/seasons${scopeQuery(scope)}`),
+    request(`/players/${playerId}/seasons${scopeQuery(scope)}`).then(noteSeasons),
   getPlayerMilestones: (playerId) => request(`/players/${playerId}/milestones`),
   getPlayerPartnerships: (playerId, scope) =>
     request(`/players/${playerId}/partnerships${scopeQuery(scope)}`),
@@ -1641,7 +1653,7 @@ export const api = {
     request(`/club-admin/players/${playerId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   claimFillIn: (data) =>
     request('/players/claim-fill-in', { method: 'POST', body: JSON.stringify(data) }),
-  adminListSeasons: () => request('/club-admin/seasons'),
+  adminListSeasons: () => request('/club-admin/seasons').then(noteSeasons),
   adminReorderSeasons: (items) =>
     request('/club-admin/seasons/reorder', { method: 'PUT', body: JSON.stringify(items) }),
   // Season merges (aliases)

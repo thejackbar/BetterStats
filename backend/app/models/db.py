@@ -340,6 +340,10 @@ class Organisation(Base):
     # default. Signed-in club admins still see everything. Read through
     # services/junior_hiding.py, never directly.
     hide_juniors = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Count a club's winter and summer seasons of one year as ONE season
+    # (migration 331). Off by default: "Winter 2026" and "Summer 2026/27" are two
+    # seasons. Read through services/season_kind.py's callers, never directly.
+    amalgamate_seasons = Column(Boolean, nullable=False, server_default="false", default=False)
     # The club's own names for the four sponsor tiers (migration 318), e.g.
     # {"major": "Naming Partner"}. NULL means the stock names. Read through
     # services/sponsor_tiers.resolve_labels, never directly.
