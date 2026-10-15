@@ -1386,7 +1386,18 @@ Reported: some teams play 12 a side and some 11, but setting the size on the Sel
 
 Verification: `backend/verification/verify_team_side_size.py` (25 checks; the control on the previous commit fails 17).
 
-## v9.113.7: custom side size
+
+## v9.113.7: open players first on the pool, and the Draft table pool is pinned
+
+Reported (selector feedback): on the Draft table the pool scrolled out of view with the teams, so a player could not be dragged to a team off the edge; and opening a lower side (an OD6 Gold fixture) buried available players from higher grades behind the side's own squad.
+
+Pool order on the single-team board is now: (1) players marked AVAILABLE for the fixture's date and named in no confirmed XI, no same-day playable game and no other side's draft, from any squad, highest squad first by `open_seq` (their best squad's sequence; 999 for a squad with no rank); (2) the fixture's own squad; (3) as before: players the squad above has not picked, the squad below, the rest of the squad above, everyone else. `open_seq` needs a fixture date, a squad on the right side of the gender wall and an active player; otherwise it is None. Maybe, unavailable and no answer are not open, and a no-answer drop-in keeps its old place after the own squad. `selection_pool._pool_rank(open_seq, tier, drop_in)` and `selectionMeta.poolRank` were changed together; `tier`, `drop_in_from` and auto-fill are untouched.
+
+Draft table: the pool column is `sticky left-0` inside the sideways scroller, with an opaque tint. `selectionDnd` auto-scrolls any `data-autoscroll-x` element while a drag is held within 80px of its edge (a child tagged `data-autoscroll-skip` is not counted in the left edge) and re-reads the drop target after each step.
+
+Verification: `backend/verification/verify_selection_open_pool.py` (22 checks; the control on the previous `selection_pool.py` fails 8) and `verify_selection_drop_in.py` (30, unchanged). `frontend/verification/verify_draft_table_browser.mjs` gained a pinned-pool section at 1100px (91 pass; the control on the previous build fails 4: pool scrolls away, no edge auto-scroll, far drop fails).
+
+## v9.113.8: custom side size
 
 Asked for: women's and junior sides need a number outside 11, 12 and 13. A side size is now 0 (no limit) or any whole number from 1 to 30 (`services/side_size.valid_side_size`, the one rule for the board route, `PATCH /teams/{id}`, the rules screen and club settings). The board's `SizePicker` has a Custom button that opens a number box (Enter saves, Escape cancels, 0, blank and over 30 are not sent) and reads "Custom · n" when the size is off the presets; the rules screen select has a "Custom..." option with a number box.
 
@@ -1394,7 +1405,7 @@ Open idea, not built: a side that needs a minimum but may name more (women's 8 t
 
 Verification: `verify_team_side_size.py` (33 checks), `frontend/verification/verify_custom_side_size_browser.mjs` (12 checks, 390px clean).
 
-## v9.113.8: a minimum per team (migration 333)
+## v9.113.9: a minimum per team (migration 333)
 
 Asked for: a side that needs 8 but may name 12. `teams.min_team_size` (nullable; NULL = must be full) sits beside `default_team_size`, which stays the MAXIMUM (slots and cap). Rules: a minimum is 1 to 30 and strictly below the size (any in range when the size is 0, no limit); `side_size.effective_min` is the one reader, so a stale minimum never makes a full side read short. `POST /selection/default-team-size` takes `min_size`: absent leaves it alone, explicit null clears, a number sets it; refused (400) for a club default or a fixture with no team; a size write that leaves the minimum no longer below it clears it. `PATCH /teams/{id}` takes `min_team_size` with the same checks against the size the team will have after the write. The overview carries `team_min` per fixture, the pool `team_min`, the Fixtures list `format_min`.
 

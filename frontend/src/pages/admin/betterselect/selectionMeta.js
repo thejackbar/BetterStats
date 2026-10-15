@@ -22,13 +22,16 @@ export function dropInLine(p) { return p?.drop_in_from ? `Not picked in ${p.drop
 // Another side's UNCONFIRMED draft already names this player that day. Never
 // blocks a pick (only a confirmed XI does); it just says someone has plans.
 export function inDraftLine(p) { return Array.isArray(p?.in_draft_of) && p.in_draft_of.length ? `In ${p.in_draft_of.join(', ')} draft (not confirmed)` : '' }
-// The board's default order, mirroring selection_pool._pool_rank: the fixture's
-// own squad first (0), then players the squad above has not picked (1), the
-// squad below (2), the rest of the squad above (3), everyone else.
+// The board's default order, mirroring selection_pool._pool_rank: everyone who
+// says they are available and is named nowhere that day first, highest squad
+// first (`open_seq`); then, as before, the fixture's own squad, players the squad
+// above has not picked, the squad below, the rest of the squad above, everyone else.
 export function poolRank(p) {
-  if (p?.tier === 1) return 0
-  if (p?.drop_in_from) return 1
-  return p?.tier ?? 99
+  if (p?.open_seq != null) return p.open_seq
+  if (p?.tier === 1) return 1000
+  if (p?.drop_in_from) return 1001
+  if (p?.tier === 2 || p?.tier === 3) return 1000 + p.tier
+  return 1099
 }
 
 export function alsoInTight(p) { return alsoIn(p).some((a) => a.tight) }

@@ -287,6 +287,49 @@ const run = async () => {
     ok('switching day shows that day\'s one team', (await page.locator('[data-team-col]').count()) === 1)
   }
 
+  // ═══════════════ Draft table: the pool stays in view ═══════════════
+  console.log('\n# Draft table: the pool is pinned while the teams scroll')
+  await page.setViewportSize({ width: 1100, height: 800 })
+  await page.goto(`${BASE}/admin/betterselect/selection/draft-table`, { waitUntil: 'domcontentloaded' })
+  await page.locator('[data-draft-table]').waitFor({ timeout: 15000 })
+  await page.waitForTimeout(500)
+  const scrollInfo = () => page.evaluate(() => {
+    const b = document.querySelector('[data-draft-table]')
+    const p = document.querySelector('[data-pool-col]').getBoundingClientRect()
+    const last = [...document.querySelectorAll('[data-team-col]')].pop().getBoundingClientRect()
+    return { over: b.scrollWidth - b.clientWidth, left: b.scrollLeft, poolX: Math.round(p.left - b.getBoundingClientRect().left), lastRight: Math.round(last.right), boardRight: Math.round(b.getBoundingClientRect().right) }
+  })
+  const before = await scrollInfo()
+  ok('the teams overflow sideways at 1100px (the test is real)', before.over > 20, JSON.stringify(before))
+  await page.evaluate(() => { const b = document.querySelector('[data-draft-table]'); b.scrollLeft = b.scrollWidth })
+  await page.waitForTimeout(200)
+  const away = await scrollInfo()
+  ok('scrolled right: the pool is still at the left edge of the board', away.poolX === 0 && away.left > 20, JSON.stringify(away))
+  ok('scrolled right: the pool is on screen and draggable', await poolCard(1).isVisible() || (await page.locator('[data-pool-col] [data-player-card]').first().isVisible()))
+  // Drag from the pinned pool to the far column: it must auto-scroll to reach it.
+  await page.evaluate(() => { document.querySelector('[data-draft-table]').scrollLeft = 0 })
+  await page.waitForTimeout(150)
+  const firstPool = page.locator('[data-pool-col] [data-player-card]').first()
+  const firstId = await firstPool.getAttribute('data-player-card')
+  const lastCol = page.locator('[data-team-col]').last()
+  const lastId = await lastCol.getAttribute('data-team-col')
+  const a = await centre(firstPool)
+  const board = await page.locator('[data-draft-table]').boundingBox()
+  await page.mouse.move(a.x, a.y); await page.mouse.down()
+  await page.mouse.move(a.x + 12, a.y + 6, { steps: 3 })
+  await page.mouse.move(board.x + board.width - 20, a.y, { steps: 8 })
+  await page.waitForTimeout(1200)               // held at the right edge: the board scrolls under the finger
+  const held = await scrollInfo()
+  ok('held at the right edge: the board scrolls sideways on its own', held.left > 20, JSON.stringify(held))
+  ok('held at the right edge: the pool stays pinned', held.poolX === 0, JSON.stringify(held))
+  const target = await centre(lastCol.locator('[data-slot-row]').first())
+  await page.mouse.move(target.x, target.y, { steps: 6 })
+  await page.mouse.up()
+  await page.waitForTimeout(1200)               // past the autosave delay
+  ok('dropped on the far team from the pinned pool: that team has the player', (await lastCol.locator(`[data-player-card="${firstId}"]`).count()) === 1)
+  ok('and nobody was dropped on the wrong team', lastPut(lastId)?.slots?.includes(firstId) === true)
+  await page.setViewportSize({ width: 1440, height: 900 })
+
   // ═══════════════ Selection board: the XI fits ═══════════════
   console.log('\n# Selection board: Selected XI fits without scrolling')
   server.confirmed[F1] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(pid)

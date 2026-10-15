@@ -205,16 +205,41 @@ def _tier_for(fx_seq: int | None, sq_seq: int | None) -> int | None:
     return None
 
 
-def _pool_rank(tier: int | None, drop_in: bool) -> int:
-    """Where a player sorts on the board's default (Squad order): the fixture's
-    own squad first (0), then players from the squad ABOVE who have not been
-    picked anywhere that day (1), the squad below (2), the rest of the squad
-    above (3), everyone else (99). The browser applies the same order."""
+def _pool_rank(open_seq: int | None, tier: int | None, drop_in: bool) -> int:
+    """Where a player sorts on the board's default (Squad order).
+
+    First everyone who says they are available and is named nowhere that day,
+    from any squad, the highest squad first (``open_seq`` is their best squad's
+    sequence, 1st XI = 1). Then, as before: the fixture's own squad (1000),
+    players from the squad above named in no XI that day who have not said no
+    (1001), the squad below (1002), the rest of the squad above (1003), everyone
+    else (1099). The browser applies the same order (selectionMeta.poolRank)."""
+    if open_seq is not None:
+        return open_seq
     if tier == 1:
-        return 0
+        return 1000
     if drop_in:
-        return 1
-    return tier if tier is not None else 99
+        return 1001
+    if tier in (2, 3):
+        return 1000 + tier
+    return 1099
+
+
+def _open_seq(
+    squad_seqs: list[int], *, has_date: bool, picked_elsewhere: bool, in_lineup: bool,
+    available: bool, eligible: bool,
+) -> int | None:
+    """The sequence of the player's highest squad when they are an open pick for
+    THIS fixture: marked available, in no XI and in no other side's draft that
+    day, and eligible (right side of the gender wall, not inactive). A squad with
+    no rank sorts after every ranked one. None when they are not an open pick or
+    we cannot say (no fixture date, no squad)."""
+    if not has_date or not eligible or not available or picked_elsewhere or in_lineup:
+        return None
+    if not squad_seqs:
+        return None
+    ranked = [q for q in squad_seqs if q > 0]
+    return min(ranked) if ranked else 999
 
 
 def _ordered_squads(names, active_teams: dict) -> list[str]:
@@ -722,6 +747,14 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             available=avail.get(pid) != "UNAVAILABLE",
             eligible=gender_ok and not manual_inactive,
         )
+        open_seq = _open_seq(
+            [squad_meta.get(s, (0, False))[0] for s in gender_squads],
+            has_date=bool(fx.played_on),
+            picked_elsewhere=bool(clash.get(pid) or also_in.get(pid) or in_other_draft.get(pid)),
+            in_lineup=pid in lineup,
+            available=avail.get(pid) == "AVAILABLE",
+            eligible=gender_ok and not manual_inactive,
+        )
         rb, rw, ss = recent_bat.get(pid), recent_bowl.get(pid), season_stats.get(pid)
         score = _compute_score(p.skill_positions, rb, rw, ss)
 
@@ -787,6 +820,10 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "clash_blocks": _clash_blocks(fx_team_seq, clash_seqs.get(pid, [])),
             "squad_match": squad_match and not manual_inactive,
             "tier": tier,
+            # Marked available, named in no XI or draft that day: the sequence of
+            # their highest squad (999 = squad has no rank), else None. This is
+            # what the default order puts first.
+            "open_seq": open_seq,
             # The squad above that has not picked this player today, or None.
             "drop_in_from": drop_in_from,
             # Other sides' UNCONFIRMED drafts that name this player that day.
@@ -836,7 +873,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
 
     _AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2, "UNAVAILABLE": 3}
     pool.sort(key=lambda e: (
-        _pool_rank(e["tier"], bool(e["drop_in_from"])),
+        _pool_rank(e["open_seq"], e["tier"], bool(e["drop_in_from"])),
         -(e["score"] or 0.0),
         _AVAIL_RANK.get(e["availability"], 9),
         (e["display_name"] or "").lower(),
