@@ -68,7 +68,8 @@ GRADE = uuid.UUID(GRADE_GUID)
 DON, MATE = uuid.uuid4(), uuid.uuid4()
 MATCH_STORED_EMPTY = uuid.uuid4()   # the reported shape: stored, result set, no detail
 MATCH_OLD_EMPTY = uuid.uuid4()      # same shape but 40 days ago: outside the re-read window
-MATCH_COMPLETE = uuid.uuid4()       # stored with its batting already
+MATCH_COMPLETE = uuid.uuid4()       # stored with its batting, fall of wickets and partnerships already
+MATCH_NO_FOW = uuid.uuid4()         # batting stored (an earlier re-read), but no fall of wickets or partnerships
 
 
 def card_for(match_id, days_ago, don_runs, mate_runs):
@@ -91,6 +92,11 @@ def card_for(match_id, days_ago, don_runs, mate_runs):
         },
         "innings": [{
             "inningsOrder": 2, "fielding": [], "bowling": [],
+            # Don out for 3 at 3, his partner out for 11 at 14.
+            "fallOfWickets": [
+                {"order": 1, "runs": 3, "participantId": str(DON), "playerShortName": "D Stewart"},
+                {"order": 2, "runs": 14, "participantId": str(MATE), "playerShortName": "M Mate"},
+            ],
             "batting": [
                 {"participantId": str(DON), "dismissalTypeId": 2, "dismissalType": "Bowled",
                  "runsScored": don_runs, "ballsFaced": 5, "batOrder": 1},
@@ -158,7 +164,8 @@ async def seed() -> None:
         for pid, nm in ((DON, "Stewart, Don"), (MATE, "Mate, Mick")):
             await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, status) "
                      "VALUES (:i, :o, :n, :g, 'active')", i=pid, o=ORG, n=nm, g=str(pid))
-        for mid, days in ((MATCH_STORED_EMPTY, 5), (MATCH_OLD_EMPTY, 40), (MATCH_COMPLETE, 5)):
+        for mid, days in ((MATCH_STORED_EMPTY, 5), (MATCH_OLD_EMPTY, 40), (MATCH_COMPLETE, 5),
+                          (MATCH_NO_FOW, 6)):
             await ex("INSERT INTO games (id, grade_id, played_at, result, home_org_id, away_org_id, status, "
                      " venue, match_format) VALUES (:i, :g, :d, 'LOSS', NULL, :o, 'COMPLETED', 'Oval', 'One Day')",
                      i=mid, g=GRADE, d=TODAY - timedelta(days=days), o=ORG)
@@ -168,7 +175,20 @@ async def seed() -> None:
         await ex("INSERT INTO batting_innings (game_id, player_id, innings_number, runs, balls, fours, sixes, "
                  " not_out, dismissal_type, did_not_bat) VALUES (:g, :p, 2, 30, 20, 3, 0, false, 'bowled', false)",
                  g=MATCH_COMPLETE, p=DON)
+        await ex("INSERT INTO fall_of_wickets (game_id, innings_number, wicket_number, score_at_fall, player_id, "
+                 " batter_name) VALUES (:g, 2, 1, 30, :p, 'D Stewart')", g=MATCH_COMPLETE, p=DON)
+        await ex("INSERT INTO partnerships (game_id, innings_number, wicket_number, batter1_id, runs, is_club_innings) "
+                 "VALUES (:g, 2, 1, :p, 30, true)", g=MATCH_COMPLETE, p=DON)
+        for p, runs in ((DON, 3), (MATE, 11)):
+            await ex("INSERT INTO batting_innings (game_id, player_id, innings_number, runs, balls, fours, sixes, "
+                     " not_out, dismissal_type, did_not_bat) VALUES (:g, :p, 2, :r, 5, 0, 0, false, 'bowled', false)",
+                     g=MATCH_NO_FOW, p=p, r=runs)
         await s.commit()
+
+
+async def count(table, game_id):
+    async with Session() as s:
+        return (await s.execute(text(f"SELECT COUNT(*) FROM {table} WHERE game_id = :g"), {"g": game_id})).scalar()
 
 
 async def runs_of(game_id, player):
@@ -187,8 +207,10 @@ async def main() -> None:
         str(MATCH_STORED_EMPTY): card_for(MATCH_STORED_EMPTY, 5, 3, 11),
         str(MATCH_OLD_EMPTY): card_for(MATCH_OLD_EMPTY, 40, 3, 11),
         str(MATCH_COMPLETE): card_for(MATCH_COMPLETE, 5, 30, 12),
+        str(MATCH_NO_FOW): card_for(MATCH_NO_FOW, 6, 3, 11),
     }
-    listing = [match_entry(MATCH_STORED_EMPTY, 5), match_entry(MATCH_OLD_EMPTY, 40), match_entry(MATCH_COMPLETE, 5)]
+    listing = [match_entry(MATCH_STORED_EMPTY, 5), match_entry(MATCH_OLD_EMPTY, 40), match_entry(MATCH_COMPLETE, 5),
+               match_entry(MATCH_NO_FOW, 6)]
     fetched: list[str] = []
 
     async def fake_matches(grade_guid, *a, **k):
@@ -210,8 +232,28 @@ async def main() -> None:
           str(MATCH_STORED_EMPTY) in fetched, f"fetched={fetched}")
     check("Don's 3 is now stored", await runs_of(MATCH_STORED_EMPTY, DON) == [3], str(await runs_of(MATCH_STORED_EMPTY, DON)))
     check("and his teammate's 11", await runs_of(MATCH_STORED_EMPTY, MATE) == [11])
-    check("a complete game is not read again (its batting is there)", str(MATCH_COMPLETE) not in fetched, str(fetched))
+    check("a complete game is not read again (batting, fall of wickets and partnerships are there)",
+          str(MATCH_COMPLETE) not in fetched, str(fetched))
     check("its stored figure is untouched", await runs_of(MATCH_COMPLETE, DON) == [30])
+    check("and its fall of wickets and partnerships are not doubled",
+          await count("fall_of_wickets", MATCH_COMPLETE) == 1 and await count("partnerships", MATCH_COMPLETE) == 1)
+
+    print("\n-- FALL OF WICKETS AND PARTNERSHIPS --")
+    check("the stored-empty game gets its 2 wickets", await count("fall_of_wickets", MATCH_STORED_EMPTY) == 2,
+          str(await count("fall_of_wickets", MATCH_STORED_EMPTY)))
+    check("and its 2 partnerships (3 then 11)", await count("partnerships", MATCH_STORED_EMPTY) == 2,
+          str(await count("partnerships", MATCH_STORED_EMPTY)))
+    async with Session() as s:
+        stands = [r[0] for r in (await s.execute(text(
+            "SELECT runs FROM partnerships WHERE game_id = :g ORDER BY wicket_number"), {"g": MATCH_STORED_EMPTY})).all()]
+        club = (await s.execute(text(
+            "SELECT bool_and(is_club_innings) FROM partnerships WHERE game_id = :g"), {"g": MATCH_STORED_EMPTY})).scalar()
+    check("the stands are 3 and 11 and belong to the club's innings", stands == [3, 11] and club is True, f"{stands} {club}")
+    check("a game that had its batting but no fall of wickets is read again and gets them",
+          str(MATCH_NO_FOW) in fetched and await count("fall_of_wickets", MATCH_NO_FOW) == 2
+          and await count("partnerships", MATCH_NO_FOW) == 2, f"fetched={fetched}")
+    check("without a second copy of its batting",
+          await runs_of(MATCH_NO_FOW, DON) == [3] and await runs_of(MATCH_NO_FOW, MATE) == [11])
     check("a 40 day old empty game stays outside the window", str(MATCH_OLD_EMPTY) not in fetched)
     check("and gets nothing", await runs_of(MATCH_OLD_EMPTY, DON) == [])
 
@@ -219,6 +261,8 @@ async def main() -> None:
     fetched.clear()
     await sync_grassroots_game_level_data(str(ORG), since=TODAY - timedelta(days=1))
     check("Don still has one 3, not two", await runs_of(MATCH_STORED_EMPTY, DON) == [3])
+    check("and still 2 wickets and 2 partnerships, not 4",
+          await count("fall_of_wickets", MATCH_STORED_EMPTY) == 2 and await count("partnerships", MATCH_STORED_EMPTY) == 2)
     check("the game is no longer re-read once it has detail", str(MATCH_STORED_EMPTY) not in fetched, str(fetched))
 
     print(f"\n{PASS} passed, {FAIL} failed")
