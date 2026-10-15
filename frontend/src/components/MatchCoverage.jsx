@@ -12,14 +12,15 @@ function CoverageExplainer({ coverage }) {
          style={{ background: 'var(--pb-surface2)' }}>
       <p className="mb-2">
         <strong className="text-pb-text">Two records of the same career.</strong>{' '}
-        Cricket Australia's own season figures count {career_matches} matches in
-        this career. They do not say which grade a match was played in, so they
-        cannot be split by competition, grade type or format.
+        The career total is {career_matches} matches: Cricket Australia's season
+        figures plus any history the club has added from its own records. Neither
+        says which grade a match was played in, so the total cannot be split by
+        competition, grade type or format.
       </p>
       <p className="mb-2">
         Anything you filter, such as a competition, a grade type or a format, is counted from
-        the {breakdown_matches} matches we hold a scorecard for, not from Cricket
-        Australia's count. That is why the parts do not add up to {career_matches}.
+        the {breakdown_matches} matches we hold a scorecard for, not from the career
+        total. That is why the parts do not add up to {career_matches}.
       </p>
       {short && (
         <p className="mb-2">
@@ -28,7 +29,7 @@ function CoverageExplainer({ coverage }) {
           scorecard for {without_scorecard === 1 ? 'it' : 'them'} at all. There is nothing
           waiting to be filed. {without_scorecard === 1 ? 'The match is' : 'The matches are'}{' '}
           not in the records as {without_scorecard === 1 ? 'a game' : 'games'}, only in
-          Cricket Australia's season count.
+          the season counts and the club's own history.
         </p>
       )}
       {extra_scorecards > 0 && (
@@ -113,7 +114,7 @@ export function MatchCoverageNote({ coverage, filtered = false, className = '' }
   // class of mistake this note exists to prevent, one level down.
   const headline = filtered
     ? `Filtered figures are counted from the ${breakdown_matches} matches we hold `
-      + `a scorecard for, not the ${career_matches} in Cricket Australia's season totals.`
+      + `a scorecard for, not the ${career_matches} in the career total.`
     : short
       ? `${breakdown_matches} of these ${career_matches} matches can be broken down by competition, grade or format.`
       : `Filtering counts ${breakdown_matches} matches, ${extra_scorecards} more than the ${career_matches} in the season totals.`

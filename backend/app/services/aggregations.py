@@ -2121,13 +2121,27 @@ async def get_player_team_breakdown(
     # They belong to no season cell, and a NULL season id used to reach the
     # season lookup below as the string 'None', which Postgres refused as a UUID
     # and turned the whole Team tab into a 500 for any player holding one.
-    without_season = 0
     for r in season_totals.mappings():
         if r["season_id"] is None:
-            without_season += int(r["matches"] or 0)
             continue
         sid = _canonical_season(r["season_id"])
         season_aggregate[sid] = season_aggregate.get(sid, 0) + int(r["matches"] or 0)
+    # Judged by the filter exactly as the profile header judges them
+    # (`_career_residuals`): kept under the club default and any pick that includes
+    # senior cricket, left out under Juniors, Women's or Masters, gone under a format,
+    # competition or grade filter, and left out when a season is named.
+    without_season = 0
+    if not season_ids:
+        without_season = int((await session.execute(
+            text(f"""
+                SELECT COALESCE(SUM(pss.matches), 0)
+                  FROM v_effective_player_season_stats pss
+                 WHERE pss.player_id = CAST(:pid AS UUID) AND pss.season_id IS NULL
+                   AND pss.source = ANY(:resid_sources)
+                   {scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label") if scope_active else ""}
+            """),
+            {**params, "resid_sources": list(_RESIDUAL_SOURCES)},
+        )).scalar() or 0)
 
     # WHICH SEASONS THE FILTER ACTUALLY NARROWED. CA's per-season total covers
     # every grade, so under a filter it counts matches the filter has just
@@ -2401,7 +2415,9 @@ async def get_player_team_breakdown(
     return {
         "rows": rows,
         "season_rows": season_rows,
-        "grid_matches": sum(s["matches"] for s in season_rows),
+        # The seasons plus the club's season-less adjustments (an import's career-level
+        # line), so the header, which carries those, is raised to a total that does too.
+        "grid_matches": sum(s["matches"] for s in season_rows) + without_season,
         "unattributed": unattributed,
         "total_aggregate_matches": total_aggregate,
         # What the active filter could and could not reach, so the screen can

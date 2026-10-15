@@ -240,7 +240,7 @@ class GradeScope:
         "categories", "formats", "excluded_ids", "excluded_categories",
         "excluded_labels", "format_fallback_ids", "param", "competitions",
         "competition_names", "competition_extra_ids", "hidden_grade_ids",
-        "grades", "grade_names", "grade_pick_ids",
+        "grades", "grade_names", "grade_pick_ids", "explicit_categories",
     )
 
     def __init__(
@@ -259,8 +259,13 @@ class GradeScope:
         grades: Optional[Sequence] = None,
         grade_names: Sequence[str] = (),
         grade_pick_ids: Sequence = (),
+        explicit_categories: bool = False,
     ):
         self.categories = tuple(categories)
+        # True when a person PICKED the categories (Juniors, Masters...) rather
+        # than the club default applying. Decides what a residual with no grade
+        # at all is shown under: see `clause`.
+        self.explicit_categories = bool(explicit_categories)
         self.formats = tuple(formats) if formats is not None else None
         # Junior grades a club has hidden from its PUBLIC Stats (migration 315,
         # services/junior_hiding.py). They are folded into `excluded_ids`, so
@@ -337,6 +342,16 @@ class GradeScope:
                 or self.competition_active or self.grade_active)
 
     @property
+    def _keeps_unlabelled(self) -> bool:
+        """Is a residual with neither a grade nor a grade label shown here?
+
+        Yes under the club default and under any pick that includes senior
+        cricket. No under a person's pick that leaves senior out: nothing says
+        such a figure belongs to Juniors, Women's or Masters.
+        """
+        return not (self.explicit_categories and "senior" not in self.categories)
+
+    @property
     def _label_param(self) -> str:
         return f"{self.param}_labels"
 
@@ -410,11 +425,16 @@ class GradeScope:
                 # imported before CA's per-grade data shows up under Juniors,
                 # Women's and Masters alike. A residual with a real grade_id (a
                 # season adjustment) is still judged by it; a truly label-less
-                # career lump is kept, since it genuinely cannot be classified.
+                # career lump is kept under the club default and under any pick that
+                # includes senior cricket, since it cannot be classified. Under a
+                # pick that leaves senior out (Juniors, Women's, Masters) it has no
+                # claim to be in that category either: a club's history book with
+                # no grades showed 42 matches under Juniors for a player with none.
+                keep_unlabelled = "TRUE" if self._keeps_unlabelled else "FALSE"
                 out += (
                     f" AND (CASE WHEN {column} IS NOT NULL"
                     f" THEN NOT ({column} = ANY(:{self.param}))"
-                    f" WHEN {label_column} IS NULL THEN TRUE"
+                    f" WHEN {label_column} IS NULL THEN {keep_unlabelled}"
                     f" ELSE NOT ({label_column} = ANY(CAST(:{self._label_param} AS text[]))) END)"
                 )
             else:
@@ -817,6 +837,7 @@ async def resolve_scope(
         grades=pick_names if wanted_grades is not None else None,
         grade_names=pick_names,
         grade_pick_ids=pick_ids,
+        explicit_categories=explicit,
     )
 
 

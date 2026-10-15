@@ -357,8 +357,8 @@ try {
     ck('THE EXPLAINER NEVER CLAIMS ITS FIGURES ARE THE HEADLINE — it names both '
        + 'career sources (CA 9, scorecards 14), so nothing on screen contradicts '
        + 'anything else',
-       /counted from\s+the 14 matches we hold a scorecard for, not from Cricket Australia's count/
-         .test(opened) && /count 9 matches/.test(opened), opened.slice(0, 500))
+       /counted from\s+the 14 matches we hold a scorecard for, not from the career\s+total/
+         .test(opened) && /career total is 9 matches/.test(opened), opened.slice(0, 500))
     ck('no page errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }
