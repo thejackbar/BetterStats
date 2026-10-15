@@ -1750,7 +1750,7 @@ export default function StatLab() {
     const header = [...dimCols.map(c => c.label), ...cols.map(c => c.label || c.key)]
     const lines = [header.join(',')]
     sortedRows.forEach(row => {
-      const left = dimCols.map(c => csvEscape(row[c.key] ?? ''))
+      const left = dimCols.map(c => csvEscape(dimText(c.key, row)))
       const right = cols.map(c => csvEscape(row[c.key] ?? ''))
       lines.push([...left, ...right].join(','))
     })
@@ -2386,6 +2386,19 @@ function formatCell(v, col) {
     return fmtCount(v)
   }
   return v
+}
+
+// Plain-text value of a dimension cell, for the CSV export. Mirrors the
+// fallbacks in renderDimCell: the pair column is built from the two batter
+// names, there is no `pair` field on the row itself.
+function dimText(key, row) {
+  if (key === 'pair') {
+    const a = row.player_a_name || row.batter1_name
+    const b = row.player_b_name || row.batter2_name
+    return [a, b].filter(Boolean).join(' & ')
+  }
+  if (key === 'player_name') return row.player_name || row.name || ''
+  return row[key] ?? ''
 }
 
 function renderDimCell(key, row, clubSlug) {

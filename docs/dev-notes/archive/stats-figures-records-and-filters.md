@@ -2410,3 +2410,11 @@ Verified: `verify_club_room_records.py` 24 checks on a local Postgres 16 (a hidd
 - **Not done.** Other readers of `get_career_*` (compare, share cards) still use the old figure.
 
 Verified: `verification/verify_match_coverage.py` 72 checks on a local Postgres 16 (headline equals the grid route's total on all three career blocks, CA's 9 kept where it exceeds the 3 held, an agreeing player untouched, a single season follows the same rule, `match_coverage.career_matches` still CA's figure). The previous commit fails the 3 header checks and passes the rest.
+
+### StatLab CSV export left the Pair column empty (v9.112.2, Oct 2026)
+
+- **Reported.** Yarraville CC's treasurer made a partnership report: the Pair column showed names on screen but was blank in the CSV.
+- **Cause.** The on-screen Pair cell is built in `renderDimCell` from `player_a_name`/`batter1_name` and `player_b_name`/`batter2_name`. No row carries a `pair` field, and `downloadCSV` read `row[c.key]`, so it wrote an empty string.
+- **Change.** `dimText` in `StatLab.jsx` builds the same "A & B" text for the CSV (and the `player_name`/`name` fallback). Any new dimension cell that needs a fallback in `renderDimCell` needs the same one in `dimText`.
+
+Verified: `dimText` run against a partnership_list row, an aggregate row and a row with one name missing.
