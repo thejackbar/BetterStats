@@ -1411,6 +1411,8 @@ Asked for: a side that needs 8 but may name 12. `teams.min_team_size` (nullable;
 
 Frontend: `lib/sideSize.js` (`sideFit`, `sideLabel`, `sideProblem`) is the one place a count is judged against size and minimum; the Selection board, confirm prompt, Draft table and overview all use it. The Min box (`MinBox` in `SelectionViews.jsx`) only shows for a fixture with a team. Overview: complete at the minimum; flag reads "short of the minimum" with one, "short of XI" without.
 
+The Min box widened the compact `FixtureBar` (shown below 900px of window height) enough to wrap it, which made the Dual rail XI scroll at 1280x720 (`verify_draft_table_browser.mjs` caught it, control on main was clean); the title's `basis` there is now 120px so the picker, Min box and pill stay on one row.
+
 Not done: a minimum on the club default (a minimum belongs to a team); BetterIQ's best-XI still builds to the size.
 
 Verification: `verify_team_side_size.py` (53 checks), `frontend/verification/verify_side_minimum_browser.mjs` (19 checks, 390px clean).
