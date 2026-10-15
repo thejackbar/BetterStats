@@ -347,6 +347,36 @@ async def reread_stored_game(db: AsyncSession, org_id, game_id, scorecard: dict,
     return n
 
 
+async def recent_games_without_detail(db: AsyncSession, org_id, days: int = REREAD_DAYS) -> set:
+    """Match ids of recent games we hold a `games` row for but no batting or bowling row of the CLUB'S OWN players.
+
+    An incremental run only reads fixtures newer than the club's last sync (less an
+    overlap), so a game stored while CA had its result but not yet its scorecard
+    detail is outside every later run's window and stays empty. Handing these ids
+    back lets the run read them again; `attach` then fills them in. Only games the
+    club played in (a side, or its own season) and only the last `days` days, so a
+    run never reads further back than it does for a game that is complete.
+
+    "Of the club's own players" matters for a fixture between two synced clubs: the
+    other club's sync may have stored ITS players' rows and none of ours.
+    """
+    res = await db.execute(text("""
+        SELECT g.id::text
+          FROM games g
+          LEFT JOIN grades gr ON gr.id = g.grade_id
+          LEFT JOIN seasons s ON s.id = gr.season_id
+         WHERE g.played_at >= CURRENT_DATE - CAST(:days AS INTEGER)
+           AND g.played_at <= CURRENT_DATE
+           AND (g.home_org_id = CAST(:org AS UUID) OR g.away_org_id = CAST(:org AS UUID)
+                OR s.organisation_id = CAST(:org AS UUID))
+           AND NOT EXISTS (SELECT 1 FROM batting_innings bi JOIN players p ON p.id = bi.player_id
+                            WHERE bi.game_id = g.id AND p.organisation_id = CAST(:org AS UUID))
+           AND NOT EXISTS (SELECT 1 FROM bowling_spells bs JOIN players p ON p.id = bs.player_id
+                            WHERE bs.game_id = g.id AND p.organisation_id = CAST(:org AS UUID))
+    """), {"org": str(org_id), "days": days})
+    return {r[0] for r in res.all()}
+
+
 async def adopt_identity(db: AsyncSession, org_id, adopt: dict) -> int:
     """Give a hand-added player the Cricket Australia id sync just matched them to.
 

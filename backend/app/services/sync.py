@@ -1995,6 +1995,20 @@ async def sync_grassroots_game_level_data(
     # return every match between all teams in the competition.
     org_id_str_lower = org_id_str.lower()
     seen_match_ids: set[str] = set()
+    # A recent game we hold with none of our players' batting or bowling on it
+    # (stored when CA had its result but not yet its detail) is read again even
+    # when it is older than this run's window, or no later run would ever fill it.
+    reread_ids: set[str] = set()
+    if since is not None:
+        try:
+            from app.services import participant_relink
+            async with async_session_maker() as _s:
+                reread_ids = await participant_relink.recent_games_without_detail(_s, org_uuid)
+            if reread_ids:
+                logger.info(f"GR-sync: {len(reread_ids)} recent game(s) without player detail will be re-read")
+        except Exception as _e:
+            logger.warning(f"GR-sync: recent-game check failed: {_e}")
+            reread_ids = set()
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
     match_to_format: dict[str, str] = {}  # match_id → CA's own matchType string
@@ -2020,7 +2034,7 @@ async def sync_grassroots_game_level_data(
                 # (services/sync_drift.py) is for.
                 sched = m.get("matchSchedule") or []
                 day = ((sched[0].get("startDateTime") if sched else "") or "")[:10]
-                if not day or day < since.isoformat():
+                if not day or (day < since.isoformat() and mid not in reread_ids):
                     stats["gr_matches_out_of_window"] = stats.get("gr_matches_out_of_window", 0) + 1
                     continue
             teams = m.get("teams") or []
