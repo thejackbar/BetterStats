@@ -410,6 +410,14 @@ async def main() -> None:
                 "INSERT INTO batting_innings (game_id, player_id, innings_number, runs, balls, fours, sixes, "
                 " not_out, dismissal_type, did_not_bat) VALUES (:g, :p, 1, 9, 12, 1, 0, false, 'caught', false)"),
                 {"g": complete, "p": HEAVY})
+            await s.execute(text(
+                "INSERT INTO fall_of_wickets (game_id, innings_number, wicket_number, score_at_fall, player_id, "
+                " batter_name) VALUES (:g, 1, 1, 9, :p, 'H Heavy')"), {"g": complete, "p": HEAVY})
+            no_fow = await mk(5)
+            await s.execute(text(
+                "INSERT INTO batting_innings (game_id, player_id, innings_number, runs, balls, fours, sixes, "
+                " not_out, dismissal_type, did_not_bat) VALUES (:g, :p, 1, 9, 12, 1, 0, false, 'caught', false)"),
+                {"g": no_fow, "p": HEAVY})
             stranger = uuid.uuid4()
             await s.execute(text("INSERT INTO players (id, organisation_id, name, grassroots_id, status) "
                                  "VALUES (:i, :o, 'Other, Olly', :g, 'active')"),
@@ -424,7 +432,10 @@ async def main() -> None:
             else:
                 found = await participant_relink.recent_games_without_detail(s, ORG)
                 check("the recent game with no player detail is picked up", str(empty_recent) in found, str(found))
-                check("a recent game that has batting is left alone", str(complete) not in found)
+                check("a recent game with batting, fall of wickets and partnerships data is left alone",
+                      str(complete) not in found)
+                check("a recent game with batting but no fall of wickets or partnerships is picked up",
+                      str(no_fow) in found)
                 check("a game older than the 14 day window is not", str(empty_old) not in found)
                 check("a shared fixture where only the OTHER club's players have rows still counts as empty for us",
                       str(theirs_only) in found)
