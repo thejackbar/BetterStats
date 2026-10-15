@@ -432,6 +432,22 @@ async def main() -> int:
     check("M: the ordinary import pins the career to the book's 1158 and loses 681 online runs",
           n(cm6["bat"], "total_runs") == 1158, str(cm6["bat"].get("total_runs")))
 
+    print("\n-- a player who already has an ordinary whole-career import is warned before a book is added")
+    async with Session() as db:
+        club = await db.get(Organisation, ORG)
+        warned = await imp.resolve(request(r2["parsed"], r2["mapping"], player_overrides=r2["overrides"],
+                                           through_season="2004/05"), USER, club, db)
+    texts = [w for w in warned["warnings"] if "earlier whole-career import" in w]
+    check("the review names the three players who already have one", bool(texts) and all(
+        n_ in texts[0] for n_ in ("TRAVCICH M", "TRAVCICH S", "OVERTON T")), str(warned["warnings"]))
+    check("and says where to undo it", bool(texts) and "Undo just this player" in texts[0])
+    async with Session() as db:
+        club = await db.get(Organisation, ORG)
+        clean = await imp.resolve(request(r2["parsed"], r2["mapping"], player_overrides=r2["overrides"]),
+                                  USER, club, db)
+    check("an ordinary import over an ordinary import says nothing new",
+          not any("earlier whole-career import" in w for w in clean["warnings"]))
+
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:
         print("  FAILED:", f)

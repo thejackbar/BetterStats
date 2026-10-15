@@ -532,6 +532,25 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
                     + ("…" if len(past) > 8 else "")
                     + ". A summary that stops at "
                       f"{cut_label} should not hold them. Any the online data already has are dropped; the rest are added as they stand.")
+        # An earlier ordinary (whole-career) import for the same player is a
+        # second claim on the same career. Each kind is reconciled on its own,
+        # so both would add their share: say so, and let a person decide which
+        # one to undo.
+        pids_in_sheet = [uuid.UUID(p) for p in items_by_player]
+        if pids_in_sheet:
+            plain = (await db.execute(
+                select(ImportedStat.player_id).join(ImportBatch, ImportBatch.id == ImportedStat.import_batch_id)
+                .where(ImportedStat.organisation_id == org_id, ImportedStat.player_id.in_(pids_in_sheet),
+                       ImportBatch.through_year.is_(None)).distinct()
+            )).scalars().all()
+            doubled = sorted(name_by_pid.get(str(p)) or str(p) for p in plain)
+            if doubled:
+                warnings.append(
+                    f"{len(doubled)} player(s) already have an earlier whole-career import: "
+                    + ", ".join(doubled[:8]) + ("…" if len(doubled) > 8 else "")
+                    + f". That import and this one up to {cut_label} are reconciled separately and both add their "
+                      "share, so a figure can be counted twice. If this sheet replaces the earlier one, undo it for "
+                      "those players first (Past imports, then Undo just this player).")
         if grade_col:
             warnings.append(
                 f"A summary that stops at {cut_label} is compared against each player's whole online record "
