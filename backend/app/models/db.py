@@ -1634,6 +1634,7 @@ class Team(Base):
     sequence = Column(Integer, default=0, nullable=False, server_default="0")  # hierarchy rank (1 = top team)
     grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
     default_formation = Column(Text, nullable=True)
+    default_team_size = Column(Integer, nullable=True)  # NULL = follow the club; 0 = no limit
     is_active = Column(Boolean, default=True, nullable=False, server_default="true")
     source = Column(Text, nullable=False, server_default="manual")  # 'auto' | 'manual'
     playhq_id = Column(Text, nullable=True)

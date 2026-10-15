@@ -416,6 +416,17 @@ async def _latest_season_stats(db: AsyncSession, org_id) -> dict[str, dict]:
     return out
 
 
+def side_size(club, team=None) -> int:
+    """Players in a side's XI (0 = no limit): the team's own number when it has
+    one, else the club's default, else 11. A club runs 12-a-side seconds next
+    to 11-a-side firsts, so this is judged per team, never once for the club."""
+    own = getattr(team, "default_team_size", None) if team is not None else None
+    if own is not None:
+        return own
+    club_size = getattr(club, "default_team_size", None)
+    return club_size if club_size is not None else 11
+
+
 async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     """A fixture's lineup + the pickable pool with per-date availability,
     recency, squad tier, gender wall and a composite form score per player.
@@ -608,6 +619,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     # board can show (and switch between) which of our teams is being picked.
     fx_team_seq: int | None = None
     fx_team_name: str | None = None
+    fx_team_obj = None
     if fx.team_id:
         fx_team_obj = await db.get(Team, fx.team_id)
         if fx_team_obj:
@@ -906,5 +918,6 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "age_basis_label": selection_rules.age_basis_label(rules.age_basis),
         },
         "dormancy_months": months,
-        "default_team_size": club.default_team_size if club.default_team_size is not None else 11,
+        "default_team_size": side_size(club, fx_team_obj),
+        "team_size_own": fx_team_obj.default_team_size if fx_team_obj is not None else None,
     }

@@ -53,6 +53,7 @@ def _serialize(t: Team, grades: Optional[dict] = None) -> dict:
         "grade_id": str(t.grade_id) if t.grade_id else None,
         "grade_name": (grades or {}).get(str(t.grade_id)) if t.grade_id else None,
         "default_formation": t.default_formation,
+        "default_team_size": t.default_team_size,
         "is_active": t.is_active,
         "source": t.source,
     }
@@ -182,6 +183,8 @@ class TeamUpdate(BaseModel):
     grade_id: Optional[str] = None
     default_formation: Optional[str] = None
     is_active: Optional[bool] = None
+    # Players in this team's XI (0 = no limit). Sent null to follow the club.
+    default_team_size: Optional[int] = None
 
 
 @router.get("")
@@ -273,6 +276,8 @@ async def update_team(
         data["grade_id"] = grade_uuid
     if data.get("name"):
         data["name"] = data["name"].strip()
+    if data.get("default_team_size") is not None and data["default_team_size"] not in (0, 11, 12, 13):
+        raise HTTPException(status_code=400, detail="Invalid team size")
     was_active = t.is_active
     for key, value in data.items():
         setattr(t, key, value)

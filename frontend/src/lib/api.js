@@ -3451,8 +3451,10 @@ export const api = {
   // has changed since is refused with 409 (error.detail = the current draft).
   bsDiscardSelectionDraft: (fixtureId, baseVersion = 0, opts = {}) =>
     request(`/selection/${fixtureId}/draft${baseVersion ? `?base_version=${baseVersion}` : ''}`, { method: 'DELETE', ...opts }),
-  bsSetDefaultTeamSize: (size) =>
-    request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size }) }),
+  // With a fixtureId the size is saved on that fixture's team; without one it is
+  // the club default.
+  bsSetDefaultTeamSize: (size, fixtureId) =>
+    request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size, fixture_id: fixtureId || null }) }),
   // The previous fixture's named XI (for Selection's "fill from last week").
   bsPreviousXI: (fixtureId) => request(`/selection/${fixtureId}/previous-xi`),
   // Player ids named in any saved XI for the round containing `on` (a date) —

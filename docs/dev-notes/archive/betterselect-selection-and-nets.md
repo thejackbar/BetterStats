@@ -1377,3 +1377,11 @@ Verification: `verify_draft_table_browser.mjs` (84 checks: columns, drags in all
 
 Not done: the draft table does not poll for another selector's changes (a 409 on the next save is the first sign); demotions from a call-up are carried through a loaded draft but the table never creates them; past matchdays are not offered (the overview is upcoming only).
 
+
+## v9.113.6: a side size per team (migration 332)
+
+Reported: some teams play 12 a side and some 11, but setting the size on the Selection board wrote the club default, so every team changed and a 12-a-side team showed "short of XI" on the matchday overview.
+
+`teams.default_team_size` (nullable; NULL follows the club, 0 = no limit) holds a team's own number. `selection_pool.side_size(club, team)` is the one resolver. `POST /selection/default-team-size` takes an optional `fixture_id`: a fixture with one of our teams saves on that team (`scope: "team"`), anything else writes the club default (`scope: "club"`). The overview carries `team_size` per fixture, `assemble_selection` returns the fixture's own size as `default_team_size` (plus `team_size_own`), and the Fixtures list `format_size` follows the team. `PATCH /teams/{id}` accepts `default_team_size` (explicit null clears). Per round (one fixture differing from its team) is not built.
+
+Verification: `backend/verification/verify_team_side_size.py` (25 checks; the control on the previous commit fails 17).

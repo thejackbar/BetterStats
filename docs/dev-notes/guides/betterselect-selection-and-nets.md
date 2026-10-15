@@ -133,7 +133,7 @@
 - Gotchas: Playwright `**` glob does not cross a `?` (route the live poll by regex or the catch-all hands `{}` and crashes the page); routes match most-recently-registered first; `NAMES.map(att)` passes `(value, index)`; `unzip` glob-matches `[Content_Types].xml`; lifespan raw-SQL tables need their CREATE plus every later ALTER; suites share one database; stubs must match real response shapes.
 
 ## Operator commands and scripts
-none. Migrations 268, 269, 271, 272, 273, 284, 289, 317, 325 are mirrored idempotently in the lifespan.
+none. Migrations 268, 269, 271, 272, 273, 284, 289, 317, 325, 332 are mirrored idempotently in the lifespan.
 
 ## Open follow-ups
 - Confirm does not check for a newer draft from another selector; a 409 during the keepalive flush on leaving is lost with the page.
@@ -175,4 +175,5 @@ none. Migrations 268, 269, 271, 272, 273, 284, 289, 317, 325 are mirrored idempo
 - `Player.display_name` shows a two-word free-text override as "Last, First" (`name_format.canonical_player_name`). Any list that orders by `coalesce(display_name_override, name)` in SQL must re-sort with `name_sort_key`; raw-SQL COALESCE readers get the unflipped text.
 - BetterSelect admin screens print names through `useAdminNameFormat()` (the club's `player_name_format`), never the raw `display_name`. Sort and search stay on the stored name.
 - A player's `squads` on the selection pool are the club's LIVE squads only (members, plus appearance names that equal a live squad), top squad first; a switched-off team feeds nothing (not `team_members`, not `squad_team_id`, not the tier maps). Confirmed sides are emailed through `services/selection_notify` (captain team sheet with phones; players without phones; automatic on Confirm only when `notify_captain_on_confirm` is on); every send is a `selection_notices` row. Archive: grep `Squads that were not squads`.
+- A side's size is per team: `selection_pool.side_size(club, team)` (team's `default_team_size`, else the club's, else 11). Never judge a fixture against `club.default_team_size` directly. The board's size picker saves with its `fixture_id` so it writes the team, not the club. Check: `verify_team_side_size.py`.
 - `GET /selection/overview` orders fixtures by date, start time, then team rank (`Team.sequence`, ranked teams first), then team name with numbers read as numbers, then id. Sides that start together on a matchday (1st XI, 2nd XI, OD3s) must never come back in database order.

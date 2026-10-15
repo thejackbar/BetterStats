@@ -50,7 +50,9 @@ function gradeBadge(fx) {
 
 function summarize(fx, defaultTarget) {
   const players = fx.lineup || []
-  const target = defaultTarget || 11
+  // Each side is judged against its own size (a club can run 12-a-side seconds
+  // next to 11-a-side firsts); the club default only fills in when it has none.
+  const target = fx.team_size || defaultTarget || 11
   const has = (p, c) => (p.skill_positions || []).includes(c)
   const count = players.length
   const bal = { BAT: 0, ALL: 0, BWL: 0, WKT: 0 }

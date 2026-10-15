@@ -4485,6 +4485,12 @@ async def lifespan(app: FastAPI):
         for _stmt in _IMPORT_THROUGH_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 332: a team's own side size. Same one-copy rule: this and
+        # alembic's 332 both run services/team_size_ddl.STATEMENTS.
+        from app.services.team_size_ddl import STATEMENTS as _TEAM_SIZE_DDL
+        for _stmt in _TEAM_SIZE_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.

@@ -30,7 +30,7 @@ from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, T
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
 from app.services import selection_clash, selection_notify, selection_rules, selection_seed
-from app.services.selection_pool import assemble_selection, rule_context
+from app.services.selection_pool import assemble_selection, rule_context, side_size
 
 router = APIRouter(prefix="/selection", tags=["selection"])
 
@@ -61,6 +61,10 @@ class LineupSet(BaseModel):
 
 class TeamSizeSet(BaseModel):
     size: int
+    # The fixture the selector is looking at. When it belongs to one of our
+    # teams the number is saved on THAT team; without it (or for a fixture with
+    # no team) it is the club default, as before.
+    fixture_id: Optional[str] = None
 
 
 class DraftDemotion(Demotion):
@@ -110,7 +114,7 @@ async def selection_overview(
     )
     fixtures = fx_res.scalars().all()
     if not fixtures:
-        return {"fixtures": [], "default_team_size": club.default_team_size}
+        return {"fixtures": [], "default_team_size": side_size(club)}
 
     # Team names + seniority, to show which of our teams each fixture belongs to
     # and order a matchday's teams (1st XI → 2nd → …) in the team switcher.
@@ -118,6 +122,7 @@ async def selection_overview(
     teams = tm_res.scalars().all()
     team_names = {str(t.id): (t.short_name or t.name) for t in teams}
     team_seqs = {str(t.id): t.sequence for t in teams}
+    team_sizes = {str(t.id): side_size(club, t) for t in teams}
 
     # Teams that play at the same time on the same day (most clubs start every
     # side at once) would otherwise come back in whatever order Postgres likes.
@@ -224,13 +229,14 @@ async def selection_overview(
             "venue": f.venue,
             "team_name": team_names.get(str(f.team_id)) if f.team_id else None,
             "team_sequence": team_seqs.get(str(f.team_id)) if f.team_id else None,
+            "team_size": team_sizes.get(str(f.team_id), side_size(club)) if f.team_id else side_size(club),
             "grade_name": grade_names.get(str(f.grade_id)) if f.grade_id else None,
             "lineup": lineup,
             "has_draft": str(f.id) in drafts,
             "draft_updated_at": drafts[str(f.id)].isoformat() if str(f.id) in drafts and drafts[str(f.id)] else None,
         })
 
-    return {"fixtures": out, "default_team_size": club.default_team_size}
+    return {"fixtures": out, "default_team_size": side_size(club)}
 
 
 @router.get("/selected-players")
@@ -353,13 +359,27 @@ async def set_default_team_size(
     club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
-    """Persist the club's default lineup size (0 = no limit). Editable here by
-    selectors so the Selection format selector sticks across reloads."""
+    """Persist a lineup size (0 = no limit) so the Selection format selector
+    sticks across reloads. With a `fixture_id` of one of our teams the number is
+    that team's own; otherwise it is the club default every team without its own
+    number follows."""
     if body.size not in (0, 11, 12, 13):
         raise HTTPException(status_code=400, detail="Invalid team size")
-    club.default_team_size = body.size
+    team = None
+    if body.fixture_id:
+        fx = await _get_owned_fixture(db, body.fixture_id, club.id)
+        if fx.team_id:
+            team = await db.get(Team, fx.team_id)
+            if team is not None and team.organisation_id != club.id:
+                team = None
+    if team is not None:
+        team.default_team_size = body.size
+        scope = "team"
+    else:
+        club.default_team_size = body.size
+        scope = "club"
     await db.commit()
-    return {"status": "ok", "default_team_size": body.size}
+    return {"status": "ok", "default_team_size": body.size, "scope": scope}
 
 
 async def _current_draft(db: AsyncSession, fixture_id, org_id) -> dict:

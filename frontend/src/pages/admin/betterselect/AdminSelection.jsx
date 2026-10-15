@@ -688,7 +688,7 @@ export default function AdminSelection() {
       if (wkId && !kept.has(wkId)) setWkId(null)
       return next
     })
-    if (canEdit) { try { await api.bsSetDefaultTeamSize(size) } catch (e) { toast.error('Could not save side size: ' + e.message) } }
+    if (canEdit) { try { await api.bsSetDefaultTeamSize(size, fixtureId) } catch (e) { toast.error('Could not save side size: ' + e.message) } }
   }
 
   const pickAvail = async (status) => {
