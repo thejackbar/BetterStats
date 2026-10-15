@@ -1385,3 +1385,11 @@ Reported: some teams play 12 a side and some 11, but setting the size on the Sel
 `teams.default_team_size` (nullable; NULL follows the club, 0 = no limit) holds a team's own number. `selection_pool.side_size(club, team)` is the one resolver. `POST /selection/default-team-size` takes an optional `fixture_id`: a fixture with one of our teams saves on that team (`scope: "team"`), anything else writes the club default (`scope: "club"`). The overview carries `team_size` per fixture, `assemble_selection` returns the fixture's own size as `default_team_size` (plus `team_size_own`), and the Fixtures list `format_size` follows the team. `PATCH /teams/{id}` accepts `default_team_size` (explicit null clears). Per round (one fixture differing from its team) is not built.
 
 Verification: `backend/verification/verify_team_side_size.py` (25 checks; the control on the previous commit fails 17).
+
+## v9.113.7: custom side size
+
+Asked for: women's and junior sides need a number outside 11, 12 and 13. A side size is now 0 (no limit) or any whole number from 1 to 30 (`services/side_size.valid_side_size`, the one rule for the board route, `PATCH /teams/{id}`, the rules screen and club settings). The board's `SizePicker` has a Custom button that opens a number box (Enter saves, Escape cancels, 0, blank and over 30 are not sent) and reads "Custom · n" when the size is off the presets; the rules screen select has a "Custom..." option with a number box.
+
+Open idea, not built: a side that needs a minimum but may name more (women's 8 to 12). "No limit" is the wrong stand-in (no cap, no empty slots, reads as set at zero); the plan is an optional per-team minimum beside the size, where the size stays the maximum.
+
+Verification: `verify_team_side_size.py` (33 checks), `frontend/verification/verify_custom_side_size_browser.mjs` (12 checks, 390px clean).

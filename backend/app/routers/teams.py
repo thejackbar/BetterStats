@@ -26,6 +26,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Game, GameAppearance, Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import months_ago
+from app.services.side_size import valid_side_size
 from app.services.squad_membership import (
     add_squad_memberships,
     clear_all_squad_memberships,
@@ -276,7 +277,7 @@ async def update_team(
         data["grade_id"] = grade_uuid
     if data.get("name"):
         data["name"] = data["name"].strip()
-    if data.get("default_team_size") is not None and data["default_team_size"] not in (0, 11, 12, 13):
+    if data.get("default_team_size") is not None and not valid_side_size(data["default_team_size"]):
         raise HTTPException(status_code=400, detail="Invalid team size")
     was_active = t.is_active
     for key, value in data.items():

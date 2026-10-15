@@ -31,6 +31,7 @@ from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
 from app.services import selection_clash, selection_notify, selection_rules, selection_seed
 from app.services.selection_pool import assemble_selection, rule_context, side_size
+from app.services.side_size import valid_side_size
 
 router = APIRouter(prefix="/selection", tags=["selection"])
 
@@ -363,7 +364,7 @@ async def set_default_team_size(
     sticks across reloads. With a `fixture_id` of one of our teams the number is
     that team's own; otherwise it is the club default every team without its own
     number follows."""
-    if body.size not in (0, 11, 12, 13):
+    if not valid_side_size(body.size):
         raise HTTPException(status_code=400, detail="Invalid team size")
     team = None
     if body.fixture_id:

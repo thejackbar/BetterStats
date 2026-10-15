@@ -8,6 +8,7 @@
 // the pointer DnD engine (selectionDnd). Player rows show the real role + style
 // + a quiet form indicator (selectionMeta.roleLine / FormBars) — never the old
 // hardcoded positional hints.
+import { useState } from 'react'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { Icon, Avatar, Dot, Tag, RuleTags } from './ui'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
@@ -97,14 +98,38 @@ function AvailMini({ players }) {
 }
 
 /* ── Shared fixture / balance / size chrome ──────────────────────────────── */
+const SIZE_PRESETS = [[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']]
+const MAX_SIDE = 30
 function SizePicker({ value, onChange }) {
-  const opts = [[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']]
+  // Anything off the presets is a custom number (a junior or women's side may
+  // name 7 or 9). Clicking Custom opens a box to type it in.
+  const isCustom = value > 0 && !SIZE_PRESETS.some(([v]) => v === value)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const open = () => { setDraft(isCustom ? String(value) : ''); setEditing(true) }
+  const commit = () => {
+    const n = Math.floor(Number(draft))
+    setEditing(false)
+    if (Number.isFinite(n) && n >= 1 && n <= MAX_SIDE && n !== value) onChange(n)
+  }
+  const on = 'bg-pb-accent/15 text-pb-accent'
+  const off = 'text-pb-faint hover:text-pb-text'
   return (
     <div className="inline-flex p-[3px] gap-0.5 bg-pb-surface2 rounded-lg border border-pb-hairline whitespace-nowrap">
-      {opts.map(([v, l]) => (
-        <button key={v} type="button" onClick={() => onChange(v)}
-          className={`rounded-md font-display font-semibold text-xs px-2.5 py-1 transition ${v === value ? 'bg-pb-accent/15 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
+      {SIZE_PRESETS.map(([v, l]) => (
+        <button key={v} type="button" onClick={() => { setEditing(false); onChange(v) }}
+          className={`rounded-md font-display font-semibold text-xs px-2.5 py-1 transition ${v === value && !editing ? on : off}`}>{l}</button>
       ))}
+      {editing ? (
+        <input autoFocus type="number" inputMode="numeric" min={1} max={MAX_SIDE} value={draft} placeholder="No."
+          aria-label={`Custom side size, 1 to ${MAX_SIDE}`}
+          onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditing(false) }}
+          className="w-14 rounded-md bg-pb-surface border border-pb-accent text-pb-text font-display font-semibold text-xs px-2 py-1 outline-none pb-num" />
+      ) : (
+        <button type="button" onClick={open} title="Enter your own side size"
+          className={`rounded-md font-display font-semibold text-xs px-2.5 py-1 transition ${isCustom ? on : off}`}>{isCustom ? `Custom · ${value}` : 'Custom'}</button>
+      )}
     </div>
   )
 }

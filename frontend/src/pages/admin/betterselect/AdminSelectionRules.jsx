@@ -622,7 +622,8 @@ function BoardSettingsCard({ settings, onSave, canEdit }) {
         select_show_age: !!form.select_show_age,
         select_show_age_under: form.select_show_age_under ?? null,
         dormancy_months: Number(form.dormancy_months),
-        default_team_size: Number(form.default_team_size),
+        // Blank (a custom box cleared) falls back to 11; anything typed is kept to 0..30.
+        default_team_size: form.default_team_size === '' ? 11 : Math.min(30, Math.max(0, Math.floor(Number(form.default_team_size)) || 0)),
         show_fees: form.show_fees !== false,
         show_training: form.show_training !== false,
         notify_captain_on_confirm: !!form.notify_captain_on_confirm,
@@ -712,11 +713,25 @@ function BoardSettingsCard({ settings, onSave, canEdit }) {
           </div>
           <div>
             <label className={LABEL}>Default side size</label>
-            <select className={FIELD} value={form.default_team_size ?? 11}
-              onChange={(e) => setForm((f) => ({ ...f, default_team_size: Number(e.target.value) }))}>
-              {[[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-            <p className={HINT}>What a new team sheet opens on.</p>
+            {(() => {
+              const size = form.default_team_size ?? 11
+              const custom = size === '' || (size > 0 && ![11, 12, 13].includes(size))
+              return (
+                <div className="flex gap-2">
+                  <select className={FIELD} value={custom ? 'custom' : size}
+                    onChange={(e) => setForm((f) => ({ ...f, default_team_size: e.target.value === 'custom' ? 7 : Number(e.target.value) }))}>
+                    {[[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    <option value="custom">Custom…</option>
+                  </select>
+                  {custom && (
+                    <input type="number" inputMode="numeric" min={1} max={30} value={size} aria-label="Custom side size, 1 to 30"
+                      onChange={(e) => setForm((f) => ({ ...f, default_team_size: e.target.value === '' ? '' : Math.min(30, Math.max(1, Math.floor(Number(e.target.value)) || 1)) }))}
+                      className={`${FIELD} w-20 shrink-0`} />
+                  )}
+                </div>
+              )
+            })()}
+            <p className={HINT}>What a new team sheet opens on. A team can have its own on the Selection board.</p>
           </div>
         </div>
         {canEdit && (

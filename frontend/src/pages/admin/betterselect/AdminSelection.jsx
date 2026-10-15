@@ -642,7 +642,7 @@ export default function AdminSelection() {
   // seeding from last week's XI first. Unchanged tier discipline.
   const fillEmpty = (useLastWeek) => {
     if (!canEdit) return
-    if (format === 0) { toast.error('Set a side size (11/12/13) to auto-fill'); return }
+    if (format === 0) { toast.error('Set a side size to auto-fill'); return }
     // Auto-fill never puts anyone in two games; a player in another XI that day
     // (clash or a back to back game) is picked by hand.
     const okToPick = (p) => p && !inAnotherXI(p) && p.availability !== 'UNAVAILABLE'
