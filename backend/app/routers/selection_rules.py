@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Organisation, User, get_db
 from app.routers.auth import get_current_club
+from app.services.side_size import valid_side_size
 from app.services import grade_labels, player_age, selection_rules as rules_svc
 
 router = APIRouter(prefix="/selection-rules", tags=["selection-rules"])
@@ -176,7 +177,7 @@ async def patch_settings(
         club.select_show_age_under = player_age.clean_age_limit(body.select_show_age_under)
     if body.dormancy_months is not None:
         club.dormancy_months = max(1, min(600, int(body.dormancy_months)))
-    if body.default_team_size is not None and int(body.default_team_size) in (0, 11, 12, 13):
+    if body.default_team_size is not None and valid_side_size(int(body.default_team_size)):
         club.default_team_size = int(body.default_team_size)
     if body.show_fees is not None:
         cfg["show_fees"] = bool(body.show_fees)

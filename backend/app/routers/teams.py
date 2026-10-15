@@ -26,6 +26,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Game, GameAppearance, Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import months_ago
+from app.services.side_size import effective_min, valid_min_size, valid_side_size
 from app.services.squad_membership import (
     add_squad_memberships,
     clear_all_squad_memberships,
@@ -54,6 +55,7 @@ def _serialize(t: Team, grades: Optional[dict] = None) -> dict:
         "grade_name": (grades or {}).get(str(t.grade_id)) if t.grade_id else None,
         "default_formation": t.default_formation,
         "default_team_size": t.default_team_size,
+        "min_team_size": t.min_team_size,
         "is_active": t.is_active,
         "source": t.source,
     }
@@ -185,6 +187,8 @@ class TeamUpdate(BaseModel):
     is_active: Optional[bool] = None
     # Players in this team's XI (0 = no limit). Sent null to follow the club.
     default_team_size: Optional[int] = None
+    # Fewest players the team may field; must sit below the size. Null clears it.
+    min_team_size: Optional[int] = None
 
 
 @router.get("")
@@ -276,8 +280,19 @@ async def update_team(
         data["grade_id"] = grade_uuid
     if data.get("name"):
         data["name"] = data["name"].strip()
-    if data.get("default_team_size") is not None and data["default_team_size"] not in (0, 11, 12, 13):
+    if data.get("default_team_size") is not None and not valid_side_size(data["default_team_size"]):
         raise HTTPException(status_code=400, detail="Invalid team size")
+    if "default_team_size" in data or "min_team_size" in data:
+        # The minimum is judged against the size the team will have after this
+        # write: its own, else the club's, else 11.
+        own_after = data["default_team_size"] if "default_team_size" in data else t.default_team_size
+        size_after = own_after if own_after is not None else (
+            club.default_team_size if club.default_team_size is not None else 11)
+        if data.get("min_team_size") is not None:
+            if not valid_min_size(data["min_team_size"], size_after):
+                raise HTTPException(status_code=400, detail="The minimum must be a whole number below the side size")
+        elif "min_team_size" not in data and effective_min(t.min_team_size, size_after) is None:
+            data["min_team_size"] = None     # the size moved to or below the old minimum
     was_active = t.is_active
     for key, value in data.items():
         setattr(t, key, value)

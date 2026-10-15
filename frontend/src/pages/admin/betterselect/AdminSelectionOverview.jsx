@@ -52,7 +52,11 @@ function summarize(fx, defaultTarget) {
   const players = fx.lineup || []
   // Each side is judged against its own size (a club can run 12-a-side seconds
   // next to 11-a-side firsts); the club default only fills in when it has none.
-  const target = fx.team_size || defaultTarget || 11
+  const min = fx.team_min || 0
+  const rawSize = fx.team_size ?? defaultTarget ?? 11
+  // No limit with a minimum has no cap, so the minimum is the whole need.
+  const target = rawSize || (min ? 0 : (defaultTarget || 11))
+  const need = min || target
   const has = (p, c) => (p.skill_positions || []).includes(c)
   const count = players.length
   const bal = { BAT: 0, ALL: 0, BWL: 0, WKT: 0 }
@@ -75,7 +79,7 @@ function summarize(fx, defaultTarget) {
   const bowlers = bal.ALL + bal.BWL
 
   const flags = []
-  if (count > 0 && count < target) flags.push({ tone: 'amber', text: `${target - count} short of XI` })
+  if (count > 0 && count < need) flags.push({ tone: 'amber', text: min ? `${need - count} short of the minimum` : `${need - count} short of XI` })
   if (wkOut) flags.push({ tone: 'red', text: 'Keeper out' })
   unavailableNames.forEach((n) => { if (!(wkOut && n === wkName)) flags.push({ tone: 'red', text: `${n} unavailable` }) })
   if (count >= 8 && !keeperPresent) flags.push({ tone: 'amber', text: 'No keeper named' })
@@ -85,11 +89,11 @@ function summarize(fx, defaultTarget) {
   let status, statusLabel
   if (count === 0) { status = 'progress'; statusLabel = 'Not started' }
   else if (flags.some((f) => f.tone === 'red')) { status = 'attention'; statusLabel = 'Needs attention' }
-  else if (count >= target && flags.length === 0) { status = 'ready'; statusLabel = 'Squad set' }
-  else if (count >= target) { status = 'review'; statusLabel = 'Ready to review' }
+  else if (count >= need && flags.length === 0) { status = 'ready'; statusLabel = 'Squad set' }
+  else if (count >= need) { status = 'review'; statusLabel = 'Ready to review' }
   else { status = 'progress'; statusLabel = 'In progress' }
 
-  return { count, target, bal, bowlers, avail, keeperPresent, capName, wkName, wkOut, flags, status, statusLabel }
+  return { count, target, min, need, bal, bowlers, avail, keeperPresent, capName, wkName, wkOut, flags, status, statusLabel }
 }
 
 function fmtDay(iso) {
@@ -170,7 +174,7 @@ function FixtureRow({ fx, target, open, onToggle }) {
   const squad = fx.team_name || fx.grade_name || 'Team'
   const worst = a.flags.find((f) => f.tone === 'red') || a.flags.find((f) => f.tone === 'amber')
   const extra = a.flags.length - (worst ? 1 : 0)
-  const complete = a.count >= a.target
+  const complete = a.count >= a.need
   const cta = fx.has_draft ? 'Continue draft' : a.count === 0 ? 'Build XI' : a.status === 'attention' ? 'Review XI' : 'Edit XI'
   const when = daysUntil(fx.played_on)
   const sv = STATUS_VAR[a.status]
@@ -209,7 +213,7 @@ function FixtureRow({ fx, target, open, onToggle }) {
           )}
           <span className="font-display font-bold text-[15px] pb-num whitespace-nowrap"
             style={{ color: a.count === 0 ? 'var(--pb-faint)' : complete ? 'var(--pb-accent)' : 'var(--pb-amber)' }}>
-            {a.count}<span className="text-xs text-pb-faint font-medium">/{a.target}</span>
+            {a.count}<span className="text-xs text-pb-faint font-medium">/{a.need}{a.min > 0 && a.target > a.need ? ` to ${a.target}` : ''}</span>
           </span>
           <Pill color={sv} className="hidden sm:inline-flex"><span className="w-1.5 h-1.5 rounded-full bg-current" />{a.statusLabel}</Pill>
           <button onClick={(e) => { e.stopPropagation(); onToggle(fx.id) }} title={open ? 'Collapse' : 'Peek'}
@@ -275,7 +279,7 @@ function FixtureRow({ fx, target, open, onToggle }) {
           <div className="flex items-center justify-between gap-3 flex-wrap px-4 py-2.5 border-t pb-hairline" style={{ background: 'color-mix(in srgb, var(--pb-surface2) 45%, transparent)' }}>
             <div className="flex items-center gap-2.5 min-w-0">
               <AvailBar avail={a.avail} />
-              <span className="text-xs text-pb-dim whitespace-nowrap">{a.count} selected{a.count > a.target ? ` · ${a.count - a.target} in reserve` : ''}</span>
+              <span className="text-xs text-pb-dim whitespace-nowrap">{a.count} selected{a.target > 0 && a.count > a.target ? ` · ${a.count - a.target} in reserve` : ''}</span>
             </div>
             <button onClick={goBuild}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-display font-semibold text-[13px] transition hover:brightness-105 active:scale-[0.98]"

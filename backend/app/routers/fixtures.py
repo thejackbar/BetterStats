@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_FIXTURES, require_cap
 from app.models.db import Fixture, Grade, Organisation, Season, Team, User, get_db
 from app.routers.auth import get_current_club
+from app.services.side_size import effective_min
 from app.services.club_match import fixture_side
 from app.services.fixtures_reconcile import reconcile
 from app.services.fixtures_source import org_grassroots_fixtures_checked
@@ -110,7 +111,7 @@ async def _team_map(db: AsyncSession, club_id) -> dict:
     """{team_id_str: {name, short_name}} for the club — used to enrich fixtures
     with the playing team's name without an async lazy-load on f.team."""
     res = await db.execute(select(Team).where(Team.organisation_id == club_id))
-    return {str(t.id): {"name": t.name, "short_name": t.short_name, "sequence": t.sequence, "size": t.default_team_size} for t in res.scalars().all()}
+    return {str(t.id): {"name": t.name, "short_name": t.short_name, "sequence": t.sequence, "size": t.default_team_size, "min": t.min_team_size} for t in res.scalars().all()}
 
 
 def _norm(s: Optional[str]) -> str:
@@ -218,6 +219,8 @@ async def list_fixtures(
         # "Completed XI" facet: none / in progress / complete.
         own = (teams.get(str(f.team_id)) or {}).get("size") if f.team_id else None
         d["format_size"] = own if own is not None else (club.default_team_size if club.default_team_size is not None else 11)
+        # Fewest players the team may field, when it has a minimum below its size.
+        d["format_min"] = effective_min((teams.get(str(f.team_id)) or {}).get("min"), d["format_size"]) if f.team_id else None
         out.append(d)
     return out
 

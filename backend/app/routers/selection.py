@@ -31,6 +31,7 @@ from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
 from app.services import selection_clash, selection_notify, selection_rules, selection_seed
 from app.services.selection_pool import assemble_selection, rule_context, side_size
+from app.services.side_size import effective_min, valid_min_size, valid_side_size
 
 router = APIRouter(prefix="/selection", tags=["selection"])
 
@@ -65,6 +66,10 @@ class TeamSizeSet(BaseModel):
     # teams the number is saved on THAT team; without it (or for a fixture with
     # no team) it is the club default, as before.
     fixture_id: Optional[str] = None
+    # The fewest players the team may field (size stays the maximum). Sent only
+    # to change it: absent leaves it alone, an explicit null clears it. A
+    # minimum belongs to a team, so it is refused without one.
+    min_size: Optional[int] = None
 
 
 class DraftDemotion(Demotion):
@@ -123,6 +128,7 @@ async def selection_overview(
     team_names = {str(t.id): (t.short_name or t.name) for t in teams}
     team_seqs = {str(t.id): t.sequence for t in teams}
     team_sizes = {str(t.id): side_size(club, t) for t in teams}
+    team_mins = {str(t.id): effective_min(t.min_team_size, team_sizes[str(t.id)]) for t in teams}
 
     # Teams that play at the same time on the same day (most clubs start every
     # side at once) would otherwise come back in whatever order Postgres likes.
@@ -230,6 +236,7 @@ async def selection_overview(
             "team_name": team_names.get(str(f.team_id)) if f.team_id else None,
             "team_sequence": team_seqs.get(str(f.team_id)) if f.team_id else None,
             "team_size": team_sizes.get(str(f.team_id), side_size(club)) if f.team_id else side_size(club),
+            "team_min": team_mins.get(str(f.team_id)) if f.team_id else None,
             "grade_name": grade_names.get(str(f.grade_id)) if f.grade_id else None,
             "lineup": lineup,
             "has_draft": str(f.id) in drafts,
@@ -363,7 +370,7 @@ async def set_default_team_size(
     sticks across reloads. With a `fixture_id` of one of our teams the number is
     that team's own; otherwise it is the club default every team without its own
     number follows."""
-    if body.size not in (0, 11, 12, 13):
+    if not valid_side_size(body.size):
         raise HTTPException(status_code=400, detail="Invalid team size")
     team = None
     if body.fixture_id:
@@ -374,12 +381,25 @@ async def set_default_team_size(
                 team = None
     if team is not None:
         team.default_team_size = body.size
+        if "min_size" in body.model_fields_set:
+            if body.min_size is not None and not valid_min_size(body.min_size, body.size):
+                raise HTTPException(status_code=400, detail="The minimum must be a whole number below the side size")
+            team.min_team_size = body.min_size
+        elif effective_min(team.min_team_size, body.size) is None:
+            # The size moved to or below the stored minimum: drop it rather than
+            # keep a number that no longer means anything.
+            team.min_team_size = None
         scope = "team"
     else:
+        if body.min_size is not None:
+            raise HTTPException(status_code=400, detail="A minimum needs a team")
         club.default_team_size = body.size
         scope = "club"
     await db.commit()
-    return {"status": "ok", "default_team_size": body.size, "scope": scope}
+    return {
+        "status": "ok", "default_team_size": body.size, "scope": scope,
+        "min_size": team.min_team_size if team is not None else None,
+    }
 
 
 async def _current_draft(db: AsyncSession, fixture_id, org_id) -> dict:

@@ -1396,3 +1396,23 @@ Pool order on the single-team board is now: (1) players marked AVAILABLE for the
 Draft table: the pool column is `sticky left-0` inside the sideways scroller, with an opaque tint. `selectionDnd` auto-scrolls any `data-autoscroll-x` element while a drag is held within 80px of its edge (a child tagged `data-autoscroll-skip` is not counted in the left edge) and re-reads the drop target after each step.
 
 Verification: `backend/verification/verify_selection_open_pool.py` (22 checks; the control on the previous `selection_pool.py` fails 8) and `verify_selection_drop_in.py` (30, unchanged). `frontend/verification/verify_draft_table_browser.mjs` gained a pinned-pool section at 1100px (91 pass; the control on the previous build fails 4: pool scrolls away, no edge auto-scroll, far drop fails).
+
+## v9.113.8: custom side size
+
+Asked for: women's and junior sides need a number outside 11, 12 and 13. A side size is now 0 (no limit) or any whole number from 1 to 30 (`services/side_size.valid_side_size`, the one rule for the board route, `PATCH /teams/{id}`, the rules screen and club settings). The board's `SizePicker` has a Custom button that opens a number box (Enter saves, Escape cancels, 0, blank and over 30 are not sent) and reads "Custom · n" when the size is off the presets; the rules screen select has a "Custom..." option with a number box.
+
+Open idea, not built: a side that needs a minimum but may name more (women's 8 to 12). "No limit" is the wrong stand-in (no cap, no empty slots, reads as set at zero); the plan is an optional per-team minimum beside the size, where the size stays the maximum.
+
+Verification: `verify_team_side_size.py` (33 checks), `frontend/verification/verify_custom_side_size_browser.mjs` (12 checks, 390px clean).
+
+## v9.113.9: a minimum per team (migration 333)
+
+Asked for: a side that needs 8 but may name 12. `teams.min_team_size` (nullable; NULL = must be full) sits beside `default_team_size`, which stays the MAXIMUM (slots and cap). Rules: a minimum is 1 to 30 and strictly below the size (any in range when the size is 0, no limit); `side_size.effective_min` is the one reader, so a stale minimum never makes a full side read short. `POST /selection/default-team-size` takes `min_size`: absent leaves it alone, explicit null clears, a number sets it; refused (400) for a club default or a fixture with no team; a size write that leaves the minimum no longer below it clears it. `PATCH /teams/{id}` takes `min_team_size` with the same checks against the size the team will have after the write. The overview carries `team_min` per fixture, the pool `team_min`, the Fixtures list `format_min`.
+
+Frontend: `lib/sideSize.js` (`sideFit`, `sideLabel`, `sideProblem`) is the one place a count is judged against size and minimum; the Selection board, confirm prompt, Draft table and overview all use it. The Min box (`MinBox` in `SelectionViews.jsx`) only shows for a fixture with a team. Overview: complete at the minimum; flag reads "short of the minimum" with one, "short of XI" without.
+
+The Min box widened the compact `FixtureBar` (shown below 900px of window height) enough to wrap it, which made the Dual rail XI scroll at 1280x720 (`verify_draft_table_browser.mjs` caught it, control on main was clean); the title's `basis` there is now 120px so the picker, Min box and pill stay on one row.
+
+Not done: a minimum on the club default (a minimum belongs to a team); BetterIQ's best-XI still builds to the size.
+
+Verification: `verify_team_side_size.py` (53 checks), `frontend/verification/verify_side_minimum_browser.mjs` (19 checks, 390px clean).
