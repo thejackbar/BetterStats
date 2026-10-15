@@ -13,7 +13,7 @@ import { useState } from 'react'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { Icon, Chip, Search, RecencySelect, Dot, Segmented, FilterButton } from './ui'
 import { SortMenu, SquadPicker } from './filters'
-import { BOWL_KINDS, HAND_KINDS, FORM_BUCKETS, SORTS, ageFilterOptions, ageFilterLabel } from './selectionMeta'
+import { BOWL_KINDS, HAND_KINDS, FORM_BUCKETS, SORTS, ageFilterOptions, ageFilterLabel, GENDER_OPTS } from './selectionMeta'
 import { RULE_FILTERS } from './selectionRules'
 
 const ROLE_QUICK = [['BAT', 'Bat'], ['BWL', 'Bowl'], ['ALL', 'All'], ['WKT', 'WK']]
@@ -62,7 +62,7 @@ function Check({ label, checked, onChange, dot }) {
   )
 }
 
-export default function SelectionFilters({ filters, sort, setSort, squadOptions, yearsF, setYearsF, count, total, inactiveHidden, flags, rules }) {
+export default function SelectionFilters({ filters, sort, setSort, squadOptions, showGender, yearsF, setYearsF, count, total, inactiveHidden, flags, rules }) {
   const [open, setOpen] = useState(false)
   const { values, search, setSearch, toggle, setValue, setMulti, clearAll, activeCount } = filters
   const hideUnavail = !!values.hideUnavail
@@ -88,6 +88,7 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   ;(values.form || []).forEach((fm) => pills.push({ k: 'f' + fm, label: (FORM_BUCKETS.find((x) => x.value === fm) || {}).label, rm: () => toggle('form', fm) }))
   ;(values.squad || []).forEach((s) => pills.push({ k: 's' + s, label: (squadOptions.find((o) => o.value === s) || {}).label || s, rm: () => toggle('squad', s) }))
   if (values.status) pills.push({ k: 'st', label: values.status === 'unselected' ? 'Unselected' : 'In another XI', rm: () => setValue('status', '') })
+  if (showGender && values.gender) pills.push({ k: 'gn', label: optLabel(GENDER_OPTS, values.gender), rm: () => setValue('gender', '') })
   if (hideUnavail) pills.push({ k: 'hu', label: 'Hide unavailable', rm: () => setValue('hideUnavail', false) })
   if (showFees && values.fees) pills.push({ k: 'fee', label: optLabel(FEES_OPTS, values.fees), rm: () => setValue('fees', '') })
   if (showTraining && values.training) pills.push({ k: 'trn', label: optLabel(TRAINING_OPTS, values.training), rm: () => setValue('training', '') })
@@ -172,6 +173,11 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
             <SquadPicker options={squadOptions} selected={values.squad || []}
               onToggle={(v) => toggle('squad', v)} onSetMany={(arr) => setMulti('squad', arr)} />
           </PanelGroup>
+          {showGender && (
+            <PanelGroup label="Gender">
+              <Segmented sm value={values.gender || ''} onChange={(v) => setValue('gender', v)} options={GENDER_OPTS} />
+            </PanelGroup>
+          )}
           <PanelGroup label="Selection">
             <Segmented sm value={values.status || ''} onChange={(v) => setValue('status', v)} options={STATUS_OPTS} />
           </PanelGroup>

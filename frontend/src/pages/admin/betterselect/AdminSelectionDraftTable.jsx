@@ -28,7 +28,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { availRank, AVAILABILITY } from '../../../lib/availability'
 import { Icon, Avatar, Btn, Tag, RuleTags, playedWithinYears } from './ui'
 import { DnD, useDrag } from './selectionDnd'
-import { nameMatches, roleLine, spark, formMeta } from './selectionMeta'
+import { nameMatches, roleLine, spark, formMeta, normGender } from './selectionMeta'
 import { xiCompliance, isBlocked } from './selectionRules'
 import { confirmSig, restoreDraft } from './selectionDraft'
 import { sortTeams, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
@@ -232,7 +232,7 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
 // ── The pool ────────────────────────────────────────────────────────────────
 function PoolColumn({ ctx, drag }) {
   const hovered = drag.hover === 'pool'
-  const { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad } = ctx.filters
+  const { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad, gender, setGender } = ctx.filters
   const activeTeam = ctx.activeFid && ctx.cols[ctx.activeFid] ? ctx.shortTeam(ctx.cols[ctx.activeFid].fx) : null
   return (
     // Pinned to the left of the scrolling board (sticky, so the team columns slide
@@ -262,6 +262,14 @@ function PoolColumn({ ctx, drag }) {
               className="bg-pb-surface2 border border-pb-hairline rounded-md text-[11.5px] px-1.5 py-1 text-pb-dim max-w-[110px]">
               <option value="" style={{ color: '#000' }}>All squads</option>
               {ctx.squadOptions.map((s) => <option key={s} value={s} style={{ color: '#000' }}>{ctx.squadShort(s)}</option>)}
+            </select>
+          )}
+          {ctx.showGender && (
+            <select value={gender} onChange={(e) => setGender(e.target.value)} aria-label="Gender"
+              className="bg-pb-surface2 border border-pb-hairline rounded-md text-[11.5px] px-1.5 py-1 text-pb-dim">
+              <option value="" style={{ color: '#000' }}>All genders</option>
+              <option value="male" style={{ color: '#000' }}>Men</option>
+              <option value="female" style={{ color: '#000' }}>Women</option>
             </select>
           )}
           <label className="inline-flex items-center gap-1 text-[11.5px] text-pb-dim cursor-pointer">
@@ -326,6 +334,7 @@ export default function AdminSelectionDraftTable() {
   const [years, setYears] = useState(3)
   const [hideOut, setHideOut] = useState(false)
   const [squad, setSquad] = useState('')
+  const [gender, setGender] = useState('')
 
   const colsRef = useRef(cols)
   colsRef.current = cols
@@ -609,10 +618,13 @@ export default function AdminSelectionDraftTable() {
     return s
   }, [cols, order])
   const unnamed = useMemo(() => Object.values(merged).filter((p) => !named.has(p.id) && !p.is_inactive), [merged, named])
+  // Offered only when the pool holds both: a control that can only answer "nobody" is worse than none.
+  const showGender = useMemo(() => new Set(unnamed.map((p) => normGender(p.gender)).filter(Boolean)).size > 1, [unnamed])
   const pool = useMemo(() => {
     let list = unnamed
     if (q.trim()) list = list.filter((p) => nameMatches(p.display_name, q))
     if (squad) list = list.filter((p) => (p.squads || []).includes(squad))
+    if (gender) list = list.filter((p) => normGender(p.gender) === gender)
     if (hideOut) list = list.filter((p) => p.availability !== 'UNAVAILABLE')
     // A name typed into search is someone being looked for, so the recency window
     // only trims the browse list.
@@ -621,7 +633,7 @@ export default function AdminSelectionDraftTable() {
       availRank(a.availability) - availRank(b.availability)
       || (b.score ?? 0) - (a.score ?? 0)
       || (a.display_name || '').localeCompare(b.display_name || ''))
-  }, [unnamed, q, squad, hideOut, years])
+  }, [unnamed, q, squad, gender, hideOut, years])
 
   // ── Confirm ───────────────────────────────────────────────────────────────
   const dirtyIds = order.filter((f) => cols?.[f] && isDirty(cols[f]))
@@ -781,8 +793,8 @@ export default function AdminSelectionDraftTable() {
 
   const ctx = {
     cols, order, merged, status, conflicts, canEdit, busy, activeFid, setActiveFid,
-    shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length,
-    filters: { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad },
+    shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length, showGender,
+    filters: { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad, gender, setGender },
     tapPool, removeAt, toggleCap, toggleWk, confirmOne, discard, useTheirs, keepMine,
   }
 

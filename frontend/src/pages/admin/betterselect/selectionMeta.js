@@ -37,6 +37,10 @@ export function poolRank(p) {
   return 1099
 }
 
+// A player's gender as the filters read it: 'male', 'female', or '' when unrecorded.
+export function normGender(g) { const s = String(g || '').toLowerCase(); return s.startsWith('f') ? 'female' : s.startsWith('m') ? 'male' : '' }
+export const GENDER_OPTS = [{ value: '', label: 'All' }, { value: 'male', label: 'Men' }, { value: 'female', label: 'Women' }]
+
 export function alsoInTight(p) { return alsoIn(p).some((a) => a.tight) }
 
 // Every word typed must appear somewhere in the name, in any order, so

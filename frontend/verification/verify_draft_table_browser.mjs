@@ -58,7 +58,7 @@ for (let n = 1; n <= 24; n++) {
     id: pid(n), display_name: nm, player_role: null, skill_positions: ROLES[n % ROLES.length],
     squads: [], squad_team_id: null, availability: n === 20 ? 'UNAVAILABLE' : 'AVAILABLE', availability_reason: null,
     last_played: '2099-03-01', photo_url: null, batting_hand: null, bowling_action: null, bowling_type: null,
-    is_opening_batsman: null, gender: 'male', is_overseas: null, age: null, is_dormant: false,
+    is_opening_batsman: null, gender: [17, 18, 19].includes(n) ? 'female' : 'male', is_overseas: null, age: null, is_dormant: false,
     is_inactive: n === 24, is_current: true, selected: false, clash: [], clash_detail: [], also_in: [],
     clash_blocks: false, squad_match: false, tier: 1, gender_ok: true, recent_ok: true, score: 24 - n, recent: [],
     rule_flags: [], rule_notes: [], rule_state: 'ok',
@@ -389,6 +389,49 @@ const run = async () => {
     return p ? Math.round(p.getBoundingClientRect().bottom) <= window.innerHeight : null
   })
   ok('the Available pool ends inside the window too', poolFit === true, String(poolFit))
+
+  // ═══════════════ Gender filter ═══════════════
+  console.log('\n# Gender filter (Draft table and Selection board)')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BASE}/admin/betterselect/selection/draft-table`, { waitUntil: 'domcontentloaded' })
+  await page.locator('[data-draft-table]').waitFor({ timeout: 15000 })
+  await page.waitForTimeout(500)
+  const gSel = page.locator('[data-pool-col] select[aria-label="Gender"]')
+  ok('draft table: the pool offers a Gender filter when it holds men and women', (await gSel.count()) === 1)
+  if (await gSel.count()) {
+    const total = (await page.locator('[data-pool-count]').innerText()).trim()
+    const womenIn = async () => (await Promise.all([17, 18, 19].map((n) => poolCard(n).count()))).reduce((a, b) => a + b, 0)
+    const cards = () => page.locator('[data-pool-col] [data-player-card]').count()
+    const nW = await womenIn(), nAll = await cards()
+    ok('draft table: the pool still holds some women and some men to filter', nW > 0 && nAll > nW, `${nW} of ${nAll}`)
+    await gSel.selectOption('female')
+    await page.waitForTimeout(200)
+    ok('draft table: Women leaves only the women', (await cards()) === nW && (await womenIn()) === nW, `${await cards()} cards`)
+    await gSel.selectOption('male')
+    await page.waitForTimeout(200)
+    ok('draft table: Men leaves nobody who is a woman', (await womenIn()) === 0 && (await cards()) === nAll - nW)
+    await gSel.selectOption('')
+    await page.waitForTimeout(200)
+    ok('draft table: All genders restores the pool', (await page.locator('[data-pool-count]').innerText()).trim() === total)
+  }
+  await page.goto(`${BASE}/admin/betterselect/select/${F1}`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /^Filters/ }).first().waitFor({ timeout: 15000 })
+  await page.waitForTimeout(500)
+  const poolText = () => page.locator('[data-drop-kind="pool"]').first().innerText()
+  ok('board: starts with men and women both in the pool', /PlayerQ/.test(await poolText()) && /PlayerM/.test(await poolText()))
+  await page.getByRole('button', { name: /^Filters/ }).first().click()
+  const womenBtn = page.getByRole('button', { name: 'Women', exact: true })
+  ok('board: the Filters panel has a Gender group with Women', (await womenBtn.count()) === 1)
+  if (await womenBtn.count()) {
+    await womenBtn.click()
+    await page.waitForTimeout(300)
+    const t = await poolText()
+    ok('board: Women shows the women and not the men', /PlayerQ/.test(t) && /PlayerR/.test(t) && !/PlayerM/.test(t), t.slice(0, 120))
+    await page.getByRole('button', { name: 'Men', exact: true }).click()
+    await page.waitForTimeout(300)
+    const t2 = await poolText()
+    ok('board: Men shows the men and not the women', /PlayerM/.test(t2) && !/PlayerQ/.test(t2))
+  }
 
   // ═══════════════ Phone ═══════════════
   console.log('\n# 390px')

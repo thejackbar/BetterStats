@@ -33,7 +33,7 @@ import { DualRailView, TeamSheetView } from './SelectionViews'
 import { AddPlayersSheet, SlotSheet, MobileBar } from './SelectionMobile'
 import SendSide from './SendSide'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
-import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank } from './selectionMeta'
+import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank, normGender } from './selectionMeta'
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
 import { teamSeq, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
 import { confirmSig, restoreDraft } from './selectionDraft'
@@ -400,7 +400,7 @@ export default function AdminSelection() {
   const facets = useMemo(() => [
     { key: 'squad', type: 'multi' }, { key: 'avail', type: 'multi' }, { key: 'role', type: 'multi' },
     { key: 'bowling', type: 'multi' }, { key: 'hand', type: 'multi' }, { key: 'form', type: 'multi' },
-    { key: 'status', type: 'single' }, { key: 'hideUnavail', type: 'bool' },
+    { key: 'status', type: 'single' }, { key: 'gender', type: 'single' }, { key: 'hideUnavail', type: 'bool' },
     // Fees + training. Single-choice rather than checkboxes because "shown
     // both ways" is just no filter, and each has a third real answer —
     // unknown — for a club whose modules can't say.
@@ -433,6 +433,9 @@ export default function AdminSelection() {
   // their slot. The count is passed down so the pool can say who is missing.
   const available = useMemo(() => (data?.pool || []).filter((p) => !usedIds.has(p.id) && !p.is_inactive), [data, usedIds])
   const inactiveHidden = useMemo(() => (data?.pool || []).filter((p) => p.is_inactive && !usedIds.has(p.id)).length, [data, usedIds])
+  // Offered only when the pool holds both: a control that can only answer
+  // "nobody" is worse than none.
+  const showGender = useMemo(() => new Set(available.map((p) => normGender(p.gender)).filter(Boolean)).size > 1, [available])
   const pool = useMemo(() => {
     let list = available
     if (search.trim()) list = list.filter((p) => nameMatches(p.display_name, search))
@@ -442,6 +445,7 @@ export default function AdminSelection() {
     if (values.hand?.length) list = list.filter((p) => values.hand.includes(p.batting_hand))
     if (values.form?.length) list = list.filter((p) => { const b = formBucket(p); return b && values.form.includes(b) })
     if (values.squad?.length) list = list.filter((p) => values.squad.some((s) => (p.squads || []).includes(s)))
+    if (values.gender) list = list.filter((p) => normGender(p.gender) === values.gender)
     if (values.hideUnavail) list = list.filter((p) => p.availability !== 'UNAVAILABLE')
     // is_financial / trained_recently are tri-state: true, false, or null when
     // neither BetterFees nor Net Manager could answer and nobody has said by
@@ -827,7 +831,7 @@ export default function AdminSelection() {
   )
 
   const filterBar = (
-    <SelectionFilters filters={filters} sort={sort} setSort={setSort} squadOptions={squadOptions}
+    <SelectionFilters filters={filters} sort={sort} setSort={setSort} squadOptions={squadOptions} showGender={showGender}
       yearsF={yearsF} setYearsF={setYearsF} count={pool.length} total={available.length}
       inactiveHidden={inactiveHidden} flags={data?.flags} rules={data?.rules} />
   )

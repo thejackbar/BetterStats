@@ -1427,3 +1427,10 @@ Pool order: `teams.sequence` is guessed from the name (`routers/teams._guess_seq
 Keeper: the overview and the board's balance counted only players tagged WKT. A keeper is a WKT-tagged player or the one named keeper (`is_wicket_keeper` / `wkId`); captain and keeper may be one person. The Draft table already did this.
 
 Verification: `verify_selection_open_pool.py` now 27 checks (the control on the v9.113.7 file fails the two unranked-OD checks); `verify_draft_table_browser.mjs` 93 (the control on the old overview fails the keeper check).
+
+
+## v9.113.11: a gender filter on the pool
+
+Requested: a gender filter on the selection screens, as the Players page has. `selectionMeta.normGender` and `GENDER_OPTS` are the one reading of a player's gender ('male', 'female', or '' when unrecorded). The Selection board adds a single-choice `gender` facet (Filters panel, with a pill) and the Draft table pool a drop-down; each is drawn only when the pool holds both genders (`showGender`), since a control that can only answer "nobody" is worse than none. It filters the browse list only; it does not touch `gender_ok`, tiers or auto-fill.
+
+Verification: `verify_draft_table_browser.mjs` (102 checks) drives both filters with three women in the stub pool. Not covered: the one-gender club where the control is absent.
