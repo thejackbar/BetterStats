@@ -234,9 +234,13 @@ function PoolColumn({ ctx, drag }) {
   const { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad } = ctx.filters
   const activeTeam = ctx.activeFid && ctx.cols[ctx.activeFid] ? ctx.shortTeam(ctx.cols[ctx.activeFid].fx) : null
   return (
-    <section data-pool-col data-drop-kind="pool"
-      className={`w-[270px] shrink-0 min-h-0 flex flex-col rounded-xl border bg-pb-surface transition-colors ${hovered ? 'border-pb-red/50' : 'border-pb-hairline'}`}
-      style={hovered ? { background: tint('var(--pb-red)', 5) } : undefined}>
+    // Pinned to the left of the scrolling board (sticky, so the team columns slide
+    // under it): the pool is where a drag starts and ends, so it must stay in
+    // view however far the teams are scrolled. Its tint is mixed into the surface
+    // colour, never transparent, or the columns would show through.
+    <section data-pool-col data-autoscroll-skip data-drop-kind="pool"
+      className={`sticky left-0 z-10 w-[270px] shrink-0 min-h-0 flex flex-col rounded-xl border bg-pb-surface shadow-[6px_0_14px_-8px_rgba(0,0,0,0.4)] transition-colors ${hovered ? 'border-pb-red/50' : 'border-pb-hairline'}`}
+      style={hovered ? { background: 'color-mix(in srgb, var(--pb-red) 5%, var(--pb-surface))' } : undefined}>
       <header className="px-2.5 pt-2 pb-2 border-b pb-hairline flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-display font-bold text-[14px]">Pool</h3>
@@ -284,7 +288,7 @@ function Board({ ctx, isPhone }) {
   const maxSlots = Math.max(1, ...ctx.order.map((f) => ctx.cols[f].slots.length))
   const density = rowDensity(listH, maxSlots)
   return (
-    <div ref={fitRef} data-draft-table data-fit={fitH != null ? 'on' : 'off'} style={fitH != null ? { height: fitH } : undefined}
+    <div ref={fitRef} data-draft-table data-autoscroll-x data-fit={fitH != null ? 'on' : 'off'} style={fitH != null ? { height: fitH } : undefined}
       className="flex gap-2.5 overflow-x-auto pb-1 items-stretch">
       <PoolColumn ctx={ctx} drag={drag} />
       {ctx.order.map((f, i) => <TeamColumn key={f} col={f} density={density} listRef={i === 0 ? listRef : undefined} ctx={ctx} drag={drag} />)}
