@@ -2079,7 +2079,16 @@ async def get_player_team_breakdown(
         params,
     )
     season_aggregate: dict = {}  # season_id -> CA's own match count
+    # Matches recorded against no season at all: an import's career-level
+    # adjustment ("Prior Seasons & Adjustments") or a hand-typed career figure.
+    # They belong to no season cell, and a NULL season id used to reach the
+    # season lookup below as the string 'None', which Postgres refused as a UUID
+    # and turned the whole Team tab into a 500 for any player holding one.
+    without_season = 0
     for r in season_totals.mappings():
+        if r["season_id"] is None:
+            without_season += int(r["matches"] or 0)
+            continue
         sid = _canonical_season(r["season_id"])
         season_aggregate[sid] = season_aggregate.get(sid, 0) + int(r["matches"] or 0)
 
@@ -2317,7 +2326,9 @@ async def get_player_team_breakdown(
         row["attributed_unknown"] = grade_unknown.get(grade_name, 0)
         row["seasons"] = grade_seasons.get(grade_name, 0)
 
-    unattributed = sum(season_unattributed.values())
+    # Season-less matches have no grade either, so they are reported the same way
+    # ("recorded without a grade, not counted above") instead of vanishing.
+    unattributed = sum(season_unattributed.values()) + without_season
 
     # The club's own reading order for its grades (Manage Grades → Order),
     # keyed on the same folded name every query above groups by, so a merged
@@ -2349,7 +2360,7 @@ async def get_player_team_breakdown(
         })
     season_rows.sort(key=lambda r: ((r["year"] is None), -(r["year"] or 0), r["season_name"] or ""))
 
-    total_aggregate = sum(season_aggregate.values())
+    total_aggregate = sum(season_aggregate.values()) + without_season
     return {
         "rows": rows,
         "season_rows": season_rows,

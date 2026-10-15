@@ -333,6 +333,18 @@ async def main() -> int:
           {s.get("year") for s in cm["seasons"] if s.get("year")} >= {2003, 2004, 2012, 2013},
           str([(s.get("season_name"), s.get("year")) for s in cm["seasons"]]))
 
+    # The Team tab read every season-less figure as the string 'None' and 500ed.
+    async with Session() as db:
+        try:
+            tb = await agg.get_player_team_breakdown(db, str(M), str(ORG), None, scope=None)
+            err = ""
+        except Exception as exc:  # control run: report the failure, do not crash
+            tb, err = {}, f"{type(exc).__name__}: {str(exc)[:90]}"
+    check("M's Team tab loads with the book's adjustment in it (it used to 500)", bool(tb), err)
+    # No scorecards are held in this fixture, so the 45 online matches sit unplaced too: 45 + 45.
+    check("and its total reads 90 like the header, the book's 45 reported as matches without a grade",
+          (tb.get("total_aggregate_matches"), tb.get("unattributed")) == (90, 90),
+          str((tb.get("total_aggregate_matches"), tb.get("unattributed"))))
     check("S profile (nothing online): exactly the book, 21 games, 28 innings, 74 runs, high score 11",
           (n(cs["bat"], "games"), n(cs["bat"], "innings"), n(cs["bat"], "total_runs"), n(cs["bat"], "high_score"))
           == (21, 28, 74, 11), str({k: cs["bat"].get(k) for k in ("games", "innings", "total_runs", "high_score")}))
