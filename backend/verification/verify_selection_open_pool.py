@@ -180,6 +180,42 @@ async def main():
     re_ = {r["display_name"]: r for r in await pool(fx_early)}
     check("another date: the answers were for the first date, so no one is open", [n for n, r in re_.items() if r.get("open_seq") is not None], [])
 
+    print("\n# E. Squads with no rank of their own (OD sides all guessed to the same default)")
+    od = {}
+    async with Session() as db:
+        for n in ("OD1 Gold", "OD2 Gold", "OD3 Gold", "OD6 Gold", "OD10 Blue"):
+            g, t = uuid.uuid4(), uuid.uuid4()
+            db.add(Grade(id=g, season_id=season_id, name=n, match_formats=["one_day"], categories=["senior"]))
+            await db.flush()
+            db.add(Team(id=t, organisation_id=org_id, name=n, sequence=50, grade_id=g))
+            G[n], T[n], od[n] = g, t, n
+        await db.commit()
+    fx6 = await fixture("OD6 Gold", on=d + timedelta(days=28))
+    async def avail_on(pid_, status, on):
+        async with Session() as db:
+            await db.execute(text(
+                "INSERT INTO player_availability (organisation_id, player_id, avail_date, status) "
+                "VALUES (:o, :p, :d, :s)"), {"o": org_id, "p": pid_, "d": on, "s": status})
+            await db.commit()
+    on6 = d + timedelta(days=28)
+    od10 = await player("Od Ten", ["OD10 Blue"])
+    od6 = await player("Od Six", ["OD6 Gold"])
+    od3 = await player("Od Three", ["OD3 Gold"])
+    od2 = await player("Od Two", ["OD2 Gold"])
+    od1 = await player("Od One", ["OD1 Gold"])
+    od6_noresp = await player("Od Six NoResponse", ["OD6 Gold"])
+    od3_noresp = await player("Od Three NoResponse", ["OD3 Gold"])
+    for p_ in (od10, od6, od3, od2, od1):
+        await avail_on(p_, "AVAILABLE", on6)
+    rows6 = await pool(fx6)
+    o6 = [r["display_name"] for r in rows6]
+    i6 = lambda n: o6.index(n) if n in o6 else 10_000
+    check("OD1 above OD2 above OD3", i6("Od One") < i6("Od Two") < i6("Od Three"), True)
+    check("OD3 above OD6 Gold (own squad), though all share sequence 50", i6("Od Three") < i6("Od Six"), True)
+    check("OD6 Gold available above OD10 Blue available (numbers read as numbers)", i6("Od Six") < i6("Od Ten"), True)
+    check("every available OD player comes before any no-answer player", max(i6(n) for n in ("Od One", "Od Two", "Od Three", "Od Six", "Od Ten")) < min(i6("Od Six NoResponse"), i6("Od Three NoResponse")), True)
+    check("OD6 Gold's own no-answer player sorts first of those left", i6("Od Six NoResponse") < i6("Od Three NoResponse"), True)
+
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     if base.FAIL:
         print("\n".join(base.FAILURES))

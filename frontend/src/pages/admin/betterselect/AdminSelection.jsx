@@ -791,8 +791,8 @@ export default function AdminSelection() {
     const b = { BAT: 0, ALL: 0, BWL: 0, WKT: 0 }
     filled.forEach((id) => { ['BAT', 'ALL', 'BWL', 'WKT'].forEach((c) => { if (has(id, c)) b[c] += 1 }) })
     const bowlers = filled.filter((id) => has(id, 'BWL') || has(id, 'ALL')).length
-    return { ...b, lightBowling: count >= 8 && bowlers < 5, hasKeeper: filled.some((id) => has(id, 'WKT')) }
-  }, [filled, poolById, count])
+    return { ...b, lightBowling: count >= 8 && bowlers < 5, hasKeeper: filled.some((id) => has(id, 'WKT')) || (!!wkId && filled.includes(wkId)) }
+  }, [filled, poolById, count, wkId])
 
   if (data === null) return <BetterSelectLayout title="Selection"><PbSpinner message="Loading selection…" /></BetterSelectLayout>
 

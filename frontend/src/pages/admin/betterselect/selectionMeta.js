@@ -24,13 +24,16 @@ export function dropInLine(p) { return p?.drop_in_from ? `Not picked in ${p.drop
 export function inDraftLine(p) { return Array.isArray(p?.in_draft_of) && p.in_draft_of.length ? `In ${p.in_draft_of.join(', ')} draft (not confirmed)` : '' }
 // The board's default order, mirroring selection_pool._pool_rank: everyone who
 // says they are available and is named nowhere that day first, highest squad
-// first (`open_seq`); then, as before, the fixture's own squad, players the squad
-// above has not picked, the squad below, the rest of the squad above, everyone else.
+// first (`open_seq`: the place of their highest squad in the club). Then the
+// fixture's own squad (members, then anyone ranked level with it), players the
+// squad above has not picked, the squad below, the rest of the squad above, and
+// everyone else.
 export function poolRank(p) {
   if (p?.open_seq != null) return p.open_seq
-  if (p?.tier === 1) return 1000
-  if (p?.drop_in_from) return 1001
-  if (p?.tier === 2 || p?.tier === 3) return 1000 + p.tier
+  if (p?.squad_match) return 1000
+  if (p?.tier === 1) return 1001
+  if (p?.drop_in_from) return 1002
+  if (p?.tier === 2 || p?.tier === 3) return 1002 + p.tier
   return 1099
 }
 

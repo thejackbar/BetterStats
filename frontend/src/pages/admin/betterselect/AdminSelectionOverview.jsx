@@ -64,9 +64,11 @@ function summarize(fx, defaultTarget) {
     avail[a] = (avail[a] || 0) + 1
     if (a === 'UNAVAILABLE') unavailableNames.push(shortName(p.display_name))
   })
-  const keeperPresent = bal.WKT > 0
   const capP = players.find((p) => p.is_captain)
   const wkP = players.find((p) => p.is_wicket_keeper)
+  // A keeper is a player tagged WKT OR the one named keeper: the captain can be
+  // the keeper, and a named keeper with no WKT tag is still the keeper.
+  const keeperPresent = bal.WKT > 0 || !!wkP
   const capName = capP ? shortName(capP.display_name) : null
   const wkName = wkP ? shortName(wkP.display_name) : null
   const wkOut = !!(wkP && wkP.availability === 'UNAVAILABLE')

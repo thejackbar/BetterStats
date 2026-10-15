@@ -11,6 +11,8 @@ years-dormant name appearing as a "promote" suggestion for a men's 2nd XI).
 """
 from __future__ import annotations
 
+import re
+
 from datetime import date, timedelta
 
 from sqlalchemy import select, text
@@ -204,7 +206,7 @@ def _tier_for(fx_seq: int | None, sq_seq: int | None) -> int | None:
     return None
 
 
-def _pool_rank(open_seq: int | None, tier: int | None, drop_in: bool) -> int:
+def _pool_rank(open_seq: int | None, tier: int | None, drop_in: bool, squad_match: bool = False) -> int:
     """Where a player sorts on the board's default (Squad order).
 
     First everyone who says they are available and is named nowhere that day,
@@ -215,30 +217,46 @@ def _pool_rank(open_seq: int | None, tier: int | None, drop_in: bool) -> int:
     else (1099). The browser applies the same order (selectionMeta.poolRank)."""
     if open_seq is not None:
         return open_seq
-    if tier == 1:
+    if squad_match:
         return 1000
-    if drop_in:
+    if tier == 1:
         return 1001
+    if drop_in:
+        return 1002
     if tier in (2, 3):
-        return 1000 + tier
+        return 1002 + tier
     return 1099
 
 
+def _squad_order(teams: dict[str, tuple[str, int]]) -> dict[str, int]:
+    """Each live squad's place in the club's hierarchy, 1 = highest.
+
+    Ranked squads go by `sequence`; squads that share a sequence (every side
+    named like "OD3 Gold" is guessed to the same unranked default) are told apart
+    the way every squad list does it: by name with numbers read as numbers, so
+    OD2 is above OD10. `teams` is {team_id: (name, sequence)}."""
+    def key(item):
+        tid, (name, seq) = item
+        return (
+            not (seq or 0) > 0, seq or 0,
+            [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", (name or "").lower())],
+            tid,
+        )
+    return {tid: i + 1 for i, (tid, _) in enumerate(sorted(teams.items(), key=key))}
+
+
 def _open_seq(
-    squad_seqs: list[int], *, has_date: bool, picked_elsewhere: bool, in_lineup: bool,
+    squad_ranks: list[int], *, has_date: bool, picked_elsewhere: bool, in_lineup: bool,
     available: bool, eligible: bool,
 ) -> int | None:
-    """The sequence of the player's highest squad when they are an open pick for
-    THIS fixture: marked available, in no XI and in no other side's draft that
-    day, and eligible (right side of the gender wall, not inactive). A squad with
-    no rank sorts after every ranked one. None when they are not an open pick or
-    we cannot say (no fixture date, no squad)."""
+    """The place of the player's highest squad (1 = top of the club) when they
+    are an open pick for THIS fixture: marked available, in no XI and in no other
+    side's draft that day, and eligible (right side of the gender wall, not
+    inactive). None when they are not an open pick or we cannot say (no fixture
+    date, no squad)."""
     if not has_date or not eligible or not available or picked_elsewhere or in_lineup:
         return None
-    if not squad_seqs:
-        return None
-    ranked = [q for q in squad_seqs if q > 0]
-    return min(ranked) if ranked else 999
+    return min(squad_ranks) if squad_ranks else None
 
 
 def _ordered_squads(names, active_teams: dict) -> list[str]:
@@ -674,6 +692,8 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         squad_meta[str(tid)] = (seq or 0, fee == "women")
         squad_label[str(tid)] = short or nm or ""
 
+    squad_place = _squad_order(active_teams)
+
     # The two module-derived selection flags. Both can come back None — "we
     # can't tell" — in which case only a per-player override answers, which is
     # exactly the club that runs neither module ticking a box by hand.
@@ -747,7 +767,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             eligible=gender_ok and not manual_inactive,
         )
         open_seq = _open_seq(
-            [squad_meta.get(s, (0, False))[0] for s in gender_squads],
+            [squad_place[s] for s in gender_squads if s in squad_place],
             has_date=bool(fx.played_on),
             picked_elsewhere=bool(clash.get(pid) or also_in.get(pid) or in_other_draft.get(pid)),
             in_lineup=pid in lineup,
@@ -872,7 +892,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
 
     _AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2, "UNAVAILABLE": 3}
     pool.sort(key=lambda e: (
-        _pool_rank(e["open_seq"], e["tier"], bool(e["drop_in_from"])),
+        _pool_rank(e["open_seq"], e["tier"], bool(e["drop_in_from"]), bool(e["squad_match"])),
         -(e["score"] or 0.0),
         _AVAIL_RANK.get(e["availability"], 9),
         (e["display_name"] or "").lower(),

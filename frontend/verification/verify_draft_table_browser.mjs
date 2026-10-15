@@ -103,7 +103,7 @@ const run = async () => {
   await page.route('**/api/selection/overview', (r) => json(r, {
     default_team_size: 11,
     fixtures: FX.map((f) => ({
-      ...f, lineup: server.confirmed[f.id].map((p, i) => ({ player_id: p, display_name: 'x', batting_order: i + 1, skill_positions: [], availability: 'AVAILABLE' })),
+      ...f, lineup: server.confirmed[f.id].map((p, i) => ({ player_id: p, display_name: 'x', batting_order: i + 1, skill_positions: [], availability: 'AVAILABLE', is_captain: f.id === F1 && p === pid(1), is_wicket_keeper: f.id === F1 && p === pid(1) })),
       has_draft: !!server.drafts[f.id],
     })),
   }))
@@ -329,6 +329,14 @@ const run = async () => {
   ok('dropped on the far team from the pinned pool: that team has the player', (await lastCol.locator(`[data-player-card="${firstId}"]`).count()) === 1)
   ok('and nobody was dropped on the wrong team', lastPut(lastId)?.slots?.includes(firstId) === true)
   await page.setViewportSize({ width: 1440, height: 900 })
+
+  // ═══════════════ Overview: one player is captain AND keeper ═══════════════
+  console.log('\n# Overview: a captain who is also the named keeper')
+  await page.goto(`${BASE}/admin/betterselect/selection`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1500)
+  const ovText = await page.locator('body').innerText()
+  ok('the overview loaded with the 1st XI (11 named)', /1st XI/.test(ovText))
+  ok('a named keeper (who is also captain, with no WKT tag) is not "No keeper named"', !/No keeper named/i.test(ovText), 'still says No keeper named')
 
   // ═══════════════ Selection board: the XI fits ═══════════════
   console.log('\n# Selection board: Selected XI fits without scrolling')
