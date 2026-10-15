@@ -1416,3 +1416,14 @@ The Min box widened the compact `FixtureBar` (shown below 900px of window height
 Not done: a minimum on the club default (a minimum belongs to a team); BetterIQ's best-XI still builds to the size.
 
 Verification: `verify_team_side_size.py` (53 checks), `frontend/verification/verify_side_minimum_browser.mjs` (19 checks, 390px clean).
+
+
+## v9.113.10: pool order for unranked squads; a named keeper is a keeper
+
+Reported after v9.113.7: the pool order still did not look right, and a side whose captain was also its keeper said "No keeper named".
+
+Pool order: `teams.sequence` is guessed from the name (`routers/teams._guess_sequence`), and a name with no ordinal word, age group or grade letter ("OD6 Gold") gets the unranked default 50, so a whole OD ladder shares one sequence. `open_seq` was the squad's raw sequence, so those squads tied. It is now the squad's place from `selection_pool._squad_order`: sequence for ranked squads, then name with numbers read as numbers (OD2 before OD10), the same tie-break the overview's team order uses. The same tie also made every OD squad `tier` 1, so the own-squad rank now keys on `squad_match` (literal membership, 1000) with a tier 1 non-member just behind (1001).
+
+Keeper: the overview and the board's balance counted only players tagged WKT. A keeper is a WKT-tagged player or the one named keeper (`is_wicket_keeper` / `wkId`); captain and keeper may be one person. The Draft table already did this.
+
+Verification: `verify_selection_open_pool.py` now 27 checks (the control on the v9.113.7 file fails the two unranked-OD checks); `verify_draft_table_browser.mjs` 93 (the control on the old overview fails the keeper check).
