@@ -33,6 +33,7 @@ import { xiCompliance, isBlocked } from './selectionRules'
 import { confirmSig, restoreDraft } from './selectionDraft'
 import { sortTeams, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
 import { useFitHeight, useBoxHeight, rowDensity, ROW_MIN } from './useFitHeight'
+import { sideFit, sideLabel } from '../../../lib/sideSize'
 
 const DRAFT_DELAY_MS = 600
 const DRAFT_RETRY_MS = 5000
@@ -80,7 +81,7 @@ function buildCol(f, d, dr, fallbackSize) {
   slots = tidySlots(slots, size)
   const poolById = {}
   ;(d.pool || []).forEach((p) => { poolById[p.id] = p })
-  return { fid: f.id, fx: f, data: d, poolById, size, slots, cap, wk, demo, baseSig, fromDraft }
+  return { fid: f.id, fx: f, data: d, poolById, size, min: d.team_min || 0, slots, cap, wk, demo, baseSig, fromDraft }
 }
 
 // ── A player card (a team's slot, and the pool) ──────────────────────────────
@@ -165,7 +166,7 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
   const status = ctx.status[col]
   const conflict = ctx.conflicts[col]
   const target = c.size
-  const off = target > 0 && filled.length !== target
+  const off = sideFit(filled.length, target, c.min).off
   const hasKeeper = filled.some((id) => (c.poolById[id]?.skill_positions || []).includes('WKT')) || (c.wk && filled.includes(c.wk))
   const bowlers = filled.filter((id) => { const r = c.poolById[id]?.skill_positions || []; return r.includes('BWL') || r.includes('ALL') }).length
   const rules = xiCompliance(c.data.rules, c.poolById, filled)
@@ -185,7 +186,7 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
           <h3 className="font-display font-bold text-[14px] truncate min-w-0 flex-1" title={teamNameOf(fx)}>{ctx.shortTeam(fx)}</h3>
           <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
             style={{ background: off ? 'var(--pb-amber)' : tint('var(--pb-accent)', 18), color: off ? '#1b1205' : 'var(--pb-accent)' }}>
-            {filled.length}{target > 0 ? `/${target}` : ''}
+            {filled.length}{target > 0 ? `/${target}` : ''}{c.min > 0 ? ` · min ${c.min}` : ''}
           </span>
         </div>
         <div className="text-[11.5px] text-pb-faint truncate" title={`${oppLabelOf(fx)}${fx.start_time ? ' · ' + fx.start_time : ''}${fx.venue ? ' · ' + fx.venue : ''}`}>
@@ -642,7 +643,7 @@ export default function AdminSelectionDraftTable() {
       const c = colsRef.current[fid]
       const n = filledOf(c).length
       const name = ctxShort(c.fx)
-      if (c.size > 0 && n !== c.size) lines.push(`• ${name}: ${n} player${n === 1 ? '' : 's'} for a ${c.size}-a-side match`)
+      if (sideFit(n, c.size, c.min).off) lines.push(`• ${name}: ${n} player${n === 1 ? '' : 's'} for a ${sideLabel(c.size, c.min)} match`)
       const { warnings } = xiCompliance(c.data.rules, c.poolById, filledOf(c))
       warnings.slice(0, 4).forEach((w) => lines.push(`• ${name}: ${w.player ? w.player + ', ' : ''}${w.detail}`))
     })

@@ -8,7 +8,8 @@
 // the pointer DnD engine (selectionDnd). Player rows show the real role + style
 // + a quiet form indicator (selectionMeta.roleLine / FormBars) — never the old
 // hardcoded positional hints.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { sideFit } from '../../../lib/sideSize'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { Icon, Avatar, Dot, Tag, RuleTags } from './ui'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
@@ -100,7 +101,7 @@ function AvailMini({ players }) {
 /* ── Shared fixture / balance / size chrome ──────────────────────────────── */
 const SIZE_PRESETS = [[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']]
 const MAX_SIDE = 30
-function SizePicker({ value, onChange }) {
+function SizeBar({ value, onChange }) {
   // Anything off the presets is a custom number (a junior or women's side may
   // name 7 or 9). Clicking Custom opens a box to type it in.
   const isCustom = value > 0 && !SIZE_PRESETS.some(([v]) => v === value)
@@ -133,12 +134,45 @@ function SizePicker({ value, onChange }) {
     </div>
   )
 }
-function PickPill({ count, target }) {
-  const off = target > 0 && count !== target
+// The fewest players the side may field: blank means the side must be full.
+// Only offered for a fixture that belongs to one of our teams (the minimum is
+// saved on the team).
+function MinBox({ value, size, onChange }) {
+  const [draft, setDraft] = useState(value ? String(value) : '')
+  useEffect(() => { setDraft(value ? String(value) : '') }, [value])
+  const commit = () => {
+    const t = draft.trim()
+    if (t === '') { if (value) onChange(null); return }
+    const n = Math.floor(Number(t))
+    if (!Number.isFinite(n) || n < 1 || n > 30) { setDraft(value ? String(value) : ''); return }
+    if (n !== value) onChange(n)
+  }
+  return (
+    <label className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-dim whitespace-nowrap"
+      title={`The fewest players this team may field. Leave blank if the side must be full${size > 0 ? ` (${size})` : ''}.`}>
+      Min
+      <input type="number" inputMode="numeric" min={1} max={30} value={draft} placeholder="none"
+        aria-label="Minimum players for this team"
+        onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(value ? String(value) : ''); e.currentTarget.blur() } }}
+        className="w-14 rounded-md bg-pb-surface2 border border-pb-hairline text-pb-text font-display font-semibold text-xs px-2 py-1 outline-none focus:border-pb-accent pb-num" />
+    </label>
+  )
+}
+function SizePicker({ vm }) {
+  return (
+    <div className="inline-flex items-center gap-2 flex-wrap">
+      <SizeBar value={vm.format} onChange={vm.changeFormat} />
+      {vm.canMin && <MinBox value={vm.minFormat || 0} size={vm.format} onChange={vm.changeMin} />}
+    </div>
+  )
+}
+function PickPill({ count, target, min = 0 }) {
+  const off = sideFit(count, target, min).off
   return (
     <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap"
       style={{ background: off ? 'var(--pb-amber)' : 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: off ? '#1b1205' : 'var(--pb-accent)' }}>
-      {count}{target > 0 ? ` / ${target}` : ''} picked
+      {count}{target > 0 ? ` / ${target}` : ''} picked{min > 0 ? ` · min ${min}` : ''}
     </span>
   )
 }
@@ -157,8 +191,8 @@ export function FixtureBar({ vm, compact = false }) {
         </div>
         {vm.canEdit && (
           <div className="flex flex-wrap items-center gap-2">
-            <SizePicker value={vm.format} onChange={vm.changeFormat} />
-            <PickPill count={vm.count} target={vm.target} />
+            <SizePicker vm={vm} />
+            <PickPill count={vm.count} target={vm.target} min={vm.minFormat || 0} />
           </div>
         )}
       </div>
@@ -176,8 +210,8 @@ export function FixtureBar({ vm, compact = false }) {
         </div>
         {vm.canEdit && (
           <div className="flex flex-wrap items-center gap-2.5">
-            <SizePicker value={vm.format} onChange={vm.changeFormat} />
-            <PickPill count={vm.count} target={vm.target} />
+            <SizePicker vm={vm} />
+            <PickPill count={vm.count} target={vm.target} min={vm.minFormat || 0} />
           </div>
         )}
       </div>
@@ -609,7 +643,7 @@ export function TeamSheetView({ vm }) {
           {vm.sub && <div className="text-[13px] text-pb-dim">{vm.sub}</div>}
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          {vm.canEdit && <SizePicker value={vm.format} onChange={vm.changeFormat} />}
+          {vm.canEdit && <SizePicker vm={vm} />}
           <div className="font-display flex items-baseline gap-1"><b className="text-[38px] leading-none text-pb-accent font-bold pb-num">{vm.count}</b><span className="text-[17px] text-pb-faint">/ {vm.target || '∞'}</span></div>
           <div className="hidden sm:flex gap-3.5 font-display">
             {ROLE_CODES.map((c) => {

@@ -20,6 +20,7 @@ from app.models.db import FixtureLineup, Grade, Player, Season, Team
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 from app.auth.modules import org_has_module
 from app.services import player_age, selection_clash, selection_rules
+from app.services.side_size import effective_min
 
 # Autofill scoring constants ─────────────────────────────────────────────────
 # Window for "recent form" — last N batting innings & bowling spells per player.
@@ -920,4 +921,5 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         "dormancy_months": months,
         "default_team_size": side_size(club, fx_team_obj),
         "team_size_own": fx_team_obj.default_team_size if fx_team_obj is not None else None,
+        "team_min": effective_min(fx_team_obj.min_team_size, side_size(club, fx_team_obj)) if fx_team_obj is not None else None,
     }

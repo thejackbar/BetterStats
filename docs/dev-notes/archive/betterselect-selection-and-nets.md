@@ -1393,3 +1393,13 @@ Asked for: women's and junior sides need a number outside 11, 12 and 13. A side 
 Open idea, not built: a side that needs a minimum but may name more (women's 8 to 12). "No limit" is the wrong stand-in (no cap, no empty slots, reads as set at zero); the plan is an optional per-team minimum beside the size, where the size stays the maximum.
 
 Verification: `verify_team_side_size.py` (33 checks), `frontend/verification/verify_custom_side_size_browser.mjs` (12 checks, 390px clean).
+
+## v9.113.8: a minimum per team (migration 333)
+
+Asked for: a side that needs 8 but may name 12. `teams.min_team_size` (nullable; NULL = must be full) sits beside `default_team_size`, which stays the MAXIMUM (slots and cap). Rules: a minimum is 1 to 30 and strictly below the size (any in range when the size is 0, no limit); `side_size.effective_min` is the one reader, so a stale minimum never makes a full side read short. `POST /selection/default-team-size` takes `min_size`: absent leaves it alone, explicit null clears, a number sets it; refused (400) for a club default or a fixture with no team; a size write that leaves the minimum no longer below it clears it. `PATCH /teams/{id}` takes `min_team_size` with the same checks against the size the team will have after the write. The overview carries `team_min` per fixture, the pool `team_min`, the Fixtures list `format_min`.
+
+Frontend: `lib/sideSize.js` (`sideFit`, `sideLabel`, `sideProblem`) is the one place a count is judged against size and minimum; the Selection board, confirm prompt, Draft table and overview all use it. The Min box (`MinBox` in `SelectionViews.jsx`) only shows for a fixture with a team. Overview: complete at the minimum; flag reads "short of the minimum" with one, "short of XI" without.
+
+Not done: a minimum on the club default (a minimum belongs to a team); BetterIQ's best-XI still builds to the size.
+
+Verification: `verify_team_side_size.py` (53 checks), `frontend/verification/verify_side_minimum_browser.mjs` (19 checks, 390px clean).

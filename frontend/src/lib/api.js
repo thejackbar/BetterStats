@@ -3453,8 +3453,12 @@ export const api = {
     request(`/selection/${fixtureId}/draft${baseVersion ? `?base_version=${baseVersion}` : ''}`, { method: 'DELETE', ...opts }),
   // With a fixtureId the size is saved on that fixture's team; without one it is
   // the club default.
-  bsSetDefaultTeamSize: (size, fixtureId) =>
-    request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size, fixture_id: fixtureId || null }) }),
+  // `minSize` is only sent when given: undefined leaves the team's minimum
+  // alone, null clears it, a number sets it (the fewest players the side may field).
+  bsSetDefaultTeamSize: (size, fixtureId, minSize) =>
+    request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({
+      size, fixture_id: fixtureId || null, ...(minSize === undefined ? {} : { min_size: minSize }),
+    }) }),
   // The previous fixture's named XI (for Selection's "fill from last week").
   bsPreviousXI: (fixtureId) => request(`/selection/${fixtureId}/previous-xi`),
   // Player ids named in any saved XI for the round containing `on` (a date) —

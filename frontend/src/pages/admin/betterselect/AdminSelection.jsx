@@ -37,6 +37,7 @@ import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, 
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
 import { teamSeq, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
 import { confirmSig, restoreDraft } from './selectionDraft'
+import { sideFit, sideLabel, sideProblem } from '../../../lib/sideSize'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
 // displayed positional *hints* are gone, but the eligibility model is useful).
@@ -174,6 +175,7 @@ export default function AdminSelection() {
   const [wkId, setWkId] = useState(null)
   const [focus, setFocus] = useState(null)
   const [format, setFormat] = useState(11)
+  const [minFormat, setMinFormat] = useState(null)   // fewest players the side may field, null = must be full
   const [saving, setSaving] = useState(false)
   // The confirmed XI as loaded; "unconfirmed changes" is the board differing
   // from it. Derived, so putting someone back where they were reads as clean.
@@ -275,6 +277,7 @@ export default function AdminSelection() {
         setCapId(cap)
         setWkId(wk)
         setFormat(size)
+        setMinFormat(d.team_min ?? null)
         setFocus(slotsInit.findIndex((x) => x == null))
         setDemotions(demo)
         setDraftStatus('idle')
@@ -555,7 +558,8 @@ export default function AdminSelection() {
     else { setDraftConflict(null); load() }
   }
   const target = format || 0
-  const offCount = target > 0 && count !== target
+  const fit = sideFit(count, target, minFormat || 0)
+  const offCount = fit.off
 
   // ── Slot mutations (plain fns — DnD always calls the latest onDrop) ────────
   const placeInSlot = (slotIdx, playerId) => {
@@ -679,6 +683,9 @@ export default function AdminSelection() {
 
   const changeFormat = async (size) => {
     setFormat(size)
+    // The server drops a minimum the new size no longer sits above; mirror it.
+    const minAfter = minFormat && (size === 0 || minFormat < size) ? minFormat : null
+    setMinFormat(minAfter)
     setSlots((prev) => {
       if (size === 0) return prev.filter(Boolean)
       const next = prev.slice(0, size)
@@ -689,6 +696,18 @@ export default function AdminSelection() {
       return next
     })
     if (canEdit) { try { await api.bsSetDefaultTeamSize(size, fixtureId) } catch (e) { toast.error('Could not save side size: ' + e.message) } }
+  }
+
+  // The fewest players this team may field (null clears it). The size stays the
+  // maximum; the server refuses a minimum that is not below it.
+  const changeMin = async (n) => {
+    if (n != null && format > 0 && n >= format) { toast.error(`The minimum has to be lower than the side size of ${format}`); return }
+    const before = minFormat
+    setMinFormat(n)
+    if (canEdit) {
+      try { await api.bsSetDefaultTeamSize(format, fixtureId, n) }
+      catch (e) { setMinFormat(before); toast.error('Could not save the minimum: ' + e.message) }
+    }
   }
 
   const pickAvail = async (status) => {
@@ -702,8 +721,8 @@ export default function AdminSelection() {
 
   const save = async () => {
     if (offCount) {
-      const diff = count > target ? `${count - target} too many` : `${target - count} too few`
-      if (!window.confirm(`You have ${count} player${count === 1 ? '' : 's'} for a ${target}-a-side match — ${diff}.\n\nConfirm anyway?`)) return
+      const diff = sideProblem(count, target, minFormat || 0)
+      if (!window.confirm(`You have ${count} player${count === 1 ? '' : 's'} for a ${sideLabel(target, minFormat || 0)} match — ${diff}.\n\nConfirm anyway?`)) return
     }
     // A warning-level rule is the selector's to weigh, so it asks rather than
     // refuses. A blocking one never gets this far — the server decides, and
@@ -815,13 +834,14 @@ export default function AdminSelection() {
 
   const vm = {
     title, sub, kicker, teamName, contextLeft, filterBar, squadShort, canEdit,
-    poolById, pool, slots, capId, wkId, focus, format, count, target, balance,
+    poolById, pool, slots, capId, wkId, focus, format, minFormat, count, target, balance,
+    canMin: !!(canEdit && fx?.team_id),
     rules: data?.rules,
     filledSet: usedIds, canAutofill, hasPrev,
     available, view, isPhone, panel, setPanel,
     openAdd: (i) => { if (i != null) setFocus(i); setAddOpen(true) },
     openSlot: (i) => setSlotOpen(i),
-    changeFormat, tapPlayer, placeInSlot, removeAt, swapSlots, setFocus, toggleCap, toggleWk,
+    changeFormat, changeMin, tapPlayer, placeInSlot, removeAt, swapSlots, setFocus, toggleCap, toggleWk,
     autofill: () => fillEmpty(false), fillLastWeek: () => fillEmpty(true), clearXI, setAvailEdit,
   }
 
@@ -946,7 +966,7 @@ export default function AdminSelection() {
                 )
               })}
               {count === 0 && <div className="p-4"><Empty>No players selected.</Empty></div>}
-              {offCount && <div className="px-4 py-2 text-[12px] text-pb-amber">{count > target ? `${count - target} over` : `${target - count} short of`} your {target}-a-side format.</div>}
+              {offCount && <div className="px-4 py-2 text-[12px] text-pb-amber">{sideProblem(count, target, minFormat || 0)} for your {sideLabel(target, minFormat || 0)} format.</div>}
               {/* Club rules, on the sheet as well as the board — this is the
                   copy that gets sent to a captain, so it should not be the one
                   place a problem is invisible. */}

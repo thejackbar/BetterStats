@@ -109,8 +109,8 @@ function isoLocal(date) { return `${date.getFullYear()}-${String(date.getMonth()
 function xiState(f) {
   const n = f.lineup_count || 0
   if (n === 0) return 'none'
-  const size = f.format_size || 0
-  if (size && n >= size) return 'complete'
+  const need = f.format_min || f.format_size || 0   // a side with a minimum is complete at the minimum
+  if (need && n >= need) return 'complete'
   return 'progress'
 }
 
