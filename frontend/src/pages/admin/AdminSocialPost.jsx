@@ -729,6 +729,17 @@ function sortByGrade(rows) {
   })
 }
 
+// Round import category toggles (Men's / Juniors / Women's ...). A row carries
+// the grade's categories, a list, since "Girls Under 14" is junior AND women's;
+// it stays while ANY of them is on. A row with none (football, an older pull)
+// is never hidden.
+const ROUND_CAT_ORDER = ['senior', 'junior', 'womens', 'masters', 'mixed']
+const ROUND_CAT_LABELS = { senior: "Men's", junior: 'Juniors', womens: "Women's", masters: 'Masters', mixed: 'Mixed / Other' }
+function filterByCats(rows, off) {
+  if (!off || !off.length) return rows
+  return rows.filter(r => !(r.categories && r.categories.length) || r.categories.some(c => !off.includes(c)))
+}
+
 // Top 3 bowlers (most wickets, then fewest runs / best economy).
 function topBowlers(t) {
   const overs = (o) => parseFloat(String(o || '0').replace(/[^0-9.]/g, '')) || 0
@@ -807,9 +818,12 @@ function OppLogoChip({ logo, loading, onClear }) {
 // live feed with no link, or a pasted match link resolves that link's own round
 // (onFetchLink). A pasted playhq.com link comes back as a `notice` — a different
 // id namespace, so the correction renders as its own amber box.
-function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice }) {
+function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice, off = [], onToggleCat }) {
   const [link, setLink] = useState('')
   const rowsOf = (d) => (d ? d[rowsKey] || [] : [])
+  // Which categories the pull holds, counted on the day being shown.
+  const present = ROUND_CAT_ORDER.filter(k => dates.some(d => rowsOf(d).some(r => (r.categories || []).includes(k))))
+  const countOn = (k) => rowsOf(dates[idx]).filter(r => (r.categories || []).includes(k)).length
   const fetchLink = () => { const q = link.trim(); if (q) onFetchLink(q) }
   return (
     <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
@@ -845,8 +859,32 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
           <p className="font-mono text-[9px] text-amber-400/80 mt-1 leading-relaxed">Open your match on play.cricket.com.au and copy the address from there.</p>
         </div>
       )}
+      {status === 'ok' && dates.length > 0 && present.length > 0 && onToggleCat && (
+        <div className="mt-3" data-testid="round-cat-toggles">
+          <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-1.5">Include</p>
+          <div className="flex flex-wrap gap-1.5">
+            {present.map(k => {
+              const on = !off.includes(k)
+              return (
+                <button key={k} type="button" onClick={() => onToggleCat(k)} aria-pressed={on}
+                  className="px-2.5 py-1 rounded border font-mono text-[10px] tracking-wide2 transition-colors"
+                  style={on
+                    ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+                    : { background: 'transparent', color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' }}>
+                  {ROUND_CAT_LABELS[k]} ({countOn(k)})
+                </button>
+              )
+            })}
+          </div>
+          {present.length === 1 && (
+            <p className="font-mono text-[9px] mt-1.5 text-pb-faintest leading-relaxed">
+              Only {ROUND_CAT_LABELS[present[0]]} grades came back for this pull. Other grades show up here once the competition has published their {hint}.
+            </p>
+          )}
+        </div>
+      )}
       {status === 'ok' && dates.length > 0 && (
-        <p className="font-mono text-[9px] mt-1.5 text-green-400">✓ {rowsOf(dates[idx]).length} loaded · {dates[idx]?.label}</p>
+        <p className="font-mono text-[9px] mt-1.5 text-green-400">✓ {filterByCats(rowsOf(dates[idx]), off).length} loaded · {dates[idx]?.label}</p>
       )}
       {status && status !== 'loading' && status !== 'ok' && (
         <p className="font-mono text-[9px] mt-1.5 text-pb-faint">
@@ -1424,6 +1462,9 @@ export default function AdminSocialPost() {
   // Play.cricket round import (the multi-match analogue of the scorecard import).
   const [fxImport, setFxImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
   const [rrImport, setRrImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
+  // Categories switched OFF on each import (empty = everything the pull found).
+  const [fxOff, setFxOff] = useState([])
+  const [rrOff, setRrOff] = useState([])
   // Fixtures / results roundups spread across a carousel: rows are split evenly
   // across `count` derived pages, `idx` is the page being previewed.
   const [roundPages, setRoundPages] = useState({ fixtures: { count: 1, idx: 0 }, results: { count: 1, idx: 0 } })
@@ -2325,9 +2366,9 @@ export default function AdminSocialPost() {
   }
 
   // ── Play.cricket fixtures / results round import ────────────────────────────
-  const applyFxDate = useCallback((d, season) => {
+  const applyFxDate = useCallback((d, season, off) => {
     if (!d) return
-    setFixtures(sortByGrade((d.fixtures || []).map(f => ({ ...f }))))
+    setFixtures(sortByGrade(filterByCats(d.fixtures || [], off).map(f => ({ ...f }))))
     setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
   }, [])
   const importFixtures = useCallback(async () => {
@@ -2337,13 +2378,13 @@ export default function AdminSocialPost() {
       const dates = data.dates || []
       if (!dates.length) { setFxImport({ status: 'empty', dates: [], idx: 0, season: data.season }); return }
       setFxImport({ status: 'ok', dates, idx: 0, season: data.season })
-      applyFxDate(dates[0], data.season)
+      applyFxDate(dates[0], data.season, fxOff)
     } catch (e) { setFxImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
-  }, [applyFxDate])
+  }, [applyFxDate, fxOff])
 
-  const applyRrDate = useCallback((d, season) => {
+  const applyRrDate = useCallback((d, season, off) => {
     if (!d) return
-    setResults(sortByGrade((d.results || []).map(r => ({ ...r }))))
+    setResults(sortByGrade(filterByCats(d.results || [], off).map(r => ({ ...r }))))
     setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
   }, [])
   const importResults = useCallback(async () => {
@@ -2353,9 +2394,9 @@ export default function AdminSocialPost() {
       const dates = data.dates || []
       if (!dates.length) { setRrImport({ status: 'empty', dates: [], idx: 0, season: data.season }); return }
       setRrImport({ status: 'ok', dates, idx: 0, season: data.season })
-      applyRrDate(dates[0], data.season)
+      applyRrDate(dates[0], data.season, rrOff)
     } catch (e) { setRrImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
-  }, [applyRrDate])
+  }, [applyRrDate, rrOff])
 
   // Same round pull, resolved from a pasted match link instead of the live
   // feed's latest — any one match link from a round names the whole round.
@@ -2369,7 +2410,7 @@ export default function AdminSocialPost() {
         const dates = data.dates || []
         if (!dates.length) { setFxImport(s => ({ ...s, status: 'empty', notice: null })); return }
         setFxImport({ status: 'ok', dates, idx: 0, season: data.season, notice: null })
-        applyFxDate(dates[0], data.season)
+        applyFxDate(dates[0], data.season, fxOff)
         return
       }
       if (data.kind === 'playhq') {
@@ -2380,7 +2421,7 @@ export default function AdminSocialPost() {
     } catch (e) {
       setFxImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
     }
-  }, [applyFxDate])
+  }, [applyFxDate, fxOff])
 
   const importResultsFromLink = useCallback(async (q) => {
     setRrImport(s => ({ ...s, status: 'loading', notice: null }))
@@ -2390,7 +2431,7 @@ export default function AdminSocialPost() {
         const dates = data.dates || []
         if (!dates.length) { setRrImport(s => ({ ...s, status: 'empty', notice: null })); return }
         setRrImport({ status: 'ok', dates, idx: 0, season: data.season, notice: null })
-        applyRrDate(dates[0], data.season)
+        applyRrDate(dates[0], data.season, rrOff)
         return
       }
       if (data.kind === 'playhq') {
@@ -2401,7 +2442,19 @@ export default function AdminSocialPost() {
     } catch (e) {
       setRrImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
     }
-  }, [applyRrDate])
+  }, [applyRrDate, rrOff])
+
+  // Switch a category on or off and re-fill from the day being shown.
+  const toggleFxCat = (k) => {
+    const next = fxOff.includes(k) ? fxOff.filter(x => x !== k) : [...fxOff, k]
+    setFxOff(next)
+    applyFxDate(fxImport.dates[fxImport.idx], fxImport.season, next)
+  }
+  const toggleRrCat = (k) => {
+    const next = rrOff.includes(k) ? rrOff.filter(x => x !== k) : [...rrOff, k]
+    setRrOff(next)
+    applyRrDate(rrImport.dates[rrImport.idx], rrImport.season, next)
+  }
 
   // Drag-and-drop reorder for the roundup row cards (▲▼ and ✕ keep working).
   const fxDrag = useRowDrag(setFixtures)
@@ -4154,7 +4207,8 @@ export default function AdminSocialPost() {
                     <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
                       status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
                       onPull={importFixtures} onFetchLink={importFixturesFromLink} notice={fxImport.notice}
-                      onPick={(i) => { setFxImport((s) => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season) }} />
+                      onPick={(i) => { setFxImport((s) => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season, fxOff) }}
+                      off={fxOff} onToggleCat={toggleFxCat} />
                   </div>
                 )}
                 {activeTab === 'results' && (
@@ -4162,7 +4216,8 @@ export default function AdminSocialPost() {
                     <RoundImportBox hint="recent results" rowsKey="results"
                       status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
                       onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
-                      onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season) }} />
+                      onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
+                      off={rrOff} onToggleCat={toggleRrCat} />
                   </div>
                 )}
 
@@ -5492,7 +5547,8 @@ export default function AdminSocialPost() {
                 <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
                   status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
                   onPull={importFixtures} onFetchLink={importFixturesFromLink} notice={fxImport.notice}
-                  onPick={(i) => { setFxImport(s => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season) }} />
+                  onPick={(i) => { setFxImport(s => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season, fxOff) }}
+                  off={fxOff} onToggleCat={toggleFxCat} />
                 <div className="flex flex-col gap-2">
                   {fixtures.map((f, i) => {
                     const set = (patch) => setFixtures(rows => rows.map((r, j) => j === i ? { ...r, ...patch } : r))
@@ -5558,7 +5614,8 @@ export default function AdminSocialPost() {
                 <RoundImportBox hint="recent results" rowsKey="results"
                   status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
                   onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
-                  onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season) }} />
+                  onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
+                  off={rrOff} onToggleCat={toggleRrCat} />
                 <div className="flex flex-col gap-2">
                   {results.map((r, i) => {
                     const set = (patch) => setResults(rows => rows.map((x, j) => j === i ? { ...x, ...patch } : x))
