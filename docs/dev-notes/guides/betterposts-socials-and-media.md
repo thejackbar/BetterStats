@@ -187,3 +187,4 @@
 
 **Round imports (Fixtures and Results)**
 57. A roundup pull groups by match-day and the editor loads `dates[0]`, so anything in another bucket is hidden behind the date select. Fixtures merges a weekend (`_merge_weekend_days`); never reintroduce an exact-date split for a round. Every row carries `categories` (a list, not one value) and the Include chips in `RoundImportBox` filter on it; a row with none is never hidden.
+58. A round pull must not depend on the club's stored grades alone: new grades reach our tables only on a sync. Read-only pulls use `fixtures_source.current_grade_rows_with_live` (`discover_live=True`); anything that stamps a `grades.id` must not, since live-only grades have none.

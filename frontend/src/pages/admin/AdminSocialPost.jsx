@@ -828,15 +828,15 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
   return (
     <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
       <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
-      <div className="flex gap-2 items-center">
+      <div className="flex flex-col gap-2">
         <button onClick={onPull} disabled={status === 'loading'}
           className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
           style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
           {status === 'loading' ? 'Loading…' : 'Pull latest round'}
         </button>
         {dates.length > 1 && (
-          <select value={idx} onChange={e => onPick(+e.target.value)}
-            className="flex-1 min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono">
+          <select value={idx} onChange={e => onPick(+e.target.value)} aria-label="Match-day"
+            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono">
             {dates.map((d, i) => (
               <option key={d.date || i} value={i}>{d.label}{d.round ? ` · ${d.round}` : ''} ({rowsOf(d).length})</option>
             ))}

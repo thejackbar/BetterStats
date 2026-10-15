@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import grassroots_scores_client as gr
 from app.services.club_match import club_match_keys, fixture_side, fixture_involves_club, team_is_club
-from app.services.fixtures_source import _current_grade_rows, org_grassroots_fixtures
+from app.services.fixtures_source import current_grade_rows_with_live, org_grassroots_fixtures
 from app.services.grade_labels import GRADE_CATEGORIES, categories_for_name, org_grade_category_sets
 from app.services.social_match_lookup import parse_reference
 from app.services.sync import strip_team_suffix
@@ -403,7 +403,7 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
 async def social_fixtures(db: AsyncSession, org) -> dict:
     """Upcoming/live fixtures for the org, grouped by match-day, shaped for the
     Fixtures roundup posts."""
-    fixtures = await org_grassroots_fixtures(db, org)
+    fixtures = await org_grassroots_fixtures(db, org, discover_live=True)
     grade_orders = await _grade_display_orders(db, org.id)
     cats_of = await _category_lookup(db, org.id)
     season = next((fx.get("season_name") for fx in fixtures if fx.get("season_name")), None)
@@ -446,7 +446,7 @@ async def _recent_club_matches(db: AsyncSession, org) -> dict | None:
 
     Shared by the Results roundup and the team of the week, so the two agree on
     which matches "the latest round" means."""
-    rows = await _current_grade_rows(db, org.id)
+    rows = await current_grade_rows_with_live(db, org.id)
     if not rows:
         return None
     keys = club_match_keys(org)
