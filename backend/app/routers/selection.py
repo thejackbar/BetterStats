@@ -15,6 +15,7 @@ All endpoints scoped to the caller's club via get_current_club.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import date, timedelta
 from typing import Optional
@@ -117,6 +118,24 @@ async def selection_overview(
     teams = tm_res.scalars().all()
     team_names = {str(t.id): (t.short_name or t.name) for t in teams}
     team_seqs = {str(t.id): t.sequence for t in teams}
+
+    # Teams that play at the same time on the same day (most clubs start every
+    # side at once) would otherwise come back in whatever order Postgres likes.
+    # Break the tie the way every squad list does: ranked teams first by
+    # hierarchy (1st XI, 2nd XI, ...), then unranked ones by name, numbers read
+    # as numbers (OD3s before OD10s). Date and start time still lead.
+    def _team_order(f: Fixture):
+        seq = team_seqs.get(str(f.team_id)) if f.team_id else None
+        name = (team_names.get(str(f.team_id)) if f.team_id else None) or f.label or f.opponent_name or ""
+        return (
+            f.played_on is None, f.played_on or date.min,
+            f.start_time is None, f.start_time or "",
+            not (seq or 0) > 0, seq or 0,
+            [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", name.lower())],
+            str(f.id),
+        )
+
+    fixtures = sorted(fixtures, key=_team_order)
 
     # Grade label per fixture (drives the small grade badge).
     grade_ids = {f.grade_id for f in fixtures if f.grade_id}
