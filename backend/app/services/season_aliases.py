@@ -19,6 +19,8 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.season_kind import season_kind
+
 
 def _as_uuid(value) -> uuid.UUID:
     if isinstance(value, uuid.UUID):
@@ -105,17 +107,32 @@ async def resolve_season_filter(
     # even though it's "the same year"). Pull in sibling rows sharing the
     # canonical season's year so a year split across comps is fully counted
     # (same fix as iq_team.player_impact's year-based MVP scope).
+    #
+    # "Same year" also means the same KIND (services/season_kind.py): Winter 2026
+    # and Summer 2026/27 are both year 2026 and are two seasons, so picking one
+    # must not return the other's games. A club that amalgamates its seasons
+    # (`organisations.amalgamate_seasons`) gets the plain year back.
+    amalgamate = bool((await session.execute(
+        text("SELECT amalgamate_seasons FROM organisations WHERE id = CAST(:org AS UUID)"),
+        {"org": str(_as_uuid(org_id))},
+    )).scalar())
     year_row = await session.execute(
-        text("SELECT year FROM seasons WHERE id = CAST(:sid AS UUID)"),
+        text("SELECT year, name FROM seasons WHERE id = CAST(:sid AS UUID)"),
         {"sid": canonical},
     )
-    year = year_row.scalar()
+    picked = year_row.first()
+    year, picked_name = (picked[0], picked[1]) if picked else (None, None)
+    kind = "" if amalgamate else season_kind(picked_name)
+
+    def _same_kind(name) -> bool:
+        return amalgamate or season_kind(name) == kind
+
     if year is not None:
         siblings = await session.execute(
-            text("SELECT id FROM seasons WHERE organisation_id = CAST(:org AS UUID) AND year = :year"),
+            text("SELECT id, name FROM seasons WHERE organisation_id = CAST(:org AS UUID) AND year = :year"),
             {"org": str(_as_uuid(org_id)), "year": year},
         )
-        ids |= {str(r[0]) for r in siblings.all()}
+        ids |= {str(r[0]) for r in siblings.all() if _same_kind(r[1])}
 
     if include_shared:
         # Every club's row for the same real-world season, three ways:
@@ -124,8 +141,8 @@ async def resolve_season_filter(
         #      per club, so two clubs in one competition hold the same
         #      `grassroots_id` under their own per-club row ids. This is the
         #      key `iq_filters.season_ids_cross_club` already matches on.
-        #   2. the same year, for two clubs whose competitions report under
-        #      different CA season ids for the one summer.
+        #   2. the same year AND kind, for two clubs whose competitions report
+        #      under different CA season ids for the one summer.
         #   3. the same name, because `year` is nullable — it is only set when
         #      CA returns a start date (see the sync's season upsert), and a
         #      hand-created season row can have neither of the above.
@@ -142,14 +159,20 @@ async def resolve_season_filter(
                 guids.add(guid)
         shared = await session.execute(
             text(
-                "SELECT id FROM seasons"
+                "SELECT id, name, year,"
+                "       (grassroots_id IS NOT NULL AND grassroots_id = ANY(:guids)) AS by_guid"
+                " FROM seasons"
                 " WHERE (grassroots_id IS NOT NULL AND grassroots_id = ANY(:guids))"
                 "    OR (CAST(:year AS INT) IS NOT NULL AND year = CAST(:year AS INT))"
                 "    OR LOWER(name) = ANY(:names)"
             ),
             {"guids": list(guids), "year": year, "names": list(names)},
         )
-        ids |= {str(r[0]) for r in shared.all()}
+        for sid, nm, yr, by_guid in shared.all():
+            by_name = bool(nm) and nm.lower() in names
+            by_year = year is not None and yr == year and _same_kind(nm)
+            if by_guid or by_name or by_year:
+                ids.add(str(sid))
     return list(ids)
 
 

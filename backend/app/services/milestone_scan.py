@@ -39,6 +39,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import milestone_totals
+from app.services.grade_milestone_schemes import load_book
 from app.services.milestone_rules import (
     Scheme, crossed_thresholds, load_scheme, next_threshold, reach_window,
 )
@@ -252,7 +253,9 @@ async def grade_milestones(session: AsyncSession, org_id: str, *,
     reach. Each row carries ``grade`` (the name the club reads) and
     ``grade_key`` (a stable, case-folded key for de-duplication).
     """
-    scheme = await load_scheme(session, org_id)
+    # Each grade reads its own increments where the club set them, else the
+    # club's (services/grade_milestone_schemes).
+    book = await load_book(session, org_id)
     cutoff_year = datetime.date.today().year - ACTIVE_SEASON_YEARS
     people = (await session.execute(text("""
         SELECT p.id::text AS player_id,
@@ -313,6 +316,7 @@ async def grade_milestones(session: AsyncSession, org_id: str, *,
             "grade": labels.get(name) or name,
             "grade_key": (name or "").strip().lower(),
         }
+        scheme = book.for_grade(name)
         earlier = set(crossed_thresholds(mt, before, scheme))
         for threshold in crossed_thresholds(mt, total, scheme):
             if threshold not in earlier:

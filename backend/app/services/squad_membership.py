@@ -35,6 +35,7 @@ _RECOMPUTE_PRIMARY_SQL = text(
     "  SELECT tm.team_id FROM team_members tm"
     "  JOIN teams t ON t.id = tm.team_id"
     "  WHERE tm.player_id = :pid AND tm.organisation_id = :org"
+    "    AND t.is_active IS NOT FALSE"
     "  ORDER BY (CASE WHEN COALESCE(t.sequence, 0) > 0 THEN 0 ELSE 1 END),"
     "           COALESCE(t.sequence, 0), lower(t.name)"
     "  LIMIT 1"
@@ -55,18 +56,50 @@ async def recompute_primary_squad(
 async def member_team_ids(
     db: AsyncSession, organisation_id: uuid.UUID, player_id: uuid.UUID
 ) -> list[uuid.UUID]:
-    """Every squad the player is a member of, top-ranked first."""
+    """Every live squad the player is a member of, top-ranked first.
+
+    A squad the club has switched off is left out: it is hidden everywhere a
+    person can see squads, so it must not be listed, counted or replaced by a
+    write that was made without being able to see it. Its membership rows are
+    kept, so switching the squad back on restores them."""
     rows = (await db.execute(
         text(
             "SELECT tm.team_id FROM team_members tm "
             "JOIN teams t ON t.id = tm.team_id "
             "WHERE tm.player_id = :pid AND tm.organisation_id = :org "
+            "AND t.is_active IS NOT FALSE "
             "ORDER BY (CASE WHEN COALESCE(t.sequence, 0) > 0 THEN 0 ELSE 1 END), "
             "COALESCE(t.sequence, 0), lower(t.name)"
         ),
         {"pid": player_id, "org": organisation_id},
     )).all()
     return [r[0] for r in rows]
+
+
+async def recompute_primary_squads_for_team(
+    db: AsyncSession, organisation_id: uuid.UUID, team_id: uuid.UUID
+) -> None:
+    """Re-derive the primary squad of everyone in ``team_id``.
+
+    Run when a squad is switched on or off, so a player whose headline squad was
+    just hidden falls back to their next live one (or none) and one switched back
+    on is restored. Does NOT commit."""
+    await db.execute(
+        text(
+            "UPDATE players p SET squad_team_id = ("
+            "  SELECT tm.team_id FROM team_members tm"
+            "  JOIN teams t ON t.id = tm.team_id"
+            "  WHERE tm.player_id = p.id AND tm.organisation_id = :org"
+            "    AND t.is_active IS NOT FALSE"
+            "  ORDER BY (CASE WHEN COALESCE(t.sequence, 0) > 0 THEN 0 ELSE 1 END),"
+            "           COALESCE(t.sequence, 0), lower(t.name)"
+            "  LIMIT 1"
+            ") WHERE p.organisation_id = :org AND p.id IN ("
+            "  SELECT player_id FROM team_members"
+            "  WHERE team_id = :tid AND organisation_id = :org)"
+        ),
+        {"org": organisation_id, "tid": team_id},
+    )
 
 
 async def _delete_membership(db, organisation_id, player_id, team_id) -> None:

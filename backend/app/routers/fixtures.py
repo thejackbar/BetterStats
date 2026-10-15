@@ -27,8 +27,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_FIXTURES, require_cap
 from app.models.db import Fixture, Grade, Organisation, Season, Team, User, get_db
 from app.routers.auth import get_current_club
-from app.services.club_match import club_match_keys
-from app.services.fixtures_source import org_grassroots_fixtures
+from app.services.club_match import fixture_side
+from app.services.fixtures_reconcile import reconcile
+from app.services.fixtures_source import org_grassroots_fixtures_checked
 
 router = APIRouter(prefix="/fixtures", tags=["fixtures"])
 
@@ -73,11 +74,13 @@ def _derive_sides(g: dict, club: Organisation) -> tuple[Optional[str], Optional[
     """Best-effort (home_away, opponent_name) from the club's perspective."""
     home = g.get("home_team") or ""
     away = g.get("away_team") or ""
-    keys = club_match_keys(club)
-    hl, al = home.lower(), away.lower()
-    if any(k in hl for k in keys):
+    # By owning organisation id first, then by name. A first-word test alone
+    # filed "North Beach v North Perth" as a HOME game for North Perth, with
+    # North Perth itself as the opponent.
+    side = fixture_side(club, home, away, g.get("home_org_id"), g.get("away_org_id"))
+    if side == "home":
         return "HOME", away
-    if any(k in al for k in keys):
+    if side == "away":
         return "AWAY", home
     return None, None
 
@@ -307,23 +310,43 @@ async def sync_fixtures(
     club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_FIXTURES)),
 ):
-    """Pull upcoming fixtures from the Grassroots /scores API and upsert them.
+    """Make the club's synced fixtures match the Grassroots draw as it is now.
 
     Upserts on (organisation_id, playhq_id) so re-running is idempotent and two
     clubs that play each other keep separate rows. The Grassroots source already
     returns only upcoming/live matches dated today-or-later. (``playhq_id`` is the
     upstream match id — now the GR match GUID — kept as the column name for
     backwards compatibility, not a PlayHQ namespace anymore.)
+
+    It also reconciles the other direction (``services/fixtures_reconcile``): a
+    synced game CA no longer lists is moved onto its replacement's GUID, removed,
+    or, when the club has picked an XI or collected votes on it, kept and marked
+    CANCELLED. The match lists are fetched fresh (not from the 30 minute cache)
+    so the button reflects the draw as it is when pressed.
     """
-    games = await org_grassroots_fixtures(db, club)
-    if not games:
-        return {"synced": 0, "detail": "No upcoming Grassroots fixtures found for this club."}
+    games, listing = await org_grassroots_fixtures_checked(db, club, force=True)
+    today = date.today()
 
     # Teams for name-based auto-attribution (id, name, sequence).
     tm_res = await db.execute(
         select(Team.id, Team.name, Team.sequence).where(Team.organisation_id == club.id)
     )
     teams = [(tid, tname, tseq) for tid, tname, tseq in tm_res.fetchall()]
+
+    existing_rows = list(
+        (await db.execute(select(Fixture).where(Fixture.organisation_id == club.id))).scalars().all()
+    )
+    incoming_ids = {str(g["id"]) for g in games if g.get("id") and g.get("played_at")}
+    rec = await reconcile(
+        db,
+        existing=existing_rows,
+        games=[g for g in games if g.get("id") and g.get("played_at")],
+        incoming_ids=incoming_ids,
+        listing=listing,
+        today=today,
+        derive_sides=lambda g: _derive_sides(g, club),
+    )
+    by_gid = {f.playhq_id: f for f in existing_rows if f.playhq_id and f.source == "grassroots"}
 
     synced = 0
     teams_assigned = 0
@@ -332,14 +355,7 @@ async def sync_fixtures(
         played = g.get("played_at")
         if not gid or not played:
             continue
-        existing = (
-            await db.execute(
-                select(Fixture).where(
-                    Fixture.organisation_id == club.id,
-                    Fixture.playhq_id == str(gid),
-                )
-            )
-        ).scalar_one_or_none()
+        existing = by_gid.get(str(gid))
         home_away, opponent = _derive_sides(g, club)
         target = existing or Fixture(id=uuid.uuid4(), organisation_id=club.id)
         target.source = "grassroots"
@@ -374,12 +390,34 @@ async def sync_fixtures(
             target.updated_at = datetime.now(timezone.utc)
         else:
             db.add(target)
+            by_gid[str(gid)] = target
         synced += 1
 
     await db.commit()
+
+    if not synced and not rec.changed:
+        return {
+            "synced": 0, "teams_assigned": 0, "rekeyed": 0, "removed": 0, "cancelled": 0,
+            "detail": "No upcoming Grassroots fixtures found for this club.",
+        }
     detail = f"Synced {synced} fixture{'' if synced == 1 else 's'}"
     if teams_assigned:
         detail += f", auto-assigned {teams_assigned} to a team"
     elif not teams:
         detail += " — seed teams first to auto-assign them"
-    return {"synced": synced, "teams_assigned": teams_assigned, "detail": detail}
+    n_removed = len(rec.removed)
+    if n_removed:
+        detail += f". Removed {n_removed} that {'is' if n_removed == 1 else 'are'} no longer on the draw"
+    if rec.rekeyed:
+        detail += f". Updated {len(rec.rekeyed)} that Cricket Australia re-listed"
+    if rec.cancelled:
+        n = len(rec.cancelled)
+        detail += f". Marked {n} cancelled (you had picked a team or recorded votes, so {'it is' if n == 1 else 'they are'} kept)"
+    return {
+        "synced": synced,
+        "teams_assigned": teams_assigned,
+        "rekeyed": len(rec.rekeyed),
+        "removed": n_removed,
+        "cancelled": len(rec.cancelled),
+        "detail": detail,
+    }

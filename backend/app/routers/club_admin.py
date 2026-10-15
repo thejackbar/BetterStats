@@ -35,7 +35,10 @@ from app.auth.modules import (
     BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for, STATUS_PRIORITY,
 )
 from app.services import junior_hiding
-from app.services.milestone_rules import RUNS_STEPS, WICKETS_STEPS
+from app.services.milestone_rules import (
+    DEFAULT_STEPS as MILESTONE_DEFAULT_STEPS, PRESET_STEPS as MILESTONE_PRESETS,
+    STATS as MILESTONE_STATS, STEP_LIMITS as MILESTONE_LIMITS, step_problem,
+)
 from app.services import sponsor_tiers
 from app.services import section_names
 from app.services import honour_layout
@@ -918,6 +921,9 @@ class SettingsPatch(BaseModel):
     # junior-only players and every game in a competition tagged junior. Off by
     # default; club admins still see everything. See services/junior_hiding.py.
     hide_juniors: Optional[bool] = None
+    # Count a club's winter and summer seasons of one year as ONE season
+    # (migration 331). Off by default: Winter 2026 and Summer 2026/27 stay two.
+    amalgamate_seasons: Optional[bool] = None
     # Who may open a committee document the club uploaded (migration 218).
     # True = the uploader, current Office Bearers and the Main Admin only.
     # False = any committee member who can reach the register.
@@ -1075,6 +1081,7 @@ async def get_settings(
         "public_header_logo": bool(club.public_header_logo),
         "show_competition_filters": bool(club.show_competition_filters),
         "hide_juniors": bool(club.hide_juniors),
+        "amalgamate_seasons": bool(club.amalgamate_seasons),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "diary_start_month": club.diary_start_month or 7,
         "socials_style": club.socials_style,
@@ -1161,6 +1168,8 @@ async def patch_settings(
         # The cached answer is per club and would otherwise serve the old
         # switch for up to its TTL.
         junior_hiding.forget(club.id)
+    if data.amalgamate_seasons is not None:
+        club.amalgamate_seasons = bool(data.amalgamate_seasons)
     if data.committee_docs_office_bearer_only is not None:
         club.committee_docs_office_bearer_only = bool(data.committee_docs_office_bearer_only)
     if data.diary_start_month is not None:
@@ -6396,12 +6405,15 @@ async def list_milestones_report(
     """
     import datetime
     from app.services.milestone_rules import (
-        next_threshold, reach_window, crossed_thresholds, is_displayable, load_scheme,
+        next_threshold, reach_window, crossed_thresholds, is_displayable,
     )
-    from app.services import milestone_scan
+    from app.services import grade_milestone_schemes, milestone_scan
 
     org_id = str(club.id)
-    scheme = await load_scheme(db, org_id)
+    # The club's scheme for career milestones; a grade-level one (grade_matches
+    # below) reads that grade's own increments where the club set them.
+    book = await grade_milestone_schemes.load_book(db, org_id)
+    scheme = book.club
     _CAT = {
         "runs": "batting",
         "wickets": "bowling",
@@ -6477,16 +6489,16 @@ async def list_milestones_report(
             WHERE p.organisation_id = :org_id AND p.is_player = TRUE
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender,
                      COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
-            HAVING COUNT(DISTINCT ga.game_id) >= 50
+            HAVING COUNT(DISTINCT ga.game_id) >= :min_step
         """),
-        {"org_id": org_id},
+        {"org_id": org_id, "min_step": book.smallest_step("matches")},
     )
     for r in gm_rows.mappings().all():
         n = int(r["matches"])
         grade_name = r["grade_name"]
         if not grade_name:
             continue
-        for threshold in crossed_thresholds("grade_matches", n):
+        for threshold in crossed_thresholds("grade_matches", n, book.for_grade(grade_name)):
             achieved.append({
                 "player_id": r["player_id"],
                 "player_name": r["player_name"],
@@ -6555,11 +6567,12 @@ async def list_milestones_report(
         grade_name = r["grade_name"]
         if not grade_name:
             continue
-        target = next_threshold("grade_matches", n)
+        grade_scheme = book.for_grade(grade_name)
+        target = next_threshold("grade_matches", n, grade_scheme)
         if target is None:
             continue
         needed = target - n
-        if needed > reach_window("grade_matches", target):
+        if needed > reach_window("grade_matches", target, grade_scheme):
             continue
         upcoming.append({
             "player_id": r["player_id"],
@@ -6578,14 +6591,35 @@ async def list_milestones_report(
     return {
         "upcoming": upcoming,
         "achieved": achieved,
-        "scheme": {"runs_step": scheme.runs_step, "wickets_step": scheme.wickets_step},
-        "scheme_options": {"runs_steps": list(RUNS_STEPS), "wickets_steps": list(WICKETS_STEPS)},
+        "scheme": _scheme_payload(scheme),
+        "scheme_options": {f"{stat}_steps": list(MILESTONE_PRESETS[stat]) for stat in MILESTONE_STATS},
+        "step_limits": {
+            stat: {"min": lo, "max": hi, "multiple": unit}
+            for stat, (lo, hi, unit) in MILESTONE_LIMITS.items()
+        },
+        "grade_schemes": await grade_milestone_schemes.club_grade_choices(
+            db, org_id, this_year=current_year),
     }
+
+
+def _scheme_payload(scheme) -> dict:
+    return {f"{stat}_step": scheme.step_for(stat) for stat in MILESTONE_STATS}
 
 
 class MilestoneSchemeUpdate(BaseModel):
     runs_step: Optional[int] = None
     wickets_step: Optional[int] = None
+    matches_step: Optional[int] = None
+    catches_step: Optional[int] = None
+
+
+class MilestoneGradeSchemeUpdate(BaseModel):
+    """One grade's own increments. A step left out is not touched; null follows the club."""
+    grade: str
+    runs_step: Optional[int] = None
+    wickets_step: Optional[int] = None
+    matches_step: Optional[int] = None
+    catches_step: Optional[int] = None
 
 
 async def _fill_milestone_rungs(org_id) -> None:
@@ -6615,36 +6649,38 @@ async def update_milestone_scheme(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Pick the club's run and wicket milestone increments.
+    """Pick the club's milestone increments: a preset, or a step of its own.
 
     A key that is not sent leaves that increment alone; an explicit null puts it
-    back to the default. A value the screen does not offer is refused, not
-    quietly mapped to the default. Stored rows are never deleted: a rung the new
-    step does not use is hidden by ``is_displayable`` and returns if the club
-    picks that step again. Rungs the new step adds are filled in, undated.
+    back to the default. A value outside the limits in ``milestone_rules`` is
+    refused, not quietly mapped to the default. Stored rows are never deleted:
+    a rung the new step does not use is hidden by ``is_displayable`` and returns
+    if the club picks that step again. Rungs the new step adds are filled in,
+    undated. A grade's own increments (``/milestones/grade-schemes``) are not
+    touched by this.
     """
     from app.services.audit_log import log_activity
-    from app.services.milestone_rules import clean_runs_step, clean_wickets_step
 
-    before = (club.milestone_runs_step, club.milestone_wickets_step)
+    columns = {stat: f"milestone_{stat}_step" for stat in MILESTONE_STATS}
+    before = tuple(getattr(club, col) for col in columns.values())
     fields = data.model_fields_set
-    if "runs_step" in fields:
-        if data.runs_step is not None and data.runs_step not in RUNS_STEPS:
-            raise HTTPException(status_code=422,
-                                detail=f"Runs step must be one of {', '.join(map(str, RUNS_STEPS))}")
-        club.milestone_runs_step = data.runs_step
-    if "wickets_step" in fields:
-        if data.wickets_step is not None and data.wickets_step not in WICKETS_STEPS:
-            raise HTTPException(status_code=422,
-                                detail=f"Wickets step must be one of {', '.join(map(str, WICKETS_STEPS))}")
-        club.milestone_wickets_step = data.wickets_step
+    for stat, col in columns.items():
+        key = f"{stat}_step"
+        if key not in fields:
+            continue
+        value = getattr(data, key)
+        if value is not None:
+            problem = step_problem(stat, value)
+            if problem:
+                raise HTTPException(status_code=422, detail=problem)
+        setattr(club, col, value)
 
-    changed = before != (club.milestone_runs_step, club.milestone_wickets_step)
+    changed = before != tuple(getattr(club, col) for col in columns.values())
     await db.commit()
     await db.refresh(club)
     saved = {
-        "runs_step": clean_runs_step(club.milestone_runs_step),
-        "wickets_step": clean_wickets_step(club.milestone_wickets_step),
+        f"{stat}_step": _clean_step(stat, getattr(club, col))
+        for stat, col in columns.items()
     }
     if changed:
         # After the commit: a failed audit write must not undo the club's choice.
@@ -6655,3 +6691,56 @@ async def update_milestone_scheme(
         )
         background_tasks.add_task(_fill_milestone_rungs, club.id)
     return saved
+
+
+def _clean_step(stat: str, value) -> int:
+    return value if step_problem(stat, value) is None else MILESTONE_DEFAULT_STEPS[stat]
+
+
+@router.put("/milestones/grade-schemes")
+async def update_milestone_grade_scheme(
+    data: MilestoneGradeSchemeUpdate,
+    current_user: User = Depends(require_cap(MANAGE_MILESTONES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Give one grade its own milestone increments.
+
+    Covers the milestones inside that grade (100 games in A Grade, 1,000 runs in
+    A Grade, the Records page with the grade picked, the grade notices). Career
+    milestones keep the club's scheme. A step not sent is left alone, an
+    explicit null follows the club's setting again, and a value outside the
+    limits is refused. Nothing is stored per player, so nothing is rebuilt: the
+    new ladder is read the next time a screen asks.
+    """
+    import datetime
+    from app.services import grade_milestone_schemes
+    from app.services.audit_log import log_activity
+
+    choice = await grade_milestone_schemes.resolve_grade(
+        db, club.id, data.grade, this_year=datetime.date.today().year)
+    if choice is None:
+        raise HTTPException(status_code=422, detail="That grade is not one of this club's grades")
+    steps = {}
+    for stat in MILESTONE_STATS:
+        key = f"{stat}_step"
+        if key not in data.model_fields_set:
+            continue
+        value = getattr(data, key)
+        if value is not None:
+            problem = step_problem(stat, value)
+            if problem:
+                raise HTTPException(status_code=422, detail=problem)
+        steps[stat] = value
+    before = dict(choice["steps"])
+    saved = await grade_milestone_schemes.save_grade_steps(db, club.id, choice, steps)
+    await db.commit()
+    if saved != before:
+        await log_activity(
+            db, org_id=club.id, user_id=current_user.id,
+            action="update_milestone_grade_scheme", target_type="organisation",
+            target_id=str(club.id),
+            details={"grade": choice["name"], "grade_key": choice["key"], "steps": saved},
+            commit=True,
+        )
+    return {"key": choice["key"], "name": choice["name"], "steps": saved}

@@ -53,6 +53,8 @@ const run = async () => {
   const json = (r, body, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
   // Catch-all FIRST: Playwright matches routes in reverse registration order.
   await page.route('**/api/**', (r) => json(r, {}))
+  // Names print through the club's format (default "Last, First"); these checks look them up as typed.
+  await page.route(/\/api\/club-admin\/settings$/, (r) => json(r, { player_name_format: 'first_last' }))
   await page.route('**/api/auth/me', (r) => json(r, ME))
   await page.route('**/api/selection/overview', (r) => json(r, { fixtures: [] }))
   await page.route(/\/api\/selection\/[^/]+\/previous-xi/, (r) => json(r, { source_fixture_id: null, player_ids: [], captain_id: null, wicket_keeper_id: null }))

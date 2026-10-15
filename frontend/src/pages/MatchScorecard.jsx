@@ -7,7 +7,7 @@ import { fmtOvers, oversToBalls, ballsToOvers } from '../lib/cricketFormat'
 import { useAuth } from '../contexts/AuthContext'
 import { CAP } from '../lib/capabilities'
 import { useClubTheme } from '../hooks/useClubTheme'
-import { rememberClubSlug } from '../lib/clubSlug'
+import { rememberClubSlug, readClubSlug } from '../lib/clubSlug'
 import TeamBadge from '../components/TeamBadge'
 
 // Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
@@ -924,7 +924,10 @@ export default function MatchScorecard() {
     // Always DB-first → Grassroots fallback for live/unsynced (api.getScorecard);
     // the old PlayHQ Partner path (when ?org was present) is retired. ?org is
     // still read below purely for club name-formatting.
-    api.getScorecard(gameId)
+    // Whose side to read the match from: the club in the link, else the club the
+    // visitor was last browsing. The server only honours it for a club that
+    // played in the game, so a stale one is ignored rather than trusted.
+    api.getScorecard(gameId, orgId || readClubSlug())
       .then(setGame)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -1066,7 +1069,7 @@ export default function MatchScorecard() {
           onClose={() => setClaimTarget(null)}
           onSaved={() => {
             setClaimTarget(null)
-            api.getScorecard(gameId).then(setGame).catch(() => {})
+            api.getScorecard(gameId, orgId || readClubSlug()).then(setGame).catch(() => {})
           }}
         />
       )}

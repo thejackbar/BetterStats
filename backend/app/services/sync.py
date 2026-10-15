@@ -76,6 +76,27 @@ def classify_match_result(scorecard: dict, our_org_id_str: str) -> Optional[str]
     return None
 
 
+def winning_team_name(scorecard: dict) -> Optional[str]:
+    """The winning side's display name, or None for a draw, tie or no result.
+
+    ``isWinner`` on a team is the answer when Cricket Australia has flagged it.
+    Before the flag arrives (a result entered late) a team's ``resultType``
+    still says WON, or LOST for the other side of a two-team match.
+    """
+    teams = scorecard.get("teams") or []
+    summary = (scorecard.get("matchSummary") or {}).get("teams") or []
+    for t in teams + summary:
+        if t.get("isWinner"):
+            return t.get("displayName")
+    for st in summary:
+        if (st.get("resultType") or "").upper().startswith("WON"):
+            return st.get("displayName")
+    lost = [st for st in summary if (st.get("resultType") or "").upper().startswith("LOST")]
+    if len(lost) == 1 and len(summary) == 2:
+        return next(st for st in summary if st is not lost[0]).get("displayName")
+    return None
+
+
 def _parse_uuid(val: str) -> Optional[uuid.UUID]:
     try:
         return uuid.UUID(val)
@@ -1974,6 +1995,20 @@ async def sync_grassroots_game_level_data(
     # return every match between all teams in the competition.
     org_id_str_lower = org_id_str.lower()
     seen_match_ids: set[str] = set()
+    # A recent game we hold with none of our players' batting or bowling on it
+    # (stored when CA had its result but not yet its detail) is read again even
+    # when it is older than this run's window, or no later run would ever fill it.
+    reread_ids: set[str] = set()
+    if since is not None:
+        try:
+            from app.services import participant_relink
+            async with async_session_maker() as _s:
+                reread_ids = await participant_relink.recent_games_without_detail(_s, org_uuid)
+            if reread_ids:
+                logger.info(f"GR-sync: {len(reread_ids)} recent game(s) without player detail will be re-read")
+        except Exception as _e:
+            logger.warning(f"GR-sync: recent-game check failed: {_e}")
+            reread_ids = set()
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
     match_to_format: dict[str, str] = {}  # match_id → CA's own matchType string
@@ -1999,7 +2034,7 @@ async def sync_grassroots_game_level_data(
                 # (services/sync_drift.py) is for.
                 sched = m.get("matchSchedule") or []
                 day = ((sched[0].get("startDateTime") if sched else "") or "")[:10]
-                if not day or day < since.isoformat():
+                if not day or (day < since.isoformat() and mid not in reread_ids):
                     stats["gr_matches_out_of_window"] = stats.get("gr_matches_out_of_window", 0) + 1
                     continue
             teams = m.get("teams") or []
@@ -2182,6 +2217,16 @@ async def sync_grassroots_game_level_data(
         # per-game error.
         if run_id and processed % 25 == 0:
             await _check_sync_control(run_id, stats)
+            # Progress is reported HERE, ahead of every `continue` below. It used
+            # to sit at the bottom of the loop, which a game that is already
+            # stored (the common case on a re-sync) skips, so the bar sat at
+            # "0 / N" for a run that was working through hundreds of games.
+            # Scorecards own 55→99% of the overall bar, the long phase.
+            _progress(stats, "Saving scorecards",
+                      55 + 44 * (processed - 1) / max(len(seen_match_ids), 1),
+                      processed - 1, len(seen_match_ids))
+            await update_sync_run(run_id, stats)
+            logger.info(f"GR-sync: processed {processed - 1}/{len(seen_match_ids)} games, stats={stats}")
         try:
             match_uuid = uuid.UUID(match_id_str)
         except ValueError:
@@ -2249,8 +2294,17 @@ async def sync_grassroots_game_level_data(
         summary_teams = (scorecard.get("matchSummary") or {}).get("teams") or []
         home_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "")
         away_team_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "")
-        our_is_home = bool(our_team_name) and our_team_name == home_team_name
-        our_is_away = bool(our_team_name) and our_team_name == away_team_name
+        # Which side is ours: by team id first (the names on `teams[]` and on
+        # `matchSummary.teams` are not always spelled the same, and a miss here
+        # leaves home_org_id/away_org_id unset, so a fixture another club synced
+        # first never counts as ours in our stats), then by exact name.
+        _our_tid = str((our_team or {}).get("id") or "").lower()
+        _home_tid = next((str(t.get("id") or "").lower() for t in summary_teams if t.get("isHome") is True), "")
+        _away_tid = next((str(t.get("id") or "").lower() for t in summary_teams if t.get("isHome") is False), "")
+        our_is_home = bool(our_team_name) and (
+            our_team_name == home_team_name or (bool(_our_tid) and _our_tid == _home_tid))
+        our_is_away = bool(our_team_name) and not our_is_home and (
+            our_team_name == away_team_name or (bool(_our_tid) and _our_tid == _away_tid))
 
         # Open a fresh per-game session.
         try:
@@ -2278,7 +2332,7 @@ async def sync_grassroots_game_level_data(
                         logger.warning(f"GR-sync: identity adoption for {match_id_str} failed: {_e}")
 
                 existing = await session.execute(
-                    text("SELECT venue, result, innings_totals FROM games WHERE id=:gid LIMIT 1"),
+                    text("SELECT venue, result, innings_totals, winning_team FROM games WHERE id=:gid LIMIT 1"),
                     {"gid": match_id_str},
                 )
                 existing_row = existing.fetchone()
@@ -2316,7 +2370,7 @@ async def sync_grassroots_game_level_data(
                     our_appearances_done = our_appear_check.first() is not None
 
                 if game_exists:
-                    existing_venue, existing_result, existing_innings_totals = existing_row
+                    existing_venue, existing_result, existing_innings_totals, existing_winner = existing_row
                     updates: dict[str, str] = {}
                     if existing_venue is None:
                         venue_name = (scorecard.get("venue") or {}).get("name")
@@ -2331,6 +2385,16 @@ async def sync_grassroots_game_level_data(
                         new_result = classify_match_result(scorecard, org_id_str)
                         if new_result:
                             updates["result"] = new_result
+                    if existing_winner is None:
+                        # The row can be created before the result is in, and
+                        # then only `result` was ever filled (above), from
+                        # whichever club's sync revisited it first, so it reads
+                        # as that club's verdict. The winner's NAME is neutral:
+                        # every club's page, list and stats read the result
+                        # against its own side from it.
+                        _winner = winning_team_name(scorecard)
+                        if _winner:
+                            updates["winning_team"] = _winner
                     if existing_innings_totals is None:
                         # Prospective-only self-heal, same idiom as venue/result
                         # above: a pre-migration-230 game has no stored totals,
@@ -2356,7 +2420,12 @@ async def sync_grassroots_game_level_data(
                         # sheet names whom the club holds now.
                         try:
                             from app.services import participant_relink
-                            _fixed = await participant_relink.repair_stored_game(
+                            # A game from the last two weeks is checked for any
+                            # missing ROW; an older one only for missing PLAYERS.
+                            _repair = (participant_relink.reread_stored_game
+                                       if participant_relink.played_within(scorecard)
+                                       else participant_relink.repair_stored_game)
+                            _fixed = await _repair(
                                 session, org_uuid, match_uuid, scorecard,
                                 lambda g: _team_pid(_parse_uuid(g)))
                             if _fixed:
@@ -2448,7 +2517,7 @@ async def sync_grassroots_game_level_data(
 
                 # (summary_teams / home_team_name / away_team_name computed
                 # earlier, before the game-exists check)
-                winner_name = next((t.get("displayName") for t in (teams_data or []) + summary_teams if t.get("isWinner")), None)
+                winner_name = winning_team_name(scorecard)
                 result_text = classify_match_result(scorecard, org_id_str)
 
                 # Game — only create the row the first time; when it already
@@ -2781,14 +2850,6 @@ async def sync_grassroots_game_level_data(
         except Exception as e:
             logger.error(f"GR-sync: per-game exception for {match_id_str}: {e}")
             # session has already auto-closed; just move on
-
-        if run_id and processed % 25 == 0:
-            # Scorecards own 55→99% of the overall bar — the long phase.
-            _progress(stats, "Saving scorecards",
-                      55 + 44 * processed / max(len(seen_match_ids), 1),
-                      processed, len(seen_match_ids))
-            await update_sync_run(run_id, stats)
-            logger.info(f"GR-sync: processed {processed}/{len(seen_match_ids)} games, stats={stats}")
 
     logger.info(f"GR-sync complete: {stats} for org {org_uuid}")
     return stats

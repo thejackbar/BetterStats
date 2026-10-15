@@ -3,7 +3,7 @@
 // team's fixture, colour-coded by team, with a Pick/Select action. A grade
 // filter narrows to one team. Manual add / PlayHQ sync / edit / delete are
 // preserved from the previous screen.
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Fragment, useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -191,7 +191,8 @@ export default function AdminFixtures() {
         week,
         current: week === thisMon,
         games: list.slice().sort((a, b) =>
-          (a.team_sequence ?? 99) - (b.team_sequence ?? 99)
+          (a.played_on || '').localeCompare(b.played_on || '')
+          || (a.team_sequence ?? 99) - (b.team_sequence ?? 99)
           || (a.start_time || '').localeCompare(b.start_time || '')),
       }))
   }, [fixtures, values, scope])
@@ -251,6 +252,8 @@ export default function AdminFixtures() {
           <div className="flex flex-col gap-3.5">
             {groups.map(({ week, current, games }) => {
               const playable = games.filter((g) => g.home_away !== 'BYE')
+              // A weekend can span days (Sat and Sun): label each day inside the card.
+              const multiDay = new Set(games.map((g) => g.played_on || '')).size > 1
               return (
                 <div key={week} className="pb-card overflow-hidden" style={{ borderColor: current ? 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' : undefined }}>
                   <div className="flex items-center gap-3 px-[18px] py-3 border-b pb-hairline" style={{ background: current ? 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' : 'var(--pb-surface2)' }}>
@@ -262,11 +265,20 @@ export default function AdminFixtures() {
                   {games.map((g, gi) => {
                     const bye = g.home_away === 'BYE'
                     const named = (g.lineup_count || 0) > 0
+                    const cancelled = g.status === 'CANCELLED'
                     const isCurrentTop = current && (g.team_sequence ?? 99) <= 1
+                    const newDay = multiDay && (gi === 0 || games[gi - 1].played_on !== g.played_on)
                     return (
-                      <div key={g.id}
-                        className={`relative flex items-center gap-2 sm:gap-4 pl-[18px] pr-3 sm:pl-[22px] sm:pr-[18px] py-3 ${gi > 0 ? 'border-t pb-hairline' : ''}`}
-                        style={{ background: named ? 'color-mix(in srgb, var(--pb-positive) 6%, transparent)' : 'transparent' }}>
+                      <Fragment key={g.id}>
+                      {newDay && (
+                        <div className={`px-[18px] py-1.5 font-mono text-[10px] uppercase tracking-wide2 text-pb-faint ${gi > 0 ? 'border-t pb-hairline' : ''}`}
+                          style={{ background: 'var(--pb-surface2)' }}>
+                          {g.played_on ? fmtDate(g.played_on) : 'Undated'}
+                        </div>
+                      )}
+                      <div
+                        className={`relative flex items-center gap-2 sm:gap-4 pl-[18px] pr-3 sm:pl-[22px] sm:pr-[18px] py-3 ${gi > 0 && !newDay ? 'border-t pb-hairline' : ''}`}
+                        style={{ background: named && !cancelled ? 'color-mix(in srgb, var(--pb-positive) 6%, transparent)' : 'transparent', opacity: cancelled ? 0.6 : 1 }}>
                         {/* Home/away accent bar on the far left */}
                         <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: homeAwayColor(g.home_away) }}
                           title={g.home_away === 'HOME' ? 'Home' : g.home_away === 'AWAY' ? 'Away' : 'Bye'} />
@@ -283,8 +295,9 @@ export default function AdminFixtures() {
                             </>
                           )}
                         </div>
+                        {cancelled && <span title="Cricket Australia no longer lists this game. It is kept because a team or votes were recorded on it." className="font-mono text-[9px] text-pb-red bg-pb-red/10 px-1.5 py-0.5 rounded shrink-0">CANCELLED</span>}
                         {named && <span className="font-mono text-[9px] text-pb-positive bg-pb-positive/12 px-1.5 py-0.5 rounded shrink-0">XI named</span>}
-                        {!bye && canSelect && (
+                        {!bye && !cancelled && canSelect && (
                           <Btn variant={isCurrentTop ? 'primary' : 'ghost'} sm onClick={() => navigate(`/admin/betterselect/select/${g.id}`)}>
                             {isCurrentTop ? 'Pick team' : 'Select'}
                           </Btn>
@@ -296,6 +309,7 @@ export default function AdminFixtures() {
                           </div>
                         )}
                       </div>
+                      </Fragment>
                     )
                   })}
                 </div>

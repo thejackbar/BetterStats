@@ -49,7 +49,7 @@ function MergeBuilder({ seasons, onMerged }) {
     <div className="pb-card p-5 mb-6">
       <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Merge Seasons</p>
       <p className="text-pb-dim text-sm mb-4 leading-relaxed">
-        Use this when one calendar year has been split into multiple seasons by the data source — e.g. "Summer 2025/26" and "Winter 2025/26" are both really 2025/26.
+        Use this when one season has been split into multiple seasons by the data source and you want a single season everywhere. To join every winter and summer pair at once, use the switch above instead.
         Stats from the variant will roll up into the canonical season everywhere (leaderboards, player profiles, records). The variant is hidden from the season dropdown but kept in the database, so this is fully reversible.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -136,6 +136,58 @@ function MergeHistory({ refreshKey, onChanged }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function AmalgamateSetting() {
+  // Whether Winter 2026 and Summer 2026/27 count as one season per year.
+  // Off by default: they are two seasons, in every filter and every table.
+  const [on, setOn] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    api.adminGetSettings().then(s => setOn(!!s.amalgamate_seasons)).catch(() => setOn(false))
+  }, [])
+
+  async function toggle(next) {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.adminPatchSettings({ amalgamate_seasons: next })
+      setOn(next)
+    } catch (e) {
+      setError(e.message || 'Could not save')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (on === null) return null
+  return (
+    <div className="pb-card p-5 mb-6">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Winter and summer</p>
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={busy}
+          onChange={e => toggle(e.target.checked)}
+          className="mt-1"
+        />
+        <span className="text-sm text-pb-text leading-relaxed">
+          Count winter and summer as one season per year
+          <span className="block text-pb-faint text-[13px] mt-1">
+            Off: Winter 2026 and Summer 2026/27 are separate seasons in every season filter, season table and
+            season total. On: they are added together as 2026/27. The kind is read from the season name, so a
+            season with no winter in its name counts as the main summer season.
+          </span>
+        </span>
+      </label>
+      {error && (
+        <div className="mt-3 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
+      )}
     </div>
   )
 }
@@ -374,6 +426,7 @@ export default function AdminSeasons() {
           ))}
         </div>
 
+        <AmalgamateSetting />
         <MergeBuilder seasons={seasons} onMerged={refresh} />
         <MergeHistory refreshKey={mergeRefresh} onChanged={refresh} />
       </div>

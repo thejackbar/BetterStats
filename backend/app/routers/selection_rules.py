@@ -62,6 +62,7 @@ class SettingsBody(BaseModel):
     # A rule about either still shows: that one the club asked for.
     show_fees: Optional[bool] = None
     show_training: Optional[bool] = None
+    notify_captain_on_confirm: Optional[bool] = None
 
 
 async def _grade_options(db: AsyncSession, org_id) -> list[dict]:
@@ -108,6 +109,7 @@ def _settings_out(club: Organisation) -> dict:
         "default_team_size": club.default_team_size if club.default_team_size is not None else 11,
         "show_fees": cfg["show_fees"],
         "show_training": cfg["show_training"],
+        "notify_captain_on_confirm": cfg["notify_captain_on_confirm"],
     }
 
 
@@ -180,6 +182,8 @@ async def patch_settings(
         cfg["show_fees"] = bool(body.show_fees)
     if body.show_training is not None:
         cfg["show_training"] = bool(body.show_training)
+    if body.notify_captain_on_confirm is not None:
+        cfg["notify_captain_on_confirm"] = bool(body.notify_captain_on_confirm)
     club.selection_rules_config = cfg or None
     await db.commit()
     return _settings_out(club)

@@ -27,7 +27,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import grassroots_scores_client as gr
-from app.services.club_match import club_match_keys
+from app.services.club_match import name_score
 
 # Cricket Australia redacts junior participants' names to a run of asterisks.
 # Existing convention (see the fill-in notes in CLAUDE.md) is to show that
@@ -93,12 +93,17 @@ def our_team_index(teams: list[dict], org) -> Optional[int]:
         oid = str((t.get("club_id") or "")).lower()
         if oid and oid in org_ids:
             return i
-    keys = club_match_keys(org)
+    # No side carried our id. A side that names ANOTHER club by id is not ours
+    # whatever its name shares with ours ("North Beach" for "North Perth"), so
+    # only a side with no organisation id at all is judged on its name.
+    best_i, best = None, 0
     for i, t in enumerate(teams):
-        hay = f"{t.get('club') or ''} {t.get('name') or ''}".lower()
-        if any(k in hay for k in keys):
-            return i
-    return None
+        if str((t.get("club_id") or "")).strip():
+            continue
+        score = max(name_score(org, t.get("club")), name_score(org, t.get("name")))
+        if score > best:
+            best_i, best = i, score
+    return best_i
 
 
 def _name_key(n: Optional[str]) -> tuple[str, str]:

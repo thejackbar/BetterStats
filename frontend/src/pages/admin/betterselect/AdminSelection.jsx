@@ -31,9 +31,12 @@ import SelectionFilters from './SelectionFilters'
 import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
 import { AddPlayersSheet, SlotSheet, MobileBar } from './SelectionMobile'
+import SendSide from './SendSide'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
 import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank } from './selectionMeta'
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
+import { teamSeq, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
+import { confirmSig, restoreDraft } from './selectionDraft'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
 // displayed positional *hints* are gone, but the eligibility model is useful).
@@ -48,35 +51,7 @@ function fitsSlot(p, i) {
   return (p.skill_positions || []).some((r) => slotAccepts(i).includes(r))
 }
 
-// Longest shared leading word-run across squad names, so a tag reads "2nd XI"
-// not "Applecross 2nd XI" without hardcoding the club name.
-function commonPrefixWord(names) {
-  if (names.length < 2) return ''
-  let prefix = names[0]
-  for (const n of names.slice(1)) {
-    let i = 0
-    while (i < prefix.length && i < n.length && prefix[i] === n[i]) i++
-    prefix = prefix.slice(0, i)
-    if (!prefix) break
-  }
-  const cut = prefix.lastIndexOf(' ')
-  return cut > 0 ? prefix.slice(0, cut + 1) : ''
-}
-const stripPrefix = (prefix, name) => (prefix && name?.startsWith(prefix) ? name.slice(prefix.length) : name)
-
 // ── Team switcher (which of our teams this fixture is for) ───────────────────
-// Seniority rank for ordering a matchday's teams (1 = top team). Prefer the
-// explicit Team.sequence; fall back to the first number in the team/grade name
-// (mirrors the backend's _guess_sequence); unranked teams sink to the bottom.
-function teamSeq(f) {
-  if (f?.team_sequence && f.team_sequence > 0) return f.team_sequence
-  const m = (f?.team_name || f?.grade_name || '').match(/(\d+)/)
-  return m ? parseInt(m[1], 10) : 999
-}
-const teamNameOf = (f) => f?.team_name || f?.grade_name || f?.opponent_name || f?.label || 'Team'
-const oppLabelOf = (f) =>
-  f?.home_away === 'BYE' ? 'BYE' : `${f?.home_away === 'AWAY' ? '@ ' : 'vs '}${f?.opponent_name || f?.label || 'TBC'}`
-
 // A dropdown of the teams playing on this fixture's date (current team shown,
 // switch to any other) flanked by ◀ / ▶ to jump one team higher / lower in the
 // club hierarchy. The arrows grey out when there's no team above / below.
@@ -172,37 +147,9 @@ function ViewToggle({ value, onChange }) {
   )
 }
 
-// What Confirm would write: the named XI in batting order, captain, keeper and
-// the call-up cascades. Gaps between slots are not part of it.
-const confirmSig = (filled, capId, wkId, demoList) =>
-  JSON.stringify([filled.map((id) => [id, id === capId, id === wkId]), demoList])
-
 const DRAFT_DELAY_MS = 600
 const DRAFT_RETRY_MS = 5000
 const DRAFT_POLL_MS = 8000
-
-// A saved draft laid back onto the board. Anyone no longer in the pool is
-// dropped; the server re-judges everything at Confirm.
-function restoreDraft(dd, pool, size) {
-  const inPool = new Set((pool || []).map((p) => p.id))
-  let slots = (dd.slots || []).map((id) => (id && inPool.has(id) ? id : null))
-  if (size === 0) slots = slots.filter(Boolean)
-  else {
-    while (slots.length > size && slots[slots.length - 1] == null) slots.pop()
-    while (slots.length < size) slots.push(null)
-  }
-  const kept = new Set(slots.filter(Boolean))
-  const demo = {}
-  ;(dd.demotions || []).forEach((x) => {
-    if (x.callup_id && kept.has(x.callup_id)) demo[x.player_id] = { fixture_id: x.fixture_id, batting_order: x.batting_order, callupId: x.callup_id }
-  })
-  return {
-    slots,
-    cap: kept.has(dd.captain_id) ? dd.captain_id : null,
-    wk: kept.has(dd.wicket_keeper_id) ? dd.wicket_keeper_id : null,
-    demo,
-  }
-}
 
 export default function AdminSelection() {
   const fmt = useAdminNameFormat()
@@ -257,6 +204,7 @@ export default function AdminSelection() {
   const [addOpen, setAddOpen] = useState(false)
   const [slotOpen, setSlotOpen] = useState(null)
   const [showSheet, setShowSheet] = useState(false)
+  const [showSend, setShowSend] = useState(false)
   const [copied, setCopied] = useState(false)
   // How the team sheet lists the XI: the saved batting order, or A to Z by first
   // name for a team announcement. Display only: the batting order itself is not
@@ -407,8 +355,9 @@ export default function AdminSelection() {
   }, [data])
   const usedIds = useMemo(() => new Set(slots.filter(Boolean)), [slots])
 
-  // Default (Squad order) comparator: players the squad above has not picked
-  // first, then tier → form score → availability → name.
+  // Default (Squad order) comparator: own squad, then players the squad above
+  // has not picked, then the squad below, then the rest → form score →
+  // availability → name.
   const cmp = useCallback((a, b) => {
     const at = poolRank(a), bt = poolRank(b)
     if (at !== bt) return at - bt
@@ -886,6 +835,7 @@ export default function AdminSelection() {
         <Icon name={theme === 'light' ? 'moon' : 'sun'} size={16} />
       </button>
       <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}><span className="hidden sm:inline">Share</span></Btn>
+      {canEdit && <Btn variant="soft" sm icon="share" onClick={() => setShowSend(true)} title="Email the confirmed side to the captain or the players"><span className="hidden sm:inline">Email</span></Btn>}
       {/* Below `lg` Confirm lives in the bar pinned to the bottom of the screen. */}
       {canEdit && <Btn variant="primary" sm icon="check" className="max-lg:hidden" onClick={save} disabled={saving || !dirty}>{confirmLabel}</Btn>}
     </div>
@@ -952,6 +902,10 @@ export default function AdminSelection() {
       {availEdit && (
         <QuickAvailModal player={availEdit} dateLabel={fx?.played_on} current={availEdit.availability}
           onPick={pickAvail} onClose={() => setAvailEdit(null)} />
+      )}
+
+      {showSend && (
+        <SendSide fixtureId={fixtureId} title={title} dirty={dirty} count={count} onClose={() => setShowSend(false)} />
       )}
 
       {showSheet && (

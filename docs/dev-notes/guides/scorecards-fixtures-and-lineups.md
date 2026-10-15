@@ -134,3 +134,5 @@ none specific to this area. A Full Rebuild (`POST /club-admin/hard-refresh`) is 
 | - v8.79.1 crests and header; v8.79.2 winner and ordering | rules extracted | Rules 21 to 23 |
 | - v8.79.3 cross-club leak in team classification | rules extracted | Rules 4, 18; Open follow-ups |
 | - Yearbook auto-generation after Full Rebuild (misfiled) | rules extracted | Rule 35; Flag 9 |
+
+- Never decide "is this team ours" from a name fragment. `services/club_match.fixture_side` / `side_is_club` / `team_is_club`: owning organisation id first, name (whole words, fuller name wins) only for a side with no id. `club_match_keys` includes the club's FIRST WORD, so a substring test on it matched "North Beach" for "North Perth". The match page reads from the club in `?org=` when that club played in the game (`games._viewing_club`), never always from the club that synced it first. Check: `verify_north_perth_report.py`.

@@ -1486,3 +1486,25 @@ a new table:
   which now wins over the first-touch snapshot whenever present.
 
 <!-- END original CLAUDE.md L15510-15559 -->
+
+## v9.110.11: trial extension request on /trial
+
+A registered club whose public page is paused (inactive, or BetterStats/Core not live, so `clubs._public_blocked`) used to be sent to `ClubInactive` ("Club page paused") when picked on `/trial`.
+
+- `self_serve_trial.search_clubs` adds `already_registered_paused` per result via `_public_page_paused`, which re-reads the club with `module_subscriptions` loaded (`org_core_live` fails open on unloaded rows). The internal super-admin search shares the function and just carries the extra key.
+- `Trial.jsx` `handleClubClick`: registered and paused opens `ExtensionRequestModal`; registered and live still navigates to the slug; unregistered still opens `ClubActionModal`. Paused wins over the slug check.
+- `POST /public/self-serve/request-trial-extension` (same flag-gated router, 10 per hour per IP counting rejected posts). Requires club, name, email shape, phone of 8 to 15 digits, role and message. Saves a `club_onboarding_requests` row (`source = trial_extension_request`, no migration, no CRM deal since the club already has one) BEFORE emailing, then sends one email per address in `TRIAL_EXTENSION_NOTIFY` (jack@ and elton@bettersports.com.au), reply-to the requester, all fields HTML-escaped.
+- No live provider (console) or every send failing returns 503 with the support address; the saved row stays for staff. Not a thank-you (rule 26).
+- Not covered: a club locked by `password_protect_reason = trial_ended` (the 423 PIN page) keeps its own `request-unpause` form.
+- Proof: `backend/verification/verify_trial_extension_request.py` (real Postgres, shipped route bodies; control run against the previous commit reports the flag MISSING and the endpoint absent). UI driven in Chromium with the API stubbed: exact request body, live and unregistered paths unchanged, 390px no overflow.
+
+## v9.112.1: the extension request grants 7 days once
+
+Follow-up to v9.110.11. A first request from a paused club now extends it straight away instead of only notifying.
+
+- `public_self_serve._grant_extension` resolves the club on the server (`find_matching_organisation` plus `_reclaimable_existing`, then `self_serve_trial._paused_org`), never from the slug or id the browser sends. It grants only when: page paused, `is_active`, the Core row is status `trial` and the master `subscription_status` is live, and no earlier `trial_extension_granted` row exists for that club. Then `module_subscriptions.extend_trial_for_org(days=TRIAL_EXTENSION_DAYS, reset_start=True)`, the same function the sales "Extend Trial" uses, so every module on trial moves together.
+- "Once" is remembered by the row's `source` (`trial_extension_granted` against the resolved org id; anything else is `trial_extension_request`). No migration. The extension and its row commit together, before the email.
+- The reply carries `extended`, `extension_days`, `trial_ends_at` and the club's own `club_slug`; the modal shows the right thank-you and a link to the club page. `GET /public/self-serve/status` returns `trial_extension_days` for the intro copy.
+- A granted extension with no live email provider still answers ok (it is true and saved); a request that was NOT granted and could not be emailed is still a 503.
+- Accepted risk: the form is unauthenticated, so anyone who types a paused club's name gets that club one 7 day extension. The cap is once per club plus the 10 per hour IP limit. Change `TRIAL_EXTENSION_DAYS` in one place.
+- Proof: `backend/verification/verify_trial_extension_request.py` (37 checks; the control run on the previous code fails the 15 new-behaviour ones with no crash). UI in Chromium: both replies, exact link target, 390px.

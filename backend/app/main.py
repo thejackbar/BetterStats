@@ -4375,6 +4375,20 @@ async def lifespan(app: FastAPI):
         for _stmt in _SELECTION_DRAFT_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 329: the record of a confirmed side being sent to the
+        # captain and the players. Same one-copy rule: this list and alembic's
+        # 329 both run services/selection_notice_ddl.STATEMENTS.
+        from app.services.selection_notice_ddl import STATEMENTS as _SELECTION_NOTICE_DDL
+        for _stmt in _SELECTION_NOTICE_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 331: the club's switch for counting winter and summer as one
+        # season per year. Same one-copy rule: this list and alembic's 331 both
+        # run services/amalgamate_seasons_ddl.STATEMENTS.
+        from app.services.amalgamate_seasons_ddl import STATEMENTS as _AMALGAMATE_SEASONS_DDL
+        for _stmt in _AMALGAMATE_SEASONS_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 285: importing a club's history from its own public
         # CricketStatz site. Same one-copy rule — this list and alembic's 285
         # both run services/cricketstatz_ddl.STATEMENTS.
@@ -4416,6 +4430,13 @@ async def lifespan(app: FastAPI):
         # services/milestone_scheme_ddl.STATEMENTS.
         from app.services.milestone_scheme_ddl import STATEMENTS as _MILESTONE_SCHEME_DDL
         for _stmt in _MILESTONE_SCHEME_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 330: milestone increments per grade, and club-wide matches
+        # and catches steps. Same one-copy rule: this list and alembic's 330
+        # both run services/milestone_grade_scheme_ddl.STATEMENTS.
+        from app.services.milestone_grade_scheme_ddl import STATEMENTS as _MILESTONE_GRADE_DDL
+        for _stmt in _MILESTONE_GRADE_DDL:
             await conn.execute(text(_stmt))
 
         # Migration 322: linked clubs. Same one-copy rule: this list and

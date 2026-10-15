@@ -86,22 +86,33 @@ export function fmtPct(v, { sign = false } = {}) {
   return `${sign && n > 0 ? '+' : ''}${n}%`
 }
 
-// ── Season labels: canonical "YYYY/YY" ───────────────────────────────────────
+// ── Season labels ────────────────────────────────────────────────────────────
 // Single source of truth for how a season is shown ANYWHERE in the app. Cricket
 // Australia, MyCricket and manual imports all name seasons differently
 // ("Summer 2025/26", "Winter 2024/25", "2025_26", or a bare "2016"), which used
 // to leak into dropdowns and tables as inconsistent labels and even duplicate
-// season groups. Normalise every one to the Australian-summer-season form
+// season groups. The main (summer) season is normalised to the Australian form
 // "YYYY/YY" (start year + 2-digit end year), e.g.
 //   "Summer 1996/97" → "1996/97"   "2025_26" → "2025/26"   2016 → "2016/17"
+//
+// A winter, spring or autumn season keeps its word, because the year alone does
+// not tell it from the summer season that starts the same year:
+//   "Winter 2026" → "Winter 2026"   "Winter 2025/26" → "Winter 2025/26"
+// and where a club HAS such a season the summer one is named too ("Summer
+// 2026/27"), so two rows never read as the same "2026/27". `registerSeasons`
+// is how the label learns which years have a second season; api.js calls it
+// whenever a season list arrives, before the page renders it.
 //
 // Accepts a season object ({ name, year }), a raw name string, or a numeric
 // year. Returns the original string when it can't find a year (so genuinely
 // non-dated labels survive), and passes "All Time" / blank through untouched.
 const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const _KIND_RE = /\b(winter|spring|autumn)\b/i
 
-export function formatSeason(input, year) {
-  if (input === null || input === undefined || input === '') return ''
+// Start years that have a winter/spring/autumn season beside the summer one.
+const _splitYears = new Set()
+
+function _seasonParts(input, year) {
   let name
   if (typeof input === 'object') {
     name = input.name
@@ -109,16 +120,14 @@ export function formatSeason(input, year) {
   } else {
     name = String(input)
   }
-  if (name === 'All Time' || name === 'Career (no season)') return name
-  // A raw UUID (achievements occasionally store the season's DB id) carries no
-  // readable year — hand it back so the caller can decide what to show.
-  if (typeof name === 'string' && _UUID_RE.test(name.trim())) return name
-
+  const kindMatch = name ? String(name).match(_KIND_RE) : null
+  const kind = kindMatch ? kindMatch[1].toLowerCase() : ''
   let start = null
+  let end = null
   // 1) An explicit split year ("…2016/17", "2025_26", "2025-26") — unambiguous.
   if (name) {
-    const m = String(name).match(/(\d{4})\s*[/_-]\s*\d{2,4}/)
-    if (m) start = parseInt(m[1], 10)
+    const m = String(name).match(/(\d{4})\s*[/_-]\s*(\d{2,4})/)
+    if (m) { start = parseInt(m[1], 10); end = m[2] }
   }
   // 2) The numeric year column (the season's start year).
   if (start === null && year !== undefined && year !== null && /^\d{4}$/.test(String(year))) {
@@ -129,9 +138,39 @@ export function formatSeason(input, year) {
     const m = String(name).match(/(\d{4})/)
     if (m) start = parseInt(m[1], 10)
   }
-  if (start === null) return name || ''
-  const end = String((start + 1) % 100).padStart(2, '0')
-  return `${start}/${end}`
+  return { name, kind, start, end, explicitSplit: end !== null }
+}
+
+// Tell the label which seasons a club has, so it can name the summer one when a
+// winter one shares its year. Safe to call with anything; additive only.
+export function registerSeasons(list) {
+  if (!Array.isArray(list)) return
+  for (const s of list) {
+    if (!s || typeof s !== 'object') continue
+    const p = _seasonParts(s)
+    if (p.kind && p.start !== null) _splitYears.add(p.start)
+  }
+}
+
+export function formatSeason(input, year) {
+  if (input === null || input === undefined || input === '') return ''
+  const p = _seasonParts(input, year)
+  const name = p.name
+  if (name === 'All Time' || name === 'Career (no season)') return name
+  // A raw UUID (achievements occasionally store the season's DB id) carries no
+  // readable year — hand it back so the caller can decide what to show.
+  if (typeof name === 'string' && _UUID_RE.test(name.trim())) return name
+
+  if (p.start === null) return name || ''
+  const end = String((p.start + 1) % 100).padStart(2, '0')
+  if (p.kind) {
+    // Winter 2026 stays Winter 2026; a split-year name keeps its own end year.
+    const word = p.kind.charAt(0).toUpperCase() + p.kind.slice(1)
+    if (p.explicitSplit) return `${word} ${p.start}/${String(p.end).slice(-2)}`
+    return `${word} ${p.start}`
+  }
+  const label = `${p.start}/${end}`
+  return _splitYears.has(p.start) ? `Summer ${label}` : label
 }
 // Clearer intent at call sites that pass a season row.
 export const seasonLabel = formatSeason

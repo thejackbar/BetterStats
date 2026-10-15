@@ -31,6 +31,7 @@ from app.services.squad_membership import (
     clear_all_squad_memberships,
     move_squad_membership,
     recompute_primary_squad,
+    recompute_primary_squads_for_team,
     remove_squad_memberships,
     set_squad_memberships,
 )
@@ -272,9 +273,14 @@ async def update_team(
         data["grade_id"] = grade_uuid
     if data.get("name"):
         data["name"] = data["name"].strip()
+    was_active = t.is_active
     for key, value in data.items():
         setattr(t, key, value)
     t.updated_at = datetime.now(timezone.utc)
+    if "is_active" in data and bool(t.is_active) != bool(was_active):
+        # A squad switched off (or back on) changes who has it as their primary.
+        await db.flush()
+        await recompute_primary_squads_for_team(db, club.id, t.id)
     await db.commit()
     await db.refresh(t)
     return _serialize(t, await _grade_name_map(db, club.id))

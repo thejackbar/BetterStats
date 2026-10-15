@@ -227,9 +227,23 @@ function NetAttendanceStat({ playerId }) {
 function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail }) {
   const snap = snapshot || {}
   const avail = snap.availability_next || []
-  const bat = snap.recent_batting || []
+  // Each innings with its not-out flag, newest first. An older response carries
+  // only the plain runs list.
+  const bat = snap.recent_batting_detail
+    || (snap.recent_batting || []).map(runs => ({ runs, not_out: false }))
   const bowl = snap.recent_bowling || []
-  const showBowling = bowls(draft.bowling_action, draft.bowling_type) && bowl.length > 0
+  // Shown whenever there are spells on record, whatever the bowling attributes
+  // say: a player who has bowled has a bowling form, and one who never has
+  // shows no row at all.
+  const showBowling = bowl.length > 0
+  const season = snap.season_name || 'this season'
+  const runOuts = snap.season_run_outs ?? 0
+  const stumpings = snap.season_stumpings ?? 0
+  const fieldingExtras = [
+    (snap.season_catches_wk ?? 0) > 0 ? `${snap.season_catches_wk} wk` : null,
+    runOuts > 0 ? `${runOuts} run out${runOuts === 1 ? '' : 's'}` : null,
+    stumpings > 0 ? `${stumpings} stumping${stumpings === 1 ? '' : 's'}` : null,
+  ].filter(Boolean)
   const lp = snap.last_picked
   const lastPicked = lp
     ? [lp.round, lp.opponent ? `vs ${lp.opponent}` : null].filter(Boolean).join(' · ') || (lp.date || null)
@@ -285,13 +299,14 @@ function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail })
             <div className="flex gap-1.5">
               {bat.length === 0
                 ? <span className="text-[11.5px] text-pb-faintest">No innings yet</span>
-                : bat.map((s, i) => (
-                  <span key={i} className="pb-num min-w-[28px] text-center py-[5px] rounded-md text-[12.5px] font-semibold"
+                : bat.map((inn, i) => (
+                  <span key={i} className="pb-num min-w-[28px] text-center py-[5px] px-1 rounded-md text-[12.5px] font-semibold"
+                    title={inn.date ? inn.date : undefined}
                     style={{
-                      background: s >= 50 ? 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' : 'var(--pb-surface2)',
-                      color: s >= 50 ? 'var(--pb-accent)' : s === 0 ? 'var(--pb-red)' : 'var(--pb-dim)',
+                      background: inn.runs >= 50 ? 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' : 'var(--pb-surface2)',
+                      color: inn.runs >= 50 ? 'var(--pb-accent)' : inn.runs === 0 && !inn.not_out ? 'var(--pb-red)' : 'var(--pb-dim)',
                       border: '1px solid var(--pb-hairline)',
-                    }}>{s}</span>
+                    }}>{inn.runs}{inn.not_out ? '*' : ''}</span>
                 ))}
             </div>
           </div>
@@ -300,7 +315,7 @@ function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail })
               <span className="font-mono text-[9.5px] text-pb-faint w-14">BOWLING</span>
               <div className="flex gap-1.5">
                 {bowl.map((f, i) => (
-                  <span key={i} className="pb-num min-w-[38px] text-center py-[5px] rounded-md text-[12.5px] font-semibold"
+                  <span key={i} className="pb-num min-w-[38px] text-center py-[5px] px-1 rounded-md text-[12.5px] font-semibold"
                     style={{
                       background: f.wickets >= 3 ? 'color-mix(in srgb, var(--pb-chart-wickets) 14%, transparent)' : 'var(--pb-surface2)',
                       color: f.wickets >= 3 ? 'var(--pb-chart-wickets)' : 'var(--pb-dim)',
@@ -310,11 +325,11 @@ function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail })
               </div>
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[9.5px] text-pb-faint w-14">CATCHES</span>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="font-mono text-[9.5px] text-pb-faint w-14">FIELDING</span>
             <span className="pb-num font-display font-bold text-base text-pb-text">{snap.season_catches ?? 0}</span>
             <span className="text-[11.5px] text-pb-faintest">
-              this season{(snap.season_catches_wk ?? 0) > 0 ? ` · ${snap.season_catches_wk} wk` : ''}
+              {(snap.season_catches ?? 0) === 1 ? 'catch' : 'catches'} · {season}{fieldingExtras.length ? ` · ${fieldingExtras.join(' · ')}` : ''}
             </span>
           </div>
         </div>

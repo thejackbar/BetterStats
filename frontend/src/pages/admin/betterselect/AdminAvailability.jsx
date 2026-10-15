@@ -11,7 +11,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import {
   Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
-  RecencySelect, playedWithinYears, RuleTags,
+  RecencySelect, playedWithinYears, RuleTags, Chip,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
 import SelfServiceLinkPanel from './SelfServiceLinkPanel'
@@ -80,6 +80,11 @@ export default function AdminAvailability() {
 
   // Selected week (column) — drives the Pick XI handoff and single-week bulk.
   const [selDate, setSelDate] = useState(null)
+
+  // Columns the Availability filter judges. Empty = follow the selected week;
+  // otherwise the picked weeks, combined by `colMatch` (every one or any one).
+  const [filterCols, setFilterCols] = useState([])
+  const [colMatch, setColMatch] = useState('all')
 
   // Date-range: filters which date COLUMNS are shown AND scopes the bulk-fill.
   // `rangeApplied` is what the matrix actually uses; the From/To selects are
@@ -164,16 +169,30 @@ export default function AdminAvailability() {
     return () => { live = false }
   }, [selDate])
 
-  // A player's "effective" response for the (multi-select) availability facet:
-  // matches if ANY chosen status applies across the shown dates.
+  // The weeks the Availability filter looks at: the picked weeks that are still
+  // shown, else the selected week. A date range that hides a picked week drops it.
+  const filterDates = useMemo(() => {
+    const shown = new Set(dates.map((d) => d.date))
+    const picked = filterCols.filter((dt) => shown.has(dt))
+    if (picked.length) return picked
+    return selDate && shown.has(selDate) ? [selDate] : []
+  }, [dates, filterCols, selDate])
+
+  const toggleFilterCol = (date) => setFilterCols((prev) => {
+    const next = filterDates.includes(date) ? filterDates.filter((x) => x !== date) : [...filterDates, date]
+    if (!next.length) return prev // keep at least one week to judge
+    return dates.map((d) => d.date).filter((x) => next.includes(x))
+  })
+
+  // A player's response for the (multi-select) availability facet: matches when
+  // their status for the filtered week(s) is one of the chosen statuses.
   const matchesResponse = useCallback((p) => {
     const sel = values.avail || []
-    if (!sel.length) return true
+    if (!sel.length || !filterDates.length) return true
     const byDate = avail[p.id] || {}
-    return sel.some((s) => s === 'NO_RESPONSE'
-      ? dates.every((d) => (byDate[d.date]?.status || 'NO_RESPONSE') === 'NO_RESPONSE')
-      : dates.some((d) => byDate[d.date]?.status === s))
-  }, [values.avail, avail, dates])
+    const hit = (dt) => sel.includes(byDate[dt]?.status || 'NO_RESPONSE')
+    return colMatch === 'any' ? filterDates.some(hit) : filterDates.every(hit)
+  }, [values.avail, avail, filterDates, colMatch])
 
   const players = useMemo(() => {
     return (data?.players || []).filter((p) => {
@@ -304,6 +323,33 @@ export default function AdminAvailability() {
         </>)}
       />
 
+      {/* Which week(s) the Availability filter judges. Follows the selected
+          column by default; pick several to match across them. */}
+      {(values.avail || []).length > 0 && (
+        <div className="pb-card p-3 mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Availability for</span>
+          <div className="flex flex-wrap gap-1.5">
+            {dates.map((d) => (
+              <Chip key={d.date} label={fmtDay(d.date)} active={filterDates.includes(d.date)}
+                onClick={() => toggleFilterCol(d.date)} />
+            ))}
+          </div>
+          {filterDates.length > 1 && (
+            <Segmented sm value={colMatch} onChange={setColMatch} options={[
+              { value: 'all', label: 'Every week' }, { value: 'any', label: 'Any week' },
+            ]} />
+          )}
+          {filterCols.length > 0 && (
+            <Btn variant="ghost" sm onClick={() => setFilterCols([])}>Use selected week</Btn>
+          )}
+          <span className="basis-full text-[11px] text-pb-faint">
+            {filterCols.length === 0
+              ? 'Following the selected week. Click a week header to change it, or pick several weeks here.'
+              : `Matching ${filterDates.length === 1 ? 'this week only' : colMatch === 'all' ? 'players who fit in every picked week' : 'players who fit in any picked week'}.`}
+          </span>
+        </div>
+      )}
+
       {/* Date-range panel: narrows the shown columns (Apply) and scopes the
           bulk-fill. Staged From/To only take effect on Apply, so the column
           count changes when you commit — not while you're still choosing. */}
@@ -377,7 +423,7 @@ export default function AdminAvailability() {
                 const sel = d.date === selDate
                 const sub = fixtureSub(d)
                 return (
-                  <th key={d.date} onClick={() => setSelDate(d.date)}
+                  <th key={d.date} onClick={() => { setSelDate(d.date); setFilterCols([]) }}
                     className="sticky top-0 z-20 px-3 py-2.5 border-b border-l pb-hairline text-center cursor-pointer"
                     style={{
                       minWidth: 120,
@@ -412,7 +458,7 @@ export default function AdminAvailability() {
             {players.length === 0 && (
               <tr>
                 <td colSpan={dates.length + 1} className="border-t pb-hairline px-4 py-8 text-center">
-                  <Empty>No players match these filters. Try clearing the search/response filter, or switch to “All”.</Empty>
+                  <Empty>No players match these filters. Try clearing the search or response filter, picking another week for it, or switching to “All”.</Empty>
                 </td>
               </tr>
             )}

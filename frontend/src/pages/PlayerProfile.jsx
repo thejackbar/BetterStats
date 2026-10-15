@@ -17,7 +17,7 @@ import {
   AnimatedNum, Sparkline, Label, Card, Btn, Kpi,
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
-import { GradeTotalNote, MatchCoverageInfo } from '../components/MatchCoverage'
+import { GradeTotalNote, MatchCoverageInfo, TopUpNote } from '../components/MatchCoverage'
 import { FilterReachDot, FilterReachNote } from '../components/FilterReach'
 import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
@@ -3229,6 +3229,8 @@ export default function PlayerProfile() {
                 </div>
               )}
             </div>
+
+            <TopUpNote batting={batting} bowling={bowling} fielding={fielding} className="-mt-1" />
 
             {/* Row 2 — Batting */}
             {batting && (

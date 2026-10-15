@@ -27,7 +27,7 @@ from app.models.db import Grade, Organisation, Season, Team, User, get_db
 from app.routers.auth import get_current_club, get_optional_user, public_junior_hiding, user_can_view_org_private
 from app.routers.teams import ensure_team_grades, _grade_name_map
 from app.services import club_lock, grassroots_scores_client
-from app.services.club_match import club_match_keys
+from app.services.club_match import side_is_club
 
 router = APIRouter(prefix="/ladders", tags=["ladders"])
 
@@ -58,7 +58,7 @@ def _row_stats(ladder_data) -> dict:
     return {d.get("id"): d.get("val") for d in (ladder_data or []) if isinstance(d, dict)}
 
 
-def _parse_ladder_payload(raw, club_keys: list) -> list:
+def _parse_ladder_payload(raw, club) -> list:
     """Turn the upstream payload into display-ready views:
     [ {name, columns: [{id, heading}], rows: [{rank, team_name, logo_url,
        is_club, stats: {stat_id: val}}]} ].
@@ -79,13 +79,18 @@ def _parse_ladder_payload(raw, club_keys: list) -> list:
                 stats = _row_stats(t.get("ladderData"))
                 name = t.get("displayName") or "—"
                 org = t.get("owningOrganisation") or {}
-                hay = " ".join(str(x).lower() for x in [name, org.get("name"), org.get("shortName")] if x)
                 rows.append({
                     "rank": t.get("rank"),
                     "team_id": t.get("id"),
                     "team_name": name,
                     "logo_url": org.get("logoUrl"),
-                    "is_club": any(k and k in hay for k in club_keys),
+                    # By the owning organisation id; the name (team, club and
+                    # short name) only when the row has none. A name test alone
+                    # lit up "North Beach" on North Perth's ladder.
+                    "is_club": side_is_club(
+                        club, " ".join(str(x) for x in [name, org.get("name"), org.get("shortName")] if x),
+                        org.get("id"),
+                    ),
                     "stats": {sid: stats.get(sid) for sid, _ in LADDER_STATS},
                 })
         rows.sort(key=lambda r: (r["rank"] is None, r["rank"] if r["rank"] is not None else 9999))
@@ -114,7 +119,6 @@ async def _compute_team_ladders(
     )).all()
     grade_gr = {str(gid): (gg or str(gid)) for gid, gg, _pub in grade_rows}
     grade_public = {str(gid): (pub is not False) for gid, _gg, pub in grade_rows}
-    club_keys = club_match_keys(org)
 
     # A public club page hides grades the club opted out of sharing.
     # The same goes for a junior grade a club hides from its public Stats.
@@ -128,7 +132,7 @@ async def _compute_team_ladders(
 
     async def one(t: Team) -> dict:
         raw = await grassroots_scores_client.get_grade_ladder(grade_gr.get(str(t.grade_id), str(t.grade_id)))
-        views = _parse_ladder_payload(raw, club_keys)
+        views = _parse_ladder_payload(raw, org)
         return {
             "team_id": str(t.id),
             "team_name": t.name,
@@ -202,10 +206,9 @@ async def grade_ladder(
         raise HTTPException(status_code=404, detail="Grade not found")
     if gid in (await public_junior_hiding(db, viewer, org.id, with_players=False)).grade_ids:
         raise HTTPException(status_code=404, detail="Grade not found")
-    club_keys = club_match_keys(org)
     # Ladder API wants the shared raw CA grade GUID, not our (possibly per-club) PK.
     raw = await grassroots_scores_client.get_grade_ladder(grade.grassroots_id or str(gid))
-    views = _parse_ladder_payload(raw, club_keys)
+    views = _parse_ladder_payload(raw, org)
     return {
         "grade_id": str(gid),
         "grade_name": grade.display_name,

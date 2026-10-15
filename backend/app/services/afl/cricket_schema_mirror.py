@@ -97,6 +97,8 @@ SHARED_DDL_MODULES = (
     # Migration 328. `import_batches.through_year` / `.through_label`, on the shared
     # ORM ImportBatch model football's result imports also write through.
     ("app.services.import_through_ddl", "STATEMENTS"),
+    # Migration 331. `organisations.amalgamate_seasons`, on the shared Organisation model.
+    ("app.services.amalgamate_seasons_ddl", "STATEMENTS"),
 )
 
 

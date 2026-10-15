@@ -68,6 +68,8 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     ("team_members", "player_id", "uuid", ("team_id",)),
     ("family_members", "player_id", "uuid", ("family_id",)),
     ("player_name_aliases", "player_id", "uuid", ("alias_key",)),
+    # The record of a confirmed side being emailed to a player or their captain.
+    ("selection_notices", "player_id", "uuid", None),
     ("comms_contacts", "player_id", "uuid", None),
     ("crm_people", "player_id", "uuid", None),
     ("fee_members", "player_id", "uuid", ("organisation_id",)),

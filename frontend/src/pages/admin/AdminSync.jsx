@@ -385,7 +385,7 @@ export default function AdminSync() {
                 Club ID:{' '}
                 {settings.playhq_id
                   ? <span style={{ color: 'var(--pb-accent)' }}>{settings.playhq_id}</span>
-                  : <span style={{ color: 'var(--pb-amber)' }}>not set — game-level data requires this</span>
+                  : <span style={{ color: 'var(--pb-faint)' }}>not set. Syncing results does not need it.</span>
                 }
               </p>
             </div>

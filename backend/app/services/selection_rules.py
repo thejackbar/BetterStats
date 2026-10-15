@@ -190,6 +190,10 @@ def club_config(org) -> dict:
         # A RULE about the same thing still shows — that one was asked for.
         "show_fees": raw.get("show_fees") is not False,
         "show_training": raw.get("show_training") is not False,
+        # Email the confirmed side, with each player's mobile, to its captain
+        # the moment it is confirmed. Off until a club asks: it sends mail and
+        # shares phone numbers (services/selection_notify).
+        "notify_captain_on_confirm": raw.get("notify_captain_on_confirm") is True,
     }
 
 

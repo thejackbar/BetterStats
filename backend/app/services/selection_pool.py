@@ -205,13 +205,32 @@ def _tier_for(fx_seq: int | None, sq_seq: int | None) -> int | None:
 
 
 def _pool_rank(tier: int | None, drop_in: bool) -> int:
-    """Where a player sorts on the board's default (Squad order): a player from
-    the squad ABOVE who has not been picked anywhere that day first, then the
-    fixture's own squad (1), the squad below (2), the rest of the squad above
-    (3), everyone else (99). The browser applies the same order."""
-    if drop_in:
+    """Where a player sorts on the board's default (Squad order): the fixture's
+    own squad first (0), then players from the squad ABOVE who have not been
+    picked anywhere that day (1), the squad below (2), the rest of the squad
+    above (3), everyone else (99). The browser applies the same order."""
+    if tier == 1:
         return 0
+    if drop_in:
+        return 1
     return tier if tier is not None else 99
+
+
+def _ordered_squads(names, active_teams: dict) -> list[str]:
+    """A player's squad names, top squad first.
+
+    ``squads[0]`` is the tag on the pool card, so it has to be the player's
+    headline squad (lowest positive sequence, an unranked one last), not
+    whichever name sorts first in the alphabet. Names are compared in the same
+    case-insensitive way the squad lookup was built with.
+    """
+    rank = {}
+    for nm, seq in active_teams.values():
+        key = nm.lower()
+        r = (0 if (seq or 0) > 0 else 1, seq or 0)
+        if key not in rank or r < rank[key]:
+            rank[key] = r
+    return sorted(names, key=lambda n: (rank.get(n.lower(), (2, 0)), n.lower()))
 
 
 def _drop_in_from(
@@ -425,6 +444,22 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     for pid, lp in lp_res.fetchall():
         last_played[str(pid)] = lp
 
+    # The club's live squads. A squad the club switched off (teams.is_active
+    # false) is hidden from the Squads board and the Teams list, so it must not
+    # reach the pool either: its members' tier, gender wall, squad tag and the
+    # Squad filter all read from here. Memberships to it are kept (switching
+    # it back on restores them); they are just not read.
+    team_res = await db.execute(
+        text(
+            "SELECT id, name, COALESCE(sequence, 0) FROM teams "
+            "WHERE organisation_id = :org AND is_active IS NOT FALSE "
+            "AND name IS NOT NULL AND name <> ''"
+        ),
+        {"org": club.id},
+    )
+    active_teams = {str(tid): (nm.strip(), seq) for tid, nm, seq in team_res.fetchall()}
+    active_by_name = {nm.lower(): nm for nm, _ in active_teams.values()}
+
     # Squads: manual membership unioned with recent appearance team-names.
     squads: dict[str, set] = {}
     sq_res = await db.execute(
@@ -438,18 +473,16 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         {"org": club.id, "cutoff": cutoff},
     )
     for pid, name in sq_res.fetchall():
-        squads.setdefault(str(pid), set()).add(name.strip())
-    mem_res = await db.execute(
-        text(
-            "SELECT tm.player_id, t.name FROM team_members tm "
-            "JOIN teams t ON tm.team_id = t.id "
-            "WHERE tm.organisation_id = :org AND t.name IS NOT NULL AND t.name <> ''"
-        ),
-        {"org": club.id},
-    )
-    for pid, name in mem_res.fetchall():
-        squads.setdefault(str(pid), set()).add(name.strip())
-
+        nm = name.strip()
+        if active_teams:
+            # A club that has built its squads sees only those. Every other
+            # team name a scorecard ever carried (a sponsor spelling, an old
+            # name, a side a player guested for) is history, not a squad, and
+            # listed here it made one player look like they belonged to four.
+            nm = active_by_name.get(nm.lower())
+            if nm is None:
+                continue
+        squads.setdefault(str(pid), set()).add(nm)
     # A player's actual squad MEMBERSHIPS, by team id — team_members is
     # authoritative and a player can sit in several squads at once. This drives
     # the tier / gender wall / squad-match below: a fringe player genuinely in
@@ -462,7 +495,10 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         {"org": club.id},
     )
     for pid, tid in psid_res.fetchall():
+        if str(tid) not in active_teams:
+            continue
         player_squad_ids.setdefault(str(pid), set()).add(str(tid))
+        squads.setdefault(str(pid), set()).add(active_teams[str(tid)][0])
 
     # Availability for this fixture's playing date (explicit answer wins; period fallback).
     avail: dict[str, str] = {}
@@ -596,6 +632,8 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     )
     squad_label: dict[str, str] = {}
     for tid, seq, fee, short, nm in sq_meta_res.fetchall():
+        if str(tid) not in active_teams:
+            continue
         squad_meta[str(tid)] = (seq or 0, fee == "women")
         squad_label[str(tid)] = short or nm or ""
 
@@ -635,6 +673,8 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         dormant = bool(lp) and lp < cutoff
         manual_inactive = p.status == "inactive"
         sq_tid = str(p.squad_team_id) if p.squad_team_id else None
+        if sq_tid and sq_tid not in active_teams:
+            sq_tid = None  # their primary squad has been switched off
         # Every squad the player is in (team_members), with the derived primary
         # folded in for any legacy row that was never mirrored.
         my_squads = set(player_squad_ids.get(pid, set()))
@@ -703,7 +743,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             # team_members row or their old appearances still say. Eligibility
             # (tier, gender wall) is left as computed so BetterIQ still judges
             # a saved pick of them the way it always has.
-            "squads": [] if manual_inactive else sorted(squads.get(pid, [])),
+            "squads": [] if manual_inactive else _ordered_squads(squads.get(pid, ()), active_teams),
             "squad_team_id": None if manual_inactive else sq_tid,
             "availability": avail.get(pid, "NO_RESPONSE"),
             "availability_reason": avail_reason.get(pid),
