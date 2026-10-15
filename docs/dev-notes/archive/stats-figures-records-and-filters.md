@@ -2411,7 +2411,7 @@ Verified: `verify_club_room_records.py` 24 checks on a local Postgres 16 (a hidd
 
 Verified: `verification/verify_match_coverage.py` 72 checks on a local Postgres 16 (headline equals the grid route's total on all three career blocks, CA's 9 kept where it exceeds the 3 held, an agreeing player untouched, a single season follows the same rule, `match_coverage.career_matches` still CA's figure). The previous commit fails the 3 header checks and passes the rest.
 
-### v9.112.2: milestone increments per grade, and a step a club types (Oct 2026)
+### v9.112.3: milestone increments per grade, and a step a club types (Oct 2026)
 
 Asked for: lots of clubs want smaller increments for A Grade and larger ones for the rest of the club, and want to enter their own increment as well as pick a preset.
 
@@ -2428,3 +2428,11 @@ Asked for: lots of clubs want smaller increments for A Grade and larger ones for
 
 **Verified** against a real Postgres through the shipped route bodies: `verify_milestone_grade_schemes.py` (55 checks: nothing set reads as before; A Grade every 25 on the admin report, the profile, the grade scan and Records while B Grade, the career figures and another club's "A Grade" do not move; runs reach the grade view and not the career view; display-name and sponsor-suffix spellings are the same grade; unsent key, null, refusals; a typed club step fills its rungs undated). With the per-grade lookup switched off (`CONTROL=1`, which is how the code behaved before) 44 pass and exactly the 11 per-grade checks fail. `verify_milestone_scheme.py` 38, `verify_milestone_figures.py` 81, `verify_upcoming_milestones.py` 24, `verify_notifications.py` 146, `verify_inferred_unplayed.py` 19, `verify_summary_only_seasons.py` 20, `verify_merge_carry.py` 31, `verify_merge_profile_carry.py` 33, `verify_cricketstatz_import.py` 305, `verify_player_privacy.py` 138 all pass (the notifications and upcoming-milestones harnesses gained the migration 330 DDL, rule 24). Browser: `verify_milestone_scheme_browser.mjs` 61 checks in Chromium with the API stubbed (exact PUT bodies for a preset, a typed step, a grade stat, and null; refusals shown; disabled without the permission; no sideways scroll at 390px). Against the previous build 23 pass and the new-control blocks fail.
 
+
+### StatLab CSV export left the Pair column empty (v9.112.2, Oct 2026)
+
+- **Reported.** Yarraville CC's treasurer made a partnership report: the Pair column showed names on screen but was blank in the CSV.
+- **Cause.** The on-screen Pair cell is built in `renderDimCell` from `player_a_name`/`batter1_name` and `player_b_name`/`batter2_name`. No row carries a `pair` field, and `downloadCSV` read `row[c.key]`, so it wrote an empty string.
+- **Change.** `dimText` in `StatLab.jsx` builds the same "A & B" text for the CSV (and the `player_name`/`name` fallback). Any new dimension cell that needs a fallback in `renderDimCell` needs the same one in `dimText`.
+
+Verified: `dimText` run against a partnership_list row, an aggregate row and a row with one name missing.
