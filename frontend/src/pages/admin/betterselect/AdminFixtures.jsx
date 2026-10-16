@@ -30,10 +30,21 @@ const EMPTY = {
 
 function FixtureModal({ fixture, onClose, onSaved }) {
   const toast = useToast()
-  const [form, setForm] = useState(() => ({ ...EMPTY, ...(fixture || {}), team_id: fixture?.team_id || '' }))
+  const [form, setForm] = useState(() => ({ ...EMPTY, ...(fixture || {}), team_id: fixture?.team_id || '', side_key: fixture?.side_key || '' }))
   const [saving, setSaving] = useState(false)
   const [teams, setTeams] = useState([])
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  // "Our team" is one of a squad's teams (1st XI, 2nd XI), not the squad. A squad
+  // with a single team is one choice; a squad covering several is one choice per
+  // team, each remembering its squad. Value is "squadId|teamKey".
+  const squadOf = (id) => teams.find((t) => t.id === id)
+  const isMulti = (t) => (t?.sides || []).filter((sd) => sd.stored).length > 1
+  const teamValue = form.team_id ? `${form.team_id}|${isMulti(squadOf(form.team_id)) ? form.side_key : ''}` : ''
+  const pickTeam = (e) => {
+    const [tid, key] = e.target.value.split('|')
+    setForm((f) => ({ ...f, team_id: tid || '', side_key: key || '' }))
+  }
 
   useEffect(() => { api.bsListTeams().then(setTeams).catch(() => {}) }, [])
 
@@ -43,6 +54,7 @@ function FixtureModal({ fixture, onClose, onSaved }) {
       const payload = {
         label: form.label || null, opponent_name: form.opponent_name || null,
         home_away: form.home_away || null, team_id: form.team_id || null,
+        side_key: form.team_id && isMulti(squadOf(form.team_id)) ? (form.side_key || null) : null,
         played_on: form.played_on || null, end_on: form.end_on || null,
         start_time: form.start_time || null, venue: form.venue || null,
         round: form.round || null, notes: form.notes || null,
@@ -72,9 +84,13 @@ function FixtureModal({ fixture, onClose, onSaved }) {
             </Field>
           </div>
           <Field label="Our team">
-            <Select value={form.team_id || ''} onChange={set('team_id')}>
+            <Select value={teamValue} onChange={pickTeam} data-fixture-team>
               <option value="">— No team assigned —</option>
-              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {teams.map((t) => (isMulti(t)
+                ? (t.sides || []).map((sd) => (
+                  <option key={`${t.id}|${sd.key}`} value={`${t.id}|${sd.key}`}>{t.name} › {sd.label || sd.default_label}</option>
+                ))
+                : <option key={t.id} value={`${t.id}|`}>{t.name}</option>))}
             </Select>
           </Field>
           <div className="grid grid-cols-2 gap-3">

@@ -38,6 +38,28 @@ from app.services.junior_fixtures import junior_fixture_ids
 router = APIRouter(prefix="/fixtures", tags=["fixtures"])
 
 
+def _side_key_of(f: Fixture, sides: Optional[squad_sides.SquadSides]) -> Optional[str]:
+    """The key of the squad's team that plays this fixture, as the edit form shows
+    it: the one the club picked, else the one its grade implies."""
+    if sides is None or not f.team_id:
+        return None
+    sq, side = sides.resolve(f.team_id, f.grade_id, f.side_key)
+    return side.key if sq is not None and side is not None else None
+
+
+async def _checked_side_key(db: AsyncSession, club_id, team_uuid, side_key: Optional[str]) -> Optional[str]:
+    """A side key the club may put on a fixture: one of the named squad's own
+    teams. Anything else is refused, not guessed."""
+    if not side_key:
+        return None
+    if team_uuid is None:
+        raise HTTPException(status_code=400, detail="Pick a squad before picking one of its teams.")
+    sq = (await squad_sides.load(db, club_id)).squads.get(str(team_uuid))
+    if sq is None or sq.side_for_key(side_key) is None:
+        raise HTTPException(status_code=400, detail="That team is not one of this squad's teams.")
+    return side_key
+
+
 def _serialize(f: Fixture, teams: Optional[dict] = None, sides: Optional[squad_sides.SquadSides] = None) -> dict:
     t = (teams or {}).get(str(f.team_id)) if f.team_id else None
     # A squad that covers several teams names each fixture by its team ("2nd XI"),
@@ -46,11 +68,11 @@ def _serialize(f: Fixture, teams: Optional[dict] = None, sides: Optional[squad_s
     team_seq = t["sequence"] if t else None
     squad_name = team_name
     if sides is not None:
-        named = sides.name(f.team_id, f.grade_id)
+        named = sides.name(f.team_id, f.grade_id, f.side_key)
         if named:
             team_name = named
-            squad_name = sides.squad_name(f.team_id, f.grade_id)
-        ranked = sides.rank(f.team_id, f.grade_id)
+            squad_name = sides.squad_name(f.team_id, f.grade_id, f.side_key)
+        ranked = sides.rank(f.team_id, f.grade_id, f.side_key)
         if ranked:
             team_seq = ranked
     return {
@@ -58,6 +80,7 @@ def _serialize(f: Fixture, teams: Optional[dict] = None, sides: Optional[squad_s
         "organisation_id": str(f.organisation_id),
         "grade_id": str(f.grade_id) if f.grade_id else None,
         "team_id": str(f.team_id) if f.team_id else None,
+        "side_key": _side_key_of(f, sides),
         "team_name": team_name,
         "team_short": t["short_name"] if t and team_name == t["name"] else team_name,
         "team_sequence": team_seq,
@@ -184,7 +207,8 @@ class FixtureCreate(BaseModel):
     opponent_name: Optional[str] = None
     home_away: Optional[str] = None  # HOME | AWAY | BYE
     grade_id: Optional[str] = None
-    team_id: Optional[str] = None    # which of our teams is playing
+    team_id: Optional[str] = None    # which of our squads is playing
+    side_key: Optional[str] = None   # which of that squad's teams ("2nd XI"), a grade key
     round: Optional[str] = None
     played_on: Optional[date] = None
     end_on: Optional[date] = None
@@ -200,6 +224,7 @@ class FixtureUpdate(BaseModel):
     home_away: Optional[str] = None
     grade_id: Optional[str] = None
     team_id: Optional[str] = None
+    side_key: Optional[str] = None
     round: Optional[str] = None
     played_on: Optional[date] = None
     end_on: Optional[date] = None
@@ -272,6 +297,7 @@ async def create_fixture(
     await _assert_grade_in_club(db, grade_uuid, club.id)
     team_uuid = uuid.UUID(body.team_id) if body.team_id else None
     await _assert_team_in_club(db, team_uuid, club.id)
+    side_key = await _checked_side_key(db, club.id, team_uuid, body.side_key)
 
     us = club.short_name or club.name
     home_team = away_team = None
@@ -286,6 +312,7 @@ async def create_fixture(
         source="manual",
         grade_id=grade_uuid,
         team_id=team_uuid,
+        side_key=side_key,
         label=body.label,
         round=body.round,
         played_on=body.played_on,
@@ -323,6 +350,13 @@ async def update_fixture(
         team_uuid = uuid.UUID(data["team_id"]) if data["team_id"] else None
         await _assert_team_in_club(db, team_uuid, club.id)
         data["team_id"] = team_uuid
+        # A team belongs to one squad: moving the fixture to another squad (or to
+        # none) drops the old team unless a new one is named in the same request.
+        if str(team_uuid) != (str(f.team_id) if f.team_id else None) and "side_key" not in data:
+            data["side_key"] = None
+    if "side_key" in data:
+        target_team = data["team_id"] if "team_id" in data else f.team_id
+        data["side_key"] = await _checked_side_key(db, club.id, target_team, data["side_key"])
     for key, value in data.items():
         setattr(f, key, value)
     f.updated_at = datetime.now(timezone.utc)

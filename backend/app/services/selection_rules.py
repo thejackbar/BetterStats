@@ -1154,7 +1154,7 @@ async def _team_sequences(db: AsyncSession, org_id, fx) -> tuple[dict[str, int],
                         if label:
                             seqs[label.strip().lower()] = side.rank
     if fx.team_id:
-        mine = sides.rank(fx.team_id, fx.grade_id)
+        mine = sides.rank(fx.team_id, fx.grade_id, fx.side_key)
     else:
         # No squad named: only a squad set up to cover this grade may claim it.
         owner = sides.squad_for_stored_grade(fx.grade_id) if fx.grade_id else None

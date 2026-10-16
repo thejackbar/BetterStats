@@ -109,6 +109,8 @@ SHARED_DDL_MODULES = (
     # Migration 336. `team_sides`: shared routers (the player's availability page)
     # read it, so the football database needs the (empty) table.
     ("app.services.team_sides_ddl", "STATEMENTS"),
+    # Migration 337. `fixtures.side_key`, on the shared ORM Fixture model.
+    ("app.services.fixture_side_ddl", "STATEMENTS"),
 )
 
 

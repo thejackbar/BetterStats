@@ -606,7 +606,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         cl_res = await db.execute(
             text(
                 "SELECT fl.player_id, COALESCE(t.name, f.label, f.opponent_name) AS where_, t.sequence AS seq, "
-                "fl.fixture_id AS fid, fl.batting_order AS bo, f.team_id AS tid, f.grade_id AS gid "
+                "fl.fixture_id AS fid, fl.batting_order AS bo, f.team_id AS tid, f.grade_id AS gid, f.side_key AS skey "
                 "FROM fixture_lineups fl "
                 "JOIN fixtures f ON fl.fixture_id = f.id "
                 "LEFT JOIN teams t ON f.team_id = t.id "
@@ -622,11 +622,11 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         playable = await selection_clash.compatible_fixtures(
             db, club.id, fx, {r[3] for r in cl_rows}
         )
-        for pid, where_, seq, other_fid, bo, other_tid, other_gid in cl_rows:
+        for pid, where_, seq, other_fid, bo, other_tid, other_gid, other_skey in cl_rows:
             # The other fixture's team, called what its squad calls it ("2nd XI")
             # and ranked by its own XI number, not its squad's.
-            where_ = sq_sides.name(other_tid, other_gid) if other_tid and sq_sides.name(other_tid, other_gid) else where_
-            seq = sq_sides.rank(other_tid, other_gid) or seq
+            where_ = sq_sides.name(other_tid, other_gid, other_skey) if other_tid and sq_sides.name(other_tid, other_gid, other_skey) else where_
+            seq = sq_sides.rank(other_tid, other_gid, other_skey) or seq
             verdict = playable.get(str(other_fid))
             if verdict:
                 also_in.setdefault(str(pid), []).append({
@@ -692,9 +692,9 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             fx_team_name = fx_team_obj.short_name or fx_team_obj.name
             if (fx_team_obj.sequence or 0) > 0:
                 fx_team_seq = fx_team_obj.sequence
-    fx_team_seq = sq_sides.rank(fx.team_id, fx.grade_id) or fx_team_seq
-    fx_team_name = sq_sides.name(fx.team_id, fx.grade_id) or fx_team_name
-    fx_squad_name = sq_sides.squad_name(fx.team_id, fx.grade_id)
+    fx_team_seq = sq_sides.rank(fx.team_id, fx.grade_id, fx.side_key) or fx_team_seq
+    fx_team_name = sq_sides.name(fx.team_id, fx.grade_id, fx.side_key) or fx_team_name
+    fx_squad_name = sq_sides.squad_name(fx.team_id, fx.grade_id, fx.side_key)
     locked_by_name = None
     if fx.locked_at is not None and fx.locked_by:
         locked_by_name = (await db.execute(

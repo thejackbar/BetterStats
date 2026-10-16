@@ -373,7 +373,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
     sel_rows = (await db.execute(
         text(
             "SELECT f.id, f.played_on, f.start_time, f.venue, f.opponent_name, f.home_away, f.label, f.round, "
-            "COALESCE(NULLIF(t.short_name, ''), t.name), fl.is_captain, fl.is_wicket_keeper, f.team_id, f.grade_id "
+            "COALESCE(NULLIF(t.short_name, ''), t.name), fl.is_captain, fl.is_wicket_keeper, f.team_id, f.grade_id, f.side_key "
             "FROM fixture_lineups fl JOIN fixtures f ON f.id = fl.fixture_id "
             "LEFT JOIN teams t ON t.id = f.team_id "
             "WHERE fl.player_id = :p AND fl.organisation_id = :org AND f.locked_at IS NOT NULL "
@@ -388,7 +388,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
             "opponent_name": r[4], "home_away": r[5], "label": r[6], "round": r[7],
             # The side's name is the squad's, so it follows the same switch.
             # (A squad covering several teams names this one by its team.)
-            "team_name": (my_sides.name(r[11], r[12]) or r[8]) if squads_visible else None,
+            "team_name": (my_sides.name(r[11], r[12], r[13]) or r[8]) if squads_visible else None,
             "is_captain": bool(r[9]), "is_wicket_keeper": bool(r[10]),
         }
         for r in sel_rows

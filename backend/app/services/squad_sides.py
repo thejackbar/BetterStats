@@ -134,11 +134,17 @@ class SquadSides:
         owner = self.stored_owner.get(self.key_of_grade(grade_id) or "")
         return self.squads.get(owner) if owner else None
 
-    def resolve(self, team_id, grade_id) -> tuple[Optional[SquadInfo], Optional[Side]]:
-        """The squad and team a fixture (its ``team_id`` and ``grade_id``) belongs to.
-        A fixture naming a squad is that squad's; one that names none is found by
-        its grade."""
+    def resolve(self, team_id, grade_id, side_key=None) -> tuple[Optional[SquadInfo], Optional[Side]]:
+        """The squad and team a fixture (its ``team_id``, ``grade_id`` and
+        ``side_key``) belongs to. A fixture naming a squad is that squad's; one
+        that names none is found by its grade. A team the club picked on the
+        fixture (``side_key``) wins over the one its grade implies, but only when
+        that squad actually has it: a stale key falls back to the grade."""
         key = self.key_of_grade(grade_id)
+        if side_key:
+            sq0 = self.squads.get(str(team_id)) if team_id else None
+            if sq0 is not None and sq0.side_for_key(side_key) is not None:
+                key = side_key
         sq = self.squads.get(str(team_id)) if team_id else None
         if sq is None and key:
             sq = self.squads.get(self.key_owner.get(key, ""))
@@ -146,19 +152,19 @@ class SquadSides:
             return None, None
         return sq, sq.side_for_key(key)
 
-    def rank(self, team_id, grade_id) -> Optional[int]:
+    def rank(self, team_id, grade_id, side_key=None) -> Optional[int]:
         """The fixture's XI number: its team's, else the squad's own order."""
-        sq, side = self.resolve(team_id, grade_id)
+        sq, side = self.resolve(team_id, grade_id, side_key)
         if sq is None:
             return None
         if side is not None and side.rank:
             return side.rank
         return sq.sequence if sq.sequence and sq.sequence > 0 else None
 
-    def name(self, team_id, grade_id) -> Optional[str]:
+    def name(self, team_id, grade_id, side_key=None) -> Optional[str]:
         """What the fixture's team is called. A squad with several teams names
         each by its label; any other squad is called by its own name, as ever."""
-        sq, side = self.resolve(team_id, grade_id)
+        sq, side = self.resolve(team_id, grade_id, side_key)
         if sq is None:
             return None
         if sq.multi and side is not None:
@@ -167,12 +173,12 @@ class SquadSides:
             return side.label
         return sq.short_name or sq.name
 
-    def squad_name(self, team_id, grade_id) -> Optional[str]:
-        sq, _ = self.resolve(team_id, grade_id)
+    def squad_name(self, team_id, grade_id, side_key=None) -> Optional[str]:
+        sq, _ = self.resolve(team_id, grade_id, side_key)
         return (sq.short_name or sq.name) if sq else None
 
-    def squad_id(self, team_id, grade_id) -> Optional[str]:
-        sq, _ = self.resolve(team_id, grade_id)
+    def squad_id(self, team_id, grade_id, side_key=None) -> Optional[str]:
+        sq, _ = self.resolve(team_id, grade_id, side_key)
         return sq.id if sq else None
 
     def grade_ids(self, team_id) -> set:
@@ -187,7 +193,7 @@ class SquadSides:
             out.add(str(sq.grade_id))
         return out
 
-    def same_team_grade_ids(self, team_id, grade_id) -> Optional[set]:
+    def same_team_grade_ids(self, team_id, grade_id, side_key=None) -> Optional[set]:
         """The grade rows that make up the SAME team as this fixture's, when the
         squad has several teams; None when the squad is one team (every fixture of
         the squad is the same side, as before)."""
@@ -195,6 +201,8 @@ class SquadSides:
         if sq is None or not sq.multi:
             return None
         key = self.key_of_grade(grade_id)
+        if side_key and sq.side_for_key(side_key) is not None:
+            key = side_key
         return set(self.grade_ids_by_key.get(key, set())) if key else None
 
     def grade_names(self, team_id) -> list[str]:

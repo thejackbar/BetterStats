@@ -4517,6 +4517,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _TEAM_SIDES_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 337: a fixture records which of its squad's teams plays it.
+        # Same one-copy rule: this and alembic's 337 both run
+        # services/fixture_side_ddl.STATEMENTS.
+        from app.services.fixture_side_ddl import STATEMENTS as _FIXTURE_SIDE_DDL
+        for _stmt in _FIXTURE_SIDE_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.

@@ -390,6 +390,26 @@ const run = async () => {
   })
   ok('the Available pool ends inside the window too', poolFit === true, String(poolFit))
 
+  // ═══════════════ Show juniors ═══════════════
+  console.log('\n# Show juniors (Selection Whiteboard)')
+  {
+    const asked = []
+    const onReq = (rq) => { if (/\/api\/selection\/overview/.test(rq.url())) asked.push(rq.url()) }
+    page.on('request', onReq)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
+    await page.locator('[data-draft-table]').waitFor({ timeout: 15000 }).catch(() => {})
+    await page.waitForTimeout(300)
+    ok('the whiteboard has the Show juniors switch', (await page.locator('[data-juniors-toggle]').count()) === 1)
+    ok('juniors are left out until asked for', asked.length > 0 && asked.every((u) => /hide_juniors=true/.test(u)), asked.join(' '))
+    asked.length = 0
+    await page.locator('[data-juniors-toggle]').click()
+    await page.waitForTimeout(500)
+    ok('switching them on asks for the overview without the hide flag', asked.length > 0 && asked.every((u) => !/hide_juniors/.test(u)), asked.join(' '))
+    page.off('request', onReq)
+    await page.evaluate(() => { try { localStorage.removeItem('select.juniors') } catch { /* nothing stored */ } })
+  }
+
   // ═══════════════ Gender filter ═══════════════
   console.log('\n# Gender filter (Draft table and Selection board)')
   await page.setViewportSize({ width: 1440, height: 900 })

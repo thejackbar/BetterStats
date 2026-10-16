@@ -1609,6 +1609,9 @@ class Fixture(Base):
     # names its finals something the heuristic can't read.
     is_final = Column(Boolean, nullable=True)
     notes = Column(Text, nullable=True)
+    # Which of the squad's teams plays this fixture, as a grade key (migration 337).
+    # NULL = work it out from grade_id. Sync never writes it.
+    side_key = Column(Text, nullable=True)
     # Set when the confirmed side is locked (migration 334); NULL = open to edit.
     locked_at = Column(TIMESTAMP(timezone=True), nullable=True)
     locked_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

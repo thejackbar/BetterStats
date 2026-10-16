@@ -26,7 +26,7 @@ import { CAP } from '../../../lib/capabilities'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { availRank, AVAILABILITY } from '../../../lib/availability'
-import { Icon, Avatar, Btn, Tag, RuleTags, playedWithinYears } from './ui'
+import { Icon, Avatar, Btn, Tag, RuleTags, JuniorsToggle, playedWithinYears } from './ui'
 import { DnD, useDrag } from './selectionDnd'
 import { nameMatches, roleLine, spark, formMeta, normGender } from './selectionMeta'
 import { xiCompliance, isBlocked } from './selectionRules'
@@ -34,6 +34,7 @@ import { confirmSig, restoreDraft } from './selectionDraft'
 import { sortTeams, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
 import { useFitHeight, useBoxHeight, rowDensity, ROW_MIN } from './useFitHeight'
 import { sideFit, sideLabel } from '../../../lib/sideSize'
+import usePersistedState from '../../../lib/usePersistedState'
 
 const DRAFT_DELAY_MS = 600
 const DRAFT_RETRY_MS = 5000
@@ -232,7 +233,7 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
 // ── The pool ────────────────────────────────────────────────────────────────
 function PoolColumn({ ctx, drag }) {
   const hovered = drag.hover === 'pool'
-  const { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad, gender, setGender } = ctx.filters
+  const { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad, gender, setGender, showJuniors, setShowJuniors } = ctx.filters
   const activeTeam = ctx.activeFid && ctx.cols[ctx.activeFid] ? ctx.shortTeam(ctx.cols[ctx.activeFid].fx) : null
   return (
     // Pinned to the left of the scrolling board (sticky, so the team columns slide
@@ -275,6 +276,7 @@ function PoolColumn({ ctx, drag }) {
           <label className="inline-flex items-center gap-1 text-[11.5px] text-pb-dim cursor-pointer">
             <input type="checkbox" checked={hideOut} onChange={(e) => setHideOut(e.target.checked)} />Hide unavailable
           </label>
+          <JuniorsToggle value={showJuniors} onChange={setShowJuniors} className="!px-2 !py-1 !text-[11.5px] !rounded-md" />
         </div>
         {ctx.canEdit && activeTeam && <div className="text-[11px] text-pb-faint">Click a player to add them to <b className="text-pb-text">{activeTeam}</b>, or drag onto any team.</div>}
       </header>
@@ -335,6 +337,8 @@ export default function AdminSelectionDraftTable() {
   const [hideOut, setHideOut] = useState(false)
   const [squad, setSquad] = useState('')
   const [gender, setGender] = useState('')
+  // The same remembered Show juniors choice Availability, Fixtures and Selection use.
+  const [showJuniors, setShowJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   const colsRef = useRef(cols)
   colsRef.current = cols
@@ -345,9 +349,9 @@ export default function AdminSelectionDraftTable() {
 
   // ── Loading ───────────────────────────────────────────────────────────────
   useEffect(() => {
-    api.bsSelectionOverview().then(setOverview)
+    api.bsSelectionOverview({ hideJuniors: !showJuniors }).then(setOverview)
       .catch((e) => { toastRef.current.error(e.message); setOverview({ fixtures: [] }) })
-  }, [])
+  }, [showJuniors])
 
   const days = useMemo(() => {
     const m = new Map()
@@ -794,7 +798,7 @@ export default function AdminSelectionDraftTable() {
   const ctx = {
     cols, order, merged, status, conflicts, canEdit, busy, activeFid, setActiveFid,
     shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length, showGender,
-    filters: { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad, gender, setGender },
+    filters: { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad, gender, setGender, showJuniors, setShowJuniors },
     tapPool, removeAt, toggleCap, toggleWk, confirmOne, discard, useTheirs, keepMine,
   }
 

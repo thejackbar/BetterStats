@@ -1479,3 +1479,15 @@ Request: when captains and selected players can be emailed from BetterSelect, le
 - Sending: `selection_notify.linked_template` resolves the template on every send; `render_template` fills `{{variables}}` (`SELECTION_VARIABLES`: first_name, club, team, opponent, match, date, time, when, venue, round, home_away, captain, side, team_sheet, note), escaping values in HTML, blanking any token left over, wrapping a fragment in the club shell with no unsubscribe line (operational mail) and sending a full document as is. `team_sheet` (phones) resolves only for the captain's email, `note` only for players. No subject on the template keeps the standard one. Deleted, empty, or no BetterComms means the standard email goes and the response carries `template_note`; the auto-send on Confirm uses the same path.
 - Screens: Selection rules > "Selection emails" card (`EmailTemplatesCard`, preview via `POST /selection-rules/email-templates/preview` with a made-up side); Admin > Comms > Templates shows Subject to every club and a selection variables panel; the Email dialog shows the template used or the fallback note.
 - Proof: `verify_foreign_fixtures_and_selection_templates.py` (real Postgres, control fails every template check), `frontend/verification/verify_selection_email_templates_browser.mjs` (16 checks, 390px, exact PATCH and preview bodies).
+
+
+## Our team on a fixture is a team of the squad (v9.116.0)
+
+Gisborne: "our team" in Edit fixture was only a list of squads, but the fixture needs one of the squad's teams (the 2nd XI of MACs), which the squad is assigned to.
+
+- A team is chosen per fixture in `fixtures.side_key` (a grade key), not in `grade_id`, because sync overwrites `grade_id` on every run. `SquadSides.resolve` prefers a valid `side_key`; a stale one (the squad no longer has that team) falls back to the grade.
+- The form offers one option per team for a squad covering several, and one plain option for a one-team squad (which sends `side_key` null). Value is `squadId|teamKey`.
+- Not done: last week's XI for a team is still found by grade, so a hand-made fixture with a picked team and no grade will not find a previous XI by grade. Past games with no pick are unchanged.
+- Also: the Selection Whiteboard got the Show juniors switch (it always showed juniors before).
+- Proof: `verify_fixture_side.py` (18 checks, control fails the team checks), `verify_fixture_side_browser.mjs` (10 checks, exact PATCH bodies, 390px), a juniors check in `verify_draft_table_browser.mjs`.
+
