@@ -3551,6 +3551,11 @@ export const api = {
   // Self check-in link — the one URL behind both the printed QR code and the
   // NFC tag. The backend returns a PATH; the panel prefixes the origin.
   nmGetCheckInLink: () => request('/nets/checkin-link'),
+  // One session's own link (minted on first ask for an older session) and a new
+  // token for it alone.
+  nmSessionCheckInLink: (id) => request(`/nets/sessions/${id}/checkin-link`),
+  nmRegenerateSessionCheckInLink: (id) =>
+    request(`/nets/sessions/${id}/checkin-link/regenerate`, { method: 'POST' }),
   nmSetCheckInLink: (data) =>
     request('/nets/checkin-link', { method: 'POST', body: JSON.stringify(data) }),
   nmRegenerateCheckInLink: () =>
