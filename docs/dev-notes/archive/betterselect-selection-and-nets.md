@@ -1449,7 +1449,24 @@ Meeting notes from Gisborne turned into one release. What was built, what was fo
 **Built**: lock and unlock, audit trail and History, Undo, Registered filter, Played this season, first name and surname order, remembered filters, junior hiding, remove-from-squad, Alt-drop copy, squad CSV and PDF export, per-session net links and squads, squad-by-squad check-in, squad under the player's name, My page.
 
 **Open**
-- A squad still has one grade (`teams.grade_id`). A squad that plays in more than one grade (for example a men's side in one-day and T20) is linked to one of them, and the rest of its fixtures reach it only through `fixtures.team_id`. Making squad to grade many to many touches `squad_next_games`, ladders and the rules scope; it was not done.
+- (Done in v9.115.0, below.) A squad had one grade (`teams.grade_id`).
 - The audit trail records confirmations, locks, unlocks and call-ups. It does not record every drag on an unconfirmed board (that is what Undo and the draft are for).
 - Remembered filters and the Show juniors choice are per browser, not per user across devices.
 - The Draft table does not yet draw locked columns as read-only; the server refuses the write and the error is shown.
+
+## Squads cover several teams (v9.115.0)
+
+Asked for after the Gisborne round: MACs is the squad for the 1st and 2nd XI, the next squad for the 3rds, the last for the 4ths to 6ths; the women's squad can serve two women's teams; juniors can be a squad per year group holding several teams.
+
+**Model.** A squad (`teams` row) stays the pool of players. The new `team_sides` table lists the TEAMS (grades) the squad covers, in order. Keyed on grade name, so it survives a new season's grade rows. The XI number of a team is the squad's Order plus its place in the list, derived on read; collisions between squads are the club's to avoid (the editor shows the numbers). A squad with no rows is the old single-grade squad and reads as before.
+
+**Decisions worth knowing.**
+- One reader (`services/squad_sides`) answers rank, name and squad for a fixture. Before this, call-ups and the pool compared `Team.sequence`, which would have made the 1st and 2nd XI of one squad equal (a blocked clash instead of a call-up).
+- Fixtures carry `team_id` of the SQUAD and are told apart by grade. Saving a squad's teams moves upcoming synced fixtures onto it; hand-typed fixtures that name a squad are not touched.
+- The old Order scale is kept (1st XI = 1; women's 50; juniors 100+) rather than a dense club-wide ranking, so tiers between unranked groups did not start to touch.
+- Label defaults: "1st XI" style for XI numbers 1 to 12, else the grade name. A club can type its own per team.
+
+**Not done.** Past games are not re-assigned. The ladder for a team is read from the newest season that has its grade name. The AFL silo gets the table (shared routers read it) but has no editor for it.
+
+**Also in this release.** The Draft table became Selection Whiteboard with its own menu item.
+

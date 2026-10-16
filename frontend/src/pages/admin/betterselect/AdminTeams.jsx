@@ -116,59 +116,151 @@ function nextGameInfo(col, squadNext, firstDate) {
 }
 
 /* ── Team create/edit modal (grade linking preserved) ─────────────────────── */
-function TeamModal({ team, onClose, onSaved }) {
+function TeamModal({ team, teams = [], onClose, onSaved }) {
   const toast = useToast()
   const [form, setForm] = useState(() => ({ ...EMPTY_TEAM, ...(team || {}), grade_id: team?.grade_id || '' }))
   const [saving, setSaving] = useState(false)
-  const [gradeSeasons, setGradeSeasons] = useState([])
+  const [gradeSeasons, setGradeSeasons] = useState(null)
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
-  useEffect(() => { api.bsTeamGradeOptions().then((d) => setGradeSeasons(d.seasons || [])).catch(() => {}) }, [])
+  useEffect(() => { api.bsTeamGradeOptions().then((d) => setGradeSeasons(d.seasons || [])).catch(() => setGradeSeasons([])) }, [])
 
-  const knownGradeIds = new Set(gradeSeasons.flatMap((s) => s.grades.map((g) => g.id)))
-  const currentGradeMissing = form.grade_id && !knownGradeIds.has(form.grade_id)
+  // Every grade the club has, one per name (newest season first), keyed the way
+  // the server keys them. A squad's teams are matched to fixtures by grade NAME,
+  // so a team keeps working when the season rolls over.
+  const gradeByKey = useMemo(() => {
+    const m = new Map()
+    ;(gradeSeasons || []).forEach((s) => s.grades.forEach((g) => { if (!m.has(g.key)) m.set(g.key, g) }))
+    return m
+  }, [gradeSeasons])
+
+  // The squad's teams, in order. `grade_id` is the grade row to send; for a team
+  // the picker does not list (an older season's) it is the squad's own link.
+  const [sides, setSides] = useState(() => (team?.sides || []).map((sd) => ({
+    key: sd.key, grade_name: sd.grade_name, label: sd.label || '', grade_id: null, fallbackId: team.grade_id || null,
+  })))
+  const [sidesDirty, setSidesDirty] = useState(false)
+  useEffect(() => {
+    if (!gradeSeasons) return
+    setSides((cur) => cur.map((sd, i) => ({ ...sd, grade_id: sd.grade_id || gradeByKey.get(sd.key)?.id || (i === 0 ? sd.fallbackId : null) })))
+  }, [gradeSeasons, gradeByKey])
+
+  // Which squad already has a grade, so picking it can say it is being moved.
+  const ownerOf = useMemo(() => {
+    const m = new Map()
+    teams.filter((t) => t.id !== team?.id).forEach((t) => (t.sides || []).forEach((sd) => m.set(sd.key, t.name)))
+    return m
+  }, [teams, team])
+
+  const firstXI = Number(form.sequence) > 0 ? Number(form.sequence) : null
+  const xiOf = (i) => (firstXI ? firstXI + i : null)
+  const defaultLabel = (i, gradeName) => {
+    const n = xiOf(i)
+    if (n && n >= 1 && n <= 12) {
+      const v = n % 100
+      const suffix = (v >= 11 && v <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th')
+      return `${n}${suffix} XI`
+    }
+    return gradeName
+  }
+
+  const editSides = (fn) => { setSides(fn); setSidesDirty(true) }
+  const addSide = (key) => {
+    const g = gradeByKey.get(key)
+    if (!g) return
+    editSides((cur) => (cur.some((sd) => sd.key === key) ? cur : [...cur, { key, grade_name: g.name, label: '', grade_id: g.id }]))
+  }
+  const moveSide = (i, dir) => editSides((cur) => {
+    const j = i + dir
+    if (j < 0 || j >= cur.length) return cur
+    const next = cur.slice()
+    ;[next[i], next[j]] = [next[j], next[i]]
+    return next
+  })
+  const removeSide = (i) => editSides((cur) => cur.filter((_, k) => k !== i))
+  const setLabel = (i, v) => editSides((cur) => cur.map((sd, k) => (k === i ? { ...sd, label: v } : sd)))
+
+  const addable = useMemo(() => [...gradeByKey.values()].filter((g) => !sides.some((sd) => sd.key === g.key)), [gradeByKey, sides])
 
   const save = async () => {
     if (!form.name.trim()) { toast.error('Squad name is required'); return }
+    if (sidesDirty && sides.some((sd) => !sd.grade_id)) { toast.error('One of the teams has no grade to read. Remove it and add it again.'); return }
     setSaving(true)
     try {
       const payload = {
         name: form.name.trim(), short_name: form.short_name || null,
         sequence: Number(form.sequence) || 0, default_formation: form.default_formation || null,
-        is_active: !!form.is_active, grade_id: form.grade_id || null,
+        is_active: !!form.is_active,
       }
+      // Teams are sent only when they were touched, so saving a rename never
+      // moves fixtures about.
+      if (sidesDirty || !team) payload.sides = sides.map((sd) => ({ grade_id: sd.grade_id, label: sd.label.trim() || null }))
+      if (!team && !sides.length && form.grade_id) payload.grade_id = form.grade_id
       const saved = team ? await api.bsUpdateTeam(team.id, payload) : await api.bsCreateTeam(payload)
-      toast.success(team ? 'Squad updated' : 'Squad added')
+      if (saved?.moved_from?.length) toast.info(`Took ${saved.moved_from.length === 1 ? 'a team' : 'teams'} from ${saved.moved_from.join(' and ')}`)
+      if (saved?.fixtures_assigned) toast.success(`${saved.fixtures_assigned} upcoming game${saved.fixtures_assigned === 1 ? '' : 's'} now belong to this squad`)
+      else toast.success(team ? 'Squad updated' : 'Squad added')
       onSaved(saved)
     } catch (e) { toast.error('Save failed: ' + e.message) }
     finally { setSaving(false) }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <div className="bg-pb-surface pb-card max-w-md w-full mt-16 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto">
+      <div className="bg-pb-surface pb-card max-w-lg w-full mt-12 mb-8 overflow-hidden" data-squad-modal>
         <div className="flex items-center justify-between px-5 py-3 border-b pb-hairline">
           <h3 className="font-mono text-[11px] uppercase tracking-wide3 text-pb-faint">{team ? 'Edit squad' : 'New squad'}</h3>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-text"><Icon name="close" size={16} /></button>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text" aria-label="Close"><Icon name="close" size={16} /></button>
         </div>
         <div className="p-5 space-y-3">
-          <Field label="Name"><Input value={form.name} onChange={set('name')} placeholder="e.g. 1st XI" /></Field>
+          <Field label="Name"><Input value={form.name} onChange={set('name')} placeholder="e.g. MACs" /></Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Short name"><Input value={form.short_name || ''} onChange={set('short_name')} placeholder="e.g. 1s" /></Field>
-            <Field label="Order (1 = top)"><Input type="number" value={form.sequence} onChange={set('sequence')} /></Field>
+            <Field label="Short name"><Input value={form.short_name || ''} onChange={set('short_name')} placeholder="e.g. Macs" /></Field>
+            <Field label="Order (XI of its first team)"><Input type="number" value={form.sequence} onChange={set('sequence')} data-squad-order /></Field>
           </div>
-          <Field label="Default formation (optional)"><Input value={form.default_formation || ''} onChange={set('default_formation')} placeholder="e.g. Traditional" /></Field>
-          <Field label="Grade (for ladder — auto-linked, override here)">
-            <Select value={form.grade_id || ''} onChange={set('grade_id')}>
-              <option value="">— Auto-link from match data —</option>
-              {currentGradeMissing && <option value={form.grade_id}>{team?.grade_name || 'Current grade'}</option>}
-              {gradeSeasons.map((s) => (
-                <optgroup key={s.season_id} label={formatSeason(s.season_name)}>
-                  {s.grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                </optgroup>
+
+          <div data-squad-teams>
+            <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1.5">Teams in this squad</div>
+            <p className="text-[11.5px] text-pb-faint mb-2">
+              The grades this squad's players fill. Their games belong to the squad, and each team is told apart by its XI number:
+              {firstXI ? ` the first is the ${defaultLabel(0, '')}, the next follows on.` : ' set an order above to number them.'}
+            </p>
+            {gradeSeasons === null && <div className="text-[12.5px] text-pb-faint py-2">Loading grades…</div>}
+            <div className="flex flex-col gap-1.5">
+              {sides.map((sd, i) => (
+                <div key={sd.key} data-squad-team={sd.key} className="flex items-center gap-2 rounded-lg border border-pb-hairline bg-pb-surface2 px-2.5 py-1.5">
+                  <span className="shrink-0 w-9 text-center font-mono text-[11px] text-pb-accent" title="XI number">{firstXI ? xiOf(i) : i + 1}</span>
+                  <span className="min-w-0 flex-1 truncate text-[13px]" title={sd.grade_name}>{sd.grade_name}</span>
+                  <input value={sd.label} onChange={(e) => setLabel(i, e.target.value)} maxLength={40} aria-label={`Name for ${sd.grade_name}`}
+                    placeholder={defaultLabel(i, sd.grade_name)}
+                    className="w-28 shrink-0 bg-pb-surface border border-pb-hairline rounded-md px-2 py-1 text-[12.5px] focus:outline-none focus:border-pb-accent" />
+                  <button type="button" onClick={() => moveSide(i, -1)} disabled={i === 0} aria-label="Move up" className="text-pb-faint hover:text-pb-text disabled:opacity-30 px-0.5"><span className="inline-block -rotate-90"><Icon name="chevron" size={13} /></span></button>
+                  <button type="button" onClick={() => moveSide(i, 1)} disabled={i === sides.length - 1} aria-label="Move down" className="text-pb-faint hover:text-pb-text disabled:opacity-30 px-0.5"><span className="inline-block rotate-90"><Icon name="chevron" size={13} /></span></button>
+                  <button type="button" onClick={() => removeSide(i)} aria-label={`Remove ${sd.grade_name}`} data-remove-team className="text-pb-faint hover:text-pb-red px-0.5"><Icon name="close" size={13} /></button>
+                </div>
               ))}
-            </Select>
-          </Field>
+              {sides.length === 0 && gradeSeasons && (
+                <div className="text-[12.5px] text-pb-faint rounded-lg border border-dashed border-pb-hairline2 px-3 py-3">
+                  No teams yet. {team?.grade_name ? `This squad is linked to ${team.grade_name}.` : 'Its games are matched by team name until you add one.'}
+                </div>
+              )}
+            </div>
+            {gradeSeasons && (
+              <Select value="" onChange={(e) => { if (e.target.value) addSide(e.target.value) }} className="mt-2" aria-label="Add a team" data-add-team>
+                <option value="">+ Add a team to this squad…</option>
+                {addable.map((g) => (
+                  <option key={g.key} value={g.key}>{g.name}{ownerOf.get(g.key) ? ` (now in ${ownerOf.get(g.key)})` : ''}</option>
+                ))}
+              </Select>
+            )}
+            {sides.some((sd) => ownerOf.has(sd.key)) && (
+              <p className="text-[11.5px] text-pb-amber mt-1.5">
+                {sides.filter((sd) => ownerOf.has(sd.key)).map((sd) => `${sd.grade_name} moves from ${ownerOf.get(sd.key)}`).join('. ')}. A team belongs to one squad.
+              </p>
+            )}
+          </div>
+
+          <Field label="Default formation (optional)"><Input value={form.default_formation || ''} onChange={set('default_formation')} placeholder="e.g. Traditional" /></Field>
           <label className="flex items-center gap-2 text-sm text-pb-faint">
             <input type="checkbox" checked={!!form.is_active} onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))} className="accent-pb-accent" />
             Active
@@ -400,7 +492,13 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
           )}
         </div>
         <div className="flex items-center gap-2 mt-1.5 pl-[26px]">
-          {(col.grade_name || col.note) && <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint truncate">{col.grade_name || col.note}</span>}
+          {(col.grade_name || col.note) && !(col.team && (col.team.sides || []).filter((sd) => sd.stored).length > 1) && <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint truncate">{col.grade_name || col.note}</span>}
+          {/* A squad that covers several teams: name them, with their XI numbers. */}
+          {col.team && (col.team.sides || []).filter((sd) => sd.stored).length > 1 && (
+            <span data-squad-sides className="font-mono text-[10px] text-pb-dim truncate" title={col.team.sides.map((sd) => `${sd.label || sd.default_label} · ${sd.grade_name}`).join('\n')}>
+              {col.team.sides.map((sd) => sd.label || sd.default_label).join(' · ')}
+            </span>
+          )}
           {/* A squad with no grade has nothing to read its fixtures, ladder or women's side from. Say so, and where to fix it. */}
           {col.team && !col.grade_name && (
             <button type="button" onClick={onEdit} data-no-grade title="Link this squad to a grade"
@@ -1202,7 +1300,7 @@ export default function AdminTeams() {
     <BetterSelectLayout title="Squads" actions={actions}>
       {canManage && <div className="md:hidden flex flex-wrap gap-2 mb-3" data-squads-actions>{actionButtons}</div>}
       {editing !== undefined && (
-        <TeamModal team={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); loadTeams() }} />
+        <TeamModal team={editing} teams={teams || []} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); loadTeams() }} />
       )}
       {addTo !== undefined && (
         <BulkAddModal fixedTeam={addTo} teams={teams || []} players={players || []}
