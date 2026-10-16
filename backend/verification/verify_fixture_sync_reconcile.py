@@ -92,8 +92,12 @@ async def fake_get(url, params=None):
 gr._get = fake_get
 
 
+# The club's real id: since v9.111.0 "is this side ours" is the owning organisation id.
+US_ORG = uuid.uuid4()
+
+
 def match(mid, day, rnd, opp, *, home=True, status_id=0, status="UPCOMING", hh="10:00"):
-    us = {"isHome": home, "displayName": "Applecross CC 1st XI", "owningOrganisation": {"id": "o-us"}}
+    us = {"isHome": home, "displayName": "Applecross CC 1st XI", "owningOrganisation": {"id": str(US_ORG)}}
     them = {"isHome": not home, "displayName": f"{opp} CC", "owningOrganisation": {"id": f"o-{opp}"}}
     return {
         "id": mid, "statusId": status_id, "status": status,
@@ -128,7 +132,7 @@ async def main():
 
     from app.routers.fixtures import sync_fixtures
 
-    org_id, user_id, season_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    org_id, user_id, season_id = US_ORG, uuid.uuid4(), uuid.uuid4()
     GA, GB, GC = "guid-A-1st", "guid-B-2nd", "guid-C-colts"
     A, B, C = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     async with Session() as db:

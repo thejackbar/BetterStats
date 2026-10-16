@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import logging
 
+from app.services import club_match
 from app.services import grassroots_scores_client as gr
 from app.services import playhq_client
 from app.services.grade_labels import category_for_name, category_label, org_grade_categories
@@ -118,6 +119,8 @@ async def org_grassroots_fixtures_checked(
       ``failed``  how many grades could not be read at all (a non-200 or an
                   exception: ``get_grade_matches`` returns ``[]`` for those too,
                   so the cache is the only honest signal).
+      ``others``  match guids, in the grades that were read, that CA lists
+                  between two other clubs (both owning clubs named, neither us).
 
     ``force`` bypasses the 30 minute match-list cache, for the Sync button: an
     admin pressing it expects today's draw, not whatever was fetched earlier.
@@ -132,7 +135,7 @@ async def org_grassroots_fixtures_checked(
         # junior_hiding): never fetched, so they cost no Grassroots call either.
         hidden = {str(g) for g in hidden_grade_ids}
         rows = [r for r in rows if str(r[1]) not in hidden]
-    listing: dict = {"grades": {}, "failed": 0}
+    listing: dict = {"grades": {}, "failed": 0, "others": set()}
     if not rows:
         return [], listing
     meta = {guid: (grade_id, gname, sname) for guid, grade_id, gname, sname in rows}
@@ -150,6 +153,13 @@ async def org_grassroots_fixtures_checked(
             listing["grades"][str(grade_id)] = {
                 m.get("id"): (m.get("status") or "").strip().upper() for m in matches if m.get("id")
             }
+            # A grade is a whole competition. Games CA lists in it between two
+            # OTHER clubs are still "listed", so on that evidence alone a stored
+            # copy of one (kept from before fixtures were filtered by owning
+            # club) never goes stale. Name them so the sync can clear them.
+            for m in matches:
+                if m.get("id") and club_match.fixture_is_between_others(org, gr.match_sides(m)):
+                    listing["others"].add(m["id"])
     for fx in fixtures:
         db_grade_id, gname, sname = meta.get(fx.get("grade_id"), (None, None, None))
         fx["db_grade_id"] = str(db_grade_id) if db_grade_id else None

@@ -84,6 +84,13 @@ export default function CommsTemplates() {
   const [notice, setNotice] = useState('')
   const [toast, setToast] = useState(null)
   const [q, setQ] = useState('')
+  // The variables a template can use when it is linked to a BetterSelect email.
+  // A club without BetterSelect (or a user without its permission) gets none, and
+  // the panel is simply not drawn.
+  const [selectionVars, setSelectionVars] = useState([])
+  useEffect(() => {
+    api.bsSelectionEmailTemplates().then(r => setSelectionVars(r?.variables || [])).catch(() => setSelectionVars([]))
+  }, [])
   // Bumped whenever the HTML is replaced wholesale (a different template
   // selected, a file imported). EmailEditorTabs seeds its design iframe once on
   // mount, so a new body only lands if the editor remounts.
@@ -271,12 +278,13 @@ export default function CommsTemplates() {
                 </Note>
               )}
 
-              {isSuper && (
-                <Field label="Subject" hint="Only needed for a template that's sent as-is (e.g. a Sales Workspace email) — a BetterComms campaign started from this template sets its own subject.">
-                  <TextInput value={draft.subject}
-                    onChange={e => setDraft(d => ({ ...d, subject: e.target.value }))} placeholder="(no subject)" />
-                </Field>
-              )}
+              <Field label="Subject"
+                hint={isSuper
+                  ? "Only needed for a template that's sent as-is (e.g. a Sales Workspace email) — a BetterComms campaign started from this template sets its own subject."
+                  : 'Only used when this template is linked to a BetterSelect email (Selection settings). A BetterComms campaign sets its own subject. You can use the selection variables below.'}>
+                <TextInput value={draft.subject}
+                  onChange={e => setDraft(d => ({ ...d, subject: e.target.value }))} placeholder="(no subject)" />
+              </Field>
 
               <CountBar>
                 <span className="text-pb-dim">
@@ -292,6 +300,26 @@ export default function CommsTemplates() {
               />
 
               {notice && <Note toneKey="warn" className="mt-3">{notice}</Note>}
+
+              {selectionVars.length > 0 && (
+                <details className="pb-card p-3 mt-6" data-testid="selection-vars">
+                  <summary className="cursor-pointer text-[13px] text-pb-text">Writing a BetterSelect email? Variables for the captain's and players' emails</summary>
+                  <p className="text-pb-dim text-xs mt-2">
+                    Click one to put it where your cursor is. They fill in from the match and the confirmed side when the email is sent.
+                    Link the template under BetterSelect, Selection rules, Selection emails.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {selectionVars.map(v => (
+                      <button key={v.name} type="button" title={v.desc}
+                        onClick={() => editorRef.current?.insertVariable(v.name)}
+                        className="font-mono text-[11px] border pb-hairline rounded px-2 py-1 hover:bg-pb-surface2"
+                        style={{ color: 'var(--pb-accent)' }}>
+                        {`{{${v.name}}}`}{v.to.length === 1 ? (v.to[0] === 'captain' ? ' (captain)' : ' (players)') : ''}
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              )}
 
               <SectionHeading className="mt-8 mb-2.5">The layout itself</SectionHeading>
               <EmailEditorTabs

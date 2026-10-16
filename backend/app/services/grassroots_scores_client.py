@@ -392,6 +392,20 @@ async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> li
     return out
 
 
+def match_sides(m: dict) -> dict:
+    """A raw match-list entry reduced to the fields ``club_match`` reads:
+    ``home_team``/``away_team`` and each side's owning organisation id."""
+    teams = m.get("teams") or []
+    home_t = next((t for t in teams if t.get("isHome")), None)
+    away_t = next((t for t in teams if not t.get("isHome")), None)
+    return {
+        "home_team": (home_t or {}).get("displayName"),
+        "away_team": (away_t or {}).get("displayName"),
+        "home_org_id": ((home_t or {}).get("owningOrganisation") or {}).get("id"),
+        "away_org_id": ((away_t or {}).get("owningOrganisation") or {}).get("id"),
+    }
+
+
 def cached_grade_matches(grade_id: str) -> Optional[list[dict]]:
     """The grade's match list if the last fetch genuinely succeeded, else None.
 
