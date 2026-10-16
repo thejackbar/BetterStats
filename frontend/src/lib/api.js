@@ -3283,6 +3283,8 @@ export const api = {
   availPublicSwitch: (token) =>
     request(`/public/availability/${token}/switch`, { method: 'POST' }),
   availPublicMe: (token) => request(`/public/availability/${token}/me${tzQuery()}`),
+  // The verified player's own page: squads, locked selections, training.
+  availPublicProfile: (token) => request(`/public/availability/${token}/me/profile${tzQuery()}`),
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
 

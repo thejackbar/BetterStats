@@ -278,6 +278,22 @@ async def _in_junior_squad(db: AsyncSession, club: Organisation, player: Player)
     return False
 
 
+async def _squad_names(db: AsyncSession, club: Organisation, player: Player) -> list[str]:
+    """The names of the squads this player is in, top squad first. Read only when
+    the club has the show-squad switch on; with it off nothing about a squad is
+    ever read for the page, so nothing can leak."""
+    rows = (await db.execute(
+        text(
+            "SELECT COALESCE(NULLIF(t.short_name, ''), t.name) FROM team_members tm "
+            "JOIN teams t ON t.id = tm.team_id "
+            "WHERE tm.player_id = :p AND t.organisation_id = :org AND COALESCE(t.is_active, true) "
+            "ORDER BY t.sequence NULLS LAST, t.name"
+        ),
+        {"p": player.id, "org": club.id},
+    )).fetchall()
+    return [r[0] for r in rows]
+
+
 async def _fixtures_for_player(db: AsyncSession, club: Organisation, squads: list, tz: Optional[str] = None,
                                hide_juniors: bool = False) -> dict[str, list[dict]]:
     """Upcoming fixtures with time, venue, our team and which are this player's."""
@@ -331,6 +347,91 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
         "availability": answers,
         # False for a player in no squad: the page then emphasises no game.
         "has_squad": bool(squads),
+        # Their squads by name, only where the club lets players see them.
+        "squads": await _squad_names(db, club, player) if club.availability_show_squad else [],
+    }
+
+
+@router.get("/{token}/me/profile")
+async def get_my_profile(token: str, request: Request, tz: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+    """The verified player's own page: their squads, the sides they have been
+    selected in, and training. Their own data only, behind the same PIN cookie as
+    the availability answers; nobody else's name appears.
+
+    A side shows only once it is LOCKED (confirmed). A draft or an unlocked side
+    can still change, and telling a player they are in before the selector has
+    finished is worse than telling them nothing."""
+    club = await _club_for_token(db, token)
+    player = await _player_for_session(db, request, club)
+    now = local_now(tz)
+    today = now.date() if now else date.today()
+
+    squads_visible = bool(club.availability_show_squad)
+    squad_names = await _squad_names(db, club, player) if squads_visible else []
+
+    sel_rows = (await db.execute(
+        text(
+            "SELECT f.id, f.played_on, f.start_time, f.venue, f.opponent_name, f.home_away, f.label, f.round, "
+            "COALESCE(NULLIF(t.short_name, ''), t.name), fl.is_captain, fl.is_wicket_keeper "
+            "FROM fixture_lineups fl JOIN fixtures f ON f.id = fl.fixture_id "
+            "LEFT JOIN teams t ON t.id = f.team_id "
+            "WHERE fl.player_id = :p AND fl.organisation_id = :org AND f.locked_at IS NOT NULL "
+            "AND f.played_on >= :today AND COALESCE(f.status, '') <> 'CANCELLED' "
+            "ORDER BY f.played_on, f.start_time NULLS LAST LIMIT 10"
+        ),
+        {"p": player.id, "org": club.id, "today": today},
+    )).fetchall()
+    selected = [
+        {
+            "date": r[1].isoformat() if r[1] else None, "start_time": r[2], "venue": r[3],
+            "opponent_name": r[4], "home_away": r[5], "label": r[6], "round": r[7],
+            # The side's name is the squad's, so it follows the same switch.
+            "team_name": r[8] if squads_visible else None,
+            "is_captain": bool(r[9]), "is_wicket_keeper": bool(r[10]),
+        }
+        for r in sel_rows
+    ]
+
+    # Training: the sessions still to come that are for everyone or for a squad
+    # this player is in, and how often they have turned up lately.
+    my_team_ids = {r[0] for r in (await db.execute(
+        text("SELECT team_id FROM team_members WHERE player_id = :p AND organisation_id = :org"),
+        {"p": player.id, "org": club.id},
+    )).fetchall()}
+    sessions = (await db.execute(
+        text(
+            "SELECT session_date, label, squad_team_ids FROM net_sessions "
+            "WHERE organisation_id = :org AND status = 'active' AND session_date >= :today "
+            "ORDER BY session_date, created_at LIMIT 12"
+        ),
+        {"org": club.id, "today": today},
+    )).fetchall()
+    upcoming = [
+        {"date": d.isoformat(), "label": label}
+        for d, label, squad_ids in sessions
+        if not squad_ids or my_team_ids.intersection(squad_ids)
+    ][:5]
+    since = today - timedelta(days=56)
+    att = (await db.execute(
+        text(
+            "SELECT count(*), max(ns.session_date) FROM net_attendance na "
+            "JOIN net_sessions ns ON ns.id = na.session_id "
+            "WHERE na.player_id = :p AND ns.organisation_id = :org AND ns.session_date >= :since"
+        ),
+        {"p": player.id, "org": club.id, "since": since},
+    )).first()
+
+    return {
+        "club": _club_branding(club),
+        "player": {"id": str(player.id), "display_name": player.display_name},
+        "squads": squad_names,
+        "squads_visible": squads_visible,
+        "selected": selected,
+        "training": {
+            "upcoming": upcoming,
+            "attended_8_weeks": int(att[0] or 0) if att else 0,
+            "last_attended": att[1].isoformat() if att and att[1] else None,
+        },
     }
 
 

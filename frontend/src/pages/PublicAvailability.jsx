@@ -158,6 +158,107 @@ function Banner({ tone = 'error', children }) {
   )
 }
 
+function fmtShort(d) {
+  try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) } catch { return d }
+}
+
+function Section({ title, children }) {
+  return (
+    <section className="rounded-xl border pb-hairline p-3.5 mb-3">
+      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-2">{title}</div>
+      {children}
+    </section>
+  )
+}
+
+// The player's own page: their availability at a glance, their squads, the sides
+// they have been picked in, and training. Only their own data, behind the same
+// PIN cookie as the availability answers.
+function MyPage({ token, me }) {
+  const [data, setData] = useState(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let alive = true
+    api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
+    return () => { alive = false }
+  }, [token])
+
+  const upcoming = (me.dates || []).slice(0, 6)
+  return (
+    <div data-my-page>
+      <Section title="Your availability">
+        {upcoming.length === 0 && <div className="text-sm text-pb-faint">No upcoming games to answer yet.</div>}
+        <div className="flex flex-col gap-1.5">
+          {upcoming.map((d) => {
+            const cur = me.availability?.[d.date]?.status || 'NO_RESPONSE'
+            const meta = AVAILABILITY[cur] || AVAILABILITY.NO_RESPONSE
+            return (
+              <div key={d.date} className="flex items-center justify-between gap-3 text-sm">
+                <span>{fmtShort(d.date)}</span>
+                <span className="font-semibold" style={{ color: meta.cssVar }}>{meta.glyph} {meta.label}</span>
+              </div>
+            )
+          })}
+        </div>
+      </Section>
+
+      {failed && <div className="text-sm text-pb-faint mb-3">Your page could not load. Pull down to try again.</div>}
+      {!data && !failed && <div className="text-sm text-pb-faint mb-3">Loading your page…</div>}
+
+      {data && (
+        <>
+          <Section title="Your squad">
+            {data.squads_visible
+              ? (data.squads.length
+                ? <div className="flex flex-wrap gap-1.5">{data.squads.map((n) => <span key={n} className="text-[13px] font-semibold rounded-full px-3 py-1" style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}>{n}</span>)}</div>
+                : <div className="text-sm text-pb-faint">You are not in a squad yet. Your club will add you.</div>)
+              : <div className="text-sm text-pb-faint">Your club has not turned on squad names for this page.</div>}
+          </Section>
+
+          <Section title="Selected">
+            {data.selected.length === 0
+              ? <div className="text-sm text-pb-faint" data-no-selection>Nothing yet. Sides show here once your selectors have locked them in.</div>
+              : (
+                <div className="flex flex-col gap-2.5">
+                  {data.selected.map((s) => (
+                    <div key={`${s.date}-${s.opponent_name}`} className="rounded-lg px-3 py-2.5" style={{ background: 'color-mix(in srgb, var(--pb-positive) 10%, transparent)' }}>
+                      <div className="font-display font-bold text-[15px]">
+                        {fmtShort(s.date)}{s.team_name ? ` · ${s.team_name}` : ''}
+                      </div>
+                      <div className="text-[13px] text-pb-dim">
+                        {s.home_away === 'AWAY' ? '@ ' : 'vs '}{s.opponent_name || s.label || 'TBC'}{s.start_time ? ` · ${s.start_time}` : ''}{s.venue ? ` · ${s.venue}` : ''}
+                      </div>
+                      {(s.is_captain || s.is_wicket_keeper) && (
+                        <div className="text-[12px] font-semibold mt-0.5" style={{ color: 'var(--pb-accent)' }}>
+                          {[s.is_captain && 'Captain', s.is_wicket_keeper && 'Keeper'].filter(Boolean).join(' and ')}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+          </Section>
+
+          <Section title="Training">
+            {data.training.upcoming.length === 0
+              ? <div className="text-sm text-pb-faint">No nets listed for you yet.</div>
+              : data.training.upcoming.map((t) => (
+                <div key={`${t.date}-${t.label}`} className="flex justify-between gap-3 text-sm py-0.5">
+                  <span>{fmtShort(t.date)}</span><span className="text-pb-dim truncate">{t.label || 'Nets'}</span>
+                </div>
+              ))}
+            <div className="text-[12.5px] text-pb-faint mt-2">
+              {data.training.attended_8_weeks > 0
+                ? `You were at ${data.training.attended_8_weeks} session${data.training.attended_8_weeks === 1 ? '' : 's'} in the last eight weeks${data.training.last_attended ? `, most recently ${fmtShort(data.training.last_attended)}` : ''}.`
+                : 'No nets recorded for you in the last eight weeks.'}
+            </div>
+          </Section>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function PublicAvailability() {
   const { token } = useParams()
   const [step, setStep] = useState('loading') // loading | pick | pin | weekend | dead
@@ -173,6 +274,7 @@ export default function PublicAvailability() {
   const [savingDate, setSavingDate] = useState(null)
   const [savedDate, setSavedDate] = useState(null)
   const [weeksOpen, setWeeksOpen] = useState(1) // weeks of games showing, from the next one
+  const [tab, setTab] = useState('weekend') // weekend | mine
   const pinRef = useRef(null)
   const weeks = useMemo(() => groupByWeek(me?.dates || []), [me?.dates])
 
@@ -396,7 +498,25 @@ export default function PublicAvailability() {
               </div>
               <button onClick={switchPlayer} className="text-pb-faint text-xs hover:text-pb-text underline shrink-0">Not you?</button>
             </div>
+            {(me.squads || []).length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 -mt-2 mb-4" data-my-squads>
+                <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Your squad</span>
+                {me.squads.map((n) => (
+                  <span key={n} className="text-[12px] font-semibold rounded-full px-2.5 py-0.5"
+                    style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}>{n}</span>
+                ))}
+              </div>
+            )}
+            <div role="tablist" className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-pb-surface2 mb-4">
+              {[['weekend', 'Availability'], ['mine', 'My page']].map(([id, label]) => (
+                <button key={id} role="tab" aria-selected={tab === id} data-tab={id} onClick={() => setTab(id)}
+                  className={`py-2 rounded-lg text-sm font-semibold transition-colors ${tab === id ? 'bg-pb-surface text-pb-text shadow-sm' : 'text-pb-faint'}`}>{label}</button>
+              ))}
+            </div>
             <Banner>{error}</Banner>
+
+            {tab === 'mine' && <MyPage token={token} me={me} />}
+            {tab === 'weekend' && (<>
 
             {(me.dates || []).length === 0 && (
               <div className="rounded-xl border pb-hairline px-4 py-10 text-center text-pb-faint text-sm">
@@ -455,6 +575,7 @@ export default function PublicAvailability() {
             <p className="text-center text-pb-faintest text-[11px] mt-6">
               Your answers save automatically. One tap covers every game that day.
             </p>
+            </>)}
           </div>
         )}
 
