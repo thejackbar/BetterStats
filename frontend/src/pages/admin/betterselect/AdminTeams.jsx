@@ -7,8 +7,10 @@
 //
 // Dragging a card MOVES it: from one squad to another it moves (leaving every
 // other squad the player is in alone), and to Unassigned it removes them from
-// that one squad. To ADD a player to a SECOND squad, use the squad's "Add
-// players" button, the "＋" on the card, or Auto-assign — all additive. Writes
+// that one squad. Hold Alt (Option) while dropping to COPY instead. To ADD a
+// player to a SECOND squad, use the squad's "Add players" button, the "＋" on
+// the card, Alt-drop, or Auto-assign — all additive. The "×" on a card in a
+// squad removes them from that one squad. Writes
 // go through POST /teams/squad-assign with an action (move/add/remove).
 //
 // Clubs can have many squads (16+ for Applecross), so the columns WRAP into a
@@ -40,6 +42,8 @@ import {
   RecencySelect, playedWithinYears, monthsAgoISO,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
+import usePersistedState from '../../../lib/usePersistedState'
+import { orderPlayers, downloadSquadCsv, downloadSquadPdf } from '../../../lib/squadExport'
 
 function matchesName(p, q) {
   const needle = q.trim().toLowerCase()
@@ -330,7 +334,7 @@ function AddToSquadMenu({ p, teams, onAddToSquad }) {
 }
 
 /* ── A draggable player card ───────────────────────────────────────────────── */
-function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEnd, onEditAvail, teams, onAddToSquad }) {
+function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEnd, onEditAvail, teams, onAddToSquad, onRemove }) {
   const fmt = useAdminNameFormat()
   const meta = AVAILABILITY[status] || AVAILABILITY.NO_RESPONSE
   const badge = recencyBadge(p, dormantCutoff)
@@ -346,12 +350,21 @@ function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEn
       {badge && <span className="font-mono text-[8px] text-amber-300/60 uppercase shrink-0" title={badge.title}>{badge.text}</span>}
       <RoleChips roles={p.skill_positions} muted />
       {draggable && onAddToSquad && <AddToSquadMenu p={p} teams={teams} onAddToSquad={onAddToSquad} />}
+      {onRemove && (
+        <button type="button" onClick={onRemove} data-remove-from-squad
+          title="Remove from this squad" aria-label={`Remove ${p.display_name || p.name} from this squad`}
+          className="shrink-0 rounded p-1 -mr-1 text-pb-faintest hover:text-pb-red hover:bg-pb-red/10 transition-colors [@media(pointer:coarse)]:p-2.5">
+          <Icon name="close" size={13} />
+        </button>
+      )}
     </div>
   )
 }
 
 /* ── One squad column (collapsible) ────────────────────────────────────────── */
-function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, canManage, collapsed, onToggleCollapse, isOver, dragHandlers, onAdd, onEdit, onDelete, onEditAvail, teams, onAddToSquad }) {
+function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, canManage, collapsed, onToggleCollapse, isOver, dragHandlers, onAdd, onEdit, onDelete, onEditAvail, teams, onAddToSquad, onRemove, onExport, sortMode = 'avail' }) {
+  // A long squad can be opened out to its full length instead of scrolling in a box.
+  const [tall, setTall] = useState(false)
   const hasKeeper = members.some(isKeeper)
   // Every status on this column is read against the column's own date.
   const statusOf = useCallback((id) => statusAt(id, next.date), [statusAt, next.date])
@@ -360,12 +373,12 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
   // the column div hands React two props no DOM element knows, which it warns
   // about on every render.
   const { onCardDragStart, onCardDragEnd, ...columnDrag } = dragHandlers
-  const sorted = useMemo(
-    () => [...members].sort((a, b) =>
+  const sorted = useMemo(() => {
+    if (sortMode === 'first' || sortMode === 'last') return orderPlayers(members, sortMode)
+    return [...members].sort((a, b) =>
       (AVAILABILITY[statusOf(a.id)]?.rank ?? 9) - (AVAILABILITY[statusOf(b.id)]?.rank ?? 9)
-      || (a.display_name || a.name || '').localeCompare(b.display_name || b.name || '')),
-    [members, statusOf],
-  )
+      || (a.display_name || a.name || '').localeCompare(b.display_name || b.name || ''))
+  }, [members, statusOf, sortMode])
 
   return (
     <div {...columnDrag} className="pb-card flex flex-col min-h-0 transition-colors self-start"
@@ -380,6 +393,7 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
           <span className="ml-auto font-mono text-xs text-pb-faint pb-num shrink-0">{members.length}</span>
           {canManage && !col.unassigned && (
             <div className="flex items-center gap-1 ml-1 shrink-0">
+              {onExport && <button onClick={onExport} title="Export this squad list" aria-label="Export this squad list" data-export-squad className="text-pb-faintest hover:text-pb-text p-0.5"><Icon name="download" size={13} /></button>}
               <button onClick={onEdit} title="Edit squad" className="text-pb-faintest hover:text-pb-text p-0.5"><Icon name="filter" size={13} /></button>
               <button onClick={onDelete} title="Delete squad" className="text-pb-faintest hover:text-pb-red p-0.5"><Icon name="trash" size={13} /></button>
             </div>
@@ -399,12 +413,14 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
 
       {!collapsed && (
         <>
-          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1.5 pb-scroll" style={{ maxHeight: 360 }}>
+          <div className="overflow-auto flex-1 p-2 flex flex-col gap-1.5 pb-scroll" data-squad-list={tall ? 'tall' : 'fit'}
+            style={{ maxHeight: tall ? 'none' : 'max(360px, 62vh)' }}>
             {sorted.map((p) => (
               <PlayerCard key={p.id} p={p} status={statusOf(p.id)} dormantCutoff={dormantCutoff} draggable={canManage}
                 onDragStart={() => onCardDragStart(p.id)} onDragEnd={onCardDragEnd}
                 onEditAvail={onEditAvail && next.date ? () => onEditAvail(p, next) : undefined}
-                teams={teams} onAddToSquad={onAddToSquad} />
+                teams={teams} onAddToSquad={onAddToSquad}
+                onRemove={canManage && !col.unassigned ? () => onRemove(p.id) : undefined} />
             ))}
             {members.length === 0 && (
               <div className="m-1 px-2.5 py-5 text-center text-pb-faintest text-[11.5px] border border-dashed border-pb-hairline2 rounded-lg">
@@ -412,6 +428,12 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
               </div>
             )}
           </div>
+          {sorted.length > 8 && (
+            <button onClick={() => setTall((t) => !t)} data-squad-tall
+              className="w-full text-center text-[11px] text-pb-faint hover:text-pb-text border-t pb-hairline py-1.5">
+              {tall ? 'Show less' : `Show all ${sorted.length}`}
+            </button>
+          )}
           {canManage && !col.unassigned && (
             <div className="p-2 border-t pb-hairline">
               <button onClick={onAdd}
@@ -699,6 +721,75 @@ function AutoSeedModal({ onSeeded, onClose }) {
   )
 }
 
+/* ── Export squad lists: CSV or PDF, with a club header ───────────────────── */
+function ExportSquadsModal({ teams, players, initial, initialOrder, onClose }) {
+  const toast = useToast()
+  const fmt = useAdminNameFormat()
+  const [picked, setPicked] = useState(() => new Set(initial === 'all' ? teams.map((t) => t.id) : [initial]))
+  const [order, setOrder] = useState(initialOrder === 'last' ? 'last' : 'first')
+  const [busy, setBusy] = useState(false)
+  const toggle = (id) => setPicked((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const squads = () => teams.filter((t) => picked.has(t.id))
+    .map((t) => ({ team: t, members: players.filter((p) => inSquad(p, t.id) && p.status !== 'inactive') }))
+
+  const run = async (kind) => {
+    if (!picked.size) { toast.error('Pick at least one squad'); return }
+    setBusy(true)
+    try {
+      const club = await api.adminGetSettings().catch(() => ({}))
+      const args = { club, squads: squads(), order, fmt }
+      if (kind === 'csv') downloadSquadCsv(args); else await downloadSquadPdf(args)
+      onClose()
+    } catch (e) { toast.error('Export failed: ' + e.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-[460px] max-w-full max-h-[86%] flex flex-col bg-pb-surface rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl" data-export-modal>
+        <div className="flex items-center justify-between px-5 py-3 border-b pb-hairline">
+          <h3 className="font-mono text-[11px] uppercase tracking-wide3 text-pb-faint">Export squad lists</h3>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text" aria-label="Close"><Icon name="close" size={16} /></button>
+        </div>
+        <div className="p-5 overflow-auto pb-scroll space-y-4">
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[12px] text-pb-faint">Squads</span>
+              <span className="flex gap-2 text-[11.5px]">
+                <button className="text-pb-accent" onClick={() => setPicked(new Set(teams.map((t) => t.id)))}>All</button>
+                <button className="text-pb-faint" onClick={() => setPicked(new Set())}>None</button>
+              </span>
+            </div>
+            <div className="flex flex-col gap-1 max-h-56 overflow-auto pb-scroll">
+              {teams.map((t) => (
+                <label key={t.id} className="flex items-center gap-2 text-[13px] text-pb-dim cursor-pointer">
+                  <input type="checkbox" className="accent-pb-accent" checked={picked.has(t.id)} onChange={() => toggle(t.id)} />
+                  {t.name}
+                  <span className="ml-auto font-mono text-[11px] text-pb-faint">{players.filter((p) => inSquad(p, t.id) && p.status !== 'inactive').length}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-[12.5px] text-pb-dim">
+            Order
+            <select value={order} onChange={(e) => setOrder(e.target.value)}
+              className="rounded-lg border border-pb-hairline2 bg-pb-surface text-pb-dim px-2.5 py-1.5">
+              <option value="first">First name A to Z</option>
+              <option value="last">Surname A to Z</option>
+            </select>
+          </div>
+          <p className="text-[11.5px] text-pb-faint">Players marked inactive are left out. The file opens with the club name and today's date.</p>
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t pb-hairline">
+          <Btn variant="ghost" sm onClick={onClose}>Cancel</Btn>
+          <Btn variant="soft" sm icon="download" onClick={() => run('csv')} disabled={busy}>CSV</Btn>
+          <Btn variant="primary" sm icon="download" onClick={() => run('pdf')} disabled={busy}>{busy ? 'Working…' : 'PDF'}</Btn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ── Manage squads modal: a plain list of every squad with a checkbox, for
  * bulk deletion — quicker than the per-column delete icon when cleaning up
  * after an auto-seed that created more (or wrongly-ordered) squads than
@@ -794,6 +885,9 @@ export default function AdminTeams() {
   const [autoAssign, setAutoAssign] = useState(false)  // auto-assign modal open
   const [manageSquads, setManageSquads] = useState(false)  // bulk-delete modal open
   const [resequencing, setResequencing] = useState(false)
+  const [exporting, setExporting] = useState(null)     // export modal: null | 'all' | a squad id
+  // How each squad lists its players. Remembered on this device.
+  const [sortMode, setSortMode] = usePersistedState('squads.sort', 'avail', (v) => ['avail', 'first', 'last'].includes(v))
   const [availEdit, setAvailEdit] = useState(null)     // player for quick-update modal
 
   // Filters + view — the fill-in reach is a quiet control; the rest are facets.
@@ -1031,14 +1125,16 @@ export default function AdminTeams() {
     catch (e) { setPlayers(prev); toast.error('Add failed: ' + e.message) }
   }, [players, toast])
 
-  const onDrop = (col) => {
+  const onDrop = (col, e) => {
     setOver(null)
     const d = dragRef.current
     dragRef.current = null
     if (!d) return
     const toId = col.id || null   // null for any unassigned pool
     if ((d.fromId || null) === toId) return   // dropped back where it came from
-    editMembership(d.id, { add: toId, remove: d.fromId || null })
+    // Alt (Option) held = copy: join the new squad and stay in the old one.
+    const copy = !!(e && e.altKey) && !!toId
+    editMembership(d.id, { add: toId, remove: copy ? null : (d.fromId || null) })
   }
 
   const isCollapsed = useCallback(
@@ -1111,6 +1207,10 @@ export default function AdminTeams() {
           dateLabel={`${fmtDay(availEdit.date)}${availEdit.opponent ? ` · ${availEdit.opponent}` : ''}`}
           current={statusOf(availEdit.player.id, availEdit.date)} onPick={pickAvail} onClose={() => setAvailEdit(null)} />
       )}
+      {exporting && (
+        <ExportSquadsModal teams={teams || []} players={players || []} initial={exporting} initialOrder={sortMode}
+          onClose={() => setExporting(null)} />
+      )}
       {autoAssign && <AutoAssignModal onApply={applyAutoAssign} onClose={() => setAutoAssign(false)} />}
       {autoSeed && <AutoSeedModal onSeeded={() => { loadTeams(); loadPlayers() }} onClose={() => setAutoSeed(false)} />}
       {manageSquads && (
@@ -1140,6 +1240,13 @@ export default function AdminTeams() {
                     title="How far back the Potential fill-ins pool reaches" />
                 )}
                 {canManage && <Btn variant="soft" sm icon="plus" onClick={() => setAddTo(null)}>Bulk add</Btn>}
+                <Btn variant="ghost" sm icon="download" onClick={() => setExporting('all')}>Export lists</Btn>
+                <select value={sortMode} onChange={(e) => setSortMode(e.target.value)} aria-label="Order players in each squad" data-squad-sort
+                  className="rounded-lg border border-pb-hairline2 bg-pb-surface text-pb-dim text-[12.5px] px-2.5 py-1.5">
+                  <option value="avail">Order: by availability</option>
+                  <option value="first">Order: first name A to Z</option>
+                  <option value="last">Order: surname A to Z</option>
+                </select>
                 <span className="ml-auto text-pb-faint text-[12.5px]"><b className="text-pb-text pb-num">{players.length}</b> players · <b className="text-pb-text pb-num">{teams.length}</b> squads</span>
                 <div className="flex gap-1">
                   <Btn variant="ghost" sm onClick={collapseAll}>Collapse all</Btn>
@@ -1148,6 +1255,11 @@ export default function AdminTeams() {
               </>)}
             />
 
+            {canManage && (
+              <p className="text-[11.5px] text-pb-faint mb-3" data-squad-hint>
+                Drag a card to move it. Hold Alt (Option) as you drop to copy it into another squad and keep it in the first. <b className="text-pb-dim">×</b> takes a player out of one squad, <b className="text-pb-dim">＋</b> adds them to another.
+              </p>
+            )}
             <div className="grid gap-3 items-start" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
               {visibleColumns.map((col) => {
                 const members = membersOf(col)
@@ -1160,10 +1272,13 @@ export default function AdminTeams() {
                       collapsed={isCollapsed(col)} onToggleCollapse={() => toggleCollapse(col)}
                       isOver={over === col.key}
                       teams={teams} onAddToSquad={addToSquad}
+                      sortMode={sortMode}
+                      onRemove={(id) => editMembership(id, { remove: col.id })}
+                      onExport={col.team ? () => setExporting(col.id) : undefined}
                       dragHandlers={{
                         onDragOver: canManage ? (e) => { e.preventDefault(); setOver(col.key) } : undefined,
                         onDragLeave: canManage ? () => setOver((o) => (o === col.key ? null : o)) : undefined,
-                        onDrop: canManage ? () => onDrop(col) : undefined,
+                        onDrop: canManage ? (e) => onDrop(col, e) : undefined,
                         onCardDragStart: (id) => { dragRef.current = { id, fromId: col.id || null } },
                         onCardDragEnd: () => { dragRef.current = null; setOver(null) },
                       }}
