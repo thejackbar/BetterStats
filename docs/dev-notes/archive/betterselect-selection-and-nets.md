@@ -1434,3 +1434,22 @@ Verification: `verify_selection_open_pool.py` now 27 checks (the control on the 
 Requested: a gender filter on the selection screens, as the Players page has. `selectionMeta.normGender` and `GENDER_OPTS` are the one reading of a player's gender ('male', 'female', or '' when unrecorded). The Selection board adds a single-choice `gender` facet (Filters panel, with a pill) and the Draft table pool a drop-down; each is drawn only when the pool holds both genders (`showGender`), since a control that can only answer "nobody" is worse than none. It filters the browse list only; it does not touch `gender_ok`, tiers or auto-fill.
 
 Verification: `verify_draft_table_browser.mjs` (102 checks) drives both filters with three women in the stub pool. Not covered: the one-gender club where the control is absent.
+
+## Gisborne feedback round (v9.114.0)
+
+Meeting notes from Gisborne turned into one release. What was built, what was found, and what is still open.
+
+**Found**
+- "Fill from last week" (`GET /selection/{id}/previous-xi`) fell back to ANY prior fixture of the club when the team had no history. A women's side with no XI of its own was handed the men's last XI, which is the "men autofilled into the women's team" report. It now reads the same team (or the fixture's grade) only, and the board no longer carries across anyone the gender wall or a blocking rule bars.
+- The women's half of the gender wall only knew a grade as women's when `grades.fee_format == 'women'`, a BetterFees override that no sync sets. A club that classified a grade as Women's in Manage Grades got no wall. `grade_labels.grade_is_women` now reads both, and a player recorded male is never eligible for a women's fixture.
+- Wrongly attributed fixtures (Jensen Shield South B, 13 Womens B Grade) came from the old first-word name test that commit 3dd806e replaced with owning organisation ids. The rows it had already written were never cleaned up, because `find_stale` only drops games CA no longer lists as upcoming. `find_foreign` adds that case. Not confirmed from Gisborne data: whether CA omits `owningOrganisation` on one side, which would still let a first-word name match through `club_match.fixture_side`.
+- "Women labelled as Macs": no literal in the code, so it is a team name from CA appearances. `teams` is unique on (organisation, name), so a sponsor name on both a men's and a women's side collapses into one squad. `ensure_team_grades` now leaves such a name unlinked instead of linking it to whichever grade played last. Splitting the one squad into two is a data fix for the club and is not automated.
+- "Ready to review but unable to click confirm": the board's button was disabled whenever the side matched the saved XI, and the overview called a full saved side "Ready to review". There was nothing to press. Confirm now saves and locks, and a named, unlocked side offers Lock team.
+
+**Built**: lock and unlock, audit trail and History, Undo, Registered filter, Played this season, first name and surname order, remembered filters, junior hiding, remove-from-squad, Alt-drop copy, squad CSV and PDF export, per-session net links and squads, squad-by-squad check-in, squad under the player's name, My page.
+
+**Open**
+- A squad still has one grade (`teams.grade_id`). A squad that plays in more than one grade (for example a men's side in one-day and T20) is linked to one of them, and the rest of its fixtures reach it only through `fixtures.team_id`. Making squad to grade many to many touches `squad_next_games`, ladders and the rules scope; it was not done.
+- The audit trail records confirmations, locks, unlocks and call-ups. It does not record every drag on an unconfirmed board (that is what Undo and the draft are for).
+- Remembered filters and the Show juniors choice are per browser, not per user across devices.
+- The Draft table does not yet draw locked columns as read-only; the server refuses the write and the error is shown.

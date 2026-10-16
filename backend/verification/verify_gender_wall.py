@@ -36,7 +36,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import verify_selection_same_day as base
-from app.models.db import Organisation, User, Player, Team, Grade, Season, Fixture, FeeMember, FeeMemberSeason
+from app.models.db import (
+    Organisation, User, Player, Team, Grade, Season, Fixture, FeeMember, FeeMemberSeason, Game, GameAppearance,
+)
 
 engine = create_async_engine(os.environ["DATABASE_URL"], echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -165,6 +167,32 @@ async def main():
     check("a ticked player is registered", (p.get("Max Man") or {}).get("registered"), True)
     check("an unticked player is not", (p.get("Wilma InMens") or {}).get("registered"), False)
     check("a player with no member row is 'not told', not 'no'", (p.get("Dan NoRow") or p.get("Sam Social") or {}).get("registered"), None)
+
+    # ---- Linking a squad to a grade must not guess across genders -----------
+    # "Macs" is a sponsor's name on a men's side AND a women's side. Whichever
+    # grade was played last used to claim both; now an ambiguous name is left
+    # unlinked for the club to choose, while an unambiguous one still links.
+    from app.routers.teams import ensure_team_grades
+    pm = (await pool_and_flags(fx_m))[0]  # warm the harness; no effect
+    mac, hawk = uuid.uuid4(), uuid.uuid4()
+    async with Session() as db:
+        db.add(Team(id=mac, organisation_id=org_id, name="Macs", sequence=7))
+        db.add(Team(id=hawk, organisation_id=org_id, name="Hawks", sequence=8))
+        await db.flush()
+        pid = (await db.execute(text("SELECT id FROM players WHERE organisation_id=:o AND name='Max Man'"), {"o": org_id})).scalar()
+        for gid, tname, days in ((gm, "Macs", 20), (gw, "Macs", 10), (gm, "Hawks", 30)):
+            g = Game(id=uuid.uuid4(), grade_id=gid,
+                     played_at=date.today() - timedelta(days=days))
+            db.add(g)
+            await db.flush()
+            db.add(GameAppearance(game_id=g.id, player_id=pid, team_name=tname))
+        await db.commit()
+    async with Session() as db:
+        linked = await ensure_team_grades(db, org_id)
+    async with Session() as db:
+        rows = dict((await db.execute(text("SELECT name, grade_id FROM teams WHERE name IN ('Macs','Hawks')"))).fetchall())
+    check("a team name played in both men's and women's grades is left unlinked", rows.get("Macs"), None)
+    check("a team name that only ever played one gender's grade still links", rows.get("Hawks"), gm)
 
     from app.routers.fixtures import _match_team
     teams = [(tm, "Mens A", 1, False), (tw, "Womens B", 2, True), (uuid.uuid4(), "Mens B", 2, False)]

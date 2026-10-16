@@ -401,6 +401,11 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
         </div>
         <div className="flex items-center gap-2 mt-1.5 pl-[26px]">
           {(col.grade_name || col.note) && <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint truncate">{col.grade_name || col.note}</span>}
+          {/* A squad with no grade has nothing to read its fixtures, ladder or women's side from. Say so, and where to fix it. */}
+          {col.team && !col.grade_name && (
+            <button type="button" onClick={onEdit} data-no-grade title="Link this squad to a grade"
+              className="font-mono text-[10px] uppercase tracking-wide2 text-pb-amber truncate hover:underline">No grade linked</button>
+          )}
           {members.length > 0 && !hasKeeper && !col.unassigned && <span className="text-[10px] text-pb-amber">· no keeper</span>}
           <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-pb-faint shrink-0"><Dot status="AVAILABLE" size={7} /> {nAvail}</span>
         </div>

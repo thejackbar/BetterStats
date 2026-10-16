@@ -23,6 +23,7 @@ from sqlalchemy import select, text, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
+from app.services.grade_labels import grade_is_women, org_grade_category_sets
 from app.models.db import Game, GameAppearance, Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import months_ago
@@ -81,20 +82,34 @@ async def ensure_team_grades(db: AsyncSession, club_id) -> int:
     )).scalars().all()
     if not unlinked:
         return 0
-    # Most-recent grade per team name, in one pass.
+    # Every grade each team name has played in, newest first.
     rows = await db.execute(
         text(
-            "SELECT DISTINCT ON (lower(ga.team_name)) lower(ga.team_name) AS tname, gr.id AS grade_id "
+            "SELECT lower(ga.team_name) AS tname, gr.id AS grade_id, gr.name AS grade_name, "
+            "gr.fee_format, MAX(g.played_at) AS last_played "
             "FROM game_appearances ga "
             "JOIN games g ON ga.game_id = g.id "
             "JOIN grades gr ON g.grade_id = gr.id "
             "JOIN players p ON ga.player_id = p.id "
             "WHERE p.organisation_id = :org AND ga.team_name IS NOT NULL AND ga.team_name <> '' "
-            "ORDER BY lower(ga.team_name), g.played_at DESC NULLS LAST"
+            "GROUP BY lower(ga.team_name), gr.id, gr.name, gr.fee_format "
+            "ORDER BY lower(ga.team_name), MAX(g.played_at) DESC NULLS LAST"
         ),
         {"org": str(club_id)},
     )
-    name_to_grade = {tname: gid for tname, gid in rows.fetchall()}
+    categories = await org_grade_category_sets(db, club_id)
+    by_name: dict[str, list] = {}
+    for tname, gid, gname, fee, last in rows.fetchall():
+        by_name.setdefault(tname, []).append((gid, grade_is_women(fee, gname, categories)))
+    # A team name that has played in both men's and women's grades (a sponsor's
+    # name on two sides, say "Macs") cannot be linked by guessing: whichever
+    # grade was played last would claim the lot. Those are left unlinked for the
+    # club to choose, rather than linked to the wrong gender's grade.
+    name_to_grade = {
+        tname: grades[0][0]
+        for tname, grades in by_name.items()
+        if len({w for _, w in grades}) == 1
+    }
     linked = 0
     for t in unlinked:
         gid = name_to_grade.get((t.name or "").strip().lower())
