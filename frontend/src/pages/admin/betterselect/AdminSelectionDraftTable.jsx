@@ -28,7 +28,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { availRank, AVAILABILITY } from '../../../lib/availability'
 import { Icon, Avatar, Btn, Tag, RuleTags, JuniorsToggle, playedWithinYears } from './ui'
 import { DnD, useDrag } from './selectionDnd'
-import { nameMatches, roleLine, spark, formMeta, normGender, weekChipsNeeded, unavailableWeeksText, gameDatesLabel } from './selectionMeta'
+import { nameMatches, roleLine, spark, formMeta, normGender, weekChipsNeeded, unavailableWeeksText, gameDatesLabel, fixtureTabs } from './selectionMeta'
 import { xiCompliance, isBlocked } from './selectionRules'
 import { confirmSig, restoreDraft } from './selectionDraft'
 import { sortTeams, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
@@ -223,7 +223,9 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
         </div>
         {fx.end_on && fx.end_on > fx.played_on && (
           <div className="text-[11px] font-semibold truncate" style={{ color: 'var(--pb-amber)' }} data-two-day-header title="Played over two weekends. W1 and W2 on a card are each player's answer for that weekend.">
-            Two-day · W1 {gameDatesLabel(fx.played_on)} + W2 {gameDatesLabel(fx.end_on)}
+            {ctx.day === fx.end_on
+              ? `Two-day · week 2 of 2, started ${gameDatesLabel(fx.played_on)}`
+              : `Two-day · W1 ${gameDatesLabel(fx.played_on)} + W2 ${gameDatesLabel(fx.end_on)}`}
           </div>
         )}
         <div className="flex flex-wrap items-center gap-1 mt-1 min-h-[22px]">
@@ -388,8 +390,9 @@ export default function AdminSelectionDraftTable() {
 
   const days = useMemo(() => {
     const m = new Map()
-    ;(overview?.fixtures || []).forEach((f) => { const k = f.played_on || 'tbc'; m.set(k, (m.get(k) || 0) + 1) })
-    return [...m.entries()].map(([day, n]) => ({ day, n }))
+    ;(overview?.fixtures || []).forEach((f) => fixtureTabs(f).forEach((k) => m.set(k, (m.get(k) || 0) + 1)))
+    // A two-day game adds its second weekend, so dates are put in order ('tbc' last).
+    return [...m.entries()].sort(([a], [b]) => (a === 'tbc') - (b === 'tbc') || (a < b ? -1 : a > b ? 1 : 0)).map(([day, n]) => ({ day, n }))
   }, [overview])
   const wanted = params.get('date')
   const day = wanted && days.some((d) => d.day === wanted) ? wanted : days[0]?.day || null
@@ -456,7 +459,7 @@ export default function AdminSelectionDraftTable() {
     // Anything still waiting out the pause for the day we are leaving goes first.
     Object.keys(savers.current).forEach((fid) => flush(fid, false))
     const mine = ++gen.current
-    const fixtures = sortTeams((overview.fixtures || []).filter((f) => (f.played_on || 'tbc') === day))
+    const fixtures = sortTeams((overview.fixtures || []).filter((f) => fixtureTabs(f).includes(day)))
     setCols(null)
     setConflicts({})
     setStatusMap({})
@@ -670,10 +673,18 @@ export default function AdminSelectionDraftTable() {
   }, [cols, order])
   // The shared pool answers "can they play TODAY": the first team's pool may be
   // the two-day game, whose status is the worse of both weeks, which would mark
-  // a player OUT for one-day teams they are free for. Today is W1; W2 is the chips.
+  // a player OUT for one-day teams they are free for. The open weekend is what the pool shows; the chips show both.
+  // Which weekend is open: the second tab of a two-day game reads W2.
+  const weekIdx = useMemo(() => {
+    for (const f of order) {
+      const x = cols?.[f]?.fx
+      if (x?.end_on && x.end_on > x.played_on) return x.end_on === day ? 1 : 0
+    }
+    return 0
+  }, [cols, order, day])
   const unnamed = useMemo(() => Object.values(merged)
     .filter((p) => !named.has(p.id) && !p.is_inactive)
-    .map((p) => (weekByPlayer[p.id] ? { ...p, availability: weekByPlayer[p.id][0].status } : p)), [merged, named, weekByPlayer])
+    .map((p) => (weekByPlayer[p.id] ? { ...p, availability: weekByPlayer[p.id][weekIdx]?.status || p.availability } : p)), [merged, named, weekByPlayer, weekIdx])
   // Offered only when the pool holds both: a control that can only answer "nobody" is worse than none.
   const showGender = useMemo(() => new Set(unnamed.map((p) => normGender(p.gender)).filter(Boolean)).size > 1, [unnamed])
   const pool = useMemo(() => {
@@ -849,7 +860,7 @@ export default function AdminSelectionDraftTable() {
 
   const ctx = {
     cols, order, merged, status, conflicts, canEdit, busy, activeFid, setActiveFid,
-    shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length, showGender, weekByPlayer,
+    shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length, showGender, weekByPlayer, day,
     filters: { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad, gender, setGender, showJuniors, setShowJuniors },
     tapPool, removeAt, toggleCap, toggleWk, confirmOne, discard, useTheirs, keepMine,
   }
@@ -864,7 +875,7 @@ export default function AdminSelectionDraftTable() {
           </p>
           {Object.keys(weekByPlayer).length > 0 && (
             <p className="text-[12px] text-pb-faint mt-0.5" data-week-legend>
-              Today has a two-day game. <b className="font-mono">W1</b> and <b className="font-mono">W2</b> on a card are that player's answer for each weekend, shown when either is not a yes.
+              This weekend has a two-day game. <b className="font-mono">W1</b> and <b className="font-mono">W2</b> on a card are that player's answer for each weekend, shown when either is not a yes.
             </p>
           )}
         </div>

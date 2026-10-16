@@ -32,6 +32,12 @@ export function weekSplitLine(p) {
   if (d.every((x) => x.status === d[0].status)) return ''
   return d.map((x, i) => `Week ${i + 1} ${WEEK_WORD[x.status] || x.status}`).join(' · ')
 }
+// The day tabs a fixture belongs on: its own date, and for a two-day game its
+// second weekend too, so both weekends show the game and the two are linked.
+export function fixtureTabs(f) {
+  const first = f?.played_on || 'tbc'
+  return f?.end_on && f?.played_on && f.end_on > f.played_on ? [first, f.end_on] : [first]
+}
 // Whether a player's two weeks are worth drawing as W1 / W2 chips: only when at
 // least one week is not a plain yes. A player free both weeks needs no marker.
 export function weekChipsNeeded(days) {

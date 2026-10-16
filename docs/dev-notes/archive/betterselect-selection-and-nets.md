@@ -1537,3 +1537,14 @@ Applecross: on the Whiteboard a player picked for a one-day team on the 24th loo
 - The two-day column header reads "Two-day · W1 date + W2 date"; a note under the title explains W1/W2 while the day has one.
 - Not done: the second weekend's tab does not list the two-day game (tabs group by `played_on`), so on that day nothing shows W2 as "today". The single Selection board still uses its text line (`weekSplitLine`), not chips, and does not know a day's other games.
 - Proof: `verify_two_day_whiteboard_browser.mjs` (21 checks; control on the previous build fails 11, including the pool marking him OUT), `verify_draft_table_browser.mjs` 105 still pass.
+
+
+## Two-day games: the weekends are linked, no auto-removal (v9.117.5)
+
+Applecross, Jack in OD4s on the 24th and away for week 2 of the 1st XI game: the 31 Oct Whiteboard tab showed only games STARTING that week, so nothing there said the 1st XI was already using anyone, and the pool was free to offer them for a one-day side. Selectors' rule: anyone picked in the top five (two-day) grades is busy for one-day sides in week 2. And: nobody is removed from a side for being unavailable.
+- `fixture_days.SHARES_A_DAY_SQL` (bind `:ds` to `fixture_days(...)`) is "the other fixture is played on a day this game occupies": its `played_on`, or a later `end_on`. The pool's clash query, the other-draft marker (`in_draft_of`) and `set_selection`'s clash query all use it. A two-day game is never compatible with another (`selection_clash` rule 1), so it stays a clash; the usual call-up rule applies (a higher side may take a player from a lower one, a lower side may not take a player from a higher one).
+- `selection_overview` lists a game while `end_on` is today or later, so a game under way stays on the board for week 2.
+- Whiteboard: `selectionMeta.fixtureTabs(f)` puts a two-day game on the tab of each weekend; tabs are sorted by date. The column header reads "week 2 of 2, started <date>" on the second tab. The shared pool takes each player's answer for the OPEN weekend (`weekIdx`).
+- Removed: the draft carry no longer drops unavailable players, at seed time or on `GET /draft` (`unavailable_ids`, `without_unavailable` deleted; `left_out` stays in the payload, always empty). This reverses rule 69's old clause. `verify_selection_next_round_draft.py` sections J, K, M now assert everyone is kept.
+- Not done: a one-day side cannot be confirmed if a two-day pick on its date is only a DRAFT (drafts never block, only flag), by design.
+- Proof: `verify_two_day_availability.py` 52 (control on the previous app code fails 8: no clash on week 2, a 409 not raised, the call-up not applied, the game dropped off the overview), `verify_two_day_whiteboard_browser.mjs` 28 (control fails 5: no week 2 tab, header, week 2 pool), `verify_draft_table_browser.mjs` 105, `verify_selection_next_round_draft.py` 46.

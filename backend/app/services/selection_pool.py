@@ -22,7 +22,7 @@ from app.models.db import FixtureLineup, Grade, Player, Season, Team
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 from app.auth.modules import org_has_module
 from app.services import player_age, selection_clash, selection_rules, squad_sides
-from app.services.fixture_days import combine_status, fixture_days
+from app.services.fixture_days import SHARES_A_DAY_SQL, combine_status, fixture_days
 from app.services.side_size import effective_min
 from app.services.grade_labels import grade_is_women, org_grade_category_sets
 
@@ -626,9 +626,9 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
                 "JOIN fixtures f ON fl.fixture_id = f.id "
                 "LEFT JOIN teams t ON f.team_id = t.id "
                 "WHERE fl.organisation_id = :org AND f.id <> :fid "
-                "AND f.played_on = :d"
+                "AND " + SHARES_A_DAY_SQL
             ),
-            {"org": club.id, "fid": fx.id, "d": fx.played_on},
+            {"org": club.id, "fid": fx.id, "ds": days},
         )
         cl_rows = cl_res.fetchall()
         # A same-date selection that can be played alongside this game (back to
@@ -678,10 +678,10 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
                 "CROSS JOIN LATERAL jsonb_array_elements_text("
                 "  CASE WHEN jsonb_typeof(d.draft->'slots') = 'array' THEN d.draft->'slots' "
                 "       ELSE '[]'::jsonb END) AS x(pid) "
-                "WHERE d.organisation_id = :org AND f.played_on = :d AND f.id <> :fid "
+                "WHERE d.organisation_id = :org AND " + SHARES_A_DAY_SQL + " AND f.id <> :fid "
                 "AND x.pid IS NOT NULL"
             ),
-            {"org": club.id, "fid": fx.id, "d": fx.played_on},
+            {"org": club.id, "fid": fx.id, "ds": days},
         )
         for pid_, where_ in dr_res.fetchall():
             names_ = in_other_draft.setdefault(str(pid_), [])

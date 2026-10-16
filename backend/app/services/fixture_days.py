@@ -36,3 +36,12 @@ def combine_status(statuses: Iterable[Optional[str]]) -> str:
         if s in seen:
             return s
     return "NO_RESPONSE"
+
+
+# "The other fixture `f` is played on a day this game occupies." A two-day game
+# occupies both of its dates, so a one-day side on its second weekend clashes with
+# it as surely as one on its first. Bind :ds to `fixture_days(...)`.
+SHARES_A_DAY_SQL = (
+    "(f.played_on = ANY(CAST(:ds AS date[])) "
+    "OR (f.end_on IS NOT NULL AND f.end_on > f.played_on AND f.end_on = ANY(CAST(:ds AS date[]))))"
+)

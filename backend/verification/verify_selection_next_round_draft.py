@@ -300,7 +300,7 @@ async def main():
     ids = await scalar("SELECT array_agg(player_id::text ORDER BY batting_order) FROM fixture_lineups WHERE fixture_id=:f", f=R1)
     check("and the XI was written", ids, [s[0], s[1]])
 
-    print("\n# J. Anyone who said unavailable for the next round is left out")
+    print("\n# J. Nobody is taken out of the carried draft for being unavailable")
     a2_date = d0 + timedelta(days=37)
     async def avail(pid, on, status):
         async with engine.begin() as conn:
@@ -321,26 +321,24 @@ async def main():
     await avail(P[3], d0 + timedelta(days=36), "UNAVAILABLE")   # P3: said no, but for another date
     check("A1 confirmed", await confirm(A1, [P[0], P[1], P[2], P[3], P[4], P[5]], cap=P[1], wk=P[2]), "ok")
     dr = await draft_of(A2) or {}
-    check("the one who said unavailable is left out, the rest close up",
-          dr.get("slots"), [s[0], s[2], s[3], s[4], s[5]])
-    check("captain who said no is cleared; keeper who is maybe stays", (dr.get("captain_id"), dr.get("wicket_keeper_id")), (None, s[2]))
-    check("who was left out is recorded", dr.get("left_out"), [s[1]])
-    check("an explicit yes beats a period; a no for another date does not count",
-          (s[5] in dr.get("slots", []), s[3] in dr.get("slots", [])), (True, True))
+    check("everyone is carried, the one who said no included (the selector decides)",
+          dr.get("slots"), [s[0], s[1], s[2], s[3], s[4], s[5]])
+    check("captain and keeper are kept as picked", (dr.get("captain_id"), dr.get("wicket_keeper_id")), (s[1], s[2]))
+    check("nobody is reported as left out", dr.get("left_out") or [], [])
     check("still nothing in fixture_lineups", await scalar("SELECT COUNT(*) FROM fixture_lineups WHERE fixture_id=:f", f=A2), 0)
 
-    print("\n# K. A no that comes in after the draft was made")
+    print("\n# K. A no that comes in after the draft was made changes nothing")
     await avail(P[4], a2_date, "UNAVAILABLE")
     dr = await draft_of(A2) or {}
-    check("the board's read drops them", dr.get("slots"), [s[0], s[2], s[3], s[5]])
-    check("both are reported as left out", dr.get("left_out"), sorted([s[1], s[4]]))
+    check("the board's read still names them", dr.get("slots"), [s[0], s[1], s[2], s[3], s[4], s[5]])
+    check("nobody is reported as left out", dr.get("left_out") or [], [])
     stored = await scalar("SELECT draft->'slots' FROM selection_drafts WHERE fixture_id=:f", f=A2)
-    check("the stored draft is not rewritten", len(stored), 5)
+    check("the stored draft is not rewritten", len(stored), 6)
     r, _ = await call(get_draft, str(A2))
     check("and its version is unchanged", r["version"], await scalar("SELECT version FROM selection_drafts WHERE fixture_id=:f", f=A2))
     await avail(P[4], a2_date, "AVAILABLE")
     dr = await draft_of(A2) or {}
-    check("a yes again brings them back (nothing was lost)", s[4] in dr.get("slots", []), True)
+    check("and a yes again changes nothing either", s[4] in dr.get("slots", []), True)
 
     print("\n# L. A selector's own draft is never filtered")
     r, _ = await call(get_draft, str(A2))
@@ -349,12 +347,12 @@ async def main():
     dr = await draft_of(A2) or {}
     check("it comes back exactly as saved", dr.get("slots"), [s[1], s[0]])
 
-    print("\n# M. Everyone said no: nothing to carry")
+    print("\n# M. Everyone said no: the side is still carried")
     await call(discard_draft, str(A2))
     for p in P[:3]:
         await avail(p, a2_date, "UNAVAILABLE")
     check("A1 re-confirmed with only people who said no", await confirm(A1, [P[0], P[1], P[2]]), "ok")
-    check("no draft is made", await draft_of(A2), None)
+    check("the draft is made with all three", (await draft_of(A2) or {}).get("slots"), [s[0], s[1], s[2]])
 
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:

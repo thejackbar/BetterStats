@@ -13,7 +13,7 @@ for week 2 was offered as available, because
 
 Drives the SHIPPED code: `grassroots_scores_client.get_grade_fixtures`, the
 `POST /fixtures/sync` route body, `upcoming_fixtures_by_date`,
-`assemble_selection`, `selection_overview`, `selection_seed.unavailable_ids` and
+`assemble_selection`, `selection_overview`, the two-weekend clash rules and
 the public `GET/POST /public/availability/{token}/me`.
 
 CONTROL MODE: against the commit before this change every "both days" check
@@ -172,12 +172,12 @@ async def main():
     import app.routers.availability as av
     import app.routers.fixtures as fxr
     import app.routers.public_availability as pa
-    import app.services.selection_seed as seed
     import app.services.grassroots_scores_client as gr
     from app.services.selection_pool import assemble_selection
 
     org, season, g1, t1, user_id = (uuid.uuid4() for _ in range(5))
-    TD, OD, FB = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    g2, t2 = uuid.uuid4(), uuid.uuid4()
+    TD, OD, FB, OW2, TDP, ODP = (uuid.uuid4() for _ in range(6))
     jack, ann, bob, cal = (uuid.uuid4() for _ in range(4))
     wk1 = date.today() + timedelta(days=10)
     wk2 = wk1 + timedelta(days=7)
@@ -192,13 +192,25 @@ async def main():
         await db.flush()
         db.add(Grade(id=g1, season_id=season, name="1st Grade"))
         await db.flush()
+        db.add(Grade(id=g2, season_id=season, name="2nd Grade"))
+        await db.flush()
         db.add(Team(id=t1, organisation_id=org, name="1st XI", sequence=1, grade_id=g1))
+        db.add(Team(id=t2, organisation_id=org, name="2nd XI", sequence=2, grade_id=g2))
         await db.flush()
         for pid, nm in ((jack, "Jack"), (ann, "Ann"), (bob, "Bob"), (cal, "Cal")):
             db.add(Player(id=pid, organisation_id=org, name=nm, gender="male", is_player=True, status="active"))
         await db.flush()
         db.add(Fixture(id=TD, organisation_id=org, grade_id=g1, team_id=t1, source="manual", status="UPCOMING",
                        played_on=wk1, end_on=wk2, start_time="12:30", opponent_name="Kalamunda", label="Round 3"))
+        # A one-day 2nd XI game on the two-day game's SECOND weekend.
+        db.add(Fixture(id=OW2, organisation_id=org, grade_id=g2, team_id=t2, source="manual", status="UPCOMING",
+                       played_on=wk2, start_time="12:30", opponent_name="Joondalup", label="Round 4"))
+        # A two-day game already under way (week 1 gone, week 2 tomorrow) and a past one-day game.
+        db.add(Fixture(id=TDP, organisation_id=org, grade_id=g1, team_id=t1, source="manual", status="UPCOMING",
+                       played_on=date.today() - timedelta(days=6), end_on=date.today() + timedelta(days=1),
+                       start_time="12:30", opponent_name="Swan Districts", label="Round 2"))
+        db.add(Fixture(id=ODP, organisation_id=org, grade_id=g2, team_id=t2, source="manual", status="UPCOMING",
+                       played_on=date.today() - timedelta(days=1), start_time="12:30", opponent_name="Past", label="Round 1"))
         db.add(Fixture(id=OD, organisation_id=org, grade_id=g1, team_id=t1, source="manual", status="UPCOMING",
                        played_on=wk3, start_time="12:30", opponent_name="Wanneroo", label="Round 5"))
         # Jack: free week 1, away week 2. Ann: free both. Bob: free week 1, no answer week 2.
@@ -273,17 +285,61 @@ async def main():
     row1 = next(f for f in ov["fixtures"] if f["id"] == str(OD))
     check("control: a one-day game has no end_on", row1.get("end_on"), None)
 
-    print("\n# E. The next-round carry leaves out someone away in week 2")
-    ids = [str(jack), str(ann)]
+    print("\n# E. The two weekends are linked: a two-day pick is busy for one-day sides in week 2")
     async with Session() as db:
+        club = await db.get(Organisation, org)
+        ow2 = await assemble_selection(db, club, await db.get(Fixture, OW2))
+        od3 = await assemble_selection(db, club, await db.get(Fixture, OD))
+    p2 = {p["display_name"]: p for p in ow2["pool"]}
+    check("Ann (in the two-day 1st XI) shows as picked elsewhere on week 2's one-day side", p2["Ann"].get("clash"), ["1st XI"])
+    check("...and the lower side cannot take her", p2["Ann"].get("clash_blocks"), True)
+    check("control: Bob (picked nowhere) has no clash", p2["Bob"].get("clash"), [])
+    check("control: a one-day side on a third weekend is not affected", {p["display_name"]: p for p in od3["pool"]}["Ann"].get("clash"), [])
+    try:
+        async with Session() as db:
+            club = await db.get(Organisation, org); user = await db.get(User, user_id)
+            await sel.set_selection(str(OW2), sel.LineupSet(players=[
+                sel.LineupSlot(player_id=str(ann), batting_order=1, is_captain=False, is_wicket_keeper=False)]), db, club, user)
+        refused = None
+    except HTTPException as e:
+        refused = e.status_code
+    check("saving her into the week 2 one-day side is refused (409)", refused, 409)
+    async with Session() as db:
+        club = await db.get(Organisation, org); user = await db.get(User, user_id)
+        await sel.set_selection(str(OW2), sel.LineupSet(players=[
+            sel.LineupSlot(player_id=str(bob), batting_order=1, is_captain=False, is_wicket_keeper=False)]), db, club, user)
+        td = await assemble_selection(db, club, await db.get(Fixture, TD))
+    pt = {p["display_name"]: p for p in td["pool"]}
+    check("the other way round: the two-day pool shows Bob as picked in the week 2 side", pt["Bob"].get("clash"), ["2nd XI"])
+    check("...as a call-up (the higher side may take him)", pt["Bob"].get("clash_blocks"), False)
+    async with Session() as db:
+        club = await db.get(Organisation, org); user = await db.get(User, user_id)
+        await sel.set_selection(str(TD), sel.LineupSet(players=[
+            sel.LineupSlot(player_id=str(p), batting_order=i + 1, is_captain=False, is_wicket_keeper=False)
+            for i, p in enumerate((jack, ann, bob))]), db, club, user)
+    left = await _rows("SELECT count(*) FROM fixture_lineups WHERE fixture_id=:f AND player_id=:p", f=OW2, p=bob)
+    check("calling Bob up to the two-day side takes him out of the week 2 side", left[0][0], 0)
+    # An unconfirmed draft for the two-day game is flagged on the week 2 side, never blocking.
+    async with Session() as db:
+        club = await db.get(Organisation, org); user = await db.get(User, user_id)
         try:
-            gone = await seed.unavailable_ids(db, org, wk1, ids, wk2)
-        except TypeError:
-            gone = None   # previous code has no end date argument: report, do not crash
-        old = await seed.unavailable_ids(db, org, wk1, ids)
-    check("Jack is left out of a two-day draft", gone and sorted(gone), [str(jack)])
-    check("control: read on week 1 alone he would have been kept", sorted(old), [])
-    check("control: a fully available player is never dropped", str(ann) in (gone or set()), False)
+            await sel.save_draft(str(TD), sel.DraftSet(slots=[str(cal)], base_version=0), db=db, club=club, user=user)
+        except Exception:
+            pass
+        ow2 = await assemble_selection(db, club, await db.get(Fixture, OW2))
+    check("a player in the two-day draft is flagged on the week 2 side", {p["display_name"]: p for p in ow2["pool"]}["Cal"].get("in_draft_of"), ["1st XI"])
+
+    print("\n# E2. A two-day game under way stays on the board until week 2 is over")
+    async with Session() as db:
+        club = await db.get(Organisation, org)
+        ov = await sel.selection_overview(db=db, club=club)
+    ids_on_board = {f["id"] for f in ov["fixtures"]}
+    check("the game with week 1 gone and week 2 tomorrow is still listed", str(TDP) in ids_on_board, True)
+    check("control: a one-day game that has been played is not", str(ODP) in ids_on_board, False)
+
+    print("\n# E3. Nobody is taken out of a carried draft for being unavailable")
+    import app.services.selection_seed as seed2
+    check("the removal helpers are gone", (hasattr(seed2, "without_unavailable"), hasattr(seed2, "unavailable_ids")), (False, False))
 
     print("\n# F. The public page and a player's own answer for week 2")
     from jose import jwt as jose_jwt

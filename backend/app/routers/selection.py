@@ -22,7 +22,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
@@ -132,7 +132,8 @@ async def selection_overview(
         select(Fixture)
         .where(
             Fixture.organisation_id == club.id,
-            Fixture.played_on >= date.today(),
+            # A two-day game stays on the board until its second weekend is over.
+            or_(Fixture.played_on >= date.today(), Fixture.end_on >= date.today()),
             Fixture.status != "CANCELLED",
         )
         .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
@@ -485,12 +486,9 @@ async def get_draft(
     unchanged, and so only someone who can edit the XI is ever handed a
     half-built one."""
     fx = await _get_owned_fixture(db, fixture_id, club.id)
-    current = await _current_draft(db, fx.id, club.id)
-    if current["draft"] is not None:
-        # A carried draft (never edited) drops anyone who has since said
-        # unavailable for the date. The stored row and its version are unchanged.
-        current["draft"] = await selection_seed.without_unavailable(db, club.id, fx.played_on, current["draft"], fx.end_on)
-    return current
+    # Nobody is taken out of a carried draft for being unavailable: the board
+    # shows the answer on their card and the selector decides.
+    return await _current_draft(db, fx.id, club.id)
 
 
 @router.put("/{fixture_id}/draft")
@@ -690,7 +688,13 @@ async def set_selection(
                 .where(
                     FixtureLineup.organisation_id == club.id,
                     Fixture.id != fx.id,
-                    Fixture.played_on == fx.played_on,
+                    # Any day this game occupies: a two-day game also holds its
+                    # second weekend, so a one-day side then clashes with it.
+                    or_(
+                        Fixture.played_on.in_(fixture_days(fx.played_on, fx.end_on)),
+                        and_(Fixture.end_on.isnot(None), Fixture.end_on > Fixture.played_on,
+                             Fixture.end_on.in_(fixture_days(fx.played_on, fx.end_on))),
+                    ),
                     FixtureLineup.player_id.in_(seen),
                 )
             )

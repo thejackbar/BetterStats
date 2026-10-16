@@ -15,11 +15,11 @@ Rules this module keeps:
   rebuilds the payload on its first save, which drops the tag, so a tagged
   draft is by definition untouched and may be refreshed when the source XI is
   confirmed again, or removed when the source is emptied.
-* Anyone who has said UNAVAILABLE for the next fixture's date is left out
-  (``left_out`` lists them). The same filter runs when the board reads a
-  carried draft, so a player who says no after the draft was made drops out
-  too. It is a read-time view of a draft nobody has edited; nothing is
-  written, and a player who later says yes is not put back.
+* Nobody is taken out for having said UNAVAILABLE. The carried side is the
+  selector's starting point, and an availability answer is shown on each card
+  (and per weekend for a two-day game); removing a name behind their back hid a
+  decision that is theirs. (An earlier version dropped them, at seed time and on
+  read; ``left_out`` stays in the payload, always empty, for older boards.)
 * Only the immediate next fixture is seeded, never a chain: round 3 is seeded
   when round 2 is confirmed, not from round 1.
 * Never raises: a failure here must not take down the confirm that called it.
@@ -35,7 +35,6 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.fixture_days import fixture_days
 
 log = logging.getLogger(__name__)
 
@@ -68,66 +67,6 @@ async def next_fixture_id(
     return (row[0], row[1]) if row else None
 
 
-async def unavailable_ids(
-    db: AsyncSession, org_id, on: Optional[date], ids: list[str], end_on: Optional[date] = None,
-) -> set[str]:
-    """Which of ``ids`` have said UNAVAILABLE for the game starting ``on``.
-
-    Same rule as the selection pool: an explicit answer for the date wins, and
-    only where there is none does a covering availability period speak. MAYBE
-    and no answer are not "unavailable". A two-day game (``end_on`` after
-    ``on``) is read on both days: UNAVAILABLE on either rules the player out."""
-    days = fixture_days(on, end_on)
-    if not days or not ids:
-        return set()
-    uids = []
-    for i in ids:
-        try:
-            uids.append(uuid.UUID(i))
-        except (ValueError, AttributeError, TypeError):
-            pass
-    if not uids:
-        return set()
-    from app.routers.availability import resolve_period_statuses
-
-    rows = (await db.execute(
-        text(
-            "SELECT player_id, avail_date, status FROM player_availability "
-            "WHERE organisation_id = :org AND avail_date = ANY(CAST(:ds AS date[])) "
-            "AND player_id = ANY(CAST(:ids AS uuid[]))"
-        ),
-        {"org": org_id, "ds": days, "ids": uids},
-    )).fetchall()
-    status = {(str(pid), d): st for pid, d, st in rows}
-    periods = await resolve_period_statuses(db, org_id, days)
-    for d in days:
-        for pid, info in periods.get(d.isoformat(), {}).items():
-            status.setdefault((pid, d), info["status"])
-    return {i for i in ids if any(status.get((i, d)) == "UNAVAILABLE" for d in days)}
-
-
-async def without_unavailable(
-    db: AsyncSession, org_id, on: Optional[date], draft: dict, end_on: Optional[date] = None,
-) -> dict:
-    """A copy of a CARRIED draft with the unavailable players taken out of the
-    batting order (the rest close up). A draft with no ``seeded_from`` is a
-    selector's own and is returned as it is."""
-    if not isinstance(draft, dict) or not draft.get("seeded_from"):
-        return draft
-    slots = [s for s in (draft.get("slots") or []) if s]
-    out = await unavailable_ids(db, org_id, on, slots, end_on)
-    if not out:
-        return draft
-    kept = [s for s in slots if s not in out]
-    return {
-        **draft,
-        "slots": kept,
-        "captain_id": draft.get("captain_id") if draft.get("captain_id") in kept else None,
-        "wicket_keeper_id": draft.get("wicket_keeper_id") if draft.get("wicket_keeper_id") in kept else None,
-        "left_out": sorted(set(draft.get("left_out") or []) | out),
-    }
-
-
 async def seed_next_round_draft(
     db: AsyncSession,
     *,
@@ -155,12 +94,6 @@ async def seed_next_round_draft(
             nxt, nxt_on = found
             src = str(fixture_id)
 
-            nxt_end = (await db.execute(
-                text("SELECT end_on FROM fixtures WHERE id = :id"), {"id": nxt},
-            )).scalar()
-            gone = await unavailable_ids(db, org_id, nxt_on, list(player_ids), nxt_end)
-            player_ids = [p for p in player_ids if p not in gone]
-
             if not player_ids:
                 # Nobody left to carry (the source XI was emptied, or all said
                 # no): drop only a draft that is still the
@@ -176,7 +109,7 @@ async def seed_next_round_draft(
                 "captain_id": captain_id if captain_id in player_ids else None,
                 "wicket_keeper_id": wicket_keeper_id if wicket_keeper_id in player_ids else None,
                 "demotions": [],
-                "left_out": sorted(gone),
+                "left_out": [],
                 "seeded_from": src,
             })
             params = {"nf": nxt, "org": org_id, "d": payload, "uid": user_id, "src": src}
