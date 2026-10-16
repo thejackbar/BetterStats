@@ -19,7 +19,8 @@ const LAST = ['Johnson', 'Jensen', 'Arthur', 'Barker', 'Bourke', 'Brennan', 'Bro
 const SIZES = [13, 50, 20, 11, 15, 12]
 const TEAM_IDS = SIZES.map((_, i) => `00000000-0000-0000-0000-00000000000${i + 1}`)
 const NAMES = ['Jenson A', 'Jenson B / Club Grade', 'Womens', 'MacIntyre 1s & 2s', 'Juniors U14', 'Juniors U12']
-const mkTeams = (n) => TEAM_IDS.slice(0, n).map((id, i) => ({ id, name: NAMES[i], short_name: null, sequence: i + 1, is_active: true, grade_id: null, grade_name: `Grade ${i + 1}` }))
+let GRADE = null
+const mkTeams = (n) => TEAM_IDS.slice(0, n).map((id, i) => ({ id, name: NAMES[i], short_name: null, sequence: i + 1, is_active: true, grade_id: null, grade_name: GRADE || `Grade ${i + 1}` }))
 let seq = 0
 const mkPlayers = (sizes) => sizes.flatMap((n, ti) => Array.from({ length: n }, () => {
   const k = seq++
@@ -29,8 +30,9 @@ const mkPlayers = (sizes) => sizes.flatMap((n, ti) => Array.from({ length: n }, 
 }))
 const ME = { id: 'u-1', username: 'admin', email: 'a@b.c', role: 'club_admin', organisation_id: 'org-1', club_slug: 'gisborne', capabilities: [], entitlements: { modules: ['select'], core_live: true, status: 'active' } }
 
-async function openAndExport(browser, sizes, { all = true } = {}) {
+async function openAndExport(browser, sizes, { grade = null } = {}) {
   seq = 0
+  GRADE = grade
   const players = mkPlayers(sizes), teams = mkTeams(sizes.length)
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true })
   const page = await ctx.newPage()
@@ -80,6 +82,20 @@ const run = async () => {
     check('the file is named for the club', /Gisborne - squads\.pdf$/.test(r.name), r.name)
     execFileSync('pdftoppm', ['-png', '-r', '70', r.file, `${OUT}/squad-sheet-six`])
     check('no page errors', r.errors.length === 0, r.errors.join(' | '))
+  })
+
+  await safe('one big squad', async () => {
+    console.log('\n── One squad of 41 with a long list of grades ──')
+    const r = await openAndExport(browser, [41], { grade: '09. Jensen Shield - North B, 10. Jensen Shield - South B, 10. Club Grade - North, 11. Club Grade - South' })
+    const i = info(r.file), t = text(r.file)
+    check('one landscape page', /Pages:\s+1\b/.test(i) && (() => { const m = /Page size:\s+([\d.]+) x ([\d.]+)/.exec(i); return m && +m[1] > +m[2] })(), i)
+    check('all 41 names are there', r.players.every((p) => { const [l, f] = p.name.split(', '); return t.includes(`${f} ${l}`) }))
+    check('the grades are written out in full across the top, not squeezed into a column', t.includes('11. Club Grade - South') && /41 players/.test(t))
+    // Columns, not one long list: count distinct x positions of the numbering.
+    const bbox = execFileSync('pdftotext', ['-bbox-layout', r.file, '-']).toString()
+    const xs = new Set([...bbox.matchAll(/<word xMin="([\d.]+)"[^>]*>(\d+)<\/word>/g)].filter((m) => +m[2] <= 41).map((m) => Math.round(+m[1] / 40)))
+    check('the names run across several columns', xs.size >= 2, [...xs].join())
+    execFileSync('pdftoppm', ['-png', '-r', '70', r.file, `${OUT}/squad-sheet-one`])
   })
 
   await safe('one small squad', async () => {

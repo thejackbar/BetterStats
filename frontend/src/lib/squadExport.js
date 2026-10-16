@@ -71,59 +71,87 @@ export function downloadSquadCsv({ club, squads, order, fmt }) {
   save(csv, 'text/csv;charset=utf-8', docFilename(club?.short_name || club?.name, 'squads') + '.csv')
 }
 
-/* The squads, placed on ONE landscape page. Every squad is a block of numbered
- * names. The blocks flow down a number of columns, and the number of columns
- * and the type size are worked out together: the biggest type that still puts
- * every name on the page, with the fewest columns that manage it. A long squad
- * may carry over into the next column. Only if even the smallest readable type
- * cannot hold the lot does it run onto a second page. */
+/* The squads, placed on ONE landscape page, as many columns as the names need.
+ *
+ * Every squad is a block of numbered names. The blocks flow down columns, and the
+ * type size and the number of columns are worked out together: the biggest type
+ * that still puts every name on the page, with the fewest columns that manage it.
+ * Columns are then balanced (a 41-name squad is three columns of 14, not 18, 18
+ * and 5) and each is only as wide as its longest name plus its role, so the sheet
+ * is names, not white space. A long squad may carry over into the next column.
+ * Only if even the smallest readable type cannot hold the lot does it run onto a
+ * second page. */
 const SHORT_ROLE = { BAT: 'BAT', BOWL: 'BWL', AR: 'AR', WKT: 'WK' }
 const roleShort = (p) => (p.skill_positions || []).map((x) => SHORT_ROLE[x] || x).join(' ')
-const SIZES = [10.5, 10, 9.5, 9, 8.5, 8, 7.5, 7, 6.5]
-const COL_GAP = 20
-const MAX_COL = 230
+const SIZES = [12, 11.5, 11, 10.5, 10, 9.5, 9, 8.5, 8, 7.5, 7, 6.5]
+const COL_GAP = 22
+const MAX_GAP = 44
+
+// `text` cut to fit `maxW` points, with an ellipsis when it had to be.
+export function fitText(text, size, bold, maxW) {
+  if (sheetTextWidth(text, size, bold) <= maxW) return text
+  let t = text
+  while (t.length > 1 && sheetTextWidth(`${t}…`, size, bold) > maxW) t = t.slice(0, -1)
+  return `${t.trimEnd()}…`
+}
 
 export function planSquadSheet(items, { width, height }) {
-  const need = (f) => {
-    let w = 0
-    for (const it of items) for (const r of it.rows) w = Math.max(w, sheetTextWidth(r.name, f, false) + sheetTextWidth(String(it.rows.length), f, false) + 10)
-    for (const it of items) w = Math.max(w, sheetTextWidth(it.heading, f + 1.5, true) + 18)
-    return w
+  const total = items.reduce((n, it) => n + it.rows.length, 0)
+  const hasRoles = items.some((it) => it.rows.some((r) => r.role))
+  const metrics = (f) => {
+    const numW = Math.max(...items.map((it) => sheetTextWidth(String(it.rows.length || 0), f, false)), sheetTextWidth('99', f, false))
+    let nameW = 0
+    let roleW = 0
+    for (const it of items) for (const r of it.rows) {
+      nameW = Math.max(nameW, sheetTextWidth(r.name, f, false))
+      if (r.role) roleW = Math.max(roleW, sheetTextWidth(r.role, f - 1.5, false))
+    }
+    const headW = Math.max(...items.map((it) => sheetTextWidth(it.name, f + 1.5, true) + sheetTextWidth(String(it.rows.length), f, false) + 14), 0)
+    const need = Math.max(numW + 5 + nameW + (hasRoles ? 10 + roleW : 0) + 4, Math.min(headW, 190))
+    return { numW, nameW, roleW, need }
   }
-  // Pack blocks into columns of `perCol` lines. A block is kept whole when it fits in
-  // what is left of its column, else started fresh, else (longer than a column) split.
-  const pack = (f, perCol, maxCols) => {
+  // Blocks into columns of `perCol` lines. A block is kept whole when it fits what is
+  // left of its column, else started fresh, else (longer than a column) split.
+  const pack = (perCol, maxCols) => {
     const cols = [[]]
     let used = 0
     const take = (line) => {
       if (used + line.h > perCol + 1e-6 && cols[cols.length - 1].length) {
         cols.push([]); used = 0
         // A squad carried over into a new column says whose names these are.
-        if (line.row) { cols[cols.length - 1].push({ h: 1.7, head: `${line.squad} (cont.)`, count: null }); used = 1.7 }
+        if (line.row && !items[0].solo) { cols[cols.length - 1].push({ h: 1.7, head: `${line.squad} (cont.)`, count: null }); used = 1.7 }
       }
       cols[cols.length - 1].push(line); used += line.h
     }
-    for (const it of items) {
+    items.forEach((it, i) => {
       const block = it.rows.length + 1.7
-      const left = perCol - used
-      if (block > left && block <= perCol && cols[cols.length - 1].length) { cols.push([]); used = 0 }
-      take({ h: 1.7, head: it.heading, count: it.rows.length })
-      it.rows.forEach((r) => take({ h: 1, row: r, count: it.rows.length, squad: it.heading }))
-      take({ h: 0.6, gap: true })
-    }
-    // A column that opens with a row (a split squad) is marked so it can say "cont."
+      if (block > perCol - used && block <= perCol && cols[cols.length - 1].length) { cols.push([]); used = 0 }
+      // A lone squad needs no heading over its columns: its name is the page title.
+      if (!it.solo) take({ h: 1.7, head: it.name, grades: it.grades, count: it.rows.length })
+      it.rows.forEach((r) => take({ h: 1, row: r, count: it.rows.length, squad: it.name }))
+      if (i < items.length - 1) take({ h: 0.6, gap: true })
+    })
     return cols.length <= maxCols ? cols : null
   }
   const attempt = (f, k) => {
+    const m = metrics(f)
     const lineH = f * 1.36
-    const perCol = Math.floor(height / lineH)
-    const colW = Math.min(MAX_COL, (width - COL_GAP * (k - 1)) / k)
-    if (colW < need(f)) return null
-    const cols = pack(f, perCol, k)
-    return cols ? { f, k, lineH, colW, cols, pages: 1 } : null
+    const perColMax = Math.floor(height / lineH)
+    if (m.need * k + COL_GAP * (k - 1) > width + 1e-6) return null
+    let cols = pack(perColMax, k)
+    if (!cols) return null
+    // Balance: the shortest column height that still fits in k columns.
+    for (let per = Math.max(Math.ceil(total / k), 4); per < perColMax; per++) {
+      const tight = pack(per, k)
+      if (tight) { cols = tight; break }
+    }
+    const colW = Math.min((width - COL_GAP * (k - 1)) / k, m.need * 1.25)
+    return { f, k, lineH, colW, ...m, cols: cols.filter((c) => c.length), pages: 1 }
   }
   for (const f of SIZES) {
-    for (let k = 1; k <= 8; k++) {
+    const m = metrics(f)
+    const kmax = Math.max(1, Math.floor((width + COL_GAP) / (m.need + COL_GAP)))
+    for (let k = 1; k <= kmax; k++) {
       const hit = attempt(f, k)
       if (hit) return hit
     }
@@ -131,13 +159,12 @@ export function planSquadSheet(items, { width, height }) {
   // Too much for one page even in the smallest type: fill pages of the widest
   // arrangement the smallest type allows.
   const f = SIZES[SIZES.length - 1]
-  let k = 8
-  while (k > 1 && (width - COL_GAP * (k - 1)) / k < need(f)) k -= 1
+  const m = metrics(f)
+  const k = Math.max(1, Math.floor((width + COL_GAP) / (m.need + COL_GAP)))
   const lineH = f * 1.36
   const perCol = Math.floor(height / lineH)
-  const colW = Math.min(MAX_COL, (width - COL_GAP * (k - 1)) / k)
-  const all = pack(f, perCol, 1e9)
-  return { f, k, lineH, colW, cols: all, pages: Math.ceil(all.length / k) }
+  const all = pack(perCol, 1e9)
+  return { f, k, lineH, colW: Math.min((width - COL_GAP * (k - 1)) / k, m.need * 1.25), ...m, cols: all, pages: Math.ceil(all.length / k) }
 }
 
 export async function downloadSquadPdf({ club, squads, order, fmt }) {
@@ -145,44 +172,58 @@ export async function downloadSquadPdf({ club, squads, order, fmt }) {
   const cfg = club?.theme_config || {}
   const theme = { accent: cfg.accent || club?.accent_color || club?.primary_color, accent2: cfg.accent2 || club?.accent_color }
   const accent = hex6(theme.accent) ? `#${hex6(theme.accent)}` : '#16c784'
+  const one = squads.length === 1
   const items = squads.map(({ team, members }) => ({
-    heading: `${team.name}${team.grade_name ? ` (${team.grade_name})` : ''}`,
+    name: team.name,
+    grades: team.grade_name || '',
+    solo: one,
     rows: orderPlayers(members, order).map((p, i) => ({ n: i + 1, name: fmt(p.display_name || p.name || ''), role: roleShort(p) })),
   }))
-  const one = squads.length === 1
   downloadSheetPdf({
     filename: docFilename(club?.short_name || club?.name, one ? squads[0].team.name : 'squads'),
     title: `${club?.name || 'Club'}: ${one ? `${squads[0].team.name} squad` : 'squad lists'}`,
     subtitle: `Printed ${today()}`,
     header: letterhead(theme, logo),
     place: ({ G, top, width, height }) => {
-      const plan = planSquadSheet(items, { width, height: height - 4 })
-      const { f, k, lineH, colW, cols } = plan
+      // One squad: a single grey line across the page names its grades and how many.
+      const lead = one
+        ? [items[0].grades ? `${items[0].grades}  ·  ` : '', `${items[0].rows.length} player${items[0].rows.length === 1 ? '' : 's'}`].join('')
+        : ''
+      const leadH = lead ? 20 : 0
+      const plan = planSquadSheet(items, { width, height: height - 4 - leadH })
+      const { f, k, lineH, colW, cols, numW, nameW } = plan
       const pages = []
+      const perPage = k
+      const used = Math.min(k, cols.length)
+      const gap = used > 1 ? Math.min(MAX_GAP, Math.max(COL_GAP, (width - used * colW) / (used - 1))) : 0
+      const x0 = G.margin + Math.max(0, (width - (used * colW + (used - 1) * gap)) / 2)
       cols.forEach((col, ci) => {
-        const pi = Math.floor(ci / k)
-        const x = G.margin + (ci % k) * (colW + COL_GAP)
-        if (!pages[pi]) pages[pi] = []
-        let y = top
+        const pi = Math.floor(ci / perPage)
+        const x = x0 + (ci % perPage) * (colW + gap)
+        if (!pages[pi]) {
+          pages[pi] = []
+          if (lead) pages[pi].push({ kind: 'text', text: fitText(lead, f, false, width), size: Math.min(f, 10.5), grey: true, centre: true, y: top - 11 })
+        }
+        let y = top - leadH
         col.forEach((ln) => {
           if (ln.gap) {
             y -= lineH * ln.h
           } else if (ln.head) {
             y -= lineH * 1.15
-            pages[pi].push({ kind: 'text', text: ln.head, size: f + 1.5, bold: true, colour: accent, x, y: y + 2 })
-            if (ln.count != null) pages[pi].push({ kind: 'text', text: String(ln.count), size: f, grey: true, rightX: x + colW, y: y + 2 })
+            const count = ln.count != null ? String(ln.count) : ''
+            const room = colW - (count ? sheetTextWidth(count, f, false) + 10 : 0)
+            const label = fitText(ln.grades && sheetTextWidth(`${ln.head} (${ln.grades})`, f + 1.5, true) <= room ? `${ln.head} (${ln.grades})` : ln.head, f + 1.5, true, room)
+            pages[pi].push({ kind: 'text', text: label, size: f + 1.5, bold: true, colour: accent, x, y: y + 2 })
+            if (count) pages[pi].push({ kind: 'text', text: count, size: f, grey: true, rightX: x + colW, y: y + 2 })
             pages[pi].push({ kind: 'hline', x1: x, x2: x + colW, y: y - 1.5, colour: accent, width: 0.8 })
             y -= lineH * 0.55
           } else {
             y -= lineH
             const r = ln.row
-            const numW = sheetTextWidth(String(ln.count), f, false)
             pages[pi].push({ kind: 'text', text: String(r.n), size: f, grey: true, rightX: x + numW, y })
             pages[pi].push({ kind: 'text', text: r.name, size: f, x: x + numW + 5, y })
-            const free = colW - numW - 5 - sheetTextWidth(r.name, f, false) - 8
-            if (r.role && sheetTextWidth(r.role, f - 1.5, false) <= free) {
-              pages[pi].push({ kind: 'text', text: r.role, size: f - 1.5, grey: true, rightX: x + colW, y })
-            }
+            // Roles line up in one column just past the longest name.
+            if (r.role) pages[pi].push({ kind: 'text', text: r.role, size: f - 1.5, grey: true, x: x + numW + 5 + nameW + 10, y })
           }
         })
       })
