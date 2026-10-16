@@ -1500,3 +1500,11 @@ Gisborne: a women's fixture ("Macedon Women 1st XI") showed the men's MacIntyre 
 - Existing wrong fixtures are tidied by the next Sync. A synced fixture someone had set by hand before 338 existed is not pinned and will move if its squad does not play its grade.
 - Proof: `verify_fixture_side.py` F and G (control fails the move checks). `verify_shared_fixture_stats.py` (one check) and `verify_quick_sync.py` fail the same way on the previous commit.
 
+
+## Squads board and squad PDF (v9.116.2)
+
+Gisborne: names were cut off on the Squads cards, the squad list should fit one page (landscape, columns), and real squads should come before Unassigned and Not yet played.
+- Card: name takes the row, roles and flags on a second line, add and remove float over the edge on hover (inline on touch).
+- Order: squads first; `select.squads.poolsAt` ('end' default, 'start') puts the pools first. Manual drag ordering of squads was not built: a squad's Order is its XI number and drives selection tiers, so reordering it is a selection change, not a display one.
+- PDF: `textDocs.writePdf` now takes page size and margin, and the new `downloadSheetPdf` places ops itself. The old flowing writer is unchanged in output (minutes suites pass).
+

@@ -142,6 +142,22 @@ const run = async () => {
   const colOf = (title) => page.locator('.pb-card', { has: page.locator('.font-display', { hasText: new RegExp(`^${title}$`) }) }).first()
   const namesIn = async (title) => colOf(title).locator('[draggable="true"] .flex-1').allInnerTexts()
 
+  // The club's real squads come first; the working pools sit at the end unless asked for.
+  const order = async () => page.locator('.pb-card .font-display').allInnerTexts()
+  let titles = await order()
+  const iUn = titles.findIndex((t) => /^Unassigned/.test(t)), iSq = titles.findIndex((t) => t === '1s')
+  check('squads come before the Unassigned pools', iSq >= 0 && iUn > iSq, JSON.stringify(titles))
+  check('...and the first card on the board is a squad', titles[0] === '1s', JSON.stringify(titles))
+  await page.locator('[data-pools-at]').selectOption('start')
+  await page.waitForTimeout(250)
+  titles = await order()
+  check('"Pools first" puts them back at the front', /^Unassigned/.test(titles[0] || ''), JSON.stringify(titles))
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.pb-card', { timeout: 20000 })
+  check('...and the choice is remembered', /^Unassigned/.test((await order())[0] || ''))
+  await page.locator('[data-pools-at]').selectOption('end')
+  await page.waitForTimeout(250)
+
   // × on Zed Adams in the 1st XI
   wire.length = 0
   const zed1 = colOf('1s').locator('[draggable="true"]', { hasText: 'Zed' }).first()
@@ -153,6 +169,27 @@ const run = async () => {
   check('...and Zed leaves the 1st XI column', !(await namesIn('1s')).some((n) => /Zed/.test(n)), JSON.stringify(await namesIn('1s')))
   check('...but is still in the 2nd XI column', (await namesIn('2s')).some((n) => /Zed/.test(n)), JSON.stringify(await namesIn('2s')))
   check('cards in Unassigned have no ×', (await page.locator('.pb-card', { has: page.locator('.font-display', { hasText: /^Unassigned$/ }) }).first().locator('[data-remove-from-squad]').count()) === 0)
+
+  // Names are the point of the board: in a three-column squad screen the name
+  // takes most of the card, and the add / remove buttons only show on hover.
+  await page.setViewportSize({ width: 860, height: 900 })
+  await page.waitForTimeout(300)
+  const share = await page.evaluate(() => {
+    const out = []
+    document.querySelectorAll('[draggable="true"]').forEach((card) => {
+      const n = card.querySelector('span.truncate')
+      if (n) out.push(n.getBoundingClientRect().width / card.getBoundingClientRect().width)
+    })
+    return out
+  })
+  check('names take most of each squad card at 860px', share.length > 0 && Math.min(...share) > 0.55, JSON.stringify(share.map((x) => +x.toFixed(2))))
+  const acts = page.locator('[draggable="true"]').first().locator('[data-card-actions]')
+  check('add and remove buttons stay out of the way until hover', (await acts.count()) === 1 && (await acts.evaluate((e) => getComputedStyle(e).opacity)) === '0')
+  await page.locator('[draggable="true"]').first().hover()
+  await page.waitForTimeout(250)
+  check('...and appear when the card is hovered', (await acts.evaluate((e) => getComputedStyle(e).opacity)) === '1')
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.waitForTimeout(200)
 
   // Alt-drop copy: Anna from 1s onto 2s
   wire.length = 0

@@ -432,22 +432,37 @@ function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEn
   const badge = recencyBadge(p, dormantCutoff)
   return (
     <div draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd}
-      className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-pb-hairline ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      className={`group relative flex items-center gap-2 px-2 py-1.5 rounded-lg border border-pb-hairline ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
       style={{ background: status === 'NO_RESPONSE' ? 'var(--pb-surface2)' : `color-mix(in srgb, ${meta.cssVar} 8%, var(--pb-surface2))` }}>
-      {draggable && <span className="text-pb-faintest shrink-0"><Icon name="grip" size={14} /></span>}
+      {draggable && <span className="text-pb-faintest shrink-0 -mr-0.5"><Icon name="grip" size={13} /></span>}
       <AvailDot player={p} status={status} onEdit={onEditAvail} />
       <Avatar player={p} size={26} />
-      <span className="flex-1 min-w-0 text-[13px] font-medium truncate">{fmt(p.display_name || p.name)}</span>
-      {p.status === 'inactive' && <span className="font-mono text-[8px] text-pb-faintest uppercase shrink-0" title="Marked inactive">inactive</span>}
-      {badge && <span className="font-mono text-[8px] text-amber-300/60 uppercase shrink-0" title={badge.title}>{badge.text}</span>}
-      <RoleChips roles={p.skill_positions} muted />
-      {draggable && onAddToSquad && <AddToSquadMenu p={p} teams={teams} onAddToSquad={onAddToSquad} />}
-      {onRemove && (
-        <button type="button" onClick={onRemove} data-remove-from-squad
-          title="Remove from this squad" aria-label={`Remove ${p.display_name || p.name} from this squad`}
-          className="shrink-0 rounded p-1 -mr-1 text-pb-faintest hover:text-pb-red hover:bg-pb-red/10 transition-colors [@media(pointer:coarse)]:p-2.5">
-          <Icon name="close" size={13} />
-        </button>
+      {/* The name gets the whole row. Roles and flags sit under it, and the
+          add / remove buttons float over the row's right edge on hover, so a
+          narrow squad column still reads as names. Touch screens have no hover,
+          so there the buttons stay in the row. */}
+      <span className="flex-1 min-w-0 flex flex-col leading-tight">
+        <span className="text-[13px] font-medium truncate" title={fmt(p.display_name || p.name)}>{fmt(p.display_name || p.name)}</span>
+        {(p.status === 'inactive' || badge || (p.skill_positions || []).length > 0) && (
+          <span className="flex items-center gap-1 mt-0.5 min-w-0 overflow-hidden">
+            <RoleChips roles={p.skill_positions} muted />
+            {p.status === 'inactive' && <span className="font-mono text-[8px] text-pb-faintest uppercase shrink-0" title="Marked inactive">inactive</span>}
+            {badge && <span className="font-mono text-[8px] text-amber-300/60 uppercase shrink-0" title={badge.title}>{badge.text}</span>}
+          </span>
+        )}
+      </span>
+      {((draggable && onAddToSquad) || onRemove) && (
+        <span data-card-actions
+          className="shrink-0 flex items-center gap-0.5 rounded-md [@media(hover:hover)]:absolute [@media(hover:hover)]:right-1.5 [@media(hover:hover)]:top-1/2 [@media(hover:hover)]:-translate-y-1/2 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100 [@media(hover:hover)]:bg-pb-surface [@media(hover:hover)]:shadow-[0_0_0_1px_var(--pb-hairline)] [@media(hover:hover)]:px-0.5 transition-opacity">
+          {draggable && onAddToSquad && <AddToSquadMenu p={p} teams={teams} onAddToSquad={onAddToSquad} />}
+          {onRemove && (
+            <button type="button" onClick={onRemove} data-remove-from-squad
+              title="Remove from this squad" aria-label={`Remove ${p.display_name || p.name} from this squad`}
+              className="shrink-0 rounded p-1 text-pb-faintest hover:text-pb-red hover:bg-pb-red/10 transition-colors [@media(pointer:coarse)]:p-2.5">
+              <Icon name="close" size={13} />
+            </button>
+          )}
+        </span>
       )}
     </div>
   )
@@ -1092,8 +1107,10 @@ export default function AdminTeams() {
   // mix) first, then teams by sequence/name. Fill-ins and Not-yet-played only
   // appear when they hold someone; the primary Unassigned always shows (both
   // Men and Women when split, so each working list is there even when empty).
+  const [poolsAt, setPoolsAt] = usePersistedState('select.squads.poolsAt', 'end', (v) => v === 'end' || v === 'start')
   const columns = useMemo(() => {
     const cols = []
+    const teamCols = []
     const buckets = genderSplit ? GENDER_COLS : [{ g: null, lbl: null }]
     const POOLS = [
       { pool: 'unassigned', base: 'Unassigned', emptyText: 'Everyone active is in a squad', primary: true },
@@ -1124,12 +1141,15 @@ export default function AdminTeams() {
         })
       })
     })
-    ;(teams || []).forEach((t, i) => cols.push({
+    ;(teams || []).forEach((t, i) => teamCols.push({
       key: t.id, id: t.id, name: t.name, short_name: t.short_name, grade_name: t.grade_name,
       tint: COLUMN_TINTS[i % COLUMN_TINTS.length], team: t,
     }))
-    return cols
-  }, [teams, poolCounts, genderSplit])
+    // The club's real squads come first. The working pools (Unassigned, Potential
+    // fill-ins, Not yet played) sit after them, unless the selector asked for
+    // them up front. Remembered on this device.
+    return poolsAt === 'start' ? [...cols, ...teamCols] : [...teamCols, ...cols]
+  }, [teams, poolCounts, genderSplit, poolsAt])
 
   const facets = useMemo(() => [
     { key: 'squad', label: 'Squad', type: 'multi', options: (teams || []).map((t) => ({ value: t.id, label: t.name })) },
@@ -1347,6 +1367,11 @@ export default function AdminTeams() {
                 )}
                 {canManage && <Btn variant="soft" sm icon="plus" onClick={() => setAddTo(null)}>Bulk add</Btn>}
                 <Btn variant="ghost" sm icon="download" onClick={() => setExporting('all')}>Export lists</Btn>
+                <select value={poolsAt} onChange={(e) => setPoolsAt(e.target.value)} aria-label="Where the Unassigned, fill-in and Not yet played lists sit" data-pools-at
+                  className="rounded-lg border border-pb-hairline2 bg-pb-surface text-pb-dim text-[12.5px] px-2.5 py-1.5">
+                  <option value="end">Squads first, pools last</option>
+                  <option value="start">Pools first, squads after</option>
+                </select>
                 <select value={sortMode} onChange={(e) => setSortMode(e.target.value)} aria-label="Order players in each squad" data-squad-sort
                   className="rounded-lg border border-pb-hairline2 bg-pb-surface text-pb-dim text-[12.5px] px-2.5 py-1.5">
                   <option value="avail">Order: by availability</option>
