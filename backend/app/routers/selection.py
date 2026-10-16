@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -29,7 +29,8 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
-from app.services import selection_clash, selection_notify, selection_rules, selection_seed
+from app.services import selection_audit, selection_clash, selection_notify, selection_rules, selection_seed
+from app.services.junior_fixtures import junior_fixture_ids
 from app.services.selection_pool import assemble_selection, rule_context, side_size
 from app.services.side_size import effective_min, valid_min_size, valid_side_size
 
@@ -58,6 +59,9 @@ class Demotion(BaseModel):
 class LineupSet(BaseModel):
     players: list[LineupSlot]
     demotions: list[Demotion] = []
+    # Lock the side as it is confirmed. Off unless the caller asks, so a script
+    # or an older client that only saves an XI behaves exactly as before.
+    lock: bool = False
 
 
 class TeamSizeSet(BaseModel):
@@ -90,6 +94,19 @@ class DraftSet(BaseModel):
     base_version: int = 0
 
 
+def _locked_error(fx: Fixture, what: str = "This side is locked") -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": "locked",
+        "message": f"{what}. Unlock it to make changes.",
+        "locked_at": fx.locked_at.isoformat() if fx.locked_at else None,
+    })
+
+
+def _ensure_unlocked(fx: Fixture, what: str = "This side is locked") -> None:
+    if fx.locked_at is not None:
+        raise _locked_error(fx, what)
+
+
 async def _get_owned_fixture(db: AsyncSession, fixture_id: str, club_id) -> Fixture:
     f = await db.get(Fixture, uuid.UUID(fixture_id))
     if not f or f.organisation_id != club_id:
@@ -101,6 +118,8 @@ async def _get_owned_fixture(db: AsyncSession, fixture_id: str, club_id) -> Fixt
 async def selection_overview(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
+    # Last, so a caller that passes db and club positionally is unaffected.
+    juniors: bool = False,
 ):
     """All upcoming fixtures with their finalised lineups, for the matchday
     board. One row per fixture, players in batting order, each carrying their
@@ -118,6 +137,10 @@ async def selection_overview(
         .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
     )
     fixtures = fx_res.scalars().all()
+    # Junior grades (per Manage Grades) stay off the board unless asked for.
+    if not juniors and fixtures:
+        junior_ids = await junior_fixture_ids(db, club.id, fixtures)
+        fixtures = [f for f in fixtures if str(f.id) not in junior_ids]
     if not fixtures:
         return {"fixtures": [], "default_team_size": side_size(club)}
 
@@ -239,6 +262,8 @@ async def selection_overview(
             "team_min": team_mins.get(str(f.team_id)) if f.team_id else None,
             "grade_name": grade_names.get(str(f.grade_id)) if f.grade_id else None,
             "lineup": lineup,
+            "locked": f.locked_at is not None,
+            "locked_at": f.locked_at.isoformat() if f.locked_at else None,
             "has_draft": str(f.id) in drafts,
             "draft_updated_at": drafts[str(f.id)].isoformat() if str(f.id) in drafts and drafts[str(f.id)] else None,
         })
@@ -470,6 +495,7 @@ async def save_draft(
     and the answer is a 409 carrying the current draft. The write is one
     conditional statement, so two simultaneous saves cannot both win."""
     fx = await _get_owned_fixture(db, fixture_id, club.id)
+    _ensure_unlocked(fx)
     if len(body.slots) > 40:
         raise HTTPException(status_code=400, detail="Too many slots")
 
@@ -590,6 +616,8 @@ async def set_selection(
     lower grade is a call-up — the player is removed from that lower XI here.
     """
     fx = await _get_owned_fixture(db, fixture_id, club.id)
+    _ensure_unlocked(fx)
+    before_xi = await selection_audit.snapshot(db, fx.id)
 
     # Validate + de-dupe incoming player ids.
     seen: set[uuid.UUID] = set()
@@ -601,6 +629,7 @@ async def set_selection(
         seen.add(pid)
         slots.append(s)
 
+    call_up_before: dict = {}
     if seen:
         owned_res = await db.execute(
             select(Player.id).where(
@@ -632,6 +661,7 @@ async def set_selection(
                     FixtureLineup.fixture_id,
                     func.coalesce(Player.display_name_override, Player.name),
                     Team.sequence,
+                    Fixture.locked_at,
                 )
                 .select_from(FixtureLineup)
                 .join(Fixture, FixtureLineup.fixture_id == Fixture.id)
@@ -653,13 +683,17 @@ async def set_selection(
             playable = await selection_clash.compatible_fixtures(
                 db, club.id, fx, {r[1] for r in clash_rows}
             )
-            for pid, other_fid, pname, other_seq in clash_rows:
+            for pid, other_fid, pname, other_seq, other_locked in clash_rows:
                 if str(other_fid) in playable:
                     continue
+                # A call-up pulls the player out of the lower side. A side that
+                # is locked is not changed behind its selector's back: unlock it
+                # first, then call the player up.
                 can_override = (
                     this_seq is not None
                     and (other_seq or 0) > 0
                     and this_seq < other_seq
+                    and other_locked is None
                 )
                 if can_override:
                     call_ups.append((pid, other_fid))
@@ -672,6 +706,9 @@ async def set_selection(
                     detail=f"Already selected for another fixture on {fx.played_on.isoformat()}: {names}",
                 )
             # Vacate the lower-grade XIs the called-up players came from.
+            for _pid, other_fid in call_ups:
+                if other_fid not in call_up_before:
+                    call_up_before[other_fid] = await selection_audit.snapshot(db, other_fid)
             for pid, other_fid in call_ups:
                 await db.execute(
                     text("DELETE FROM fixture_lineups WHERE fixture_id = :fid AND player_id = :pid"),
@@ -723,6 +760,14 @@ async def set_selection(
                             selected_by=user.id,
                         ))
 
+    for other_fid, other_before in call_up_before.items():
+        await db.flush()
+        await selection_audit.record(
+            db, club_id=club.id, fixture_id=other_fid, user=user, action="called_up_out",
+            before=other_before, after=await selection_audit.snapshot(db, other_fid),
+            extra={"for_fixture_id": str(fx.id)},
+        )
+
     # The club's own association rules. Only a rule the club marked BLOCKING
     # refuses a save; a warning has already been shown on the board and is the
     # selector's to weigh. Re-checked here rather than trusted from the
@@ -760,6 +805,15 @@ async def set_selection(
             is_wicket_keeper=bool(s.is_wicket_keeper),
             selected_by=user.id,
         ))
+    await db.flush()
+    if body.lock and slots:
+        fx.locked_at = datetime.now(timezone.utc)
+        fx.locked_by = user.id
+    await selection_audit.record(
+        db, club_id=club.id, fixture_id=fx.id, user=user, action="confirmed",
+        before=before_xi, after=await selection_audit.snapshot(db, fx.id),
+        extra={"locked": bool(body.lock and slots)},
+    )
     # Confirming makes the draft redundant: same transaction, so a failed
     # confirm leaves the draft alone.
     await db.execute(
@@ -786,7 +840,62 @@ async def set_selection(
     if slots and background_tasks is not None \
             and selection_rules.club_config(club).get("notify_captain_on_confirm"):
         background_tasks.add_task(selection_notify.auto_send_captain, club.id, fx.id, user.id)
-    return {"status": "ok", "count": len(slots)}
+    return {"status": "ok", "count": len(slots), "locked": bool(fx.locked_at)}
+
+
+@router.post("/{fixture_id}/lock")
+async def lock_selection(
+    fixture_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Lock the side as it stands. Needs a named XI: locking nothing locks
+    nobody out of anything and only confuses the overview."""
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    if fx.locked_at is not None:
+        return {"status": "ok", "locked": True, "locked_at": fx.locked_at.isoformat()}
+    xi = await selection_audit.snapshot(db, fx.id)
+    if not xi:
+        raise HTTPException(status_code=400, detail="Name a side before you lock it")
+    fx.locked_at = datetime.now(timezone.utc)
+    fx.locked_by = user.id
+    await selection_audit.record(db, club_id=club.id, fixture_id=fx.id, user=user, action="locked", after=xi)
+    await db.commit()
+    await db.refresh(fx)
+    return {"status": "ok", "locked": True, "locked_at": fx.locked_at.isoformat()}
+
+
+@router.post("/{fixture_id}/unlock")
+async def unlock_selection(
+    fixture_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    if fx.locked_at is None:
+        return {"status": "ok", "locked": False}
+    fx.locked_at = None
+    fx.locked_by = None
+    await selection_audit.record(
+        db, club_id=club.id, fixture_id=fx.id, user=user, action="unlocked",
+        after=await selection_audit.snapshot(db, fx.id),
+    )
+    await db.commit()
+    return {"status": "ok", "locked": False}
+
+
+@router.get("/{fixture_id}/history")
+async def selection_history(
+    fixture_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Who changed this side and when, newest first, each with the players
+    before and after so a selector can read it back or restore from it."""
+    fx = await _get_owned_fixture(db, fixture_id, club.id)
+    return {"events": await selection_audit.history(db, club.id, fx.id)}
 
 
 class NotifyBody(BaseModel):

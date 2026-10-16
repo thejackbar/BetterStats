@@ -4497,6 +4497,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _TEAM_MIN_SIZE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 334: locking a confirmed side and the selection audit trail.
+        # Same one-copy rule: this and alembic's 334 both run
+        # services/selection_lock_ddl.STATEMENTS.
+        from app.services.selection_lock_ddl import STATEMENTS as _SELECTION_LOCK_DDL
+        for _stmt in _SELECTION_LOCK_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.

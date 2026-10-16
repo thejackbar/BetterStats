@@ -677,6 +677,13 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             fx_team_name = fx_team_obj.short_name or fx_team_obj.name
             if (fx_team_obj.sequence or 0) > 0:
                 fx_team_seq = fx_team_obj.sequence
+    locked_by_name = None
+    if fx.locked_at is not None and fx.locked_by:
+        locked_by_name = (await db.execute(
+            text("SELECT COALESCE(NULLIF(display_name, ''), NULLIF(TRIM(CONCAT(first_name, ' ', last_name)), ''), username) "
+                 "FROM users WHERE id = :u"),
+            {"u": fx.locked_by},
+        )).scalar()
     fx_is_women = False
     fx_grade_name: str | None = None
     # Women's-ness is the BetterFees override OR what Manage Grades says the
@@ -937,6 +944,9 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "team_name": fx_team_name,
             "grade_name": fx_grade_name,
             "team_sequence": fx_team_seq,
+            "locked": fx.locked_at is not None,
+            "locked_at": fx.locked_at.isoformat() if fx.locked_at else None,
+            "locked_by": locked_by_name,
         },
         "lineup": [
             {
