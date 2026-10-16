@@ -23,7 +23,7 @@ from sqlalchemy import select, text, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
-from app.services import squad_sides
+from app.services import player_audit, squad_sides
 from app.services.grade_labels import grade_is_women, grade_key, org_grade_category_sets
 from app.models.db import Game, GameAppearance, Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
 from app.routers.auth import get_current_club
@@ -301,6 +301,8 @@ async def create_team(
     extra: dict = {}
     if body.sides:
         extra = await _apply_sides(db, club.id, t, body.sides, assign=True)
+    await player_audit.record(db, club_id=club.id, area="squads", action="squad_created",
+                           summary=f"Squad {t.name} created", team_id=t.id, team_name_=t.name)
     await db.commit()
     await db.refresh(t)
     return await _squad_response(db, club.id, t, extra)
@@ -373,6 +375,15 @@ async def update_team(
     extra: dict = {}
     if sides_in is not None:
         extra = await _apply_sides(db, club.id, t, sides_in, assign)
+    changed = sorted(set(data) | ({"teams"} if sides_in is not None else set()))
+    if changed:
+        labels = {"name": "name", "short_name": "short name", "sequence": "order", "grade_id": "grade",
+                  "is_active": "active", "default_formation": "formation", "default_team_size": "side size",
+                  "min_team_size": "minimum side", "teams": "teams"}
+        await player_audit.record(
+            db, club_id=club.id, area="squads", action="squad_updated",
+            summary=f"Squad {t.name} edited: " + ", ".join(labels.get(k, k.replace("_", " ")) for k in changed),
+            team_id=t.id, team_name_=t.name, detail={"fields": changed})
     await db.commit()
     await db.refresh(t)
     return await _squad_response(db, club.id, t, extra)
@@ -386,6 +397,8 @@ async def delete_team(
     _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
     t = await _get_owned_team(db, team_id, club.id)
+    await player_audit.record(db, club_id=club.id, area="squads", action="squad_deleted",
+                           summary=f"Squad {t.name} deleted", team_id=t.id, team_name_=t.name)
     await db.delete(t)
     await db.commit()
 
@@ -680,10 +693,9 @@ async def add_team_member(
     existing = await db.get(TeamMember, {"team_id": team.id, "player_id": pid})
     if existing:
         return {"status": "exists"}
-    db.add(TeamMember(team_id=team.id, player_id=pid,
-                      organisation_id=club.id, added_by=user.id))
-    # team_members is authoritative now; keep the derived primary squad in step.
-    await recompute_primary_squad(db, club.id, pid)
+    # team_members is authoritative; this also keeps the derived primary squad in
+    # step and writes the audit trail.
+    await add_squad_memberships(db, club.id, pid, [team.id], user.id)
     await db.commit()
     return {"status": "added"}
 
@@ -698,11 +710,8 @@ async def remove_team_member(
 ):
     team = await _get_owned_team(db, team_id, club.id)
     pid = uuid.UUID(player_id)
-    tm = await db.get(TeamMember, {"team_id": team.id, "player_id": pid})
-    if tm:
-        await db.delete(tm)
-        await recompute_primary_squad(db, club.id, pid)
-        await db.commit()
+    await remove_squad_memberships(db, club.id, pid, [team.id])
+    await db.commit()
 
 
 # ─── Squad assignment (one selection-pool squad per player) ─────────────────

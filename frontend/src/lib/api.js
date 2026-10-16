@@ -5,6 +5,12 @@ import { registerSeasons } from './cricketFormat'
 
 const BASE = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
 
+// ?a=1&b=2 from an object, leaving out anything empty.
+const auditQuery = (p) => {
+  const q = Object.entries(p || {}).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
+  return q ? `?${q}` : ''
+}
+
 // Shown while the backend is briefly unavailable (e.g. during a deploy, when
 // nginx can't reach the backend and would otherwise surface a raw
 // "Bad Gateway"/"Service Unavailable"). Keep this friendly and reassuring.
@@ -3255,6 +3261,7 @@ export const api = {
     }) }),
 
   // ─── BetterSelect: Availability ─────────────────────────
+  bsAvailabilityConfig: () => request('/availability/config'),
   bsAvailabilityMatrix: ({ juniors = false } = {}) =>
     request(`/availability/matrix${tzQuery()}${juniors ? (tzQuery() ? '&' : '?') + 'juniors=true' : ''}`),
   bsSetAvailability: (data) =>
@@ -3447,6 +3454,19 @@ export const api = {
   bsLockSelection: (fixtureId) => request(`/selection/${fixtureId}/lock`, { method: 'POST' }),
   bsUnlockSelection: (fixtureId) => request(`/selection/${fixtureId}/unlock`, { method: 'POST' }),
   bsSelectionHistory: (fixtureId) => request(`/selection/${fixtureId}/history`),
+  // Audit History: the club-wide trail of changes to players.
+  bsAuditEvents: (params = {}) => request(`/audit/events${auditQuery(params)}`),
+  bsAuditFacets: () => request('/audit/facets'),
+  // Same filters as the list. Fetched with the session cookie, then saved as a file.
+  bsAuditExport: async (params = {}) => {
+    const res = await fetch(`${BASE}/audit/export.csv${auditQuery(params)}`, { credentials: 'include' })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `Export failed (${res.status})`)
+    const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')?.[1] || 'audit-history.csv'
+    const url = URL.createObjectURL(await res.blob())
+    const a = document.createElement('a'); a.href = url; a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  },
   // Autosaved, unconfirmed side for a fixture. `opts` goes to fetch, so a
   // leaving page can pass { keepalive: true }.
   // Email the CONFIRMED side: `to` is 'captain' (team sheet with every player's

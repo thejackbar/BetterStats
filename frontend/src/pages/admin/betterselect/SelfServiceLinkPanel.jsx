@@ -10,6 +10,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { Icon, Btn, Segmented } from './ui'
+import { setAllowMaybe } from '../../../lib/useAvailabilityConfig'
 
 export default function SelfServiceLinkPanel() {
   const { hasCapability } = useAuth()
@@ -115,6 +116,12 @@ export default function SelfServiceLinkPanel() {
                   options={[{ value: 'pin', label: 'Last-4 PIN' }, { value: 'nopin', label: 'No PIN' }]} />
               </div>
             )}
+            <div className="flex items-center gap-2.5" data-allow-maybe-setting>
+              <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Maybe answer</span>
+              <Segmented sm value={cfg.allow_maybe === false ? 'off' : 'on'}
+                onChange={(v) => { update({ allow_maybe: v === 'on' }); setAllowMaybe(v === 'on') }}
+                options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} />
+            </div>
             {enabled && (
               <div className="flex items-center gap-2.5" data-show-squad-setting>
                 <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Show squad</span>
@@ -123,6 +130,11 @@ export default function SelfServiceLinkPanel() {
               </div>
             )}
           </div>
+          {cfg.allow_maybe === false && (
+            <p className="text-[11.5px] text-pb-faintest -mt-2" data-maybe-off-note>
+              Maybe is off: selectors and players can record only Available or Unavailable. Answers already recorded as Maybe still show.
+            </p>
+          )}
           {enabled && (
             <p className="text-[11.5px] text-pb-faintest -mt-2">
               {cfg.show_squad

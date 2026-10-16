@@ -14,7 +14,7 @@ import { api } from '../lib/api'
 import { AVAILABILITY } from '../lib/availability'
 
 // The three answers a player can give (NO_RESPONSE is the absence of one).
-const CHOICES = ['AVAILABLE', 'MAYBE', 'UNAVAILABLE']
+const ALL_CHOICES = ['AVAILABLE', 'MAYBE', 'UNAVAILABLE']
 
 function fmtDay(d) {
   try {
@@ -277,6 +277,8 @@ export default function PublicAvailability() {
   const [tab, setTab] = useState('weekend') // weekend | mine
   const pinRef = useRef(null)
   const weeks = useMemo(() => groupByWeek(me?.dates || []), [me?.dates])
+  // A club that has switched Maybe off offers only Available and Unavailable.
+  const choices = me?.allow_maybe === false ? ALL_CHOICES.filter((c) => c !== 'MAYBE') : ALL_CHOICES
 
   // White-label: re-point --pb-accent (and its rgb form, used by a few tints) to
   // the club's colour for this page only. Falls back to the brand green.
@@ -534,8 +536,8 @@ export default function PublicAvailability() {
                       {savedDate === d.date && <span className="font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
                     </div>
                     <FixtureList fixtures={d.fixtures || []} />
-                    <div className="grid grid-cols-3 gap-2">
-                      {CHOICES.map((s) => {
+                    <div className={`grid ${choices.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
+                      {choices.map((s) => {
                         const meta = AVAILABILITY[s]
                         const active = cur === s
                         return (

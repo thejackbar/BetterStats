@@ -15,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import instructional_videos
+from app.routers import audit as audit_router
 from app.routers import admin_broadcasts
 from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
@@ -4531,6 +4532,19 @@ async def lifespan(app: FastAPI):
         for _stmt in _FIXTURE_PIN_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 339: the club-wide audit trail. Same one-copy rule: this and
+        # alembic's 339 both run services/audit_ddl.STATEMENTS.
+        from app.services.audit_ddl import STATEMENTS as _AUDIT_DDL
+        for _stmt in _AUDIT_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 340: a club can switch off the "Maybe" availability answer.
+        # Same one-copy rule: this and alembic's 340 both run
+        # services/availability_maybe_ddl.STATEMENTS.
+        from app.services.availability_maybe_ddl import STATEMENTS as _AVAIL_MAYBE_DDL
+        for _stmt in _AVAIL_MAYBE_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.
@@ -6463,6 +6477,7 @@ app.include_router(fixtures.router, dependencies=[Depends(require_module("select
 app.include_router(teams.router, dependencies=[Depends(require_module("select"))])        # BetterSelect
 app.include_router(availability.router, dependencies=[Depends(require_module("select"))]) # BetterSelect
 app.include_router(selection.router, dependencies=[Depends(require_module("select"))])    # BetterSelect
+app.include_router(audit_router.router, dependencies=[Depends(require_module("select"))])  # BetterSelect: Audit History
 app.include_router(selection_rules.router, dependencies=[Depends(require_module("select"))])  # BetterSelect
 app.include_router(net_manager.router, dependencies=[Depends(require_module("select"))])  # BetterSelect (Net Manager)
 app.include_router(votes.router, dependencies=[Depends(require_module("select"))])        # BetterSelect (vote collection)

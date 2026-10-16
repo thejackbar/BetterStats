@@ -21,6 +21,8 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import player_audit
+
 log = logging.getLogger(__name__)
 
 ACTIONS = ("confirmed", "locked", "unlocked", "called_up_out", "restored_to_board")
@@ -90,6 +92,7 @@ async def record(
             )
     except Exception:  # noqa: BLE001 - the trail must never break the change it describes
         log.exception("selection audit write failed for fixture %s", fixture_id)
+    await _club_trail(db, club_id, fixture_id, user, action, before, after, extra or {})
 
 
 async def history(db: AsyncSession, club_id, fixture_id, limit: int = 60) -> list[dict]:
@@ -104,3 +107,112 @@ async def history(db: AsyncSession, club_id, fixture_id, limit: int = 60) -> lis
         {"id": str(i), "by": by, "action": action, "detail": detail or {}, "at": at.isoformat() if at else None}
         for i, by, action, detail, at in rows
     ]
+
+
+def _moved(before: list[dict], after: list[dict]) -> list[tuple[dict, dict]]:
+    """Players who changed place in the batting order, as (before, after) pairs.
+
+    Only the fewest moves that explain the new order: if one player goes from 5 to
+    2, the players he jumped over slid down one place and are not reported."""
+    a = {p["player_id"]: p for p in after}
+    common_before = [p for p in before if p["player_id"] in a]
+    pos_after = {p["player_id"]: i for i, p in enumerate(after)}
+    seq = [pos_after[p["player_id"]] for p in common_before]
+    # Longest increasing subsequence: those players kept their relative place.
+    tails: list[int] = []
+    prev: list[Optional[int]] = [None] * len(seq)
+    idx: list[int] = []
+    for i, v in enumerate(seq):
+        lo, hi = 0, len(tails)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if seq[tails[mid]] < v:
+                lo = mid + 1
+            else:
+                hi = mid
+        if lo > 0:
+            prev[i] = tails[lo - 1]
+        if lo == len(tails):
+            tails.append(i)
+        else:
+            tails[lo] = i
+    keep: set[int] = set()
+    k = tails[-1] if tails else None
+    while k is not None:
+        keep.add(k)
+        k = prev[k]
+    return [(common_before[i], a[common_before[i]["player_id"]]) for i in range(len(seq)) if i not in keep]
+
+
+async def _club_trail(db, club_id, fixture_id, user, action, before, after, extra) -> None:
+    """The same change as one audit_events row per player, for the Audit History page."""
+    try:
+        game = await player_audit.fixture_label(db, fixture_id)
+        row = (await db.execute(
+            text("SELECT t.id, t.name FROM fixtures f LEFT JOIN teams t ON t.id = f.team_id WHERE f.id = :f"),
+            {"f": fixture_id},
+        )).first()
+        tid, tname = (row[0], row[1]) if row else (None, None)
+        where = f" in {game}" if game else ""
+
+        async def emit(act, summary, p=None, detail=None):
+            await player_audit.record(
+                db, club_id=club_id, area="selection", action=act, summary=summary,
+                player_id=(p or {}).get("player_id"), player_name_=(p or {}).get("name"),
+                team_id=tid, team_name_=tname, fixture_id=fixture_id, fixture_label_=game,
+                detail=detail, user=user,
+            )
+
+        if action in ("locked", "unlocked"):
+            await emit("side_locked" if action == "locked" else "side_unlocked",
+                       f"{'Locked' if action == 'locked' else 'Unlocked'} the side{where}")
+            return
+        before = before or []
+        after = after or []
+        b = {p["player_id"]: p for p in before}
+        a = {p["player_id"]: p for p in after}
+        if action == "called_up_out":
+            for pid, p in b.items():
+                if pid not in a:
+                    await emit("called_up_out", f"{p['name']} called up out of the XI{where}", p, extra)
+            return
+        changed = False
+        for pid, p in a.items():
+            if pid not in b:
+                changed = True
+                no = f" at no. {p['batting_order']}" if p.get("batting_order") else ""
+                await emit("added_to_xi", f"{p['name']} added to the XI{where}{no}", p, {"batting_order": p.get("batting_order")})
+        for pid, p in b.items():
+            if pid not in a:
+                changed = True
+                await emit("removed_from_xi", f"{p['name']} removed from the XI{where}", p, {"batting_order": p.get("batting_order")})
+        for old, new in _moved(before, after):
+            ob, nb = old.get("batting_order"), new.get("batting_order")
+            if ob == nb:
+                continue
+            changed = True
+            way = "up" if (nb or 0) < (ob or 0) else "down"
+            await emit("batting_order_changed",
+                       f"{new['name']} moved {way} the batting order from no. {ob} to no. {nb}{where}", new,
+                       {"from": ob, "to": nb, "direction": way})
+        for pid, p in a.items():
+            old = b.get(pid)
+            if old is None:
+                continue
+            if p.get("is_captain") != old.get("is_captain"):
+                changed = True
+                await emit("made_captain" if p.get("is_captain") else "removed_captain",
+                           f"{p['name']} {'made captain' if p.get('is_captain') else 'no longer captain'}{where}", p)
+            if p.get("is_wicket_keeper") != old.get("is_wicket_keeper"):
+                changed = True
+                await emit("made_keeper" if p.get("is_wicket_keeper") else "removed_keeper",
+                           f"{p['name']} {'made wicket-keeper' if p.get('is_wicket_keeper') else 'no longer wicket-keeper'}{where}", p)
+        if action == "confirmed":
+            n = len(after)
+            tail = " and locked it" if extra.get("locked") else ""
+            await emit("side_confirmed", f"Confirmed the side{where}: {n} player{'s' if n != 1 else ''}{tail}"
+                       + ("" if changed else " (no changes)"))
+        elif action == "restored_to_board":
+            await emit("restored_to_board", f"Restored the side{where} to the board")
+    except Exception:  # noqa: BLE001 - the trail must never break the change it describes
+        log.exception("club audit write failed for fixture %s", fixture_id)

@@ -63,6 +63,7 @@ const CRICKET_GROUPS = [
     desc: 'The rules your competition runs on, and what the board shows.',
     items: [
       { to: '/admin/betterselect/rules', label: 'Selection rules', icon: 'settings', cap: CAP.MANAGE_SELECTIONS, desc: "Your association's age limits, overseas caps and eligibility." },
+      { to: '/admin/betterselect/audit', label: 'Audit History', icon: 'history', cap: CAP.MANAGE_SELECTIONS, desc: 'Who changed which player in selection, availability and squads, and when.' },
     ],
   },
   {

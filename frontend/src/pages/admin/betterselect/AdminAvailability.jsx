@@ -9,6 +9,7 @@ import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
+import { useAllowMaybe } from '../../../lib/useAvailabilityConfig'
 import {
   Icon, JuniorsToggle, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
   RecencySelect, playedWithinYears, RuleTags, Chip,
@@ -101,6 +102,9 @@ export default function AdminAvailability() {
   // Bulk update
   const [selected, setSelected] = useState(() => new Set())
   const [bulkStatus, setBulkStatus] = useState('AVAILABLE')
+  const allowMaybe = useAllowMaybe()
+  // Switching Maybe off while it was the chosen bulk answer falls back to Available.
+  useEffect(() => { if (!allowMaybe && bulkStatus === 'MAYBE') setBulkStatus('AVAILABLE') }, [allowMaybe, bulkStatus])
   const [bulkReason, setBulkReason] = useState('')
   const [applying, setApplying] = useState(false)
 
@@ -384,7 +388,7 @@ export default function AdminAvailability() {
           <span className="font-mono text-[11px] text-pb-accent">{selected.size} selected</span>
           <span className="text-sm text-pb-dim">mark</span>
           <Segmented sm value={bulkStatus} onChange={setBulkStatus}
-            options={AVAIL_ORDER.map((s) => ({ value: s, label: AVAILABILITY[s].short }))} />
+            options={AVAIL_ORDER.filter((s) => allowMaybe || s !== 'MAYBE').map((s) => ({ value: s, label: AVAILABILITY[s].short }))} />
           {rangeApplied ? (
             <span className="inline-flex items-center gap-2 text-sm text-pb-dim">
               across

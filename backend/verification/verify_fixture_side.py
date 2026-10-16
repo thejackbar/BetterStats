@@ -54,7 +54,7 @@ async def main():
     async with engine.begin() as conn:
         for stmt in DRAFT_DDL:
             await conn.execute(text(stmt))
-        for mod in ("team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl"):
+        for mod in ("team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl", "audit_ddl"):
             try:
                 for stmt in importlib.import_module(f"app.services.{mod}").STATEMENTS:
                     await conn.execute(text(stmt))

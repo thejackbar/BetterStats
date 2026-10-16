@@ -26,6 +26,8 @@ from typing import Iterable, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import player_audit
+
 # The primary squad is the member team with the best rank: a ranked team
 # (sequence > 0) beats an unranked one, then the lowest sequence wins, then the
 # name settles it so the choice is deterministic. NULL when the player is in no
@@ -102,24 +104,46 @@ async def recompute_primary_squads_for_team(
     )
 
 
-async def _delete_membership(db, organisation_id, player_id, team_id) -> None:
-    await db.execute(
+async def _audit(db, organisation_id, player_id, action, summary, *, team_id=None, team_name=None, detail=None) -> None:
+    await player_audit.record(
+        db, club_id=organisation_id, area="squads", action=action, summary=summary,
+        player_id=player_id, player_name_=await player_audit.player_name(db, player_id),
+        team_id=team_id, team_name_=team_name, detail=detail,
+    )
+
+
+async def _delete_membership(db, organisation_id, player_id, team_id, *, log=True) -> bool:
+    res = await db.execute(
         text(
             "DELETE FROM team_members "
             "WHERE team_id = :t AND player_id = :pid AND organisation_id = :org"
         ),
         {"t": team_id, "pid": player_id, "org": organisation_id},
     )
+    gone = bool(res.rowcount)
+    if gone and log:
+        tname = await player_audit.team_name(db, team_id)
+        pname = await player_audit.player_name(db, player_id)
+        await _audit(db, organisation_id, player_id, "removed_from_squad",
+                     f"{pname} removed from {tname}", team_id=team_id, team_name=tname)
+    return gone
 
 
-async def _add_membership(db, organisation_id, player_id, team_id, added_by) -> None:
-    await db.execute(
+async def _add_membership(db, organisation_id, player_id, team_id, added_by, *, log=True) -> bool:
+    res = await db.execute(
         text(
             "INSERT INTO team_members (team_id, player_id, organisation_id, added_by) "
             "VALUES (:t, :pid, :org, :by) ON CONFLICT DO NOTHING"
         ),
         {"t": team_id, "pid": player_id, "org": organisation_id, "by": added_by},
     )
+    added = bool(res.rowcount)
+    if added and log:
+        tname = await player_audit.team_name(db, team_id)
+        pname = await player_audit.player_name(db, player_id)
+        await _audit(db, organisation_id, player_id, "added_to_squad",
+                     f"{pname} added to {tname}", team_id=team_id, team_name=tname)
+    return added
 
 
 async def add_squad_memberships(
@@ -174,11 +198,27 @@ async def move_squad_membership(
     A None source is a plain add; a None target is a plain remove. Does NOT commit."""
     if from_team_id == to_team_id:
         return
+    gone = added = False
     if from_team_id is not None:
-        await _delete_membership(db, organisation_id, player_id, from_team_id)
+        gone = await _delete_membership(db, organisation_id, player_id, from_team_id, log=False)
     if to_team_id is not None:
-        await _add_membership(db, organisation_id, player_id, to_team_id, added_by)
+        added = await _add_membership(db, organisation_id, player_id, to_team_id, added_by, log=False)
     await recompute_primary_squad(db, organisation_id, player_id)
+    # One event for a move; a plain add or remove says that instead.
+    pname = await player_audit.player_name(db, player_id)
+    if gone and added:
+        fname = await player_audit.team_name(db, from_team_id)
+        tname = await player_audit.team_name(db, to_team_id)
+        await _audit(db, organisation_id, player_id, "moved_squad", f"{pname} moved from {fname} to {tname}",
+                     team_id=to_team_id, team_name=tname, detail={"from": fname, "to": tname})
+    elif added:
+        tname = await player_audit.team_name(db, to_team_id)
+        await _audit(db, organisation_id, player_id, "added_to_squad", f"{pname} added to {tname}",
+                     team_id=to_team_id, team_name=tname)
+    elif gone:
+        fname = await player_audit.team_name(db, from_team_id)
+        await _audit(db, organisation_id, player_id, "removed_from_squad", f"{pname} removed from {fname}",
+                     team_id=from_team_id, team_name=fname)
 
 
 async def set_squad_memberships(
@@ -206,10 +246,19 @@ async def clear_all_squad_memberships(
     """Take the player out of every squad. Used when a player is marked inactive —
     an inactive player is not in this season's pool, so leaving them filed in any
     squad is what makes the Squads board disagree with the roster. Does NOT commit."""
+    held = (await db.execute(
+        text("SELECT team_id FROM team_members WHERE player_id = :pid AND organisation_id = :org"),
+        {"pid": player_id, "org": organisation_id},
+    )).scalars().all()
     await db.execute(
         text("DELETE FROM team_members WHERE player_id = :pid AND organisation_id = :org"),
         {"pid": player_id, "org": organisation_id},
     )
+    for tid in held:
+        tname = await player_audit.team_name(db, tid)
+        pname = await player_audit.player_name(db, player_id)
+        await _audit(db, organisation_id, player_id, "removed_from_squad",
+                     f"{pname} removed from {tname} (taken out of every squad)", team_id=tid, team_name=tname)
     await db.execute(
         text("UPDATE players SET squad_team_id = NULL WHERE id = :pid AND organisation_id = :org"),
         {"pid": player_id, "org": organisation_id},

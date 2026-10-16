@@ -37,7 +37,10 @@ from app.auth.modules import MODULE_SELECT, org_has_module
 from app.config.settings import settings
 from app.models.db import Grade, Organisation, Player, PlayerAvailability, get_db
 from app.routers.availability import (
+    MAYBE_OFF,
     active_self_service_players,
+    allow_maybe,
+    audit_availability,
     local_now,
     phone_last4,
     upcoming_fixtures_by_date,
@@ -177,6 +180,7 @@ async def get_landing(token: str, db: AsyncSession = Depends(get_db)):
     return {
         "club": _club_branding(club),
         "require_pin": bool(club.availability_require_pin),
+        "allow_maybe": allow_maybe(club),
         "players": [
             {"id": str(p.id), "display_name": p.display_name, "has_phone": phone_last4(p.phone) is not None}
             for p in players
@@ -343,6 +347,7 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
     return {
         "club": _club_branding(club),
         "player": {"id": str(player.id), "display_name": player.display_name},
+        "allow_maybe": allow_maybe(club),
         "dates": _grouped_dates(by_date),
         "availability": answers,
         # False for a player in no squad: the page then emphasises no game.
@@ -448,6 +453,8 @@ async def set_me(token: str, body: SetBody, request: Request, db: AsyncSession =
     status = (body.status or "").upper()
     if status not in SELF_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
+    if status == "MAYBE" and not allow_maybe(club):
+        raise HTTPException(status_code=400, detail=MAYBE_OFF)
 
     by_date = await upcoming_fixtures_by_date(db, club.id)
     if body.date.isoformat() not in by_date:
@@ -461,6 +468,9 @@ async def set_me(token: str, body: SetBody, request: Request, db: AsyncSession =
         )
     )
     row = res.scalar_one_or_none()
+    # The player's own answer: the trail names the player, not a user.
+    await audit_availability(db, club.id, player.id, body.date, row.status if row else None, status, note,
+                             self_service=True)
     if row:
         row.status = status
         row.note = note

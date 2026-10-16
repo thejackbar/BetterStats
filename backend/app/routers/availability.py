@@ -238,9 +238,47 @@ async def upcoming_fixtures_by_date(
     return by_date
 
 
-async def _upsert(db: AsyncSession, item: AvailabilitySet, club_id, user_id, player_ids: set) -> None:
+def allow_maybe(club) -> bool:
+    """Whether the club records "Maybe". True unless the club switched it off."""
+    return getattr(club, "availability_allow_maybe", True) is not False
+
+
+MAYBE_OFF = "Maybe is switched off for this club. Record Available or Unavailable."
+
+
+@router.get("/config")
+async def availability_config(club: Organisation = Depends(get_current_club), user: User = Depends(get_current_user)):
+    """The few club settings every screen that records availability needs."""
+    return {"allow_maybe": allow_maybe(club)}
+
+
+_AVAIL_WORD = {"AVAILABLE": "Available", "UNAVAILABLE": "Unavailable", "MAYBE": "Maybe", "NO_RESPONSE": "No response"}
+
+
+async def audit_availability(db: AsyncSession, club_id, player_id, on_date, old, new, note, self_service: bool = False) -> None:
+    """One audit_events row for a recorded answer: who, which player, which date, from what to what."""
+    from app.services import player_audit
+    if (old or "NO_RESPONSE") == new and not note:
+        return
+    pname = await player_audit.player_name(db, player_id)
+    when = on_date.strftime("%a %-d %b")
+    was = f" (was {_AVAIL_WORD.get(old or 'NO_RESPONSE', old)})" if old and old != new else ""
+    tail = f" - {note}" if note else ""
+    await player_audit.record(
+        db, club_id=club_id, area="availability", action="availability_set",
+        summary=f"{pname} marked {_AVAIL_WORD.get(new, new)} for {when}{was}{tail}",
+        player_id=player_id, player_name_=pname,
+        detail={"date": on_date.isoformat(), "from": old, "to": new, "note": note},
+        # The player's own answer through their link names the player, not a user.
+        **({"user": None, "via": "player link", "by": pname} if self_service else {}),
+    )
+
+
+async def _upsert(db: AsyncSession, item: AvailabilitySet, club_id, user_id, player_ids: set, club=None) -> None:
     if item.status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {item.status}")
+    if item.status == "MAYBE" and club is not None and not allow_maybe(club):
+        raise HTTPException(status_code=400, detail=MAYBE_OFF)
     pid = uuid.UUID(item.player_id)
     if pid not in player_ids:
         raise HTTPException(status_code=404, detail="Player not found")
@@ -251,6 +289,8 @@ async def _upsert(db: AsyncSession, item: AvailabilitySet, club_id, user_id, pla
         )
     )
     row = res.scalar_one_or_none()
+    old_status = row.status if row else None
+    await audit_availability(db, club_id, pid, item.date, old_status, item.status, item.note)
     if row:
         row.status = item.status
         row.note = item.note
@@ -520,7 +560,7 @@ async def set_availability(
     user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
     player_ids = await _owned_player_ids(db, club.id)
-    await _upsert(db, body, club.id, user.id, player_ids)
+    await _upsert(db, body, club.id, user.id, player_ids, club)
     await db.commit()
     return {"status": "ok"}
 
@@ -534,7 +574,7 @@ async def set_availability_bulk(
 ):
     player_ids = await _owned_player_ids(db, club.id)
     for item in body.items:
-        await _upsert(db, item, club.id, user.id, player_ids)
+        await _upsert(db, item, club.id, user.id, player_ids, club)
     await db.commit()
     return {"status": "ok", "count": len(body.items)}
 
@@ -619,6 +659,8 @@ async def create_period(
 ):
     if body.status not in PERIOD_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
+    if body.status == "MAYBE" and not allow_maybe(club):
+        raise HTTPException(status_code=400, detail=MAYBE_OFF)
     if body.end_date and body.end_date < body.start_date:
         raise HTTPException(status_code=400, detail="End date is before start date")
     try:
@@ -637,6 +679,14 @@ async def create_period(
         recorded_by=user.id,
     )
     db.add(period)
+    from app.services import player_audit
+    pname = await player_audit.player_name(db, pid)
+    rng = body.start_date.strftime("%-d %b") + (f" to {body.end_date.strftime('%-d %b')}" if body.end_date else " onwards")
+    await player_audit.record(
+        db, club_id=club.id, area="availability", action="availability_period_added",
+        summary=f"{pname} marked {_AVAIL_WORD.get(body.status, body.status)} {rng}" + (f" - {period.reason}" if period.reason else ""),
+        player_id=pid, player_name_=pname,
+        detail={"start": body.start_date.isoformat(), "end": body.end_date.isoformat() if body.end_date else None, "status": body.status})
     await db.commit()
     await db.refresh(period)
     return {"status": "ok", "id": period.id}
@@ -658,6 +708,12 @@ async def delete_period(
     period = res.scalar_one_or_none()
     if not period:
         raise HTTPException(status_code=404, detail="Period not found")
+    from app.services import player_audit
+    pname = await player_audit.player_name(db, period.player_id)
+    await player_audit.record(
+        db, club_id=club.id, area="availability", action="availability_period_removed",
+        summary=f"{pname}: {_AVAIL_WORD.get(period.status, period.status)} period from {period.start_date.strftime('%-d %b')} removed",
+        player_id=period.player_id, player_name_=pname)
     await db.delete(period)
     await db.commit()
     return {"status": "ok"}
@@ -673,6 +729,7 @@ class SelfServiceUpdate(BaseModel):
     enabled: Optional[bool] = None
     require_pin: Optional[bool] = None
     show_squad: Optional[bool] = None
+    allow_maybe: Optional[bool] = None
 
 
 async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
@@ -682,6 +739,7 @@ async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
         "enabled": bool(club.availability_self_service_enabled),
         "require_pin": bool(club.availability_require_pin),
         "show_squad": bool(club.availability_show_squad),
+        "allow_maybe": allow_maybe(club),
         "token": club.availability_link_token,
         # The link is a frontend route; the admin UI prefixes its own origin.
         "path": f"/avail/{club.availability_link_token}" if club.availability_link_token else None,
@@ -713,6 +771,8 @@ async def update_self_service(
         club.availability_require_pin = bool(body.require_pin)
     if body.show_squad is not None:
         club.availability_show_squad = bool(body.show_squad)
+    if body.allow_maybe is not None:
+        club.availability_allow_maybe = bool(body.allow_maybe)
     if body.enabled is not None:
         club.availability_self_service_enabled = bool(body.enabled)
         if body.enabled and not club.availability_link_token:

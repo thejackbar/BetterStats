@@ -1508,3 +1508,12 @@ Gisborne: names were cut off on the Squads cards, the squad list should fit one 
 - Order: squads first; `select.squads.poolsAt` ('end' default, 'start') puts the pools first. Manual drag ordering of squads was not built: a squad's Order is its XI number and drives selection tiers, so reordering it is a selection change, not a display one.
 - PDF: `textDocs.writePdf` now takes page size and margin, and the new `downloadSheetPdf` places ops itself. The old flowing writer is unchanged in output (minutes suites pass).
 
+
+## Audit History and the Maybe switch (v9.117.0)
+
+Gisborne: a side-menu Audit History with a full trail of players moved between squads, up and down a batting order, made captain or keeper, and any other change in selection, availability and squads, with time, date and who; searchable, filterable, CSV. And an option to turn Maybe off, with one vocabulary (no In/Out) in the bulk bar.
+- Table `audit_events` with plain ids (no foreign keys) and names as they were. One row per player per change, with a sentence for the list. Selection rows come out of `selection_audit.record` by diffing the before and after XI; batting-order moves use a longest-increasing-subsequence so only players who actually moved are reported. Squad rows come from the shared membership helpers, so every screen that moves players is covered. Availability rows come from the admin writers and the player's own link.
+- Not recorded: drafts (autosave), fixture edits, ladder changes. Football's own selection routes do not write to it.
+- Maybe off is per club (`availability_allow_maybe`), enforced on the server, and offered nowhere once off.
+- Proof: `verify_audit_history.py` (51 checks incl. the Maybe refusals; control fails the trail checks), `verify_audit_history_browser.mjs` (24), `verify_availability_maybe_browser.mjs` (11).
+

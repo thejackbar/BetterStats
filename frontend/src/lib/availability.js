@@ -14,7 +14,7 @@ export const AVAIL_STATUSES = ['AVAILABLE', 'UNAVAILABLE', 'MAYBE', 'NO_RESPONSE
 export const AVAILABILITY = {
   AVAILABLE: {
     label: 'Available',
-    short: 'In',
+    short: 'Available',
     glyph: '✓',
     // Semantic green — uses --pb-positive (fixed), NOT --pb-accent (the club's
     // white-label colour). "Available = green" must never re-colour per club;
@@ -26,7 +26,7 @@ export const AVAILABILITY = {
   },
   UNAVAILABLE: {
     label: 'Unavailable',
-    short: 'Out',
+    short: 'Unavailable',
     glyph: '✕',
     chip: 'bg-pb-red/20 text-pb-red border-pb-red/40',
     dot: 'bg-pb-red',
@@ -44,7 +44,7 @@ export const AVAILABILITY = {
   },
   NO_RESPONSE: {
     label: 'No response',
-    short: 'No reply',
+    short: 'No response',
     glyph: '–',
     chip: 'bg-pb-surface2 text-pb-faintest border-pb-hairline',
     dot: 'bg-pb-faintest',

@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../contexts/AuthContext'
 import { ruleBadges } from './selectionRules'
 import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availRank } from '../../../lib/availability'
+import { useAllowMaybe } from '../../../lib/useAvailabilityConfig'
 
 /* ── Icons — simple geometric line glyphs (stroke = currentColor) ────────── */
 const ICON_PATHS = {
@@ -42,6 +43,7 @@ const ICON_PATHS = {
   timer: <><circle cx="12" cy="13" r="8" /><path d="M12 13V9M9 2h6M12 5V2" /></>,
   play: <><path d="M7 5l12 7-12 7z" fill="currentColor" stroke="none" /></>,
   pause: <><rect x="7" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none" /><rect x="13.5" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none" /></>,
+  history: <><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1" /><path d="M3.5 4v4.5H8" /><path d="M12 7.5V12l3 2" /></>,
   lock: <><rect x="5" y="11" width="14" height="9.5" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
   undo: <><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></>,
   reset: <><path d="M3.5 12a8.5 8.5 0 1 1 2.5 6" /><path d="M3.5 20v-5h5" /></>,
@@ -493,6 +495,8 @@ export function AvailSummary({ players, statusOf = (p) => p.availability ?? p.av
    onPick(status) is called when a status is chosen; the caller persists it. */
 export function QuickAvailModal({ player, dateLabel, current, onPick, onClose }) {
   const navigate = useNavigate()
+  // A club that has switched Maybe off is only offered the other answers.
+  const allowMaybe = useAllowMaybe()
   // A bottom sheet on a phone (the buttons land under the thumb, and it can only
   // ever be as wide as the screen), a centred card from `sm` up.
   return (
@@ -533,7 +537,7 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose })
           <button onClick={onClose} className="text-pb-faint hover:text-pb-text w-10 h-10 -mr-2 inline-flex items-center justify-center" aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
         <div className="p-4 grid grid-cols-2 gap-2.5">
-          {AVAIL_ORDER.map((s) => {
+          {AVAIL_ORDER.filter((s) => allowMaybe || s !== 'MAYBE').map((s) => {
             const meta = AVAILABILITY[s]
             const on = current === s
             return (

@@ -11,7 +11,7 @@ import uuid
 
 from app.models.db import User, ClubMembership, Organisation, get_db
 from app.config.settings import settings
-from app.services import junior_hiding
+from app.services import player_audit, junior_hiding
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -69,6 +69,8 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     user = await db.get(User, uuid.UUID(user_id))
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    # Who is acting, for the audit trail's shared writers (see services/player_audit).
+    player_audit.set_actor(user)
     return user
 
 

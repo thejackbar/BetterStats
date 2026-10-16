@@ -113,6 +113,10 @@ SHARED_DDL_MODULES = (
     ("app.services.fixture_side_ddl", "STATEMENTS"),
     # Migration 338. `fixtures.team_pinned`, on the shared ORM Fixture model.
     ("app.services.fixture_pin_ddl", "STATEMENTS"),
+    # Migration 339. `audit_events`: the shared squad and availability writers record into it.
+    ("app.services.audit_ddl", "STATEMENTS"),
+    # Migration 340. `organisations.availability_allow_maybe`, on the shared Organisation model.
+    ("app.services.availability_maybe_ddl", "STATEMENTS"),
 )
 
 

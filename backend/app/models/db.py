@@ -543,6 +543,8 @@ class Organisation(Base):
     # Whether the self-service page tells a player which squad is theirs (migration
     # 325). Off by default: some clubs do not want squads known to the players.
     availability_show_squad = Column(Boolean, nullable=False, server_default="false", default=False)
+    # False = the club records only Available / Unavailable (migration 340).
+    availability_allow_maybe = Column(Boolean, nullable=False, server_default="true", default=True)
     # ─── BetterFantasyCricket: public fantasy link (migration 087) ────────────
     # The per-club magic link members and supporters use to register and play
     # (mirrors availability_link_token). Rotatable; resolves to the club's
