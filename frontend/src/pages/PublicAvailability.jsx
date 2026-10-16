@@ -8,7 +8,7 @@
 // White-labelled from the club's own colours; the only dependency on the rest of
 // the app is the shared availability colour map so a player's chips match the
 // admin matrix exactly.
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { AVAILABILITY } from '../lib/availability'
@@ -34,14 +34,44 @@ function weekKey(iso) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 function groupByWeek(dates) {
-  const weeks = []
-  let last = null
+  // A two-day game spans two weeks. Its weeks join into one group, so week 2 is
+  // never hidden behind "See more games" while week 1 is open.
+  const parent = {}
+  const find = (x) => { parent[x] = parent[x] ?? x; while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x] } return x }
+  const have = new Set(dates.map((d) => d.date))
   for (const d of dates) {
-    const k = weekKey(d.date)
-    if (k !== last) { weeks.push([]); last = k }
-    weeks[weeks.length - 1].push(d)
+    find(weekKey(d.date))
+    for (const f of d.fixtures || []) {
+      if (f.two_day && f.day1 && f.day2 && have.has(f.day1) && have.has(f.day2)) {
+        parent[find(weekKey(f.day2))] = find(weekKey(f.day1))
+      }
+    }
   }
-  return weeks
+  const order = []
+  const byRoot = {}
+  for (const d of dates) {
+    const k = find(weekKey(d.date))
+    if (!byRoot[k]) { byRoot[k] = []; order.push(k) }
+    byRoot[k].push(d)
+  }
+  return order.map((k) => byRoot[k])
+}
+
+// The pairs of dates that are the two weeks of one game (or several games on the
+// same two dates): [{ key, day1, day2, teams: [name], opponents: [name] }].
+function twoDayPairs(dates) {
+  const have = new Set(dates.map((d) => d.date))
+  const out = {}
+  for (const d of dates) {
+    for (const f of d.fixtures || []) {
+      if (f.two_day && f.role === 'day1' && f.day1 && f.day2 && have.has(f.day1) && have.has(f.day2)) {
+        const key = `${f.day1}|${f.day2}`
+        out[key] = out[key] || { key, day1: f.day1, day2: f.day2, fixtures: [] }
+        out[key].fixtures.push(f)
+      }
+    }
+  }
+  return out
 }
 
 // "13:00" → "1:00pm". The time is the club's own local display string, so an
@@ -78,7 +108,6 @@ function FixtureRow({ f }) {
   const opp = f.opponent_name || f.label || 'TBC'
   const bye = f.home_away === 'BYE'
   const where = f.home_away === 'AWAY' ? 'at' : 'vs'
-  const dayTag = f.two_day ? (f.role === 'day1' ? 'Day 1' : f.role === 'day2' ? 'Day 2' : null) : null
   return (
     <div data-fixture data-mine={f.mine ? 'yes' : 'no'}
       className={`flex gap-3 rounded-lg px-2.5 py-2 ${f.mine ? 'border-l-[3px]' : ''}`}
@@ -97,11 +126,15 @@ function FixtureRow({ f }) {
           )}
           {f.mine && <Tag tone="var(--pb-accent)">Your squad</Tag>}
           {bye ? <Tag>Bye</Tag> : f.home_away ? <Tag>{f.home_away === 'AWAY' ? 'Away' : 'Home'}</Tag> : null}
-          {dayTag && <Tag>{dayTag}</Tag>}
         </div>
         {!bye && (
           <div className={`mt-0.5 ${f.mine ? 'text-[14px] text-pb-text' : 'text-[12.5px] text-pb-faint'}`}>
             {where} {opp}
+          </div>
+        )}
+        {f.two_day && f.day1 && f.day2 && (
+          <div className="text-[11.5px] text-pb-faint mt-0.5" data-two-day-note>
+            Two-day game: {fmtShort(f.day1)} and {fmtShort(f.day2)}
           </div>
         )}
         {f.venue && <div className="text-[11.5px] text-pb-faint mt-0.5">{f.venue}</div>}
@@ -133,6 +166,48 @@ function FixtureList({ fixtures }) {
   )
 }
 
+// One answer for both weeks of a two-day game. Each week keeps its own answer
+// underneath (a player can be free for week 1 and away for week 2); this is the
+// quick way to say the same thing twice.
+function BothWeeks({ pair, me, choices, onPick, busy }) {
+  const a = me.availability?.[pair.day1]?.status || 'NO_RESPONSE'
+  const b = me.availability?.[pair.day2]?.status || 'NO_RESPONSE'
+  const same = a === b ? a : null
+  const names = [...new Set(pair.fixtures.map((f) => f.team_name).filter(Boolean))]
+  return (
+    <div data-both-weeks={pair.key} className="rounded-xl border p-3.5"
+      style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 45%, transparent)', background: 'color-mix(in srgb, var(--pb-amber) 6%, transparent)' }}>
+      <div className="flex items-baseline justify-between gap-2 mb-0.5">
+        <div className="font-display font-bold text-[16px]">Two-day game: both weeks</div>
+        <Tag tone="var(--pb-amber)">2 weeks</Tag>
+      </div>
+      <div className="text-[12.5px] text-pb-dim mb-2.5">
+        {fmtShort(pair.day1)} and {fmtShort(pair.day2)}{names.length ? ` · ${names.join(', ')}` : ''}
+      </div>
+      <div className={`grid ${choices.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
+        {choices.map((s) => {
+          const meta = AVAILABILITY[s]
+          const active = same === s
+          return (
+            <button key={s} type="button" data-both={s} onClick={() => onPick(pair, s)} disabled={busy}
+              className="py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
+              style={active
+                ? { background: meta.cssVar, color: 'var(--pb-bg)' }
+                : { background: `color-mix(in srgb, ${meta.cssVar} 12%, transparent)`, color: meta.cssVar, border: `1px solid color-mix(in srgb, ${meta.cssVar} 30%, transparent)` }}>
+              {meta.glyph} {meta.label}
+            </button>
+          )
+        })}
+      </div>
+      <div className="text-[12px] mt-2" data-both-summary style={{ color: same ? 'var(--pb-faint)' : 'var(--pb-amber)' }}>
+        {same
+          ? `Same answer for both weeks. You can still change one week below.`
+          : `Week 1: ${(AVAILABILITY[a] || AVAILABILITY.NO_RESPONSE).label} · Week 2: ${(AVAILABILITY[b] || AVAILABILITY.NO_RESPONSE).label}`}
+      </div>
+    </div>
+  )
+}
+
 function ClubHeader({ club }) {
   const initials = (club?.name || 'Club').split(' ').map((w) => w[0]).join('').slice(0, 3).toUpperCase()
   return (
@@ -160,6 +235,12 @@ function Banner({ tone = 'error', children }) {
 
 function fmtShort(d) {
   try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) } catch { return d }
+}
+
+// "Week 1 of 2" for the days of a two-day game, '' for an ordinary date.
+function weekLabel(d) {
+  const f = (d.fixtures || []).find((x) => x.two_day)
+  return f ? (f.role === 'day2' ? 'Week 2 of 2' : 'Week 1 of 2') : ''
 }
 
 function Section({ title, children }) {
@@ -194,7 +275,7 @@ function MyPage({ token, me }) {
             const meta = AVAILABILITY[cur] || AVAILABILITY.NO_RESPONSE
             return (
               <div key={d.date} className="flex items-center justify-between gap-3 text-sm">
-                <span>{fmtShort(d.date)}</span>
+                <span>{fmtShort(d.date)}{weekLabel(d) ? <span className="text-pb-faint"> · {weekLabel(d)}</span> : null}</span>
                 <span className="font-semibold" style={{ color: meta.cssVar }}>{meta.glyph} {meta.label}</span>
               </div>
             )
@@ -277,6 +358,7 @@ export default function PublicAvailability() {
   const [tab, setTab] = useState('weekend') // weekend | mine
   const pinRef = useRef(null)
   const weeks = useMemo(() => groupByWeek(me?.dates || []), [me?.dates])
+  const pairs = useMemo(() => twoDayPairs(me?.dates || []), [me?.dates])
   // A club that has switched Maybe off offers only Available and Unavailable.
   const choices = me?.allow_maybe === false ? ALL_CHOICES.filter((c) => c !== 'MAYBE') : ALL_CHOICES
 
@@ -395,6 +477,30 @@ export default function PublicAvailability() {
     } finally {
       setSavingDate((cur) => (cur === d ? null : cur))
     }
+  }
+
+  // Both weeks of a two-day game in one tap. Two writes, one per date (the store
+  // is per date), each rolled back on its own if it fails.
+  const setBoth = async (pair, status) => {
+    const dates = [pair.day1, pair.day2]
+    const prior = Object.fromEntries(dates.map((d) => [d, me.availability?.[d]]))
+    setMe((m) => ({ ...m, availability: { ...(m.availability || {}), ...Object.fromEntries(dates.map((d) => [d, { status, source: 'self' }])) } }))
+    setSavingDate(pair.key)
+    const results = await Promise.allSettled(dates.map((d) => api.availPublicSet(token, { date: d, status })))
+    const failed = dates.filter((_, i) => results[i].status === 'rejected')
+    if (failed.length) {
+      setMe((m) => {
+        const av = { ...(m.availability || {}) }
+        for (const d of failed) { if (prior[d]) av[d] = prior[d]; else delete av[d] }
+        return { ...m, availability: av }
+      })
+      const first = results.find((r) => r.status === 'rejected')
+      setError((first?.reason && first.reason.message) || 'Couldn’t save both weeks. Please try again.')
+    } else {
+      setSavedDate(pair.key)
+      setTimeout(() => setSavedDate((cur) => (cur === pair.key ? null : cur)), 1600)
+    }
+    setSavingDate((cur) => (cur === pair.key ? null : cur))
   }
 
   return (
@@ -529,11 +635,23 @@ export default function PublicAvailability() {
             <div className="flex flex-col gap-3">
               {weeks.slice(0, weeksOpen).flat().map((d) => {
                 const cur = me.availability?.[d.date]?.status || 'NO_RESPONSE'
+                const startsPair = Object.values(pairs).filter((pr) => pr.day1 === d.date)
+                const wk = weekLabel(d)
                 return (
-                  <div key={d.date} className="rounded-xl border pb-hairline p-3.5">
+                  <Fragment key={d.date}>
+                  {startsPair.map((pr) => (
+                    <div key={pr.key} className="relative">
+                      <BothWeeks pair={pr} me={me} choices={choices} onPick={setBoth} busy={savingDate === pr.key} />
+                      {savedDate === pr.key && <span className="absolute right-3 bottom-2 font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
+                    </div>
+                  ))}
+                  <div className="rounded-xl border pb-hairline p-3.5" data-date-card={d.date}>
                     <div className="flex items-baseline justify-between gap-2 mb-2">
                       <div className="font-display font-bold text-[16px]">{fmtDay(d.date)}</div>
-                      {savedDate === d.date && <span className="font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
+                      <div className="flex items-baseline gap-2 shrink-0">
+                        {wk && <Tag tone="var(--pb-amber)">{wk}</Tag>}
+                        {savedDate === d.date && <span className="font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
+                      </div>
                     </div>
                     <FixtureList fixtures={d.fixtures || []} />
                     <div className={`grid ${choices.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
@@ -556,6 +674,7 @@ export default function PublicAvailability() {
                       })}
                     </div>
                   </div>
+                  </Fragment>
                 )
               })}
             </div>
@@ -575,7 +694,7 @@ export default function PublicAvailability() {
               </button>
             )}
             <p className="text-center text-pb-faintest text-[11px] mt-6">
-              Your answers save automatically. One tap covers every game that day.
+              Your answers save automatically. One tap covers every game that day. For a two-day game, answer each week or both at once.
             </p>
             </>)}
           </div>

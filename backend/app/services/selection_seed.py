@@ -35,6 +35,8 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.fixture_days import fixture_days
+
 log = logging.getLogger(__name__)
 
 # The app has no per-club timezone, so a fixture a day or two behind today still
@@ -66,13 +68,17 @@ async def next_fixture_id(
     return (row[0], row[1]) if row else None
 
 
-async def unavailable_ids(db: AsyncSession, org_id, on: Optional[date], ids: list[str]) -> set[str]:
-    """Which of ``ids`` have said UNAVAILABLE for the date ``on``.
+async def unavailable_ids(
+    db: AsyncSession, org_id, on: Optional[date], ids: list[str], end_on: Optional[date] = None,
+) -> set[str]:
+    """Which of ``ids`` have said UNAVAILABLE for the game starting ``on``.
 
     Same rule as the selection pool: an explicit answer for the date wins, and
     only where there is none does a covering availability period speak. MAYBE
-    and no answer are not "unavailable"."""
-    if not on or not ids:
+    and no answer are not "unavailable". A two-day game (``end_on`` after
+    ``on``) is read on both days: UNAVAILABLE on either rules the player out."""
+    days = fixture_days(on, end_on)
+    if not days or not ids:
         return set()
     uids = []
     for i in ids:
@@ -86,26 +92,30 @@ async def unavailable_ids(db: AsyncSession, org_id, on: Optional[date], ids: lis
 
     rows = (await db.execute(
         text(
-            "SELECT player_id, status FROM player_availability "
-            "WHERE organisation_id = :org AND avail_date = :d AND player_id = ANY(CAST(:ids AS uuid[]))"
+            "SELECT player_id, avail_date, status FROM player_availability "
+            "WHERE organisation_id = :org AND avail_date = ANY(CAST(:ds AS date[])) "
+            "AND player_id = ANY(CAST(:ids AS uuid[]))"
         ),
-        {"org": org_id, "d": on, "ids": uids},
+        {"org": org_id, "ds": days, "ids": uids},
     )).fetchall()
-    status = {str(pid): st for pid, st in rows}
-    periods = await resolve_period_statuses(db, org_id, [on])
-    for pid, info in periods.get(on.isoformat(), {}).items():
-        status.setdefault(pid, info["status"])
-    return {i for i in ids if status.get(i) == "UNAVAILABLE"}
+    status = {(str(pid), d): st for pid, d, st in rows}
+    periods = await resolve_period_statuses(db, org_id, days)
+    for d in days:
+        for pid, info in periods.get(d.isoformat(), {}).items():
+            status.setdefault((pid, d), info["status"])
+    return {i for i in ids if any(status.get((i, d)) == "UNAVAILABLE" for d in days)}
 
 
-async def without_unavailable(db: AsyncSession, org_id, on: Optional[date], draft: dict) -> dict:
+async def without_unavailable(
+    db: AsyncSession, org_id, on: Optional[date], draft: dict, end_on: Optional[date] = None,
+) -> dict:
     """A copy of a CARRIED draft with the unavailable players taken out of the
     batting order (the rest close up). A draft with no ``seeded_from`` is a
     selector's own and is returned as it is."""
     if not isinstance(draft, dict) or not draft.get("seeded_from"):
         return draft
     slots = [s for s in (draft.get("slots") or []) if s]
-    out = await unavailable_ids(db, org_id, on, slots)
+    out = await unavailable_ids(db, org_id, on, slots, end_on)
     if not out:
         return draft
     kept = [s for s in slots if s not in out]
@@ -145,7 +155,10 @@ async def seed_next_round_draft(
             nxt, nxt_on = found
             src = str(fixture_id)
 
-            gone = await unavailable_ids(db, org_id, nxt_on, list(player_ids))
+            nxt_end = (await db.execute(
+                text("SELECT end_on FROM fixtures WHERE id = :id"), {"id": nxt},
+            )).scalar()
+            gone = await unavailable_ids(db, org_id, nxt_on, list(player_ids), nxt_end)
             player_ids = [p for p in player_ids if p not in gone]
 
             if not player_ids:

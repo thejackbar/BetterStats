@@ -454,6 +454,12 @@ async def sync_fixtures(
                 pass
         target.round = g.get("round")
         target.played_on = _parse_date(played)
+        # A two-day game: the feed lists both days. Only a later second day is
+        # written; a one-day entry leaves `end_on` alone so an end date a person
+        # typed on a synced game is not wiped by the next sync.
+        _end = _parse_date(g.get("end_at"))
+        if _end and target.played_on and _end > target.played_on:
+            target.end_on = _end
         target.start_time = g.get("time")
         target.home_team = g.get("home_team")
         target.away_team = g.get("away_team")

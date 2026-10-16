@@ -14,7 +14,7 @@ import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { Icon, Avatar, Dot, Tag, RuleTags } from './ui'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useDrag } from './selectionDnd'
-import { roleLine, formMeta, spark, alsoInLine, dropInLine, inDraftLine } from './selectionMeta'
+import { roleLine, formMeta, spark, alsoInLine, dropInLine, inDraftLine, weekSplitLine } from './selectionMeta'
 import { hasRuleFlag, ruleNotes, isBlocked, xiCompliance } from './selectionRules'
 import { useFitHeight, useBoxHeight, rowDensity, ROW_MIN } from './useFitHeight'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
@@ -417,6 +417,7 @@ function DualCard({ p, kind, idx, vm, drag, density = 'full' }) {
             {warnLine || <span className="text-pb-dim">{roleLine(p)}</span>}
           </div>
         )) : <div className="text-[12px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>}
+        {!dense && weekSplitLine(p) && <div className="text-[11px] font-semibold text-pb-red mt-0.5 truncate" data-week-split>{weekSplitLine(p)}</div>}
         {!dense && (clash
           ? (callUp
               ? <div className="text-[11px] text-pb-amber mt-0.5 truncate">↑ Call-up from {p.clash.join(', ')}</div>

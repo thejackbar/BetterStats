@@ -35,7 +35,7 @@ import { DualRailView, TeamSheetView } from './SelectionViews'
 import { AddPlayersSheet, SlotSheet, MobileBar } from './SelectionMobile'
 import SendSide from './SendSide'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
-import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank, normGender } from './selectionMeta'
+import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank, normGender, gameDatesLabel } from './selectionMeta'
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
 import { teamSeq, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
 import { confirmSig, restoreDraft } from './selectionDraft'
@@ -120,10 +120,7 @@ function fmtHeader(fx) {
   const title = fx.home_away === 'BYE' ? 'BYE' : `${us} vs ${opp}`
   const bits = []
   if (fx.round) bits.push(`Round ${fx.round}`)
-  if (fx.played_on) {
-    try { bits.push(new Date(fx.played_on + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })) }
-    catch { bits.push(fx.played_on) }
-  }
+  if (fx.played_on) bits.push(gameDatesLabel(fx.played_on, fx.end_on) + (fx.end_on && fx.end_on > fx.played_on ? ' (two days)' : ''))
   if (fx.start_time) bits.push(fx.start_time)
   if (fx.venue) bits.push(`${fx.venue}${fx.home_away === 'AWAY' ? ' (A)' : fx.home_away === 'HOME' ? ' (H)' : ''}`)
   return { title, sub: bits.join(' · '), kicker: `Team sheet${fx.round ? ` · Round ${fx.round}` : ''}` }
@@ -806,13 +803,32 @@ export default function AdminSelection() {
     }
   }
 
-  const pickAvail = async (status) => {
+  // `which` is only sent by a two-day game's editor: a date for one week, or
+  // 'both'. Left out it means the fixture's own (only) date.
+  const pickAvail = async (status, which) => {
     const p = availEdit
     setAvailEdit(null)
     if (!p || !fx?.played_on) { if (!fx?.played_on) toast.error('No fixture date to set availability against'); return }
-    setData((d) => ({ ...d, pool: d.pool.map((x) => (x.id === p.id ? { ...x, availability: status } : x)) }))
-    try { await api.bsSetAvailability({ player_id: p.id, date: fx.played_on, status }) }
-    catch (e) { toast.error('Could not update availability: ' + e.message); load() }
+    const twoDay = !!(fx.end_on && fx.end_on > fx.played_on)
+    const dates = !twoDay ? [fx.played_on] : which === 'both' ? [fx.played_on, fx.end_on] : [which || fx.played_on]
+    // Optimistic: set those weeks, then the combined answer is the least
+    // favourable of the weeks (the server does the same on reload).
+    const RANK = { UNAVAILABLE: 0, MAYBE: 1, NO_RESPONSE: 2, AVAILABLE: 3 }
+    setData((d) => ({
+      ...d,
+      pool: d.pool.map((x) => {
+        if (x.id !== p.id) return x
+        const days = twoDay
+          ? (x.availability_days || [fx.played_on, fx.end_on].map((date) => ({ date, status: x.availability || 'NO_RESPONSE' })))
+              .map((w) => (dates.includes(w.date) ? { ...w, status } : w))
+          : null
+        const combined = days ? days.reduce((a, w) => (RANK[w.status] < RANK[a] ? w.status : a), 'AVAILABLE') : status
+        return { ...x, availability: combined, availability_days: days || x.availability_days }
+      }),
+    }))
+    try {
+      for (const date of dates) await api.bsSetAvailability({ player_id: p.id, date, status })
+    } catch (e) { toast.error('Could not update availability: ' + e.message); load() }
   }
 
   const save = async () => {
@@ -1047,7 +1063,12 @@ export default function AdminSelection() {
       {canEdit && slotOpen != null && <SlotSheet vm={vm} idx={slotOpen} onClose={() => setSlotOpen(null)} />}
 
       {availEdit && (
-        <QuickAvailModal player={availEdit} dateLabel={fx?.played_on} current={availEdit.availability}
+        <QuickAvailModal player={availEdit}
+          dateLabel={fx?.end_on && fx.end_on > fx.played_on ? undefined : fx?.played_on}
+          current={availEdit.availability}
+          days={fx?.end_on && fx.end_on > fx.played_on
+            ? (availEdit.availability_days || [fx.played_on, fx.end_on].map((date) => ({ date, status: availEdit.availability || 'NO_RESPONSE' })))
+            : null}
           onPick={pickAvail} onClose={() => setAvailEdit(null)} />
       )}
 

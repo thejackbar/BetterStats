@@ -60,7 +60,7 @@ function fixtureSub(dateObj) {
   return fxs.map((f) => {
     const opp = f.opponent_name || f.label || 'TBC'
     const prefix = f.home_away === 'AWAY' ? '@ ' : f.home_away === 'BYE' ? '' : 'vs '
-    const d1d2 = f.two_day ? (f.role === 'day1' ? 'D1 ' : f.role === 'day2' ? 'D2 ' : '') : ''
+    const d1d2 = f.two_day ? (f.role === 'day1' ? 'Wk 1/2 ' : f.role === 'day2' ? 'Wk 2/2 ' : '') : ''
     return `${d1d2}${prefix}${opp}`
   }).join(' · ')
 }

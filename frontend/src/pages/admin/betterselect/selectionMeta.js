@@ -22,6 +22,25 @@ export function dropInLine(p) { return p?.drop_in_from ? `Not picked in ${p.drop
 // Another side's UNCONFIRMED draft already names this player that day. Never
 // blocks a pick (only a confirmed XI does); it just says someone has plans.
 export function inDraftLine(p) { return Array.isArray(p?.in_draft_of) && p.in_draft_of.length ? `In ${p.in_draft_of.join(', ')} draft (not confirmed)` : '' }
+// A two-day game is answered on both dates. `availability` is already the least
+// favourable of them; this says WHICH week is the problem, and only when the
+// weeks differ ("Week 1 Available · Week 2 Unavailable").
+const WEEK_WORD = { AVAILABLE: 'Available', UNAVAILABLE: 'Unavailable', MAYBE: 'Maybe', NO_RESPONSE: 'No response' }
+export function weekSplitLine(p) {
+  const d = p?.availability_days
+  if (!Array.isArray(d) || d.length < 2) return ''
+  if (d.every((x) => x.status === d[0].status)) return ''
+  return d.map((x, i) => `Week ${i + 1} ${WEEK_WORD[x.status] || x.status}`).join(' · ')
+}
+// "Sat 24 Oct" or, for a two-day game, "Sat 24 Oct + Sat 31 Oct".
+export function gameDatesLabel(playedOn, endOn) {
+  const f = (iso) => {
+    try { return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }
+    catch { return iso }
+  }
+  if (!playedOn) return ''
+  return endOn && endOn > playedOn ? `${f(playedOn)} + ${f(endOn)}` : f(playedOn)
+}
 // The board's default order, mirroring selection_pool._pool_rank: everyone who
 // says they are available and is named nowhere that day first, highest squad
 // first (`open_seq`: the place of their highest squad in the club). Then the

@@ -22,6 +22,7 @@ from app.models.db import FixtureLineup, Grade, Player, Season, Team
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 from app.auth.modules import org_has_module
 from app.services import player_age, selection_clash, selection_rules, squad_sides
+from app.services.fixture_days import combine_status, fixture_days
 from app.services.side_size import effective_min
 from app.services.grade_labels import grade_is_women, org_grade_category_sets
 
@@ -568,25 +569,39 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         player_squad_ids.setdefault(str(pid), set()).add(str(tid))
         squads.setdefault(str(pid), set()).add(active_teams[str(tid)][0])
 
-    # Availability for this fixture's playing date (explicit answer wins; period fallback).
+    # Availability for each day this fixture is played on (explicit answer wins;
+    # period fallback). A two-day game reads both days and the player's status is
+    # the least favourable of them, so a player free in week 1 and away in week 2
+    # is not offered as available. `avail_days` keeps each day for the card.
     avail: dict[str, str] = {}
     avail_reason: dict[str, str] = {}
-    if fx.played_on:
+    avail_days: dict[str, list[dict]] = {}
+    days = fixture_days(fx.played_on, getattr(fx, "end_on", None))
+    if days:
+        per_day: dict[date, dict[str, str]] = {d: {} for d in days}
         av_res = await db.execute(
             text(
-                "SELECT player_id, status FROM player_availability "
-                "WHERE organisation_id = :org AND avail_date = :d"
+                "SELECT player_id, avail_date, status FROM player_availability "
+                "WHERE organisation_id = :org AND avail_date = ANY(CAST(:ds AS date[]))"
             ),
-            {"org": club.id, "d": fx.played_on},
+            {"org": club.id, "ds": days},
         )
-        for pid, status in av_res.fetchall():
-            avail[str(pid)] = status
-        period_map = await resolve_period_statuses(db, club.id, [fx.played_on])
-        for pid, info in period_map.get(fx.played_on.isoformat(), {}).items():
-            if pid not in avail:
-                avail[pid] = info["status"]
-                if info.get("reason"):
-                    avail_reason[pid] = info["reason"]
+        for pid, d, status in av_res.fetchall():
+            per_day[d][str(pid)] = status
+        period_map = await resolve_period_statuses(db, club.id, days)
+        for d in days:
+            for pid, info in period_map.get(d.isoformat(), {}).items():
+                if pid not in per_day[d]:
+                    per_day[d][pid] = info["status"]
+                    if info.get("reason"):
+                        avail_reason.setdefault(pid, info["reason"])
+        for pid in {p for m in per_day.values() for p in m}:
+            statuses = [per_day[d].get(pid, "NO_RESPONSE") for d in days]
+            avail[pid] = combine_status(statuses)
+            if len(days) > 1:
+                avail_days[pid] = [
+                    {"date": d.isoformat(), "status": per_day[d].get(pid, "NO_RESPONSE")} for d in days
+                ]
 
     # Players already selected for ANOTHER fixture on the same date (clash). We
     # also keep each clashing XI's team sequence so the pool can flag whether
@@ -870,6 +885,11 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "squad_team_id": None if manual_inactive else sq_tid,
             "availability": avail.get(pid, "NO_RESPONSE"),
             "availability_reason": avail_reason.get(pid),
+            # Two-day game only: [{date, status}] per day, in order. Absent for a
+            # one-day game, where `availability` already says it all.
+            "availability_days": avail_days.get(pid) or ([
+                {"date": d.isoformat(), "status": "NO_RESPONSE"} for d in days
+            ] if len(days) > 1 else None),
             "last_played": lp.isoformat() if lp else None,
             "photo_url": p.photo_url,
             "batting_hand": p.batting_hand,

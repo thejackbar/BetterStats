@@ -491,9 +491,55 @@ export function AvailSummary({ players, statusOf = (p) => p.availability ?? p.av
   )
 }
 
+/* A two-day game is answered a week at a time, or for both weeks at once.
+   `days` is [{date, status}] in order; onPick(status, which) where `which` is a
+   date or 'both'. Declared at module level (never inside a render). */
+function TwoDayAvail({ days, onPick, allowMaybe }) {
+  const fmt = (iso) => {
+    try { return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }
+    catch { return iso }
+  }
+  const choices = AVAIL_ORDER.filter((s) => allowMaybe || s !== 'MAYBE')
+  const same = days.every((d) => d.status === days[0].status) ? days[0].status : null
+  const rows = [
+    { key: 'both', which: 'both', title: 'Both weeks', sub: days.map((d) => fmt(d.date)).join(' + '), current: same },
+    ...days.map((d, i) => ({ key: d.date, which: d.date, title: `Week ${i + 1}`, sub: fmt(d.date), current: d.status })),
+  ]
+  return (
+    <div className="p-4 flex flex-col gap-3" data-two-day-avail>
+      {rows.map((r) => (
+        <div key={r.key} data-avail-row={r.key === 'both' ? 'both' : r.key}>
+          <div className="flex items-baseline justify-between gap-2 mb-1.5">
+            <span className="font-display font-bold text-[14px]">{r.title}</span>
+            <span className="text-[11.5px] text-pb-faint">{r.sub}</span>
+          </div>
+          <div className={`grid gap-2 ${choices.length === 4 ? 'grid-cols-4' : 'grid-cols-3'}`}>
+            {choices.map((s) => {
+              const meta = AVAILABILITY[s]
+              const on = r.current === s
+              return (
+                <button key={s} type="button" data-pick={s} onClick={() => onPick(s, r.which)}
+                  title={`${r.title}: ${meta.label}`}
+                  className="min-h-[44px] rounded-lg font-display font-semibold text-[12.5px] px-1 transition"
+                  style={{
+                    border: `1.5px solid ${on ? meta.cssVar : 'var(--pb-hairline2)'}`,
+                    background: on ? `color-mix(in srgb, ${meta.cssVar} 12%, transparent)` : 'transparent',
+                    color: on ? meta.cssVar : 'var(--pb-dim)',
+                  }}>
+                  {meta.glyph} {meta.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /* ── Quick-update availability modal (presentational) ─────────────────────
    onPick(status) is called when a status is chosen; the caller persists it. */
-export function QuickAvailModal({ player, dateLabel, current, onPick, onClose }) {
+export function QuickAvailModal({ player, dateLabel, current, onPick, onClose, days }) {
   const navigate = useNavigate()
   // A club that has switched Maybe off is only offered the other answers.
   const allowMaybe = useAllowMaybe()
@@ -536,6 +582,10 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose })
             )}
           <button onClick={onClose} className="text-pb-faint hover:text-pb-text w-10 h-10 -mr-2 inline-flex items-center justify-center" aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
+        {Array.isArray(days) && days.length > 1 && (
+          <TwoDayAvail days={days} onPick={onPick} allowMaybe={allowMaybe} />
+        )}
+        {!(Array.isArray(days) && days.length > 1) && (
         <div className="p-4 grid grid-cols-2 gap-2.5">
           {AVAIL_ORDER.filter((s) => allowMaybe || s !== 'MAYBE').map((s) => {
             const meta = AVAILABILITY[s]
@@ -559,6 +609,7 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose })
             )
           })}
         </div>
+        )}
         <div className="px-4 pb-4 flex items-center gap-1.5 text-[11.5px] text-pb-faint">
           <Icon name="info" size={13} /> Tap a status — saves instantly.
         </div>

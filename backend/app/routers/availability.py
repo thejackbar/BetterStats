@@ -201,7 +201,11 @@ async def upcoming_fixtures_by_date(
         select(Fixture)
         .where(
             Fixture.organisation_id == club_id,
-            Fixture.played_on >= (now_local.date() if now_local else date.today()),
+            # A two-day game whose first day has gone still has its second to answer.
+            or_(
+                Fixture.played_on >= (now_local.date() if now_local else date.today()),
+                Fixture.end_on >= (now_local.date() if now_local else date.today()),
+            ),
             Fixture.status != "CANCELLED",
         )
         .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
@@ -209,17 +213,26 @@ async def upcoming_fixtures_by_date(
     fixtures = fx_res.scalars().all()
     junior_ids = await junior_fixture_ids(db, club_id, fixtures) if hide_juniors else set()
     by_date: dict[str, list[dict]] = {}
+    today = now_local.date() if now_local else date.today()
     for f in fixtures:
         if str(f.id) in junior_ids:
             continue
-        if fixture_has_started(f.status, f.played_on, f.start_time, now_local):
-            continue
+        two_day = bool(f.played_on and f.end_on and f.end_on > f.played_on)
         spans = []
         if f.played_on:
-            spans.append((f.played_on, "day1" if f.end_on and f.end_on != f.played_on else "single"))
-        if f.end_on and f.end_on != f.played_on:
+            spans.append((f.played_on, "day1" if two_day else "single"))
+        if two_day:
             spans.append((f.end_on, "day2"))
         for d, role in spans:
+            if d < today:
+                continue
+            # Each day is judged on its own clock: a game's status says it is
+            # under way, which is true of day 1 and says nothing about day 2.
+            if role == "day2":
+                if fixture_has_started(None, d, f.start_time, now_local):
+                    continue
+            elif fixture_has_started(f.status, f.played_on, f.start_time, now_local):
+                continue
             entry = {
                 "id": str(f.id),
                 "label": f.label,
@@ -228,6 +241,10 @@ async def upcoming_fixtures_by_date(
                 "role": role,
                 "two_day": role in ("day1", "day2"),
             }
+            if role in ("day1", "day2"):
+                # Both days, so a screen can say "week 1 of 2" and link the pair.
+                entry["day1"] = f.played_on.isoformat()
+                entry["day2"] = f.end_on.isoformat()
             if with_scope:
                 entry["team_id"] = str(f.team_id) if f.team_id else None
                 entry["grade_id"] = str(f.grade_id) if f.grade_id else None

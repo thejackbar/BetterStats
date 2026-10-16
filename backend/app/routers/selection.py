@@ -30,6 +30,7 @@ from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, T
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
 from app.services import selection_audit, selection_clash, selection_notify, selection_rules, selection_seed, squad_sides
+from app.services.fixture_days import combine_status, fixture_days
 from app.services.junior_fixtures import junior_fixture_ids
 from app.services.selection_pool import assemble_selection, rule_context, side_size
 from app.services.side_size import effective_min, valid_min_size, valid_side_size
@@ -211,7 +212,8 @@ async def selection_overview(
     # Availability for every fixture's playing date (explicit answer wins, then
     # the period fallback) — same resolution the builder uses, so the board's
     # health flags match what you'd see inside.
-    dates = sorted({f.played_on for f in fixtures if f.played_on})
+    # A two-day game is answered on both its dates.
+    dates = sorted({d for f in fixtures for d in fixture_days(f.played_on, f.end_on)})
     explicit: dict[tuple[str, str], str] = {}
     period_map: dict[str, dict] = {}
     if dates:
@@ -226,13 +228,17 @@ async def selection_overview(
             explicit[(d.isoformat(), str(pid))] = status
         period_map = await resolve_period_statuses(db, club.id, dates)
 
-    def avail_for(date_iso: str | None, pid: str) -> str:
+    def avail_on(date_iso: str | None, pid: str) -> str:
         if not date_iso:
             return "NO_RESPONSE"
         if (date_iso, pid) in explicit:
             return explicit[(date_iso, pid)]
         info = period_map.get(date_iso, {}).get(pid)
         return info["status"] if info else "NO_RESPONSE"
+
+    def avail_for(f, pid: str) -> str:
+        """The player's answer for the game: the least favourable across its days."""
+        return combine_status(avail_on(d.isoformat(), pid) for d in fixture_days(f.played_on, f.end_on))
 
     # Fixtures with an unconfirmed draft behind them. A flag only: the draft
     # itself goes to people who can edit the XI, through /{id}/draft.
@@ -250,13 +256,14 @@ async def selection_overview(
         date_iso = f.played_on.isoformat() if f.played_on else None
         lineup = by_fixture.get(str(f.id), [])
         for p in lineup:
-            p["availability"] = avail_for(date_iso, p["player_id"])
+            p["availability"] = avail_for(f, p["player_id"])
         out.append({
             "id": str(f.id),
             "label": f.label,
             "opponent_name": f.opponent_name,
             "home_away": f.home_away,
             "played_on": date_iso,
+            "end_on": f.end_on.isoformat() if f.end_on and f.played_on and f.end_on > f.played_on else None,
             "start_time": f.start_time,
             "round": f.round,
             "venue": f.venue,
@@ -482,7 +489,7 @@ async def get_draft(
     if current["draft"] is not None:
         # A carried draft (never edited) drops anyone who has since said
         # unavailable for the date. The stored row and its version are unchanged.
-        current["draft"] = await selection_seed.without_unavailable(db, club.id, fx.played_on, current["draft"])
+        current["draft"] = await selection_seed.without_unavailable(db, club.id, fx.played_on, current["draft"], fx.end_on)
     return current
 
 
