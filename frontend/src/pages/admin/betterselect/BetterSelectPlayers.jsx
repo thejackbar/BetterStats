@@ -23,6 +23,7 @@ import {
   AVAIL_ORDER, AVAILABILITY, RuleTags,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
+import usePersistedState from '../../../lib/usePersistedState'
 import '../../../styles/players-list.css'
 
 function normGender(g) { const s = (g || '').toLowerCase(); return s.startsWith('f') ? 'female' : s.startsWith('m') ? 'male' : '' }
@@ -306,8 +307,9 @@ export default function BetterSelectPlayers() {
     setSearchParams(next, { replace: true })
   }, [selId])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
   const loadMatrix = useCallback(() => {
-    api.bsAvailabilityMatrix()
+    api.bsAvailabilityMatrix({ juniors: showJuniors })
       .then((d) => {
         setAvailability(d?.availability || {})
         setFirstDate((d?.dates || [])[0]?.date || null)
@@ -316,7 +318,7 @@ export default function BetterSelectPlayers() {
         setRulesById(Object.fromEntries((d?.players || []).map((p) => [p.id, p])))
       })
       .catch(() => { setAvailability({}); setFirstDate(null); setRulesById({}) })
-  }, [])
+  }, [showJuniors])
 
   useEffect(() => {
     api.bsListTeams().then((t) => setTeams(t || [])).catch(() => setTeams([]))

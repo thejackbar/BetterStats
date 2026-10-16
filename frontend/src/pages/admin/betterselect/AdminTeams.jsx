@@ -915,8 +915,11 @@ export default function AdminTeams() {
     api.adminListPlayers().then((rows) => setPlayers(rows.filter((p) => p.is_player !== false)))
       .catch((e) => { toast.error(e.message); setPlayers([]) })
   }, [toast])
+  // The remembered Show juniors choice (Availability, Fixtures, Selection) also
+  // decides whether junior squads get a next game here.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
   const loadMatrix = useCallback(() => {
-    api.bsAvailabilityMatrix()
+    api.bsAvailabilityMatrix({ juniors: showJuniors })
       .then((d) => {
         setAvailability(d.availability || {}); setFirstDate((d.dates || [])[0]?.date || null)
         setSquadNext(d.squad_next || {})
@@ -926,7 +929,7 @@ export default function AdminTeams() {
         if (d.dormancy_months) setDormancyMonths(d.dormancy_months)
       })
       .catch(() => {})
-  }, [])
+  }, [showJuniors])
 
   useEffect(() => { loadTeams() }, [loadTeams])
   useEffect(() => { loadPlayers() }, [loadPlayers])
