@@ -1556,3 +1556,8 @@ First look at v9.117.4 on live data: almost every card carried grey W1 and W2 pi
 - `selectionMeta.weekFlagParts(days)` returns only the weeks that are UNAVAILABLE or MAYBE, and only when the two weeks differ (both away already reads OUT). NO_RESPONSE is never flagged. `WeekFlag` draws plain mono text, "W2 OUT" (red) or "W2 ?" (amber), no background, border or pointer cursor; it replaces the generic OUT tag where a weekend is the reason, with both weeks and their dates in the tooltip. The old `WeekChips` and `weekChipsNeeded` are gone.
 - Header is "Two-day · 24 Oct + 31 Oct" and "Two-day · week 2 of 2, from 24 Oct" on the second tab.
 - Proof: `verify_two_day_whiteboard_browser.mjs` 30 (control on the pill build fails 10), `verify_draft_table_browser.mjs` 105.
+
+
+## Whiteboard: weekend flags in purple (v9.117.7)
+
+The "W2 OUT" and "W2 ?" flags took the red and amber of the OUT tag and the Maybe dot, so a card edge saying "out today" and a flag saying "out in week 2" looked like one signal. `WeekFlag` now uses `WEEK_FLAG_COLOUR` (`var(--pb-chart-4)`, the theme's purple) for both, since it says WHICH weekend, not how bad. Proof: `verify_two_day_whiteboard_browser.mjs` 32 (control on the red build fails 2: the flag colour is the red token, and "W2 ?" is amber).

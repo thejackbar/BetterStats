@@ -86,10 +86,14 @@ function buildCol(f, d, dr, fallbackSize) {
   return { fid: f.id, fx: f, data: d, poolById, size, min: d.team_min || 0, slots, cap, wk, demo, baseSig, fromDraft }
 }
 
+// Purple (the theme's chart-4), so a weekend marker is never mistaken for the red
+// OUT tag or the amber Maybe: it says WHICH weekend, not how bad.
+const WEEK_FLAG_COLOUR = 'var(--pb-chart-4)'
+
 // ── Which weekend ───────────────────────────────────────────────────────────
 // A two-day game is played over two weekends and a player answers each. Beside a
-// name, plain coloured text says which weekend is the problem: "W2 OUT" (red) or
-// "W2 ?" (amber), the same quiet style as the OUT tag. Nothing is drawn for a
+// name, plain purple text says which weekend is the problem: "W2 OUT" or "W2 ?",
+// the same quiet style as the OUT tag. Nothing is drawn for a
 // player who has not answered a weekend yet, or whose weekends match.
 function weekFlagText(days) {
   return weekFlagParts(days).map((w) => `W${w.week} ${w.status === 'UNAVAILABLE' ? 'OUT' : '?'}`).join(' ')
@@ -98,10 +102,9 @@ function WeekFlag({ days }) {
   const parts = weekFlagParts(days)
   if (!parts.length) return null
   const tip = days.map((d, i) => `Week ${i + 1} (${gameDatesLabel(d.date)}): ${(AVAILABILITY[d.status] || AVAILABILITY.NO_RESPONSE).label}`).join('\n')
-  const worst = parts.some((w) => w.status === 'UNAVAILABLE') ? 'UNAVAILABLE' : 'MAYBE'
   return (
     <span data-week-flag title={tip} className="font-mono text-[9.5px] font-semibold shrink-0 cursor-default"
-      style={{ color: AVAILABILITY[worst].cssVar }}>
+      style={{ color: WEEK_FLAG_COLOUR }}>
       {weekFlagText(days)}
     </span>
   )
@@ -872,7 +875,7 @@ export default function AdminSelectionDraftTable() {
           </p>
           {Object.keys(weekByPlayer).length > 0 && (
             <p className="text-[12px] text-pb-faint mt-0.5" data-week-legend>
-              This weekend has a two-day game. A red <b className="font-mono">W2 OUT</b> beside a name means that player is away that weekend of it; amber <b className="font-mono">?</b> is a maybe.
+              This weekend has a two-day game. A purple <b className="font-mono" style={{ color: WEEK_FLAG_COLOUR }}>W2 OUT</b> beside a name means that player is away that weekend of it; <b className="font-mono" style={{ color: WEEK_FLAG_COLOUR }}>W2 ?</b> is a maybe.
             </p>
           )}
         </div>

@@ -5,7 +5,7 @@
 // picked for a ONE-day team on the 24th looked available for the two-day game
 // too, because nothing on the card showed that he is away the following weekend.
 // Checks: a card whose weekends differ says which one in plain coloured text
-// ("W2 OUT", "W2 ?"), never a pill and never for "no answer yet"; a player free
+// ("W2 OUT", "W2 ?") in purple, never a pill and never for "no answer yet"; a player free
 // for both weekends carries nothing; the one-day team's card has no separate
 // OUT tag (he IS free that day); the shared pool judges
 // "today" (W1) so a two-day team's worse combined status does not mark him OUT
@@ -115,6 +115,11 @@ const run = async () => {
     const cs = getComputedStyle(el)
     return el.tagName === 'SPAN' && !el.closest('button') && cs.cursor !== 'pointer' && cs.backgroundColor === 'rgba(0, 0, 0, 0)' && cs.borderTopWidth === '0px'
   }, null, { timeout: 1500 }).catch(() => false))
+  const colourOf = (loc) => loc.locator('[data-week-flag]').first().evaluate((el) => getComputedStyle(el).color, null, { timeout: 1500 }).catch(() => '<absent>')
+  const resolve = (cssColour) => page.evaluate((c) => { const e = document.createElement('i'); e.style.color = c; document.body.appendChild(e); const r = getComputedStyle(e).color; e.remove(); return r }, cssColour)
+  const [purple, red, amber] = [await resolve('var(--pb-chart-4)'), await resolve('var(--pb-red)'), await resolve('var(--pb-amber)')]
+  ok('the weekend flag is purple, not the red of OUT or the amber of Maybe', (await colourOf(jackInOneDay)) === purple && purple !== red && purple !== amber, `${await colourOf(jackInOneDay)} vs ${purple}`)
+  ok('"W2 ?" is the same purple (it is about which weekend, not how bad)', (await colourOf(poolCard(W2MAYBE))) === purple, await colourOf(poolCard(W2MAYBE)))
   ok('...and no separate OUT tag on top of it (he is free that day)', !hasPlainOut(await text(jackInOneDay)), await text(jackInOneDay))
   const tip = (await jackInOneDay.locator('[data-week-flag]').getAttribute('title', { timeout: 1500 }).catch(() => '')) || ''
   ok('the tooltip names both weeks and dates', /Week 2 .*Unavailable/.test(tip) && /Week 1 .*Available/.test(tip), tip)
