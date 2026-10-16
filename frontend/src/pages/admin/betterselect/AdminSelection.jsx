@@ -661,7 +661,9 @@ export default function AdminSelection() {
         prevXI.player_ids.forEach((pid, i) => {
           if (i >= next.length || next[i]) return
           const p = poolById[pid]
-          if (p && !taken.has(pid) && okToPick(p)) { next[i] = pid; taken.add(pid) }
+          // Last week's side still has to pass this fixture's own rules: someone
+          // the gender wall or a blocking rule bars is not carried across.
+          if (p && !taken.has(pid) && okToPick(p) && p.gender_ok !== false && p.rule_state !== 'block') { next[i] = pid; taken.add(pid) }
         })
       }
       const eligible = (data?.pool || []).filter((p) => p.autofill_eligible && okToPick(p))

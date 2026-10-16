@@ -314,32 +314,31 @@ async def previous_xi(
 ):
     """The most recent prior fixture's named XI, for "fill from last week".
 
-    Looks back for the same team's last fixture (before this one's date) that has
-    a saved lineup; falls back to any of the club's prior fixtures with a lineup
-    if the team has no history. Returns player ids in batting order plus the
-    captain/keeper, so the selection board can seed empty slots.
+    Looks back for the SAME team's last fixture (before this one's date) that has
+    a saved lineup. A fixture with no team of its own falls back to the same
+    grade. It never borrows another team's XI: a women's side with no history of
+    its own used to be filled with the men's last XI, because the lookup fell
+    back to "any of the club's prior fixtures". Returns player ids in batting
+    order plus the captain/keeper, so the selection board can seed empty slots,
+    and the source fixture's team so the board can name where the side came from.
     """
     fx = await _get_owned_fixture(db, fixture_id, club.id)
+    empty = {"source_fixture_id": None, "player_ids": [], "captain_id": None, "wicket_keeper_id": None}
 
-    # Candidate prior fixtures: before this fixture's date (nulls last), newest
-    # first, same team preferred. We pick the first that actually has a lineup.
-    q = (
-        select(Fixture)
-        .where(
-            Fixture.organisation_id == club.id,
-            Fixture.id != fx.id,
-        )
-    )
+    if fx.team_id:
+        scope = Fixture.team_id == fx.team_id
+    elif fx.grade_id:
+        scope = Fixture.grade_id == fx.grade_id
+    else:
+        return empty  # nothing says which side this is, so there is no "last week"
+
+    q = select(Fixture).where(Fixture.organisation_id == club.id, Fixture.id != fx.id, scope)
     if fx.played_on:
         q = q.where(Fixture.played_on < fx.played_on)
     q = q.order_by(Fixture.played_on.desc().nullslast(), Fixture.start_time.desc().nullslast())
     prior = (await db.execute(q)).scalars().all()
 
-    # Prefer same-team history, then anything.
-    ordered = [f for f in prior if fx.team_id and f.team_id == fx.team_id] + \
-              [f for f in prior if not (fx.team_id and f.team_id == fx.team_id)]
-
-    for f in ordered:
+    for f in prior:
         rows = (await db.execute(
             select(FixtureLineup).where(FixtureLineup.fixture_id == f.id)
         )).scalars().all()
@@ -356,7 +355,7 @@ async def previous_xi(
             "wicket_keeper_id": next((str(r.player_id) for r in rows if r.is_wicket_keeper), None),
         }
 
-    return {"source_fixture_id": None, "player_ids": [], "captain_id": None, "wicket_keeper_id": None}
+    return empty
 
 
 @router.post("/default-team-size")
