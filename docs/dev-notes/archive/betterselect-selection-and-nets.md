@@ -1491,3 +1491,12 @@ Gisborne: "our team" in Edit fixture was only a list of squads, but the fixture 
 - Also: the Selection Whiteboard got the Show juniors switch (it always showed juniors before).
 - Proof: `verify_fixture_side.py` (18 checks, control fails the team checks), `verify_fixture_side_browser.mjs` (10 checks, exact PATCH bodies, 390px), a juniors check in `verify_draft_table_browser.mjs`.
 
+
+## Synced games on the wrong squad (v9.116.1)
+
+Gisborne: a women's fixture ("Macedon Women 1st XI") showed the men's MacIntyre squad although the Womens Squad plays that grade, which skewed Availability and Selection.
+- Cause: sync only set a fixture's squad when empty, by stored teams first and then by team name plus grade number, and an earlier guess stuck forever. Squads linked to one grade the old way were not consulted at all.
+- Fix: sync asks the squad that plays the grade (stored or old link) and moves the fixture when its current squad does not play it. A squad picked by hand sets `fixtures.team_pinned` and is left alone.
+- Existing wrong fixtures are tidied by the next Sync. A synced fixture someone had set by hand before 338 existed is not pinned and will move if its squad does not play its grade.
+- Proof: `verify_fixture_side.py` F and G (control fails the move checks). `verify_shared_fixture_stats.py` (one check) and `verify_quick_sync.py` fail the same way on the previous commit.
+

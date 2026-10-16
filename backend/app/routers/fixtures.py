@@ -354,6 +354,9 @@ async def update_fixture(
         # none) drops the old team unless a new one is named in the same request.
         if str(team_uuid) != (str(f.team_id) if f.team_id else None) and "side_key" not in data:
             data["side_key"] = None
+        # Picked by hand: sync leaves a synced fixture's squad alone from now on.
+        # "No team" hands the choice back to sync.
+        data["team_pinned"] = team_uuid is not None
     if "side_key" in data:
         target_team = data["team_id"] if "team_id" in data else f.team_id
         data["side_key"] = await _checked_side_key(db, club.id, target_team, data["side_key"])
@@ -462,10 +465,17 @@ async def sync_fixtures(
         # assignment is never overwritten by a later sync.
         # A squad the club has set up to cover this grade claims the fixture first:
         # "MACs plays the 1st and 2nd XI grades" says more than any team name.
-        if target.team_id is None and target.grade_id is not None:
-            claimed = sides.squad_for_stored_grade(target.grade_id)
-            if claimed is not None:
+        # A synced fixture that sits on a squad which does not play its grade (an
+        # earlier name match guessed wrong, say a women's grade on the men's squad)
+        # moves to the squad that does, unless someone picked it by hand.
+        if target.grade_id is not None and not target.team_pinned:
+            current = sides.squads.get(str(target.team_id)) if target.team_id else None
+            key = sides.key_of_grade(target.grade_id)
+            plays_it = current is not None and key is not None and current.side_for_key(key) is not None
+            claimed = sides.squad_for_grade(target.grade_id) if (target.team_id is None or not plays_it) else None
+            if claimed is not None and claimed.id != str(target.team_id):
                 target.team_id = uuid.UUID(claimed.id)
+                target.side_key = None
                 teams_assigned += 1
         if teams and target.team_id is None:
             our_name = target.home_team if home_away == "HOME" else target.away_team if home_away == "AWAY" else None

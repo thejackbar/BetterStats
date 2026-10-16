@@ -111,6 +111,8 @@ SHARED_DDL_MODULES = (
     ("app.services.team_sides_ddl", "STATEMENTS"),
     # Migration 337. `fixtures.side_key`, on the shared ORM Fixture model.
     ("app.services.fixture_side_ddl", "STATEMENTS"),
+    # Migration 338. `fixtures.team_pinned`, on the shared ORM Fixture model.
+    ("app.services.fixture_pin_ddl", "STATEMENTS"),
 )
 
 

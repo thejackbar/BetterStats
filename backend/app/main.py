@@ -4524,6 +4524,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _FIXTURE_SIDE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 338: a synced fixture whose squad was picked by hand is pinned.
+        # Same one-copy rule: this and alembic's 338 both run
+        # services/fixture_pin_ddl.STATEMENTS.
+        from app.services.fixture_pin_ddl import STATEMENTS as _FIXTURE_PIN_DDL
+        for _stmt in _FIXTURE_PIN_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.

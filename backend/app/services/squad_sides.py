@@ -359,7 +359,7 @@ async def assign_fixtures(db: AsyncSession, club_id, team_id, today: Optional[da
             "UPDATE fixtures SET team_id = :tid, updated_at = NOW() "
             "WHERE organisation_id = :org AND grade_id = ANY(CAST(:gids AS uuid[])) "
             "AND played_on >= :today AND COALESCE(status, '') <> 'CANCELLED' "
-            "AND team_id IS DISTINCT FROM :tid "
+            "AND team_id IS DISTINCT FROM :tid AND NOT COALESCE(team_pinned, false) "
             "AND (source = 'grassroots' OR team_id IS NULL) "
             "RETURNING id"
         ),

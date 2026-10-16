@@ -54,7 +54,7 @@ async def main():
     async with engine.begin() as conn:
         for stmt in DRAFT_DDL:
             await conn.execute(text(stmt))
-        for mod in ("team_sides_ddl", "fixture_side_ddl"):
+        for mod in ("team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl"):
             try:
                 for stmt in importlib.import_module(f"app.services.{mod}").STATEMENTS:
                     await conn.execute(text(stmt))
@@ -148,7 +148,7 @@ async def main():
         fx = await db.get(Fixture, FX["synced-1st"])
         pool = await assemble_selection(db, await db.get(Organisation, org), fx)
     check("the selection pool names it the 2nd XI too", ((pool or {}).get("fixture") or {}).get("team_name"), "2nd XI")
-    check("the sync never writes the pick", "side_key" in inspect.getsource(fixtures_r.sync_fixtures), False)
+    check("the sync never sets a pick (it only drops one when it moves a fixture)", inspect.getsource(fixtures_r.sync_fixtures).count("side_key"), 1)
 
     print("\n# C. A team that is not the squad's is refused")
     r, e = await as_admin(fixtures_r.update_fixture, str(FX["synced-1st"]), body(fixtures_r.FixtureUpdate, side_key=K["Womens A"]))
@@ -168,6 +168,53 @@ async def main():
     print("\n# E. A single-team squad needs no pick")
     r, e = await as_admin(fixtures_r.update_fixture, str(FX["synced-3rd"]), body(fixtures_r.FixtureUpdate, team_id=str(T["Thirds"])))
     check("it reads as before", ((r or {}).get("team_name"), (r or {}).get("team_sequence")), ("Thirds", 3))
+
+    print("\n# F. Sync puts a synced fixture on the squad that plays its grade")
+    # Earlier name matching left women's games on the men's squad and a 3rd Grade game on MACs.
+    ids = {}
+    async with Session() as db:
+        for key, grade, tid, pinned in (
+            ("w-wrong", "Womens A", T["MACs"], False),     # guessed wrong by name: should move
+            ("w-pinned", "Womens A", T["MACs"], True),     # somebody picked it: stays
+            ("w-none", "Womens B", None, False),           # nothing yet: the squad claims it
+            ("t-wrong", "3rd Grade", T["MACs"], False),    # the 3rds are linked the old way (one grade)
+            ("m-right", "1st Grade", T["MACs"], False),    # already right: untouched
+        ):
+            f = Fixture(id=uuid.uuid4(), organisation_id=org, grade_id=G[grade], team_id=tid, source="grassroots",
+                        playhq_id=f"sync-{key}", played_on=d1, start_time="13:00", status="UPCOMING", opponent_name=key, round=key)
+            if hasattr(Fixture, "team_pinned"):
+                f.team_pinned = pinned
+            db.add(f)
+            ids[key] = f.id
+        await db.commit()
+    games = [{"id": f"sync-{k}", "played_at": d1.isoformat(), "time": "13:00", "home_team": "Gisborne", "away_team": "Opp",
+              "db_grade_id": str(G[g]), "grade_name": g, "round": k, "venue": "V", "status": "UPCOMING"}
+             for k, g in (("w-wrong", "Womens A"), ("w-pinned", "Womens A"), ("w-none", "Womens B"), ("t-wrong", "3rd Grade"), ("m-right", "1st Grade"))]
+
+    async def fake_games(db, club, force=False):
+        return games, {}
+    fixtures_r.org_grassroots_fixtures_checked = fake_games
+    async with Session() as db:
+        club = await db.get(Organisation, org)
+        await fixtures_r.sync_fixtures(db=db, club=club, _user=None)
+
+    async def team_of(key):
+        return await _scalar("SELECT team_id FROM fixtures WHERE id=:f", f=ids[key])
+    check("a women's game on the men's squad moves to the women's squad", await team_of("w-wrong"), T["Women"])
+    check("a game nobody has assigned goes to the squad that plays the grade", await team_of("w-none"), T["Women"])
+    check("a game on a squad linked the old way moves to its squad", await team_of("t-wrong"), T["Thirds"])
+    check("a game already on the right squad stays", await team_of("m-right"), T["MACs"])
+    check("a game picked by hand stays where it was put", await team_of("w-pinned"), T["MACs"])
+
+    print("\n# G. Picking a squad by hand pins it against the next sync")
+    await as_admin(fixtures_r.update_fixture, str(ids["w-wrong"]), body(fixtures_r.FixtureUpdate, team_id=str(T["MACs"])))
+    async with Session() as db:
+        await fixtures_r.sync_fixtures(db=db, club=await db.get(Organisation, org), _user=None)
+    check("a squad chosen in Edit fixture survives the next sync", await team_of("w-wrong"), T["MACs"])
+    await as_admin(fixtures_r.update_fixture, str(ids["w-wrong"]), body(fixtures_r.FixtureUpdate, team_id=None))
+    async with Session() as db:
+        await fixtures_r.sync_fixtures(db=db, club=await db.get(Organisation, org), _user=None)
+    check("choosing No team hands it back to sync", await team_of("w-wrong"), T["Women"])
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     await engine.dispose()
