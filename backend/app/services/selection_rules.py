@@ -44,6 +44,7 @@ with it.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -200,7 +201,27 @@ def club_config(org) -> dict:
         # looks it up on every send, so a deleted template falls back, loudly.
         "captain_email_template_id": clean_template_id(raw.get("captain_email_template_id")),
         "player_email_template_id": clean_template_id(raw.get("player_email_template_id")),
+        # The colour of the availability dot and card edge for a player who is
+        # free for ONE weekend of a two-day game and away for the other ("half
+        # available"): `w1` when only week 1 is a yes, `w2` when only week 2 is.
+        "half_colours": half_colours(raw.get("half_colours")),
     }
+
+
+DEFAULT_HALF_COLOURS = {"w1": "#a855f7", "w2": "#06b6d4"}
+
+
+def clean_colour(raw) -> Optional[str]:
+    """A #rrggbb colour, lower case, or None for anything else (so a bad value is
+    never stored and never reaches a style attribute)."""
+    s = str(raw or "").strip().lower()
+    return s if re.fullmatch(r"#[0-9a-f]{6}", s) else None
+
+
+def half_colours(raw) -> dict:
+    """The club's two half-available colours, a default for each one not set."""
+    raw = raw if isinstance(raw, dict) else {}
+    return {k: clean_colour(raw.get(k)) or v for k, v in DEFAULT_HALF_COLOURS.items()}
 
 
 def clean_template_id(raw) -> Optional[str]:

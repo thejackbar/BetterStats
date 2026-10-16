@@ -25,7 +25,7 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
-import { availRank, AVAILABILITY } from '../../../lib/availability'
+import { availRank, AVAILABILITY, halfStatus, viewStatus } from '../../../lib/availability'
 import { Icon, Avatar, Btn, Tag, RuleTags, JuniorsToggle, playedWithinYears } from './ui'
 import { DnD, useDrag } from './selectionDnd'
 import { nameMatches, roleLine, spark, formMeta, normGender, weekFlagParts, unavailableWeeksText, gameDatesLabel, fixtureTabs } from './selectionMeta'
@@ -86,14 +86,11 @@ function buildCol(f, d, dr, fallbackSize) {
   return { fid: f.id, fx: f, data: d, poolById, size, min: d.team_min || 0, slots, cap, wk, demo, baseSig, fromDraft }
 }
 
-// Purple (the theme's chart-4), so a weekend marker is never mistaken for the red
-// OUT tag or the amber Maybe: it says WHICH weekend, not how bad.
-const WEEK_FLAG_COLOUR = 'var(--pb-chart-4)'
-
 // ── Which weekend ───────────────────────────────────────────────────────────
 // A two-day game is played over two weekends and a player answers each. Beside a
-// name, plain purple text says which weekend is the problem: "W2 OUT" or "W2 ?",
-// the same quiet style as the OUT tag. Nothing is drawn for a
+// name, plain text says which weekend is the problem: "W2 OUT" or "W2 ?", the same
+// quiet style as the OUT tag, in the club's half-available colour for a player
+// who is free one weekend and away the other. Nothing is drawn for a
 // player who has not answered a weekend yet, or whose weekends match.
 function weekFlagText(days) {
   return weekFlagParts(days).map((w) => `W${w.week} ${w.status === 'UNAVAILABLE' ? 'OUT' : '?'}`).join(' ')
@@ -102,9 +99,11 @@ function WeekFlag({ days }) {
   const parts = weekFlagParts(days)
   if (!parts.length) return null
   const tip = days.map((d, i) => `Week ${i + 1} (${gameDatesLabel(d.date)}): ${(AVAILABILITY[d.status] || AVAILABILITY.NO_RESPONSE).label}`).join('\n')
+  // Half available: the same colour as the card's dot and edge. Otherwise the
+  // colour of the weekend's own answer (a maybe is amber).
+  const colour = AVAILABILITY[halfStatus(days) || (parts.some((w) => w.status === 'UNAVAILABLE') ? 'UNAVAILABLE' : 'MAYBE')].cssVar
   return (
-    <span data-week-flag title={tip} className="font-mono text-[9.5px] font-semibold shrink-0 cursor-default"
-      style={{ color: WEEK_FLAG_COLOUR }}>
+    <span data-week-flag title={tip} className="font-mono text-[9.5px] font-semibold shrink-0 cursor-default" style={{ color: colour }}>
       {weekFlagText(days)}
     </span>
   )
@@ -113,7 +112,8 @@ function WeekFlag({ days }) {
 // ── A player card (a team's slot, and the pool) ──────────────────────────────
 function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) {
   const fmt = useAdminNameFormat()
-  const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
+  const shown = viewStatus(p, ctx.weekByPlayer[p.id])
+  const meta = AVAILABILITY[shown] || AVAILABILITY.NO_RESPONSE
   const slot = kind === 'slot'
   const dense = slot && density !== 'full'
   const tight = slot && density === 'tight'
@@ -130,7 +130,7 @@ function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) 
       {...(ctx.canEdit ? drag.bind(item) : {})}
       onClick={!slot && ctx.canEdit ? drag.clickGuard(() => ctx.tapPool(p)) : undefined}
       className={`group relative flex items-center gap-2 pl-3 pr-2 rounded-lg border bg-pb-surface2 overflow-hidden transition-colors select-none ${slot ? 'h-full min-h-0' : 'shrink-0 py-1.5'} ${ctx.canEdit ? 'cursor-grab' : ''} ${barred ? 'border-pb-red/45' : 'border-pb-hairline'} hover:border-pb-accent/45`}>
-      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
+      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: shown === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       <Avatar player={p} size={tight ? 20 : dense ? 24 : 30} noLink />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1 min-w-0">
@@ -874,8 +874,8 @@ export default function AdminSelectionDraftTable() {
             Every team for the day side by side. Drag a player from one team to another, or into and out of the pool. Changes save as drafts until you confirm.
           </p>
           {Object.keys(weekByPlayer).length > 0 && (
-            <p className="text-[12px] text-pb-faint mt-0.5" data-week-legend>
-              This weekend has a two-day game. A purple <b className="font-mono" style={{ color: WEEK_FLAG_COLOUR }}>W2 OUT</b> beside a name means that player is away that weekend of it; <b className="font-mono" style={{ color: WEEK_FLAG_COLOUR }}>W2 ?</b> is a maybe.
+            <p className="text-[12px] text-pb-faint mt-0.5 max-w-[70ch]" data-week-legend>
+              A coloured dot and <b className="font-mono">W2 OUT</b> mean free one weekend of a two-day game, away the other. Colours are in Settings.
             </p>
           )}
         </div>

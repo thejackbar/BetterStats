@@ -266,7 +266,8 @@ MAYBE_OFF = "Maybe is switched off for this club. Record Available or Unavailabl
 @router.get("/config")
 async def availability_config(club: Organisation = Depends(get_current_club), user: User = Depends(get_current_user)):
     """The few club settings every screen that records availability needs."""
-    return {"allow_maybe": allow_maybe(club)}
+    from app.services import selection_rules as rules_svc
+    return {"allow_maybe": allow_maybe(club), "half_colours": rules_svc.club_config(club)["half_colours"]}
 
 
 _AVAIL_WORD = {"AVAILABLE": "Available", "UNAVAILABLE": "Unavailable", "MAYBE": "Maybe", "NO_RESPONSE": "No response"}

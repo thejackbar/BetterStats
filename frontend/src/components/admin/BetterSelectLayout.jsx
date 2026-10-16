@@ -10,6 +10,7 @@ import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
 import BookmarkButton from './BookmarkButton'
 import { IS_AFL, PLATFORM_NAME } from '../../lib/sport'
+import { useHalfColours } from '../../lib/useAvailabilityConfig'
 
 // The football app has no bookmarks service, so the star renders nothing there.
 const Bookmark = IS_AFL ? () => null : BookmarkButton
@@ -62,6 +63,7 @@ const CRICKET_GROUPS = [
     label: 'Setup',
     desc: 'The rules your competition runs on, and what the board shows.',
     items: [
+      { to: '/admin/betterselect/settings', label: 'Settings', icon: 'settings', cap: CAP.MANAGE_SELECTIONS, desc: 'Two-day game colours, junior grades and the Maybe answer.' },
       { to: '/admin/betterselect/rules', label: 'Selection rules', icon: 'settings', cap: CAP.MANAGE_SELECTIONS, desc: "Your association's age limits, overseas caps and eligibility." },
       { to: '/admin/betterselect/audit', label: 'Audit History', icon: 'history', cap: CAP.MANAGE_SELECTIONS, desc: 'Who changed which player in selection, availability and squads, and when.' },
     ],
@@ -134,6 +136,7 @@ export default function BetterSelectLayout({ children, title, caption, actions, 
   const [club, setClub] = useState(_clubCache)
   useEffect(() => { loadClubBranding().then(s => { if (s) setClub(s) }) }, [])
   useClubTheme(club)  // inject the club's white-label palette (accent etc.)
+  useHalfColours()    // the club's half-available colours, on the page before the first card
 
   // Nav may include `{ heading }` separators (kept regardless of cap — they
   // carry no `to`/`cap`); ordinary items are filtered by capability, with

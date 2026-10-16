@@ -70,6 +70,10 @@ class SettingsBody(BaseModel):
     # model_fields_set below).
     captain_email_template_id: Optional[str] = None
     player_email_template_id: Optional[str] = None
+    # Half-available colours (#rrggbb). Absent leaves one alone; null or an empty
+    # string puts it back to the platform colour (model_fields_set below).
+    half_colour_w1: Optional[str] = None
+    half_colour_w2: Optional[str] = None
 
 
 async def _grade_options(db: AsyncSession, org_id) -> list[dict]:
@@ -119,6 +123,7 @@ def _settings_out(club: Organisation) -> dict:
         "notify_captain_on_confirm": cfg["notify_captain_on_confirm"],
         "captain_email_template_id": cfg["captain_email_template_id"],
         "player_email_template_id": cfg["player_email_template_id"],
+        "half_colours": cfg["half_colours"],
     }
 
 
@@ -213,6 +218,22 @@ async def patch_settings(
         if not found:
             raise HTTPException(status_code=404, detail="Template not found.")
         cfg[field] = tid
+    for key, field in (("w1", "half_colour_w1"), ("w2", "half_colour_w2")):
+        if field not in body.model_fields_set:
+            continue
+        raw = getattr(body, field)
+        halves = dict(cfg.get("half_colours") or {})
+        if not (raw or "").strip():
+            halves.pop(key, None)         # an explicit clear: the platform colour
+        else:
+            colour = rules_svc.clean_colour(raw)
+            if colour is None:
+                raise HTTPException(status_code=400, detail="Pick a colour like #a855f7.")
+            halves[key] = colour
+        if halves:
+            cfg["half_colours"] = halves
+        else:
+            cfg.pop("half_colours", None)
     club.selection_rules_config = cfg or None
     await db.commit()
     return _settings_out(club)

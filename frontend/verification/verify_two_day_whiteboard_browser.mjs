@@ -5,7 +5,7 @@
 // picked for a ONE-day team on the 24th looked available for the two-day game
 // too, because nothing on the card showed that he is away the following weekend.
 // Checks: a card whose weekends differ says which one in plain coloured text
-// ("W2 OUT", "W2 ?") in purple, never a pill and never for "no answer yet"; a player free
+// ("W2 OUT", "W2 ?"), never a pill; a player free one weekend and away the other has the club\'s half-available colour on the edge and flag and never for "no answer yet"; a player free
 // for both weekends carries nothing; the one-day team's card has no separate
 // OUT tag (he IS free that day); the shared pool judges
 // "today" (W1) so a two-day team's worse combined status does not mark him OUT
@@ -72,6 +72,9 @@ const run = async () => {
   await page.route('**/api/**', (r) => json(r, {}))
   await page.route('**/api/auth/me', (r) => json(r, ME))
   await page.route(/\/api\/club-admin\/settings$/, (r) => json(r, { player_name_format: 'first_last' }))
+  // The club's own half-available colours (Settings), so the colours on the cards are proved to come from them.
+  const CLUB = { w1: '#ff00aa', w2: '#00ff88' }
+  await page.route(/\/api\/availability\/config/, (r) => json(r, { allow_maybe: true, half_colours: CLUB }))
   await page.route(/\/api\/selection\/overview(\?.*)?$/, (r) => json(r, { default_team_size: 11, fixtures: FX.map((f) => ({
     ...f, has_draft: false,
     lineup: confirmed[f.id].map((p, i) => ({ player_id: p, display_name: 'x', batting_order: i + 1, skill_positions: [], availability: 'AVAILABLE', is_captain: false, is_wicket_keeper: false })),
@@ -116,10 +119,16 @@ const run = async () => {
     return el.tagName === 'SPAN' && !el.closest('button') && cs.cursor !== 'pointer' && cs.backgroundColor === 'rgba(0, 0, 0, 0)' && cs.borderTopWidth === '0px'
   }, null, { timeout: 1500 }).catch(() => false))
   const colourOf = (loc) => loc.locator('[data-week-flag]').first().evaluate((el) => getComputedStyle(el).color, null, { timeout: 1500 }).catch(() => '<absent>')
+  const barOf = (loc) => loc.locator('span.absolute.left-0').first().evaluate((el) => getComputedStyle(el).backgroundColor, null, { timeout: 1500 }).catch(() => '<absent>')
   const resolve = (cssColour) => page.evaluate((c) => { const e = document.createElement('i'); e.style.color = c; document.body.appendChild(e); const r = getComputedStyle(e).color; e.remove(); return r }, cssColour)
-  const [purple, red, amber] = [await resolve('var(--pb-chart-4)'), await resolve('var(--pb-red)'), await resolve('var(--pb-amber)')]
-  ok('the weekend flag is purple, not the red of OUT or the amber of Maybe', (await colourOf(jackInOneDay)) === purple && purple !== red && purple !== amber, `${await colourOf(jackInOneDay)} vs ${purple}`)
-  ok('"W2 ?" is the same purple (it is about which weekend, not how bad)', (await colourOf(poolCard(W2MAYBE))) === purple, await colourOf(poolCard(W2MAYBE)))
+  const [half1, half2, green, red, amber] = [await resolve('var(--pb-half-w1)'), await resolve('var(--pb-half-w2)'), await resolve('var(--pb-positive)'), await resolve('var(--pb-red)'), await resolve('var(--pb-amber)')]
+  ok('the club\'s colours reached the page (not the platform defaults)', half1 === 'rgb(255, 0, 170)' && half2 === 'rgb(0, 255, 136)', `${half1} ${half2}`)
+  ok('Jack (free week 1, away week 2) has the WEEK 1 half-available edge, not green or red', (await barOf(jackInOneDay)) === half1 && half1 !== green && half1 !== red, `${await barOf(jackInOneDay)} vs ${half1}`)
+  ok('...and his flag matches the edge', (await colourOf(jackInOneDay)) === half1, await colourOf(jackInOneDay))
+  ok('a player away week 1 and free week 2 has the WEEK 2 colour', (await barOf(poolCard(W1OUT))) === half2 && (await colourOf(poolCard(W1OUT))) === half2, `${await barOf(poolCard(W1OUT))} / ${await colourOf(poolCard(W1OUT))}`)
+  ok('control: a player free both weeks keeps the green', (await barOf(poolCard(FREE))) === green, await barOf(poolCard(FREE)))
+  ok('control: a maybe for week 2 is NOT half available: amber flag, edge stays green', (await colourOf(poolCard(W2MAYBE))) === amber && (await barOf(poolCard(W2MAYBE))) === green, `${await colourOf(poolCard(W2MAYBE))} / ${await barOf(poolCard(W2MAYBE))}`)
+  ok('control: no answer for week 2 yet is NOT half available either', (await barOf(poolCard(W2NONE))) === green, await barOf(poolCard(W2NONE)))
   ok('...and no separate OUT tag on top of it (he is free that day)', !hasPlainOut(await text(jackInOneDay)), await text(jackInOneDay))
   const tip = (await jackInOneDay.locator('[data-week-flag]').getAttribute('title', { timeout: 1500 }).catch(() => '')) || ''
   ok('the tooltip names both weeks and dates', /Week 2 .*Unavailable/.test(tip) && /Week 1 .*Available/.test(tip), tip)

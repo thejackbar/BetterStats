@@ -12,7 +12,7 @@ import { useEffect, useState } from 'react'
 import { sideFit } from '../../../lib/sideSize'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { Icon, Avatar, Dot, Tag, RuleTags } from './ui'
-import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
+import { AVAILABILITY, AVAIL_ORDER, viewStatus } from '../../../lib/availability'
 import { useDrag } from './selectionDnd'
 import { roleLine, formMeta, spark, alsoInLine, dropInLine, inDraftLine, weekSplitLine } from './selectionMeta'
 import { hasRuleFlag, ruleNotes, isBlocked, xiCompliance } from './selectionRules'
@@ -314,10 +314,10 @@ function AvatarAvail({ p, vm, size = 34, dotSize = 10 }) {
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); vm.setAvailEdit(p) }}
             className="absolute -right-[11px] -bottom-[11px] w-8 h-8 inline-flex items-center justify-center rounded-full">
-            <Dot status={p.availability} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} />
+            <Dot status={viewStatus(p)} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} />
           </button>
         )
-        : <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>}
+        : <span className="absolute -right-px -bottom-px"><Dot status={viewStatus(p)} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>}
     </span>
   )
 }
@@ -363,7 +363,7 @@ function SlotControls({ vm, id, idx }) {
 /* ══ Dual rail ══════════════════════════════════════════════════════════════ */
 function DualCard({ p, kind, idx, vm, drag, density = 'full' }) {
   const fmt = useAdminNameFormat()
-  const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
+  const meta = AVAILABILITY[viewStatus(p)] || AVAILABILITY.NO_RESPONSE
   const clash = p.clash?.length > 0
   // A call-up (higher grade taking a player from a lower XI) stays pickable;
   // only a same/higher-grade clash blocks. An "unavailable" player is NOT
@@ -394,7 +394,7 @@ function DualCard({ p, kind, idx, vm, drag, density = 'full' }) {
       className={`group relative flex items-center gap-2.5 pl-3.5 pr-3 ${dense ? 'py-0.5 min-h-0 h-full' : 'py-1.5 shrink-0'} rounded-xl border bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''} ${barred ? 'border-pb-red/45' : 'border-pb-hairline'}`}
       {...(kind === 'pool' && interactive ? drag.bind(dragItem) : {})}
       onClick={kind === 'pool' && interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
-      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
+      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: viewStatus(p) === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       {kind === 'slot' && vm.canEdit && (
         <span {...drag.bind(dragItem)} className="max-sm:hidden cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={14} /></span>
       )}
@@ -585,7 +585,7 @@ function SheetRow({ i, id, vm, drag }) {
 
 function TrayCard({ p, vm, drag }) {
   const fmt = useAdminNameFormat()
-  const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
+  const meta = AVAILABILITY[viewStatus(p)] || AVAILABILITY.NO_RESPONSE
   const clash = p.clash?.length > 0
   const callUp = clash && !p.clash_blocks
   // Unavailable players stay pickable (see DualCard) — only a hard clash blocks.
@@ -596,7 +596,7 @@ function TrayCard({ p, vm, drag }) {
     <div className={`group relative flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl border ${barred ? 'border-pb-red/45' : 'border-pb-hairline'} bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''}`}
       {...(interactive ? drag.bind({ kind: 'pool', player: p }) : {})}
       onClick={interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
-      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
+      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: viewStatus(p) === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       <AvatarAvail p={p} vm={vm} dotSize={10} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">

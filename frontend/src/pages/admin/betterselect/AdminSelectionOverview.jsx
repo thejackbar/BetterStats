@@ -20,7 +20,7 @@ import { useTheme } from '../../../contexts/ThemeContext'
 import { api } from '../../../lib/api'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
-import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
+import { AVAILABILITY, AVAIL_ORDER, viewStatus } from '../../../lib/availability'
 import { Icon, Avatar, Dot, Tag, RoleChips, JuniorsToggle } from './ui'
 import usePersistedState from '../../../lib/usePersistedState'
 
@@ -145,16 +145,16 @@ function AvailBar({ avail }) {
 
 function PlayerRow({ p, n }) {
   const fmt = useAdminNameFormat()
-  const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
+  const meta = AVAILABILITY[viewStatus(p)] || AVAILABILITY.NO_RESPONSE
   const out = p.availability === 'UNAVAILABLE'
   const concern = out || p.availability === 'MAYBE'
   return (
     <div className={`relative flex items-center gap-2 px-2 py-1 rounded-lg min-h-[34px] hover:bg-pb-surface2 ${out ? 'opacity-60' : ''}`}>
       <span className="font-mono text-[11px] font-semibold text-pb-faintest w-[16px] text-right shrink-0 pb-num">{n}</span>
-      <span className="w-[3px] self-stretch rounded-full my-0.5 shrink-0" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
+      <span className="w-[3px] self-stretch rounded-full my-0.5 shrink-0" style={{ background: viewStatus(p) === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       <span className="relative shrink-0">
         <Avatar player={p} size={22} />
-        <span className="absolute -right-0.5 -bottom-0.5"><Dot status={p.availability} size={8} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
+        <span className="absolute -right-0.5 -bottom-0.5"><Dot status={viewStatus(p)} size={8} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
       </span>
       <span className="font-display font-semibold text-[13.5px] truncate flex-1 min-w-0">{fmt(p.display_name)}</span>
       {p.is_captain && <Tag>C</Tag>}{p.is_wicket_keeper && <Tag tone="amber">WK</Tag>}
