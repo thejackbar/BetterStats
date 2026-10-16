@@ -3210,8 +3210,10 @@ export const api = {
   getPlayerCaptainStats: (playerId, scope) => request(`/players/${playerId}/captain-stats${scopeQuery(scope)}`),
 
   // ─── BetterSelect: Fixtures ─────────────────────────────
-  bsListFixtures: (upcomingOnly = false) =>
-    request(`/fixtures${upcomingOnly ? '?upcoming_only=true' : ''}`),
+  bsListFixtures: (upcomingOnly = false, { hideJuniors = false } = {}) => {
+    const q = [upcomingOnly && 'upcoming_only=true', hideJuniors && 'hide_juniors=true'].filter(Boolean).join('&')
+    return request(`/fixtures${q ? '?' + q : ''}`)
+  },
   bsCreateFixture: (data) =>
     request('/fixtures', { method: 'POST', body: JSON.stringify(data) }),
   bsUpdateFixture: (id, data) =>
@@ -3434,10 +3436,15 @@ export const api = {
     request(`/public/fantasy/${token}/trades/${tradeId}/respond`, { method: 'POST', body: JSON.stringify({ accept }) }),
 
   // ─── BetterSelect: Selection (lineups) ──────────────────
-  bsSelectionOverview: () => request('/selection/overview'),
+  bsSelectionOverview: ({ hideJuniors = false } = {}) =>
+    request(`/selection/overview${hideJuniors ? '?hide_juniors=true' : ''}`),
   bsGetSelection: (fixtureId) => request(`/selection/${fixtureId}`),
-  bsSetSelection: (fixtureId, players, demotions = []) =>
-    request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players, demotions }) }),
+  // `lock` locks the side as it is confirmed (Confirm on the board does).
+  bsSetSelection: (fixtureId, players, demotions = [], { lock = false } = {}) =>
+    request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players, demotions, lock }) }),
+  bsLockSelection: (fixtureId) => request(`/selection/${fixtureId}/lock`, { method: 'POST' }),
+  bsUnlockSelection: (fixtureId) => request(`/selection/${fixtureId}/unlock`, { method: 'POST' }),
+  bsSelectionHistory: (fixtureId) => request(`/selection/${fixtureId}/history`),
   // Autosaved, unconfirmed side for a fixture. `opts` goes to fetch, so a
   // leaving page can pass { keepalive: true }.
   // Email the CONFIRMED side: `to` is 'captain' (team sheet with every player's

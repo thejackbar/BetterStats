@@ -646,7 +646,7 @@ export default function AdminSelectionDraftTable() {
     s.pending = null
     await Promise.resolve(s.inflight).catch(() => {})
     const players = filledOf(c).map((id, i) => ({ player_id: id, batting_order: i + 1, is_captain: id === c.cap, is_wicket_keeper: id === c.wk }))
-    await api.bsSetSelection(fid, players, [])
+    await api.bsSetSelection(fid, players, [], { lock: true })
     const fresh = await loadCol(c.fx)
     attachSaver(fresh)
     setStatusMap((m) => ({ ...m, [fid]: 'idle' }))

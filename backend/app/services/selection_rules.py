@@ -1171,6 +1171,34 @@ async def _registrations(db: AsyncSession, org_id, season_id) -> dict[str, bool]
     return {str(pid): bool(reg) for pid, reg in rows}
 
 
+async def registered_for_fixture(db: AsyncSession, org_id, fx) -> dict[str, bool]:
+    """{player_id: registered} for the season this fixture belongs to, from the
+    registration tick on the Accounts screen (BetterAdmin fees). A player with no
+    member row is absent, not False: the club has not told us either way. Empty
+    for a club that keeps no such records, which is what lets the board drop the
+    filter instead of showing one that can only answer "nobody".
+
+    The season is the fixture's grade's season, else the club's latest, the same
+    two steps the rules engine takes."""
+    season_id = None
+    if getattr(fx, "grade_id", None):
+        season_id = (await db.execute(
+            text("SELECT season_id FROM grades WHERE id = :g"), {"g": fx.grade_id})).scalar()
+    if season_id is None:
+        season_id = (await db.execute(
+            text("SELECT id FROM seasons WHERE organisation_id = :org "
+                 "ORDER BY year DESC NULLS LAST, name DESC LIMIT 1"), {"org": org_id})).scalar()
+    if season_id is None:
+        return {}
+    try:
+        # A savepoint, not a rollback: a rollback would expire the club and the
+        # fixture the caller still holds.
+        async with db.begin_nested():
+            return await _registrations(db, org_id, season_id)
+    except Exception:  # noqa: BLE001 - a club without the fees tables simply has no answer
+        return {}
+
+
 async def _nearby_commitments(db: AsyncSession, org_id, fx, window_days: int) -> dict[str, int]:
     """Other sides each player is already named in, within the window either
     side of this fixture. Read from named XIs, which is where a club's own

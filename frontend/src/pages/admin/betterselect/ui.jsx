@@ -42,6 +42,8 @@ const ICON_PATHS = {
   timer: <><circle cx="12" cy="13" r="8" /><path d="M12 13V9M9 2h6M12 5V2" /></>,
   play: <><path d="M7 5l12 7-12 7z" fill="currentColor" stroke="none" /></>,
   pause: <><rect x="7" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none" /><rect x="13.5" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none" /></>,
+  lock: <><rect x="5" y="11" width="14" height="9.5" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
+  undo: <><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></>,
   reset: <><path d="M3.5 12a8.5 8.5 0 1 1 2.5 6" /><path d="M3.5 20v-5h5" /></>,
   sound: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /></>,
   mute: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M22 9l-6 6M16 9l6 6" /></>,
@@ -299,7 +301,21 @@ const BTN_VARIANTS = {
   soft: 'bg-pb-surface2 text-pb-text border border-pb-hairline hover:border-pb-hairline2',
   danger: 'bg-transparent text-pb-red border border-pb-red/40 hover:bg-pb-red/10',
 }
-export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, disabled = false, type = 'button', className = '', title, href, download, target, rel }) {
+/* The "Show juniors" switch. Junior grades are whatever Manage Grades says they
+ * are; they are left out of Availability, Fixtures and Selection until asked
+ * for. One shared preference, remembered on this device (select.juniors). */
+export function JuniorsToggle({ value, onChange, className = '' }) {
+  return (
+    <button type="button" onClick={() => onChange(!value)} aria-pressed={value} data-juniors-toggle
+      title="Junior grades are set in Manage Grades"
+      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${value ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'} ${className}`}>
+      {value ? 'Juniors shown' : 'Show juniors'}
+    </button>
+  )
+}
+
+export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, disabled = false, type = 'button', className = '', title, href, download, target, rel, ...rest }) {
+  // `rest` carries data-* and aria-* attributes through to the element.
   const size = sm ? 'text-[12.5px] px-2.5 py-1.5 gap-1.5' : 'text-[13.5px] px-3.5 py-2 gap-2'
   const cls = `inline-flex items-center justify-center rounded-lg font-display leading-none transition whitespace-nowrap disabled:opacity-40 disabled:cursor-default ${size} ${BTN_VARIANTS[variant] || BTN_VARIANTS.ghost} ${className}`
   const inner = <>{icon && <Icon name={icon} size={sm ? 14 : 16} />}{children}</>
@@ -308,12 +324,12 @@ export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, di
   if (href) {
     return (
       <a href={disabled ? undefined : href} download={download} title={title}
-        target={target} rel={target === '_blank' ? (rel || 'noopener noreferrer') : rel}
+        target={target} rel={target === '_blank' ? (rel || 'noopener noreferrer') : rel} {...rest}
         className={`${cls}${disabled ? ' opacity-40 pointer-events-none' : ''}`}>{inner}</a>
     )
   }
   return (
-    <button type={type} onClick={disabled ? undefined : onClick} disabled={disabled} title={title} className={cls}>
+    <button type={type} onClick={disabled ? undefined : onClick} disabled={disabled} title={title} className={cls} {...rest}>
       {inner}
     </button>
   )
@@ -379,8 +395,11 @@ export const RECENCY_OPTIONS = [
   { value: 5, label: 'Played ≤ 5 yrs' },
   { value: 10, label: 'Played ≤ 10 yrs' },
 ]
-export function playedWithinYears(lastPlayed, years) {
+// `years` of -1 means "played this season": `seasonStart` is the first day of the
+// season the match sits in (the server sends it); without one it filters nothing.
+export function playedWithinYears(lastPlayed, years, seasonStart) {
   if (!years) return true
+  if (years < 0) return !seasonStart || (!!lastPlayed && lastPlayed >= seasonStart)
   if (!lastPlayed) return true // never-played (e.g. a new manual add) — keep
   const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
   return new Date(lastPlayed + 'T00:00:00') >= cutoff

@@ -36,7 +36,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import verify_selection_same_day as base
-from app.models.db import Organisation, User, Player, Team, Grade, Season, Fixture
+from app.models.db import Organisation, User, Player, Team, Grade, Season, Fixture, FeeMember, FeeMemberSeason
 
 engine = create_async_engine(os.environ["DATABASE_URL"], echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -135,6 +135,36 @@ async def main():
     p = await pool(fx_x)
     check("a mixed grade is not a women's side: the man in its squad is eligible",
           (p.get("Sam Social") or {}).get("gender_ok"), True)
+
+    # ---- Registered this season (Accounts tick) and the season start ---------
+    async def pool_and_flags(fid):
+        async with Session() as db:
+            club = await db.get(Organisation, org_id)
+            fx = await db.get(Fixture, fid)
+            sel = await assemble_selection(db, club, fx)
+        return {r["display_name"]: r for r in sel["pool"]}, sel["flags"]
+
+    p, flags = await pool_and_flags(fx_m)
+    check("with no registration records the Registered filter is not offered", flags.get("registered"), None)
+    check("...and nobody carries a registered answer", (p.get("Max Man") or {}).get("registered"), None)
+    season_start = flags.get("season_start")
+    check("the pool says when the season started (1 July by default), for 'played this season'",
+          isinstance(season_start, str) and season_start.endswith("-07-01") and season_start <= (date.today() + timedelta(days=14)).isoformat(),
+          True)
+    async with Session() as db:
+        for nm, reg in (("Max Man", True), ("Wilma InMens", False)):
+            pid = (await db.execute(text("SELECT id FROM players WHERE organisation_id=:o AND name=:n"), {"o": org_id, "n": nm})).scalar()
+            m = FeeMember(id=uuid.uuid4(), organisation_id=org_id, player_id=pid, full_name=nm)
+            db.add(m)
+            await db.flush()
+            db.add(FeeMemberSeason(id=uuid.uuid4(), member_id=m.id, season_id=season_id, organisation_id=org_id,
+                                   playhq_registered=reg))
+        await db.commit()
+    p, flags = await pool_and_flags(fx_m)
+    check("once the club records registrations the filter is offered", flags.get("registered"), "fees")
+    check("a ticked player is registered", (p.get("Max Man") or {}).get("registered"), True)
+    check("an unticked player is not", (p.get("Wilma InMens") or {}).get("registered"), False)
+    check("a player with no member row is 'not told', not 'no'", (p.get("Dan NoRow") or p.get("Sam Social") or {}).get("registered"), None)
 
     from app.routers.fixtures import _match_team
     teams = [(tm, "Mens A", 1, False), (tw, "Womens B", 2, True), (uuid.uuid4(), "Mens B", 2, False)]

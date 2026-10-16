@@ -10,7 +10,7 @@ import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import {
-  Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
+  Icon, JuniorsToggle, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
   RecencySelect, playedWithinYears, RuleTags, Chip,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
@@ -79,7 +79,7 @@ export default function AdminAvailability() {
   const [roster, setRoster] = usePersistedState('avail.roster', 'current', (v) => v === 'current' || v === 'all') // 'current' hides dormant/inactive; 'all' shows everyone
   const [years, setYears] = usePersistedState('avail.years', 0, (v) => Number.isFinite(v)) // recency: played within N yrs (0 = any)
   // Junior grades (per Manage Grades) are left out until asked for.
-  const [showJuniors, setShowJuniors] = usePersistedState('avail.juniors', false, (v) => typeof v === 'boolean')
+  const [showJuniors, setShowJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
   const [selectedIds, setSelectedIds] = useState(() => new Set()) // picked in any XI this round
 
   // Selected week (column) — drives the Pick XI handoff and single-week bulk.
@@ -320,11 +320,7 @@ export default function AdminAvailability() {
             { value: 'all', label: 'All' },
           ]} />
           <RecencySelect value={years} onChange={setYears} />
-          <button onClick={() => setShowJuniors(!showJuniors)} aria-pressed={showJuniors}
-            title="Junior grades are set in Manage Grades"
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${showJuniors ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}>
-            {showJuniors ? 'Juniors shown' : 'Show juniors'}
-          </button>
+          <JuniorsToggle value={showJuniors} onChange={setShowJuniors} />
           <button onClick={() => setRangeOn((v) => !v)}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${rangeOn ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}>
             <Icon name="fixtures" size={14} /> Date range {rangeOn ? '▲' : '▼'}

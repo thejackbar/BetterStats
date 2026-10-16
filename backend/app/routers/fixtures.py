@@ -32,6 +32,7 @@ from app.services.club_match import fixture_side
 from app.services.fixtures_reconcile import reconcile
 from app.services.fixtures_source import org_grassroots_fixtures_checked
 from app.services.grade_labels import grade_is_women, org_grade_category_sets
+from app.services.junior_fixtures import junior_fixture_ids
 
 router = APIRouter(prefix="/fixtures", tags=["fixtures"])
 
@@ -196,6 +197,7 @@ class FixtureUpdate(BaseModel):
 @router.get("")
 async def list_fixtures(
     upcoming_only: bool = False,
+    hide_juniors: bool = False,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
@@ -210,6 +212,11 @@ async def list_fixtures(
     stmt = stmt.order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
     res = await db.execute(stmt)
     fixtures = res.scalars().all()
+    # Junior grades (per Manage Grades) can be left off the list; the default
+    # keeps every fixture, as before.
+    if hide_juniors and fixtures:
+        junior_ids = await junior_fixture_ids(db, club.id, fixtures)
+        fixtures = [f for f in fixtures if str(f.id) not in junior_ids]
 
     counts: dict[str, int] = {}
     if fixtures:

@@ -219,11 +219,12 @@ async def main():
 
     print("\n# F. The overview leaves juniors out and reports locks")
     r, _ = await as_club(sel.selection_overview)
+    check("by default the overview is unchanged: the junior fixture is there",
+          str(FJ) in {f["id"] for f in (r or {}).get("fixtures", [])}, True)
+    r, _ = await as_club(sel.selection_overview, hide_juniors=True)
     ids = {f["id"] for f in (r or {}).get("fixtures", [])}
-    check("junior fixture is not on the overview by default", str(FJ) in ids, False)
-    check("senior fixtures still are", {str(F1), str(F2), str(FW)} <= ids, True)
-    r, _ = await as_club(sel.selection_overview, juniors=True)
-    check("juniors=true brings the junior fixture back", str(FJ) in {f["id"] for f in (r or {}).get("fixtures", [])}, True)
+    check("hide_juniors leaves the junior fixture off", str(FJ) in ids, False)
+    check("...and every senior and women's fixture stays", {str(F1), str(F2), str(FW)} <= ids, True)
     await as_user(sel.lock_selection, str(F1)) if has_lock else None
     r, _ = await as_club(sel.selection_overview)
     one = next((f for f in (r or {}).get("fixtures", []) if f["id"] == str(F1)), {})

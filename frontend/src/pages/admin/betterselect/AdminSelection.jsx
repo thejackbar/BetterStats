@@ -27,6 +27,8 @@ import { PbSpinner } from '../../../lib/presskit'
 import { availRank } from '../../../lib/availability'
 import { Icon, Avatar, Btn, RoleChips, Tag, Empty, QuickAvailModal, playedWithinYears, RuleTags } from './ui'
 import { useFilters } from './filters'
+import SelectionHistory from './SelectionHistory'
+import usePersistedState from '../../../lib/usePersistedState'
 import SelectionFilters from './SelectionFilters'
 import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
@@ -165,11 +167,14 @@ export default function AdminSelection() {
   const toastRef = useRef(toast)
   toastRef.current = toast
   const { theme, toggle: toggleTheme } = useTheme()
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canManage = hasCapability(CAP.MANAGE_SELECTIONS)
+  const [data, setData] = useState(null)
+  // A locked side is read-only for everyone, selectors included, until it is
+  // unlocked. canManage is the capability; canEdit is "may change the board now".
+  const locked = !!data?.fixture?.locked
+  const canEdit = canManage && !locked
   const canEditRef = useRef(canEdit)
   canEditRef.current = canEdit
-
-  const [data, setData] = useState(null)
   const [slots, setSlots] = useState([])
   const [capId, setCapId] = useState(null)
   const [wkId, setWkId] = useState(null)
@@ -196,8 +201,8 @@ export default function AdminSelection() {
   // stops until it is settled.
   const [draftConflict, setDraftConflict] = useState(null)
   const pollDraft = useRef(() => {})
-  const [yearsF, setYearsF] = useState(3)
-  const [sort, setSort] = useState('squad')
+  const [yearsF, setYearsF] = usePersistedState('selection.years', 3, (v) => Number.isFinite(v))
+  const [sort, setSort] = usePersistedState('selection.sort', 'squad', (v) => ['squad', 'form', 'name', 'first'].includes(v))
   const [availEdit, setAvailEdit] = useState(null)
   // Phone only. `panel` is which of Pool / XI the bottom bar has up; the two
   // sheets are the "add players" search and one batting-order row's actions.
@@ -256,7 +261,8 @@ export default function AdminSelection() {
         // An autosaved draft replaces the confirmed XI on the board.
         let slotsInit = init
         let demo = {}
-        const dd = dr?.draft
+        // A locked side shows the confirmed XI whatever draft is behind it.
+        const dd = d.fixture?.locked ? null : dr?.draft
         draftOnServer.current = false
         draftVersion.current = 0
         setDraftInfo(null)
@@ -347,7 +353,9 @@ export default function AdminSelection() {
   }, [fixtureId, flushDraft])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { api.bsSelectionOverview().then((d) => setAllFixtures(d.fixtures || [])).catch(() => {}) }, [])
+  // Junior grades stay out of the team switcher unless the Show juniors switch (Availability, Fixtures, Selection overview) is on.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
+  useEffect(() => { api.bsSelectionOverview({ hideJuniors: !showJuniors }).then((d) => setAllFixtures(d.fixtures || [])).catch(() => {}) }, [showJuniors])
   useEffect(() => { setPrevXI(null); api.bsPreviousXI(fixtureId).then(setPrevXI).catch(() => setPrevXI(null)) }, [fixtureId])
 
   const fx = data?.fixture
@@ -401,6 +409,7 @@ export default function AdminSelection() {
     { key: 'squad', type: 'multi' }, { key: 'avail', type: 'multi' }, { key: 'role', type: 'multi' },
     { key: 'bowling', type: 'multi' }, { key: 'hand', type: 'multi' }, { key: 'form', type: 'multi' },
     { key: 'status', type: 'single' }, { key: 'gender', type: 'single' }, { key: 'hideUnavail', type: 'bool' },
+    { key: 'registered', type: 'single' },
     // Fees + training. Single-choice rather than checkboxes because "shown
     // both ways" is just no filter, and each has a third real answer —
     // unknown — for a club whose modules can't say.
@@ -464,16 +473,22 @@ export default function AdminSelection() {
     // A name typed into search is someone the selector is looking for, so the
     // "Played ≤ N yrs" window does not hide them. It only trims the browse list.
     // (Players marked inactive stay out either way: see `available`.)
-    if (yearsF && !search.trim()) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
+    if (yearsF && !search.trim()) list = list.filter((p) => playedWithinYears(p.last_played, yearsF, data?.flags?.season_start))
+    // Registered this season, where the club records it (Accounts screen). Absent
+    // is "not told", which is its own answer: the list still to be chased.
+    if (values.registered === 'yes') list = list.filter((p) => p.registered === true)
+    else if (values.registered === 'no') list = list.filter((p) => p.registered === false)
+    else if (values.registered === 'unknown') list = list.filter((p) => p.registered == null)
     if (values.status === 'unselected') list = list.filter((p) => !inAnotherXI(p))
     else if (values.status === 'clash') list = list.filter((p) => inAnotherXI(p))
+    if (sort === 'first') return sortByFirstName(list, (p) => p.display_name)
     const sorters = {
       squad: cmp,
       form: (a, b) => (b.score ?? 0) - (a.score ?? 0) || (a.display_name || '').localeCompare(b.display_name || ''),
       name: (a, b) => (a.display_name || '').localeCompare(b.display_name || ''),
     }
     return list.slice().sort(sorters[sort] || cmp)
-  }, [available, search, values, yearsF, sort, cmp])
+  }, [available, search, values, yearsF, sort, cmp, data])
 
   const filled = slots.filter(Boolean)
   const count = filled.length
@@ -561,6 +576,81 @@ export default function AdminSelection() {
     if (t) adoptDraft(t)
     else { setDraftConflict(null); load() }
   }
+  // ── Undo ───────────────────────────────────────────────────────────────────
+  // Every change to the board (a drop, a removal, an auto-fill, a restored
+  // version) is one step back. The stack lives on this device and belongs to the
+  // fixture on screen: loading a fixture, or confirming, starts it afresh.
+  const hist = useRef({ stack: [], prev: null, fixture: null })
+  const [undoDepth, setUndoDepth] = useState(0)
+  useEffect(() => {
+    const h = hist.current
+    if (loadedFor.current !== fixtureId) { h.stack = []; h.prev = null; h.fixture = null; setUndoDepth(0); return }
+    const cur = { slots, capId, wkId, demotions }
+    if (h.fixture !== fixtureId) { h.fixture = fixtureId; h.prev = cur; h.stack = []; setUndoDepth(0); return }
+    const sig = (x) => JSON.stringify([x.slots, x.capId, x.wkId, x.demotions])
+    if (h.prev && sig(h.prev) !== sig(cur)) {
+      h.stack.push(h.prev)
+      if (h.stack.length > 50) h.stack.shift()
+      setUndoDepth(h.stack.length)
+    }
+    h.prev = cur
+  }, [slots, capId, wkId, demotions, data])  // eslint-disable-line react-hooks/exhaustive-deps
+  const undo = useCallback(() => {
+    const h = hist.current
+    if (!canEditRef.current || !h.stack.length) return
+    const prev = h.stack.pop()
+    h.prev = prev   // the effect then sees no difference and records nothing
+    setUndoDepth(h.stack.length)
+    setSlots(prev.slots); setCapId(prev.capId); setWkId(prev.wkId); setDemotions(prev.demotions)
+    setFocus(prev.slots.findIndex((x) => x == null))
+    toastRef.current.info('Undid the last change')
+  }, [])
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return
+      const t = e.target
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      if (!hist.current.stack.length) return
+      e.preventDefault()
+      undo()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [undo])
+
+  // ── Lock, unlock, history ──────────────────────────────────────────────────
+  const [showHistory, setShowHistory] = useState(false)
+  const [locking, setLocking] = useState(false)
+  const lockNow = async () => {
+    setLocking(true)
+    try { await api.bsLockSelection(fixtureId); toast.success('Locked'); load() }
+    catch (e) { toast.error('Could not lock: ' + e.message) }
+    finally { setLocking(false) }
+  }
+  const unlockNow = async () => {
+    if (!window.confirm('Unlock this side so it can be changed? Anyone with selection access will be able to edit it until it is confirmed again.')) return
+    setLocking(true)
+    try { await api.bsUnlockSelection(fixtureId); toast.success('Unlocked'); load() }
+    catch (e) { toast.error('Could not unlock: ' + e.message) }
+    finally { setLocking(false) }
+  }
+  // A version from the history goes onto the board as unconfirmed changes.
+  const restoreVersion = (ev) => {
+    const after = (ev.detail?.after || []).slice().sort((a, b) => (a.batting_order || 999) - (b.batting_order || 999))
+    const inPool = after.filter((x) => poolById[x.player_id])
+    if (!inPool.length) { toast.error('None of those players are in the pool for this match'); return }
+    const size = format > 0 ? Math.max(format, inPool.length) : inPool.length
+    const next = Array(size).fill(null)
+    inPool.forEach((x, i) => { next[i] = x.player_id })
+    setSlots(next)
+    setCapId(inPool.find((x) => x.is_captain)?.player_id ?? null)
+    setWkId(inPool.find((x) => x.is_wicket_keeper)?.player_id ?? null)
+    setDemotions({})
+    setShowHistory(false)
+    const missed = after.length - inPool.length
+    toast.success(`Loaded that side onto the board${missed ? ` (${missed} player${missed === 1 ? ' is' : 's are'} no longer in the pool)` : ''}. Confirm to save it.`)
+  }
+
   const target = format || 0
   const fit = sideFit(count, target, minFormat || 0)
   const offCount = fit.off
@@ -747,14 +837,15 @@ export default function AdminSelection() {
       draftPending.current = null
       await Promise.resolve(draftInflight.current).catch(() => {})
       const players = filled.map((id, i) => ({ player_id: id, batting_order: i + 1, is_captain: id === capId, is_wicket_keeper: id === wkId }))
-      const r = await api.bsSetSelection(fixtureId, players, demoList)
-      toast.success(`Confirmed ${r.count} player${r.count === 1 ? '' : 's'}`)
+      const r = await api.bsSetSelection(fixtureId, players, demoList, { lock: true })
+      toast.success(`Confirmed and locked ${r.count} player${r.count === 1 ? '' : 's'}`)
       load()
     } catch (e) {
       // A blocking rule comes back as a structured 409 listing exactly what
       // broke, which is more use than "save failed".
       const breaches = e?.detail?.breaches || e?.data?.detail?.breaches
-      if (breaches?.length) toast.error(`Can't save — ${breaches.join('; ')}`)
+      if (e?.detail?.code === 'locked') { toast.error(e.detail.message || 'This side is locked'); load() }
+      else if (breaches?.length) toast.error(`Can't save — ${breaches.join('; ')}`)
       else toast.error(e.message.includes('Already selected') ? e.message : 'Save failed: ' + e.message)
     } finally { setSaving(false) }
   }
@@ -852,7 +943,14 @@ export default function AdminSelection() {
   }
 
   const headerLeft = <ViewToggle value={view} onChange={setView} />
-  const confirmLabel = saving ? 'Confirming…' : dirty ? `Confirm${count ? ` (${count})` : ''}` : 'Confirmed'
+  // Confirm saves the side AND locks it. With nothing to save, a side that is
+  // named but not yet locked offers "Lock team" so it is never stuck "ready to
+  // review" with nothing to press.
+  const lockable = !dirty && !locked && count > 0
+  const confirmLabel = saving || locking ? (locking ? 'Locking…' : 'Confirming…')
+    : dirty ? `Confirm${count ? ` (${count})` : ''}` : locked ? 'Locked' : count > 0 ? 'Lock team' : 'Confirmed'
+  const confirmDisabled = saving || locking || locked || (!dirty && !lockable)
+  const confirmAction = lockable ? lockNow : save
   const actions = (
     <div className="flex items-center gap-2.5">
       {/* The site's own top bar already carries the theme toggle on a phone. */}
@@ -861,14 +959,32 @@ export default function AdminSelection() {
         <Icon name={theme === 'light' ? 'moon' : 'sun'} size={16} />
       </button>
       <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}><span className="hidden sm:inline">Share</span></Btn>
-      {canEdit && <Btn variant="soft" sm icon="share" onClick={() => setShowSend(true)} title="Email the confirmed side to the captain or the players"><span className="hidden sm:inline">Email</span></Btn>}
+      {canManage && <Btn variant="soft" sm icon="share" onClick={() => setShowSend(true)} title="Email the confirmed side to the captain or the players"><span className="hidden sm:inline">Email</span></Btn>}
       {/* Below `lg` Confirm lives in the bar pinned to the bottom of the screen. */}
-      {canEdit && <Btn variant="primary" sm icon="check" className="max-lg:hidden" onClick={save} disabled={saving || !dirty}>{confirmLabel}</Btn>}
+      {canManage && <Btn variant="ghost" sm icon="reset" onClick={() => setShowHistory(true)} title="Who changed this side, and what it was before"><span className="hidden sm:inline">History</span></Btn>}
+      {canEdit && <Btn variant="ghost" sm icon="undo" onClick={undo} disabled={!undoDepth} title="Undo the last change (Ctrl or Cmd + Z)" data-undo><span className="hidden sm:inline">Undo</span></Btn>}
+      {canManage && locked && <Btn variant="soft" sm icon="lock" onClick={unlockNow} disabled={locking} data-unlock>Unlock</Btn>}
+      {canManage && !locked && <Btn variant="primary" sm icon="check" className="max-lg:hidden" onClick={confirmAction} disabled={confirmDisabled} data-confirm>{confirmLabel}</Btn>}
     </div>
   )
 
   return (
     <BetterSelectLayout title="Selection" headerLeft={headerLeft} actions={actions}>
+      {locked && (
+        <div role="status" data-locked-banner className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-pb-hairline bg-pb-surface px-3 py-2 text-[12px] text-pb-dim">
+          <Icon name="lock" size={14} />
+          <span className="min-w-0 flex-1 basis-60">
+            <span className="font-semibold text-pb-text">Locked.</span>{' '}
+            {fx?.locked_by ? `${fx.locked_by} locked this side` : 'This side is locked'}
+            {fx?.locked_at ? ` on ${new Date(fx.locked_at).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}.
+            {canManage ? ' Unlock it to make a change.' : ' It can only be changed by someone with selection access.'}
+          </span>
+          {canManage && <button type="button" onClick={unlockNow} disabled={locking} className="shrink-0 font-display font-semibold text-pb-accent hover:underline disabled:opacity-50">Unlock</button>}
+        </div>
+      )}
+      {showHistory && (
+        <SelectionHistory fixtureId={fixtureId} title={title} canRestore={canEdit} onRestore={restoreVersion} onClose={() => setShowHistory(false)} />
+      )}
       {canEdit && draftConflict && (
         <div role="alert" className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3 py-2 text-[12px] text-pb-text"
           style={{ borderColor: 'var(--pb-amber)', background: 'color-mix(in srgb, var(--pb-amber) 10%, var(--pb-surface))' }}>
@@ -919,8 +1035,13 @@ export default function AdminSelection() {
         </DnD>
       </div>
 
-      <MobileBar vm={vm} confirm={canEdit && (
-        <Btn variant="primary" icon="check" className="min-h-[44px] shrink-0" onClick={save} disabled={saving || !dirty}>{confirmLabel}</Btn>
+      <MobileBar vm={vm} confirm={canManage && (
+        <>
+          {canEdit && <Btn variant="ghost" icon="undo" className="min-h-[44px] shrink-0" onClick={undo} disabled={!undoDepth} title="Undo the last change" data-undo><span className="sr-only">Undo</span></Btn>}
+          {locked
+            ? <Btn variant="soft" icon="lock" className="min-h-[44px] shrink-0" onClick={unlockNow} disabled={locking}>Unlock</Btn>
+            : <Btn variant="primary" icon="check" className="min-h-[44px] shrink-0" onClick={confirmAction} disabled={confirmDisabled}>{confirmLabel}</Btn>}
+        </>
       )} />
       {canEdit && addOpen && <AddPlayersSheet vm={vm} onClose={() => setAddOpen(false)} />}
       {canEdit && slotOpen != null && <SlotSheet vm={vm} idx={slotOpen} onClose={() => setSlotOpen(null)} />}

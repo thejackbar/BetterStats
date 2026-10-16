@@ -731,6 +731,12 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     _fixture_team_id = str(fx.team_id) if fx.team_id else None
 
     financial_by_id, trained_by_id = _flag_maps(players, owing_ids, trained_ids)
+    # "Registered for the season", where the club records it (Accounts screen).
+    registered_by_id = await selection_rules.registered_for_fixture(db, club.id, fx)
+    _cfg_month = selection_rules.club_config(club)["season_start_month"]
+    _ref_day = fx.played_on or date.today()
+    season_start = selection_rules.season_window(
+        selection_rules.season_year_for(_ref_day, _cfg_month), _cfg_month)[0]
 
     # The club's own association rules, judged against this fixture. A club
     # that has written none gets an empty context and everything below reads
@@ -892,6 +898,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             # unaffected: its verdict rides in rule_flags, which the club
             # asked for explicitly.
             "is_financial": financial if rule_cfg["show_fees"] else None,
+            "registered": registered_by_id.get(pid),
             "financial_source": (
                 "override" if p.is_financial_override is not None
                 else "fees" if owing_ids is not None else None
@@ -969,6 +976,12 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "financial": ("fees" if owing_ids is not None else None) if rule_cfg["show_fees"] else None,
             "training": ("nets" if trained_ids is not None else None) if rule_cfg["show_training"] else None,
             "show_fees": rule_cfg["show_fees"],
+            # Where the club records who is registered this season, the board
+            # offers a Registered filter; with no records there is nothing for
+            # it to answer and it is not drawn.
+            "registered": "fees" if registered_by_id else None,
+            # First day of the season the fixture sits in, for "Played this season".
+            "season_start": season_start.isoformat(),
             "show_training": rule_cfg["show_training"],
             "training_window_days": TRAINING_WINDOW_DAYS,
             # The club's own age rule, echoed so the filter can offer only

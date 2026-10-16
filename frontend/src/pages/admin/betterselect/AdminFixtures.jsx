@@ -11,7 +11,8 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
-import { Icon, Btn, Segmented, Empty } from './ui'
+import { Icon, Btn, Segmented, Empty, JuniorsToggle } from './ui'
+import usePersistedState from '../../../lib/usePersistedState'
 import { useFilters, FilterBar } from './filters'
 
 // Home/Away accent for the left edge of each row — fixed semantic colours
@@ -124,13 +125,14 @@ export default function AdminFixtures() {
   const [scope, setScope] = useState('upcoming') // 'upcoming' | 'past' | 'all'
   const [editing, setEditing] = useState(undefined)
   const [syncing, setSyncing] = useState(false)
+  const [showJuniors, setShowJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   // Always fetch the full set; scope (upcoming/past/all) is a client-side cut so
   // switching tabs is instant and "past" needs no extra endpoint.
   const load = useCallback(() => {
     setFixtures(null)
-    api.bsListFixtures(false).then(setFixtures).catch((e) => { toast.error(e.message); setFixtures([]) })
-  }, [toast])
+    api.bsListFixtures(false, { hideJuniors: !showJuniors }).then(setFixtures).catch((e) => { toast.error(e.message); setFixtures([]) })
+  }, [toast, showJuniors])
   useEffect(() => { load() }, [load])
 
   const teamOptions = useMemo(() => {
@@ -223,13 +225,14 @@ export default function AdminFixtures() {
       <FilterBar
         filters={filters} facets={facets} showSearch={false}
         count={shownCount} total={fixtures?.length} className="mb-2"
-        right={(
+        right={(<>
+          <JuniorsToggle value={showJuniors} onChange={setShowJuniors} />
           <Segmented value={scope} onChange={setScope} sm options={[
             { value: 'upcoming', label: 'Upcoming' },
             { value: 'past', label: 'Past' },
             { value: 'all', label: 'All' },
           ]} />
-        )}
+        </>)}
       />
       <div className="flex items-center gap-4 mb-4 font-mono text-[10px] text-pb-faint">
         <span className="inline-flex items-center gap-1.5"><span className="w-[3px] h-3 rounded-sm" style={{ background: 'var(--pb-positive)' }} /> Home</span>

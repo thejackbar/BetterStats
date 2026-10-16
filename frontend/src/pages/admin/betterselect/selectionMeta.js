@@ -179,7 +179,8 @@ export const HAND_KINDS = [
 export const SORTS = [
   { value: 'squad', label: 'Squad order' },
   { value: 'form', label: 'Form' },
-  { value: 'name', label: 'Name (A–Z)' },
+  { value: 'name', label: 'Surname (A–Z)' },
+  { value: 'first', label: 'First name (A–Z)' },
 ]
 
 // Normalise a recent series to 0..1 bar heights for a mini sparkline.

@@ -100,7 +100,7 @@ const run = async () => {
 
   await page.route('**/api/**', (r) => json(r, {}))
   await page.route('**/api/auth/me', (r) => json(r, ME))
-  await page.route('**/api/selection/overview', (r) => json(r, {
+  await page.route(/\/api\/selection\/overview(\?.*)?$/, (r) => json(r, {
     default_team_size: 11,
     fixtures: FX.map((f) => ({
       ...f, lineup: server.confirmed[f.id].map((p, i) => ({ player_id: p, display_name: 'x', batting_order: i + 1, skill_positions: [], availability: 'AVAILABLE', is_captain: f.id === F1 && p === pid(1), is_wicket_keeper: f.id === F1 && p === pid(1) })),

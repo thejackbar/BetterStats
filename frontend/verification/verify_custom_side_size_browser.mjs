@@ -44,7 +44,7 @@ const run = async () => {
   await page.route('**/api/**', (r) => json(r, {}))
   await page.route(/\/api\/club-admin\/settings$/, (r) => json(r, { player_name_format: 'first_last' }))
   await page.route('**/api/auth/me', (r) => json(r, ME))
-  await page.route('**/api/selection/overview', (r) => json(r, { fixtures: [], default_team_size: 11 }))
+  await page.route(/\/api\/selection\/overview(\?.*)?$/, (r) => json(r, { fixtures: [], default_team_size: 11 }))
   await page.route(/\/api\/selection\/[^/]+\/previous-xi/, (r) => json(r, { source_fixture_id: null, player_ids: [], captain_id: null, wicket_keeper_id: null }))
   await page.route(/\/api\/selection\/selected-players/, (r) => json(r, { player_ids: [] }))
   await page.route(new RegExp(`/api/selection/${FID}/draft(\\?.*)?$`), (r) => json(r, { draft: null, version: 0 }))

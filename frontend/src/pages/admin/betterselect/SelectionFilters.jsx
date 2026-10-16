@@ -11,13 +11,19 @@
 // is a 3-way segmented control rather than yet another checkbox.
 import { useState } from 'react'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
-import { Icon, Chip, Search, RecencySelect, Dot, Segmented, FilterButton } from './ui'
+import { Icon, Chip, Search, RecencySelect, RECENCY_OPTIONS, Dot, Segmented, FilterButton } from './ui'
 import { SortMenu, SquadPicker } from './filters'
 import { BOWL_KINDS, HAND_KINDS, FORM_BUCKETS, SORTS, ageFilterOptions, ageFilterLabel, GENDER_OPTS } from './selectionMeta'
 import { RULE_FILTERS } from './selectionRules'
 
 const ROLE_QUICK = [['BAT', 'Bat'], ['BWL', 'Bowl'], ['ALL', 'All'], ['WKT', 'WK']]
 const ROLE_LABEL = { BAT: 'Batter', BWL: 'Bowler', ALL: 'All-rounder', WKT: 'Keeper' }
+const REGISTERED_OPTS = [
+  { value: '', label: 'All' }, { value: 'yes', label: 'Registered' },
+  { value: 'no', label: 'Not registered' }, { value: 'unknown', label: 'Not known' },
+]
+// "Played this season" sits beside the usual look-back windows.
+const SELECTION_RECENCY = [{ value: 0, label: 'Played any time' }, { value: -1, label: 'Played this season' }, ...RECENCY_OPTIONS.filter((o) => o.value)]
 const STATUS_OPTS = [{ value: '', label: 'All' }, { value: 'unselected', label: 'Unselected' }, { value: 'clash', label: 'In another XI' }]
 // Fees and training. Each carries a third answer — "Not known" — because a
 // club that runs neither BetterFees nor Net Manager, and hasn't set the flag
@@ -79,6 +85,8 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   // so there is nothing for these two groups to filter on and they go.
   const showFees = flags?.show_fees !== false
   const showTraining = flags?.show_training !== false
+  // Only where the club records who is registered this season.
+  const showRegistered = !!flags?.registered
 
   const pills = []
   ;(values.role || []).forEach((r) => pills.push({ k: 'r' + r, label: ROLE_LABEL[r] || r, rm: () => toggle('role', r) }))
@@ -92,6 +100,7 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   if (hideUnavail) pills.push({ k: 'hu', label: 'Hide unavailable', rm: () => setValue('hideUnavail', false) })
   if (showFees && values.fees) pills.push({ k: 'fee', label: optLabel(FEES_OPTS, values.fees), rm: () => setValue('fees', '') })
   if (showTraining && values.training) pills.push({ k: 'trn', label: optLabel(TRAINING_OPTS, values.training), rm: () => setValue('training', '') })
+  if (showRegistered && values.registered) pills.push({ k: 'reg', label: optLabel(REGISTERED_OPTS, values.registered), rm: () => setValue('registered', '') })
   if (values.age && ageFilterLabel(values.age, flags)) pills.push({ k: 'age', label: ageFilterLabel(values.age, flags), rm: () => setValue('age', '') })
   if (showRules && values.rules) pills.push({ k: 'rul', label: optLabel(RULE_FILTERS, values.rules), rm: () => setValue('rules', '') })
   // (recency has its own dedicated dropdown control, so it isn't duplicated as a pill)
@@ -115,7 +124,7 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
         <span className="h-4 w-px bg-pb-hairline2 mx-0.5" />
         <Chip label="Hide unavailable" dot={hideUnavail ? 'var(--pb-positive)' : undefined}
           active={hideUnavail} onClick={() => setValue('hideUnavail', !hideUnavail)} />
-        <span className="ml-auto"><RecencySelect value={yearsF} onChange={setYearsF} /></span>
+        <span className="ml-auto"><RecencySelect value={yearsF} onChange={setYearsF} options={SELECTION_RECENCY} /></span>
       </div>
 
       {/* Filters panel */}
@@ -181,6 +190,12 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
           <PanelGroup label="Selection">
             <Segmented sm value={values.status || ''} onChange={(v) => setValue('status', v)} options={STATUS_OPTS} />
           </PanelGroup>
+          {showRegistered && (
+            <PanelGroup label="Registered">
+              <Segmented sm value={values.registered || ''} onChange={(v) => setValue('registered', v)} options={REGISTERED_OPTS} />
+              <div className="text-[10.5px] leading-snug text-pb-faintest mt-1.5">From the registration tick on the Accounts screen, for this match's season.</div>
+            </PanelGroup>
+          )}
           {showFees && (
             <PanelGroup label="Fees">
               <Segmented sm value={values.fees || ''} onChange={(v) => setValue('fees', v)} options={FEES_OPTS} />

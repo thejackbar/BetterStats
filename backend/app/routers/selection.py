@@ -119,7 +119,7 @@ async def selection_overview(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
     # Last, so a caller that passes db and club positionally is unaffected.
-    juniors: bool = False,
+    hide_juniors: bool = False,
 ):
     """All upcoming fixtures with their finalised lineups, for the matchday
     board. One row per fixture, players in batting order, each carrying their
@@ -137,8 +137,9 @@ async def selection_overview(
         .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
     )
     fixtures = fx_res.scalars().all()
-    # Junior grades (per Manage Grades) stay off the board unless asked for.
-    if not juniors and fixtures:
+    # Junior grades (per Manage Grades) can be left off the board. Off by default
+    # so every other reader of the overview sees what it always did.
+    if hide_juniors and fixtures:
         junior_ids = await junior_fixture_ids(db, club.id, fixtures)
         fixtures = [f for f in fixtures if str(f.id) not in junior_ids]
     if not fixtures:

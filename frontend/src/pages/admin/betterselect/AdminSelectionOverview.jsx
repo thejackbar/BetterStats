@@ -21,7 +21,8 @@ import { api } from '../../../lib/api'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
-import { Icon, Avatar, Dot, Tag, RoleChips } from './ui'
+import { Icon, Avatar, Dot, Tag, RoleChips, JuniorsToggle } from './ui'
+import usePersistedState from '../../../lib/usePersistedState'
 
 const ROLE_CODES = ['BAT', 'ALL', 'BWL', 'WKT']
 const tint = (token, pct) => `color-mix(in srgb, ${token} ${pct}%, transparent)`
@@ -89,6 +90,7 @@ function summarize(fx, defaultTarget) {
   let status, statusLabel
   if (count === 0) { status = 'progress'; statusLabel = 'Not started' }
   else if (flags.some((f) => f.tone === 'red')) { status = 'attention'; statusLabel = 'Needs attention' }
+  else if (fx.locked && count >= need) { status = 'ready'; statusLabel = 'Locked' }
   else if (count >= need && flags.length === 0) { status = 'ready'; statusLabel = 'Squad set' }
   else if (count >= need) { status = 'review'; statusLabel = 'Ready to review' }
   else { status = 'progress'; statusLabel = 'In progress' }
@@ -175,7 +177,10 @@ function FixtureRow({ fx, target, open, onToggle }) {
   const worst = a.flags.find((f) => f.tone === 'red') || a.flags.find((f) => f.tone === 'amber')
   const extra = a.flags.length - (worst ? 1 : 0)
   const complete = a.count >= a.need
-  const cta = fx.has_draft ? 'Continue draft' : a.count === 0 ? 'Build XI' : a.status === 'attention' ? 'Review XI' : 'Edit XI'
+  const cta = fx.has_draft ? 'Continue draft' : a.count === 0 ? 'Build XI'
+    : fx.locked ? 'View XI'
+      : a.status === 'attention' ? 'Review XI'
+        : a.status === 'review' || a.status === 'ready' ? 'Review and lock' : 'Edit XI'
   const when = daysUntil(fx.played_on)
   const sv = STATUS_VAR[a.status]
 
@@ -301,11 +306,12 @@ export default function AdminSelectionOverview() {
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
   const [openKeys, setOpenKeys] = useState(() => new Set())
+  const [showJuniors, setShowJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   const load = useCallback(() => {
     setData(null)
-    api.bsSelectionOverview().then(setData).catch((e) => { toast.error(e.message); setData({ fixtures: [] }) })
-  }, [toast])
+    api.bsSelectionOverview({ hideJuniors: !showJuniors }).then(setData).catch((e) => { toast.error(e.message); setData({ fixtures: [] }) })
+  }, [toast, showJuniors])
   useEffect(() => { load() }, [load])
 
   const target = data?.default_team_size ?? 11
@@ -402,6 +408,7 @@ export default function AdminSelectionOverview() {
           })}
         </div>
         <span className="flex-1" />
+        <JuniorsToggle value={showJuniors} onChange={setShowJuniors} />
         {draftDay && (
           <Link to={`/admin/betterselect/selection/draft-table?date=${draftDay}`}
             title="Every team for the day side by side, drag players between them"
