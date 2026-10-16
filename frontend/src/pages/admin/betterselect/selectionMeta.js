@@ -38,10 +38,17 @@ export function fixtureTabs(f) {
   const first = f?.played_on || 'tbc'
   return f?.end_on && f?.played_on && f.end_on > f.played_on ? [first, f.end_on] : [first]
 }
-// Whether a player's two weeks are worth drawing as W1 / W2 chips: only when at
-// least one week is not a plain yes. A player free both weeks needs no marker.
-export function weekChipsNeeded(days) {
-  return Array.isArray(days) && days.length > 1 && !days.every((d) => d.status === 'AVAILABLE')
+// The weeks of a two-day game worth flagging beside a name: only a week the
+// player is UNAVAILABLE or MAYBE for, and only when the weeks differ (a player
+// away both weekends already reads OUT). No answer is the normal state before
+// the second weekend is collected, so it is never flagged. Returns
+// [{ week: 1|2, status }], empty when there is nothing to say.
+export function weekFlagParts(days) {
+  if (!Array.isArray(days) || days.length < 2) return []
+  if (days.every((d) => d.status === days[0].status)) return []
+  return days
+    .map((d, i) => ({ week: i + 1, status: d.status }))
+    .filter((w) => w.status === 'UNAVAILABLE' || w.status === 'MAYBE')
 }
 // " for week 2" / " for weeks 1 and 2" for the weeks marked UNAVAILABLE, '' when none.
 export function unavailableWeeksText(days) {

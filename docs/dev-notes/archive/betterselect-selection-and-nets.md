@@ -1548,3 +1548,11 @@ Applecross, Jack in OD4s on the 24th and away for week 2 of the 1st XI game: the
 - Removed: the draft carry no longer drops unavailable players, at seed time or on `GET /draft` (`unavailable_ids`, `without_unavailable` deleted; `left_out` stays in the payload, always empty). This reverses rule 69's old clause. `verify_selection_next_round_draft.py` sections J, K, M now assert everyone is kept.
 - Not done: a one-day side cannot be confirmed if a two-day pick on its date is only a DRAFT (drafts never block, only flag), by design.
 - Proof: `verify_two_day_availability.py` 52 (control on the previous app code fails 8: no clash on week 2, a 409 not raised, the call-up not applied, the game dropped off the overview), `verify_two_day_whiteboard_browser.mjs` 28 (control fails 5: no week 2 tab, header, week 2 pool), `verify_draft_table_browser.mjs` 105, `verify_selection_next_round_draft.py` 46.
+
+
+## Whiteboard: W1/W2 pills replaced by a quiet flag (v9.117.6)
+
+First look at v9.117.4 on live data: almost every card carried grey W1 and W2 pills (nobody has answered week 2 yet, and the rule drew them for any week that was not AVAILABLE), names were cut short, and the pills read as buttons.
+- `selectionMeta.weekFlagParts(days)` returns only the weeks that are UNAVAILABLE or MAYBE, and only when the two weeks differ (both away already reads OUT). NO_RESPONSE is never flagged. `WeekFlag` draws plain mono text, "W2 OUT" (red) or "W2 ?" (amber), no background, border or pointer cursor; it replaces the generic OUT tag where a weekend is the reason, with both weeks and their dates in the tooltip. The old `WeekChips` and `weekChipsNeeded` are gone.
+- Header is "Two-day · 24 Oct + 31 Oct" and "Two-day · week 2 of 2, from 24 Oct" on the second tab.
+- Proof: `verify_two_day_whiteboard_browser.mjs` 30 (control on the pill build fails 10), `verify_draft_table_browser.mjs` 105.

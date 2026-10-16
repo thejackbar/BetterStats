@@ -4,9 +4,10 @@
 // Reported (Applecross, Oct 2026): on a day with a two-day 1st XI game, a player
 // picked for a ONE-day team on the 24th looked available for the two-day game
 // too, because nothing on the card showed that he is away the following weekend.
-// Checks: a card whose weeks are not both a plain yes carries W1 and W2 chips in
-// each week's colour; a player free for both weeks carries none; the one-day
-// team's card is not marked OUT (he IS free that day); the shared pool judges
+// Checks: a card whose weekends differ says which one in plain coloured text
+// ("W2 OUT", "W2 ?"), never a pill and never for "no answer yet"; a player free
+// for both weekends carries nothing; the one-day team's card has no separate
+// OUT tag (he IS free that day); the shared pool judges
 // "today" (W1) so a two-day team's worse combined status does not mark him OUT
 // there; dropping him into the two-day team warns "unavailable for week 2"; the
 // two-day column says so; a day with no two-day game has none of it.
@@ -30,11 +31,11 @@ const F1 = '00000000-0000-4000-8000-0000000000f1'   // two-day 1st XI
 const F2 = '00000000-0000-4000-8000-0000000000f2'   // one-day 2nd XI
 const F3 = '00000000-0000-4000-8000-0000000000f3'   // one-day, another day (control)
 const pid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
-const JACK = 5, FREE = 6, W1OUT = 7, W2NONE = 8
+const JACK = 5, FREE = 6, W1OUT = 7, W2NONE = 8, W2MAYBE = 11
 const json = (r, body, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
 
 // Per-player answers: [W1, W2].
-const WEEKS = { [JACK]: ['AVAILABLE', 'UNAVAILABLE'], [FREE]: ['AVAILABLE', 'AVAILABLE'], [W1OUT]: ['UNAVAILABLE', 'AVAILABLE'], [W2NONE]: ['AVAILABLE', 'NO_RESPONSE'] }
+const WEEKS = { [JACK]: ['AVAILABLE', 'UNAVAILABLE'], [FREE]: ['AVAILABLE', 'AVAILABLE'], [W1OUT]: ['UNAVAILABLE', 'AVAILABLE'], [W2NONE]: ['AVAILABLE', 'NO_RESPONSE'], [W2MAYBE]: ['AVAILABLE', 'MAYBE'] }
 const RANK = { UNAVAILABLE: 0, NO_RESPONSE: 1, MAYBE: 2, AVAILABLE: 3 }
 const worst = (a) => a.reduce((x, s) => (RANK[s] < RANK[x] ? s : x), 'AVAILABLE')
 
@@ -91,8 +92,10 @@ const run = async () => {
   const col = (fid) => page.locator(`[data-team-col="${fid}"]`)
   const cardIn = (fid, n) => col(fid).locator(`[data-player-card="${pid(n)}"]`)
   const poolCard = (n) => page.locator(`[data-pool-col] [data-player-card="${pid(n)}"]`)
-  const chips = (loc) => loc.locator('[data-week-chip]')
-  const chipStatuses = async (loc) => (await chips(loc).evaluateAll((els) => els.map((e) => `${e.getAttribute('data-week-chip')}:${e.getAttribute('data-status')}`)))
+  const flags = (loc) => loc.locator('[data-week-flag]')
+  const flagText = async (loc) => ((await flags(loc).count()) ? (await flags(loc).first().innerText({ timeout: 1500 })).trim() : '')
+  // The plain OUT tag, once any "W2 OUT" flag is set aside.
+  const hasPlainOut = (t) => /\bOUT\b/.test(String(t).replace(/W\d OUT/g, ''))
   const text = async (loc) => (await loc.count() ? (await loc.first().innerText({ timeout: 2000 })).replace(/\s+/g, ' ') : '<absent>')
 
   console.log('\n# a day with a two-day game')
@@ -101,27 +104,26 @@ const run = async () => {
   await page.waitForTimeout(400)
 
   ok('the two-day column says it is played over two weekends', /two-day/i.test(await text(col(F1).locator('[data-two-day-header]'))), await text(col(F1).locator('[data-two-day-header]')))
-  ok('...and names both dates', /W1/.test(await text(col(F1).locator('[data-two-day-header]'))) && /W2/.test(await text(col(F1).locator('[data-two-day-header]'))))
+  ok('...and names both dates', /\b18\b/.test(await text(col(F1).locator('[data-two-day-header]'))) && /\b25\b/.test(await text(col(F1).locator('[data-two-day-header]'))), await text(col(F1).locator('[data-two-day-header]')))
   ok('control: the one-day column has no such line', (await col(F2).locator('[data-two-day-header]').count()) === 0)
   ok('a legend explains W1 and W2', (await page.locator('[data-week-legend]').count()) === 1)
 
   const jackInOneDay = cardIn(F2, JACK)
   ok('Jack is in the one-day team', (await jackInOneDay.count()) === 1)
-  const st = await chipStatuses(jackInOneDay)
-  ok('his one-day card shows W1 available and W2 unavailable', JSON.stringify(st) === JSON.stringify(['W1:AVAILABLE', 'W2:UNAVAILABLE']), JSON.stringify(st))
-  ok('...in each week\'s colour (W2 red, W1 green)', await jackInOneDay.evaluate((el) => {
-    const q = (w) => el.querySelector(`[data-week-chip="${w}"]`)
-    if (!q('W1') || !q('W2')) return false
-    return getComputedStyle(q('W2')).color !== getComputedStyle(q('W1')).color
-  }))
-  ok('...and he is NOT marked OUT there (he is free that day)', !/\bOUT\b/.test(await text(jackInOneDay)), await text(jackInOneDay))
-  ok('the chip tooltip names the weeks and dates', /W2 .*Unavailable/.test((await jackInOneDay.locator('[data-week-chips]').getAttribute('title', { timeout: 1500 }).catch(() => '')) || ''))
-  ok('a player free both weeks has no chips', (await chips(poolCard(FREE)).count()) === 0)
-  const stOut = await chipStatuses(poolCard(W1OUT))
-  ok('a player away this week but free next has both chips', JSON.stringify(stOut) === JSON.stringify(['W1:UNAVAILABLE', 'W2:AVAILABLE']), JSON.stringify(stOut))
-  ok('...and is OUT in the pool (today)', /\bOUT\b/.test(await text(poolCard(W1OUT))))
-  const stNone = await chipStatuses(poolCard(W2NONE))
-  ok('no answer for week 2 shows a W2 chip too', JSON.stringify(stNone) === JSON.stringify(['W1:AVAILABLE', 'W2:NO_RESPONSE']), JSON.stringify(stNone))
+  ok('his one-day card says "W2 OUT"', (await flagText(jackInOneDay)) === 'W2 OUT', await flagText(jackInOneDay))
+  ok('...in red, as plain text (no pill, no button, not clickable-looking)', await jackInOneDay.locator('[data-week-flag]').evaluate((el) => {
+    const cs = getComputedStyle(el)
+    return el.tagName === 'SPAN' && !el.closest('button') && cs.cursor !== 'pointer' && cs.backgroundColor === 'rgba(0, 0, 0, 0)' && cs.borderTopWidth === '0px'
+  }, null, { timeout: 1500 }).catch(() => false))
+  ok('...and no separate OUT tag on top of it (he is free that day)', !hasPlainOut(await text(jackInOneDay)), await text(jackInOneDay))
+  const tip = (await jackInOneDay.locator('[data-week-flag]').getAttribute('title', { timeout: 1500 }).catch(() => '')) || ''
+  ok('the tooltip names both weeks and dates', /Week 2 .*Unavailable/.test(tip) && /Week 1 .*Available/.test(tip), tip)
+  ok('a player free both weeks has no flag', (await flags(poolCard(FREE)).count()) === 0)
+  ok('a player away this week but free next says "W1 OUT"', (await flagText(poolCard(W1OUT))) === 'W1 OUT', await flagText(poolCard(W1OUT)))
+  ok('a maybe for week 2 says "W2 ?"', (await flagText(poolCard(W2MAYBE))) === 'W2 ?', await flagText(poolCard(W2MAYBE)))
+  ok('no answer for week 2 yet is NOT flagged (that is everyone before it is collected)', (await flags(poolCard(W2NONE)).count()) === 0)
+  ok('only the three players with something to say are flagged', (await page.locator('[data-week-flag]').count()) === 3, String(await page.locator('[data-week-flag]').count()))
+  ok('no pill-shaped W1/W2 chips remain', (await page.locator('[data-week-chip]').count()) === 0)
   await page.screenshot({ path: join(SHOTS, 'whiteboard_two_day.png') })
 
   console.log('\n# the shared pool judges today')
@@ -131,8 +133,8 @@ const run = async () => {
   await col(F2).locator(`[data-player-card="${pid(JACK)}"] button[aria-label^="Remove"]`).click({ force: true, timeout: 3000 }).catch(() => {})
   await page.waitForTimeout(300)
   ok('Jack is in the pool', (await poolCard(JACK).count()) === 1)
-  ok('...not marked OUT (free today)', !/\bOUT\b/.test(await text(poolCard(JACK))), await text(poolCard(JACK)))
-  ok('...and still carries W1 / W2', JSON.stringify(await chipStatuses(poolCard(JACK))) === JSON.stringify(['W1:AVAILABLE', 'W2:UNAVAILABLE']))
+  ok('...not marked plain OUT (free today)', !hasPlainOut(await text(poolCard(JACK))), await text(poolCard(JACK)))
+  ok('...and still says "W2 OUT"', (await flagText(poolCard(JACK))) === 'W2 OUT', await flagText(poolCard(JACK)))
 
   console.log('\n# dropping him into the two-day team')
   const centre = async (loc) => { const b = await loc.boundingBox(); return b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null }
@@ -144,7 +146,7 @@ const run = async () => {
   await page.waitForTimeout(500)
   ok('he lands in the two-day team', (await cardIn(F1, JACK).count()) === 1)
   ok('the warning names the week he is away', /unavailable for week 2/i.test(await page.locator('body').innerText()), (await page.locator('body').innerText()).slice(0, 200))
-  ok('in the two-day team he reads OUT (the worse of both weeks)', /\bOUT\b/.test(await text(cardIn(F1, JACK))), await text(cardIn(F1, JACK)))
+  ok('in the two-day team the card says "W2 OUT"', (await flagText(cardIn(F1, JACK))) === 'W2 OUT', await text(cardIn(F1, JACK)))
 
   console.log('\n# the second weekend shows the same game, linked')
   const tabs = await page.locator('[data-day]').evaluateAll((els) => els.map((e) => e.getAttribute('data-day')))
@@ -153,17 +155,17 @@ const run = async () => {
   await page.waitForTimeout(600)
   ok('the two-day 1st XI is a column on the week 2 tab', (await col(F1).count()) === 1)
   ok('control: the one-day 2nd XI from week 1 is not', (await col(F2).count()) === 0)
-  ok('it says it is week 2 and when it started', /week 2 of 2, started/i.test(await text(col(F1).locator('[data-two-day-header]'))), await text(col(F1).locator('[data-two-day-header]')))
+  ok('it says it is week 2 and when it started', /week 2 of 2, from/i.test(await text(col(F1).locator('[data-two-day-header]'))), await text(col(F1).locator('[data-two-day-header]')))
   ok('players already in it are in the column, not the pool (they are busy in week 2)', (await poolCard(1).count()) === 0 && (await cardIn(F1, 1).count()) === 1)
   ok('a player away in week 2 reads OUT in the week 2 pool', (await poolCard(JACK).count()) === 1 && /\bOUT\b/.test(await text(poolCard(JACK))), await text(poolCard(JACK)))
-  ok('a player away in week 1 only is NOT out in the week 2 pool', !/\bOUT\b/.test(await text(poolCard(W1OUT))), await text(poolCard(W1OUT)))
+  ok('a player away in week 1 only is NOT out in the week 2 pool', !hasPlainOut(await text(poolCard(W1OUT))), await text(poolCard(W1OUT)))
   await page.screenshot({ path: join(SHOTS, 'whiteboard_week2.png') })
 
   console.log('\n# control: a day with no two-day game')
   await page.locator('[data-day]').last().click()
   await page.waitForTimeout(500)
   ok('no legend', (await page.locator('[data-week-legend]').count()) === 0)
-  ok('no chips anywhere', (await page.locator('[data-week-chip]').count()) === 0)
+  ok('no flags anywhere', (await page.locator('[data-week-flag]').count()) === 0)
 
   await browser.close()
   console.log(`\n${PASS.length} passed, ${FAIL.length} failed`)

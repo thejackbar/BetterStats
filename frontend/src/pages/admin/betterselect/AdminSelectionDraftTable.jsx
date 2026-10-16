@@ -28,7 +28,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { availRank, AVAILABILITY } from '../../../lib/availability'
 import { Icon, Avatar, Btn, Tag, RuleTags, JuniorsToggle, playedWithinYears } from './ui'
 import { DnD, useDrag } from './selectionDnd'
-import { nameMatches, roleLine, spark, formMeta, normGender, weekChipsNeeded, unavailableWeeksText, gameDatesLabel, fixtureTabs } from './selectionMeta'
+import { nameMatches, roleLine, spark, formMeta, normGender, weekFlagParts, unavailableWeeksText, gameDatesLabel, fixtureTabs } from './selectionMeta'
 import { xiCompliance, isBlocked } from './selectionRules'
 import { confirmSig, restoreDraft } from './selectionDraft'
 import { sortTeams, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
@@ -38,6 +38,7 @@ import usePersistedState from '../../../lib/usePersistedState'
 
 const DRAFT_DELAY_MS = 600
 const DRAFT_RETRY_MS = 5000
+const shortDate = (iso) => { try { return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) } catch { return iso } }
 const tint = (token, pct) => `color-mix(in srgb, ${token} ${pct}%, transparent)`
 
 const sigOf = (c) => JSON.stringify([c.slots, c.cap, c.wk])
@@ -85,29 +86,23 @@ function buildCol(f, d, dr, fallbackSize) {
   return { fid: f.id, fx: f, data: d, poolById, size, min: d.team_min || 0, slots, cap, wk, demo, baseSig, fromDraft }
 }
 
-// ── W1 / W2 ─────────────────────────────────────────────────────────────────
-// A two-day game is played over two weekends, and a player answers each one. On a
-// day with a two-day game every card whose weeks are not both a plain yes carries
-// a W1 and a W2 chip in that week's colour, so someone free for the one-day game
-// today but away next week reads as "W1 only", not as available for the lot.
-function WeekChips({ days, tight }) {
-  if (!weekChipsNeeded(days)) return null
-  const text = days.map((d, i) => `W${i + 1} ${gameDatesLabel(d.date)}: ${(AVAILABILITY[d.status] || AVAILABILITY.NO_RESPONSE).label}`).join('\n')
+// ── Which weekend ───────────────────────────────────────────────────────────
+// A two-day game is played over two weekends and a player answers each. Beside a
+// name, plain coloured text says which weekend is the problem: "W2 OUT" (red) or
+// "W2 ?" (amber), the same quiet style as the OUT tag. Nothing is drawn for a
+// player who has not answered a weekend yet, or whose weekends match.
+function weekFlagText(days) {
+  return weekFlagParts(days).map((w) => `W${w.week} ${w.status === 'UNAVAILABLE' ? 'OUT' : '?'}`).join(' ')
+}
+function WeekFlag({ days }) {
+  const parts = weekFlagParts(days)
+  if (!parts.length) return null
+  const tip = days.map((d, i) => `Week ${i + 1} (${gameDatesLabel(d.date)}): ${(AVAILABILITY[d.status] || AVAILABILITY.NO_RESPONSE).label}`).join('\n')
+  const worst = parts.some((w) => w.status === 'UNAVAILABLE') ? 'UNAVAILABLE' : 'MAYBE'
   return (
-    <span data-week-chips title={text} aria-label={text} className="inline-flex items-center gap-0.5 shrink-0">
-      {days.map((d, i) => {
-        const m = AVAILABILITY[d.status] || AVAILABILITY.NO_RESPONSE
-        const none = d.status === 'NO_RESPONSE'
-        return (
-          <span key={d.date} data-week-chip={`W${i + 1}`} data-status={d.status}
-            className={`font-mono font-bold rounded px-1 ${tight ? 'text-[8.5px]' : 'text-[9.5px]'} leading-[15px]`}
-            style={{
-              color: none ? 'var(--pb-faint)' : m.cssVar,
-              background: tint(none ? 'var(--pb-faintest)' : m.cssVar, none ? 20 : 15),
-              textDecoration: d.status === 'UNAVAILABLE' ? 'line-through' : undefined,
-            }}>W{i + 1}</span>
-        )
-      })}
+    <span data-week-flag title={tip} className="font-mono text-[9.5px] font-semibold shrink-0 cursor-default"
+      style={{ color: AVAILABILITY[worst].cssVar }}>
+      {weekFlagText(days)}
     </span>
   )
 }
@@ -140,8 +135,10 @@ function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) 
           {isCap && <Tag>C</Tag>}{isWk && <Tag tone="amber">WK</Tag>}
           {alsoIn && <Tag tone="amber" title={`Also named in ${alsoIn}`}>×2</Tag>}
           <RuleTags player={p} />
-          {out && <span className="font-mono text-[9.5px] font-semibold shrink-0" style={{ color: meta.cssVar }}>OUT</span>}
-          <WeekChips days={ctx.weekByPlayer[p.id]} tight={tight} />
+          {/* "W2 OUT" says more than "OUT" where a weekend is the reason. */}
+          {weekFlagParts(ctx.weekByPlayer[p.id]).length > 0
+            ? <WeekFlag days={ctx.weekByPlayer[p.id]} />
+            : out && <span className="font-mono text-[9.5px] font-semibold shrink-0" style={{ color: meta.cssVar }}>OUT</span>}
         </div>
         {!tight && (
           <div className="flex items-center gap-1.5 min-w-0">
@@ -222,10 +219,10 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
           {oppLabelOf(fx)}{fx.start_time ? ` · ${fx.start_time}` : ''}
         </div>
         {fx.end_on && fx.end_on > fx.played_on && (
-          <div className="text-[11px] font-semibold truncate" style={{ color: 'var(--pb-amber)' }} data-two-day-header title="Played over two weekends. W1 and W2 on a card are each player's answer for that weekend.">
+          <div className="text-[11px] font-semibold truncate" style={{ color: 'var(--pb-amber)' }} data-two-day-header title="Played over two weekends. A W1 or W2 tag beside a name is that player's answer for that weekend.">
             {ctx.day === fx.end_on
-              ? `Two-day · week 2 of 2, started ${gameDatesLabel(fx.played_on)}`
-              : `Two-day · W1 ${gameDatesLabel(fx.played_on)} + W2 ${gameDatesLabel(fx.end_on)}`}
+              ? `Two-day · week 2 of 2, from ${shortDate(fx.played_on)}`
+              : `Two-day · ${shortDate(fx.played_on)} + ${shortDate(fx.end_on)}`}
           </div>
         )}
         <div className="flex flex-wrap items-center gap-1 mt-1 min-h-[22px]">
@@ -875,7 +872,7 @@ export default function AdminSelectionDraftTable() {
           </p>
           {Object.keys(weekByPlayer).length > 0 && (
             <p className="text-[12px] text-pb-faint mt-0.5" data-week-legend>
-              This weekend has a two-day game. <b className="font-mono">W1</b> and <b className="font-mono">W2</b> on a card are that player's answer for each weekend, shown when either is not a yes.
+              This weekend has a two-day game. A red <b className="font-mono">W2 OUT</b> beside a name means that player is away that weekend of it; amber <b className="font-mono">?</b> is a maybe.
             </p>
           )}
         </div>
