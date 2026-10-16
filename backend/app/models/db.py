@@ -1914,6 +1914,13 @@ class NetSession(Base):
     # carries no net column — the default lives in the most recent session).
     settings = Column(JSONB, nullable=True)
     status = Column(Text, nullable=False, server_default="active")  # active | done
+    # This session's own check-in link (migration 335): a QR code printed for it
+    # checks people into it alone, where the club-wide link joins every live
+    # session. NULL until first asked for.
+    checkin_token = Column(Text, nullable=True)
+    # Squads this session is for; NULL/empty = everyone. Narrows the self check-in
+    # list reached by this session's own link.
+    squad_team_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
     # Bumped by every write that changes what the live screen shows, so a
     # second device polling with the version it last saw is told "nothing has
     # changed" in two fields instead of re-reading the whole session. Always

@@ -228,6 +228,8 @@ class SessionCreate(BaseModel):
     label: Optional[str] = None
     notes: Optional[str] = None
     settings: Optional[dict] = None
+    # The squads the session is for; omitted or empty = everyone.
+    squad_team_ids: Optional[list[str]] = None
 
 
 class SessionUpdate(BaseModel):
@@ -236,6 +238,9 @@ class SessionUpdate(BaseModel):
     notes: Optional[str] = None
     settings: Optional[dict] = None
     status: Optional[str] = None
+    # Sent to change it: an explicit null or empty list clears it (everyone),
+    # while leaving it out leaves the session's squads alone.
+    squad_team_ids: Optional[list[str]] = None
 
 
 class AttendeeAdd(BaseModel):
@@ -396,8 +401,39 @@ async def _live_payload(db: AsyncSession, s: NetSession) -> dict:
         "attendee_count": len(attendees),
         "batted_count": sum(1 for a in attendees if a["batted"]),
         "sitting_out_count": sum(1 for a in attendees if not a["bats"]),
+        # The squads this session is for (empty = everyone) and its own
+        # check-in link, when it has one yet (older sessions get theirs the
+        # first time the link is asked for).
+        "squad_team_ids": [str(t) for t in (s.squad_team_ids or [])],
+        "checkin_path": f"/nets-checkin/{s.checkin_token}" if s.checkin_token else None,
         "created_at": s.created_at.isoformat() if s.created_at else None,
     }
+
+
+async def _club_squad_ids(db: AsyncSession, club_id, raw) -> Optional[list[uuid.UUID]]:
+    """The given team ids that really are this club's, or None for "everyone".
+
+    A stray id from another club is dropped rather than stored, so a session can
+    never narrow its check-in list to somebody else's squad."""
+    ids: list[uuid.UUID] = []
+    for v in raw or []:
+        try:
+            ids.append(uuid.UUID(str(v)))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    if not ids:
+        return None
+    rows = await db.execute(
+        text("SELECT id FROM teams WHERE organisation_id = :org AND id = ANY(CAST(:ids AS uuid[]))"),
+        {"org": club_id, "ids": ids},
+    )
+    owned = {r[0] for r in rows.fetchall()}
+    kept = [i for i in ids if i in owned]
+    return kept or None
+
+
+def new_checkin_token() -> str:
+    return secrets.token_urlsafe(18)
 
 
 async def live_sessions(db: AsyncSession, club_id) -> list[NetSession]:
@@ -527,8 +563,24 @@ async def net_roster(
     players = await club_player_roster(db, club)
     dormant = await dormant_player_ids(db, club)
     cards = [_player_card(p, p.id in dormant) for p in players]
+    # Which squads each player is in, so check-in can be done squad by squad.
+    mem = await db.execute(
+        text("SELECT player_id, team_id FROM team_members WHERE organisation_id = :org"),
+        {"org": club.id},
+    )
+    by_player: dict[str, list[str]] = {}
+    for pid, tid in mem.fetchall():
+        by_player.setdefault(str(pid), []).append(str(tid))
+    for c in cards:
+        c["squad_team_ids"] = by_player.get(c["id"], [])
+    teams = await db.execute(
+        text("SELECT id, COALESCE(NULLIF(short_name, ''), name), name FROM teams "
+             "WHERE organisation_id = :org AND COALESCE(is_active, true) ORDER BY sequence NULLS LAST, name"),
+        {"org": club.id},
+    )
     return {
         "players": cards,
+        "squads": [{"id": str(i), "label": lbl, "name": nm} for i, lbl, nm in teams.fetchall()],
         # What the screen shows before anyone searches, so it can say how many
         # more names are behind the search box rather than implying the squad
         # is the whole club.
@@ -625,6 +677,10 @@ async def create_session(
         live_state=_default_live(seed),
         status="active",
         created_by=user.id,
+        # Its own link from the start: a QR printed for this session checks
+        # people into this session only.
+        checkin_token=new_checkin_token(),
+        squad_team_ids=await _club_squad_ids(db, club.id, body.squad_team_ids),
     )
     db.add(s)
     await db.commit()
@@ -684,6 +740,8 @@ async def update_session(
         s.label = body.label or None
     if body.notes is not None:
         s.notes = body.notes or None
+    if "squad_team_ids" in body.model_fields_set:
+        s.squad_team_ids = await _club_squad_ids(db, club.id, body.squad_team_ids)
     if body.settings is not None:
         settings = _clean_settings(body.settings)
         s.settings = settings
@@ -1325,6 +1383,50 @@ async def regenerate_checkin_link(
     await db.commit()
     await db.refresh(club)
     return await _checkin_link_payload(db, club)
+
+
+# ── One session's own link ───────────────────────────────────────────────────
+async def _session_link_payload(club: Organisation, s: NetSession) -> dict:
+    return {
+        "session_id": str(s.id),
+        "enabled": bool(club.net_checkin_enabled),
+        "token": s.checkin_token,
+        "path": f"/nets-checkin/{s.checkin_token}" if s.checkin_token else None,
+        "squad_team_ids": [str(t) for t in (s.squad_team_ids or [])],
+    }
+
+
+@router.get("/sessions/{session_id}/checkin-link")
+async def get_session_checkin_link(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """This session's own link. A session made before per-session links existed
+    gets its token the first time it is asked for, then keeps it."""
+    s = await _owned_session(db, session_id, club.id)
+    if not s.checkin_token:
+        s.checkin_token = new_checkin_token()
+        await db.commit()
+        await db.refresh(s)
+    return await _session_link_payload(club, s)
+
+
+@router.post("/sessions/{session_id}/checkin-link/regenerate")
+async def regenerate_session_checkin_link(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """A new token for this session alone. Its printed QR stops working; the
+    club-wide link and every other session's link are untouched."""
+    s = await _owned_session(db, session_id, club.id)
+    s.checkin_token = new_checkin_token()
+    await db.commit()
+    await db.refresh(s)
+    return await _session_link_payload(club, s)
 
 
 # ── New people who scanned in ────────────────────────────────────────────────

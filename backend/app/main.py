@@ -4504,6 +4504,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _SELECTION_LOCK_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 335: a net session's own check-in link and the squads it is
+        # for. Same one-copy rule: this and alembic's 335 both run
+        # services/net_session_link_ddl.STATEMENTS.
+        from app.services.net_session_link_ddl import STATEMENTS as _NET_SESSION_LINK_DDL
+        for _stmt in _NET_SESSION_LINK_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.
