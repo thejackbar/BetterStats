@@ -32,6 +32,18 @@ export function weekSplitLine(p) {
   if (d.every((x) => x.status === d[0].status)) return ''
   return d.map((x, i) => `Week ${i + 1} ${WEEK_WORD[x.status] || x.status}`).join(' · ')
 }
+// Whether a player's two weeks are worth drawing as W1 / W2 chips: only when at
+// least one week is not a plain yes. A player free both weeks needs no marker.
+export function weekChipsNeeded(days) {
+  return Array.isArray(days) && days.length > 1 && !days.every((d) => d.status === 'AVAILABLE')
+}
+// " for week 2" / " for weeks 1 and 2" for the weeks marked UNAVAILABLE, '' when none.
+export function unavailableWeeksText(days) {
+  if (!Array.isArray(days)) return ''
+  const w = days.map((d, i) => (d.status === 'UNAVAILABLE' ? i + 1 : 0)).filter(Boolean)
+  if (!w.length) return ''
+  return w.length === days.length && w.length > 1 ? ` for weeks ${w.join(' and ')}` : ` for week ${w.join(' and ')}`
+}
 // "Sat 24 Oct" or, for a two-day game, "Sat 24 Oct + Sat 31 Oct".
 export function gameDatesLabel(playedOn, endOn) {
   const f = (iso) => {

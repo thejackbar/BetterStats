@@ -28,7 +28,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { availRank, AVAILABILITY } from '../../../lib/availability'
 import { Icon, Avatar, Btn, Tag, RuleTags, JuniorsToggle, playedWithinYears } from './ui'
 import { DnD, useDrag } from './selectionDnd'
-import { nameMatches, roleLine, spark, formMeta, normGender } from './selectionMeta'
+import { nameMatches, roleLine, spark, formMeta, normGender, weekChipsNeeded, unavailableWeeksText, gameDatesLabel } from './selectionMeta'
 import { xiCompliance, isBlocked } from './selectionRules'
 import { confirmSig, restoreDraft } from './selectionDraft'
 import { sortTeams, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
@@ -85,6 +85,33 @@ function buildCol(f, d, dr, fallbackSize) {
   return { fid: f.id, fx: f, data: d, poolById, size, min: d.team_min || 0, slots, cap, wk, demo, baseSig, fromDraft }
 }
 
+// ── W1 / W2 ─────────────────────────────────────────────────────────────────
+// A two-day game is played over two weekends, and a player answers each one. On a
+// day with a two-day game every card whose weeks are not both a plain yes carries
+// a W1 and a W2 chip in that week's colour, so someone free for the one-day game
+// today but away next week reads as "W1 only", not as available for the lot.
+function WeekChips({ days, tight }) {
+  if (!weekChipsNeeded(days)) return null
+  const text = days.map((d, i) => `W${i + 1} ${gameDatesLabel(d.date)}: ${(AVAILABILITY[d.status] || AVAILABILITY.NO_RESPONSE).label}`).join('\n')
+  return (
+    <span data-week-chips title={text} aria-label={text} className="inline-flex items-center gap-0.5 shrink-0">
+      {days.map((d, i) => {
+        const m = AVAILABILITY[d.status] || AVAILABILITY.NO_RESPONSE
+        const none = d.status === 'NO_RESPONSE'
+        return (
+          <span key={d.date} data-week-chip={`W${i + 1}`} data-status={d.status}
+            className={`font-mono font-bold rounded px-1 ${tight ? 'text-[8.5px]' : 'text-[9.5px]'} leading-[15px]`}
+            style={{
+              color: none ? 'var(--pb-faint)' : m.cssVar,
+              background: tint(none ? 'var(--pb-faintest)' : m.cssVar, none ? 20 : 15),
+              textDecoration: d.status === 'UNAVAILABLE' ? 'line-through' : undefined,
+            }}>W{i + 1}</span>
+        )
+      })}
+    </span>
+  )
+}
+
 // ── A player card (a team's slot, and the pool) ──────────────────────────────
 function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) {
   const fmt = useAdminNameFormat()
@@ -114,6 +141,7 @@ function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) 
           {alsoIn && <Tag tone="amber" title={`Also named in ${alsoIn}`}>×2</Tag>}
           <RuleTags player={p} />
           {out && <span className="font-mono text-[9.5px] font-semibold shrink-0" style={{ color: meta.cssVar }}>OUT</span>}
+          <WeekChips days={ctx.weekByPlayer[p.id]} tight={tight} />
         </div>
         {!tight && (
           <div className="flex items-center gap-1.5 min-w-0">
@@ -193,6 +221,11 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
         <div className="text-[11.5px] text-pb-faint truncate" title={`${oppLabelOf(fx)}${fx.start_time ? ' · ' + fx.start_time : ''}${fx.venue ? ' · ' + fx.venue : ''}`}>
           {oppLabelOf(fx)}{fx.start_time ? ` · ${fx.start_time}` : ''}
         </div>
+        {fx.end_on && fx.end_on > fx.played_on && (
+          <div className="text-[11px] font-semibold truncate" style={{ color: 'var(--pb-amber)' }} data-two-day-header title="Played over two weekends. W1 and W2 on a card are each player's answer for that weekend.">
+            Two-day · W1 {gameDatesLabel(fx.played_on)} + W2 {gameDatesLabel(fx.end_on)}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-1 mt-1 min-h-[22px]">
           {flags.map((f, i) => (
             <span key={i} title={f.title} className="px-1.5 py-px rounded-full font-display font-semibold text-[10.5px] whitespace-nowrap"
@@ -492,8 +525,11 @@ export default function AdminSelectionDraftTable() {
   const leave = (c, id) => ({ cap: c.cap === id ? null : c.cap, wk: c.wk === id ? null : c.wk })
   const nameOf = (id) => merged[id]?.display_name || 'Player'
 
-  const warnPick = (p) => {
-    if (p.availability === 'UNAVAILABLE') toastRef.current.info(`${p.display_name} is marked unavailable. Adding anyway.`)
+  // Judged on the team they are going INTO: the pool card shows today only, but a
+  // two-day team's own answer is the worse of both weeks.
+  const warnPick = (p, fid) => {
+    const t = (fid && colsRef.current?.[fid]?.poolById?.[p.id]) || p
+    if (t.availability === 'UNAVAILABLE') toastRef.current.info(`${p.display_name} is marked unavailable${unavailableWeeksText(t.availability_days)}. Adding anyway.`)
   }
 
   const placeIn = (fid, idx, id) => {
@@ -513,7 +549,7 @@ export default function AdminSelectionDraftTable() {
       slots[idx] = id
       return put(prev, fid, { slots: tidySlots(slots, c.size), ...(displaced ? leave(c, displaced) : {}) })
     })
-    warnPick(p)
+    warnPick(p, fid)
   }
 
   const removeAt = (fid, idx) => edit((prev) => {
@@ -556,7 +592,7 @@ export default function AdminSelectionDraftTable() {
       return next
     })
     const p = merged[x]
-    if (p && fromFid !== toFid) warnPick(p)
+    if (p && fromFid !== toFid) warnPick(p, toFid)
   }
 
   const firstOpen = (fid) => {
@@ -621,7 +657,23 @@ export default function AdminSelectionDraftTable() {
     order.forEach((f) => (cols?.[f]?.slots || []).forEach((id) => id && s.add(id)))
     return s
   }, [cols, order])
-  const unnamed = useMemo(() => Object.values(merged).filter((p) => !named.has(p.id) && !p.is_inactive), [merged, named])
+  // Each player's two weeks, from any team on the day that is a two-day game
+  // (its pool carries `availability_days`). Empty on a day with no such game.
+  const weekByPlayer = useMemo(() => {
+    const m = {}
+    order.forEach((f) => {
+      const c = cols?.[f]
+      if (!c || !(c.fx?.end_on && c.fx.end_on > c.fx.played_on)) return
+      Object.values(c.poolById || {}).forEach((p) => { if (!m[p.id] && Array.isArray(p.availability_days)) m[p.id] = p.availability_days })
+    })
+    return m
+  }, [cols, order])
+  // The shared pool answers "can they play TODAY": the first team's pool may be
+  // the two-day game, whose status is the worse of both weeks, which would mark
+  // a player OUT for one-day teams they are free for. Today is W1; W2 is the chips.
+  const unnamed = useMemo(() => Object.values(merged)
+    .filter((p) => !named.has(p.id) && !p.is_inactive)
+    .map((p) => (weekByPlayer[p.id] ? { ...p, availability: weekByPlayer[p.id][0].status } : p)), [merged, named, weekByPlayer])
   // Offered only when the pool holds both: a control that can only answer "nobody" is worse than none.
   const showGender = useMemo(() => new Set(unnamed.map((p) => normGender(p.gender)).filter(Boolean)).size > 1, [unnamed])
   const pool = useMemo(() => {
@@ -797,7 +849,7 @@ export default function AdminSelectionDraftTable() {
 
   const ctx = {
     cols, order, merged, status, conflicts, canEdit, busy, activeFid, setActiveFid,
-    shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length, showGender,
+    shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length, showGender, weekByPlayer,
     filters: { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad, gender, setGender, showJuniors, setShowJuniors },
     tapPool, removeAt, toggleCap, toggleWk, confirmOne, discard, useTheirs, keepMine,
   }
@@ -810,6 +862,11 @@ export default function AdminSelectionDraftTable() {
           <p className="text-[13px] text-pb-dim mt-0.5">
             Every team for the day side by side. Drag a player from one team to another, or into and out of the pool. Changes save as drafts until you confirm.
           </p>
+          {Object.keys(weekByPlayer).length > 0 && (
+            <p className="text-[12px] text-pb-faint mt-0.5" data-week-legend>
+              Today has a two-day game. <b className="font-mono">W1</b> and <b className="font-mono">W2</b> on a card are that player's answer for each weekend, shown when either is not a yes.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Link to="/admin/betterselect/selection" className="inline-flex items-center gap-1.5 text-[12.5px] text-pb-faint hover:text-pb-accent font-display font-semibold">
