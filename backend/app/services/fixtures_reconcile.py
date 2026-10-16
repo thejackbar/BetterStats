@@ -18,6 +18,14 @@ longer lists, in this order:
      the row: keep it, set status CANCELLED, and let the club decide. A club's
      hand-typed work is never deleted by a sync.
 
+A fourth case sits outside that order: a synced fixture that is **not the
+club's at all**. A grade is a whole competition, and before fixtures were
+filtered by owning club a sync stored other clubs' games too ("North Beach v
+Scarborough" on North Perth's list). CA still lists those games, so they never
+look stale. ``find_foreign`` names them from the listing (both owning clubs
+named, neither ours) and they are removed, or cancelled when somebody has
+already picked an XI or recorded votes on one. They are never re-keyed.
+
 Only rows we can judge are touched. A grade whose match list could not be read
 (or came back empty, which a blip also looks like) is left alone, as are manual
 fixtures, past dates, and games CA still lists as completed, live or in any
@@ -134,39 +142,19 @@ def find_stale(
     return stale
 
 
-def find_foreign(
-    existing: Iterable[Fixture],
-    club_game_ids: set[str],
-    listing: dict,
-    today: date,
-) -> list[Fixture]:
-    """Synced fixtures dated today or later that CA still lists as UPCOMING in a
-    grade we read, but that are no longer one of THIS club's games.
+def find_foreign(existing: Iterable[Fixture], incoming_ids: set[str], listing: dict) -> list[Fixture]:
+    """Synced fixtures CA lists between two other clubs.
 
-    The club filter (``club_match.fixture_side``) used to accept any side whose
-    name began with the club's first word, so a neighbouring club's game in the
-    same grade could be stamped onto this club. Tightening the filter stops new
-    ones; this is what removes the ones already stored. ``club_game_ids`` is
-    every match this sync's filter kept, whatever its date, so a game CA merely
-    stopped dating is not mistaken for someone else's. Only UPCOMING games in a
-    grade whose list was read and was not empty are judged; anything else (live,
-    completed, an unfamiliar state, a grade that failed to load) is left alone.
+    Any date: a stored game of another club is wrong on the list whether it is
+    ahead or behind. Never a row this sync just confirmed as the club's own, and
+    not one already marked CANCELLED (kept for the work on it; settled).
     """
-    grades: dict = listing.get("grades") or {}
-    out: list[Fixture] = []
-    for f in existing:
-        if f.source != "grassroots" or not f.playhq_id or f.playhq_id in club_game_ids:
-            continue
-        if f.played_on is None or f.played_on < today:
-            continue
-        if (f.status or "").upper() == "CANCELLED" or not f.grade_id:
-            continue
-        states = grades.get(str(f.grade_id))
-        if states is None:
-            continue
-        if states.get(f.playhq_id) == "UPCOMING":
-            out.append(f)
-    return out
+    others = listing.get("others") or set()
+    return [
+        f for f in existing
+        if f.source == "grassroots" and f.playhq_id and f.playhq_id in others
+        and f.playhq_id not in incoming_ids and (f.status or "").upper() != "CANCELLED"
+    ]
 
 
 async def reconcile(
@@ -178,7 +166,6 @@ async def reconcile(
     listing: dict,
     today: date,
     derive_sides,
-    club_game_ids: Optional[set[str]] = None,
 ) -> ReconcileResult:
     """Re-key, remove or cancel stale synced fixtures. Does not commit.
 
@@ -188,23 +175,18 @@ async def reconcile(
     also taken out of that list's by-GUID view by the caller via the result.
     """
     result = ReconcileResult()
-    stale = find_stale(existing, incoming_ids, listing, today)
-    # Rows that belong to another club. Never re-keyed (they have no
-    # replacement here), only removed, or cancelled if a person worked on them.
-    foreign = find_foreign(existing, club_game_ids, listing, today) if club_game_ids is not None else []
+    foreign = find_foreign(existing, incoming_ids, listing)
     foreign_ids = {str(f.id) for f in foreign}
-    stale = stale + [f for f in foreign if str(f.id) not in {str(x.id) for x in stale}]
-    if not stale:
+    stale = [f for f in find_stale(existing, incoming_ids, listing, today) if str(f.id) not in foreign_ids]
+    if not stale and not foreign:
         return result
 
     by_gid: dict[str, Fixture] = {f.playhq_id: f for f in existing if f.playhq_id and f.source == "grassroots"}
-    work = await fixtures_with_work(db, list(stale) + [by_gid[g["id"]] for g in games if g.get("id") in by_gid])
+    work = await fixtures_with_work(db, list(stale) + foreign + [by_gid[g["id"]] for g in games if g.get("id") in by_gid])
 
     # --- 1. Re-key: pair a stale row with the one game CA lists in its place.
     stale_by_key: dict[tuple, list[Fixture]] = defaultdict(list)
     for f in stale:
-        if str(f.id) in foreign_ids:
-            continue
         stale_by_key[_row_key(f.grade_id, f.round, f.home_away, f.opponent_name)].append(f)
     games_by_key: dict[tuple, list[dict]] = defaultdict(list)
     for g in games:
@@ -240,8 +222,9 @@ async def reconcile(
         result.rekeyed.append(old)
         handled.add(str(old.id))
 
-    # --- 2 and 3. Whatever is left is no longer happening.
-    for f in stale:
+    # --- 2 and 3. Whatever is left is no longer happening, and another club's
+    # games were never the club's to have.
+    for f in foreign + stale:
         if str(f.id) in handled:
             continue
         if str(f.id) in work:

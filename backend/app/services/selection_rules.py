@@ -194,7 +194,21 @@ def club_config(org) -> dict:
         # the moment it is confirmed. Off until a club asks: it sends mail and
         # shares phone numbers (services/selection_notify).
         "notify_captain_on_confirm": raw.get("notify_captain_on_confirm") is True,
+        # A BetterComms template (Admin > Comms > Templates) the club wrote for
+        # the captain's email and for the players' email. Unset means the
+        # standard wording. Stored as the template's id; services/selection_notify
+        # looks it up on every send, so a deleted template falls back, loudly.
+        "captain_email_template_id": clean_template_id(raw.get("captain_email_template_id")),
+        "player_email_template_id": clean_template_id(raw.get("player_email_template_id")),
     }
+
+
+def clean_template_id(raw) -> Optional[str]:
+    """A template id as a canonical string, or None for anything unreadable."""
+    try:
+        return str(uuid.UUID(str(raw))) if raw else None
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def clean_age_basis(raw) -> dict:

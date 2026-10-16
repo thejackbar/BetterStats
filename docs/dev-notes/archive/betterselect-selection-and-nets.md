@@ -1470,3 +1470,12 @@ Asked for after the Gisborne round: MACs is the squad for the 1st and 2nd XI, th
 
 **Also in this release.** The Draft table became Selection Whiteboard with its own menu item.
 
+
+
+## Selection emails from a BetterComms template (v9.113.15)
+
+Request: when captains and selected players can be emailed from BetterSelect, let a club link that email to its own template in Admin.
+- Storage: two keys in `organisations.selection_rules_config`, `captain_email_template_id` and `player_email_template_id` (no migration). `selection_rules.club_config` reads them through `clean_template_id`; `PATCH /selection-rules/settings` validates with `model_fields_set` (absent leaves it, null or empty clears; 400 garbled, 402 without BetterComms, 404 for another club's or a Sales Workspace template).
+- Sending: `selection_notify.linked_template` resolves the template on every send; `render_template` fills `{{variables}}` (`SELECTION_VARIABLES`: first_name, club, team, opponent, match, date, time, when, venue, round, home_away, captain, side, team_sheet, note), escaping values in HTML, blanking any token left over, wrapping a fragment in the club shell with no unsubscribe line (operational mail) and sending a full document as is. `team_sheet` (phones) resolves only for the captain's email, `note` only for players. No subject on the template keeps the standard one. Deleted, empty, or no BetterComms means the standard email goes and the response carries `template_note`; the auto-send on Confirm uses the same path.
+- Screens: Selection rules > "Selection emails" card (`EmailTemplatesCard`, preview via `POST /selection-rules/email-templates/preview` with a made-up side); Admin > Comms > Templates shows Subject to every club and a selection variables panel; the Email dialog shows the template used or the fallback note.
+- Proof: `verify_foreign_fixtures_and_selection_templates.py` (real Postgres, control fails every template check), `frontend/verification/verify_selection_email_templates_browser.mjs` (16 checks, 390px, exact PATCH and preview bodies).

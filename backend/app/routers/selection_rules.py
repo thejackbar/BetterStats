@@ -24,10 +24,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
+from app.auth.modules import org_has_module
 from app.models.db import Organisation, User, get_db
 from app.routers.auth import get_current_club
 from app.services.side_size import valid_side_size
-from app.services import grade_labels, player_age, selection_rules as rules_svc
+from app.services import grade_labels, player_age, selection_notify, selection_rules as rules_svc
 
 router = APIRouter(prefix="/selection-rules", tags=["selection-rules"])
 
@@ -64,6 +65,11 @@ class SettingsBody(BaseModel):
     show_fees: Optional[bool] = None
     show_training: Optional[bool] = None
     notify_captain_on_confirm: Optional[bool] = None
+    # The BetterComms template each email uses. Absent leaves it alone; null or
+    # an empty string goes back to the standard wording (read through
+    # model_fields_set below).
+    captain_email_template_id: Optional[str] = None
+    player_email_template_id: Optional[str] = None
 
 
 async def _grade_options(db: AsyncSession, org_id) -> list[dict]:
@@ -111,6 +117,8 @@ def _settings_out(club: Organisation) -> dict:
         "show_fees": cfg["show_fees"],
         "show_training": cfg["show_training"],
         "notify_captain_on_confirm": cfg["notify_captain_on_confirm"],
+        "captain_email_template_id": cfg["captain_email_template_id"],
+        "player_email_template_id": cfg["player_email_template_id"],
     }
 
 
@@ -185,9 +193,91 @@ async def patch_settings(
         cfg["show_training"] = bool(body.show_training)
     if body.notify_captain_on_confirm is not None:
         cfg["notify_captain_on_confirm"] = bool(body.notify_captain_on_confirm)
+    for field in ("captain_email_template_id", "player_email_template_id"):
+        if field not in body.model_fields_set:
+            continue
+        raw = getattr(body, field)
+        if not (raw or "").strip():
+            cfg.pop(field, None)          # an explicit clear: the standard wording
+            continue
+        tid = rules_svc.clean_template_id(raw)
+        if tid is None:
+            raise HTTPException(status_code=400, detail="That is not a template.")
+        if not org_has_module(club, "comms"):
+            raise HTTPException(status_code=402, detail="Custom email templates need BetterComms.")
+        found = await db.scalar(
+            text("SELECT 1 FROM comms_templates WHERE id = :tid AND organisation_id = :org "
+                 "AND sales_template_key IS NULL"),
+            {"tid": uuid.UUID(tid), "org": club.id},
+        )
+        if not found:
+            raise HTTPException(status_code=404, detail="Template not found.")
+        cfg[field] = tid
     club.selection_rules_config = cfg or None
     await db.commit()
     return _settings_out(club)
+
+
+@router.get("/email-templates")
+async def email_templates(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """The club's BetterComms templates a selection email can be linked to, and
+    the variables they can use. Templates are written in Admin > Comms >
+    Templates; a club without BetterComms is told so rather than shown none.
+    The Sales Workspace's own templates are never offered."""
+    available = org_has_module(club, "comms")
+    rows = []
+    if available:
+        rows = (await db.execute(
+            text("SELECT id, name, subject FROM comms_templates "
+                 "WHERE organisation_id = :org AND sales_template_key IS NULL ORDER BY name"),
+            {"org": club.id},
+        )).mappings().all()
+    return {
+        "comms_available": available,
+        "templates": [{"id": str(r["id"]), "name": r["name"], "subject": r["subject"]} for r in rows],
+        "variables": selection_notify.SELECTION_VARIABLES,
+    }
+
+
+class TemplatePreviewBody(BaseModel):
+    template_id: str
+    to: str = "captain"
+
+
+@router.post("/email-templates/preview")
+async def preview_email_template(
+    body: TemplatePreviewBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """A template filled in with a made-up match and side, so a selector can see
+    the email before any real player does. Nothing is sent."""
+    if body.to not in selection_notify.TEMPLATE_KEY:
+        raise HTTPException(status_code=400, detail="Preview the captain's or the players' email.")
+    tid = rules_svc.clean_template_id(body.template_id)
+    row = None
+    if tid and org_has_module(club, "comms"):
+        row = (await db.execute(
+            text("SELECT id, name, subject, html FROM comms_templates "
+                 "WHERE id = :tid AND organisation_id = :org AND sales_template_key IS NULL"),
+            {"tid": uuid.UUID(tid), "org": club.id},
+        )).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Template not found.")
+    sheet = selection_notify.sample_sheet()
+    captain, other = sheet["players"][0], sheet["players"][1]
+    subject, html_doc, _text = selection_notify.render_template(
+        club, dict(row), sheet, to=body.to,
+        recipient=captain if body.to == "captain" else other,
+        captain_name=captain["name"],
+        message="Meet at the ground at 11:30 for a 12:30 start." if body.to == "players" else None,
+        default_subject="(your template has no subject, so the standard one is used)")
+    return {"subject": subject, "html": html_doc}
 
 
 def _scope_for(kind: str, raw) -> dict:

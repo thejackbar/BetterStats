@@ -391,7 +391,6 @@ async def sync_fixtures(
         listing=listing,
         today=today,
         derive_sides=lambda g: _derive_sides(g, club),
-        club_game_ids={str(g["id"]) for g in games if g.get("id")},
     )
     by_gid = {f.playhq_id: f for f in existing_rows if f.playhq_id and f.source == "grassroots"}
 

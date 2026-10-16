@@ -140,7 +140,7 @@ async def build_schema() -> None:
             for name, sql in stmts:
                 await conn.execute(text(f"DROP VIEW IF EXISTS {name} CASCADE"))
                 await conn.execute(text(sql.replace("OR REPLACE ", "")))
-        for mod in ("selection_draft_ddl", "selection_notice_ddl"):
+        for mod in ("selection_draft_ddl", "selection_notice_ddl", "selection_lock_ddl", "team_sides_ddl"):
             try:
                 for stmt in importlib.import_module(f"app.services.{mod}").STATEMENTS:
                     await conn.execute(text(stmt))

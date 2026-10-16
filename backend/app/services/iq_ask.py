@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import uuid
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -100,6 +101,14 @@ _SYSTEM = (
     "players in or around the 1st XI; a lower-grade player's strong record against "
     "this opponent is worth a mention as a possible promotion, never an automatic "
     "pick over the side's regulars.\n"
+    "- When the user asks about OUR side for a game ('the XI selected this weekend', "
+    "'our team', 'how do we win'), find the fixture with upcoming_fixtures, then call "
+    "our_selected_xi for the players actually picked. Never use current_squad or a "
+    "grade filter as the picked side: that is the whole club. Name the XI from "
+    "our_selected_xi, its strengths and weaknesses from balance, warnings and each "
+    "player's form and vs_opponent, then bring in opposition_report and the venue "
+    "record. If our_selected_xi says draft_only, tell the user the side is built but "
+    "not confirmed on the board; if not_selected, say nothing has been picked yet.\n"
     "- If opponent_danger_players says the dossier is still building, answer now "
     "from opposition_report and add that the deeper scout (their current-season "
     "form) will be ready if they ask again in a minute, or on the BetterIQ "
@@ -271,6 +280,15 @@ TOOLS = [
                 "fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"},
                 "opponent": {"type": "string", "description": "opponent club name (or opp_key)"},
             },
+        },
+    },
+    {
+        "name": "our_selected_xi",
+        "description": "OUR OWN picked side for ONE upcoming fixture: the XI confirmed on the BetterSelect board, in batting order, read straight from the saved selection. For each player: role, keeper, captain, bowling style, availability, last five scores and wickets, their record against THIS opponent (vs_opponent), and flags (unavailable, dormant, wrong grade). Also the side's balance (pace, spin, keeper, openers, all-rounders, left and right hand bats), warnings and a one-line verdict. Needs a fixture_id from upcoming_fixtures. Use it for 'the XI for this weekend', 'our side', 'how do we win', 'strengths and weaknesses of the team selected'. Do NOT stand in current_squad or a grade filter for the picked side: that is the whole club, not who is playing. If status is draft_only the selector has built a side but not confirmed it, say so; if not_selected nothing has been picked yet, say that.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"}},
+            "required": ["fixture_id"],
         },
     },
     {
@@ -832,6 +850,75 @@ def _trim_stats(d):
                                   "high_score", "wickets", "economy")}
 
 
+async def _tool_our_selected_xi(session, org_id, *, fixture_id=None):
+    if not fixture_id:
+        return {"error": "Pass a fixture_id from upcoming_fixtures."}
+    from app.models.db import Organisation
+    from app.services import iq_selection
+    club = await session.get(Organisation, org_id)
+    if club is None:
+        return {"error": "club not found"}
+    try:
+        uuid.UUID(str(fixture_id))
+    except ValueError:
+        return {"error": "That is not a fixture_id. Use one from upcoming_fixtures."}
+    d = await iq_selection.selection_analysis(session, club, str(fixture_id))
+    if d is None:
+        return {"error": "No such fixture for this club. Use a fixture_id from upcoming_fixtures."}
+    fx = d.get("fixture") or {}
+    head = {
+        "fixture_id": fx.get("fixture_id"), "date": fx.get("played_on"), "team": fx.get("team_name"),
+        "grade": fx.get("grade_name"), "opponent": fx.get("opponent_name"),
+        "home_away": fx.get("home_away"), "venue": fx.get("venue"),
+    }
+    players = d.get("players") or []
+    if not players:
+        # fixture_lineups is the CONFIRMED XI; the board autosaves a working side
+        # to selection_drafts. Say which one exists rather than call it empty.
+        draft = (await session.execute(
+            text("SELECT draft FROM selection_drafts WHERE fixture_id = CAST(:f AS uuid) "
+                 "AND organisation_id = CAST(:o AS uuid)"),
+            {"f": str(fixture_id), "o": str(org_id)},
+        )).scalar()
+        slots = [s for s in ((draft or {}).get("slots") or []) if s]
+        if slots:
+            names = (await session.execute(
+                text("SELECT id::text AS id, COALESCE(display_name_override, name) AS name FROM players "
+                     "WHERE id = ANY(CAST(:ids AS uuid[])) AND organisation_id = CAST(:o AS uuid)"),
+                {"ids": slots, "o": str(org_id)},
+            )).mappings().all()
+            by_id = {r["id"]: r["name"] for r in names}
+            return {
+                "status": "draft_only", "fixture": head,
+                "draft_players": [by_id[s] for s in slots if s in by_id],
+                "note": "A side has been built on the BetterSelect board but not confirmed yet. These are the "
+                        "draft names only, so say it is unconfirmed and could still change.",
+            }
+        return {"status": "not_selected", "fixture": head,
+                "note": "No side has been picked for this fixture on the BetterSelect board yet."}
+
+    def _p(p):
+        return {
+            "batting_order": p.get("batting_order"), "name": p.get("name"),
+            "captain": p.get("is_captain"), "keeper": p.get("is_wicket_keeper"),
+            "skills": p.get("skills"), "bowling_style": p.get("bowling_type"), "opener": p.get("is_opener"),
+            "availability": p.get("availability"),
+            "games_this_grade_this_season": p.get("season_matches"),
+            "recent_scores": p.get("recent_scores"), "recent_wickets": p.get("recent_wickets"),
+            "vs_this_opponent": p.get("vs_opponent"),
+            "flags": p.get("flags"),
+        }
+
+    return {
+        "status": "confirmed", "fixture": head,
+        "verdict": d.get("verdict"),
+        "balance": d.get("balance"),
+        "players": [_p(p) for p in players],
+        "warnings": [w.get("text") for w in (d.get("warnings") or [])],
+        "scope": _scope_echo(basis="saved XI; form is the last 5 innings or spells; vs_this_opponent is all-time, all grades"),
+    }
+
+
 async def _tool_opponent_lineup(session, org_id, *, fixture_id=None):
     if not fixture_id:
         return {"error": "Pass a fixture_id from upcoming_fixtures."}
@@ -899,6 +986,7 @@ _DISPATCH = {
     "opposition_report": _tool_opposition_report,
     "opponent_danger_players": _tool_opponent_danger_players,
     "opponent_lineup": _tool_opponent_lineup,
+    "our_selected_xi": _tool_our_selected_xi,
 }
 
 

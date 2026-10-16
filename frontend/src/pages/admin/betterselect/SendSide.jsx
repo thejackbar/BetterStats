@@ -96,6 +96,8 @@ export default function SendSide({ fixtureId, title, dirty, count, onClose }) {
                   {result.missing_phones?.length > 0 && (
                     <div className="text-pb-dim">No mobile on file for: {result.missing_phones.join(', ')}.</div>
                   )}
+                  {result.template && <div className="text-pb-dim">Used your template: {result.template}.</div>}
+                  {result.template_note && <div className="text-pb-amber" data-testid="template-note">{result.template_note}</div>}
                 </>
               ) : (
                 <>
@@ -105,6 +107,8 @@ export default function SendSide({ fixtureId, title, dirty, count, onClose }) {
                   {[...(result.failed || []), ...(result.skipped || [])].map((r, i) => (
                     <div key={i} className="text-pb-dim">{r.name}: {r.message}</div>
                   ))}
+                  {result.template && <div className="text-pb-dim">Used your template: {result.template}.</div>}
+                  {result.template_note && <div className="text-pb-amber" data-testid="template-note">{result.template_note}</div>}
                 </>
               )}
             </div>

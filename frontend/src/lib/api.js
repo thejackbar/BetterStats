@@ -3488,6 +3488,12 @@ export const api = {
     request('/selection-rules/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
   bsRuleSettings: (data) =>
     request('/selection-rules/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  // The BetterComms templates a selection email can be linked to (written in
+  // Admin > Comms > Templates), plus the {{variables}} they can use. A preview
+  // fills one in with a made-up match; nothing is sent.
+  bsSelectionEmailTemplates: () => request('/selection-rules/email-templates'),
+  bsPreviewSelectionEmailTemplate: (templateId, to) =>
+    request('/selection-rules/email-templates/preview', { method: 'POST', body: JSON.stringify({ template_id: templateId, to }) }),
   // Per-player exceptions to one rule: a permit, an association clearance, or
   // the tick a free-text rule asks for.
   bsRulePlayers: (id) => request(`/selection-rules/${id}/players`),
