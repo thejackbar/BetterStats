@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
+import logging
 import uuid
 
 from app.models.db import User, get_db
@@ -8,7 +9,9 @@ from app.routers.auth import get_optional_user, public_junior_hiding, user_can_v
 from app.services import grade_scope
 from app.services import player_visibility
 from app.services import stats_display
+from app.services.session_safety import rollback_keeping
 from app.services.aggregations import (
+    raise_board_games_to_grid,
     get_batting_leaderboard, get_bowling_leaderboard, get_fielding_leaderboard,
     get_batting_leaderboard_extended, get_bowling_leaderboard_extended,
     get_sirs_batting, get_sirs_bowling_innings, get_sirs_bowling_match,
@@ -47,6 +50,27 @@ async def _visible(db: AsyncSession, org_id: str, viewer, rows: list[dict]) -> l
     """
     public_only = not await user_can_view_org_private(db, viewer, org_id)
     return await player_visibility.filter_public_rows(db, org_id, rows, public_only)
+
+
+async def _games_like_profile(db: AsyncSession, org_id: str, rows: list[dict], season_id, scope,
+                              viewer, *, finals_only, captain_only, grade_id, grade_name) -> list[dict]:
+    """Raise each row's games to what the player's profile shows (never lower).
+
+    The profile's MATCHES is raised to its by-grade grid, which counts the matches
+    Cricket Australia's per-grade totals claim and we hold no scorecard for; the
+    board's M column counted only what we hold, so nearly every player read lower
+    on the board than on their own page. Skipped where the figure means something
+    else: finals-only (finals played), captain-only (matches as captain) and a
+    picked grade (that grade's matches). A failure leaves the figures as they were.
+    """
+    if finals_only or captain_only or grade_id or grade_name:
+        return rows
+    try:
+        return await raise_board_games_to_grid(db, org_id, rows, season_id, scope)
+    except Exception:
+        await rollback_keeping(db, viewer)
+        logging.getLogger(__name__).exception("board games vs profile failed for org %s", org_id)
+        return rows
 
 
 @router.get("/batting")
@@ -108,7 +132,10 @@ async def batting_leaderboard(
         min_rate_innings=await stats_display.resolve_min_rate_innings(db, org_id, min_rate_innings),
         grade_name=grade_name, finals_only=finals_only, captain_only=captain_only,
         gender=gender, overseas=overseas, scope=scope)
-    return _stringify(await _visible(db, org_id, viewer, rows))
+    rows = await _visible(db, org_id, viewer, rows)
+    rows = await _games_like_profile(db, org_id, rows, season_id, scope, viewer, finals_only=finals_only,
+                                     captain_only=captain_only, grade_id=grade_id, grade_name=grade_name)
+    return _stringify(rows)
 
 
 @router.get("/bowling")
@@ -170,7 +197,10 @@ async def bowling_leaderboard(
         min_rate_spells=await stats_display.resolve_min_rate_spells(db, org_id, min_rate_spells),
         grade_name=grade_name, finals_only=finals_only, captain_only=captain_only,
         gender=gender, overseas=overseas, scope=scope)
-    return _stringify(await _visible(db, org_id, viewer, rows))
+    rows = await _visible(db, org_id, viewer, rows)
+    rows = await _games_like_profile(db, org_id, rows, season_id, scope, viewer, finals_only=finals_only,
+                                     captain_only=captain_only, grade_id=grade_id, grade_name=grade_name)
+    return _stringify(rows)
 
 
 @router.get("/fielding")
@@ -217,7 +247,13 @@ async def fielding_leaderboard(
 ):
     scope = await _scope(db, viewer, org_id, categories, formats, competitions)
     rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, sort_by, limit, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
-    return _stringify(await _visible(db, org_id, viewer, rows))
+    rows = await _visible(db, org_id, viewer, rows)
+    rows = await _games_like_profile(db, org_id, rows, season_id, scope, viewer, finals_only=finals_only,
+                                     captain_only=captain_only, grade_id=grade_id, grade_name=grade_name)
+    if sort_by == "games":
+        # The limit was applied before the raise, so keep the order the figures now imply.
+        rows.sort(key=lambda r: -(r.get("games") or 0))
+    return _stringify(rows)
 
 
 @router.get("/sirs/batting")
