@@ -35,17 +35,20 @@ const run = async () => {
     const patches = [], selfService = []
     let failSave = false
     const saved = { w1: '#a855f7', w2: '#06b6d4' }
+    const T1 = '11111111-1111-4111-8111-111111111111', T2 = '22222222-2222-4222-8222-222222222222'
+    const cfgNow = () => ({ allow_maybe: true, half_colours: { ...saved }, played_years: { selection: 3, availability: 0 }, team_defaults: [],
+      squads: [{ id: 'a', name: 'Club 1st XI', sequence: 1 }, { id: 'b', name: 'Club 2nd XI', sequence: 2 }] })
     await page.route('**/api/**', (r) => json(r, {}))
     await page.route('**/api/auth/me', (r) => json(r, ME))
     await page.route(/\/api\/club-admin\/settings$/, (r) => json(r, { player_name_format: 'first_last' }))
-    await page.route(/\/api\/availability\/config/, (r) => json(r, { allow_maybe: true, half_colours: { ...saved } }))
-    await page.route(/\/api\/selection-rules$/, (r) => json(r, { rules: [], kinds: [], options: {}, settings: { half_colours: { ...saved } } }))
+    await page.route(/\/api\/availability\/config/, (r) => json(r, cfgNow()))
+    await page.route(/\/api\/selection-rules$/, (r) => json(r, { rules: [], kinds: [], options: { teams: [{ value: T1, label: '1st XI' }, { value: T2, label: "Women's XI" }] }, settings: { half_colours: { ...saved } } }))
     await page.route(/\/api\/selection-rules\/settings$/, async (r) => {
       const b = JSON.parse(r.request().postData() || '{}')
       patches.push(b)
       if (failSave) return json(r, { detail: 'Could not save' }, 500)
       for (const k of ['w1', 'w2']) if (`half_colour_${k}` in b) saved[k] = b[`half_colour_${k}`] || (k === 'w1' ? '#a855f7' : '#06b6d4')
-      return json(r, { half_colours: { ...saved } })
+      return json(r, { half_colours: { ...saved }, played_years: { selection: b.played_years_selection ?? 3, availability: b.played_years_availability ?? 0 }, team_defaults: b.team_defaults || [] })
     })
     await page.route(/\/api\/availability\/self-service$/, async (r) => {
       if (r.request().method() === 'POST') selfService.push(JSON.parse(r.request().postData() || '{}'))
@@ -97,6 +100,71 @@ const run = async () => {
     await page.waitForTimeout(500)
     ok('a failed save puts the colour back', (await hexOf('w1').inputValue()) === '#a855f7' && (await cssVar('--pb-half-w1')) !== '#00ff00', `${await hexOf('w1').inputValue()} ${await cssVar('--pb-half-w1')}`)
     failSave = false
+
+    // Players listed.
+    patches.length = 0
+    await page.locator('[data-window="selection"]').selectOption('0')
+    await page.waitForTimeout(300)
+    ok('Selection board window: "Played any time" sends played_years_selection 0', patches.length === 1 && patches[0].played_years_selection === 0 && Object.keys(patches[0]).length === 1, JSON.stringify(patches))
+    patches.length = 0
+    await page.locator('[data-window="selection"]').selectOption('-1')
+    await page.waitForTimeout(300)
+    ok('...and "Played this season" sends -1', patches.length === 1 && patches[0].played_years_selection === -1, JSON.stringify(patches))
+    patches.length = 0
+    await page.locator('[data-window="availability"]').selectOption('5')
+    await page.waitForTimeout(300)
+    ok('Availability window sends played_years_availability 5', patches.length === 1 && patches[0].played_years_availability === 5, JSON.stringify(patches))
+    ok('Availability has no "this season" (the matrix has no season to measure from)', (await page.locator('[data-window="availability"] option[value="-1"]').count()) === 0)
+    ok('Selection board does', (await page.locator('[data-window="selection"] option[value="-1"]').count()) === 1)
+
+    // Team defaults.
+    const lastRules = () => [...patches].reverse().find((b) => 'team_defaults' in b)?.team_defaults
+    ok('no team rules yet', (await page.locator('[data-team-rule]').count()) === 0)
+    patches.length = 0
+    await page.locator('[data-add-team-rule]').click()
+    await page.waitForTimeout(500)
+    ok('a new rule shows as not yet saved', (await page.locator('[data-team-rule]').count()) === 1 && (await page.locator('[data-rule-state="incomplete"]').count()) === 1)
+    ok('...and a half-made rule is not sent as a rule', lastRules() === undefined || lastRules().length === 0, JSON.stringify(patches))
+    const rule = page.locator('[data-team-rule]').first()
+    patches.length = 0
+    await rule.getByLabel("Women's XI").check()
+    await page.waitForTimeout(500)
+    ok('a team alone is still half made (nothing to start on)', (lastRules() || []).length === 0, JSON.stringify(patches))
+    await rule.getByRole('button', { name: 'Women', exact: true }).click()
+    await page.waitForTimeout(600)
+    const r1 = (lastRules() || [])[0]
+    ok('team + Gender = Women is saved as a rule', !!r1 && r1.team_ids.join() === T2 && r1.gender === 'female', JSON.stringify(patches))
+    ok('...and shows as saved', (await page.locator('[data-rule-state="saved"]').count()) === 1)
+    patches.length = 0
+    await rule.getByRole('button', { name: 'Top', exact: true }).click()
+    await page.waitForTimeout(600)
+    await rule.getByLabel('Number of squads').fill('2')
+    await page.waitForTimeout(600)
+    const r2 = (lastRules() || [])[0]
+    ok('Squads shown = Top 2 is saved', !!r2 && r2.top_squads === 2 && (r2.squads || []).length === 0, JSON.stringify(r2))
+    patches.length = 0
+    await rule.getByRole('button', { name: 'Chosen', exact: true }).click()
+    await page.waitForTimeout(300)
+    await rule.getByLabel('Club 1st XI').check()
+    await page.waitForTimeout(600)
+    const r3 = (lastRules() || [])[0]
+    ok('Chosen squads are saved by name and replace the top-N', !!r3 && r3.squads.join() === 'Club 1st XI' && !r3.top_squads, JSON.stringify(r3))
+    patches.length = 0
+    await rule.getByLabel('Played within').selectOption('0')
+    await page.waitForTimeout(600)
+    ok("a team's own window is saved on the rule", (lastRules() || [])[0]?.played_years === 0, JSON.stringify(lastRules()))
+    // A second rule, then delete both.
+    await page.locator('[data-add-team-rule]').click()
+    await page.waitForTimeout(300)
+    ok('rules can be added without limit of one', (await page.locator('[data-team-rule]').count()) === 2, `${await page.locator('[data-team-rule]').count()} rules; add buttons: ${await page.locator('[data-add-team-rule]').count()}; ids: ${(await page.locator('[data-team-rule]').evaluateAll((e) => e.map((x) => x.getAttribute('data-team-rule')))).join()}`)
+    patches.length = 0
+    await page.locator('[data-team-rule]').nth(1).getByRole('button', { name: 'Delete rule' }).click()
+    await page.waitForTimeout(600)
+    ok('deleting a rule removes just that one', (await page.locator('[data-team-rule]').count()) === 1 && (lastRules() || []).length === 1, JSON.stringify(lastRules()))
+    patches.length = 0
+    await page.locator('[data-team-rule]').first().getByRole('button', { name: 'Delete rule' }).click()
+    await page.waitForTimeout(600)
+    ok('deleting the last sends an empty list', Array.isArray(lastRules()) && lastRules().length === 0, JSON.stringify(patches))
 
     // Maybe.
     await page.locator('[data-select-settings] >> text=Maybe answer').locator('xpath=ancestor::div[contains(@class,"flex-wrap")][1]').getByRole('button', { name: 'Off' }).click()

@@ -3,9 +3,11 @@
 // The small switches that change how BetterSelect looks and behaves, in one place
 // instead of on the screens they affect. Today: the colours that mark a player
 // who is free for one weekend of a two-day game and away for the other ("half
-// available"), whether junior grades are shown, and whether Maybe is offered.
+// available"), how far back a player may have last played to be listed, starting
+// filters for each team ("Team defaults"), whether junior grades are shown, and
+// whether Maybe is offered.
 // Selection rules (age limits, side size, emails) stay on their own screen.
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -13,7 +15,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import usePersistedState from '../../../lib/usePersistedState'
-import { setAllowMaybe, setHalfColours, useHalfColours } from '../../../lib/useAvailabilityConfig'
+import { setAllowMaybe, setHalfColours, setSelectConfig, useHalfColours } from '../../../lib/useAvailabilityConfig'
 import { PbSpinner } from '../../../lib/presskit'
 import { Btn, Dot, Segmented } from './ui'
 
@@ -66,13 +68,105 @@ function HalfColour({ weekKey, title, hint, value, onChange, disabled }) {
   )
 }
 
+const SELECTION_WINDOWS = [[0, 'Any time'], [-1, 'This season'], [1, '1 year'], [2, '2 years'], [3, '3 years'], [5, '5 years'], [10, '10 years']]
+const AVAILABILITY_WINDOWS = SELECTION_WINDOWS.filter(([v]) => v !== -1)   // the matrix has no season to measure from
+const SELECT = 'bg-pb-surface2 border border-pb-hairline rounded-lg px-2.5 py-1.5 text-[13px] text-pb-text focus:outline-none focus:border-pb-accent'
+const newId = () => Math.random().toString(16).slice(2, 14)
+
+// A rule has something to start on, and a team to start it for. Anything less is
+// kept on screen while it is being written and saved once it is whole.
+const ruleIsWhole = (r) => (r.team_ids || []).length > 0 && !!(r.gender || (r.squads || []).length || r.top_squads || r.played_years != null)
+
+function CheckGrid({ options, selected, onToggle, disabled, label }) {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1.5" role="group" aria-label={label}>
+      {options.map((o) => (
+        <label key={o.value} className="inline-flex items-center gap-1.5 text-[12.5px] text-pb-dim cursor-pointer">
+          <input type="checkbox" className="accent-pb-accent" checked={selected.includes(o.value)} disabled={disabled}
+            onChange={() => onToggle(o.value)} />
+          {o.label}
+        </label>
+      ))}
+    </div>
+  )
+}
+
+// One team rule: who it is for, and what that team starts on.
+function TeamRule({ rule, teams, squads, onChange, onDelete, disabled }) {
+  const set = (patch) => onChange({ ...rule, ...patch })
+  const toggleIn = (key, v) => set({ [key]: (rule[key] || []).includes(v) ? rule[key].filter((x) => x !== v) : [...(rule[key] || []), v] })
+  // The mode is remembered on screen (`_mode`, never sent): "Chosen" with nothing
+  // ticked yet has no data to tell it apart from "All", and must not snap back.
+  const squadMode = rule._mode || (rule.top_squads ? 'top' : (rule.squads || []).length ? 'chosen' : 'all')
+  const setMode = (m) => set(m === 'all' ? { _mode: m, top_squads: null, squads: [] } : m === 'top' ? { _mode: m, top_squads: rule.top_squads || 3, squads: [] } : { _mode: m, top_squads: null, squads: rule.squads || [] })
+  const whole = ruleIsWhole(rule)
+  return (
+    <div data-team-rule={rule.id} className="rounded-lg border border-pb-hairline p-3.5 flex flex-col gap-3">
+      <div>
+        <div className={LABEL}>For these teams</div>
+        <CheckGrid label="Teams" options={teams} selected={rule.team_ids || []} onToggle={(v) => toggleIn('team_ids', v)} disabled={disabled} />
+      </div>
+      <div className="grid gap-x-6 gap-y-3 sm:grid-cols-3">
+        <div>
+          <div className={LABEL}>Gender</div>
+          <Segmented sm value={rule.gender || ''} onChange={(v) => set({ gender: v })}
+            options={[{ value: '', label: 'Any' }, { value: 'male', label: 'Men' }, { value: 'female', label: 'Women' }]} />
+        </div>
+        <div>
+          <div className={LABEL}>Squads shown</div>
+          <Segmented sm value={squadMode} onChange={setMode}
+            options={[{ value: 'all', label: 'All' }, { value: 'top', label: 'Top' }, { value: 'chosen', label: 'Chosen' }]} />
+          {squadMode === 'top' && (
+            <div className="mt-2 flex items-center gap-2 text-[12.5px] text-pb-dim">
+              Top <input type="number" min={1} max={30} value={rule.top_squads || ''} aria-label="Number of squads"
+                onChange={(e) => set({ top_squads: Math.min(30, Math.max(1, Math.floor(Number(e.target.value)) || 1)) })}
+                className={`${SELECT} w-[64px]`} /> squads, by XI number
+            </div>
+          )}
+        </div>
+        <div>
+          <div className={LABEL}>Played within</div>
+          <select value={rule.played_years == null ? 'club' : String(rule.played_years)} aria-label="Played within"
+            onChange={(e) => set({ played_years: e.target.value === 'club' ? null : Number(e.target.value) })} className={SELECT}>
+            <option value="club">Club setting</option>
+            {SELECTION_WINDOWS.map(([v, l]) => <option key={v} value={v}>{l === 'Any time' ? 'Any time' : l}</option>)}
+          </select>
+        </div>
+      </div>
+      {squadMode === 'chosen' && (
+        <div>
+          <div className={LABEL}>Only these squads</div>
+          {squads.length
+            ? <CheckGrid label="Squads" options={squads.map((n) => ({ value: n, label: n }))} selected={rule.squads || []} onToggle={(v) => toggleIn('squads', v)} disabled={disabled} />
+            : <div className="text-[12px] text-pb-faint">No squads set up yet. Add them on the Squads screen.</div>}
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[12px]" style={{ color: whole ? 'var(--pb-faint)' : 'var(--pb-amber)' }} data-rule-state={whole ? 'saved' : 'incomplete'}>
+          {whole ? 'Saved. Applies when you open one of these teams on the Selection board.' : 'Pick a team and at least one thing to start on. It is saved once both are set.'}
+        </div>
+        <Btn sm variant="ghost" onClick={onDelete} disabled={disabled}>Delete rule</Btn>
+      </div>
+    </div>
+  )
+}
+
+const LABEL = 'font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest block mb-1.5'
+
 export default function AdminSelectSettings() {
   const { hasCapability } = useAuth()
   const toast = useToast()
+  // `toast` is a new object each render: never a hook dependency (a reload would wipe a rule being written).
+  const toastRef = useRef(toast)
+  toastRef.current = toast
   const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
   const [loaded, setLoaded] = useState(false)
   const [maybe, setMaybe] = useState(true)
   const [colours, setColours] = useState(DEFAULTS)
+  const [windows, setWindows] = useState({ selection: 3, availability: 0 })
+  const [rules, setRules] = useState([])
+  const [teams, setTeams] = useState([])
+  const [squadNames, setSquadNames] = useState([])
   const [showJuniors, setShowJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
   useHalfColours()
 
@@ -83,11 +177,15 @@ export default function AdminSelectSettings() {
         if (!alive) return
         setMaybe(cfg?.allow_maybe !== false)
         setColours({ ...DEFAULTS, ...(rules?.settings?.half_colours || cfg?.half_colours || {}) })
+        setWindows({ selection: 3, availability: 0, ...(cfg?.played_years || {}) })
+        setRules(cfg?.team_defaults || [])
+        setTeams((rules?.options?.teams || []).map((t) => ({ value: t.value, label: t.label })))
+        setSquadNames((cfg?.squads || []).map((q) => q.name))
         setLoaded(true)
       })
-      .catch((e) => { toast.error(e.message || 'Could not load settings'); setLoaded(true) })
+      .catch((e) => { toastRef.current.error(e.message || 'Could not load settings'); setLoaded(true) })
     return () => { alive = false }
-  }, [toast])
+  }, [])
 
   const saveColour = async (key, hex) => {
     const before = colours
@@ -101,6 +199,32 @@ export default function AdminSelectSettings() {
       toast.error(e.message || 'Could not save the colour')
     }
   }
+  const saveWindow = async (key, n) => {
+    const before = windows
+    const next = { ...windows, [key]: n }
+    setWindows(next); setSelectConfig({ played_years: next })
+    try {
+      const s = await api.bsRuleSettings({ [`played_years_${key}`]: n })
+      if (s?.played_years) { setWindows(s.played_years); setSelectConfig({ played_years: s.played_years }) }
+    } catch (e) { setWindows(before); setSelectConfig({ played_years: before }); toast.error(e.message || 'Could not save') }
+  }
+
+  // Team rules are written as a list and saved whole, a moment after the last
+  // edit. A rule that is still half written stays on screen and is left out of
+  // what is sent (the server never stores one).
+  const saveTimer = useRef(null)
+  const persistRules = useCallback((list) => {
+    clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const s = await api.bsRuleSettings({ team_defaults: list.filter(ruleIsWhole) })
+        setSelectConfig({ team_defaults: s?.team_defaults || [] })
+      } catch (e) { toastRef.current.error(e.message || 'Could not save the team rules') }
+    }, 350)
+  }, [])
+  useEffect(() => () => clearTimeout(saveTimer.current), [])
+  const editRules = (next) => { setRules(next); persistRules(next) }
+
   const saveMaybe = async (on) => {
     setMaybe(on); setAllowMaybe(on)
     try { await api.bsSetSelfService({ allow_maybe: on }) }
@@ -126,6 +250,41 @@ export default function AdminSelectSettings() {
             <span className="inline-flex items-center gap-1.5"><Dot status="HALF_W2" size={10} /> Week 2 only</span>
             <span className="inline-flex items-center gap-1.5"><Dot status="UNAVAILABLE" size={10} /> Unavailable</span>
           </div>
+        </Card>
+
+        <Card>
+          <Head title="Players listed"
+            sub="How far back a player's last game may be for the pool to list them. Typing a name in search always finds anyone, so nobody is out of reach." />
+          <Row label="Selection board and Whiteboard" hint="Played within">
+            <select value={windows.selection} disabled={!canEdit} aria-label="Selection board played within" data-window="selection"
+              onChange={(e) => saveWindow('selection', Number(e.target.value))} className={SELECT}>
+              {SELECTION_WINDOWS.map(([v, l]) => <option key={v} value={v}>{v === 0 ? 'Played any time' : v === -1 ? 'Played this season' : `Played within ${l}`}</option>)}
+            </select>
+          </Row>
+          <Row label="Availability" hint="Played within">
+            <select value={windows.availability} disabled={!canEdit} aria-label="Availability played within" data-window="availability"
+              onChange={(e) => saveWindow('availability', Number(e.target.value))} className={SELECT}>
+              {AVAILABILITY_WINDOWS.map(([v, l]) => <option key={v} value={v}>{v === 0 ? 'Played any time' : `Played within ${l}`}</option>)}
+            </select>
+          </Row>
+        </Card>
+
+        <Card>
+          <Head title="Team defaults"
+            sub="What each team's Selection board starts on, written as rules. For example, the women's team starts on Gender = Women, and the 1st XI only sees the top three squads. The board shows the rule at the top of the pool and one click turns it off for that match, so nobody is ever hidden for good." />
+          <div className="flex flex-col gap-3" data-team-rules>
+            {rules.length === 0 && <div className="text-[12.5px] text-pb-faint">No team rules yet. Every team starts on everyone.</div>}
+            {rules.map((r) => (
+              <TeamRule key={r.id} rule={r} teams={teams} squads={squadNames} disabled={!canEdit}
+                onChange={(nr) => editRules(rules.map((x) => (x.id === r.id ? nr : x)))}
+                onDelete={() => editRules(rules.filter((x) => x.id !== r.id))} />
+            ))}
+          </div>
+          {canEdit && (
+            <div className="mt-3">
+              <Btn sm variant="soft" icon="plus" data-add-team-rule onClick={() => setRules((l) => [...l, { id: newId(), team_ids: [], gender: '', squads: [], top_squads: null, played_years: null }])}>Add a team rule</Btn>
+            </div>
+          )}
         </Card>
 
         <Card>

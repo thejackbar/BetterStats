@@ -74,6 +74,12 @@ class SettingsBody(BaseModel):
     # string puts it back to the platform colour (model_fields_set below).
     half_colour_w1: Optional[str] = None
     half_colour_w2: Optional[str] = None
+    # How far back a player may have last played to be listed (0 = any time).
+    played_years_selection: Optional[int] = None
+    played_years_availability: Optional[int] = None
+    # The whole list of per-team starting filters, replaced as one (absent
+    # leaves it alone; null or [] removes every rule).
+    team_defaults: Optional[list] = None
 
 
 async def _grade_options(db: AsyncSession, org_id) -> list[dict]:
@@ -124,6 +130,8 @@ def _settings_out(club: Organisation) -> dict:
         "captain_email_template_id": cfg["captain_email_template_id"],
         "player_email_template_id": cfg["player_email_template_id"],
         "half_colours": cfg["half_colours"],
+        "played_years": cfg["played_years"],
+        "team_defaults": cfg["team_defaults"],
     }
 
 
@@ -234,6 +242,23 @@ async def patch_settings(
             cfg["half_colours"] = halves
         else:
             cfg.pop("half_colours", None)
+    for key, field in (("selection", "played_years_selection"), ("availability", "played_years_availability")):
+        if field not in body.model_fields_set:
+            continue
+        n = rules_svc.clean_years(getattr(body, field), None)
+        if n is None:
+            raise HTTPException(status_code=400, detail="Pick a number of years from 0 (any time) to 50, or -1 for this season.")
+        py = dict(cfg.get("played_years") or {})
+        py[key] = n
+        cfg["played_years"] = py
+    if "team_defaults" in body.model_fields_set:
+        if body.team_defaults is not None and not isinstance(body.team_defaults, list):
+            raise HTTPException(status_code=400, detail="Team defaults must be a list.")
+        cleaned = rules_svc.clean_team_defaults(body.team_defaults)
+        if cleaned:
+            cfg["team_defaults"] = cleaned
+        else:
+            cfg.pop("team_defaults", None)
     club.selection_rules_config = cfg or None
     await db.commit()
     return _settings_out(club)

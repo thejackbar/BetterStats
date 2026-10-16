@@ -67,6 +67,8 @@ const run = async () => {
   const json = (r, body, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
   await page.route('**/api/**', (r) => json(r, {}))
   await page.route(/\/api\/club-admin\/settings$/, (r) => json(r, { player_name_format: 'first_last' }))
+  // The club's "played within" window is a Settings choice now (read from the config the screens share).
+  await page.route(/\/api\/availability\/config/, (r) => json(r, { allow_maybe: true, half_colours: null, played_years: { selection: server.playedYears ?? 3, availability: 0 }, team_defaults: [], squads: [] }))
   await page.route('**/api/auth/me', (r) => json(r, ME))
   await page.route(/\/api\/selection\/overview(\?.*)?$/, (r) => {
     server.overviewUrls.push(r.request().url())
@@ -213,12 +215,18 @@ const run = async () => {
     server.lineup = []
     await page.goto(`${BASE}/admin/betterselect/select/${FID}?q=`, { waitUntil: 'domcontentloaded' })
     await page.getByText('Anna Brown').first().waitFor({ timeout: 20000 })
-    const recency = page.locator('select', { has: page.locator('option', { hasText: 'Played this season' }) }).first()
-    ok('"Played this season" is in the look-back list', (await recency.count()) === 1)
-    await recency.selectOption('-1'); await page.waitForTimeout(300)
+    ok('there is no "Played within" control on the board any more', (await page.locator('select', { has: page.locator('option', { hasText: 'Played this season' }) }).count()) === 0)
+    // The window is the club's setting: "this season" drops the player who last played before the season started.
+    server.playedYears = -1
+    await page.goto(`${BASE}/admin/betterselect/select/${FID}?q=`, { waitUntil: 'domcontentloaded' })
+    await page.getByText('Cara Cole').first().waitFor({ timeout: 20000 })
+    await page.waitForTimeout(300)
     t = await body()
-    ok('"Played this season" hides the player who last played before the season started', !t.includes('Anna Brown') && t.includes('Cara Cole'))
-    await recency.selectOption('0'); await page.waitForTimeout(300)
+    ok('the club setting "Played this season" hides the player who last played before the season started', !t.includes('Anna Brown') && t.includes('Cara Cole'))
+    server.playedYears = 0
+    await page.goto(`${BASE}/admin/betterselect/select/${FID}?q=`, { waitUntil: 'domcontentloaded' })
+    await page.getByText('Anna Brown').first().waitFor({ timeout: 20000 })
+    ok('...and "any time" brings them back', (await body()).includes('Anna Brown'))
 
     await page.locator('button[title="Sort pool"]').click()
     const firstOpt = page.getByRole('button', { name: 'First name (A–Z)' })
@@ -235,17 +243,23 @@ const run = async () => {
   await safe('Overview', async () => {
     server.overviewLocked = true
     await page.goto(`${BASE}/admin/betterselect/selection`, { waitUntil: 'domcontentloaded' })
-    await page.locator('[data-juniors-toggle]').waitFor({ timeout: 20000 })
+    await page.getByRole('button', { name: /Expand all/ }).waitFor({ timeout: 20000 })
     await page.waitForTimeout(500)
+    ok('the overview no longer carries a Show juniors switch', (await page.locator('[data-juniors-toggle]').count()) === 0)
     ok('the overview asks for juniors to be left out', server.overviewUrls.some((u) => u.includes('hide_juniors=true')), JSON.stringify(server.overviewUrls))
     ok('a locked side reads Locked on the overview', /Locked/.test(await body()))
     await page.getByRole('button', { name: /Expand all/ }).click(); await page.waitForTimeout(300)
     ok('and offers View XI', /View XI/.test(await body()))
     server.overviewUrls.length = 0
-    await page.locator('[data-juniors-toggle]').click(); await page.waitForTimeout(600)
-    ok('"Show juniors" drops the filter from the request', server.overviewUrls.length > 0 && server.overviewUrls.every((u) => !u.includes('hide_juniors')), JSON.stringify(server.overviewUrls))
+    await page.evaluate(() => { try { localStorage.setItem('bs_pref:select.juniors', 'true') } catch { /* blocked */ } })
+    await page.goto(`${BASE}/admin/betterselect/selection`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /Expand all/ }).waitFor({ timeout: 20000 })
+    await page.waitForTimeout(600)
+    ok('with juniors on in Settings, the request drops the hide filter', server.overviewUrls.length > 0 && server.overviewUrls.every((u) => !u.includes('hide_juniors')), JSON.stringify(server.overviewUrls))
+    await page.evaluate(() => { try { localStorage.removeItem('bs_pref:select.juniors') } catch { /* nothing stored */ } })
     server.overviewLocked = false
-    await page.locator('[data-juniors-toggle]').click(); await page.waitForTimeout(600)
+    await page.goto(`${BASE}/admin/betterselect/selection`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /Expand all/ }).waitFor({ timeout: 20000 })
     if (!/Review and lock|Collapse all/.test(await body())) await page.getByRole('button', { name: /Expand all/ }).click().catch(() => {})
     await page.waitForTimeout(300)
     ok('an unlocked, full side offers "Review and lock"', /Review and lock/.test(await body()), (await body()).slice(0, 300))

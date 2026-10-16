@@ -79,7 +79,10 @@ async def main():
     async def config():
         async with Session() as db:
             club = await db.get(Organisation, org)
-            return await av.availability_config(club=club, user=None)
+            try:
+                return await av.availability_config(db=db, club=club, user=None)
+            except TypeError:       # the previous route took no db
+                return await av.availability_config(club=club, user=None)
 
     halves = lambda o: (o or {}).get("half_colours")
 

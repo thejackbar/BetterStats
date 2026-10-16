@@ -30,6 +30,8 @@ import { useFilters } from './filters'
 import SelectionHistory from './SelectionHistory'
 import usePersistedState from '../../../lib/usePersistedState'
 import SelectionFilters from './SelectionFilters'
+import { useSelectConfig } from '../../../lib/useAvailabilityConfig'
+import { teamDefaultFor, teamDefaultSummary } from './teamDefaults'
 import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
 import { AddPlayersSheet, SlotSheet, MobileBar } from './SelectionMobile'
@@ -198,7 +200,6 @@ export default function AdminSelection() {
   // stops until it is settled.
   const [draftConflict, setDraftConflict] = useState(null)
   const pollDraft = useRef(() => {})
-  const [yearsF, setYearsF] = usePersistedState('selection.years', 3, (v) => Number.isFinite(v))
   const [sort, setSort] = usePersistedState('selection.sort', 'squad', (v) => ['squad', 'form', 'name', 'first'].includes(v))
   const [availEdit, setAvailEdit] = useState(null)
   // Phone only. `panel` is which of Pool / XI the bottom bar has up; the two
@@ -350,12 +351,24 @@ export default function AdminSelection() {
   }, [fixtureId, flushDraft])
 
   useEffect(() => { load() }, [load])
-  // Junior grades stay out of the team switcher unless the Show juniors switch (Availability, Fixtures, Selection overview) is on.
+  // Junior grades stay out of the team switcher unless "Junior grades: Show" is on in Settings.
   const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
   useEffect(() => { api.bsSelectionOverview({ hideJuniors: !showJuniors }).then((d) => setAllFixtures(d.fixtures || [])).catch(() => {}) }, [showJuniors])
   useEffect(() => { setPrevXI(null); api.bsPreviousXI(fixtureId).then(setPrevXI).catch(() => setPrevXI(null)) }, [fixtureId])
 
   const fx = data?.fixture
+  // The club's settings (Settings): how far back the pool reaches, and this team's
+  // starting filters. A team's rules are a STARTING view, shown as a banner and
+  // switched off for the match with one click; the selector's own filters win.
+  const selCfg = useSelectConfig()
+  const [ignoreDefaults, setIgnoreDefaults] = useState(false)
+  useEffect(() => { setIgnoreDefaults(false) }, [fixtureId])
+  const teamDefault = useMemo(
+    () => (fx?.team_id ? teamDefaultFor(selCfg.teamDefaults, fx.team_id, selCfg.squads) : null),
+    [selCfg.teamDefaults, selCfg.squads, fx?.team_id],
+  )
+  const useDefault = !!teamDefault && !ignoreDefaults
+  const yearsF = useDefault && teamDefault.playedYears != null ? teamDefault.playedYears : (selCfg.playedYears?.selection ?? 3)
   const poolById = useMemo(() => {
     const m = {}
     ;(data?.pool || []).forEach((p) => { m[p.id] = p })
@@ -450,8 +463,11 @@ export default function AdminSelection() {
     if (values.bowling?.length) list = list.filter((p) => values.bowling.includes(classifyBowl(p)))
     if (values.hand?.length) list = list.filter((p) => values.hand.includes(p.batting_hand))
     if (values.form?.length) list = list.filter((p) => { const b = formBucket(p); return b && values.form.includes(b) })
-    if (values.squad?.length) list = list.filter((p) => values.squad.some((s) => (p.squads || []).includes(s)))
-    if (values.gender) list = list.filter((p) => normGender(p.gender) === values.gender)
+    // Squad and gender: the selector's own pick wins, else the team's default.
+    const squadPick = values.squad?.length ? values.squad : (useDefault && teamDefault.squads.length ? teamDefault.squads : null)
+    if (squadPick) list = list.filter((p) => squadPick.some((s) => (p.squads || []).includes(s)))
+    const genderPick = values.gender || (useDefault ? teamDefault.gender : '')
+    if (genderPick) list = list.filter((p) => normGender(p.gender) === genderPick)
     if (values.hideUnavail) list = list.filter((p) => p.availability !== 'UNAVAILABLE')
     // is_financial / trained_recently are tri-state: true, false, or null when
     // neither BetterFees nor Net Manager could answer and nobody has said by
@@ -485,7 +501,7 @@ export default function AdminSelection() {
       name: (a, b) => (a.display_name || '').localeCompare(b.display_name || ''),
     }
     return list.slice().sort(sorters[sort] || cmp)
-  }, [available, search, values, yearsF, sort, cmp, data])
+  }, [available, search, values, yearsF, sort, cmp, data, useDefault, teamDefault])
 
   const filled = slots.filter(Boolean)
   const count = filled.length
@@ -941,7 +957,8 @@ export default function AdminSelection() {
 
   const filterBar = (
     <SelectionFilters filters={filters} sort={sort} setSort={setSort} squadOptions={squadOptions} showGender={showGender}
-      yearsF={yearsF} setYearsF={setYearsF} count={pool.length} total={available.length}
+      count={pool.length} total={available.length}
+      teamDefault={teamDefault ? { summary: teamDefaultSummary(teamDefault), ignored: ignoreDefaults, toggle: () => setIgnoreDefaults((v) => !v) } : null}
       inactiveHidden={inactiveHidden} flags={data?.flags} rules={data?.rules} />
   )
 

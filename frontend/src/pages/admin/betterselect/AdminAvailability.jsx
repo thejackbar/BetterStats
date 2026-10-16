@@ -9,10 +9,10 @@ import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
-import { useAllowMaybe } from '../../../lib/useAvailabilityConfig'
+import { useAllowMaybe, useSelectConfig } from '../../../lib/useAvailabilityConfig'
 import {
-  Icon, JuniorsToggle, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
-  RecencySelect, playedWithinYears, RuleTags, Chip,
+  Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
+  playedWithinYears, RuleTags, Chip,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
 import usePersistedState from '../../../lib/usePersistedState'
@@ -78,9 +78,11 @@ export default function AdminAvailability() {
   // Filters — roster + recency are quiet view controls; the rest are facets.
   // Remembered on this device so they survive moving to another screen.
   const [roster, setRoster] = usePersistedState('avail.roster', 'current', (v) => v === 'current' || v === 'all') // 'current' hides dormant/inactive; 'all' shows everyone
-  const [years, setYears] = usePersistedState('avail.years', 0, (v) => Number.isFinite(v)) // recency: played within N yrs (0 = any)
+  // How far back a player may have last played to be listed is a club setting (Settings, Players listed).
+  const years = useSelectConfig().playedYears?.availability ?? 0
   // Junior grades (per Manage Grades) are left out until asked for.
-  const [showJuniors, setShowJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
+  // Whether junior grades show is a Settings choice now, not a switch on this screen.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
   const [selectedIds, setSelectedIds] = useState(() => new Set()) // picked in any XI this round
 
   // Selected week (column) — drives the Pick XI handoff and single-week bulk.
@@ -323,8 +325,6 @@ export default function AdminAvailability() {
             { value: 'current', label: 'Current squad' },
             { value: 'all', label: 'All' },
           ]} />
-          <RecencySelect value={years} onChange={setYears} />
-          <JuniorsToggle value={showJuniors} onChange={setShowJuniors} />
           <button onClick={() => setRangeOn((v) => !v)}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${rangeOn ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}>
             <Icon name="fixtures" size={14} /> Date range {rangeOn ? '▲' : '▼'}

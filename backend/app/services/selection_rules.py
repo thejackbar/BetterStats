@@ -205,7 +205,81 @@ def club_config(org) -> dict:
         # free for ONE weekend of a two-day game and away for the other ("half
         # available"): `w1` when only week 1 is a yes, `w2` when only week 2 is.
         "half_colours": half_colours(raw.get("half_colours")),
+        # How far back a player's last game may be for the screens' pools to
+        # list them without a search: 0 = any time. Selection board and
+        # Whiteboard read `selection`, the Availability matrix `availability`.
+        "played_years": played_years(raw.get("played_years")),
+        # Starting filters for one team's Selection board ("rules"): see
+        # clean_team_defaults.
+        "team_defaults": clean_team_defaults(raw.get("team_defaults")),
     }
+
+
+DEFAULT_PLAYED_YEARS = {"selection": 3, "availability": 0}
+MAX_PLAYED_YEARS = 50
+MAX_TEAM_DEFAULTS = 60
+
+
+def clean_years(raw, fallback=None):
+    """A whole number of years -1..50, or `fallback` for anything else. 0 is "any
+    time" and -1 is "this season" (the pools' existing "Played this season")."""
+    if isinstance(raw, bool):
+        return fallback
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return fallback
+    return n if -1 <= n <= MAX_PLAYED_YEARS else fallback
+
+
+def played_years(raw) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    return {k: clean_years(raw.get(k), v) for k, v in DEFAULT_PLAYED_YEARS.items()}
+
+
+def clean_team_defaults(raw) -> list:
+    """The club's per-team starting filters, normalised. Each rule names the
+    teams it applies to and at least one thing to start on:
+
+      gender        'male' | 'female'   only that gender
+      squads        [squad name]        only players in one of these squads
+      top_squads    N                   only players in the club's top N squads
+                                         (by XI number; follows a reorder)
+      played_years  N                   this team's own "played within" window
+                                         (0 = any time, -1 = this season), instead of the club's
+
+    A rule with no team or nothing to filter on is dropped, never stored half
+    made. These are STARTING points: the board shows them as a banner the
+    selector can switch off for the match, they never remove anyone for good."""
+    out: list = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw[:MAX_TEAM_DEFAULTS]:
+        if not isinstance(item, dict):
+            continue
+        teams = []
+        for t in item.get("team_ids") or []:
+            tid = clean_template_id(t)         # a canonical uuid string, or None
+            if tid and tid not in teams:
+                teams.append(tid)
+        gender = str(item.get("gender") or "").strip().lower()
+        gender = {"male": "male", "men": "male", "female": "female", "women": "female"}.get(gender)
+        squads = []
+        for n in item.get("squads") or []:
+            n = str(n or "").strip()[:120]
+            if n and n not in squads:
+                squads.append(n)
+        top = clean_years(item.get("top_squads"), None)
+        top = top if top and 1 <= top <= 30 else None
+        py = clean_years(item.get("played_years"), None)
+        if not teams or not (gender or squads or top or py is not None):
+            continue
+        rid = str(item.get("id") or "").strip()[:40] or uuid.uuid4().hex[:12]
+        out.append({
+            "id": rid, "team_ids": teams, "gender": gender, "squads": squads[:40],
+            "top_squads": top, "played_years": py,
+        })
+    return out
 
 
 DEFAULT_HALF_COLOURS = {"w1": "#a855f7", "w2": "#06b6d4"}

@@ -11,7 +11,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
-import { Icon, Btn, Segmented, Empty, JuniorsToggle } from './ui'
+import { Icon, Btn, Segmented, Empty } from './ui'
 import usePersistedState from '../../../lib/usePersistedState'
 import { useFilters, FilterBar } from './filters'
 
@@ -141,7 +141,8 @@ export default function AdminFixtures() {
   const [scope, setScope] = useState('upcoming') // 'upcoming' | 'past' | 'all'
   const [editing, setEditing] = useState(undefined)
   const [syncing, setSyncing] = useState(false)
-  const [showJuniors, setShowJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
+  // Whether junior grades show is a Settings choice now, not a switch on this screen.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   // Always fetch the full set; scope (upcoming/past/all) is a client-side cut so
   // switching tabs is instant and "past" needs no extra endpoint.
@@ -242,7 +243,6 @@ export default function AdminFixtures() {
         filters={filters} facets={facets} showSearch={false}
         count={shownCount} total={fixtures?.length} className="mb-2"
         right={(<>
-          <JuniorsToggle value={showJuniors} onChange={setShowJuniors} />
           <Segmented value={scope} onChange={setScope} sm options={[
             { value: 'upcoming', label: 'Upcoming' },
             { value: 'past', label: 'Past' },

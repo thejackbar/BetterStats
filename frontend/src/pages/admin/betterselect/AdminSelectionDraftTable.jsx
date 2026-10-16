@@ -26,7 +26,8 @@ import { CAP } from '../../../lib/capabilities'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { availRank, AVAILABILITY, halfStatus, viewStatus } from '../../../lib/availability'
-import { Icon, Avatar, Btn, Tag, RuleTags, JuniorsToggle, playedWithinYears } from './ui'
+import { useSelectConfig } from '../../../lib/useAvailabilityConfig'
+import { Icon, Avatar, Btn, Tag, RuleTags, playedWithinYears } from './ui'
 import { DnD, useDrag } from './selectionDnd'
 import { nameMatches, roleLine, spark, formMeta, normGender, weekFlagParts, unavailableWeeksText, gameDatesLabel, fixtureTabs } from './selectionMeta'
 import { xiCompliance, isBlocked } from './selectionRules'
@@ -268,7 +269,7 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
 // ── The pool ────────────────────────────────────────────────────────────────
 function PoolColumn({ ctx, drag }) {
   const hovered = drag.hover === 'pool'
-  const { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad, gender, setGender, showJuniors, setShowJuniors } = ctx.filters
+  const { q, setQ, hideOut, setHideOut, squad, setSquad, gender, setGender } = ctx.filters
   const activeTeam = ctx.activeFid && ctx.cols[ctx.activeFid] ? ctx.shortTeam(ctx.cols[ctx.activeFid].fx) : null
   return (
     // Pinned to the left of the scrolling board (sticky, so the team columns slide
@@ -289,10 +290,6 @@ function PoolColumn({ ctx, drag }) {
             className="bg-transparent border-0 outline-none text-pb-text text-[13px] w-full placeholder:text-pb-faint" />
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <select value={years} onChange={(e) => setYears(Number(e.target.value))} aria-label="Played within"
-            className="bg-pb-surface2 border border-pb-hairline rounded-md text-[11.5px] px-1.5 py-1 text-pb-dim">
-            {[[1, 'Played ≤ 1 yr'], [2, '≤ 2 yrs'], [3, '≤ 3 yrs'], [5, '≤ 5 yrs'], [0, 'Any time']].map(([v, l]) => <option key={v} value={v} style={{ color: '#000' }}>{l}</option>)}
-          </select>
           {ctx.squadOptions.length > 0 && (
             <select value={squad} onChange={(e) => setSquad(e.target.value)} aria-label="Squad"
               className="bg-pb-surface2 border border-pb-hairline rounded-md text-[11.5px] px-1.5 py-1 text-pb-dim max-w-[110px]">
@@ -311,7 +308,6 @@ function PoolColumn({ ctx, drag }) {
           <label className="inline-flex items-center gap-1 text-[11.5px] text-pb-dim cursor-pointer">
             <input type="checkbox" checked={hideOut} onChange={(e) => setHideOut(e.target.checked)} />Hide unavailable
           </label>
-          <JuniorsToggle value={showJuniors} onChange={setShowJuniors} className="!px-2 !py-1 !text-[11.5px] !rounded-md" />
         </div>
         {ctx.canEdit && activeTeam && <div className="text-[11px] text-pb-faint">Click a player to add them to <b className="text-pb-text">{activeTeam}</b>, or drag onto any team.</div>}
       </header>
@@ -368,12 +364,14 @@ export default function AdminSelectionDraftTable() {
   const [busy, setBusy] = useState(false)
   const [activeFid, setActiveFid] = useState(null)
   const [q, setQ] = useState('')
-  const [years, setYears] = useState(3)
+  // How far back a player may have last played to be listed is a club setting (Settings, Players listed).
+  const years = useSelectConfig().playedYears?.selection ?? 3
   const [hideOut, setHideOut] = useState(false)
   const [squad, setSquad] = useState('')
   const [gender, setGender] = useState('')
   // The same remembered Show juniors choice Availability, Fixtures and Selection use.
-  const [showJuniors, setShowJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
+  // Whether junior grades show is a Settings choice now, not a switch on this screen.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   const colsRef = useRef(cols)
   colsRef.current = cols
@@ -861,7 +859,7 @@ export default function AdminSelectionDraftTable() {
   const ctx = {
     cols, order, merged, status, conflicts, canEdit, busy, activeFid, setActiveFid,
     shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length, showGender, weekByPlayer, day,
-    filters: { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad, gender, setGender, showJuniors, setShowJuniors },
+    filters: { q, setQ, hideOut, setHideOut, squad, setSquad, gender, setGender },
     tapPool, removeAt, toggleCap, toggleWk, confirmOne, discard, useTheirs, keepMine,
   }
 

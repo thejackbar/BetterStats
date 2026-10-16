@@ -264,10 +264,29 @@ MAYBE_OFF = "Maybe is switched off for this club. Record Available or Unavailabl
 
 
 @router.get("/config")
-async def availability_config(club: Organisation = Depends(get_current_club), user: User = Depends(get_current_user)):
-    """The few club settings every screen that records availability needs."""
+async def availability_config(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(get_current_user),
+):
+    """The few club settings every BetterSelect screen needs: whether Maybe is
+    offered, the half-available colours, how far back the pools reach, the
+    per-team starting filters, and the club's squads in XI order (so "top 3
+    squads" can be worked out where the pool is)."""
     from app.services import selection_rules as rules_svc
-    return {"allow_maybe": allow_maybe(club), "half_colours": rules_svc.club_config(club)["half_colours"]}
+    cfg = rules_svc.club_config(club)
+    rows = (await db.execute(
+        text("SELECT id, name, sequence FROM teams WHERE organisation_id = :org AND is_active "
+             "ORDER BY (sequence IS NULL OR sequence <= 0), sequence, name"),
+        {"org": club.id},
+    )).fetchall()
+    return {
+        "allow_maybe": allow_maybe(club),
+        "half_colours": cfg["half_colours"],
+        "played_years": cfg["played_years"],
+        "team_defaults": cfg["team_defaults"],
+        "squads": [{"id": str(i), "name": (n or "").strip(), "sequence": q} for i, n, q in rows],
+    }
 
 
 _AVAIL_WORD = {"AVAILABLE": "Available", "UNAVAILABLE": "Unavailable", "MAYBE": "Maybe", "NO_RESPONSE": "No response"}

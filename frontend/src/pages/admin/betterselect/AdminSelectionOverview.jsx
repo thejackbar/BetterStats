@@ -21,7 +21,7 @@ import { api } from '../../../lib/api'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER, viewStatus } from '../../../lib/availability'
-import { Icon, Avatar, Dot, Tag, RoleChips, JuniorsToggle } from './ui'
+import { Icon, Avatar, Dot, Tag, RoleChips } from './ui'
 import usePersistedState from '../../../lib/usePersistedState'
 
 const ROLE_CODES = ['BAT', 'ALL', 'BWL', 'WKT']
@@ -306,7 +306,8 @@ export default function AdminSelectionOverview() {
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
   const [openKeys, setOpenKeys] = useState(() => new Set())
-  const [showJuniors, setShowJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
+  // Whether junior grades show is a Settings choice now, not a switch on this screen.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   const load = useCallback(() => {
     setData(null)
@@ -408,7 +409,6 @@ export default function AdminSelectionOverview() {
           })}
         </div>
         <span className="flex-1" />
-        <JuniorsToggle value={showJuniors} onChange={setShowJuniors} />
         {draftDay && (
           <Link to={`/admin/betterselect/whiteboard?date=${draftDay}`}
             title="Every team for the day side by side, drag players between them"
