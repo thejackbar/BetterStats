@@ -158,7 +158,7 @@ export default function AdminFixtures() {
     ] },
     ...(roundOptions.length ? [{ key: 'round', label: 'Round', type: 'multi', options: roundOptions }] : []),
   ], [teamOptions, roundOptions])
-  const filters = useFilters(facets)
+  const filters = useFilters(facets, { persist: 'fixtures' })
   const { values } = filters
 
   // Group by weekend (Monday-anchored). Scope cuts to upcoming/past/all; past

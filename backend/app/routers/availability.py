@@ -27,6 +27,7 @@ from app.models.db import (
     Fixture, PlayerAvailability, PlayerAvailabilityPeriod, Organisation, Player, User, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
+from app.services.junior_fixtures import junior_fixture_ids
 from app.services.name_format import name_sort_key
 from app.services.squad_next_game import fixture_has_started, squad_next_games
 
@@ -175,7 +176,7 @@ def local_now(tz: Optional[str]) -> Optional[datetime]:
 
 async def upcoming_fixtures_by_date(
     db: AsyncSession, club_id, with_scope: bool = False, with_detail: bool = False,
-    now_local: Optional[datetime] = None,
+    now_local: Optional[datetime] = None, hide_juniors: bool = False,
 ) -> dict[str, list[dict]]:
     """{date_iso: [fixture entries]} for every upcoming club fixture.
 
@@ -191,6 +192,9 @@ async def upcoming_fixtures_by_date(
     `now_local` (the viewer's local time, from `local_now`) drops every game that
     has started or whose start time has passed, so availability moves on to the
     next game. Left None, only whole past dates drop, as before.
+
+    `hide_juniors` drops every fixture whose grade Manage Grades calls junior
+    (services/junior_fixtures.py), and with it any date that only juniors play.
     """
     fx_res = await db.execute(
         select(Fixture)
@@ -202,8 +206,11 @@ async def upcoming_fixtures_by_date(
         .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
     )
     fixtures = fx_res.scalars().all()
+    junior_ids = await junior_fixture_ids(db, club_id, fixtures) if hide_juniors else set()
     by_date: dict[str, list[dict]] = {}
     for f in fixtures:
+        if str(f.id) in junior_ids:
+            continue
         if fixture_has_started(f.status, f.played_on, f.start_time, now_local):
             continue
         spans = []
@@ -309,6 +316,7 @@ async def resolve_period_statuses(
 @router.get("/matrix")
 async def availability_matrix(
     tz: Optional[str] = None,
+    juniors: bool = False,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
@@ -321,8 +329,12 @@ async def availability_matrix(
     `squad_next` is each squad's own next game ({team_id: {date, scope, ...}}),
     so the Squads board reads a squad's availability against ITS next game and
     not the club's first date. See services/squad_next_game.py.
+
+    Junior grades (per Manage Grades) are left out unless `juniors=true`.
     """
-    by_date = await upcoming_fixtures_by_date(db, club.id, with_scope=True, now_local=local_now(tz))
+    by_date = await upcoming_fixtures_by_date(
+        db, club.id, with_scope=True, now_local=local_now(tz), hide_juniors=not juniors,
+    )
     team_rows = (await db.execute(
         text("SELECT id, grade_id FROM teams WHERE organisation_id = :org"),
         {"org": club.id},

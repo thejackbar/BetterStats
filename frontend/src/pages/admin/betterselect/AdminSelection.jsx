@@ -412,7 +412,7 @@ export default function AdminSelection() {
     // The club's association rules — clear / has a problem / ineligible.
     { key: 'rules', type: 'single' },
   ], [])
-  const filters = useFilters(facets)
+  const filters = useFilters(facets, { persist: 'selection' })
   const { values, search } = filters
 
   // A rule the club made BLOCKING means the pool should be suggesting players

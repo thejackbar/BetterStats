@@ -111,7 +111,7 @@ function PlayerList({ players, rulesById, statusOf, squadNameOf, selectedIds, se
     { key: 'nophoto', label: 'Missing photo', type: 'bool' },
     { key: 'newbie', label: 'Never played', type: 'bool' },
   ], [squadOptions])
-  const filters = useFilters(facets)
+  const filters = useFilters(facets, { persist: 'players' })
   const { values, search } = filters
   const searching = search.trim().length > 0
 

@@ -43,6 +43,7 @@ from app.routers.availability import (
     upcoming_fixtures_by_date,
 )
 from app.services import rate_limit
+from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.squad_next_game import fixtures_for_player
 
 router = APIRouter(prefix="/public/availability", tags=["public-availability"])
@@ -251,9 +252,38 @@ async def _player_squads(db: AsyncSession, club: Organisation, player: Player) -
     return [(str(tid), str(gid) if gid else None) for tid, gid in rows]
 
 
-async def _fixtures_for_player(db: AsyncSession, club: Organisation, squads: list, tz: Optional[str] = None) -> dict[str, list[dict]]:
+async def _in_junior_squad(db: AsyncSession, club: Organisation, player: Player) -> bool:
+    """Is this player in a squad whose grade Manage Grades calls junior? Read
+    straight from team_members, whatever the club's show-squad switch says,
+    because it only decides whether junior games stay on THEIR page."""
+    rows = (await db.execute(
+        text(
+            "SELECT t.name, t.grade_id FROM team_members tm JOIN teams t ON t.id = tm.team_id "
+            "WHERE tm.player_id = :p AND t.organisation_id = :org"
+        ),
+        {"p": player.id, "org": club.id},
+    )).fetchall()
+    if not rows:
+        return False
+    categories = await org_grade_category_sets(db, club.id)
+    grade_ids = {g for _, g in rows if g}
+    names = {}
+    if grade_ids:
+        names = dict((await db.execute(
+            select(Grade.id, Grade.name).where(Grade.id.in_(grade_ids))
+        )).fetchall())
+    for tname, gid in rows:
+        if "junior" in categories_for_name(categories, names.get(gid) or tname):
+            return True
+    return False
+
+
+async def _fixtures_for_player(db: AsyncSession, club: Organisation, squads: list, tz: Optional[str] = None,
+                               hide_juniors: bool = False) -> dict[str, list[dict]]:
     """Upcoming fixtures with time, venue, our team and which are this player's."""
-    by_date = await upcoming_fixtures_by_date(db, club.id, with_scope=True, with_detail=True, now_local=local_now(tz))
+    by_date = await upcoming_fixtures_by_date(
+        db, club.id, with_scope=True, with_detail=True, now_local=local_now(tz), hide_juniors=hide_juniors,
+    )
     team_rows = (await db.execute(
         text("SELECT id, name FROM teams WHERE organisation_id = :org"),
         {"org": club.id},
@@ -279,7 +309,9 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
     # A club may not want players to know their squad: with the switch off the
     # squads are never read, so nothing about them can reach the page.
     squads = await _player_squads(db, club, player) if club.availability_show_squad else []
-    by_date = await _fixtures_for_player(db, club, squads, tz)
+    # Junior games stay off a senior player's page (Manage Grades decides what
+    # is junior); a player who is in a junior squad still sees theirs.
+    by_date = await _fixtures_for_player(db, club, squads, tz, hide_juniors=not await _in_junior_squad(db, club, player))
     answers: dict[str, dict] = {}
     if by_date:
         av_res = await db.execute(

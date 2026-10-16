@@ -14,6 +14,7 @@ import {
   RecencySelect, playedWithinYears, RuleTags, Chip,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
+import usePersistedState from '../../../lib/usePersistedState'
 import SelfServiceLinkPanel from './SelfServiceLinkPanel'
 
 const ROLE_OPTS = [
@@ -74,8 +75,11 @@ export default function AdminAvailability() {
   const [avail, setAvail] = useState({}) // {playerId: {date: {status, source, note, ...}}}
 
   // Filters — roster + recency are quiet view controls; the rest are facets.
-  const [roster, setRoster] = useState('current')   // 'current' hides dormant/inactive; 'all' shows everyone
-  const [years, setYears] = useState(0)              // recency: played within N yrs (0 = any)
+  // Remembered on this device so they survive moving to another screen.
+  const [roster, setRoster] = usePersistedState('avail.roster', 'current', (v) => v === 'current' || v === 'all') // 'current' hides dormant/inactive; 'all' shows everyone
+  const [years, setYears] = usePersistedState('avail.years', 0, (v) => Number.isFinite(v)) // recency: played within N yrs (0 = any)
+  // Junior grades (per Manage Grades) are left out until asked for.
+  const [showJuniors, setShowJuniors] = usePersistedState('avail.juniors', false, (v) => typeof v === 'boolean')
   const [selectedIds, setSelectedIds] = useState(() => new Set()) // picked in any XI this round
 
   // Selected week (column) — drives the Pick XI handoff and single-week bulk.
@@ -84,7 +88,7 @@ export default function AdminAvailability() {
   // Columns the Availability filter judges. Empty = follow the selected week;
   // otherwise the picked weeks, combined by `colMatch` (every one or any one).
   const [filterCols, setFilterCols] = useState([])
-  const [colMatch, setColMatch] = useState('all')
+  const [colMatch, setColMatch] = usePersistedState('avail.colMatch', 'all', (v) => v === 'all' || v === 'any')
 
   // Date-range: filters which date COLUMNS are shown AND scopes the bulk-fill.
   // `rangeApplied` is what the matrix actually uses; the From/To selects are
@@ -105,7 +109,7 @@ export default function AdminAvailability() {
 
   const load = useCallback(() => {
     setData(null)
-    api.bsAvailabilityMatrix()
+    api.bsAvailabilityMatrix({ juniors: showJuniors })
       .then((d) => {
         setData(d)
         setAvail(d.availability || {})
@@ -117,7 +121,7 @@ export default function AdminAvailability() {
         }
       })
       .catch((e) => { toast.error(e.message); setData({ dates: [], players: [], availability: {} }) })
-  }, [toast])
+  }, [toast, showJuniors])
 
   useEffect(() => { load() }, [load])
 
@@ -140,7 +144,7 @@ export default function AdminAvailability() {
       { value: 'selected', label: 'Selected this round' }, { value: 'unselected', label: 'Not selected' },
     ] },
   ], [squadOptions])
-  const filters = useFilters(facets)
+  const filters = useFilters(facets, { persist: 'availability' })
   const { values, search } = filters
 
   // Staged-range preview (for the panel's "N games" + chips, before Apply).
@@ -316,6 +320,11 @@ export default function AdminAvailability() {
             { value: 'all', label: 'All' },
           ]} />
           <RecencySelect value={years} onChange={setYears} />
+          <button onClick={() => setShowJuniors(!showJuniors)} aria-pressed={showJuniors}
+            title="Junior grades are set in Manage Grades"
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${showJuniors ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}>
+            {showJuniors ? 'Juniors shown' : 'Show juniors'}
+          </button>
           <button onClick={() => setRangeOn((v) => !v)}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${rangeOn ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}>
             <Icon name="fixtures" size={14} /> Date range {rangeOn ? '▲' : '▼'}

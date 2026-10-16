@@ -133,6 +133,7 @@ async def main():
     A, B, C = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     async with Session() as db:
         db.add(Organisation(id=org_id, name="Applecross", short_name="Applecross",
+                            playhq_id="o-us",   # the id CA gives the club's own teams (match())
                             slug=f"apple-{org_id.hex[:8]}"))
         db.add(User(id=user_id, username=f"u{user_id.hex[:8]}", email=f"{user_id.hex[:8]}@x.com",
                     password_hash="x"))
@@ -316,6 +317,40 @@ async def main():
     check("twin already in use: its XI survives", await xi_count(t2), 1)
     check("twin already in use: the live row is kept", len(find(rs, id=t2)), 1)
     check("twin already in use: the empty stale one is removed", len(find(rs, id=o2)), 0)
+
+    # ---- A game stored for this club that is another club's ------------------
+    # The old name test stamped a neighbour's game in the same grade onto the
+    # club. CA still lists it UPCOMING, but the club filter no longer keeps it,
+    # so nothing "dropped" it: it has to be recognised as not ours.
+    def other(mid, day, rnd):
+        m = match(mid, day, rnd, "Rovers")
+        m["teams"] = [
+            {"isHome": True, "displayName": "Applecross South CC", "owningOrganisation": {"id": "o-south"}},
+            {"isHome": False, "displayName": "Rovers CC", "owningOrganisation": {"id": "o-Rovers"}},
+        ]
+        return m
+    async with Session() as db:
+        f_plain, f_work = uuid.uuid4(), uuid.uuid4()
+        for fid, pid, rnd in ((f_plain, "a-foreign", "20"), (f_work, "a-foreign-xi", "21")):
+            db.add(Fixture(id=fid, organisation_id=org_id, source="grassroots", playhq_id=pid, grade_id=A,
+                           round=rnd, played_on=d(10), status="UPCOMING", home_away="HOME",
+                           opponent_name="Rovers CC", home_team="Applecross South CC", away_team="Rovers CC"))
+        await db.commit()
+    await named_xi(f_work)
+    DRAW[GA] = DRAW[GA] + [other("a-foreign", d(10), "20"), other("a-foreign-xi", d(10), "21")]
+    mine_before = {r.playhq_id for r in await rows() if r.source == "grassroots" and r.playhq_id.startswith("a-r")}
+    fx = await sync()
+    rs = await rows()
+    check("another club's game, nobody's work on it: removed", len(find(rs, id=f_plain)), 0)
+    check("another club's game with an XI: kept, marked CANCELLED",
+          (len(find(rs, id=f_work)), find(rs, id=f_work)[0].status if find(rs, id=f_work) else None),
+          (1, "CANCELLED"))
+    check("another club's game is never re-keyed onto a real one",
+          sorted(r.playhq_id for r in rs if r.id in (f_plain, f_work)), ["a-foreign-xi"])
+    check("the club's own games in that grade are untouched",
+          {r.playhq_id for r in rs if r.source == "grassroots" and r.playhq_id.startswith("a-r")}, mine_before)
+    check("a re-sync does not bring the other club's game back",
+          len([r for r in rs if r.playhq_id == "a-foreign"]), 0)
 
     print(f"\n{PASS} passed, {FAIL} failed")
     if FAILURES:

@@ -3253,7 +3253,8 @@ export const api = {
     }) }),
 
   // ─── BetterSelect: Availability ─────────────────────────
-  bsAvailabilityMatrix: () => request(`/availability/matrix${tzQuery()}`),
+  bsAvailabilityMatrix: ({ juniors = false } = {}) =>
+    request(`/availability/matrix${tzQuery()}${juniors ? (tzQuery() ? '&' : '?') + 'juniors=true' : ''}`),
   bsSetAvailability: (data) =>
     request('/availability', { method: 'POST', body: JSON.stringify(data) }),
   bsBulkAvailability: (items) =>

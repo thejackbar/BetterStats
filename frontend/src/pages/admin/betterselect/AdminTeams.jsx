@@ -943,7 +943,7 @@ export default function AdminTeams() {
     { key: 'showinactive', label: 'Show inactive players', type: 'bool' },
     { key: 'hideunassigned', label: 'Hide unassigned pools', type: 'bool' },
   ], [teams])
-  const filters = useFilters(facets)
+  const filters = useFilters(facets, { persist: 'squads' })
   const { values, search } = filters
 
   // How far back the fill-in pool digs. Only offer windows WIDER than the

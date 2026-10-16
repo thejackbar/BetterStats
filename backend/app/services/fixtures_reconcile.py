@@ -134,6 +134,41 @@ def find_stale(
     return stale
 
 
+def find_foreign(
+    existing: Iterable[Fixture],
+    club_game_ids: set[str],
+    listing: dict,
+    today: date,
+) -> list[Fixture]:
+    """Synced fixtures dated today or later that CA still lists as UPCOMING in a
+    grade we read, but that are no longer one of THIS club's games.
+
+    The club filter (``club_match.fixture_side``) used to accept any side whose
+    name began with the club's first word, so a neighbouring club's game in the
+    same grade could be stamped onto this club. Tightening the filter stops new
+    ones; this is what removes the ones already stored. ``club_game_ids`` is
+    every match this sync's filter kept, whatever its date, so a game CA merely
+    stopped dating is not mistaken for someone else's. Only UPCOMING games in a
+    grade whose list was read and was not empty are judged; anything else (live,
+    completed, an unfamiliar state, a grade that failed to load) is left alone.
+    """
+    grades: dict = listing.get("grades") or {}
+    out: list[Fixture] = []
+    for f in existing:
+        if f.source != "grassroots" or not f.playhq_id or f.playhq_id in club_game_ids:
+            continue
+        if f.played_on is None or f.played_on < today:
+            continue
+        if (f.status or "").upper() == "CANCELLED" or not f.grade_id:
+            continue
+        states = grades.get(str(f.grade_id))
+        if states is None:
+            continue
+        if states.get(f.playhq_id) == "UPCOMING":
+            out.append(f)
+    return out
+
+
 async def reconcile(
     db: AsyncSession,
     *,
@@ -143,6 +178,7 @@ async def reconcile(
     listing: dict,
     today: date,
     derive_sides,
+    club_game_ids: Optional[set[str]] = None,
 ) -> ReconcileResult:
     """Re-key, remove or cancel stale synced fixtures. Does not commit.
 
@@ -153,6 +189,11 @@ async def reconcile(
     """
     result = ReconcileResult()
     stale = find_stale(existing, incoming_ids, listing, today)
+    # Rows that belong to another club. Never re-keyed (they have no
+    # replacement here), only removed, or cancelled if a person worked on them.
+    foreign = find_foreign(existing, club_game_ids, listing, today) if club_game_ids is not None else []
+    foreign_ids = {str(f.id) for f in foreign}
+    stale = stale + [f for f in foreign if str(f.id) not in {str(x.id) for x in stale}]
     if not stale:
         return result
 
@@ -162,6 +203,8 @@ async def reconcile(
     # --- 1. Re-key: pair a stale row with the one game CA lists in its place.
     stale_by_key: dict[tuple, list[Fixture]] = defaultdict(list)
     for f in stale:
+        if str(f.id) in foreign_ids:
+            continue
         stale_by_key[_row_key(f.grade_id, f.round, f.home_away, f.opponent_name)].append(f)
     games_by_key: dict[tuple, list[dict]] = defaultdict(list)
     for g in games:

@@ -3,7 +3,9 @@
 // drift per screen: an always-visible search, a "Filters" button with an active
 // count, removable active-filter chips, "Clear all", and a collapsible panel of
 // facet groups. Filter state lives in the URL, so navigating away and back keeps
-// the view (and links are shareable).
+// the view (and links are shareable). Pass `persist: '<screen>'` and the view is
+// also remembered on this device, so it comes back after moving to another
+// screen (the sidebar links carry no query string) or reopening the app.
 //
 // A screen declares its facets and feeds them to useFilters + FilterBar:
 //   const FACETS = useMemo(() => [
@@ -28,8 +30,43 @@ const isBlank = (v) => v == null || v === '' || (Array.isArray(v) && v.length ==
 /* URL-backed filter state for a set of facet definitions. Only touches its own
  * keys (+ the search key), so unrelated query params — e.g. ?player= — survive.
  * Uses history replace so typing in search doesn't spam the back stack. */
-export function useFilters(facets, { searchKey = 'q' } = {}) {
+const VIEW_PREFIX = 'bs_view:'
+function readView(key) {
+  try { return localStorage.getItem(VIEW_PREFIX + key) } catch { return null }
+}
+function writeView(key, qs) {
+  try { localStorage.setItem(VIEW_PREFIX + key, qs) } catch { /* private mode / blocked */ }
+}
+
+export function useFilters(facets, { searchKey = 'q', persist = null } = {}) {
   const [params, setParams] = useSearchParams()
+  const ownKeys = useMemo(() => new Set([searchKey, ...facets.map((f) => f.key)]), [facets, searchKey])
+  const firstSave = useRef(true)
+
+  // Coming back with a bare URL: bring the remembered view back. A link that
+  // carries its own filters wins, and an explicitly cleared view is stored as ''
+  // so "Clear all" is remembered too.
+  useEffect(() => {
+    if (!persist) return
+    if ([...ownKeys].some((k) => params.has(k))) return
+    const saved = readView(persist)
+    if (!saved) return
+    const sp = new URLSearchParams(saved)
+    setParams((prev) => {
+      const p = new URLSearchParams(prev)
+      sp.forEach((v, k) => { if (ownKeys.has(k)) p.append(k, v) })
+      return p
+    }, { replace: true })
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Remember every change (not the first render: that is the restore above).
+  useEffect(() => {
+    if (!persist) return
+    if (firstSave.current) { firstSave.current = false; return }
+    const sp = new URLSearchParams()
+    params.forEach((v, k) => { if (ownKeys.has(k)) sp.append(k, v) })
+    writeView(persist, sp.toString())
+  }, [params])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const values = useMemo(() => {
     const v = {}

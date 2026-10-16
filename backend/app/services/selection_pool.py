@@ -23,6 +23,7 @@ from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolv
 from app.auth.modules import org_has_module
 from app.services import player_age, selection_clash, selection_rules
 from app.services.side_size import effective_min
+from app.services.grade_labels import grade_is_women, org_grade_category_sets
 
 # Autofill scoring constants ─────────────────────────────────────────────────
 # Window for "recent form" — last N batting innings & bowling spells per player.
@@ -37,6 +38,12 @@ AUTOFILL_RECENCY_MONTHS = 12
 # Tuesday/Thursday nets programme plus one missed week, which is the question a
 # selector is actually asking — not "has this person ever attended".
 TRAINING_WINDOW_DAYS = 21
+
+
+
+def _is_male(gender) -> bool:
+    return str(gender or "").strip().lower() in ("male", "m", "man", "men", "boy")
+
 
 
 async def _owing_player_ids(session: AsyncSession, club) -> set[str] | None:
@@ -672,25 +679,33 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
                 fx_team_seq = fx_team_obj.sequence
     fx_is_women = False
     fx_grade_name: str | None = None
-    if fx.grade_id:
-        fx_grade_obj = await db.get(Grade, fx.grade_id)
+    # Women's-ness is the BetterFees override OR what Manage Grades says the
+    # grade is (its category), so a club that classified "Women's B Grade" there
+    # gets the gender wall without also setting a fee format. A fixture with no
+    # grade of its own reads the grade of its team.
+    grade_categories = await org_grade_category_sets(db, club.id)
+    fx_grade_id = fx.grade_id or (fx_team_obj.grade_id if fx_team_obj else None)
+    if fx_grade_id:
+        fx_grade_obj = await db.get(Grade, fx_grade_id)
         if fx_grade_obj:
-            fx_is_women = (fx_grade_obj.fee_format == "women")
+            fx_is_women = grade_is_women(fx_grade_obj.fee_format, fx_grade_obj.name, grade_categories)
             fx_grade_name = fx_grade_obj.display_name_override or fx_grade_obj.name
+    elif fx_team_obj:
+        fx_is_women = grade_is_women(None, fx_team_obj.name, grade_categories)
 
     # Per-squad-team metadata: sequence + women's-grade flag.
     squad_meta: dict[str, tuple[int, bool]] = {}
     sq_meta_res = await db.execute(
-        select(Team.id, Team.sequence, Grade.fee_format, Team.short_name, Team.name)
+        select(Team.id, Team.sequence, Grade.fee_format, Team.short_name, Team.name, Grade.name)
         .select_from(Team)
         .outerjoin(Grade, Team.grade_id == Grade.id)
         .where(Team.organisation_id == club.id)
     )
     squad_label: dict[str, str] = {}
-    for tid, seq, fee, short, nm in sq_meta_res.fetchall():
+    for tid, seq, fee, short, nm, grade_nm in sq_meta_res.fetchall():
         if str(tid) not in active_teams:
             continue
-        squad_meta[str(tid)] = (seq or 0, fee == "women")
+        squad_meta[str(tid)] = (seq or 0, grade_is_women(fee, grade_nm or nm, grade_categories))
         squad_label[str(tid)] = short or nm or ""
 
     squad_place = _squad_order(active_teams)
@@ -747,6 +762,11 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         squad_match = bool(_fixture_team_id and _fixture_team_id in my_squads)
         gender_squads = [s for s in my_squads if squad_meta.get(s, (0, False))[1] == fx_is_women]
         gender_ok = bool(gender_squads)
+        # A player the club has recorded as male never fills a women's side,
+        # whatever squad a mislinked team put them in.
+        if fx_is_women and _is_male(p.gender):
+            gender_ok = False
+            gender_squads = []
         tier_squad: str | None = None
         if fx_team_seq:
             tier = None

@@ -31,6 +31,7 @@ from app.services.side_size import effective_min
 from app.services.club_match import fixture_side
 from app.services.fixtures_reconcile import reconcile
 from app.services.fixtures_source import org_grassroots_fixtures_checked
+from app.services.grade_labels import grade_is_women, org_grade_category_sets
 
 router = APIRouter(prefix="/fixtures", tags=["fixtures"])
 
@@ -118,27 +119,38 @@ def _norm(s: Optional[str]) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
-def _match_team(our_name: Optional[str], teams: list[tuple]):
+def _match_team(our_name: Optional[str], teams: list[tuple], women: Optional[bool] = None):
     """Best-effort map a fixture's own-side team name to one of the club's teams.
 
-    teams: list of (id, name, sequence). Returns a team id or None.
+    teams: list of (id, name, sequence) or (id, name, sequence, is_women), where
+    ``is_women`` is True/False when the team's grade says which side it is and
+    None when it has no grade. Returns a team id or None.
 
     Auto-seeded teams have no grade_id, so we match on the team *name* (which
     both the seed and the fixture sync derive from CA data), falling back to the
     grade number. Both steps require an unambiguous hit — never guess.
+
+    The grade-number fallback respects the gender of the fixture's grade
+    (``women``): a women's "...2nd XI" must not land on the men's second team
+    because both are "2". A women's fixture needs a team known to be women's, and
+    a men's one cannot take a team known to be women's.
     """
     n = _norm(our_name)
     if not n:
         return None
+    teams = [t if len(t) > 3 else (*t, None) for t in teams]
     # 1. exact normalised name
-    for tid, tname, _ in teams:
+    for tid, tname, _, _w in teams:
         if _norm(tname) == n:
             return tid
     # 2. grade number (e.g. "...1st Grade" -> 1), only if exactly one team ranks there
     m = re.search(r"(\d+)", n)
     if m:
         seq = int(m.group(1))
-        hits = [tid for tid, _, tseq in teams if tseq == seq]
+        hits = [
+            tid for tid, _, tseq, tw in teams
+            if tseq == seq and (women is None or (tw is True if women else tw is not True))
+        ]
         if len(hits) == 1:
             return hits[0]
     return None
@@ -333,9 +345,15 @@ async def sync_fixtures(
 
     # Teams for name-based auto-attribution (id, name, sequence).
     tm_res = await db.execute(
-        select(Team.id, Team.name, Team.sequence).where(Team.organisation_id == club.id)
+        select(Team.id, Team.name, Team.sequence, Grade.fee_format, Grade.name)
+        .select_from(Team).outerjoin(Grade, Team.grade_id == Grade.id)
+        .where(Team.organisation_id == club.id)
     )
-    teams = [(tid, tname, tseq) for tid, tname, tseq in tm_res.fetchall()]
+    grade_cats = await org_grade_category_sets(db, club.id)
+    teams = [
+        (tid, tname, tseq, grade_is_women(fee, gname, grade_cats) if gname else None)
+        for tid, tname, tseq, fee, gname in tm_res.fetchall()
+    ]
 
     existing_rows = list(
         (await db.execute(select(Fixture).where(Fixture.organisation_id == club.id))).scalars().all()
@@ -349,6 +367,7 @@ async def sync_fixtures(
         listing=listing,
         today=today,
         derive_sides=lambda g: _derive_sides(g, club),
+        club_game_ids={str(g["id"]) for g in games if g.get("id")},
     )
     by_gid = {f.playhq_id: f for f in existing_rows if f.playhq_id and f.source == "grassroots"}
 
@@ -386,7 +405,8 @@ async def sync_fixtures(
         # assignment is never overwritten by a later sync.
         if teams and target.team_id is None:
             our_name = target.home_team if home_away == "HOME" else target.away_team if home_away == "AWAY" else None
-            matched = _match_team(our_name, teams)
+            fx_women = grade_is_women(None, g.get("grade_name"), grade_cats) if g.get("grade_name") else None
+            matched = _match_team(our_name, teams, fx_women)
             if matched:
                 target.team_id = matched
                 teams_assigned += 1
