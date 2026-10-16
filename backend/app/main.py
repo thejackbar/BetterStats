@@ -4511,6 +4511,12 @@ async def lifespan(app: FastAPI):
         for _stmt in _NET_SESSION_LINK_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 336: a squad can cover several teams. Same one-copy rule: this
+        # and alembic's 336 both run services/team_sides_ddl.STATEMENTS.
+        from app.services.team_sides_ddl import STATEMENTS as _TEAM_SIDES_DDL
+        for _stmt in _TEAM_SIDES_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.

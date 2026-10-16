@@ -1120,21 +1120,31 @@ async def _team_sequences(db: AsyncSession, org_id, fx) -> tuple[dict[str, int],
     """Every team name (and short name) mapped to its seniority, plus this
     fixture's own. Seniority is what makes "a higher grade" answerable at all;
     a club that hasn't ordered its squads gets no answer, and the rule stays
-    quiet rather than guessing."""
-    rows = (await db.execute(
-        text("SELECT id, name, short_name, sequence FROM teams WHERE organisation_id = :org"),
-        {"org": org_id},
-    )).fetchall()
+    quiet rather than guessing.
+
+    A squad can cover several teams (1st and 2nd XI in one pool): each team's own
+    name ("2nd XI") carries its own XI number, and the squad's name the first."""
+    from app.services import squad_sides   # local: this module is imported by the pool
+    sides = await squad_sides.load(db, org_id)
     seqs: dict[str, int] = {}
-    mine: int | None = None
-    for tid, name, short, seq in rows:
-        if not seq or seq <= 0:
+    for sq in sides.squads.values():
+        if not sq.sequence or sq.sequence <= 0:
             continue
-        for label in (name, short):
+        for label in (sq.name, sq.short_name):
             if label:
-                seqs[label.strip().lower()] = seq
-        if fx.team_id and str(tid) == str(fx.team_id):
-            mine = seq
+                seqs[label.strip().lower()] = sq.top_rank or sq.sequence
+        if sq.multi:
+            for side in sq.sides:
+                if side.rank:
+                    for label in (side.label, side.default_label):
+                        if label:
+                            seqs[label.strip().lower()] = side.rank
+    if fx.team_id:
+        mine = sides.rank(fx.team_id, fx.grade_id)
+    else:
+        # No squad named: only a squad set up to cover this grade may claim it.
+        owner = sides.squad_for_stored_grade(fx.grade_id) if fx.grade_id else None
+        mine = sides.rank(owner.id, fx.grade_id) if owner else None
     return seqs, mine
 
 

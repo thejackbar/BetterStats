@@ -182,7 +182,7 @@ const run = async () => {
 
   // ═══════════════ Draft table ═══════════════
   console.log('\n# the table')
-  await page.goto(`${BASE}/admin/betterselect/selection/draft-table`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
   const loaded = await page.locator('[data-draft-table]').waitFor({ timeout: 15000 }).then(() => true).catch(() => false)
   ok('the draft table opens', loaded)
   if (loaded) {
@@ -290,7 +290,7 @@ const run = async () => {
   // ═══════════════ Draft table: the pool stays in view ═══════════════
   console.log('\n# Draft table: the pool is pinned while the teams scroll')
   await page.setViewportSize({ width: 1100, height: 800 })
-  await page.goto(`${BASE}/admin/betterselect/selection/draft-table`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
   await page.locator('[data-draft-table]').waitFor({ timeout: 15000 })
   await page.waitForTimeout(500)
   const scrollInfo = () => page.evaluate(() => {
@@ -393,7 +393,7 @@ const run = async () => {
   // ═══════════════ Gender filter ═══════════════
   console.log('\n# Gender filter (Draft table and Selection board)')
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto(`${BASE}/admin/betterselect/selection/draft-table`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
   await page.locator('[data-draft-table]').waitFor({ timeout: 15000 })
   await page.waitForTimeout(500)
   const gSel = page.locator('[data-pool-col] select[aria-label="Gender"]')
@@ -436,7 +436,7 @@ const run = async () => {
   // ═══════════════ Phone ═══════════════
   console.log('\n# 390px')
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto(`${BASE}/admin/betterselect/selection/draft-table`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(1200)
   const phoneNote = /needs a wider screen/.test(await page.locator('body').innerText())
   ok('the draft table says it needs a wider screen on a phone', phoneNote || CONTROL)

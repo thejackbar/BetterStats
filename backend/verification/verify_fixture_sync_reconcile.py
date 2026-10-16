@@ -125,6 +125,9 @@ async def main():
             await conn.execute(text(stmt))
         for stmt in DRAFT_DDL:
             await conn.execute(text(stmt))
+        from app.services.team_sides_ddl import STATEMENTS as SIDES_DDL
+        for stmt in SIDES_DDL:
+            await conn.execute(text(stmt))
 
     from app.routers.fixtures import sync_fixtures
 
@@ -351,6 +354,30 @@ async def main():
           {r.playhq_id for r in rs if r.source == "grassroots" and r.playhq_id.startswith("a-r")}, mine_before)
     check("a re-sync does not bring the other club's game back",
           len([r for r in rs if r.playhq_id == "a-foreign"]), 0)
+
+    # ---- A squad set up to cover a grade claims the fixtures drawn in it -----
+    # (migration 336). Before this, a synced fixture only found a squad by the
+    # name of the team; a squad called "Macs" covering the 1st Grade is no name
+    # the draw ever uses.
+    from app.services.team_sides_ddl import STATEMENTS as SIDES_DDL
+    async with engine.begin() as conn:
+        for stmt in SIDES_DDL:
+            await conn.execute(text(stmt))
+    squad = uuid.uuid4()
+    async with Session() as db:
+        from app.models.db import Team
+        db.add(Team(id=squad, organisation_id=org_id, name="Macs", sequence=1))
+        await db.flush()
+        await db.execute(text(
+            "INSERT INTO team_sides (team_id, organisation_id, grade_key, grade_name, position) "
+            "VALUES (:t, :o, '1st grade', '1st Grade', 0)"), {"t": squad, "o": org_id})
+        await db.commit()
+    DRAW[GA] = DRAW[GA] + [match("a-claimed", d(12), "30", "Hawks")]
+    await sync()
+    rs = await rows()
+    claimed = find(rs, playhq_id="a-claimed")
+    check("a new game in a grade the squad covers lands on the squad",
+          claimed[0].team_id if claimed else None, squad)
 
     print(f"\n{PASS} passed, {FAIL} failed")
     if FAILURES:

@@ -42,7 +42,7 @@ from app.routers.availability import (
     phone_last4,
     upcoming_fixtures_by_date,
 )
-from app.services import rate_limit
+from app.services import rate_limit, squad_sides
 from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.squad_next_game import fixtures_for_player
 
@@ -241,24 +241,27 @@ def _grouped_dates(by_date: dict[str, list[dict]]) -> list[dict]:
     return [{"date": d, "fixtures": by_date[d]} for d in sorted(by_date.keys())]
 
 
-async def _player_squads(db: AsyncSession, club: Organisation, player: Player) -> list[tuple[str, Optional[str]]]:
+async def _player_squads(db: AsyncSession, club: Organisation, player: Player) -> list[tuple[str, Optional[frozenset]]]:
+    """(squad id, the grade rows of every team it covers) for each squad the
+    player is in; None where a squad has no grade to read games from."""
     rows = (await db.execute(
         text(
-            "SELECT t.id, t.grade_id FROM team_members tm JOIN teams t ON t.id = tm.team_id "
+            "SELECT t.id FROM team_members tm JOIN teams t ON t.id = tm.team_id "
             "WHERE tm.player_id = :p AND t.organisation_id = :org"
         ),
         {"p": player.id, "org": club.id},
     )).fetchall()
-    return [(str(tid), str(gid) if gid else None) for tid, gid in rows]
+    sides = await squad_sides.load(db, club.id)
+    return [(str(tid), frozenset(sides.grade_ids(tid)) or None) for (tid,) in rows]
 
 
 async def _in_junior_squad(db: AsyncSession, club: Organisation, player: Player) -> bool:
-    """Is this player in a squad whose grade Manage Grades calls junior? Read
+    """Is this player in a squad with a team Manage Grades calls junior? Read
     straight from team_members, whatever the club's show-squad switch says,
     because it only decides whether junior games stay on THEIR page."""
     rows = (await db.execute(
         text(
-            "SELECT t.name, t.grade_id FROM team_members tm JOIN teams t ON t.id = tm.team_id "
+            "SELECT t.id, t.name FROM team_members tm JOIN teams t ON t.id = tm.team_id "
             "WHERE tm.player_id = :p AND t.organisation_id = :org"
         ),
         {"p": player.id, "org": club.id},
@@ -266,15 +269,12 @@ async def _in_junior_squad(db: AsyncSession, club: Organisation, player: Player)
     if not rows:
         return False
     categories = await org_grade_category_sets(db, club.id)
-    grade_ids = {g for _, g in rows if g}
-    names = {}
-    if grade_ids:
-        names = dict((await db.execute(
-            select(Grade.id, Grade.name).where(Grade.id.in_(grade_ids))
-        )).fetchall())
-    for tname, gid in rows:
-        if "junior" in categories_for_name(categories, names.get(gid) or tname):
-            return True
+    sides = await squad_sides.load(db, club.id)
+    for tid, tname in rows:
+        # Every team the squad covers, else (no grade) the squad's own name.
+        for name in (sides.grade_names(tid) or [tname]):
+            if "junior" in categories_for_name(categories, name):
+                return True
     return False
 
 
@@ -369,10 +369,11 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
     squads_visible = bool(club.availability_show_squad)
     squad_names = await _squad_names(db, club, player) if squads_visible else []
 
+    my_sides = await squad_sides.load(db, club.id)
     sel_rows = (await db.execute(
         text(
             "SELECT f.id, f.played_on, f.start_time, f.venue, f.opponent_name, f.home_away, f.label, f.round, "
-            "COALESCE(NULLIF(t.short_name, ''), t.name), fl.is_captain, fl.is_wicket_keeper "
+            "COALESCE(NULLIF(t.short_name, ''), t.name), fl.is_captain, fl.is_wicket_keeper, f.team_id, f.grade_id "
             "FROM fixture_lineups fl JOIN fixtures f ON f.id = fl.fixture_id "
             "LEFT JOIN teams t ON t.id = f.team_id "
             "WHERE fl.player_id = :p AND fl.organisation_id = :org AND f.locked_at IS NOT NULL "
@@ -386,7 +387,8 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
             "date": r[1].isoformat() if r[1] else None, "start_time": r[2], "venue": r[3],
             "opponent_name": r[4], "home_away": r[5], "label": r[6], "round": r[7],
             # The side's name is the squad's, so it follows the same switch.
-            "team_name": r[8] if squads_visible else None,
+            # (A squad covering several teams names this one by its team.)
+            "team_name": (my_sides.name(r[11], r[12]) or r[8]) if squads_visible else None,
             "is_captain": bool(r[9]), "is_wicket_keeper": bool(r[10]),
         }
         for r in sel_rows

@@ -27,6 +27,7 @@ from app.models.db import (
     Fixture, PlayerAvailability, PlayerAvailabilityPeriod, Organisation, Player, User, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
+from app.services import squad_sides
 from app.services.junior_fixtures import junior_fixture_ids
 from app.services.name_format import name_sort_key
 from app.services.squad_next_game import fixture_has_started, squad_next_games
@@ -335,12 +336,11 @@ async def availability_matrix(
     by_date = await upcoming_fixtures_by_date(
         db, club.id, with_scope=True, now_local=local_now(tz), hide_juniors=not juniors,
     )
-    team_rows = (await db.execute(
-        text("SELECT id, grade_id FROM teams WHERE organisation_id = :org"),
-        {"org": club.id},
-    )).fetchall()
+    # A squad may cover several teams (migration 336): its next game is the
+    # earliest of any of their grades.
+    sq_sides = await squad_sides.load(db, club.id)
     squad_next = squad_next_games(
-        by_date, [(str(tid), str(gid) if gid else None) for tid, gid in team_rows],
+        by_date, [(tid, (sq_sides.grade_ids(tid) or None)) for tid in sq_sides.squads],
     )
 
     # All real players (not just status=active): the frontend filter bar decides

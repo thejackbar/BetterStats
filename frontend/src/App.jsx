@@ -281,6 +281,12 @@ const PublicMemberPortal = lazy(() => import('./pages/PublicMemberPortal'))
 // Public, login-free merch storefront
 const PublicMerchStore = lazy(() => import('./pages/PublicMerchStore'))
 
+// A redirect that keeps the query string, so an old link with ?date= still lands on that day.
+function RedirectKeepingSearch({ to }) {
+  const { search } = useLocation()
+  return <Navigate to={`${to}${search}`} replace />
+}
+
 const PageLoader = () => (
   <div className="flex justify-center py-24">
     <LoadingSpinner size="lg" />
@@ -577,7 +583,9 @@ export default function App() {
           <Route path="/admin/betterselect/teams" element={<ProtectedRoute requireModule="select"><BsTeams /></ProtectedRoute>} />
           <Route path="/admin/betterselect/availability" element={<ProtectedRoute requireModule="select"><BsAvailability /></ProtectedRoute>} />
           <Route path="/admin/betterselect/selection" element={<ProtectedRoute requireModule="select"><BsSelectionOverview /></ProtectedRoute>} />
-          <Route path="/admin/betterselect/selection/draft-table" element={<ProtectedRoute requireModule="select"><BsSelectionDraftTable /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/whiteboard" element={<ProtectedRoute requireModule="select"><BsSelectionDraftTable /></ProtectedRoute>} />
+          {/* Its old address, from before it had its own place in the menu. */}
+          <Route path="/admin/betterselect/selection/draft-table" element={<RedirectKeepingSearch to="/admin/betterselect/whiteboard" />} />
           <Route path="/admin/betterselect/select/:fixtureId" element={<ProtectedRoute requireModule="select"><BsSelection /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets" element={<ProtectedRoute requireModule="select"><BsNets /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets/:id" element={<ProtectedRoute requireModule="select"><BsNetSession /></ProtectedRoute>} />

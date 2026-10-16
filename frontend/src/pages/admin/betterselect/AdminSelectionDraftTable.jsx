@@ -1,4 +1,4 @@
-// BetterSelect → Selection → Draft table.
+// BetterSelect → Selection Whiteboard (it was the Draft table; the code keeps the old name).
 //
 // Every team playing on one matchday side by side, plus the players nobody has
 // picked yet. Drag a player from one team to another (or from the pool onto a
@@ -768,11 +768,11 @@ export default function AdminSelectionDraftTable() {
   )
 
   if (overview === null || (day && cols === null)) {
-    return <BetterSelectLayout title="Draft table" actions={actions} wide><PbSpinner message="Loading the draft table…" /></BetterSelectLayout>
+    return <BetterSelectLayout title="Selection Whiteboard" actions={actions} wide><PbSpinner message="Loading the whiteboard…" /></BetterSelectLayout>
   }
   if (!days.length) {
     return (
-      <BetterSelectLayout title="Draft table" actions={actions} wide>
+      <BetterSelectLayout title="Selection Whiteboard" actions={actions} wide>
         <div className="pb-card rounded-xl px-5 py-10 text-center text-pb-faint text-sm">
           No upcoming fixtures. <Link to="/admin/betterselect/fixtures" className="text-pb-accent underline">Add or sync fixtures</Link> first.
         </div>
@@ -781,9 +781,9 @@ export default function AdminSelectionDraftTable() {
   }
   if (isPhone) {
     return (
-      <BetterSelectLayout title="Draft table" actions={actions} wide>
+      <BetterSelectLayout title="Selection Whiteboard" actions={actions} wide>
         <div className="pb-card rounded-xl px-5 py-8 text-center text-sm text-pb-dim">
-          <b className="block text-pb-text font-display text-base mb-1">The draft table needs a wider screen</b>
+          <b className="block text-pb-text font-display text-base mb-1">The Selection Whiteboard needs a wider screen</b>
           Teams sit side by side here, so it is built for a laptop or a tablet held sideways.{' '}
           <Link to="/admin/betterselect/selection" className="text-pb-accent underline">Back to Selection</Link>
         </div>
@@ -799,10 +799,10 @@ export default function AdminSelectionDraftTable() {
   }
 
   return (
-    <BetterSelectLayout title="Draft table" actions={actions} wide>
+    <BetterSelectLayout title="Selection Whiteboard" actions={actions} wide>
       <div className="flex items-end justify-between gap-x-5 gap-y-2 flex-wrap mb-3">
         <div className="min-w-0">
-          <h2 className="font-display font-bold text-[18px] tracking-tight">Draft table</h2>
+          <h2 className="font-display font-bold text-[18px] tracking-tight">Selection Whiteboard</h2>
           <p className="text-[13px] text-pb-dim mt-0.5">
             Every team for the day side by side. Drag a player from one team to another, or into and out of the pool. Changes save as drafts until you confirm.
           </p>

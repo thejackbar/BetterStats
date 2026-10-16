@@ -78,6 +78,10 @@ async def build_schema():
         await conn.execute(text(
             "ALTER TABLE net_checkin_registrations ALTER COLUMN id SET DEFAULT gen_random_uuid()"
         ))
+        # Lifespan DDL the squad readers use (migration 336).
+        from app.services.team_sides_ddl import STATEMENTS as SIDES_DDL
+        for stmt in SIDES_DDL:
+            await conn.execute(text(stmt))
 
 
 async def seed():

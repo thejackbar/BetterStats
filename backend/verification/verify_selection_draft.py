@@ -157,6 +157,12 @@ async def build_schema() -> None:
                 await conn.execute(text(stmt))
         except ImportError:
             pass
+        try:
+            ddl = importlib.import_module("app.services.team_sides_ddl")
+            for stmt in ddl.STATEMENTS:
+                await conn.execute(text(stmt))
+        except ImportError:
+            pass
 
 
 async def main():

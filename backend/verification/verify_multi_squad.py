@@ -92,7 +92,8 @@ async def main():
         # The board's draft table and the lock / audit DDL assemble_selection reads.
         from app.services.selection_draft_ddl import STATEMENTS as _DRAFT_DDL
         from app.services.selection_lock_ddl import STATEMENTS as _LOCK_DDL
-        for stmt in list(_DRAFT_DDL) + list(_LOCK_DDL):
+        from app.services.team_sides_ddl import STATEMENTS as _SIDES_DDL
+        for stmt in list(_DRAFT_DDL) + list(_LOCK_DDL) + list(_SIDES_DDL):
             await conn.execute(text(stmt))
         for stmt in SELECTION_RULE_STATEMENTS:
             await conn.execute(text(stmt))

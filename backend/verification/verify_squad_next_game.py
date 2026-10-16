@@ -137,6 +137,9 @@ async def route_checks(db_url: str) -> None:
         # table create_all never built. Lifted from the shared DDL, not stubbed.
         for stmt in SELECTION_RULE_STATEMENTS:
             await conn.execute(text(stmt))
+        from app.services.team_sides_ddl import STATEMENTS as _SIDES_DDL
+        for stmt in _SIDES_DDL:
+            await conn.execute(text(stmt))
         # Lifespan-only tables the grade classification (junior hiding, women's
         # side) reads through grade_alias_map; copied from the lifespan.
         for stmt in (
@@ -272,6 +275,9 @@ async def public_route_checks(db_url: str) -> None:
         await conn.run_sync(Base.metadata.create_all)
         for stmt in SELECTION_RULE_STATEMENTS:
             await conn.execute(text(stmt))
+        from app.services.team_sides_ddl import STATEMENTS as _SIDES_DDL
+        for stmt in _SIDES_DDL:
+            await conn.execute(text(stmt))
         # Lifespan-only tables the grade classification (junior hiding, women's
         # side) reads through grade_alias_map; copied from the lifespan.
         for stmt in (
@@ -370,6 +376,9 @@ async def show_squad_checks(db_url: str) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         for stmt in SELECTION_RULE_STATEMENTS:
+            await conn.execute(text(stmt))
+        from app.services.team_sides_ddl import STATEMENTS as _SIDES_DDL
+        for stmt in _SIDES_DDL:
             await conn.execute(text(stmt))
         # Lifespan-only tables the grade classification (junior hiding, women's
         # side) reads through grade_alias_map; copied from the lifespan.
@@ -471,6 +480,9 @@ async def started_route_checks(db_url: str) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         for stmt in SELECTION_RULE_STATEMENTS:
+            await conn.execute(text(stmt))
+        from app.services.team_sides_ddl import STATEMENTS as _SIDES_DDL
+        for stmt in _SIDES_DDL:
             await conn.execute(text(stmt))
         # Lifespan-only tables the grade classification (junior hiding, women's
         # side) reads through grade_alias_map; copied from the lifespan.

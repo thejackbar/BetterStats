@@ -106,6 +106,9 @@ SHARED_DDL_MODULES = (
     # Migration 335. `net_sessions.checkin_token` / `.squad_team_ids`, on the
     # shared ORM NetSession model; the player's page reads net_sessions.
     ("app.services.net_session_link_ddl", "STATEMENTS"),
+    # Migration 336. `team_sides`: shared routers (the player's availability page)
+    # read it, so the football database needs the (empty) table.
+    ("app.services.team_sides_ddl", "STATEMENTS"),
 )
 
 

@@ -23,7 +23,8 @@ from sqlalchemy import select, text, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
-from app.services.grade_labels import grade_is_women, org_grade_category_sets
+from app.services import squad_sides
+from app.services.grade_labels import grade_is_women, grade_key, org_grade_category_sets
 from app.models.db import Game, GameAppearance, Grade, Organisation, Player, Season, Team, TeamMember, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import months_ago
@@ -45,7 +46,14 @@ router = APIRouter(prefix="/teams", tags=["teams"])
 DEFAULT_DORMANCY_MONTHS = 24
 
 
-def _serialize(t: Team, grades: Optional[dict] = None) -> dict:
+def _serialize(t: Team, grades: Optional[dict] = None, sq: Optional["squad_sides.SquadInfo"] = None) -> dict:
+    # A squad can cover several teams (migration 336): its teams, in order, each
+    # with its XI number. `grade_name` reads as all of them so the old caption
+    # still tells the truth.
+    sides = squad_sides.sides_payload(sq) if sq else []
+    grade_name = (grades or {}).get(str(t.grade_id)) if t.grade_id else None
+    if sides:
+        grade_name = ", ".join(s["grade_name"] for s in sides)
     return {
         "id": str(t.id),
         "organisation_id": str(t.organisation_id),
@@ -53,7 +61,8 @@ def _serialize(t: Team, grades: Optional[dict] = None) -> dict:
         "short_name": t.short_name,
         "sequence": t.sequence,
         "grade_id": str(t.grade_id) if t.grade_id else None,
-        "grade_name": (grades or {}).get(str(t.grade_id)) if t.grade_id else None,
+        "grade_name": grade_name,
+        "sides": sides,
         "default_formation": t.default_formation,
         "default_team_size": t.default_team_size,
         "min_team_size": t.min_team_size,
@@ -184,6 +193,12 @@ async def _get_owned_team(db: AsyncSession, team_id: str, club_id) -> Team:
     return t
 
 
+class SideIn(BaseModel):
+    """One team in the squad: a grade the squad plays in, and what to call it."""
+    grade_id: str
+    label: Optional[str] = None
+
+
 class TeamCreate(BaseModel):
     name: str
     short_name: Optional[str] = None
@@ -191,6 +206,8 @@ class TeamCreate(BaseModel):
     grade_id: Optional[str] = None
     default_formation: Optional[str] = None
     is_active: Optional[bool] = True
+    # The teams the squad covers, in order (1st XI first). Omitted = none.
+    sides: Optional[list[SideIn]] = None
 
 
 class TeamUpdate(BaseModel):
@@ -204,6 +221,11 @@ class TeamUpdate(BaseModel):
     default_team_size: Optional[int] = None
     # Fewest players the team may field; must sit below the size. Null clears it.
     min_team_size: Optional[int] = None
+    # The teams the squad covers, in order. Sent = replaces them all (an empty list
+    # clears them); left out = untouched.
+    sides: Optional[list[SideIn]] = None
+    # With `sides`, put the squad's upcoming fixtures in those grades on this squad.
+    assign_fixtures: Optional[bool] = True
 
 
 @router.get("")
@@ -219,7 +241,8 @@ async def list_teams(
     stmt = stmt.order_by(Team.sequence.asc(), Team.name.asc())
     res = await db.execute(stmt)
     grades = await _grade_name_map(db, club.id)
-    return [_serialize(t, grades) for t in res.scalars().all()]
+    sides = await squad_sides.load(db, club.id)
+    return [_serialize(t, grades, sides.squads.get(str(t.id))) for t in res.scalars().all()]
 
 
 @router.get("/grade-options")
@@ -239,7 +262,7 @@ async def grade_options(
     )
     by_season: dict = {}
     for g in grades_res.scalars().all():
-        by_season.setdefault(str(g.season_id), []).append({"id": str(g.id), "name": g.display_name})
+        by_season.setdefault(str(g.season_id), []).append({"id": str(g.id), "name": g.display_name, "key": grade_key(g.display_name)})
     out = []
     for s in seasons:
         gl = by_season.get(str(s.id))
@@ -274,9 +297,36 @@ async def create_team(
         source="manual",
     )
     db.add(t)
+    await db.flush()
+    extra: dict = {}
+    if body.sides:
+        extra = await _apply_sides(db, club.id, t, body.sides, assign=True)
     await db.commit()
     await db.refresh(t)
-    return _serialize(t, await _grade_name_map(db, club.id))
+    return await _squad_response(db, club.id, t, extra)
+
+
+async def _apply_sides(db: AsyncSession, club_id, t: Team, sides_in: list, assign: bool) -> dict:
+    """Replace the squad's teams, then (optionally) put its upcoming fixtures on it.
+    Every grade is checked to be this club's before anything is written."""
+    specs = []
+    for s_ in sides_in:
+        gid = uuid.UUID(s_.grade_id)
+        await _assert_grade_in_club(db, gid, club_id)
+        specs.append(squad_sides.SideSpec(grade_id=str(gid), label=s_.label))
+    out = await squad_sides.replace_sides(db, club_id, t, specs)
+    assigned = 0
+    if assign and specs:
+        await db.flush()
+        assigned = await squad_sides.assign_fixtures(db, club_id, t.id)
+    return {"moved_from": out["moved_from"], "fixtures_assigned": assigned}
+
+
+async def _squad_response(db: AsyncSession, club_id, t: Team, extra: Optional[dict] = None) -> dict:
+    sides = await squad_sides.load(db, club_id)
+    out = _serialize(t, await _grade_name_map(db, club_id), sides.squads.get(str(t.id)))
+    out.update(extra or {})
+    return out
 
 
 @router.patch("/{team_id}")
@@ -289,6 +339,10 @@ async def update_team(
 ):
     t = await _get_owned_team(db, team_id, club.id)
     data = body.model_dump(exclude_unset=True)
+    sides_in = body.sides if "sides" in body.model_fields_set else None
+    assign = True if body.assign_fixtures is None else bool(body.assign_fixtures)
+    data.pop("sides", None)
+    data.pop("assign_fixtures", None)
     if "grade_id" in data:
         grade_uuid = uuid.UUID(data["grade_id"]) if data["grade_id"] else None
         await _assert_grade_in_club(db, grade_uuid, club.id)
@@ -316,9 +370,12 @@ async def update_team(
         # A squad switched off (or back on) changes who has it as their primary.
         await db.flush()
         await recompute_primary_squads_for_team(db, club.id, t.id)
+    extra: dict = {}
+    if sides_in is not None:
+        extra = await _apply_sides(db, club.id, t, sides_in, assign)
     await db.commit()
     await db.refresh(t)
-    return _serialize(t, await _grade_name_map(db, club.id))
+    return await _squad_response(db, club.id, t, extra)
 
 
 @router.delete("/{team_id}", status_code=204)
@@ -794,6 +851,16 @@ async def auto_assign_suggest(
         gname = grade_name_by_id.get(t.grade_id)
         if gname:
             by_grade_name.setdefault(gname.strip().lower(), t)
+    # A squad can cover several teams: a player who played in ANY of its grades
+    # belongs to it.
+    sq_sides = await squad_sides.load(db, club.id)
+    for sq in sq_sides.squads.values():
+        owner = next((t for t in teams if str(t.id) == sq.id), None)
+        if owner is None:
+            continue
+        for side in sq.sides:
+            by_grade_name.setdefault(side.grade_name.strip().lower(), owner)
+            by_grade_name.setdefault(side.key, owner)
 
     # The latest `seasons` seasons this club has any record of.
     season_rows = (await db.execute(

@@ -31,22 +31,37 @@ from app.services.side_size import effective_min
 from app.services.club_match import fixture_side
 from app.services.fixtures_reconcile import reconcile
 from app.services.fixtures_source import org_grassroots_fixtures_checked
+from app.services import squad_sides
 from app.services.grade_labels import grade_is_women, org_grade_category_sets
 from app.services.junior_fixtures import junior_fixture_ids
 
 router = APIRouter(prefix="/fixtures", tags=["fixtures"])
 
 
-def _serialize(f: Fixture, teams: Optional[dict] = None) -> dict:
+def _serialize(f: Fixture, teams: Optional[dict] = None, sides: Optional[squad_sides.SquadSides] = None) -> dict:
     t = (teams or {}).get(str(f.team_id)) if f.team_id else None
+    # A squad that covers several teams names each fixture by its team ("2nd XI"),
+    # and ranks it by that team's XI number, not by the squad's.
+    team_name = t["name"] if t else None
+    team_seq = t["sequence"] if t else None
+    squad_name = team_name
+    if sides is not None:
+        named = sides.name(f.team_id, f.grade_id)
+        if named:
+            team_name = named
+            squad_name = sides.squad_name(f.team_id, f.grade_id)
+        ranked = sides.rank(f.team_id, f.grade_id)
+        if ranked:
+            team_seq = ranked
     return {
         "id": str(f.id),
         "organisation_id": str(f.organisation_id),
         "grade_id": str(f.grade_id) if f.grade_id else None,
         "team_id": str(f.team_id) if f.team_id else None,
-        "team_name": t["name"] if t else None,
-        "team_short": t["short_name"] if t else None,
-        "team_sequence": t["sequence"] if t else None,
+        "team_name": team_name,
+        "team_short": t["short_name"] if t and team_name == t["name"] else team_name,
+        "team_sequence": team_seq,
+        "squad_name": squad_name,
         "source": f.source,
         "playhq_id": f.playhq_id,
         "label": f.label,
@@ -230,9 +245,10 @@ async def list_fixtures(
         counts = {str(fid): n for fid, n in cnt_res.fetchall()}
 
     teams = await _team_map(db, club.id)
+    sides = await squad_sides.load(db, club.id)
     out = []
     for f in fixtures:
-        d = _serialize(f, teams)
+        d = _serialize(f, teams, sides)
         d["lineup_count"] = counts.get(str(f.id), 0)
         # Club lineup size (0 = no limit) so the list can derive the 3-state
         # "Completed XI" facet: none / in progress / complete.
@@ -286,7 +302,7 @@ async def create_fixture(
     db.add(f)
     await db.commit()
     await db.refresh(f)
-    return _serialize(f, await _team_map(db, club.id))
+    return _serialize(f, await _team_map(db, club.id), await squad_sides.load(db, club.id))
 
 
 @router.patch("/{fixture_id}")
@@ -312,7 +328,7 @@ async def update_fixture(
     f.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(f)
-    return _serialize(f, await _team_map(db, club.id))
+    return _serialize(f, await _team_map(db, club.id), await squad_sides.load(db, club.id))
 
 
 @router.delete("/{fixture_id}", status_code=204)
@@ -362,6 +378,7 @@ async def sync_fixtures(
         for tid, tname, tseq, fee, gname in tm_res.fetchall()
     ]
 
+    sides = await squad_sides.load(db, club.id)
     existing_rows = list(
         (await db.execute(select(Fixture).where(Fixture.organisation_id == club.id))).scalars().all()
     )
@@ -410,6 +427,13 @@ async def sync_fixtures(
         target.status = g.get("status") or "UPCOMING"
         # Auto-attribute our team by name — only when unset, so a manual
         # assignment is never overwritten by a later sync.
+        # A squad the club has set up to cover this grade claims the fixture first:
+        # "MACs plays the 1st and 2nd XI grades" says more than any team name.
+        if target.team_id is None and target.grade_id is not None:
+            claimed = sides.squad_for_stored_grade(target.grade_id)
+            if claimed is not None:
+                target.team_id = uuid.UUID(claimed.id)
+                teams_assigned += 1
         if teams and target.team_id is None:
             our_name = target.home_team if home_away == "HOME" else target.away_team if home_away == "AWAY" else None
             fx_women = grade_is_women(None, g.get("grade_name"), grade_cats) if g.get("grade_name") else None

@@ -410,10 +410,10 @@ export default function AdminSelectionOverview() {
         <span className="flex-1" />
         <JuniorsToggle value={showJuniors} onChange={setShowJuniors} />
         {draftDay && (
-          <Link to={`/admin/betterselect/selection/draft-table?date=${draftDay}`}
+          <Link to={`/admin/betterselect/whiteboard?date=${draftDay}`}
             title="Every team for the day side by side, drag players between them"
             className="max-lg:hidden inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-pb-hairline2 text-pb-dim hover:text-pb-accent hover:border-pb-accent/50 font-display font-semibold text-[12.5px] whitespace-nowrap">
-            <Icon name="cols" size={14} />Draft table
+            <Icon name="cols" size={14} />Selection Whiteboard
           </Link>
         )}
         <button onClick={toggleAll} className="inline-flex items-center gap-1.5 text-pb-faint hover:text-pb-accent font-display font-semibold text-[12.5px] whitespace-nowrap">
@@ -436,10 +436,10 @@ export default function AdminSelectionOverview() {
             {g.attention > 0 && <span className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-red font-semibold whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-current" />{g.attention} need attention</span>}
             <span className="flex-1 h-px bg-pb-hairline min-w-[16px]" />
             {g.day !== 'tbc' && g.items.length > 1 && (
-              <Link to={`/admin/betterselect/selection/draft-table?date=${g.day}`} data-draft-table-link
+              <Link to={`/admin/betterselect/whiteboard?date=${g.day}`} data-draft-table-link
                 title="Every team for this day side by side, drag players between them"
                 className="hidden lg:inline-flex items-center gap-1.5 text-[12px] font-display font-semibold text-pb-faint hover:text-pb-accent whitespace-nowrap">
-                <Icon name="cols" size={13} />Draft table
+                <Icon name="cols" size={13} />Whiteboard
               </Link>
             )}
           </div>

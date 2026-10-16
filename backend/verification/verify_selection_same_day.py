@@ -146,6 +146,12 @@ async def build_schema() -> None:
                 await conn.execute(text(stmt))
         except ImportError:
             pass
+        try:
+            from app.services.team_sides_ddl import STATEMENTS as SIDES_DDL
+            for stmt in SIDES_DDL:
+                await conn.execute(text(stmt))
+        except ImportError:
+            pass
 
 
 async def main():

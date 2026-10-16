@@ -52,17 +52,28 @@ def fixture_has_started(status: Optional[str], played_on: Optional[date], start_
     return datetime.combine(played_on, time(mins // 60, mins % 60)) <= now_local
 
 
-def fixture_belongs_to_squad(f: dict, team_id: str, grade_id: Optional[str]) -> bool:
+def _gid_set(grade_id) -> frozenset:
+    """A squad's grade(s) as a set of id strings. A squad may cover several teams,
+    each in its own grade, so this takes one id, several, or nothing."""
+    if not grade_id:
+        return frozenset()
+    if isinstance(grade_id, (set, frozenset, list, tuple)):
+        return frozenset(str(g) for g in grade_id if g)
+    return frozenset([str(grade_id)])
+
+
+def fixture_belongs_to_squad(f: dict, team_id: str, grade_id) -> bool:
     """A fixture is a squad's own when it names the squad, or names no squad and
-    sits in the squad's grade. One that names a different squad is that squad's,
-    even in the same grade."""
+    sits in one of the squad's grades. One that names a different squad is that
+    squad's, even in the same grade."""
     ft = f.get("team_id")
     if ft:
         return ft == team_id
-    return bool(grade_id) and f.get("grade_id") == grade_id
+    gs = _gid_set(grade_id)
+    return bool(gs) and str(f.get("grade_id")) in gs
 
 
-def _next_entry(team_id: str, grade_id: Optional[str], fixtures: list[dict]) -> Optional[dict]:
+def _next_entry(team_id: str, grade_id, fixtures: list[dict]) -> Optional[dict]:
     for f in fixtures:   # already in date order
         if fixture_belongs_to_squad(f, team_id, grade_id):
             return f
@@ -80,10 +91,11 @@ def _shape(f: dict, scope: str) -> dict:
     }
 
 
-def squad_next_games(by_date: dict[str, list[dict]], teams: Iterable[tuple[str, Optional[str]]]) -> dict[str, dict]:
+def squad_next_games(by_date: dict[str, list[dict]], teams: Iterable[tuple]) -> dict[str, dict]:
     """{team_id: {date, fixture_id, opponent_name, label, home_away, scope}}.
 
-    `teams` is (team_id, grade_id) pairs, ids as strings. `scope` says what the
+    `teams` is (team_id, grade_id) pairs, ids as strings; `grade_id` may be one id
+    or a set of them for a squad that covers several teams. `scope` says what the
     date means:
       'squad' - the squad's own next game
       'club'  - the squad has no grade and no fixture of its own, so there is
@@ -107,7 +119,7 @@ def squad_next_games(by_date: dict[str, list[dict]], teams: Iterable[tuple[str, 
         hit = _next_entry(team_id, grade_id, flat)
         if hit:
             out[team_id] = _shape(hit, "squad")
-        elif not grade_id and club_first:
+        elif not _gid_set(grade_id) and club_first:
             out[team_id] = _shape(club_first, "club")
         else:
             out[team_id] = {

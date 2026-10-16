@@ -43,10 +43,12 @@ _RECENT_DAYS = 2
 
 
 async def next_fixture_id(
-    db: AsyncSession, org_id, team_id, fixture_id, played_on: Optional[date], today: Optional[date] = None
+    db: AsyncSession, org_id, team_id, fixture_id, played_on: Optional[date], today: Optional[date] = None,
+    grade_ids: Optional[list] = None,
 ):
     """``(id, played_on)`` of the team's next upcoming fixture after
-    ``played_on``, or None."""
+    ``played_on``, or None. ``grade_ids`` narrows it to one side of a squad that
+    covers several teams (the 1st XI's side is not seeded from the 2nd XI's)."""
     if not team_id or not played_on:
         return None
     floor = (today or date.today()) - timedelta(days=_RECENT_DAYS)
@@ -54,10 +56,12 @@ async def next_fixture_id(
         text(
             "SELECT id, played_on FROM fixtures "
             "WHERE organisation_id = :org AND team_id = :team AND id <> :fid "
+            "AND (CAST(:gids AS uuid[]) IS NULL OR grade_id = ANY(CAST(:gids AS uuid[]))) "
             "AND status = 'UPCOMING' AND played_on > :on AND played_on >= :floor "
             "ORDER BY played_on, start_time NULLS LAST, id LIMIT 1"
         ),
-        {"org": org_id, "team": team_id, "fid": fixture_id, "on": played_on, "floor": floor},
+        {"org": org_id, "team": team_id, "fid": fixture_id, "on": played_on, "floor": floor,
+         "gids": [uuid.UUID(str(g)) for g in grade_ids] if grade_ids else None},
     )).first()
     return (row[0], row[1]) if row else None
 
@@ -126,6 +130,7 @@ async def seed_next_round_draft(
     captain_id: Optional[str] = None,
     wicket_keeper_id: Optional[str] = None,
     today: Optional[date] = None,
+    grade_ids: Optional[list] = None,
 ) -> Optional[str]:
     """Seed (or refresh, or clear) the next round's draft from a confirmed XI.
 
@@ -134,7 +139,7 @@ async def seed_next_round_draft(
     when nothing was written."""
     try:
         async with db.begin_nested():
-            found = await next_fixture_id(db, org_id, team_id, fixture_id, played_on, today)
+            found = await next_fixture_id(db, org_id, team_id, fixture_id, played_on, today, grade_ids)
             if found is None:
                 return None
             nxt, nxt_on = found

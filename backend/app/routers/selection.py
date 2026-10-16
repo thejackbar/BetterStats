@@ -29,7 +29,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
-from app.services import selection_audit, selection_clash, selection_notify, selection_rules, selection_seed
+from app.services import selection_audit, selection_clash, selection_notify, selection_rules, selection_seed, squad_sides
 from app.services.junior_fixtures import junior_fixture_ids
 from app.services.selection_pool import assemble_selection, rule_context, side_size
 from app.services.side_size import effective_min, valid_min_size, valid_side_size
@@ -151,6 +151,9 @@ async def selection_overview(
     teams = tm_res.scalars().all()
     team_names = {str(t.id): (t.short_name or t.name) for t in teams}
     team_seqs = {str(t.id): t.sequence for t in teams}
+    # A squad that covers several teams names and ranks each fixture by its own
+    # team ("2nd XI", XI number 2), not by the squad.
+    sq_sides = await squad_sides.load(db, club.id)
     team_sizes = {str(t.id): side_size(club, t) for t in teams}
     team_mins = {str(t.id): effective_min(t.min_team_size, team_sizes[str(t.id)]) for t in teams}
 
@@ -160,8 +163,8 @@ async def selection_overview(
     # hierarchy (1st XI, 2nd XI, ...), then unranked ones by name, numbers read
     # as numbers (OD3s before OD10s). Date and start time still lead.
     def _team_order(f: Fixture):
-        seq = team_seqs.get(str(f.team_id)) if f.team_id else None
-        name = (team_names.get(str(f.team_id)) if f.team_id else None) or f.label or f.opponent_name or ""
+        seq = sq_sides.rank(f.team_id, f.grade_id) or (team_seqs.get(str(f.team_id)) if f.team_id else None)
+        name = sq_sides.name(f.team_id, f.grade_id) or (team_names.get(str(f.team_id)) if f.team_id else None) or f.label or f.opponent_name or ""
         return (
             f.played_on is None, f.played_on or date.min,
             f.start_time is None, f.start_time or "",
@@ -257,8 +260,9 @@ async def selection_overview(
             "start_time": f.start_time,
             "round": f.round,
             "venue": f.venue,
-            "team_name": team_names.get(str(f.team_id)) if f.team_id else None,
-            "team_sequence": team_seqs.get(str(f.team_id)) if f.team_id else None,
+            "team_name": sq_sides.name(f.team_id, f.grade_id) or (team_names.get(str(f.team_id)) if f.team_id else None),
+            "squad_name": sq_sides.squad_name(f.team_id, f.grade_id),
+            "team_sequence": sq_sides.rank(f.team_id, f.grade_id) or (team_seqs.get(str(f.team_id)) if f.team_id else None),
             "team_size": team_sizes.get(str(f.team_id), side_size(club)) if f.team_id else side_size(club),
             "team_min": team_mins.get(str(f.team_id)) if f.team_id else None,
             "grade_name": grade_names.get(str(f.grade_id)) if f.grade_id else None,
@@ -353,6 +357,11 @@ async def previous_xi(
 
     if fx.team_id:
         scope = Fixture.team_id == fx.team_id
+        # A squad covering several teams: last week's SIDE, not whichever of its
+        # teams played first.
+        same_grades = (await squad_sides.load(db, club.id)).same_team_grade_ids(fx.team_id, fx.grade_id)
+        if same_grades:
+            scope = scope & Fixture.grade_id.in_([uuid.UUID(g) for g in same_grades])
     elif fx.grade_id:
         scope = Fixture.grade_id == fx.grade_id
     else:
@@ -651,10 +660,10 @@ async def set_selection(
         # higher grade (or one whose rank we can't tell) still blocks the save.
         if fx.played_on:
             this_seq: Optional[int] = None
-            if fx.team_id:
-                this_team = await db.get(Team, fx.team_id)
-                if this_team and (this_team.sequence or 0) > 0:
-                    this_seq = this_team.sequence
+            # XI numbers, per fixture: a squad covering the 1st and 2nd XI ranks
+            # them 1 and 2, so a call-up between them still has a higher side.
+            put_sides = await squad_sides.load(db, club.id)
+            this_seq = put_sides.rank(fx.team_id, fx.grade_id)
 
             clash_res = await db.execute(
                 select(
@@ -663,6 +672,8 @@ async def set_selection(
                     func.coalesce(Player.display_name_override, Player.name),
                     Team.sequence,
                     Fixture.locked_at,
+                    Fixture.team_id,
+                    Fixture.grade_id,
                 )
                 .select_from(FixtureLineup)
                 .join(Fixture, FixtureLineup.fixture_id == Fixture.id)
@@ -684,9 +695,10 @@ async def set_selection(
             playable = await selection_clash.compatible_fixtures(
                 db, club.id, fx, {r[1] for r in clash_rows}
             )
-            for pid, other_fid, pname, other_seq, other_locked in clash_rows:
+            for pid, other_fid, pname, other_seq, other_locked, other_tid, other_gid in clash_rows:
                 if str(other_fid) in playable:
                     continue
+                other_seq = put_sides.rank(other_tid, other_gid) or other_seq
                 # A call-up pulls the player out of the lower side. A side that
                 # is locked is not changed behind its selector's back: unlock it
                 # first, then call the player up.
@@ -829,6 +841,7 @@ async def set_selection(
         org_id=club.id,
         fixture_id=fx.id,
         team_id=fx.team_id,
+        grade_ids=sorted((await squad_sides.load(db, club.id)).same_team_grade_ids(fx.team_id, fx.grade_id) or []) or None,
         played_on=fx.played_on,
         user_id=user.id,
         player_ids=[s.player_id for s in ordered],
