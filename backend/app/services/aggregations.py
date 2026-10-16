@@ -1912,22 +1912,36 @@ def _empty_grid_inputs() -> dict:
             "manual_by_season": {}, "mixed_seasons": set(), "without_season": 0}
 
 
-# Appearances of the players in `:pids`, by every way we know somebody was in a game.
-_GRID_APPEARANCES = """
+# The relations the grid reads, by default the effective views. A caller that has already
+# copied the club's rows out (the Records request keeps `_club_bi` and friends for exactly this
+# reason: a bound array of players straight against the per-innings views was measured turning a
+# 0.8s board into 20s) passes its own names. Every copy is `SELECT *` of the same relation, so the
+# columns are the same.
+_GRID_RELS_DEFAULT = {
+    "bi": "v_effective_batting_innings", "bs": "v_effective_bowling_spells",
+    "fs": "v_effective_fielding_stats", "ga": "game_appearances",
+    "games": "v_effective_games", "pss": "v_effective_player_season_stats",
+}
+
+
+def _grid_appearances(rels: dict) -> str:
+    """Appearances of the players in `:pids`, by every way we know somebody was in a game."""
+    return f"""
             WITH appearances AS (
-                SELECT bi.player_id, bi.game_id FROM v_effective_batting_innings bi
+                SELECT bi.player_id, bi.game_id FROM {rels['bi']} bi
                 WHERE bi.player_id = ANY(CAST(:pids AS uuid[]))
                 UNION
-                SELECT bs.player_id, bs.game_id FROM v_effective_bowling_spells bs
+                SELECT bs.player_id, bs.game_id FROM {rels['bs']} bs
                 WHERE bs.player_id = ANY(CAST(:pids AS uuid[]))
                 UNION
-                SELECT fs.player_id, fs.game_id FROM v_effective_fielding_stats fs
+                SELECT fs.player_id, fs.game_id FROM {rels['fs']} fs
                 WHERE fs.player_id = ANY(CAST(:pids AS uuid[]))
                 UNION
-                SELECT ga.player_id, ga.game_id FROM game_appearances ga
+                SELECT ga.player_id, ga.game_id FROM {rels['ga']} ga
                 WHERE ga.player_id = ANY(CAST(:pids AS uuid[]))
                   AND """ + _APPEARANCE_PLAYED + """
             )"""
+
 
 # The canonical grade name: the club's merge, then its own display name.
 _GRID_GRADE_NAME_JOINS = """
@@ -1949,7 +1963,8 @@ _GRID_GRADE_NAME_JOINS = """
 _GRID_GRADE_NAME = "COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))"
 
 
-async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict) -> dict:
+async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict,
+                       rels: Optional[dict] = None) -> dict:
     """Everything the by-grade attribution reads, for several players at once.
 
     ``{player_id: {season_grade_games, exact, season_aggregate, manual_by_season,
@@ -1963,6 +1978,8 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
     two cannot disagree about how many matches a player has because there is
     one loader and one `_attribute_cells`.
     """
+    rels = {**_GRID_RELS_DEFAULT, **(rels or {})}
+    appearances = _grid_appearances(rels)
     params = {**gc["params"], "pids": [str(p) for p in player_ids]}
     club_games_clause = gc["club_games_clause"]
     season_clause_gr = gc["season_clause_gr"]
@@ -2003,14 +2020,14 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
 
     # Per-(season, grade) per-game counts: the scorecards we hold.
     per_season_grade = await session.execute(
-        text(f"""{_GRID_APPEARANCES}
+        text(f"""{appearances}
             SELECT
                 ap.player_id,
                 gr.season_id AS season_id,
                 {_GRID_GRADE_NAME} AS grade_name,
                 COUNT(DISTINCT ap.game_id) AS games
             FROM appearances ap
-            JOIN v_effective_games g  ON g.id = ap.game_id
+            JOIN {rels['games']} g  ON g.id = ap.game_id
             JOIN grades gr ON gr.id = g.grade_id{_GRID_GRADE_NAME_JOINS}
             WHERE TRUE {club_games_clause}{season_clause_gr}{game_scope_clause}
             GROUP BY ap.player_id, gr.season_id, {_GRID_GRADE_NAME}
@@ -2027,7 +2044,7 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
     season_totals = await session.execute(
         text(f"""
             SELECT pss.player_id, pss.season_id, COALESCE(pss.matches, 0) AS matches
-            FROM v_effective_player_season_stats pss
+            FROM {rels['pss']} pss
             WHERE pss.player_id = ANY(CAST(:pids AS uuid[]))
               -- A correction the club typed against a specific grade is applied
               -- to that cell below; leaving it in here too would count it twice
@@ -2052,7 +2069,7 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
         ws = await session.execute(
             text(f"""
                 SELECT pss.player_id, COALESCE(SUM(pss.matches), 0) AS matches
-                  FROM v_effective_player_season_stats pss
+                  FROM {rels['pss']} pss
                  WHERE pss.player_id = ANY(CAST(:pids AS uuid[])) AND pss.season_id IS NULL
                    AND pss.source = ANY(:resid_sources)
                    {gc["without_season_clause"]}
@@ -2072,10 +2089,10 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
     # where it did.
     if gc["scope_active"]:
         unscoped = await session.execute(
-            text(f"""{_GRID_APPEARANCES}
+            text(f"""{appearances}
                 SELECT ap.player_id, gr.season_id AS season_id, COUNT(DISTINCT ap.game_id) AS games
                 FROM appearances ap
-                JOIN v_effective_games g  ON g.id = ap.game_id
+                JOIN {rels['games']} g  ON g.id = ap.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 WHERE TRUE {club_games_clause}{season_clause_gr}
                 GROUP BY ap.player_id, gr.season_id
@@ -2134,7 +2151,7 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
                 pss.season_id,
                 {_GRID_GRADE_NAME} AS grade_name,
                 SUM(COALESCE(pss.matches, 0)) AS matches
-            FROM v_effective_player_season_stats pss
+            FROM {rels['pss']} pss
             JOIN grades gr ON gr.id = pss.grade_id
             JOIN seasons sc ON sc.id = gr.season_id
                            AND sc.organisation_id = CAST(:org_id AS UUID){_GRID_GRADE_NAME_JOINS}
@@ -2231,12 +2248,30 @@ def _attribute_cells(gi: dict) -> tuple:
     return cells, cell_unknown, season_unattributed, seasons_left_to_scorecards
 
 
+_GRID_CHUNK = 300
+# A whole roster (the Players page, StatLab's player table, the IQ pickers) asks about hundreds
+# of players on every visit, and the answer only changes when a sync lands. So a request for
+# this many players or more is remembered for a couple of minutes, per club, season and scope.
+# A small request (a leaderboard's 30 rows, one profile) is never cached and always fresh.
+_GRID_CACHE_MIN_IDS = 100
+_GRID_CACHE_TTL = 120.0
+_GRID_CACHE_MAX_KEYS = 40
+_GRID_CACHE: dict = {}
+
+
+def _scope_cache_key(scope: Optional[GradeScope]) -> tuple:
+    if scope is None:
+        return ("none",)
+    return tuple(repr(getattr(scope, a, None)) for a in GradeScope.__slots__)
+
+
 async def grid_matches_for_players(
     session: AsyncSession,
     org_id: str,
     player_ids: list,
     season_id: Optional[str] = None,
     scope: Optional[GradeScope] = None,
+    rels: Optional[dict] = None,
 ) -> dict:
     """``{player_id: the by-grade grid's matches total}`` for several players.
 
@@ -2244,24 +2279,45 @@ async def grid_matches_for_players(
     (`raise_games_to_grid_total`), for the players a board is about to return, so
     the board's M column and the profile's MATCHES cannot disagree. Same loader
     and same attribution as `get_player_team_breakdown`.
+
+    Done in chunks of `_GRID_CHUNK` ids, and for a roster-sized request remembered
+    briefly (see `_GRID_CACHE_TTL`).
     """
-    if not org_id or not player_ids:
+    ids = list(dict.fromkeys(str(p) for p in (player_ids or [])))
+    if not org_id or not ids:
         return {}
-    gc = await _grid_clauses(session, org_id, season_id, scope)
-    inputs = await _grid_inputs(session, list(player_ids), org_id, gc)
-    totals: dict = {}
-    for pid, gi in inputs.items():
-        cells, _unknown, unattributed, _left = _attribute_cells(gi)
-        totals[pid] = (sum(sum(c.values()) for c in cells.values()) + sum(unattributed.values())
-                       + gi["without_season"])
-    return totals
+    cache = None
+    key = None
+    if len(ids) >= _GRID_CACHE_MIN_IDS:
+        import time as _time
+        now = _time.monotonic()
+        key = (str(org_id), str(season_id or ""), _scope_cache_key(scope))
+        for k in [k for k, (exp, _) in _GRID_CACHE.items() if exp < now]:
+            _GRID_CACHE.pop(k, None)
+        cache = _GRID_CACHE.get(key, (0, {}))[1]
+    totals: dict = dict(cache) if cache else {}
+    missing = [i for i in ids if i not in totals]
+    if missing:
+        gc = await _grid_clauses(session, org_id, season_id, scope)
+        for i in range(0, len(missing), _GRID_CHUNK):
+            inputs = await _grid_inputs(session, missing[i:i + _GRID_CHUNK], org_id, gc, rels)
+            for pid, gi in inputs.items():
+                cells, _unknown, unattributed, _left = _attribute_cells(gi)
+                totals[pid] = (sum(sum(c.values()) for c in cells.values()) + sum(unattributed.values())
+                               + gi["without_season"])
+        if key is not None:
+            import time as _time
+            if len(_GRID_CACHE) >= _GRID_CACHE_MAX_KEYS:
+                _GRID_CACHE.pop(next(iter(_GRID_CACHE)), None)
+            _GRID_CACHE[key] = (_time.monotonic() + _GRID_CACHE_TTL, dict(totals))
+    return {i: totals[i] for i in ids if i in totals}
 
 
-# A board asking for more rows than this (the Players roster asks for 5,000) is left on
-# its own count: the grid loader's cost grows with the players asked about, and the
-# views it reads are far heavier on a real club than a test database shows. The
-# boards people read (30 rows) and a team page (15) are well inside it.
-BOARD_GRID_MAX_ROWS = 600
+# A board asking for more rows than this is left on its own count: the grid loader's cost
+# grows with the players asked about, and the views it reads are far heavier on a real club
+# than a test database shows. The Players roster asks for 5,000, so it is covered; the grid
+# is read in chunks and a roster-sized answer is cached for a couple of minutes.
+BOARD_GRID_MAX_ROWS = 5000
 
 
 async def raise_board_games_to_grid(
@@ -2272,6 +2328,7 @@ async def raise_board_games_to_grid(
     scope: Optional[GradeScope] = None,
     games_key: str = "games",
     max_rows: int = BOARD_GRID_MAX_ROWS,
+    rels: Optional[dict] = None,
 ) -> list:
     """Raise each leaderboard row's games to the profile's grid total, never lower.
 
@@ -2285,7 +2342,7 @@ async def raise_board_games_to_grid(
     ids = [str(r["player_id"]) for r in rows if r.get("player_id")]
     if not ids or len(ids) > max_rows:
         return rows
-    totals = await grid_matches_for_players(session, org_id, ids, season_id, scope)
+    totals = await grid_matches_for_players(session, org_id, ids, season_id, scope, rels)
     for r in rows:
         grid = totals.get(str(r.get("player_id")))
         if grid is not None and grid > _n(r.get(games_key)):

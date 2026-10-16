@@ -39,6 +39,8 @@ from _view_ddl import view_statements
 from app.models.db import Base
 from app.routers.leaderboard import batting_leaderboard, bowling_leaderboard, fielding_leaderboard
 from app.routers.players import get_player_stats
+from app.routers.records import get_records
+from app.services import grade_scope, iq_players, iq_trends, milestone_totals, statlab
 from app.services.aggregations import raise_board_games_to_grid
 
 try:
@@ -268,6 +270,105 @@ async def main() -> None:
     check("the season-picked board equals the season-picked profile", prof_season == board_season == 7,
           f"profile {prof_season} board {board_season}")
 
+    print("\n-- THE RECORDS PAGE READS WHAT THE PROFILE READS --")
+    async def records_board(**kw):
+        args = dict(season_id=None, grade_id=None, grade_name=None, finals_only=False, captain_only=False,
+                    gender=None, categories=None, formats=None, competitions=None, debug_timing=False,
+                    viewer=None)
+        args.update(kw)
+        async with Session() as s:
+            return await get_records(str(ORG), db=s, **args)
+
+    def on(rows, pid):
+        return next((r for r in rows if str(r["player_id"]) == str(pid)), None)
+
+    rec = await records_board()
+    for pid, want in expect.items():
+        for label, rows in (("Most Career Runs", rec["batting"]["top_career_runs"]),
+                            ("Most Career Wickets", rec["bowling"]["top_career_wickets"]),
+                            ("All-rounders", rec["allrounders"]["top_allrounders"]),
+                            ("Most Matches", rec["team"]["most_matches"]),
+                            ("Most Seasons", rec["team"]["most_seasons"])):
+            r = on(rows, pid)
+            if r is None and label == "All-rounders":
+                continue  # the board has its own qualifying thresholds; these players need not meet them
+            check(f"{PLAYERS[pid]}: {label} reads {want}, as the profile does",
+                  r is not None and r.get("matches") == want,
+                  f"{None if r is None else r.get('matches')}")
+    order = [r["matches"] for r in rec["team"]["most_matches"]]
+    check("Most Matches stays in descending order after the raise", order == sorted(order, reverse=True), str(order))
+    graded = await records_board(grade_name="A Grade")
+    gr = on(graded["batting"]["top_career_runs"], SHORT_EXACT)
+    check("a picked grade is left on that grade's own count (5, not the grid's 7)",
+          gr is not None and gr["matches"] == 5, str(gr and gr.get("matches")))
+
+    print("\n-- STATLAB'S PLAYER TABLE READS WHAT THE PROFILE READS --")
+    async def statlab_rows(context=None, filters=None, sort_by="matches"):
+        async with Session() as s:
+            scope = await grade_scope.resolve_scope(s, str(ORG), None)
+            ctx = {statlab._SCOPE_KEY: scope, **(context or {})}
+            out = await statlab.run_query(
+                s, org_id=str(ORG), target="player_career", sort_by=sort_by, sort_dir="desc", limit=100,
+                page=1, metric_filters=filters or [], filter_tree=None, context=ctx)
+        return {r["player_id"]: r for r in out["rows"]}
+
+    rows = await statlab_rows()
+    for pid, want in expect.items():
+        got = (rows.get(str(pid)) or {}).get("matches")
+        check(f"{PLAYERS[pid]}: StatLab matches reads {want}", got == want, str(got))
+    rows = await statlab_rows(filters=["matches:gte:7"])
+    check("a 'matches at least 7' filter finds the player the profile puts on 7",
+          str(SHORT_EXACT) in rows and str(HELD_MORE) not in rows, str(sorted(
+              (rows[k]["player_name"], rows[k]["matches"]) for k in rows)))
+    rows = await statlab_rows(context={"result": "WIN"})
+    check("a result filter keeps its own meaning: only the matches won, scorecards held (5)",
+          (rows.get(str(SHORT_EXACT)) or {}).get("matches") == 5, str((rows.get(str(SHORT_EXACT)) or {}).get("matches")))
+    one = await statlab_rows(context={"player_id": str(SHORT_EXACT)})
+    check("a one-player view reads the same figure", (one.get(str(SHORT_EXACT)) or {}).get("matches") == 7)
+
+    print("\n-- MILESTONES COUNT THE MATCHES THE PROFILE COUNTS --")
+    async with Session() as s:
+        scope = await grade_scope.resolve_scope(s, str(ORG), None)
+        under = await milestone_totals.totals_under(s, str(ORG), list(expect), scope)
+        whole = await milestone_totals.totals_under(s, str(ORG), list(expect), None)
+    for pid, want in expect.items():
+        check(f"{PLAYERS[pid]}: milestone matches {want} under the club scope and unscoped",
+              under[str(pid)]["matches"] == want and whole[str(pid)]["matches"] == want,
+              f"{under[str(pid)]['matches']} / {whole[str(pid)]['matches']}")
+
+    print("\n-- BETTERIQ READS THEM TOO --")
+    async with Session() as s:
+        await s.execute(text("UPDATE players SET is_player = TRUE WHERE organisation_id = :o"), {"o": ORG})
+        await s.commit()
+    async with Session() as s:
+        trend = await iq_trends.player_trend(s, str(ORG), str(SHORT_EXACT))
+        roster = {r["player_id"]: r for r in await iq_players.list_all_players(s, str(ORG))}
+    check("the player trend's career games is 7", ((trend or {}).get("career") or {}).get("batting", {}).get("games") == 7,
+          str(((trend or {}).get("career") or {}).get("batting", {}).get("games")))
+    for pid, want in expect.items():
+        check(f"{PLAYERS[pid]}: the IQ roster reads {want}",
+              (roster.get(str(pid)) or {}).get("matches") == want, str((roster.get(str(pid)) or {}).get("matches")))
+
+    print("\n-- A ROSTER-SIZED REQUEST (CHUNKED AND CACHED) GIVES THE SAME ANSWERS --")
+    try:
+        from app.services.aggregations import grid_matches_for_players, _GRID_CACHE
+    except ImportError:  # the control: the chunked, cached loader does not exist yet
+        check("the roster-sized loader exists", False, "missing (control run)")
+        grid_matches_for_players, _GRID_CACHE = None, {}
+    _GRID_CACHE.clear()
+    filler = [str(uuid.uuid4()) for _ in range(350)]
+    if grid_matches_for_players is None:
+        big = again = {}
+    else:
+      async with Session() as s:
+        big = await grid_matches_for_players(s, str(ORG), [str(p) for p in expect] + filler, None, None)
+        again = await grid_matches_for_players(s, str(ORG), [str(p) for p in expect] + filler, None, None)
+    check("350 more ids, several chunks: the real players still read the profile's figures",
+          all(big.get(str(p)) == w for p, w in expect.items()), str({str(p)[:4]: big.get(str(p)) for p in expect}))
+    check("a repeat is answered the same (from the cache)", again == big)
+    check("and the request was cached", len(_GRID_CACHE) == 1, str(len(_GRID_CACHE)))
+    _GRID_CACHE.clear()
+
     print("\n-- A CLUB WITH NO JUNIOR GRADES READS CA'S TOTALS, AND THE BOARD STILL AGREES --")
     async with Session() as s:
         await s.execute(text("UPDATE grades SET category = 'senior', categories = ARRAY['senior'] WHERE id = :g"),
@@ -277,6 +378,10 @@ async def main() -> None:
         prof = await profile_games(pid)
         got = await board_games("batting", pid)
         check(f"{PLAYERS[pid]}: board {got} = profile {prof}", prof == got and prof is not None, f"{got} vs {prof}")
+
+    print("\n-- THE PLAYERS ROSTER (5,000 ROWS AT ONCE) READS THE SAME --")
+    got = await board_games("batting", SHORT_EXACT, limit=5000)
+    check("the roster-sized board call reads 7 for the player the profile puts on 7", got == 7, str(got))
 
     print("\n-- A VERY LARGE BOARD IS LEFT ON ITS OWN COUNT --")
     rows = [{"player_id": str(SHORT_EXACT), "games": 5}, {"player_id": str(SHORT_SEASON), "games": 3}]
