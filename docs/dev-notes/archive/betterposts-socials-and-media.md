@@ -974,3 +974,11 @@ Seven requests from one club meeting, built together.
 - Layout: the match-day `<select>` in `RoundImportBox` is full width under the pull button.
 - Verified: stub database holding only two stored grades against the live feed. Control `discover_live=False` gave 31 fixtures and no junior grades; `True` gave 138 fixtures, 7 junior grades, first date Fri 16 Oct, category `junior`. Not run: a browser pass, a real database.
 - Open: why sync had not stored them (the sync seeds grades from `get_teams` on every run, so a recent draw or an old last sync). Sync Now on the club would also fix the stored side.
+
+## Debut tags: this season's summary (v9.117.2)
+
+- Report (Applecross 2nd XI, Round 2 Starting XI): two players tagged DEBUT had played before. `services/social_debuts.py` read only EARLIER seasons' summaries, so a player whose only games were this season's earlier rounds, with no scorecard synced yet (no appearance or innings row), had no history.
+- Fix: this season's `v_effective_player_season_stats.matches` now counts when it is greater than the player's distinct non-washout games on or after the match date (appearances, batting, bowling). A synced match is not its own history; a lineup for a game still to be played has none, so every summary match is an earlier one. Trade-off: a game after the match date that has a summary but no scorecard is read as history, and the admin can flip the tag by hand.
+- Not proven: the actual two players were not looked at (no production data from this session), so a different cause (a duplicate player record, history under another id) would still tag them.
+- Verified: `backend/verification/verify_social_debuts.py` on a real Postgres with stub tables, 18 passed. Control run on the previous service fails exactly the three new checks (unsynced round this season, summary-only player, match still to be played) and passes the other 15. The real `v_effective_*` views are not exercised.
+
