@@ -144,6 +144,10 @@ export default function PublicVoting() {
   const teamParam = searchParams.get('team') || ''
   const roundParam = searchParams.get('round') || ''
   const qParam = searchParams.get('q') || ''
+  // From the vote reminder on a player's own page: ?player=<id> has them picked, so
+  // it is only the PIN left to type.
+  const playerParam = searchParams.get('player') || ''
+  const autoPicked = useRef(false)
 
   const [step, setStep] = useState('loading') // loading|dead|games|pick|pin|name|ballot|done
   const [landing, setLanding] = useState(null)
@@ -228,6 +232,16 @@ export default function PublicVoting() {
     } catch (e) { setError(e.message || 'That didn’t match. Please try again.') }
     finally { setBusy(false) }
   }
+
+  useEffect(() => {
+    if (step !== 'pick' || !playerParam || autoPicked.current || !landing) return
+    const p = landing.players.find((x) => x.id === playerParam)
+    if (!p) return
+    autoPicked.current = true
+    setChosen(p); setPin(''); setError('')
+    if (landing.require_pin) setStep('pin'); else doVerify(p, '')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, playerParam, landing])
 
   const votable = useMemo(() => {
     const players = fixture?.players || []

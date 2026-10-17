@@ -243,9 +243,9 @@ function weekLabel(d) {
   return f ? (f.role === 'day2' ? 'Week 2 of 2' : 'Week 1 of 2') : ''
 }
 
-function Section({ title, children }) {
+function Section({ title, children, className = '' }) {
   return (
-    <section className="rounded-xl border pb-hairline p-3.5 mb-3">
+    <section className={`rounded-xl border pb-hairline p-3.5 mb-3 min-w-0 break-inside-avoid ${className}`}>
       <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-2">{title}</div>
       {children}
     </section>
@@ -290,6 +290,79 @@ function AvailabilityModule({ me }) {
         })}
       </div>
     </Section>
+  )
+}
+
+// Games the player can still vote on and has not, then (for reference) the votes
+// they have already cast with who they gave 3, 2 and 1 to. Each to-cast game links
+// to its ballot on the vote page (which asks for their PIN once); a cast vote on a
+// game still open links to the same ballot to change it.
+function VotesModule({ data }) {
+  const due = data.votes || []
+  const cast = data.votes_cast || []
+  return (
+    <Section title={due.length ? 'Votes to cast' : 'Your votes'}>
+      {due.length > 0 && (
+        <div data-votes>
+          {due.map((v) => (
+            <div key={`${v.medal}-${v.fixture_id}`} className="flex items-center gap-3 py-2 border-t pb-hairline first:border-t-0" data-vote-due={v.fixture_id}>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold truncate">{v.round ? `${v.round} · ` : ''}vs {v.opponent || 'TBC'}</div>
+                <div className="text-[12px] text-pb-faint">
+                  {v.medal}{v.date ? ` · played ${fmtShort(v.date)}` : ''}{v.closes_on ? ` · voting closes ${fmtShort(v.closes_on)}` : ''}
+                </div>
+              </div>
+              <a href={v.link} className="shrink-0 px-3.5 py-2 rounded-lg text-[13px] font-semibold"
+                style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>Vote</a>
+            </div>
+          ))}
+        </div>
+      )}
+      {cast.length > 0 && (
+        <div className={due.length ? 'mt-4' : ''} data-votes-cast>
+          {due.length > 0 && <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Already cast</div>}
+          {cast.map((c) => (
+            <div key={`${c.medal}-${c.fixture_id}`} className="py-2 border-t pb-hairline first:border-t-0" data-vote-cast={c.fixture_id}>
+              <div className="text-sm font-semibold truncate">{c.round ? `${c.round} · ` : ''}vs {c.opponent || 'TBC'}</div>
+              <div className="text-[12px] text-pb-faint">{c.medal}{c.date ? ` · played ${fmtShort(c.date)}` : ''}</div>
+              {c.picks.length === 0
+                ? <div className="text-[12.5px] text-pb-faint mt-1">No picks recorded.</div>
+                : (
+                  <div className="mt-1.5 flex flex-col gap-0.5">
+                    {c.picks.map((pk, i) => (
+                      <div key={i} className="flex items-baseline gap-2 text-[13px]" data-pick>
+                        <span className="font-mono font-bold w-5 text-right shrink-0" style={{ color: 'var(--pb-accent)' }}>{pk.points ?? ''}</span>
+                        <span className="min-w-0 truncate">{pk.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              {c.open && c.link && (
+                <a href={c.link} data-change-vote className="inline-block text-[12px] underline text-pb-dim mt-1.5">
+                  Change my votes{c.closes_on ? ` (until ${fmtShort(c.closes_on)})` : ''}
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  )
+}
+
+// A reminder above everything else while a vote is due.
+function VotesBanner({ votes }) {
+  const n = votes.length
+  return (
+    <div className="rounded-xl px-4 py-3 mb-3 flex items-center gap-3" data-votes-banner
+      style={{ background: 'color-mix(in srgb, var(--pb-amber) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-amber) 40%, transparent)' }}>
+      <div className="min-w-0 flex-1 text-sm">
+        <b>{n === 1 ? 'You have a vote to cast.' : `You have ${n} votes to cast.`}</b>
+        <span className="text-pb-dim"> {n === 1 ? 'A game you played is still open for voting.' : 'Games you played are still open for voting.'}</span>
+      </div>
+      <a href={votes[0].link} className="shrink-0 px-3.5 py-2 rounded-lg text-[13px] font-semibold"
+        style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{n === 1 ? 'Vote now' : 'Vote'}</a>
+    </div>
   )
 }
 
@@ -354,17 +427,9 @@ function TrainingModule({ data }) {
   )
 }
 
-// The ladder asks Cricket Australia, which the rest of the page does not, so it
-// loads on its own and the rest of the page never waits on it.
-function LadderModule({ token }) {
-  const [state, setState] = useState({ status: 'loading', ladders: [] })
-  useEffect(() => {
-    let alive = true
-    api.availPublicLadder(token)
-      .then((d) => { if (alive) setState({ status: 'ok', ladders: d.ladders || [] }) })
-      .catch(() => { if (alive) setState({ status: 'failed', ladders: [] }) })
-    return () => { alive = false }
-  }, [token])
+// The ladder asks Cricket Australia, which the rest of the page does not, so the
+// page loads it on its own (see MyPage) and nothing else waits on it.
+function LadderModule({ state }) {
   return (
     <Section title="Ladder">
       {state.status === 'loading' && <Muted>Loading the ladder…</Muted>}
@@ -526,25 +591,95 @@ function FinesModule({ data }) {
   )
 }
 
+// A headline figure at the top of the dashboard.
+function Tile({ label, value, hint, tone, id }) {
+  return (
+    <div className="rounded-xl border pb-hairline px-3 py-2.5 min-w-0" data-tile={id}>
+      <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint truncate">{label}</div>
+      <div className="font-display font-bold text-[19px] leading-tight mt-0.5 truncate" style={tone ? { color: tone } : undefined}>{value}</div>
+      {hint && <div className="text-[11.5px] text-pb-faint mt-0.5 truncate">{hint}</div>}
+    </div>
+  )
+}
+
+// The tiles for the modules the club has on, from data the page already holds.
+// A tile is left out rather than shown empty when it has nothing true to say.
+function dashboardTiles({ me, data, modules, ladder }) {
+  const tiles = []
+  const has = (k) => modules.includes(k)
+  const dates = (me.dates || []).slice(0, 6)
+  const side = (data.selected || [])[0]
+  if (has('selected') && side) {
+    tiles.push({ id: 'next', label: 'Next game', value: fmtShort(side.date), hint: `${side.home_away === 'AWAY' ? '@' : 'vs'} ${side.opponent_name || side.label || 'TBC'}` })
+  } else if ((has('availability') || has('selected')) && dates[0]) {
+    const st = me.availability?.[dates[0].date]?.status || 'NO_RESPONSE'
+    tiles.push({ id: 'next', label: 'Next game', value: fmtShort(dates[0].date), hint: st === 'NO_RESPONSE' ? 'Not answered yet' : `You said ${(AVAILABILITY[st] || AVAILABILITY.NO_RESPONSE).label}` })
+  }
+  if (has('availability') && dates.length) {
+    const answered = dates.filter((d) => (me.availability?.[d.date]?.status || 'NO_RESPONSE') !== 'NO_RESPONSE').length
+    tiles.push({ id: 'availability', label: 'Availability', value: `${answered} of ${dates.length}`, hint: 'next games answered', tone: answered < dates.length ? 'var(--pb-amber)' : 'var(--pb-positive)' })
+  }
+  const due = data.votes || []
+  if (has('votes') && due.length) {
+    tiles.push({ id: 'votes', label: 'Votes due', value: due.length, hint: due.length === 1 ? 'game to vote on' : 'games to vote on', tone: 'var(--pb-amber)' })
+  }
+  const first = ladder.ladders?.[0]
+  const mine = first?.rows.find((r) => r.is_club)
+  if (has('ladder') && ladder.status === 'ok' && mine && mine.rank != null) {
+    tiles.push({ id: 'ladder', label: 'Ladder', value: `#${mine.rank}`, hint: first.team })
+  }
+  if (has('season') && data.season) {
+    tiles.push({ id: 'season', label: 'Runs this season', value: data.season.runs, hint: `${data.season.wickets} wickets · ${data.season.matches} matches` })
+  }
+  if (has('fines') && (data.fines || []).length) {
+    const owing = data.fines.reduce((a, f) => a + Math.max(f.owing, 0), 0)
+    tiles.push({ id: 'fines', label: 'Fines owing', value: owing > 0 ? money(owing) : 'All square', tone: owing > 0 ? 'var(--pb-amber)' : 'var(--pb-positive)' })
+  }
+  if (has('fees') && data.fees?.on_record) {
+    const owe = data.fees.total_outstanding
+    tiles.push({ id: 'fees', label: 'Fees owing', value: owe > 0 ? money(owe) : 'Nothing owing', tone: owe > 0 ? 'var(--pb-amber)' : 'var(--pb-positive)' })
+  }
+  if (has('training') && data.training) {
+    tiles.push({ id: 'training', label: 'Training', value: data.training.attended_8_weeks, hint: 'sessions in 8 weeks' })
+  }
+  return tiles
+}
+
 // The player's own page: whichever modules the club has turned on, in the club's
-// order. Only their own data, behind the same PIN cookie as the availability
-// answers. Availability comes from the page's own state; the rest from one call.
+// order, under a row of headline tiles. Only their own data, behind the same PIN
+// cookie as the availability answers. Availability comes from the page's own
+// state; the rest from one call. On a wide screen the modules sit in a grid, on a
+// phone they are one column.
 function MyPage({ token, me }) {
   const [data, setData] = useState(null)
   const [failed, setFailed] = useState(false)
+  const [ladder, setLadder] = useState({ status: 'loading', ladders: [] })
   useEffect(() => {
     let alive = true
     api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
     return () => { alive = false }
   }, [token])
 
+  // A server that doesn't send the list is the page as it was before clubs could choose.
+  const modules = data ? (data.modules ?? ['availability', 'squad', 'selected', 'training']) : []
+  const wantsLadder = modules.includes('ladder')
+  useEffect(() => {
+    if (!wantsLadder) return undefined
+    let alive = true
+    api.availPublicLadder(token)
+      .then((d) => { if (alive) setLadder({ status: 'ok', ladders: d.ladders || [] }) })
+      .catch(() => { if (alive) setLadder({ status: 'failed', ladders: [] }) })
+    return () => { alive = false }
+  }, [token, wantsLadder])
+
   const render = (key) => {
     switch (key) {
       case 'availability': return <AvailabilityModule key={key} me={me} />
+      case 'votes': return <VotesModule key={key} data={data} />
       case 'squad': return <SquadModule key={key} data={data} />
       case 'selected': return <SelectedModule key={key} data={data} />
       case 'training': return <TrainingModule key={key} data={data} />
-      case 'ladder': return <LadderModule key={key} token={token} />
+      case 'ladder': return <LadderModule key={key} state={ladder} />
       case 'season': return <SeasonModule key={key} data={data} />
       case 'fees': return <FeesModule key={key} data={data} />
       case 'fines': return <FinesModule key={key} data={data} />
@@ -552,8 +687,7 @@ function MyPage({ token, me }) {
     }
   }
 
-  // A server that doesn't send the list is the page as it was before clubs could choose.
-  const modules = data ? (data.modules ?? ['availability', 'squad', 'selected', 'training']) : []
+  const tiles = data ? dashboardTiles({ me, data, modules, ladder }) : []
 
   return (
     <div data-my-page>
@@ -562,7 +696,19 @@ function MyPage({ token, me }) {
       {data && modules.length === 0 && (
         <div className="text-sm text-pb-faint" data-no-modules>Your club has not added anything to this page yet.</div>
       )}
-      {data && modules.map(render)}
+      {data && modules.includes('votes') && (data.votes || []).length > 0 && <VotesBanner votes={data.votes} />}
+      {tiles.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5 mb-3" data-tiles>
+          {tiles.map((t) => <Tile key={t.id} {...t} />)}
+        </div>
+      )}
+      {data && modules.length > 0 && (
+        // Columns rather than a grid: the cards differ a lot in height (Fines is tall), and
+        // columns pack them tight with no gaps. The club's order runs down each column in turn.
+        <div className="md:columns-2 lg:columns-3 md:gap-3" data-modules>
+          {modules.map(render)}
+        </div>
+      )}
     </div>
   )
 }
@@ -746,7 +892,8 @@ export default function PublicAvailability() {
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text" style={accent ? { '--pb-accent': accent } : undefined}>
-      <div className="max-w-md mx-auto px-4 py-8 sm:py-12">
+      {/* The dashboard tab opens out on a wide screen; everything else stays a phone-width column. */}
+      <div className={`${step === 'weekend' && tab === 'mine' ? 'max-w-md md:max-w-5xl' : 'max-w-md'} mx-auto px-4 py-8 sm:py-12`}>
         {step === 'loading' && (
           <div className="py-24 text-center text-pb-faint text-sm">Loading…</div>
         )}
@@ -856,7 +1003,7 @@ export default function PublicAvailability() {
                 ))}
               </div>
             )}
-            <div role="tablist" className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-pb-surface2 mb-4">
+            <div role="tablist" className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-pb-surface2 mb-4 md:max-w-sm">
               {[['weekend', 'Availability'], ['mine', 'My page']].map(([id, label]) => (
                 <button key={id} role="tab" aria-selected={tab === id} data-tab={id} onClick={() => setTab(id)}
                   className={`py-2 rounded-lg text-sm font-semibold transition-colors ${tab === id ? 'bg-pb-surface text-pb-text shadow-sm' : 'text-pb-faint'}`}>{label}</button>

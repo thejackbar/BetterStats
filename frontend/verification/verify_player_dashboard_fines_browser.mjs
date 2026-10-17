@@ -78,7 +78,10 @@ async function playerPage(browser, width, profile, ladder) {
   await page.locator('[data-my-page]').waitFor()
   return { ctx, page, hits, errors }
 }
-const titles = (page) => page.evaluate(() => [...document.querySelectorAll('[data-my-page] > section > div:first-child')].map((e) => e.textContent.trim().toLowerCase()))
+const titles = (page) => page.evaluate(() => [...document.querySelectorAll('[data-my-page] [data-modules] > section > div:first-child')].map((e) => e.textContent.trim().toLowerCase()))
+const tileIds = (page) => page.evaluate(() => [...document.querySelectorAll('[data-my-page] [data-tile]')].map((e) => e.getAttribute('data-tile')))
+const tileText = (page, id) => page.evaluate((i) => (document.querySelector(`[data-tile="${i}"]`)?.textContent || '').replace(/\s+/g, ' ').trim(), id)
+const sectionXs = (page) => page.evaluate(() => [...new Set([...document.querySelectorAll('[data-my-page] [data-modules] > section')].map((e) => Math.round(e.getBoundingClientRect().left)))])
 
 // ─── C. the admin Fines screen ─────────────────────────────────────────────
 const ME = { id: 'u-1', username: 'admin', email: 'a@b.c', role: 'club_admin', organisation_id: 'o1', club_slug: 'gisborne', capabilities: ['*'], entitlements: { modules: ['select'], core_live: true, status: 'active' } }
@@ -174,7 +177,92 @@ const run = async () => {
     check('fees: what they owe', /You owe\s*\$60\.00/.test(body) && /Membership \$60\.00/.test(body), body)
     check('390px: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
     check('no script errors', errors.length === 0, errors.join('; '))
+    const ids = await tileIds(page)
+    check('headline tiles for the modules that are on, in a fixed order', JSON.stringify(ids) === JSON.stringify(['next', 'availability', 'ladder', 'season', 'fines', 'fees']), JSON.stringify(ids))
+    check('tile: next game says what they answered', /You said Available/.test(await tileText(page, 'next')), await tileText(page, 'next'))
+    check('tile: availability, answered of the next games', /1 of 1/.test(await tileText(page, 'availability')), await tileText(page, 'availability'))
+    check('tile: ladder position, once the ladder has loaded', /#2/.test(await tileText(page, 'ladder')) && /1st XI/.test(await tileText(page, 'ladder')), await tileText(page, 'ladder'))
+    check('tile: runs this season', /412/.test(await tileText(page, 'season')) && /9 wickets/.test(await tileText(page, 'season')), await tileText(page, 'season'))
+    check('tile: fines owing and fees owing', /\$7\.00/.test(await tileText(page, 'fines')) && /\$60\.00/.test(await tileText(page, 'fees')))
+    check('a phone gets one column of modules', (await sectionXs(page)).length === 1, JSON.stringify(await sectionXs(page)))
     await page.screenshot({ path: `${SHOT}/player-dashboard-390.png`, fullPage: true })
+    await ctx.close()
+  })
+
+  await safe('A. votes due', async () => {
+    console.log('\n── A. A vote is due: the reminder ──')
+    const due = [
+      { medal: 'Dunslow Medal', fixture_id: 'f1', opponent: 'Rovers', round: 'Round 1', date: iso(-2), closes_on: iso(5), link: '/vote/vtok?fixture=f1&player=p1' },
+      { medal: 'Dunslow Medal', fixture_id: 'f2', opponent: 'Saints', round: 'Round 2', date: iso(-1), closes_on: iso(6), link: '/vote/vtok?fixture=f2&player=p1' },
+    ]
+    const { ctx, page } = await playerPage(browser, 390, profileFor({ modules: ['availability', 'votes', 'fines'], votes: due }), { status: 200, body: LADDER })
+    await page.locator('[data-votes-banner]').waitFor()
+    const banner = norm(await page.locator('[data-votes-banner]').innerText())
+    check('a banner tops the page saying how many votes are due', /You have 2 votes to cast/.test(banner), banner)
+    check('the banner button goes to the first ballot, player already picked', (await page.locator('[data-votes-banner] a').getAttribute('href')) === '/vote/vtok?fixture=f1&player=p1')
+    const bannerBox = await page.locator('[data-votes-banner]').boundingBox()
+    const tilesBox = await page.locator('[data-tiles]').boundingBox()
+    check('the banner sits above the tiles', bannerBox.y + bannerBox.height <= tilesBox.y)
+    check('a Votes due tile counts them', /Votes due\s*2/.test(await tileText(page, 'votes')), await tileText(page, 'votes'))
+    const rows = await page.locator('[data-vote-due]').evaluateAll((els) => els.map((e) => ({ text: e.textContent.replace(/\s+/g, ' ').trim(), href: e.querySelector('a').getAttribute('href') })))
+    check('the module lists each game with its medal and when voting closes', rows.length === 2 && /Round 1 · vs Rovers/.test(rows[0].text) && /Dunslow Medal/.test(rows[0].text) && /voting closes/.test(rows[0].text), JSON.stringify(rows))
+    check('each has its own Vote link', rows[1].href === '/vote/vtok?fixture=f2&player=p1')
+    check('390px: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
+    await page.screenshot({ path: `${SHOT}/player-votes-390.png`, fullPage: true })
+    await ctx.close()
+    // For reference: what they have already cast, with the 3-2-1 picks
+    const cast = [
+      { medal: 'Dunslow Medal', fixture_id: 'f4', opponent: 'SMCC 8th XI', round: 'Round 1', date: iso(-3), open: true, closes_on: iso(4),
+        picks: [{ points: 3, name: 'Ann Anchor' }, { points: 2, name: 'Bob Bystander' }, { points: 1, name: 'Cal Cover' }], link: '/vote/vtok?fixture=f4&player=p1' },
+      { medal: 'Dunslow Medal', fixture_id: 'f3', opponent: 'Ancients', round: 'Round 0', date: iso(-30), open: false, closes_on: null,
+        picks: [{ points: 3, name: 'Bob Bystander' }], link: null },
+    ]
+    const withCast = await playerPage(browser, 390, profileFor({ modules: ['votes'], votes: due, votes_cast: cast }), { status: 200, body: LADDER })
+    await withCast.page.locator('[data-votes-cast]').waitFor()
+    check('already-cast votes sit under the ones still to cast, labelled', /already cast/i.test(await withCast.page.locator('[data-votes-cast]').innerText()))
+    const castText = norm(await withCast.page.locator('[data-vote-cast="f4"]').innerText())
+    check('a cast vote shows who got 3, 2 and 1', /3\s*Ann Anchor/.test(castText) && /2\s*Bob Bystander/.test(castText) && /1\s*Cal Cover/.test(castText), castText)
+    check('an open one can be changed, until when', /Change my votes \(until/.test(castText) && (await withCast.page.locator('[data-vote-cast="f4"] [data-change-vote]').getAttribute('href')) === '/vote/vtok?fixture=f4&player=p1')
+    check('a closed one shows the vote but no change link', (await withCast.page.locator('[data-vote-cast="f3"] [data-change-vote]').count()) === 0 && /3\s*Bob Bystander/.test(norm(await withCast.page.locator('[data-vote-cast="f3"]').innerText())))
+    check('the banner counts only what is still to cast', /You have 2 votes to cast/.test(await withCast.page.locator('[data-votes-banner]').innerText()))
+    check('390px with votes cast: no sideways overflow', (await overflow(withCast.page)) <= 0, String(await overflow(withCast.page)))
+    await withCast.page.screenshot({ path: `${SHOT}/player-votes-cast-390.png`, fullPage: true })
+    await withCast.ctx.close()
+    const castOnly = await playerPage(browser, 390, profileFor({ modules: ['votes'], votes: [], votes_cast: [cast[0]] }), { status: 200, body: LADDER })
+    await castOnly.page.locator('[data-votes-cast]').waitFor()
+    check('with only cast votes the card is "Your votes", with no banner and no tile', /your votes/i.test(await castOnly.page.locator('[data-modules] > section').first().innerText()) && (await castOnly.page.locator('[data-votes-banner]').count()) === 0 && !(await tileIds(castOnly.page)).includes('votes'))
+    await castOnly.ctx.close()
+    const one = await playerPage(browser, 390, profileFor({ modules: ['votes'], votes: [due[0]] }), { status: 200, body: LADDER })
+    await one.page.locator('[data-votes-banner]').waitFor()
+    check('with one, it says "a vote"', /You have a vote to cast/.test(await one.page.locator('[data-votes-banner]').innerText()))
+    await one.ctx.close()
+    const none = await playerPage(browser, 390, profileFor({ modules: ['availability'], votes: [] }), { status: 200, body: LADDER })
+    await none.page.waitForTimeout(300)
+    check('with nothing due there is no banner, no tile and no module', (await none.page.locator('[data-votes-banner], [data-vote-due]').count()) === 0 && !(await tileIds(none.page)).includes('votes'))
+    await none.ctx.close()
+  })
+
+  await safe('A. wide dashboard', async () => {
+    console.log('\n── A. On a wide screen it is a dashboard, not one long column ──')
+    const { ctx, page } = await playerPage(browser, 1280, profileFor(), { status: 200, body: LADDER })
+    await page.locator('[data-ladder]').waitFor()
+    const box = await page.locator('[data-my-page]').boundingBox()
+    check('the page opens out past the phone column', box.width > 700, String(box.width))
+    check('modules sit in more than one column', (await sectionXs(page)).length >= 2, JSON.stringify(await sectionXs(page)))
+    const order = (await titles(page)).map((x) => x.split(':')[0])
+    check('the club\'s order is kept (down each column in turn)', JSON.stringify(order) === JSON.stringify(['your season', 'fines', 'ladder', 'fees', 'your availability']), JSON.stringify(order))
+    const tilesBox = await page.locator('[data-tiles]').boundingBox()
+    const firstSection = await page.locator('[data-modules] > section').first().boundingBox()
+    check('the tiles sit above the modules', tilesBox.y + tilesBox.height <= firstSection.y)
+    check('1280px: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
+    const tabs = await page.locator('[role=tablist]').boundingBox()
+    check('the Availability / My page switch stays compact', tabs.width < 500, String(tabs.width))
+    await page.screenshot({ path: `${SHOT}/player-dashboard-1280.png`, fullPage: true })
+    // the Availability tab is still a phone-width column
+    await page.locator('[data-tab="weekend"]').click()
+    await page.waitForTimeout(200)
+    const wk = await page.locator('[data-date-card]').first().boundingBox()
+    check('the Availability tab stays one narrow column', wk && wk.width < 480, JSON.stringify(wk))
     await ctx.close()
   })
 

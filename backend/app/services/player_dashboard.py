@@ -14,7 +14,7 @@ page cannot be trusted with them:
   anyone holding the link could open anybody's page, so with it off the fees
   module is never served. Fail closed.
 * ``ladder`` names the player's squad, so it follows the same Show squad switch
-  as the rest of the page. (``squad`` itself stays served with the switch off: it
+  as the rest of the page. (``votes`` and ``fines`` draw nothing unless something is due or on; ``squad`` itself stays served with the switch off: it
   then says so, which is what the page always did.)
 """
 from __future__ import annotations
@@ -34,6 +34,8 @@ from app.services.aggregations import get_season_by_season
 CATALOGUE: list[dict] = [
     {"key": "availability", "label": "Your availability",
      "blurb": "Their answers for the next few games."},
+    {"key": "votes", "label": "Votes",
+     "blurb": "Reminds them to vote on games they played that are still open. Shows only when a vote is due."},
     {"key": "squad", "label": "Your squad",
      "blurb": "The squads they are in. While Show squad is off it says the club hasn't turned squad names on."},
     {"key": "selected", "label": "Selected",
@@ -53,7 +55,7 @@ KEYS = [m["key"] for m in CATALOGUE]
 
 # What every club had before the club could choose: the original page, plus
 # fines (which draws nothing unless a squad switches Fines on).
-DEFAULT_MODULES = ["availability", "squad", "selected", "training", "fines"]
+DEFAULT_MODULES = ["availability", "votes", "squad", "selected", "training", "fines"]
 
 
 def normalise(keys) -> list[str]:
@@ -65,11 +67,37 @@ def normalise(keys) -> list[str]:
     return out
 
 
+# A module that draws nothing unless something is due. A club's saved list is
+# the modules it chose from the ones it was OFFERED, so one that arrived later
+# is switched on for it rather than silently missing: a club cannot have turned
+# off what it never saw. Saving the list records what was on offer.
+AUTO_ON_WHEN_NEW = ("votes",)
+# What a list saved before `known` was recorded had been offered.
+LEGACY_KNOWN = [k for k in KEYS if k not in AUTO_ON_WHEN_NEW]
+
+
+def store(keys) -> dict:
+    """The value to save for a club's chosen modules: the ordered list that is on,
+    and every module that was on offer when it was chosen."""
+    return {"on": normalise(keys), "known": list(KEYS)}
+
+
 def enabled_modules(club: Organisation) -> list[str]:
     """The club's chosen modules, or the old page if it never chose. An explicit
-    empty list is a choice (everything off), so test None and not falsiness."""
+    empty list is a choice (everything off), so test None and not falsiness. The
+    stored value is a bare list (saved before `known` existed) or `store()`'s dict."""
     raw = club.player_dashboard_modules
-    return list(DEFAULT_MODULES) if raw is None else normalise(raw)
+    if raw is None:
+        return list(DEFAULT_MODULES)
+    if isinstance(raw, dict):
+        on, known = normalise(raw.get("on")), normalise(raw.get("known")) or list(LEGACY_KNOWN)
+    else:
+        on, known = normalise(raw), list(LEGACY_KNOWN)
+    for key in AUTO_ON_WHEN_NEW:
+        if key not in known and key not in on:
+            # Beside Availability when it is on, else first: a reminder belongs near the top.
+            on.insert(on.index("availability") + 1 if "availability" in on else 0, key)
+    return on
 
 
 def blocked_reason(club: Organisation, key: str) -> Optional[str]:

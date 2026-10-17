@@ -455,3 +455,29 @@ Asked for: the pictures should pull through on the voting page (it showed initia
 - `public_votes.fixture_state` adds `photo_url` to each eligible player, read in one query (`= ANY(CAST(:ids AS uuid[]))`). A photo is sent only when the player is public (`is_public` and `privacy_hidden_at IS NULL`): a hidden player stays on the ballot by name, but their face is not put on a page with no sign-in. The eligibility service is untouched (the admin enriches photos its own way).
 - `PublicVoting.jsx` `Face`: the photo as a 40px round image, initials when there is none or it fails to load (`onError`).
 - Proof: `verify_vote_my_page_link.py` (13, control on the previous route fails the photo check), `verify_vote_my_page_link_browser.mjs` (18, a good photo, a 404 photo and no photo).
+
+## v9.120.2: vote reminders on the player's own page
+
+Asked for: on the player page, remind a player who is due to vote in a game they played that is still open.
+
+- `public_availability._votes_due(db, club, player)`: for each enabled medal with a link, `public_votes._open_fixtures` (state `open`), minus games the player has a ballot for, then `vote_svc.resolve_eligibility` and `public_votes._voter_role` per game (the ballot page's own rules, so a reminder never points at a game they cannot vote on; captain-only mode reminds only the captain). At most 10 games examined per page load. Sorted by when voting closes. Each item carries `link` = `/vote/<medal token>?fixture=<id>&player=<id>`, built only for the verified player; the vote page still asks for the PIN (`bs_vote` and `bs_avail` stay separate).
+- A `votes` module in `services/player_dashboard` (catalogue entry, in `DEFAULT_MODULES` after availability). It drops itself from `modules` when nothing is due, so a club with no voting sees no trace of it. Failure is caught and logged like the other newer modules.
+- Frontend: `VotesBanner` above the tiles, a "Votes due" tile, `VotesModule`. `PublicVoting.jsx` reads `?player=<id>` and picks that player once on the name step.
+- Proof: `verify_player_votes_reminder.py` (own database, 20; control on the previous code fails the positive checks without crashing), `verify_player_dashboard_fines_browser.mjs` (113), `verify_vote_my_page_link_browser.mjs` (21).
+
+## v9.120.2.1: vote reminders missing for players at a big club
+
+Reported: Votes not showing on the player page, with Jack Barendse and the Dunslow Medal given as an example. Two causes, both reproduced before fixing (the new checks failed 5 of 26 on the previous code).
+
+- `_votes_due` examined only the 10 newest unvoted open games. A club has an open game per grade per round (Applecross: a dozen or more teams), so a player's own game was often past the cutoff and never looked at. Now two batched local lookups find the player's games first (`fixture_lineups`, and `game_appearances`/`batting_innings`/`bowling_spells`/`fielding_stats` through `match_ref_id`), and only those get `resolve_eligibility` and `_voter_role`. A game whose list can only come from a live Play.Cricket fetch cannot be found that way, so those are checked directly, capped at 10 per page load (`VOTES_LIVE_EXAMINED`).
+- A club that had saved its own module list (the picker, v9.120.0) had no `votes` in it, so the module was never drawn. `organisations.player_dashboard_modules` is now either the old bare list or `store()`'s `{"on": [...], "known": [...]}`. `known` is every module on offer when the list was saved; a module in `AUTO_ON_WHEN_NEW` (votes) that is not in `known` is added beside Availability. A bare list counts as having known everything except votes. JSONB, no migration.
+- Proof: `verify_player_votes_reminder.py` (own database, 29: 14 newer games for other players, the synced-scorecard path, a legacy list, a list saved now with Votes off, an empty list).
+
+## v9.120.2.2: cast votes shown on the player's page
+
+Asked for: if the player has already voted, show their 3-2-1 votes too, for reference.
+
+- `public_availability._votes_for_player` (was `_votes_due`) returns `(due, cast)`. `cast` is the player's own `VoteBallot` rows on games the medal counts in its 90-day window (open or closed), newest first, at most `VOTES_CAST_SHOWN` (6). Each carries `picks` as `{points, name}` where `points` = `ballot_values[position - 1]` (so a medal counting 5-3-1 shows 5-3-1), `open`, and, only while open, `closes_on` and the `link` to change it. Only their own ballot is read; other players' ballots are never touched.
+- The profile adds `votes_cast`. The `votes` module now stays when there are cast votes even if nothing is due, and drops only when both are empty. The banner and tile count `votes` (to cast) only.
+- Frontend: `VotesModule` is "Votes to cast" then "Already cast", or "Your votes" alone when nothing is due.
+- Proof: `verify_player_votes_reminder.py` (own database, 37; control on the previous route fails the 6 new checks without crashing), `verify_player_dashboard_fines_browser.mjs` (120).
