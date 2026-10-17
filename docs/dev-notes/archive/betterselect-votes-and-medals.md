@@ -430,3 +430,7 @@ handoff. Every existing endpoint/field keeps its shape — this is additive.
   presentation mode. No tallies anywhere on the public page.
 
 <!-- END original CLAUDE.md L13422-13500 -->
+
+## Medal voting-link switch (v9.119.0.1, Oct 2026)
+
+A new `vote_medals` row starts with `enabled = false`. After migration 267 the Settings tab had no control that sent `enabled`, so the "Turn it on under Settings" notice in `ShareVotePanel` pointed at nothing and a new medal could never be switched on from the UI. `VotesSettings.jsx` now has a "Voting link" Off/On row (PATCH `enabled` through `votesSetSettings`), and `ShareVotePanel` takes an `onEnable` prop so the Settings tab's off notice carries a "Turn on voting link" button. Other screens keep the notice that points at Settings. Frontend only; the backend already handled `enabled` and minted `link_token` on first enable.

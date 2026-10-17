@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { useToast } from '../../../../contexts/ToastContext'
-import { Icon } from '../ui'
+import { Btn, Icon } from '../ui'
 
 // One place to share a vote. Every target composes from the SAME pre-filtered
 // link, so a player only ever lands on the games that apply to them:
@@ -25,7 +25,9 @@ export function voteUrl(token, { fixtureId, gradeId, roundKey } = {}) {
   return u.toString()
 }
 
-export default function ShareVotePanel({ settings, scope, fixtures = [], onPostToSocials }) {
+// `onEnable` is passed only by the Settings tab, where the switch lives; on
+// every other screen the notice points there instead.
+export default function ShareVotePanel({ settings, scope, fixtures = [], onPostToSocials, onEnable, busy }) {
   const toast = useToast()
   const navigate = useNavigate()
   const [qr, setQr] = useState(null)
@@ -72,7 +74,14 @@ export default function ShareVotePanel({ settings, scope, fixtures = [], onPostT
   if (!settings?.enabled) {
     return (
       <div className="pb-card px-4 py-4 text-[12.5px] text-pb-amber">
-        The voting link is off, so players can't vote yet. Turn it on under Settings — admins can still enter ballots by hand.
+        {onEnable
+          ? "The voting link is off, so players can't vote yet. Admins can still enter ballots by hand."
+          : "The voting link is off, so players can't vote yet. Turn it on under Settings — admins can still enter ballots by hand."}
+        {onEnable && (
+          <div className="mt-3">
+            <Btn sm variant="primary" onClick={onEnable} disabled={busy}>Turn on voting link</Btn>
+          </div>
+        )}
       </div>
     )
   }

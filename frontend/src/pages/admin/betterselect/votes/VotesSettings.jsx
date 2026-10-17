@@ -97,9 +97,14 @@ export default function VotesSettings({
 
   return (
     <div className="flex flex-col gap-4 max-w-3xl">
-      <ShareVotePanel settings={cfg} scope={{ label: cfg.medal_name }} />
+      <ShareVotePanel settings={cfg} scope={{ label: cfg.medal_name }}
+        onEnable={canManage ? () => update({ enabled: true }) : undefined} busy={busy} />
 
       <div className="pb-card px-4 py-1">
+        <Row label="Voting link" hint="Players can only vote while this is on. A new medal starts off. Turning it off keeps every ballot already cast.">
+          <Segmented sm value={cfg.enabled ? 'on' : 'off'} onChange={(v) => update({ enabled: v === 'on' })}
+            options={[{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }]} />
+        </Row>
         <Row label="Medal name" hint="What the club calls this award. It's what players see on the voting page.">
           <div className="flex flex-wrap items-center gap-2">
             <input
