@@ -364,7 +364,7 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
     }
 
 
-VOTES_EXAMINED = 10   # open games looked at per page load, newest first
+VOTES_LIVE_EXAMINED = 10   # games whose list comes from a live Play.Cricket fetch, per page load
 
 
 async def _votes_due(db: AsyncSession, club: Organisation, player: Player) -> list[dict]:
@@ -373,6 +373,12 @@ async def _votes_due(db: AsyncSession, club: Organisation, player: Player) -> li
     ballot page uses, so a reminder never points at a game they cannot vote on),
     and no ballot from them yet. Nothing about anyone else, and nothing at all
     for a club with no enabled voting link.
+
+    A club has a game open for every grade each round, so the player's own games
+    are found first with two batched local lookups (their saved XIs and the
+    scorecards they appear on) and only those get the full eligibility check.
+    A game whose list can only come from a live Play.Cricket fetch cannot be
+    found that way; those are checked directly, a few at a time.
 
     The link carries the medal's token, so it is only ever built here, for the
     verified player, and the vote page still asks for their PIN."""
@@ -383,7 +389,7 @@ async def _votes_due(db: AsyncSession, club: Organisation, player: Player) -> li
         ).order_by(VoteMedal.name)
     )).scalars().all()
     due: list[dict] = []
-    examined = 0
+    live_left = VOTES_LIVE_EXAMINED
     for medal in medals:
         cfg = vote_svc.effective_config(medal)
         fixtures, _ = await pv._open_fixtures(db, club, cfg, medal)
@@ -396,13 +402,35 @@ async def _votes_due(db: AsyncSession, club: Organisation, player: Player) -> li
                 VoteBallot.fixture_id.in_([f.id for f in open_fx]),
             )
         )).fetchall()}
-        for f in open_fx:
-            if f.id in voted:
-                continue
-            if examined >= VOTES_EXAMINED:
-                break
-            examined += 1
-            ov = await vote_svc.get_override(db, medal.id, f.id)
+        todo = [f for f in open_fx if f.id not in voted]
+        if not todo:
+            continue
+        overrides = await vote_svc.overrides_by_fixture(db, medal.id, [f.id for f in todo])
+
+        in_lineup = {r[0] for r in (await db.execute(
+            text("SELECT fixture_id FROM fixture_lineups WHERE player_id = :p AND fixture_id = ANY(CAST(:ids AS uuid[]))"),
+            {"p": player.id, "ids": [f.id for f in todo]},
+        )).fetchall()}
+        refs = {f.id: vote_svc.match_ref_id(f) for f in todo}
+        on_scorecard = {r[0] for r in (await db.execute(
+            text(
+                "SELECT game_id FROM game_appearances WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
+                "UNION SELECT game_id FROM batting_innings WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
+                "UNION SELECT game_id FROM bowling_spells WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
+                "UNION SELECT game_id FROM fielding_stats WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[]))"
+            ),
+            {"p": player.id, "g": list(refs.values())},
+        )).fetchall()}
+
+        for f in todo:
+            ov = overrides.get(str(f.id))
+            source = vote_svc.effective_source(cfg, ov.eligibility_source if ov else None)
+            local = f.id in in_lineup or refs[f.id] in on_scorecard
+            if not local:
+                # Only a live team-list fetch could still put them on this game's list.
+                if source != "playhq" or live_left <= 0:
+                    continue
+                live_left -= 1
             elig = await vote_svc.resolve_eligibility(db, club, f, cfg, ov.eligibility_source if ov else None)
             role, _reason = pv._voter_role(cfg, player, elig["players"])
             if role != "player":

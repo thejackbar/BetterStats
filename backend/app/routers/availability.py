@@ -817,7 +817,7 @@ async def update_self_service(
     if body.allow_maybe is not None:
         club.availability_allow_maybe = bool(body.allow_maybe)
     if body.dashboard_modules is not None:
-        club.player_dashboard_modules = player_dashboard.normalise(body.dashboard_modules)
+        club.player_dashboard_modules = player_dashboard.store(body.dashboard_modules)
     if body.enabled is not None:
         club.availability_self_service_enabled = bool(body.enabled)
         if body.enabled and not club.availability_link_token:

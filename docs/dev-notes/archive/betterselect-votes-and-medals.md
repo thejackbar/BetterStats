@@ -464,3 +464,11 @@ Asked for: on the player page, remind a player who is due to vote in a game they
 - A `votes` module in `services/player_dashboard` (catalogue entry, in `DEFAULT_MODULES` after availability). It drops itself from `modules` when nothing is due, so a club with no voting sees no trace of it. Failure is caught and logged like the other newer modules.
 - Frontend: `VotesBanner` above the tiles, a "Votes due" tile, `VotesModule`. `PublicVoting.jsx` reads `?player=<id>` and picks that player once on the name step.
 - Proof: `verify_player_votes_reminder.py` (own database, 20; control on the previous code fails the positive checks without crashing), `verify_player_dashboard_fines_browser.mjs` (113), `verify_vote_my_page_link_browser.mjs` (21).
+
+## v9.120.2.1: vote reminders missing for players at a big club
+
+Reported: Votes not showing on the player page, with Jack Barendse and the Dunslow Medal given as an example. Two causes, both reproduced before fixing (the new checks failed 5 of 26 on the previous code).
+
+- `_votes_due` examined only the 10 newest unvoted open games. A club has an open game per grade per round (Applecross: a dozen or more teams), so a player's own game was often past the cutoff and never looked at. Now two batched local lookups find the player's games first (`fixture_lineups`, and `game_appearances`/`batting_innings`/`bowling_spells`/`fielding_stats` through `match_ref_id`), and only those get `resolve_eligibility` and `_voter_role`. A game whose list can only come from a live Play.Cricket fetch cannot be found that way, so those are checked directly, capped at 10 per page load (`VOTES_LIVE_EXAMINED`).
+- A club that had saved its own module list (the picker, v9.120.0) had no `votes` in it, so the module was never drawn. `organisations.player_dashboard_modules` is now either the old bare list or `store()`'s `{"on": [...], "known": [...]}`. `known` is every module on offer when the list was saved; a module in `AUTO_ON_WHEN_NEW` (votes) that is not in `known` is added beside Availability. A bare list counts as having known everything except votes. JSONB, no migration.
+- Proof: `verify_player_votes_reminder.py` (own database, 29: 14 newer games for other players, the synced-scorecard path, a legacy list, a list saved now with Votes off, an empty list).

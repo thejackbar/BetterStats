@@ -33,7 +33,7 @@ from starlette.requests import Request
 
 import verify_selection_same_day as base
 from app.config.settings import settings
-from app.models.db import Fixture, FixtureLineup, Organisation, Player, VoteBallot, VoteFixtureOverride, VoteMedal
+from app.models.db import Fixture, FixtureLineup, Game, GameAppearance, Grade, Organisation, Player, Season, VoteBallot, VoteFixtureOverride, VoteMedal
 
 engine = create_async_engine(os.environ["DATABASE_URL"], echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -150,15 +150,83 @@ async def main():
     await set_medal(voter_mode="players")
 
     print("\n# D. The club's choice of modules")
-    await set_org(player_dashboard_modules=["fines"])
+    await set_org(player_dashboard_modules=pd.store(["fines"]))
     prof = await profile(ann)
-    check("with Votes left off the page, it is not queried or shown", (prof.get("votes"), prof.get("modules")), ([], []))
+    check("with Votes left off the page (saved with Votes on offer), it is not queried or shown", (prof.get("votes"), prof.get("modules")), ([], []))
     await set_org(player_dashboard_modules=None)
     check("a club that never chose gets Votes in the default page", pd.DEFAULT_MODULES[:2], ["availability", "votes"])
     async with Session() as db:
         club = await db.get(Organisation, org)
         cat = {m["key"]: m for m in pd.catalogue_for(club)} if hasattr(pd, "catalogue_for") else {}
     check("the admin list offers it", "votes" in cat, True)
+
+    print("\n# E. A big club: many open games, the player's is not among the newest")
+    await set_org(player_dashboard_modules=None)
+    await set_medal(enabled=True, link_token=vtok, voter_mode="players")
+    async with Session() as db:
+        # 14 other grades' games, all newer than Sam's and Ann's, none involving them.
+        for i in range(14):
+            fid = uuid.uuid4()
+            db.add(Fixture(id=fid, organisation_id=org, source="manual", played_on=today, status="COMPLETED",
+                           opponent_name=f"Other {i}", label=f"Other {i}", round="1"))
+            await db.flush()
+            db.add(FixtureLineup(fixture_id=fid, player_id=bob, organisation_id=org, batting_order=1))
+        db.add(FixtureLineup(fixture_id=f1, player_id=sam, organisation_id=org, batting_order=1)) if False else None
+        await db.commit()
+        # Sam's Rovers ballot from section B stands; remove it so he has a vote due again.
+        await db.execute(text("DELETE FROM vote_ballots WHERE fixture_id = :f AND voter_player_id = :p"), {"f": f1, "p": sam})
+        await db.commit()
+    prof = await profile(sam)
+    check("Sam is still reminded though 14 newer games are open for other players", [v.get("opponent") for v in prof.get("votes") or []], ["Rovers"])
+    prof_bob = await profile(bob)
+    check("and Bob, who played all 14, is reminded of all of them", len(prof_bob.get("votes") or []), 14)
+
+    print("\n# F. A club that saved its own module list before Votes existed")
+    async with Session() as db:
+        o = await db.get(Organisation, org)
+        o.player_dashboard_modules = ["season", "fines"]   # the old shape: a bare list, no record of what it knew
+        await db.commit()
+    prof = await profile(sam)
+    check("a list saved before Votes existed gets Votes added, since a club cannot have turned off what it never saw",
+          ("votes" in (prof.get("modules") or []), [v.get("opponent") for v in prof.get("votes") or []]), (True, ["Rovers"]))
+    check("it is added after Availability, or first when Availability is off", (prof.get("modules") or [None])[0], "votes")
+    if hasattr(pd, "store"):
+        async with Session() as db:
+            o = await db.get(Organisation, org)
+            o.player_dashboard_modules = pd.store(["season", "fines"])   # saved now, with Votes on offer and left off
+            await db.commit()
+        prof = await profile(sam)
+        check("a list saved now that leaves Votes off keeps it off", ("votes" in (prof.get("modules") or []), prof.get("votes")), (False, []))
+        async with Session() as db:
+            o = await db.get(Organisation, org)
+            o.player_dashboard_modules = pd.store([])
+            await db.commit()
+        check("an explicit empty list still means everything off", (await profile(sam)).get("modules"), [])
+    else:
+        check("a list saved now records what it was offered", False)
+
+    print("\n# G. Games voted from the synced scorecard (what most clubs use)")
+    await set_org(player_dashboard_modules=None)
+    season, grade, game, fsync = (uuid.uuid4() for _ in range(4))
+    async with Session() as db:
+        db.add(Season(id=season, organisation_id=org, name="Summer", year=2026))
+        await db.flush()
+        db.add(Grade(id=grade, season_id=season, name="8th Grade"))
+        await db.flush()
+        db.add(Game(id=game, grade_id=grade, played_at=datetime.now(timezone.utc) - timedelta(days=1), home_team="Vote CC 8th XI", away_team="SMCC 8th XI"))
+        await db.flush()
+        # A synced fixture: its own random PK, the real match GUID in playhq_id. Sam played; Ann did not.
+        db.add(Fixture(id=fsync, organisation_id=org, grade_id=grade, source="grassroots", playhq_id=str(game),
+                       played_on=today - timedelta(days=1), status="COMPLETED", opponent_name="SMCC 8th XI", label="SMCC 8th XI", round="1"))
+        await db.flush()
+        db.add(GameAppearance(game_id=game, player_id=sam, team_name="Vote CC 8th XI"))
+        await db.commit()
+    prof = await profile(sam)
+    check("Sam, on the synced scorecard, is reminded of that game among 14 newer ones", "SMCC 8th XI" in [v.get("opponent") for v in prof.get("votes") or []], True)
+    prof_ann = await profile(ann)
+    check("Ann, who is not on that scorecard, is not", "SMCC 8th XI" in [v.get("opponent") for v in prof_ann.get("votes") or []], False)
+    link = next((v["link"] for v in prof.get("votes") or [] if v.get("opponent") == "SMCC 8th XI"), "")
+    check("its link opens that fixture (the fixture's id, not the match GUID)", f"fixture={fsync}" in link and str(game) not in link, True)
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     for f in base.FAILURES:

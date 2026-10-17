@@ -67,11 +67,37 @@ def normalise(keys) -> list[str]:
     return out
 
 
+# A module that draws nothing unless something is due. A club's saved list is
+# the modules it chose from the ones it was OFFERED, so one that arrived later
+# is switched on for it rather than silently missing: a club cannot have turned
+# off what it never saw. Saving the list records what was on offer.
+AUTO_ON_WHEN_NEW = ("votes",)
+# What a list saved before `known` was recorded had been offered.
+LEGACY_KNOWN = [k for k in KEYS if k not in AUTO_ON_WHEN_NEW]
+
+
+def store(keys) -> dict:
+    """The value to save for a club's chosen modules: the ordered list that is on,
+    and every module that was on offer when it was chosen."""
+    return {"on": normalise(keys), "known": list(KEYS)}
+
+
 def enabled_modules(club: Organisation) -> list[str]:
     """The club's chosen modules, or the old page if it never chose. An explicit
-    empty list is a choice (everything off), so test None and not falsiness."""
+    empty list is a choice (everything off), so test None and not falsiness. The
+    stored value is a bare list (saved before `known` existed) or `store()`'s dict."""
     raw = club.player_dashboard_modules
-    return list(DEFAULT_MODULES) if raw is None else normalise(raw)
+    if raw is None:
+        return list(DEFAULT_MODULES)
+    if isinstance(raw, dict):
+        on, known = normalise(raw.get("on")), normalise(raw.get("known")) or list(LEGACY_KNOWN)
+    else:
+        on, known = normalise(raw), list(LEGACY_KNOWN)
+    for key in AUTO_ON_WHEN_NEW:
+        if key not in known and key not in on:
+            # Beside Availability when it is on, else first: a reminder belongs near the top.
+            on.insert(on.index("availability") + 1 if "availability" in on else 0, key)
+    return on
 
 
 def blocked_reason(club: Organisation, key: str) -> Optional[str]:
