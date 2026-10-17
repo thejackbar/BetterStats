@@ -266,10 +266,16 @@ export default function PublicVoting() {
               </div>
             </div>
             {me && (
-              <button onClick={async () => {
-                try { await api.votePublicSwitch(token) } catch { /* cookie clear is best-effort */ }
-                setMe(null); setChosen(null); setStep('games')
-              }} className="ml-auto text-xs text-pb-faint hover:text-pb-text underline shrink-0">Not you?</button>
+              <div className="ml-auto flex items-center gap-3 shrink-0">
+                {me.my_page && (
+                  <a href={me.my_page} data-my-page-link
+                    className="text-xs font-semibold underline" style={{ color: 'var(--pb-accent)' }}>My page</a>
+                )}
+                <button onClick={async () => {
+                  try { await api.votePublicSwitch(token) } catch { /* cookie clear is best-effort */ }
+                  setMe(null); setChosen(null); setStep('games')
+                }} className="text-xs text-pb-faint hover:text-pb-text underline">Not you?</button>
+              </div>
             )}
           </div>
         )}
@@ -447,6 +453,11 @@ export default function PublicVoting() {
             </p>
             <button onClick={backToGames} className="mt-6 px-6 py-3 rounded-xl font-semibold text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}>Back to games</button>
+            {me?.my_page && (
+              <div className="mt-4">
+                <a href={me.my_page} data-my-page-done className="text-sm underline text-pb-dim">Go to my page</a>
+              </div>
+            )}
           </div>
         )}
 

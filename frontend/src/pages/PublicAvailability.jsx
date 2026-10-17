@@ -9,7 +9,7 @@
 // the app is the shared availability colour map so a player's chips match the
 // admin matrix exactly.
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { AVAILABILITY } from '../lib/availability'
 
@@ -569,6 +569,11 @@ function MyPage({ token, me }) {
 
 export default function PublicAvailability() {
   const { token } = useParams()
+  // Arriving from the voting page: `?tab=mine` opens the player's own page and
+  // `?player=<id>` has them already picked, so it is only the PIN left to type.
+  const [searchParams] = useSearchParams()
+  const playerParam = searchParams.get('player') || ''
+  const autoPicked = useRef(false)
   const [step, setStep] = useState('loading') // loading | pick | pin | weekend | dead
   const [club, setClub] = useState(null)
   const [requirePin, setRequirePin] = useState(true)
@@ -582,7 +587,7 @@ export default function PublicAvailability() {
   const [savingDate, setSavingDate] = useState(null)
   const [savedDate, setSavedDate] = useState(null)
   const [weeksOpen, setWeeksOpen] = useState(1) // weeks of games showing, from the next one
-  const [tab, setTab] = useState('weekend') // weekend | mine
+  const [tab, setTab] = useState(searchParams.get('tab') === 'mine' ? 'mine' : 'weekend') // weekend | mine
   const pinRef = useRef(null)
   const weeks = useMemo(() => groupByWeek(me?.dates || []), [me?.dates])
   const pairs = useMemo(() => twoDayPairs(me?.dates || []), [me?.dates])
@@ -676,6 +681,15 @@ export default function PublicAvailability() {
       setVerifying(false)
     }
   }
+
+  // From the voting page with ?player=<id>: pick that player once, on the name
+  // step, so they land on the PIN box instead of searching for themselves.
+  useEffect(() => {
+    if (step !== 'pick' || !playerParam || autoPicked.current) return
+    const p = players.find((x) => x.id === playerParam)
+    if (p) { autoPicked.current = true; pickPlayer(p) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, playerParam, players])
 
   const submitPin = (e) => {
     e.preventDefault()

@@ -64,6 +64,7 @@
 33. `ShareVotePanel` uses client-side URL schemes only (no backend send). "Post to socials" copies the message and links to `/admin/social-post`; no standings-card renderer exists.
 34. Awards night is a forced-dark stage (re-declare `color`, not only the `--pb-*` tokens, since `color` inherits). The router stamps `club_name`, `club_short` (initials fallback), `season_label`, `grade_name`, `grade_id` on the board; `grade_id` is what makes the reveal replay the same grade the leaderboard was scoped to.
 35. Public ballot is one screen: 3 tap targets above the team list, `picks` is still the same fixed-length array. The `RaceChart` is hand-rolled inline SVG; do not pull in a chart library for it.
+35a. The vote pages describe the verified voter through `public_votes._me_payload`, which adds `my_page` (a link to the player's own availability-link dashboard) only for a verified player with the club's self-service link on. Never send the availability token to an unidentified visitor, and do not share a sign-in between `bs_vote` and `bs_avail`.
 
 **Football twin (v9.34.0)**
 36. Football ballots key on `games` directly (cricket keys on `fixtures`). There is no eligibility source to choose: one team list, read by `services/afl/lineups.py` from `afl_player_game_lines` (PlayHQ `gameView.statistics.{home,away}.players[]`, both sides). It is a plain read of held data: no upstream call, works when PlayHQ is down.

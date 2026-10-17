@@ -141,6 +141,18 @@ def _club_branding(club: Organisation) -> dict:
     }
 
 
+def _me_payload(club: Organisation, player: Player) -> dict:
+    """The verified voter as the vote pages see them. `my_page` is the way back to
+    their own dashboard (the My page tab of the availability link), and is only
+    sent to a verified player and only while the club's self-service link is on.
+    The availability token is never sent to anyone who has not proved who they
+    are here: a club that lets supporters vote must not hand them the player link."""
+    out = {"id": str(player.id), "display_name": player.display_name}
+    if club.availability_self_service_enabled and club.availability_link_token:
+        out["my_page"] = f"/avail/{club.availability_link_token}?tab=mine&player={player.id}"
+    return out
+
+
 async def _verified_player(db: AsyncSession, request: Request, club: Organisation) -> Optional[Player]:
     pid = _read_session(request, club.id)
     if not pid:
@@ -289,7 +301,7 @@ async def get_landing(
         "allow_non_participants": cfg["allow_non_participants"],
         "allow_self_vote": cfg["allow_self_vote"],
         "ballot_values": cfg["ballot_values"],
-        "me": {"id": str(me.id), "display_name": me.display_name} if me else None,
+        "me": _me_payload(club, me) if me else None,
         "players": [
             {"id": str(p.id), "display_name": p.display_name,
              "has_phone": phone_last4(p.phone) is not None}
@@ -358,7 +370,7 @@ async def verify(token: str, body: VerifyBody, request: Request, response: Respo
 
     rate_limit.clear_failures(lock_key)
     _issue_cookie(response, club.id, player.id)
-    return {"status": "ok", "player": {"id": str(player.id), "display_name": player.display_name}}
+    return {"status": "ok", "player": _me_payload(club, player)}
 
 
 @router.post("/{token}/switch")
@@ -437,7 +449,7 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         "ballot_values": cfg["ballot_values"],
         "allow_self_vote": cfg["allow_self_vote"],
         "voter_mode": cfg["voter_mode"],
-        "me": {"id": str(me.id), "display_name": me.display_name} if me else None,
+        "me": _me_payload(club, me) if me else None,
         "role": role,
         "reason": reason,
         "players": [{"id": p["id"], "name": p["name"]} for p in eligible],
