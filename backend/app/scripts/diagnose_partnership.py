@@ -11,7 +11,7 @@ Read-only, writes nothing.
 
 Usage from the backend container:
   docker exec -e PYTHONPATH=/app betterstats-backend \\
-    python -m app.scripts.diagnose_partnership <org_id> <YYYY-MM-DD> [--runs N] [--days D]
+    python -m app.scripts.diagnose_partnership <org_id_or_slug> <YYYY-MM-DD> [--runs N] [--days D]
 
 `--runs` keeps only stands of that many runs; `--days` widens the date window
 either side (default 1, since a match date can sit a day off the card).
@@ -28,7 +28,22 @@ from app.models.db import async_session_maker
 from app.services.club_grades import club_game_sql
 
 
-async def diagnose(org_id_str: str, on: date, runs: int | None, days: int) -> None:
+async def _resolve_org(org_ref: str) -> str:
+    """An org id, or a club slug looked up to one. A slug that matches nothing stops the run."""
+    try:
+        return str(uuid.UUID(org_ref))
+    except ValueError:
+        pass
+    async with async_session_maker() as session:
+        found = (await session.execute(
+            text("SELECT id::text FROM organisations WHERE slug = :s"), {"s": org_ref})).scalar()
+    if not found:
+        raise SystemExit(f"No club with slug {org_ref!r}")
+    return found
+
+
+async def diagnose(org_ref: str, on: date, runs: int | None, days: int) -> None:
+    org_id_str = await _resolve_org(org_ref)
     org = uuid.UUID(org_id_str)
     params = {
         "club_org": org,
@@ -86,7 +101,7 @@ async def diagnose(org_id_str: str, on: date, runs: int | None, days: int) -> No
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("org_id")
+    ap.add_argument("org_id", help="club id (UUID) or club slug")
     ap.add_argument("date", type=date.fromisoformat)
     ap.add_argument("--runs", type=int, default=None)
     ap.add_argument("--days", type=int, default=1)

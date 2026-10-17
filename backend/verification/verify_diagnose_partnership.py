@@ -117,6 +117,20 @@ async def main() -> None:
     check("opposition-innings reason is named", "is_club_innings is FALSE" in blocks["oppinn"], blocks["oppinn"])
     check("other-org reason is named", "belongs to org" in blocks["otherorg"], blocks["otherorg"])
 
+    # A slug resolves to the same club; an unknown slug stops the run.
+    async with Session() as s:
+        await s.execute(text("UPDATE organisations SET slug = 'our-club' WHERE id = :i"), {"i": OURS})
+        await s.commit()
+    buf2 = io.StringIO()
+    with redirect_stdout(buf2):
+        await diag.diagnose("our-club", date(2017, 12, 16), 204, 1)
+    check("slug resolves to the club and finds the control stand", "INCLUDED" in buf2.getvalue(), buf2.getvalue())
+    try:
+        await diag.diagnose("no-such-club", date(2017, 12, 16), None, 1)
+        check("unknown slug stops the run", False)
+    except SystemExit:
+        check("unknown slug stops the run", True)
+
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     for f in base.FAILURES:
         print(f"  - {f}")
