@@ -96,15 +96,15 @@ async def player_fines(db: AsyncSession, org_id, player_id, weeks: int = 8) -> l
         mine = (await squad_totals(db, org_id, tid)).get(player_id, {"fined": 0.0, "paid": 0.0})
         entries = (await db.execute(
             text(
-                "SELECT fined_on, reason, amount FROM fine_entries "
+                "SELECT fined_on, reason, amount, note FROM fine_entries "
                 "WHERE organisation_id = :org AND team_id = :t AND player_id = :p AND voided_at IS NULL "
                 "ORDER BY fined_on DESC, created_at DESC LIMIT 200"
             ),
             {"org": org_id, "t": tid, "p": player_id},
         )).fetchall()
         by_date: dict[date, list] = {}
-        for d, reason, amount in entries:
-            by_date.setdefault(d, []).append({"reason": reason, "amount": money(amount)})
+        for d, reason, amount, note in entries:
+            by_date.setdefault(d, []).append({"reason": reason, "amount": money(amount), "note": note})
         recent_weeks = [
             {"date": d.isoformat(), "total": round(sum(i["amount"] for i in items), 2), "items": items}
             for d, items in list(by_date.items())[:weeks]

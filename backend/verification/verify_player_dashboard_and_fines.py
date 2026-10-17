@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import verify_selection_same_day as base
 from app.models.db import (
-    FeeMember, FeeMemberSeason, FeePayment, FeeSchedule, Grade, Organisation, Player,
+    Fixture, FixtureLineup, FeeMember, FeeMemberSeason, FeePayment, FeeSchedule, Grade, Organisation, Player,
     PlayerSeasonStats, Season, Team, User,
 )
 
@@ -59,9 +59,10 @@ def guarded(name):
 async def main():
     await base.build_schema()
     ddl = guarded("app.services.fines_ddl")
+    cap_ddl = guarded("app.services.fines_cap_ddl")
     async with engine.begin() as conn:
         for _ in range(2):  # the lifespan re-runs the list on every boot
-            for stmt in (ddl.STATEMENTS if ddl else []):
+            for stmt in (ddl.STATEMENTS if ddl else []) + (cap_ddl.STATEMENTS if cap_ddl else []):
                 await conn.execute(text(stmt))
         for mod in ("selection_lock_ddl", "team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl", "audit_ddl", "availability_maybe_ddl"):
             m = guarded(f"app.services.{mod}")
@@ -399,6 +400,100 @@ async def main():
         await db.commit()
     check("the merge reports moving both ledgers", sorted(k for k in moved if k.startswith("fine_")), ["fine_entries.player_id", "fine_payments.player_id"])
     check("the fines now belong to the keeper", (await sql("SELECT count(*) FROM fine_entries WHERE player_id = :p", p=keep))[0][0], 1)
+
+    print("\n# O. A maximum for one session")
+    t1s = str(t1)
+    d_cap = date.today() - timedelta(days=20)
+    res, _ = await admin(fr.patch_settings, t1s, fr.SettingsPatch(max_per_session=30))
+    check("the maximum is stored", res["settings"].get("max_per_session"), 30.0)
+    res, _ = await admin(fr.patch_settings, t1s, fr.SettingsPatch(reference_hint="Name"))
+    check("a PATCH that doesn't send it leaves the maximum alone", res["settings"].get("max_per_session"), 30.0)
+    _, err = await admin(fr.patch_settings, t1s, fr.SettingsPatch(max_per_session=-5))
+    check("a negative maximum is refused", err.status_code if err else None, 422)
+    n0 = (await sql("SELECT count(*) FROM fine_entries WHERE fined_on = :d", d=d_cap))[0][0]
+    _, err = await admin(fr.add_entries, t1s, fr.EntriesIn(fined_on=d_cap, items=[
+        fr.FineItem(player_id=str(ids["sam"]), reason="a", amount=20), fr.FineItem(player_id=str(ids["sam"]), reason="b", amount=15),
+        fr.FineItem(player_id=str(ids["ann"]), reason="c", amount=5)]))
+    check("two lines that together pass the maximum are refused, naming the player", (err.status_code if err else None, "Sam Sledge" in (err.detail if err else "")), (422, True))
+    check("and nothing was written, not even for the player who was fine", (await sql("SELECT count(*) FROM fine_entries WHERE fined_on = :d", d=d_cap))[0][0], n0)
+    res, err = await admin(fr.add_entries, t1s, fr.EntriesIn(fined_on=d_cap, items=[fr.FineItem(player_id=str(ids["sam"]), reason="max", amount=30)]))
+    check("exactly the maximum is allowed", (res or {}).get("created"), 1)
+    _, err = await admin(fr.add_entries, t1s, fr.EntriesIn(fined_on=d_cap, items=[fr.FineItem(player_id=str(ids["sam"]), reason="more", amount=1)]))
+    check("a second session on the same date counts what is already there", err.status_code if err else None, 422)
+    _, err = await admin(fr.add_entries, t1s, fr.EntriesIn(fined_on=d_cap, items=[fr.FineItem(player_id=str(ids["ann"]), reason="x", amount=10, quantity=4)]))
+    check("quantity counts towards the maximum", err.status_code if err else None, 422)
+    res, err = await admin(fr.add_entries, t1s, fr.EntriesIn(fined_on=d_cap - timedelta(days=1), items=[fr.FineItem(player_id=str(ids["sam"]), reason="other night", amount=30)]))
+    check("another date has its own allowance", (res or {}).get("created"), 1)
+    cap_entry = (await sql("SELECT id FROM fine_entries WHERE player_id = :p AND reason = 'max'", p=ids["sam"]))[0][0]
+    await admin(fr.void_entry, str(cap_entry))
+    res, err = await admin(fr.add_entries, t1s, fr.EntriesIn(fined_on=d_cap, items=[fr.FineItem(player_id=str(ids["sam"]), reason="after void", amount=12)]))
+    check("a voided fine frees the headroom", (res or {}).get("created"), 1)
+    res, _ = await admin(fr.patch_settings, t1s, fr.SettingsPatch(max_per_session=""))
+    check("an empty value clears the maximum", res["settings"].get("max_per_session"), None)
+    res, err = await admin(fr.add_entries, t1s, fr.EntriesIn(fined_on=d_cap, items=[fr.FineItem(player_id=str(ids["sam"]), reason="no cap now", amount=500)]))
+    check("with no maximum nothing is held back", (res or {}).get("created"), 1)
+
+    print("\n# P. A note on each fine")
+    res, _ = await admin(fr.add_entries, t1s, fr.EntriesIn(fined_on=d_cap, items=[fr.FineItem(player_id=str(ids["ann"]), reason="Dropped catch", amount=5, note="  Fine leg, 12th over  ")]))
+    led, _ = await admin(fr.player_ledger, t1s, str(ids["ann"]))
+    check("the note is kept (trimmed) and comes back in the history", [e.get("note") for e in led["entries"] if e["reason"] == "Dropped catch"], ["Fine leg, 12th over"])
+    prof = await profile(ids["ann"])
+    async with Session() as db:
+        o = await db.get(Organisation, org)
+        o.player_dashboard_modules = ["fines"]
+        await db.commit()
+    prof = await profile(ids["ann"])
+    notes = [i.get("note") for f in (prof["fines"] or []) for w in f["weeks"] for i in w["items"]]
+    check("and on the player's own page", "Fine leg, 12th over" in notes, True)
+
+    if not hasattr(fr, "session_side") or not hasattr(fr, "report"):
+        check("the selected-side and report routes exist", False)
+    else:
+        print("\n# Q. The side picked for a week")
+        today = date.today()
+        d0 = today - timedelta(days=3)
+        wk_mon = d0 - timedelta(days=d0.weekday())
+        fa, fb, fc, fd, fe = (uuid.uuid4() for _ in range(5))
+        async with Session() as db:
+            for fid, team, day, status, opp in ((fa, t1, d0, "COMPLETED", "Rovers"), (fb, t1, wk_mon, "COMPLETED", "Saints"),
+                                               (fc, t1, d0, "CANCELLED", "Washed Out"), (fd, t2, d0, "COMPLETED", "Other XI"),
+                                               (fe, t1, today + timedelta(days=10), "UPCOMING", "Future")):
+                db.add(Fixture(id=fid, organisation_id=org, team_id=team, source="manual", played_on=day, status=status, opponent_name=opp, label=opp, round="1"))
+            await db.flush()
+            for fid, pid, bo in ((fa, ids["sam"], 1), (fa, ids["ann"], 2), (fb, ids["ann"], 1), (fb, ids["idle"], 2),
+                                 (fc, ids["fill"], 1), (fd, ids["bob"], 1), (fe, ids["fill"], 1)):
+                db.add(FixtureLineup(fixture_id=fid, player_id=pid, organisation_id=org, batting_order=bo))
+            await db.commit()
+        sd, _ = await admin(fr.session_side, t1s, date_=None)
+        check("with no date it opens on the squad's latest picked game", (sd or {}).get("date"), d0.isoformat())
+        names_ = [p["name"] for p in (sd or {}).get("players", [])]
+        check("everyone picked in that week's sides, each once", sorted(names_), ["Ann Anchor", "Ian Idle", "Sam Sledge"])
+        check("a cancelled game, another squad's and next week's are not counted", ("Fiona Fillin" in names_, "Bob Rival" in names_), (False, False))
+        check("the week's games are named", sorted(f["opponent"] for f in sd["fixtures"]), ["Rovers", "Saints"])
+        check("what is already fined on that date comes with it", sd["existing"], {})
+        sd2, _ = await admin(fr.session_side, t1s, date_=today + timedelta(days=10))
+        check("any date works: next week's side", [p["name"] for p in sd2["players"]], ["Fiona Fillin"])
+        sd3, _ = await admin(fr.session_side, t1s, date_=today - timedelta(days=60))
+        check("a week with no side picked is empty, not an error", (sd3["players"], sd3["fixtures"]), ([], []))
+        sd4, _ = await admin(fr.session_side, t1s, date_=d_cap)
+        check("existing fines on the date are reported per player", sd4["existing"].get(str(ids["ann"])), 5.0)
+        _, err = await admin(fr.session_side, t1s, date_=None, club_id=other_org)
+        check("another club cannot read this squad's side", err.status_code if err else None, 404)
+
+        print("\n# R. The report")
+        rep, _ = await admin(fr.report, t1s, date_from=None, date_to=None)
+        check("the report lists every session with its notes", any(e["note"] == "Fine leg, 12th over" for s_ in rep["sessions"] for e in s_["entries"]), True)
+        sam_row = next(r for r in rep["summary"] if r["name"] == "Sam Sledge")
+        sam_now = (await sql("SELECT COALESCE(SUM(amount),0) FROM fine_entries WHERE player_id = :p AND team_id = :t AND voided_at IS NULL", p=ids["sam"], t=t1))[0][0] \
+            - (await sql("SELECT COALESCE(SUM(amount),0) FROM fine_payments WHERE player_id = :p AND team_id = :t AND voided_at IS NULL", p=ids["sam"], t=t1))[0][0]
+        check("a summary row per player: count, and the balance to date straight from the ledgers", (sam_row["count"] > 0, sam_row["owing_now"]), (True, float(sam_now)))
+        check("voided fines are not in the report", all(e["reason"] != "max" for s_ in rep["sessions"] for e in s_["entries"]), True)
+        rep2, _ = await admin(fr.report, t1s, date_from=d_cap, date_to=d_cap)
+        check("a date range narrows the sessions", [s_["date"] for s_ in rep2["sessions"]], [d_cap.isoformat()])
+        check("...but the balance is still the whole balance", next(r for r in rep2["summary"] if r["name"] == "Sam Sledge")["owing_now"], sam_row["owing_now"])
+        check("a payment in range shows, one out of range does not", (len(rep["payments"]) > len(rep2["payments"]), rep2["payments"]), (True, []))
+        _, err = await admin(fr.report, t1s, date_from=None, date_to=None, club_id=other_org)
+        check("another club cannot report on this squad", err.status_code if err else None, 404)
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     for f in base.FAILURES:

@@ -1,4 +1,5 @@
-// BetterSelect → Club Life → Fines.
+// BetterSelect → Club Life → Fines: a small dashboard per squad (overview, add fines,
+// tracker, setup, report).
 //
 // After a game a side sits around and runs a fines session; the money goes into a
 // pot. This is the tracker for it, per squad: who was fined what and when, who has
@@ -15,160 +16,10 @@ import { api } from '../../../lib/api'
 import { PbSpinner } from '../../../lib/presskit'
 import usePersistedState from '../../../lib/usePersistedState'
 import { Btn, Segmented } from './ui'
-
-const money = (n) => `${n < 0 ? '-' : ''}$${Math.abs(Number(n) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-const shortDate = (iso) => {
-  try { return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) } catch { return iso }
-}
-const todayISO = () => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-const METHODS = ['PayID', 'Bank transfer', 'Cash', 'Other']
-// useToast() hands back a new object each time a toast comes or goes, so a load
-// keyed on it would re-run (and blank the screen) after every message. Read the
-// latest one through a ref instead.
-function useLatest(value) {
-  const ref = useRef(value)
-  ref.current = value
-  return ref
-}
-const inputCls = 'bg-pb-surface2 border pb-hairline rounded-lg px-2.5 py-1.5 text-[13.5px] focus:outline-none focus:border-pb-accent min-w-0'
-
-function Card({ title, sub, children, right }) {
-  return (
-    <section className="pb-card rounded-xl p-4 sm:p-5 mb-4">
-      <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
-        <div className="min-w-0">
-          <h2 className="font-display font-bold text-[15px] tracking-tight">{title}</h2>
-          {sub && <p className="text-[12.5px] text-pb-dim mt-0.5 max-w-[66ch]">{sub}</p>}
-        </div>
-        {right}
-      </div>
-      {children}
-    </section>
-  )
-}
-
-function Modal({ title, onClose, children }) {
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3" style={{ background: 'rgba(0,0,0,.55)' }} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div role="dialog" aria-label={title} className="pb-card rounded-xl w-full max-w-md max-h-[88vh] overflow-y-auto p-4 sm:p-5 bg-pb-bg">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <h3 className="font-display font-bold text-[16px] min-w-0 truncate">{title}</h3>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-pb-faint hover:text-pb-text text-lg leading-none px-1">×</button>
-        </div>
-        {children}
-      </div>
-    </div>
-  )
-}
-
-// ── One line of a fines session ─────────────────────────────────────────────
-function FineRow({ row, squadPlayers, otherPlayers, types, onChange, onRemove }) {
-  const type = types.find((t) => t.id === row.fine_type_id)
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1.3fr)_88px_60px_auto] gap-2 items-center py-2 border-t border-pb-hairline first:border-t-0" data-fine-row>
-      <select value={row.player_id} onChange={(e) => onChange({ player_id: e.target.value })} aria-label="Player" className={`${inputCls} col-span-2 sm:col-span-1`}>
-        <option value="">Pick a player…</option>
-        {squadPlayers.length > 0 && (
-          <optgroup label="Squad">
-            {squadPlayers.map((p) => <option key={p.player_id} value={p.player_id}>{p.name}</option>)}
-          </optgroup>
-        )}
-        {otherPlayers.length > 0 && (
-          <optgroup label="Other players">
-            {otherPlayers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </optgroup>
-        )}
-      </select>
-      <div className="flex flex-col gap-1.5 col-span-2 sm:col-span-1 min-w-0">
-        <select value={row.fine_type_id} onChange={(e) => onChange({ fine_type_id: e.target.value, amount: '' })} aria-label="Fine" className={inputCls}>
-          <option value="">Something else…</option>
-          {types.map((t) => <option key={t.id} value={t.id}>{t.name} ({money(t.amount)})</option>)}
-        </select>
-        {!row.fine_type_id && (
-          <input value={row.reason} onChange={(e) => onChange({ reason: e.target.value })} maxLength={120}
-            placeholder="What was it for?" aria-label="Reason" className={inputCls} />
-        )}
-      </div>
-      <input value={row.amount} onChange={(e) => onChange({ amount: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal"
-        placeholder={type ? String(type.amount) : '$'} aria-label="Amount" className={`${inputCls} w-full`} />
-      <input value={row.quantity} onChange={(e) => onChange({ quantity: e.target.value.replace(/\D/g, '').slice(0, 2) })} inputMode="numeric"
-        aria-label="How many" title="How many" className={`${inputCls} w-full text-center`} />
-      <button type="button" onClick={onRemove} aria-label="Remove this line" className="text-pb-faint hover:text-pb-red text-lg leading-none px-1 justify-self-end">×</button>
-    </div>
-  )
-}
-
-let rowSeq = 0
-const blankRow = () => ({ key: ++rowSeq, player_id: '', fine_type_id: '', reason: '', amount: '', quantity: '1' })
-
-function AddFines({ teamId, data, onSaved }) {
-  const toast = useToast()
-  const [date, setDate] = useState(todayISO())
-  const [rows, setRows] = useState(() => [blankRow(), blankRow(), blankRow()])
-  const [saving, setSaving] = useState(false)
-  const squadPlayers = useMemo(() => data.players.filter((p) => p.in_squad), [data.players])
-  // Anyone fined before outside the squad stays pickable; the rest come from candidates.
-  const otherPlayers = useMemo(() => [
-    ...data.players.filter((p) => !p.in_squad).map((p) => ({ id: p.player_id, name: p.name })),
-    ...data.candidates,
-  ], [data.players, data.candidates])
-
-  const patch = (key, p) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)))
-  const filled = rows.filter((r) => r.player_id)
-  const total = filled.reduce((sum, r) => {
-    const t = data.types.find((x) => x.id === r.fine_type_id)
-    const amt = r.amount !== '' ? Number(r.amount) : (t ? t.amount : 0)
-    return sum + (Number.isFinite(amt) ? amt : 0) * (Number(r.quantity) || 1)
-  }, 0)
-
-  const save = async () => {
-    if (filled.length === 0) { toast.error('Pick a player for at least one line'); return }
-    setSaving(true)
-    try {
-      const res = await api.bsFinesAddEntries(teamId, {
-        fined_on: date,
-        items: filled.map((r) => ({
-          player_id: r.player_id,
-          fine_type_id: r.fine_type_id || null,
-          reason: r.fine_type_id ? null : r.reason,
-          amount: r.amount === '' ? null : r.amount,
-          quantity: Number(r.quantity) || 1,
-        })),
-      })
-      toast.success(`${res.created} fine${res.created === 1 ? '' : 's'} added, ${money(res.total)} into the pot to collect`)
-      setRows([blankRow(), blankRow(), blankRow()])
-      onSaved()
-    } catch (e) { toast.error(e.message || 'Could not save the fines') } finally { setSaving(false) }
-  }
-
-  return (
-    <Card title="Add fines" sub="One session: pick the date, then a line for each fine. Pick from your fine list or type your own reason and amount.">
-      <div className="flex flex-wrap items-center gap-2.5 mb-2">
-        <label className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint" htmlFor="fines-date">Date</label>
-        <input id="fines-date" type="date" value={date} max={todayISO()} onChange={(e) => setDate(e.target.value)} className={inputCls} />
-      </div>
-      <div>
-        {rows.map((r) => (
-          <FineRow key={r.key} row={r} squadPlayers={squadPlayers} otherPlayers={otherPlayers} types={data.types}
-            onChange={(p) => patch(r.key, p)} onRemove={() => setRows((rs) => (rs.length > 1 ? rs.filter((x) => x.key !== r.key) : [blankRow()]))} />
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-3 mt-3">
-        <Btn sm variant="ghost" icon="plus" onClick={() => setRows((rs) => [...rs, blankRow()])}>Add a line</Btn>
-        <span className="text-[13px] text-pb-dim ml-auto">{filled.length} line{filled.length === 1 ? '' : 's'}, <b className="text-pb-text">{money(total)}</b></span>
-        <Btn variant="primary" onClick={save} disabled={saving || filled.length === 0}>{saving ? 'Saving…' : 'Save fines'}</Btn>
-      </div>
-    </Card>
-  )
-}
+import { Card, Modal, METHODS, inputCls, money, shortDate, todayISO, useLatest } from './finesUi'
+import AddFinesSession from './AddFinesSession'
+import FinesOverview, { Kpi, summarise } from './FinesOverview'
+import FinesReport from './FinesReport'
 
 // ── Money in ────────────────────────────────────────────────────────────────
 function PaymentModal({ teamId, player, onClose, onSaved }) {
@@ -246,7 +97,7 @@ function LedgerModal({ teamId, player, onClose, onChanged }) {
           {led.entries.length === 0 && <div className="text-[13px] text-pb-faint mb-2">None yet.</div>}
           {led.entries.map((e) => (
             <LedgerLine key={e.id} voided={e.voided} onVoid={() => act(api.bsFinesVoidEntry, e.id)} onRestore={() => act(api.bsFinesRestoreEntry, e.id)}>
-              {shortDate(e.date)} · {e.reason} · <b>{money(e.amount)}</b>
+              {shortDate(e.date)} · {e.reason} · <b>{money(e.amount)}</b>{e.note ? ` · ${e.note}` : ''}
             </LedgerLine>
           ))}
           <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mt-4 mb-1">Payments</div>
@@ -272,7 +123,7 @@ function Tracker({ teamId, data, onChanged }) {
     <Card title="Who owes what" sub={`Fines by date, then what each player has put in the pot. The last ${dates.length || 'few'} fines date${dates.length === 1 ? '' : 's'} show as columns.`}
       right={<div className="text-[12.5px] text-pb-dim text-right">In the pot <b className="text-pb-text">{money(t.paid)}</b><br />Still to collect <b className="text-pb-text">{money(Math.max(t.owing, 0))}</b></div>}>
       {data.players.length === 0 ? (
-        <p className="text-sm text-pb-faint" data-no-players>No players in this squad yet. Add players on the Squads page, or fine a player from the list above.</p>
+        <p className="text-sm text-pb-faint" data-no-players>No players in this squad yet. Add players on the Squads page, or fine a player from the Add fines tab.</p>
       ) : (
         <div className="overflow-x-auto -mx-1 px-1">
           <table className="w-full text-[13px] min-w-[400px]">
@@ -417,11 +268,43 @@ function HowToPay({ teamId, data, onChanged }) {
   )
 }
 
-// ── One squad ───────────────────────────────────────────────────────────────
+// ── The most one player can be fined in a session ───────────────────────────
+function SessionLimit({ teamId, data, onChanged }) {
+  const toast = useToast()
+  const current = data.settings.max_per_session
+  const [value, setValue] = useState(current == null ? '' : String(current))
+  const [saving, setSaving] = useState(false)
+  const save = async (v) => {
+    setSaving(true)
+    try {
+      await api.bsFinesSettings(teamId, { max_per_session: v })
+      toast.success(v === '' ? 'Maximum removed' : `Maximum set to ${money(v)}`)
+      onChanged()
+    } catch (e) { toast.error(e.message || 'Could not save') } finally { setSaving(false) }
+  }
+  return (
+    <Card title="Maximum per session" sub="The most one player can be fined in a single session. Leave it empty for no limit. With one set, Max all and Max ticked appear when you add fines.">
+      <div className="flex flex-wrap items-center gap-2" data-session-limit>
+        <span className="text-[13px] text-pb-dim">$</span>
+        <input value={value} onChange={(e) => setValue(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" aria-label="Maximum per session"
+          placeholder="No limit" className={`${inputCls} w-28`} />
+        <Btn variant="primary" sm onClick={() => save(value)} disabled={saving || value === (current == null ? '' : String(current))}>Save</Btn>
+        {current != null && <Btn sm onClick={() => { setValue(''); save('') }} disabled={saving}>Remove limit</Btn>}
+      </div>
+    </Card>
+  )
+}
+
+// ── One squad: a small dashboard ────────────────────────────────────────────
+const TABS = [
+  ['overview', 'Overview'], ['add', 'Add fines'], ['tracker', 'Tracker'], ['setup', 'Setup'], ['report', 'Report'],
+]
+
 function SquadFines({ teamId, onSwitched }) {
   const toast = useToast()
   const toastRef = useLatest(toast)
   const [data, setData] = useState(null)
+  const [tab, setTab] = useState('overview')
   const alive = useRef(true)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const load = useCallback(() => {
@@ -441,24 +324,51 @@ function SquadFines({ teamId, onSwitched }) {
 
   if (!data) return <PbSpinner message="Loading this squad…" />
   const on = data.settings.enabled
+  const sum = summarise(data)
+  const t = data.totals
+  // Every panel stays mounted and is only hidden, so a half-built session or a
+  // half-typed form is still there when you come back from another tab.
+  const panel = (id, node) => <div key={id} hidden={tab !== id} data-fines-panel={id}>{node}</div>
   return (
     <div data-fines-squad={teamId}>
-      <Card title={`Fines for ${data.squad.name}`}
-        sub={on
-          ? 'Fines is on. Players in this squad see what they owe, and how to pay, on their private page. They also see the squad name there.'
-          : 'Fines is off for this squad. Set it up below, then switch it on and players see their balance on their private page.'}
-        right={<Segmented sm value={on ? 'on' : 'off'} onChange={(v) => setEnabled(v === 'on')} options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} />}>
-        {on && (
-          <p className="text-[12px] text-pb-faint">
-            The Fines section shows on the page players open from your self-service link. Check it is ticked under
-            {' '}<em>Self-service link → Player page</em> in Availability.
-          </p>
-        )}
-      </Card>
-      <AddFines teamId={teamId} data={data} onSaved={changed} />
-      <Tracker teamId={teamId} data={data} onChanged={changed} />
-      <FineList teamId={teamId} data={data} onChanged={load} />
-      <HowToPay teamId={teamId} data={data} onChanged={load} />
+      <div className="flex flex-wrap items-center gap-3 mb-3">
+        <h2 className="font-display font-bold text-[18px] tracking-tight min-w-0 truncate">{data.squad.name}</h2>
+        <Segmented sm value={on ? 'on' : 'off'} onChange={(v) => setEnabled(v === 'on')} options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} />
+        <Btn variant="primary" sm icon="plus" className="ml-auto" onClick={() => setTab('add')}>Add fines</Btn>
+      </div>
+      <p className="text-[12.5px] text-pb-dim mb-3 max-w-[75ch]">
+        {on
+          ? 'Fines is on. Players in this squad see what they owe, and how to pay, in a Fines section on their private page (tick it under Self-service link, Player page, in Availability). They also see the squad name there.'
+          : 'Fines is off for this squad. Set it up, then switch it on and players see their balance on their private page.'}
+      </p>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4" data-kpis>
+        <Kpi label="In the pot" value={money(t.paid)} tone="var(--pb-positive)" data-kpi="pot" />
+        <Kpi label="Still to collect" value={money(sum.toCollect)} hint={`${sum.owingCount} player${sum.owingCount === 1 ? '' : 's'} owing`} tone={sum.toCollect > 0 ? 'var(--pb-amber)' : undefined} data-kpi="owing" />
+        <Kpi label="Fined, all time" value={money(t.fined)} data-kpi="fined" />
+        <Kpi label="Last session" value={sum.perSession.length ? money(sum.perSession[sum.perSession.length - 1].total) : '$0.00'}
+          hint={sum.perSession.length ? shortDate(sum.perSession[sum.perSession.length - 1].date) : 'None yet'} data-kpi="last" />
+      </div>
+
+      <div className="flex gap-1 p-1 rounded-xl bg-pb-surface2 mb-4 overflow-x-auto" role="tablist" aria-label="Fines sections">
+        {TABS.map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} data-fines-tab={id} onClick={() => setTab(id)}
+            className={`flex-1 whitespace-nowrap px-2.5 sm:px-3 py-1.5 rounded-lg text-[12.5px] sm:text-[13px] font-display font-semibold transition-colors ${tab === id ? 'bg-pb-surface text-pb-text shadow-sm' : 'text-pb-faint hover:text-pb-text'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {panel('overview', <FinesOverview data={data} onGoto={setTab} />)}
+      {panel('add', <AddFinesSession teamId={teamId} data={data} onSaved={() => { changed(); setTab('overview') }} />)}
+      {panel('tracker', <Tracker teamId={teamId} data={data} onChanged={changed} />)}
+      {panel('setup', (
+        <div className="grid lg:grid-cols-2 gap-x-4 items-start">
+          <div className="min-w-0"><FineList teamId={teamId} data={data} onChanged={load} /><SessionLimit teamId={teamId} data={data} onChanged={load} /></div>
+          <div className="min-w-0"><HowToPay teamId={teamId} data={data} onChanged={load} /></div>
+        </div>
+      ))}
+      {panel('report', <FinesReport teamId={teamId} squadName={data.squad.name} />)}
     </div>
   )
 }

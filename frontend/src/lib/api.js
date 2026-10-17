@@ -3302,6 +3302,15 @@ export const api = {
   bsFinesVoidPayment: (id) => request(`/fines/payments/${id}/void`, { method: 'POST' }),
   bsFinesRestorePayment: (id) => request(`/fines/payments/${id}/restore`, { method: 'POST' }),
   bsFinesLedger: (teamId, playerId) => request(`/fines/squads/${teamId}/players/${playerId}/ledger`),
+  // The side picked in the squad's week (who to fine), and the report behind the PDF.
+  bsFinesSession: (teamId, date) => request(`/fines/squads/${teamId}/session${date ? `?date=${date}` : ''}`),
+  bsFinesReport: (teamId, { from, to } = {}) => {
+    const q = new URLSearchParams()
+    if (from) q.set('date_from', from)
+    if (to) q.set('date_to', to)
+    const qs = q.toString()
+    return request(`/fines/squads/${teamId}/report${qs ? `?${qs}` : ''}`)
+  },
 
   // ─── Public: self-service availability (no admin auth; player cookie) ───
   // Outside the admin surface — players reach these via the magic link + PIN.

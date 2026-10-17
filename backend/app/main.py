@@ -4552,6 +4552,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _FINES_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 342: Fines' per-session maximum and the note on each fine.
+        # Same one-copy rule: this and alembic's 342 both run
+        # services/fines_cap_ddl.STATEMENTS.
+        from app.services.fines_cap_ddl import STATEMENTS as _FINES_CAP_DDL
+        for _stmt in _FINES_CAP_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.

@@ -489,7 +489,7 @@ function FinesBlock({ f }) {
           {f.weeks.map((w) => (
             <div key={w.date} className="py-1.5 border-t pb-hairline first:border-t-0">
               <div className="flex justify-between gap-3 text-sm"><span>{fmtShort(w.date)}</span><span className="font-semibold">{money(w.total)}</span></div>
-              <div className="text-[12px] text-pb-faint">{w.items.map((i) => `${i.reason} ${money(i.amount)}`).join(' · ')}</div>
+              <div className="text-[12px] text-pb-faint">{w.items.map((i) => `${i.reason} ${money(i.amount)}${i.note ? ` (${i.note})` : ''}`).join(' · ')}</div>
             </div>
           ))}
         </div>

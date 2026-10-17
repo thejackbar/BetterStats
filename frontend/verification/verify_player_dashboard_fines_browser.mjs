@@ -83,9 +83,9 @@ const titles = (page) => page.evaluate(() => [...document.querySelectorAll('[dat
 // ─── C. the admin Fines screen ─────────────────────────────────────────────
 const ME = { id: 'u-1', username: 'admin', email: 'a@b.c', role: 'club_admin', organisation_id: 'o1', club_slug: 'gisborne', capabilities: ['*'], entitlements: { modules: ['select'], core_live: true, status: 'active' } }
 const D1 = iso(-8), D2 = iso(-1)
-const squadPayload = (on = true) => ({
+const squadPayload = (on = true, max = 30) => ({
   squad: { id: 't1', name: '1st XI' },
-  settings: { enabled: on, payid: 'pay@gisborne.org', payid_name: '', account_name: '', bsb: '063-000', account_number: '', reference_hint: '', other_instructions: '' },
+  settings: { enabled: on, max_per_session: max, payid: 'pay@gisborne.org', payid_name: '', account_name: '', bsb: '063-000', account_number: '', reference_hint: '', other_instructions: '' },
   types: [{ id: 'ty1', name: 'Dropped catch', amount: 5 }, { id: 'ty2', name: 'Late to training', amount: 10.5 }], archived_types: [],
   dates: [D2, D1],
   players: [
@@ -96,6 +96,60 @@ const squadPayload = (on = true) => ({
   candidates: [{ id: 'p9', name: 'Bob Rival' }],
   totals: { fined: 37, paid: 35, owing: 2 },
 })
+
+
+// One Fines admin page with the API stubbed. `wire` holds the writes, `reads` the
+// session and report reads, so a step can assert the exact request.
+async function finesPage(browser, { width = 1280, side = true, max = 30 } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 500, hasTouch: width < 500, acceptDownloads: true })
+  const page = await ctx.newPage()
+  page.setDefaultTimeout(8000)
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  const wire = [], reads = []
+  let on = true
+  await page.route('**/api/**', (r) => json(r, {}))
+  await page.route('**/api/auth/me', (r) => json(r, ME))
+  await page.route('**/api/club-admin/settings', (r) => json(r, { name: 'Gisborne CC', short_name: 'Gisborne' }))
+  await page.route(/\/api\/fines\/squads$/, (r) => json(r, { squads: [{ id: 't1', name: '1st XI', enabled: on, owing: 2 }, { id: 't2', name: '2nd XI', enabled: false, owing: 0 }] }))
+  await page.route(/\/api\/fines\/squads\/t1$/, (r) => json(r, squadPayload(on, max)))
+  await page.route(/\/api\/fines\/squads\/t1\/session(\?.*)?$/, (r) => {
+    const url = r.request().url(); reads.push(new URL(url).pathname.replace('/api', '') + new URL(url).search)
+    const d = new URL(url).searchParams.get('date')
+    const has = side && (!d || d === D2)
+    return json(r, {
+      date: d || D2, week_start: D2, week_end: D2,
+      fixtures: has ? [{ id: 'f1', date: D2, opponent: 'Rovers' }] : [],
+      players: has ? [{ player_id: 'p1', name: 'Sam Sledge' }, { player_id: 'p2', name: 'Ann Anchor' }, { player_id: 'p3', name: 'Ian Idle' }] : [],
+      existing: has ? { p1: 10 } : {},
+    })
+  })
+  await page.route(/\/api\/fines\/squads\/t1\/report(\?.*)?$/, (r) => {
+    const url = new URL(r.request().url()); reads.push(url.pathname.replace('/api', '') + url.search)
+    return json(r, {
+      squad: { id: 't1', name: '1st XI' }, from: url.searchParams.get('date_from'), to: url.searchParams.get('date_to'),
+      summary: [{ player_id: 'p1', name: 'Sam Sledge', count: 2, fined: 17, paid: 10, owing_now: 7 }, { player_id: 'p2', name: 'Ann Anchor', count: 1, fined: 20, paid: 25, owing_now: -5 }],
+      sessions: [{ date: D1, total: 30, entries: [{ player: 'Ann Anchor', reason: 'Sunglasses at night', note: null, amount: 20 }, { player: 'Sam Sledge', reason: 'Dropped catch', note: 'Fine leg, 12th over', amount: 5 }, { player: 'Sam Sledge', reason: 'Dropped catch', note: null, amount: 5 }] },
+        { date: D2, total: 7, entries: [{ player: 'Sam Sledge', reason: 'Chirping the umpire', note: null, amount: 7 }] }],
+      payments: [{ date: D1, player: 'Sam Sledge', amount: 10, method: 'PayID', note: null }],
+      totals: { count: 3, fined: 37, paid: 10, owing_now: 7 }, truncated: false,
+    })
+  })
+  await page.route(/\/api\/fines\/squads\/t1\/players\/p1\/ledger$/, (r) => json(r, {
+    player: { id: 'p1', name: 'Sam Sledge' }, owing: 7,
+    entries: [{ id: 'e1', date: D2, reason: 'Chirping the umpire', note: 'Fine leg, 12th over', amount: 7, voided: false }],
+    payments: [{ id: 'pay1', date: D1, amount: 10, method: 'PayID', note: null, voided: false }],
+  }))
+  await page.route(/\/api\/fines\/(squads\/t1\/(entries|payments|types|settings)|entries\/e1\/void|types\/ty1)$/, (r) => {
+    const req = r.request()
+    const body = req.postData() ? JSON.parse(req.postData()) : null
+    wire.push({ method: req.method(), path: new URL(req.url()).pathname.replace('/api', ''), body })
+    if (body && 'enabled' in body) on = body.enabled
+    return json(r, { status: 'ok', created: 2, total: 10, id: 'n1', settings: squadPayload(on, max).settings })
+  })
+  await page.goto(`${BASE}/admin/betterselect/fines`, { waitUntil: 'domcontentloaded' })
+  return { ctx, page, wire, reads, errors }
+}
 
 const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' })
@@ -232,89 +286,117 @@ const run = async () => {
   })
 
   // ── C. the admin Fines screen ──
-  await safe('C. fines screen', async () => {
-    console.log('\n── C. BetterSelect > Fines ──')
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
-    const page = await ctx.newPage()
-    page.setDefaultTimeout(8000)
-    const errors = []
-    page.on('pageerror', (e) => errors.push(e.message))
-    const wire = []
-    let on = true
-    await page.route('**/api/**', (r) => json(r, {}))
-    await page.route('**/api/auth/me', (r) => json(r, ME))
-    await page.route('**/api/club-admin/settings', (r) => json(r, { name: 'Gisborne CC' }))
-    await page.route(/\/api\/fines\/squads$/, (r) => json(r, { squads: [{ id: 't1', name: '1st XI', enabled: on, owing: 2 }, { id: 't2', name: '2nd XI', enabled: false, owing: 0 }] }))
-    await page.route(/\/api\/fines\/squads\/t1$/, (r) => json(r, squadPayload(on)))
-    await page.route(/\/api\/fines\/squads\/t1\/players\/p1\/ledger$/, (r) => json(r, {
-      player: { id: 'p1', name: 'Sam Sledge' }, owing: 7,
-      entries: [{ id: 'e1', date: D2, reason: 'Chirping the umpire', amount: 7, voided: false }],
-      payments: [{ id: 'pay1', date: D1, amount: 10, method: 'PayID', note: null, voided: false }],
-    }))
-    await page.route(/\/api\/fines\/(squads\/t1\/(entries|payments|types|settings)|entries\/e1\/void|types\/ty1)$/, (r) => {
-      const req = r.request()
-      const body = req.postData() ? JSON.parse(req.postData()) : null
-      wire.push({ method: req.method(), path: new URL(req.url()).pathname.replace('/api', ''), body })
-      if (body && 'enabled' in body) on = body.enabled
-      return json(r, { status: 'ok', created: 1, total: 10, id: 'n1', settings: squadPayload(on).settings })
-    })
-
-    await page.goto(`${BASE}/admin/betterselect/fines`, { waitUntil: 'domcontentloaded' })
+  await safe('C. fines dashboard', async () => {
+    console.log('\n── C. BetterSelect > Fines: the dashboard ──')
+    const f = await finesPage(browser, { width: 1280 })
+    const { page, wire, reads, errors } = f
     await page.locator('[data-fines-squad="t1"]').waitFor({ timeout: 20000 })
 
     const link = page.locator('a[href="/admin/betterselect/fines"]').first()
     await link.waitFor({ state: 'attached' })
     check('Fines is a side-menu item', /Fines/.test(await link.innerText()))
-    const tabs = norm(await page.locator('[role=tablist]').innerText())
+    const tabs = norm(await page.locator('[role=tablist][aria-label="Squad"]').innerText())
     check('squads are tabs showing ON/OFF, the one that is on is open', /1st XI ON/.test(tabs) && /2nd XI OFF/.test(tabs), tabs)
+    const kpi = async (k) => norm(await page.locator(`[data-kpi="${k}"]`).innerText())
+    check('tiles: the pot', /\$35\.00/.test(await kpi('pot')), await kpi('pot'))
+    check('tiles: still to collect counts only players who owe, not credit', /\$7\.00/.test(await kpi('owing')) && /1 player owing/.test(await kpi('owing')), await kpi('owing'))
+    check('tiles: fined all time and the last session', /\$37\.00/.test(await kpi('fined')) && /\$7\.00/.test(await kpi('last')), `${await kpi('fined')} | ${await kpi('last')}`)
+    check('the sections are tabs, Overview open first', (await page.locator('[data-fines-tab="overview"]').getAttribute('aria-selected')) === 'true' && (await page.locator('[data-fines-tab]').count()) === 5)
+    check('overview: a bar for each session', (await page.locator('[data-fines-panel="overview"] [data-bar]').count()) === 2)
+    check('overview: collected so far reads 95%', /95%/.test(await page.locator('[data-fines-panel="overview"]').innerText()))
+    const ov = norm(await page.locator('[data-fines-panel="overview"]').innerText())
+    check('overview: who owes most and who is most fined', /Who owes most\s*Tracker\s*1\s*Sam Sledge\s*\$7\.00/.test(ov) && /Most fined[\s\S]*1\s*Ann Anchor\s*\$20\.00/.test(ov), ov.slice(0, 500))
+    await page.screenshot({ path: `${SHOT}/fines-dashboard-1280.png`, fullPage: true })
 
-    const tr = norm(await page.locator('[data-fines-player="p1"]').innerText())
-    check('the tracker row has the fines by date, nothing paid yet shown, and what is owed', /\$10\.00/.test(tr) && /\$7\.00/.test(tr) && /\$10\.00/.test(tr), tr)
-    check('a player in credit reads as credit', /\$5\.00 credit/.test(norm(await page.locator('[data-fines-player="p2"]').innerText())))
-    check('a player with nothing owing reads square', /Square/.test(norm(await page.locator('[data-fines-player="p3"]').innerText())))
+    // ── Add fines: the rows start as the side picked for the week ──
+    await page.locator('[data-fines-tab="add"]').click()
+    const rows = () => page.locator('[data-fines-panel="add"] [data-fine-row]').evaluateAll((els) => els.map((e) => ({
+      player: e.getAttribute('data-player'),
+      name: e.querySelector('.font-semibold')?.textContent || '',
+      fine: e.querySelector('select[aria-label="Fine"]')?.value || '',
+      reason: e.querySelector('input[aria-label="Reason"]')?.value || '',
+      amount: e.querySelector('input[aria-label="Amount"]')?.value || '',
+      note: e.querySelector('input[aria-label="Note"]')?.value || '',
+      cap: e.querySelector('[data-cap-line]')?.textContent || '',
+    })))
+    await page.locator('[data-fines-panel="add"] [data-fine-row]').nth(2).waitFor()
+    let r = await rows()
+    check('one row per player picked for the week, in batting order', JSON.stringify(r.map((x) => x.name)) === JSON.stringify(['Sam Sledge', 'Ann Anchor', 'Ian Idle']), JSON.stringify(r.map((x) => x.name)))
+    check('the first request was for the squad\'s latest side (no date)', reads.some((u) => /\/session$/.test(u)), JSON.stringify(reads))
+    check('the date opens on that game', (await page.locator('#fines-date').inputValue()) === D2)
+    check('it says which game the side was picked for', /Side picked for Rovers/.test(await page.locator('[data-side-note]').innerText()))
+    check('each row shows the running total against the maximum', /\$30\.00 max/.test(r[1].cap) && /\$10\.00 already/.test(r[0].cap), JSON.stringify(r.map((x) => x.cap)))
 
-    // a fines session
-    const row = page.locator('[data-fine-row]').first()
-    await row.locator('select[aria-label="Player"]').selectOption('p1')
-    await row.locator('select[aria-label="Fine"]').selectOption('ty1')
-    check('picking a fine shows its price as the amount', (await row.locator('input[aria-label="Amount"]').getAttribute('placeholder')) === '5')
-    await row.locator('input[aria-label="How many"]').fill('2')
-    const row2 = page.locator('[data-fine-row]').nth(1)
-    await row2.locator('select[aria-label="Player"]').selectOption('p9')
-    await row2.locator('input[aria-label="Reason"]').fill('Sunglasses at night')
-    await row2.locator('input[aria-label="Amount"]').fill('20')
-    check('a line with a typed amount shows it in the running total', /\$30\.00/.test(await page.getByText(/2 lines/).innerText()), await page.getByText(/2 lines/).innerText())
+    // ── Fine ticked ──
+    await page.getByLabel('Tick Sam Sledge').check()
+    await page.getByLabel('Tick Ann Anchor').check()
+    await page.getByLabel('Fine for the group').selectOption('ty1')
+    await page.locator('[data-fine-ticked]').click()
+    r = await rows()
+    check('Fine ticked gives the chosen fine to just the ticked players', JSON.stringify(r.map((x) => x.fine)) === JSON.stringify(['ty1', 'ty1', '']), JSON.stringify(r.map((x) => x.fine)))
+    check('...without adding rows', r.length === 3)
+    await page.locator('[data-fines-panel="add"] [data-fine-row]').first().getByText('Add a note').click()
+    await page.getByLabel('Note').first().fill('Fine leg, 12th over')
     wire.length = 0
     await page.getByRole('button', { name: 'Save fines' }).click()
-    await page.waitForTimeout(400)
+    await page.waitForTimeout(500)
     const posted = wire.find((w) => w.path === '/fines/squads/t1/entries')
-    const want = { fined_on: iso(0), items: [
-      { player_id: 'p1', fine_type_id: 'ty1', reason: null, amount: null, quantity: 2 },
-      { player_id: 'p9', fine_type_id: null, reason: 'Sunglasses at night', amount: '20', quantity: 1 }] }
-    // The date is "today" in the browser's local clock; accept the UTC neighbour.
-    check('a session puts exactly the right body on the wire, blank lines dropped',
-      posted && posted.body.items.length === 2 && JSON.stringify(posted.body.items) === JSON.stringify(want.items) && /^\d{4}-\d\d-\d\d$/.test(posted.body.fined_on), JSON.stringify(posted))
+    check('Save sends only the lines with a fine, the note included, on the game\'s date',
+      posted && posted.body.fined_on === D2 && JSON.stringify(posted.body.items) === JSON.stringify([
+        { player_id: 'p1', fine_type_id: 'ty1', reason: null, amount: null, quantity: 1, note: 'Fine leg, 12th over' },
+        { player_id: 'p2', fine_type_id: 'ty1', reason: null, amount: null, quantity: 1, note: null }]), JSON.stringify(posted))
+    check('afterwards it goes back to the Overview and re-reads the side', (await page.locator('[data-fines-tab="overview"]').getAttribute('aria-selected')) === 'true')
+    await page.locator('[data-fines-tab="add"]').click()
+    await page.locator('[data-fines-panel="add"] [data-fine-row]').nth(2).waitFor()
+    check('the rows are ready again for the next session', (await rows()).length === 3)
 
-    // payment
-    await page.locator('[data-fines-player="p1"]').getByRole('button', { name: 'Paid' }).locator('visible=true').click()
-    const amount = page.locator('[role=dialog] input').first()
-    check('Paid is prefilled with what they owe', (await amount.inputValue()) === '7')
+    // ── Fine all (something else), then Max all ──
+    await page.getByLabel('Fine for the group').selectOption('')
+    await page.getByLabel('Group reason').fill('Slow over rate')
+    await page.getByLabel('Group amount').fill('4')
+    await page.locator('[data-fine-all]').click()
+    r = await rows()
+    check('Fine all gives everyone the line', r.length === 3 && r.every((x) => x.reason === 'Slow over rate' && x.amount === '4'), JSON.stringify(r))
+    check('the running total names what it comes to', /3 lines,\s*\$12\.00/.test(await page.locator('[data-session-total]').innerText()), await page.locator('[data-session-total]').innerText())
+    await page.locator('[data-max-all]').click()
+    r = await rows()
+    const maxRows = r.filter((x) => x.reason === 'Maximum fine')
+    check('Max all adds a line per player taking each to the maximum, counting what is already fined',
+      r.length === 6 && JSON.stringify(maxRows.map((x) => [x.player, x.amount])) === JSON.stringify([['p1', '16.00'], ['p2', '26.00'], ['p3', '26.00']]), JSON.stringify(maxRows.map((x) => [x.player, x.amount])))
+    await page.locator('[data-max-all]').click()
+    check('pressing it again does not stack more lines', (await rows()).length === 6)
+    // over the maximum
+    const annMax = page.locator('[data-fines-panel="add"] [data-fine-row][data-player="p2"]').nth(1).locator('input[aria-label="Amount"]')
+    await annMax.fill('40')
+    await page.locator('[data-over-max]').waitFor()
+    check('a player over the maximum is named and Save is held back', /Ann Anchor/.test(await page.locator('[data-over-max]').innerText()) && (await page.getByRole('button', { name: 'Save fines' }).isDisabled()))
+    await annMax.fill('26.00')
+    check('back under it, Save is available', !(await page.getByRole('button', { name: 'Save fines' }).isDisabled()))
+    // another fine for one player
+    await page.getByLabel('Another fine for Ian Idle').first().click()
+    check('the + adds another line for that player, under theirs', (await rows()).length === 7 && (await rows())[6].player === 'p3')
+
+    // ── Date and sides ──
+    reads.length = 0
+    await page.locator('#fines-date').fill(iso(-30))
+    await page.waitForTimeout(400)
+    check('changing the date asks for that week\'s side', reads.some((u) => u.includes(`/session?date=${iso(-30)}`)), JSON.stringify(reads))
+    check('a week with no side says so', /No side has been picked/.test(await page.locator('[data-side-note]').innerText()))
+    check('lines already entered are kept', (await rows()).length === 7)
+
+    // ── Setup: the maximum, the fine list, how to pay ──
+    await page.locator('[data-fines-tab="setup"]').click()
     wire.length = 0
-    await page.getByRole('button', { name: 'Record payment' }).click()
+    const limit = page.locator('section', { hasText: 'Maximum per session' }).first()
+    await limit.getByLabel('Maximum per session').fill('25')
+    await limit.getByRole('button', { name: 'Save', exact: true }).click()
     await page.waitForTimeout(300)
-    const pay = wire.find((w) => w.path === '/fines/squads/t1/payments')
-    check('the payment body names the player, amount, method', pay && pay.body.player_id === 'p1' && pay.body.amount === '7' && pay.body.method === 'PayID', JSON.stringify(pay))
-
-    // history + void
-    await page.locator('[data-fines-player="p1"]').getByRole('button', { name: 'History' }).locator('visible=true').click()
-    await page.getByText('Chirping the umpire').waitFor()
+    check('setting the maximum sends it alone', wire.some((w) => w.path === '/fines/squads/t1/settings' && JSON.stringify(w.body) === '{"max_per_session":"25"}'), JSON.stringify(wire))
     wire.length = 0
-    await page.locator('[role=dialog]').getByRole('button', { name: 'Void' }).first().click()
+    await limit.getByRole('button', { name: 'Remove limit' }).click()
     await page.waitForTimeout(300)
-    check('Void asks the server to void that fine', wire.some((w) => w.method === 'POST' && w.path === '/fines/entries/e1/void'), JSON.stringify(wire))
-    await page.keyboard.press('Escape')
+    check('Remove limit sends an explicit empty value', wire.some((w) => JSON.stringify(w.body) === '{"max_per_session":""}'), JSON.stringify(wire))
 
-    // fine list
     wire.length = 0
     await page.getByLabel('New fine name').fill('Phone at nets')
     await page.getByLabel('New fine amount').fill('3.5')
@@ -326,53 +408,121 @@ const run = async () => {
     await page.locator('[data-fine-type="ty1"] button', { hasText: 'Archive' }).click()
     await page.waitForTimeout(300)
     check('Archive sends archived: true to that fine only', wire.some((w) => w.method === 'PATCH' && w.path === '/fines/types/ty1' && w.body.archived === true), JSON.stringify(wire))
-
-    // a toast (from the actions above) must not reload the squad or wipe a half-typed form
-    const squadGets = []
-    page.on('request', (rq) => { if (/\/api\/fines\/squads\/t1$/.test(rq.url()) && rq.method() === 'GET') squadGets.push(rq.url()) })
+    const pay = page.locator('section', { hasText: 'How players pay' }).first()
     await page.getByPlaceholder('An email, mobile or ABN, e.g. fines@yourclub.com.au').fill('typed-but-not-saved@x.org')
-    await page.getByLabel('New fine name').fill('x')
-    await page.getByLabel('New fine name').fill('')
+    await page.getByLabel('New fine name').fill('x'); await page.getByLabel('New fine name').fill('')
     await page.waitForTimeout(500)
     check('typing in How to pay survives the screen reloading after other actions', (await page.getByPlaceholder('An email, mobile or ABN, e.g. fines@yourclub.com.au').inputValue()) === 'typed-but-not-saved@x.org')
-
-    // how to pay
     wire.length = 0
     await page.getByPlaceholder('An email, mobile or ABN, e.g. fines@yourclub.com.au').fill('fines@gisborne.org')
-    await page.getByRole('button', { name: 'Save', exact: true }).last().click()
+    await pay.getByRole('button', { name: 'Save', exact: true }).click()
     await page.waitForTimeout(300)
     const st = wire.find((w) => w.path === '/fines/squads/t1/settings')
-    check('How to pay saves the whole form, the edit included', st && st.body.payid === 'fines@gisborne.org' && st.body.bsb === '063-000' && !('enabled' in st.body), JSON.stringify(st))
+    check('How to pay saves the whole form (and not the maximum or the switch)', st && st.body.payid === 'fines@gisborne.org' && st.body.bsb === '063-000' && !('enabled' in st.body) && !('max_per_session' in st.body), JSON.stringify(st))
 
-    // switch off
+    // ── Tracker: payment, history, void ──
+    await page.locator('[data-fines-tab="tracker"]').click()
+    const tr = norm(await page.locator('[data-fines-player="p1"]').innerText())
+    check('the tracker row has the fines by date and what is owed', /\$10\.00/.test(tr) && /\$7\.00/.test(tr), tr)
+    check('a player in credit reads as credit', /\$5\.00 credit/.test(norm(await page.locator('[data-fines-player="p2"]').innerText())))
+    check('a player with nothing owing reads square', /Square/.test(norm(await page.locator('[data-fines-player="p3"]').innerText())))
+    await page.locator('[data-fines-player="p1"]').getByRole('button', { name: 'Paid' }).locator('visible=true').click()
+    check('Paid is prefilled with what they owe', (await page.locator('[role=dialog] input').first().inputValue()) === '7')
     wire.length = 0
-    await page.locator('[data-fines-squad="t1"] section').first().getByRole('button', { name: 'Off', exact: true }).click()
+    await page.getByRole('button', { name: 'Record payment' }).click()
+    await page.waitForTimeout(300)
+    const payw = wire.find((w) => w.path === '/fines/squads/t1/payments')
+    check('the payment body names the player, amount, method', payw && payw.body.player_id === 'p1' && payw.body.amount === '7' && payw.body.method === 'PayID', JSON.stringify(payw))
+    await page.locator('[data-fines-player="p1"]').getByRole('button', { name: 'History' }).locator('visible=true').click()
+    await page.getByText('Chirping the umpire').waitFor()
+    check('the history shows a fine\'s note', /Fine leg, 12th over/.test(await page.locator('[role=dialog]').innerText()))
+    wire.length = 0
+    await page.locator('[role=dialog]').getByRole('button', { name: 'Void' }).first().click()
+    await page.waitForTimeout(300)
+    check('Void asks the server to void that fine', wire.some((w) => w.method === 'POST' && w.path === '/fines/entries/e1/void'), JSON.stringify(wire))
+    await page.keyboard.press('Escape')
+
+    // ── Report ──
+    await page.locator('[data-fines-tab="report"]').click()
+    reads.length = 0
+    await page.getByLabel('From', { exact: true }).fill(iso(-30))
+    await page.getByRole('button', { name: 'Run report' }).click()
+    await page.locator('[data-report-session]').first().waitFor()
+    check('Run report asks for the period', reads.some((u) => u.includes(`/report?date_from=${iso(-30)}`) && !u.includes('date_to')), JSON.stringify(reads))
+    const tiles = norm(await page.locator('[data-report-tiles]').innerText())
+    check('the report shows its tiles', /3/.test(tiles) && /\$37\.00/.test(tiles) && /\$10\.00/.test(tiles) && /\$7\.00/.test(tiles), tiles)
+    const sess = norm(await page.locator('[data-report-session]').first().innerText())
+    check('each fine shows its reason and note', /Sam Sledge · Dropped catch · Fine leg, 12th over\s*\$5\.00/.test(sess), sess)
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.locator('[data-download-pdf]').click()])
+    const file = await dl.path()
+    const fs = await import('node:fs')
+    const bytes = fs.readFileSync(file)
+    check('Download PDF saves a PDF named for the club, squad and report', bytes.subarray(0, 5).toString() === '%PDF-' && /fines report\.pdf$/.test(dl.suggestedFilename()), dl.suggestedFilename())
+    check('...with content in it', bytes.length > 1500, String(bytes.length))
+    fs.writeFileSync(`${SHOT}/fines-report.pdf`, bytes)
+    reads.length = 0
+    await page.getByRole('button', { name: 'All time' }).click()
+    await page.waitForTimeout(300)
+    check('All time asks for no dates', reads.some((u) => /\/report$/.test(u)), JSON.stringify(reads))
+
+    // ── Switch off ──
+    wire.length = 0
+    await page.locator('[data-fines-squad="t1"]').getByRole('button', { name: 'Off', exact: true }).first().click()
     await page.waitForTimeout(300)
     check('switching Fines off sends only enabled: false', wire.some((w) => w.path === '/fines/squads/t1/settings' && JSON.stringify(w.body) === '{"enabled":false}'), JSON.stringify(wire))
     check('and the screen says so', /Fines is off for this squad/.test(await page.locator('[data-fines-squad="t1"]').innerText()))
-
     check('no script errors', errors.length === 0, errors.join('; '))
-    await page.screenshot({ path: `${SHOT}/fines-admin-1280.png`, fullPage: true })
-    await ctx.close()
+    await f.ctx.close()
+  })
+
+  await safe('C. no side picked', async () => {
+    console.log('\n── C. A week with no side picked ──')
+    const f = await finesPage(browser, { width: 1280, side: false })
+    const { page } = f
+    await page.locator('[data-fines-squad="t1"]').waitFor({ timeout: 20000 })
+    await page.locator('[data-fines-tab="add"]').click()
+    await page.locator('[data-side-note]').filter({ hasText: 'No side has been picked' }).waitFor()
+    check('it says so and offers the squad instead', (await page.getByRole('button', { name: 'Whole squad' }).count()) === 1)
+    await page.getByRole('button', { name: 'Whole squad' }).click()
+    check('Whole squad adds a row for each squad member', (await page.locator('[data-fines-panel="add"] [data-fine-row]').count()) === 3)
+    await f.ctx.close()
+  })
+
+  await safe('C. no maximum', async () => {
+    console.log('\n── C. A squad with no maximum ──')
+    const f = await finesPage(browser, { width: 1280, max: null })
+    const { page } = f
+    await page.locator('[data-fines-squad="t1"]').waitFor({ timeout: 20000 })
+    await page.locator('[data-fines-tab="add"]').click()
+    await page.locator('[data-fines-panel="add"] [data-fine-row]').nth(2).waitFor()
+    check('Max all and Max ticked are not offered', (await page.locator('[data-max-all], [data-max-ticked]').count()) === 0)
+    check('and the screen says where to set one', /Set a maximum per session in Setup/.test(await page.locator('[data-bulk-bar]').innerText()))
+    check('rows show no maximum line', (await page.locator('[data-cap-line]').count()) === 0)
+    await f.ctx.close()
   })
 
   await safe('C. 390px', async () => {
     console.log('\n── C. Fines at 390px ──')
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true })
-    const page = await ctx.newPage()
-    page.setDefaultTimeout(8000)
-    await page.route('**/api/**', (r) => json(r, {}))
-    await page.route('**/api/auth/me', (r) => json(r, ME))
-    await page.route('**/api/club-admin/settings', (r) => json(r, { name: 'Gisborne CC' }))
-    await page.route(/\/api\/fines\/squads$/, (r) => json(r, { squads: [{ id: 't1', name: '1st XI', enabled: true, owing: 2 }] }))
-    await page.route(/\/api\/fines\/squads\/t1$/, (r) => json(r, squadPayload(true)))
-    await page.goto(`${BASE}/admin/betterselect/fines`, { waitUntil: 'domcontentloaded' })
+    const f = await finesPage(browser, { width: 390 })
+    const { page } = f
     await page.locator('[data-fines-squad="t1"]').waitFor({ timeout: 20000 })
-    check('no sideways overflow of the page (the tracker scrolls inside its card)', (await overflow(page)) <= 0, String(await overflow(page)))
+    check('overview: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
+    await page.screenshot({ path: `${SHOT}/fines-dashboard-390.png`, fullPage: true })
+    await page.locator('[data-fines-tab="add"]').click()
+    await page.locator('[data-fines-panel="add"] [data-fine-row]').nth(2).waitFor()
+    await page.getByRole('button', { name: 'Max all' }).click()
+    check('add fines with the maximum lines: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
+    await page.screenshot({ path: `${SHOT}/fines-add-390.png`, fullPage: true })
+    await page.locator('[data-fines-tab="tracker"]').click()
+    check('tracker: no sideways overflow (the table scrolls inside its card)', (await overflow(page)) <= 0, String(await overflow(page)))
     const btn = await page.locator('[data-fines-player="p1"]').getByRole('button', { name: 'Paid' }).locator('visible=true').boundingBox()
     check('Paid and History are on screen, not past the right edge', btn && btn.x + btn.width <= 390, JSON.stringify(btn))
-    await page.screenshot({ path: `${SHOT}/fines-admin-390.png`, fullPage: true })
-    await ctx.close()
+    await page.locator('[data-fines-tab="report"]').click()
+    await page.getByRole('button', { name: 'Run report' }).click()
+    await page.locator('[data-report-session]').first().waitFor()
+    check('report: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
+    await page.screenshot({ path: `${SHOT}/fines-report-390.png`, fullPage: true })
+    await f.ctx.close()
   })
 
   await safe('C. nothing to show', async () => {

@@ -21,7 +21,7 @@ import uuid
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +43,8 @@ METHOD_MAX = 40
 
 class SettingsPatch(BaseModel):
     enabled: Optional[bool] = None
+    # The most one player can be fined in one session. None or "" clears it.
+    max_per_session: Optional[float | str] = None
     payid: Optional[str] = None
     payid_name: Optional[str] = None
     account_name: Optional[str] = None
@@ -69,6 +71,7 @@ class FineItem(BaseModel):
     reason: Optional[str] = None
     amount: Optional[float | str] = None
     quantity: int = 1
+    note: Optional[str] = None
 
 
 class EntriesIn(BaseModel):
@@ -140,15 +143,16 @@ async def _ensure_settings(db: AsyncSession, club: Organisation, team_id) -> Non
 async def _settings(db: AsyncSession, club: Organisation, team_id) -> dict:
     row = (await db.execute(
         text(
-            "SELECT enabled, payid, payid_name, account_name, bsb, account_number, "
+            "SELECT enabled, max_per_session, payid, payid_name, account_name, bsb, account_number, "
             "reference_hint, other_instructions FROM fine_settings "
             "WHERE team_id = :t AND organisation_id = :org"
         ),
         {"t": team_id, "org": club.id},
     )).mappings().first()
-    out = {"enabled": False, **{k: "" for k in fines_svc.PAY_FIELDS}}
+    out = {"enabled": False, "max_per_session": None, **{k: "" for k in fines_svc.PAY_FIELDS}}
     if row:
         out["enabled"] = bool(row["enabled"])
+        out["max_per_session"] = fines_svc.money(row["max_per_session"]) if row["max_per_session"] is not None else None
         for k in fines_svc.PAY_FIELDS:
             out[k] = row[k] or ""
     return out
@@ -292,6 +296,10 @@ async def patch_settings(
     if "enabled" in sent and body.enabled is not None:
         sets.append("enabled = :enabled")
         params["enabled"] = bool(body.enabled)
+    if "max_per_session" in sent:
+        raw = body.max_per_session
+        sets.append("max_per_session = :max_per_session")
+        params["max_per_session"] = None if raw is None or str(raw).strip() == "" else _amount(raw)
     for k in fines_svc.PAY_FIELDS:
         if k in sent:
             sets.append(f"{k} = :{k}")
@@ -372,6 +380,39 @@ async def patch_type(
     return {"status": "ok"}
 
 
+async def _enforce_session_max(db: AsyncSession, club: Organisation, squad: dict, fined_on: date, rows: list[dict]) -> None:
+    """Refuse a session that would take any player past the squad's maximum for one
+    session. What is already recorded on that date counts (a second session on the
+    same day cannot get round it), and voided rows do not."""
+    cap = (await db.execute(
+        text("SELECT max_per_session FROM fine_settings WHERE team_id = :t AND organisation_id = :org"),
+        {"t": squad["id"], "org": club.id},
+    )).scalar()
+    if cap is None:
+        return
+    new_totals: dict = {}
+    for r in rows:
+        new_totals[r["p"]] = new_totals.get(r["p"], 0) + r["a"]
+    existing = {pid: amt for pid, amt in (await db.execute(
+        text(
+            "SELECT player_id, COALESCE(SUM(amount), 0) FROM fine_entries "
+            "WHERE organisation_id = :org AND team_id = :t AND fined_on = :d AND voided_at IS NULL "
+            "AND player_id = ANY(CAST(:ids AS uuid[])) GROUP BY player_id"
+        ),
+        {"org": club.id, "t": squad["id"], "d": fined_on, "ids": list(new_totals)},
+    )).fetchall()}
+    over = [(pid, existing.get(pid, 0) + add) for pid, add in new_totals.items() if existing.get(pid, 0) + add > cap]
+    if not over:
+        return
+    names = {p.id: p.display_name for p in (await db.execute(select(Player).where(Player.id.in_([o[0] for o in over])))).scalars().all()}
+    shown = "; ".join(f"{names.get(pid, 'A player')} would be on {fines_svc.money(total):.2f}" for pid, total in over[:3])
+    more = f" and {len(over) - 3} more" if len(over) > 3 else ""
+    raise HTTPException(
+        status_code=422,
+        detail=f"Over the {fines_svc.money(cap):.2f} maximum for one session: {shown}{more}.",
+    )
+
+
 @router.post("/squads/{team_id}/entries")
 async def add_entries(
     team_id: str,
@@ -419,16 +460,18 @@ async def add_entries(
         qty = item.quantity if item.quantity else 1
         if qty < 1 or qty > MAX_QUANTITY:
             raise HTTPException(status_code=422, detail=f"Line {n}: quantity must be 1 to {MAX_QUANTITY}")
+        note = _clean(item.note)
         for _ in range(qty):
             rows.append({
                 "org": club.id, "t": squad["id"], "p": uuid.UUID(item.player_id),
                 "ft": uuid.UUID(ftype["id"]) if ftype else None,
-                "r": reason, "a": amount, "d": fined_on, "u": user.id,
+                "r": reason, "a": amount, "d": fined_on, "u": user.id, "n": note,
             })
+    await _enforce_session_max(db, club, squad, fined_on, rows)
     await db.execute(
         text(
-            "INSERT INTO fine_entries (organisation_id, team_id, player_id, fine_type_id, reason, amount, fined_on, created_by) "
-            "VALUES (:org, :t, :p, :ft, :r, :a, :d, :u)"
+            "INSERT INTO fine_entries (organisation_id, team_id, player_id, fine_type_id, reason, amount, fined_on, created_by, note) "
+            "VALUES (:org, :t, :p, :ft, :r, :a, :d, :u, :n)"
         ),
         rows,
     )
@@ -513,6 +556,162 @@ async def restore_payment(payment_id: str, db: AsyncSession = Depends(get_db),
     return {"status": "ok"}
 
 
+@router.get("/squads/{team_id}/session")
+async def session_side(
+    team_id: str,
+    date_: Optional[date] = Query(None, alias="date"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Who to fine for a week: the players picked in this squad's side(s) in the
+    Monday to Sunday week of `date`, from the selection lineups. With no date, the
+    squad's most recent game that has a side picked (on or before today), so the
+    page opens on last weekend. Also what each of them is already fined on `date`,
+    so the screen can hold them to the squad's maximum."""
+    squad = await _squad_or_404(db, club, team_id)
+    tid = squad["id"]
+    today = date.today()
+    chosen = date_
+    if chosen is None:
+        chosen = (await db.execute(
+            text(
+                "SELECT MAX(f.played_on) FROM fixtures f WHERE f.organisation_id = :org AND f.team_id = :t "
+                "AND f.played_on <= :today AND COALESCE(f.status, '') <> 'CANCELLED' "
+                "AND EXISTS (SELECT 1 FROM fixture_lineups fl WHERE fl.fixture_id = f.id)"
+            ),
+            {"org": club.id, "t": tid, "today": today},
+        )).scalar() or today
+    week_start = chosen - timedelta(days=chosen.weekday())
+    week_end = week_start + timedelta(days=6)
+
+    fixtures = (await db.execute(
+        text(
+            "SELECT f.id, f.played_on, f.opponent_name, f.label FROM fixtures f "
+            "WHERE f.organisation_id = :org AND f.team_id = :t AND COALESCE(f.status, '') <> 'CANCELLED' "
+            "AND (f.played_on BETWEEN :a AND :b OR f.end_on BETWEEN :a AND :b) "
+            "AND EXISTS (SELECT 1 FROM fixture_lineups fl WHERE fl.fixture_id = f.id) "
+            "ORDER BY f.played_on, f.start_time NULLS LAST"
+        ),
+        {"org": club.id, "t": tid, "a": week_start, "b": week_end},
+    )).fetchall()
+    fixture_ids = [f[0] for f in fixtures]
+    order: dict = {}
+    if fixture_ids:
+        for pid, bo in (await db.execute(
+            text(
+                "SELECT player_id, MIN(batting_order) FROM fixture_lineups "
+                "WHERE organisation_id = :org AND fixture_id = ANY(CAST(:fx AS uuid[])) GROUP BY player_id"
+            ),
+            {"org": club.id, "fx": fixture_ids},
+        )).fetchall():
+            order[pid] = bo if bo is not None else 999
+    people = {}
+    if order:
+        people = {p.id: p for p in (await db.execute(
+            select(Player).where(Player.id.in_(list(order)), Player.organisation_id == club.id)
+        )).scalars().all()}
+    picked = sorted(people.values(), key=lambda p: (order.get(p.id, 999), p.display_name.lower()))
+
+    existing = {pid: fines_svc.money(a) for pid, a in (await db.execute(
+        text(
+            "SELECT player_id, SUM(amount) FROM fine_entries WHERE organisation_id = :org AND team_id = :t "
+            "AND fined_on = :d AND voided_at IS NULL GROUP BY player_id"
+        ),
+        {"org": club.id, "t": tid, "d": chosen},
+    )).fetchall()}
+    return {
+        "date": chosen.isoformat(),
+        "week_start": week_start.isoformat(),
+        "week_end": week_end.isoformat(),
+        "fixtures": [
+            {"id": str(i), "date": d.isoformat() if d else None, "opponent": o or l}
+            for i, d, o, l in fixtures
+        ],
+        "players": [{"player_id": str(p.id), "name": p.display_name} for p in picked],
+        "existing": {str(k): v for k, v in existing.items()},
+    }
+
+
+@router.get("/squads/{team_id}/report")
+async def report(
+    team_id: str,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Everything the PDF report needs for a squad over a date range: a summary per
+    player, every fine by session with its reason and note, and the payments. Voided
+    rows are left out. `owing_now` is the player's whole balance (not limited to the
+    range), so the report never understates what is still to collect."""
+    squad = await _squad_or_404(db, club, team_id)
+    tid = squad["id"]
+    params = {"org": club.id, "t": tid, "a": date_from, "b": date_to}
+    rng = "AND (CAST(:a AS date) IS NULL OR {c} >= :a) AND (CAST(:b AS date) IS NULL OR {c} <= :b)"
+    entries = (await db.execute(
+        text(
+            "SELECT player_id, fined_on, reason, note, amount FROM fine_entries "
+            "WHERE organisation_id = :org AND team_id = :t AND voided_at IS NULL "
+            + rng.format(c="fined_on") + " ORDER BY fined_on, created_at LIMIT 5000"
+        ), params)).fetchall()
+    payments = (await db.execute(
+        text(
+            "SELECT player_id, paid_on, amount, method, note FROM fine_payments "
+            "WHERE organisation_id = :org AND team_id = :t AND voided_at IS NULL "
+            + rng.format(c="paid_on") + " ORDER BY paid_on, created_at LIMIT 5000"
+        ), params)).fetchall()
+    totals = await fines_svc.squad_totals(db, club.id, tid)
+    ids = {e[0] for e in entries} | {p[0] for p in payments}
+    names = {}
+    if ids:
+        names = {p.id: p.display_name for p in (await db.execute(
+            select(Player).where(Player.id.in_(ids), Player.organisation_id == club.id))).scalars().all()}
+
+    by_player: dict = {}
+    for pid, d, reason, note, amt in entries:
+        b = by_player.setdefault(pid, {"count": 0, "fined": 0.0, "paid": 0.0})
+        b["count"] += 1
+        b["fined"] += float(amt)
+    for pid, d, amt, m, n in payments:
+        b = by_player.setdefault(pid, {"count": 0, "fined": 0.0, "paid": 0.0})
+        b["paid"] += float(amt)
+    summary = []
+    for pid, b in by_player.items():
+        t = totals.get(pid, {"fined": 0.0, "paid": 0.0})
+        summary.append({
+            "player_id": str(pid), "name": names.get(pid, "Unknown"), "count": b["count"],
+            "fined": round(b["fined"], 2), "paid": round(b["paid"], 2),
+            "owing_now": round(t["fined"] - t["paid"], 2),
+        })
+    summary.sort(key=lambda r: (-r["fined"], r["name"].lower()))
+
+    sessions: dict = {}
+    for pid, d, reason, note, amt in entries:
+        s_ = sessions.setdefault(d, {"date": d.isoformat(), "total": 0.0, "entries": []})
+        s_["total"] = round(s_["total"] + float(amt), 2)
+        s_["entries"].append({"player": names.get(pid, "Unknown"), "reason": reason, "note": note, "amount": fines_svc.money(amt)})
+    for s_ in sessions.values():
+        s_["entries"].sort(key=lambda e: e["player"].lower())
+    fined = round(sum(r["fined"] for r in summary), 2)
+    paid = round(sum(r["paid"] for r in summary), 2)
+    return {
+        "squad": {"id": str(tid), "name": squad["name"]},
+        "from": date_from.isoformat() if date_from else None,
+        "to": date_to.isoformat() if date_to else None,
+        "summary": summary,
+        "sessions": list(sessions.values()),
+        "payments": [
+            {"date": d.isoformat(), "player": names.get(pid, "Unknown"), "amount": fines_svc.money(a), "method": m, "note": n}
+            for pid, d, a, m, n in payments
+        ],
+        "totals": {"count": len(entries), "fined": fined, "paid": paid,
+                   "owing_now": round(sum(max(t["fined"] - t["paid"], 0) for t in totals.values()), 2)},
+        "truncated": len(entries) >= 5000 or len(payments) >= 5000,
+    }
+
+
 @router.get("/squads/{team_id}/players/{player_id}/ledger")
 async def player_ledger(
     team_id: str,
@@ -533,7 +732,7 @@ async def player_ledger(
     params = {"org": club.id, "t": squad["id"], "p": pid}
     entries = (await db.execute(
         text(
-            "SELECT id, fined_on, reason, amount, voided_at FROM fine_entries "
+            "SELECT id, fined_on, reason, amount, voided_at, note FROM fine_entries "
             "WHERE organisation_id = :org AND team_id = :t AND player_id = :p "
             "ORDER BY fined_on DESC, created_at DESC LIMIT 500"
         ), params)).fetchall()
@@ -548,8 +747,8 @@ async def player_ledger(
         "player": {"id": str(pid), "name": p.display_name},
         "owing": round(totals["fined"] - totals["paid"], 2),
         "entries": [
-            {"id": str(i), "date": d.isoformat(), "reason": r, "amount": fines_svc.money(a), "voided": v is not None}
-            for i, d, r, a, v in entries
+            {"id": str(i), "date": d.isoformat(), "reason": r, "note": n, "amount": fines_svc.money(a), "voided": v is not None}
+            for i, d, r, a, v, n in entries
         ],
         "payments": [
             {"id": str(i), "date": d.isoformat(), "amount": fines_svc.money(a), "method": m, "note": n, "voided": v is not None}
