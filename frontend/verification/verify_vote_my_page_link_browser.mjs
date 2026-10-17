@@ -86,6 +86,34 @@ const run = async () => {
     await ctx.close()
   })
 
+  await safe('photos', async () => {
+    console.log('\n── Player photos on the ballot ──')
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true })
+    const page = await ctx.newPage(); page.setDefaultTimeout(8000)
+    const me = { id: 'p1', display_name: 'Sam Sledge' }
+    await voteStubs(page, me)
+    const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+    await page.route('https://img.test/**', (r) => (r.request().url().endsWith('good.png')
+      ? r.fulfill({ status: 200, contentType: 'image/png', body: PNG })
+      : r.fulfill({ status: 404, body: 'nope' })))
+    await page.route(/\/api\/public\/votes\/vtok\/fixtures\/f1$/, (r) => json(r, {
+      club: CLUB, fixture: { id: 'f1', opponent: 'Rovers', round: 'Round 1', date: iso(-2), state: 'open' }, ballot_values: [3, 2, 1],
+      allow_self_vote: false, voter_mode: 'players', me, role: 'player', reason: null, my_ballot: null,
+      players: [{ id: 'a', name: 'Ann Anchor', photo_url: 'https://img.test/good.png' }, { id: 'b', name: 'Bob Broken', photo_url: 'https://img.test/missing.png' }, { id: 'c', name: 'Cal Cover', photo_url: null }],
+    }))
+    await page.goto(`${BASE}/vote/vtok?fixture=f1`)
+    await page.getByRole('button', { name: /Ann Anchor/ }).waitFor()
+    await page.waitForTimeout(600)
+    const row = (n) => page.getByRole('button', { name: new RegExp(n) }).first()
+    check('a player with a photo shows it, not initials', (await row('Ann Anchor').locator('[data-face="photo"]').count()) === 1 && (await row('Ann Anchor').locator('[data-face="initials"]').count()) === 0)
+    check('a photo that will not load falls back to initials', (await row('Bob Broken').locator('[data-face="initials"]').count()) === 1)
+    check('a player with no photo shows initials', (await row('Cal Cover').locator('[data-face="initials"]').innerText()) === 'CC')
+    check('the photo is a round 40px face', await row('Ann Anchor').locator('[data-face="photo"]').evaluate((e) => e.getBoundingClientRect().width === 40 && getComputedStyle(e).borderRadius.includes('9999') || getComputedStyle(e).borderRadius === '50%'))
+    check('390px: no sideways overflow', (await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) <= 0)
+    await page.screenshot({ path: `${process.env.SHOT_DIR || '/tmp'}/vote-photos-390.png` })
+    await ctx.close()
+  })
+
   const availStubs = async (page, { verified }) => {
     await page.route('**/api/**', (r) => json(r, {}))
     const me = {

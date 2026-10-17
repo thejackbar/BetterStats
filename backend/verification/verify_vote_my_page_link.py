@@ -37,7 +37,7 @@ from starlette.responses import Response
 
 import verify_selection_same_day as base
 from app.config.settings import settings
-from app.models.db import Fixture, Organisation, Player, VoteMedal
+from app.models.db import Fixture, FixtureLineup, Organisation, Player, VoteMedal
 
 engine = create_async_engine(os.environ["DATABASE_URL"], echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -49,7 +49,7 @@ async def main():
     import app.routers.public_votes as pv
 
     org = uuid.uuid4()
-    sam, ann = uuid.uuid4(), uuid.uuid4()
+    sam, ann, bob, hid = (uuid.uuid4() for _ in range(4))
     vote_tok, avail_tok = "v-" + uuid.uuid4().hex, "a-" + uuid.uuid4().hex
     async with Session() as db:
         db.add(Organisation(id=org, name="Vote CC", slug=f"vote-{org.hex[:8]}", module_overrides=["select"],
@@ -57,6 +57,8 @@ async def main():
         await db.flush()
         db.add(Player(id=sam, organisation_id=org, name="Sam Sledge", is_player=True, status="active", phone="0400000111"))
         db.add(Player(id=ann, organisation_id=org, name="Ann Anchor", is_player=True, status="active", phone="0400000222"))
+        db.add(Player(id=bob, organisation_id=org, name="Bob Bare", is_player=True, status="active", photo_url="https://img.test/bob.jpg"))
+        db.add(Player(id=hid, organisation_id=org, name="Hal Hidden", is_player=True, status="active", photo_url="https://img.test/hal.jpg", is_public=False))
         db.add(VoteMedal(id=uuid.uuid4(), organisation_id=org, name="Best player", link_token=vote_tok, enabled=True, require_pin=True))
         await db.commit()
 
@@ -91,10 +93,18 @@ async def main():
     async with Session() as db:
         db.add(Fixture(id=fx, organisation_id=org, source="manual", played_on=date.today() - timedelta(days=2),
                        status="COMPLETED", opponent_name="Rovers", label="1st", round="1"))
+        await db.flush()
+        for n, pid in enumerate((ann, bob, hid, sam), 1):
+            db.add(FixtureLineup(fixture_id=fx, player_id=pid, organisation_id=org, batting_order=n))
         await db.commit()
     async with Session() as db:
         st = await pv.fixture_state(vote_tok, str(fx), req(sam), db)
     check("a verified player's ballot page carries the link", (st.get("me") or {}).get("my_page"), want)
+    ph = {p["name"]: p.get("photo_url") for p in st.get("players", [])}
+    check("the ballot lists who played", sorted(ph), ["Ann Anchor", "Bob Bare", "Hal Hidden", "Sam Sledge"])
+    check("a player with a photo has it on the ballot", ph.get("Bob Bare"), "https://img.test/bob.jpg")
+    check("a player with no photo has none (the page shows initials)", ph.get("Ann Anchor"), None)
+    check("a player hidden from public pages has no photo here, though still listed", ph.get("Hal Hidden"), None)
     async with Session() as db:
         st = await pv.fixture_state(vote_tok, str(fx), req(), db)
     check("an unidentified visitor's ballot page does not", (st.get("me"), avail_tok in str(st)), (None, False))

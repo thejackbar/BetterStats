@@ -43,6 +43,23 @@ function Banner({ tone = 'error', children }) {
 }
 
 /* ── The one-screen ballot ─────────────────────────────────────────────────── */
+// A player's photo, or their initials when they have none (or it will not load).
+function Face({ player, size = 40, chosen = false }) {
+  const [failed, setFailed] = useState(false)
+  const ring = `1.5px solid ${chosen ? 'var(--pb-accent)' : 'var(--pb-hairline2)'}`
+  const box = { width: size, height: size, minWidth: size, border: ring }
+  if (player?.photo_url && !failed) {
+    return <img src={player.photo_url} alt="" loading="lazy" onError={() => setFailed(true)} data-face="photo"
+      className="rounded-full object-cover bg-pb-surface2 shrink-0" style={box} />
+  }
+  return (
+    <span data-face="initials" className="rounded-full bg-pb-surface2 font-mono text-[11px] font-semibold flex items-center justify-center shrink-0"
+      style={{ ...box, color: chosen ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
+      {initialsOf(player?.name)}
+    </span>
+  )
+}
+
 function Ballot({ fixture, values, votable, picks, setPicks, onSubmit, busy, voterLabel, onBack }) {
   const nextSlot = picks.findIndex((p) => !p)
   const complete = picks.every(Boolean)
@@ -90,10 +107,7 @@ function Ballot({ fixture, values, votable, picks, setPicks, onSubmit, busy, vot
             <button key={p.id} onClick={() => tap(p.id)}
               className="w-full flex items-center gap-3 px-4 py-3 text-left border-b pb-hairline last:border-0 transition-colors"
               style={{ background: chosen ? 'color-mix(in srgb, var(--pb-accent) 7%, transparent)' : 'transparent' }}>
-              <span className="w-8 h-8 rounded-full bg-pb-surface2 font-mono text-[11px] font-semibold flex items-center justify-center shrink-0"
-                style={{ border: `1.5px solid ${chosen ? 'var(--pb-accent)' : 'var(--pb-hairline2)'}`, color: chosen ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
-                {initialsOf(p.name)}
-              </span>
+              <Face player={p} chosen={chosen} />
               <span className="flex-1 text-[15.5px] font-medium">{p.name}</span>
               <span className="w-[26px] h-[26px] rounded-lg flex items-center justify-center font-mono text-xs font-bold shrink-0"
                 style={chosen

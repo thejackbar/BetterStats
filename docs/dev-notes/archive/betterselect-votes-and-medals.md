@@ -447,3 +447,11 @@ Asked for: a link from the voting page back to the player's profile dashboard se
 - No sign-in is passed across: the vote cookie (`bs_vote`) and the availability cookie (`bs_avail`) stay separate, and the vote PIN can be switched off while the availability PIN is on, so the player types their PIN on the availability page. `PublicAvailability.jsx` reads `?tab=mine` (opens My page) and `?player=<id>` (picks that player once on the name step, so only the PIN is asked; "Not you?" does not re-pick).
 - Cricket only. The football voting page (`AflPublicVoting.jsx`) is unchanged.
 - Proof: `verify_vote_my_page_link.py` (real Postgres, 9; control on the previous code fails the 3 positive checks), `verify_vote_my_page_link_browser.mjs` (13).
+
+## v9.120.0.2: player photos on the public ballot
+
+Asked for: the pictures should pull through on the voting page (it showed initials only).
+
+- `public_votes.fixture_state` adds `photo_url` to each eligible player, read in one query (`= ANY(CAST(:ids AS uuid[]))`). A photo is sent only when the player is public (`is_public` and `privacy_hidden_at IS NULL`): a hidden player stays on the ballot by name, but their face is not put on a page with no sign-in. The eligibility service is untouched (the admin enriches photos its own way).
+- `PublicVoting.jsx` `Face`: the photo as a 40px round image, initials when there is none or it fails to load (`onError`).
+- Proof: `verify_vote_my_page_link.py` (13, control on the previous route fails the photo check), `verify_vote_my_page_link_browser.mjs` (18, a good photo, a 404 photo and no photo).

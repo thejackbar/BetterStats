@@ -32,7 +32,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import MODULE_SELECT, org_has_module
@@ -437,6 +437,20 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         if b:
             my_ballot = [str(p.player_id) for p in sorted(b.picks, key=lambda p: p.position)]
 
+    # Their photos, for the list. Only for a player who is public: someone hidden
+    # from the public pages (their own request, or the club's) stays a name here
+    # and does not get their face put on a page with no sign-in.
+    photos: dict[str, str] = {}
+    ids = [uuid.UUID(p["id"]) for p in eligible]
+    if ids:
+        rows = (await db.execute(
+            text("SELECT id, photo_url FROM players WHERE organisation_id = :org "
+                 "AND id = ANY(CAST(:ids AS uuid[])) AND photo_url IS NOT NULL AND photo_url <> '' "
+                 "AND COALESCE(is_public, true) AND privacy_hidden_at IS NULL"),
+            {"org": club.id, "ids": ids},
+        )).fetchall()
+        photos = {str(i): u for i, u in rows}
+
     return {
         "club": _club_branding(club),
         "fixture": {
@@ -452,7 +466,7 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         "me": _me_payload(club, me) if me else None,
         "role": role,
         "reason": reason,
-        "players": [{"id": p["id"], "name": p["name"]} for p in eligible],
+        "players": [{"id": p["id"], "name": p["name"], "photo_url": photos.get(str(p["id"]))} for p in eligible],
         "my_ballot": my_ballot,
     }
 
