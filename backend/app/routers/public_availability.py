@@ -36,8 +36,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import MODULE_SELECT, org_has_module
 from app.config.settings import settings
-from app.models.db import Grade, Organisation, Player, PlayerAvailability, get_db
+from app.models.db import Grade, Organisation, Player, PlayerAvailability, VoteBallot, VoteMedal, get_db
 from app.routers.ladders import _compute_team_ladders
+from app.routers import public_votes as pv
 from app.routers.availability import (
     MAYBE_OFF,
     active_self_service_players,
@@ -48,6 +49,7 @@ from app.routers.availability import (
     upcoming_fixtures_by_date,
 )
 from app.services import fines as fines_svc, player_dashboard, rate_limit, squad_sides
+from app.services import votes as vote_svc
 from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.squad_next_game import fixtures_for_player
 from app.services.session_safety import rollback_keeping
@@ -362,6 +364,63 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
     }
 
 
+VOTES_EXAMINED = 10   # open games looked at per page load, newest first
+
+
+async def _votes_due(db: AsyncSession, club: Organisation, player: Player) -> list[dict]:
+    """Games this player can still vote on and has not: open for voting under an
+    enabled medal, the player is on that game's votable list (the same list the
+    ballot page uses, so a reminder never points at a game they cannot vote on),
+    and no ballot from them yet. Nothing about anyone else, and nothing at all
+    for a club with no enabled voting link.
+
+    The link carries the medal's token, so it is only ever built here, for the
+    verified player, and the vote page still asks for their PIN."""
+    medals = (await db.execute(
+        select(VoteMedal).where(
+            VoteMedal.organisation_id == club.id, VoteMedal.enabled.is_(True),
+            VoteMedal.link_token.is_not(None),
+        ).order_by(VoteMedal.name)
+    )).scalars().all()
+    due: list[dict] = []
+    examined = 0
+    for medal in medals:
+        cfg = vote_svc.effective_config(medal)
+        fixtures, _ = await pv._open_fixtures(db, club, cfg, medal)
+        open_fx = [f for f, state in fixtures if state == "open"]
+        if not open_fx:
+            continue
+        voted = {r[0] for r in (await db.execute(
+            select(VoteBallot.fixture_id).where(
+                VoteBallot.medal_id == medal.id, VoteBallot.voter_player_id == player.id,
+                VoteBallot.fixture_id.in_([f.id for f in open_fx]),
+            )
+        )).fetchall()}
+        for f in open_fx:
+            if f.id in voted:
+                continue
+            if examined >= VOTES_EXAMINED:
+                break
+            examined += 1
+            ov = await vote_svc.get_override(db, medal.id, f.id)
+            elig = await vote_svc.resolve_eligibility(db, club, f, cfg, ov.eligibility_source if ov else None)
+            role, _reason = pv._voter_role(cfg, player, elig["players"])
+            if role != "player":
+                continue
+            closes = vote_svc.fixture_close_date(f, cfg)
+            due.append({
+                "medal": medal.name,
+                "fixture_id": str(f.id),
+                "opponent": f.opponent_name or f.label,
+                "round": vote_svc.round_label_for(f),
+                "date": f.played_on.isoformat() if f.played_on else None,
+                "closes_on": closes.isoformat() if closes else None,
+                "link": f"/vote/{medal.link_token}?fixture={f.id}&player={player.id}",
+            })
+    due.sort(key=lambda d: (d["closes_on"] or "9999", d["date"] or ""))
+    return due
+
+
 @router.get("/{token}/me/profile")
 async def get_my_profile(token: str, request: Request, tz: Optional[str] = None, db: AsyncSession = Depends(get_db)):
     """The verified player's own page ("My page"): the modules the club has turned
@@ -396,6 +455,15 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
     # The newer modules fail on their own: one that cannot be built is dropped
     # from this response and the rest of the page still loads.
     season = fees = fines = None
+    votes: list[dict] = []
+    if "votes" in modules:
+        try:
+            votes = await _votes_due(db, club, player)
+        except Exception:
+            logger.exception("player page: votes failed for %s", player.id)
+            await rollback_keeping(db, club, player)
+        if not votes:
+            modules = [m for m in modules if m != "votes"]
     if "season" in modules:
         try:
             season = await player_dashboard.season_overview(db, club, player)
@@ -431,6 +499,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         "season": season,
         "fees": fees,
         "fines": fines,
+        "votes": votes,
     }
 
 

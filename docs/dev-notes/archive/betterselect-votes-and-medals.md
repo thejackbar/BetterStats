@@ -455,3 +455,12 @@ Asked for: the pictures should pull through on the voting page (it showed initia
 - `public_votes.fixture_state` adds `photo_url` to each eligible player, read in one query (`= ANY(CAST(:ids AS uuid[]))`). A photo is sent only when the player is public (`is_public` and `privacy_hidden_at IS NULL`): a hidden player stays on the ballot by name, but their face is not put on a page with no sign-in. The eligibility service is untouched (the admin enriches photos its own way).
 - `PublicVoting.jsx` `Face`: the photo as a 40px round image, initials when there is none or it fails to load (`onError`).
 - Proof: `verify_vote_my_page_link.py` (13, control on the previous route fails the photo check), `verify_vote_my_page_link_browser.mjs` (18, a good photo, a 404 photo and no photo).
+
+## v9.120.2: vote reminders on the player's own page
+
+Asked for: on the player page, remind a player who is due to vote in a game they played that is still open.
+
+- `public_availability._votes_due(db, club, player)`: for each enabled medal with a link, `public_votes._open_fixtures` (state `open`), minus games the player has a ballot for, then `vote_svc.resolve_eligibility` and `public_votes._voter_role` per game (the ballot page's own rules, so a reminder never points at a game they cannot vote on; captain-only mode reminds only the captain). At most 10 games examined per page load. Sorted by when voting closes. Each item carries `link` = `/vote/<medal token>?fixture=<id>&player=<id>`, built only for the verified player; the vote page still asks for the PIN (`bs_vote` and `bs_avail` stay separate).
+- A `votes` module in `services/player_dashboard` (catalogue entry, in `DEFAULT_MODULES` after availability). It drops itself from `modules` when nothing is due, so a club with no voting sees no trace of it. Failure is caught and logged like the other newer modules.
+- Frontend: `VotesBanner` above the tiles, a "Votes due" tile, `VotesModule`. `PublicVoting.jsx` reads `?player=<id>` and picks that player once on the name step.
+- Proof: `verify_player_votes_reminder.py` (own database, 20; control on the previous code fails the positive checks without crashing), `verify_player_dashboard_fines_browser.mjs` (113), `verify_vote_my_page_link_browser.mjs` (21).

@@ -14,7 +14,7 @@ page cannot be trusted with them:
   anyone holding the link could open anybody's page, so with it off the fees
   module is never served. Fail closed.
 * ``ladder`` names the player's squad, so it follows the same Show squad switch
-  as the rest of the page. (``squad`` itself stays served with the switch off: it
+  as the rest of the page. (``votes`` and ``fines`` draw nothing unless something is due or on; ``squad`` itself stays served with the switch off: it
   then says so, which is what the page always did.)
 """
 from __future__ import annotations
@@ -34,6 +34,8 @@ from app.services.aggregations import get_season_by_season
 CATALOGUE: list[dict] = [
     {"key": "availability", "label": "Your availability",
      "blurb": "Their answers for the next few games."},
+    {"key": "votes", "label": "Votes",
+     "blurb": "Reminds them to vote on games they played that are still open. Shows only when a vote is due."},
     {"key": "squad", "label": "Your squad",
      "blurb": "The squads they are in. While Show squad is off it says the club hasn't turned squad names on."},
     {"key": "selected", "label": "Selected",
@@ -53,7 +55,7 @@ KEYS = [m["key"] for m in CATALOGUE]
 
 # What every club had before the club could choose: the original page, plus
 # fines (which draws nothing unless a squad switches Fines on).
-DEFAULT_MODULES = ["availability", "squad", "selected", "training", "fines"]
+DEFAULT_MODULES = ["availability", "votes", "squad", "selected", "training", "fines"]
 
 
 def normalise(keys) -> list[str]:

@@ -189,6 +189,37 @@ const run = async () => {
     await ctx.close()
   })
 
+  await safe('A. votes due', async () => {
+    console.log('\n── A. A vote is due: the reminder ──')
+    const due = [
+      { medal: 'Dunslow Medal', fixture_id: 'f1', opponent: 'Rovers', round: 'Round 1', date: iso(-2), closes_on: iso(5), link: '/vote/vtok?fixture=f1&player=p1' },
+      { medal: 'Dunslow Medal', fixture_id: 'f2', opponent: 'Saints', round: 'Round 2', date: iso(-1), closes_on: iso(6), link: '/vote/vtok?fixture=f2&player=p1' },
+    ]
+    const { ctx, page } = await playerPage(browser, 390, profileFor({ modules: ['availability', 'votes', 'fines'], votes: due }), { status: 200, body: LADDER })
+    await page.locator('[data-votes-banner]').waitFor()
+    const banner = norm(await page.locator('[data-votes-banner]').innerText())
+    check('a banner tops the page saying how many votes are due', /You have 2 votes to cast/.test(banner), banner)
+    check('the banner button goes to the first ballot, player already picked', (await page.locator('[data-votes-banner] a').getAttribute('href')) === '/vote/vtok?fixture=f1&player=p1')
+    const bannerBox = await page.locator('[data-votes-banner]').boundingBox()
+    const tilesBox = await page.locator('[data-tiles]').boundingBox()
+    check('the banner sits above the tiles', bannerBox.y + bannerBox.height <= tilesBox.y)
+    check('a Votes due tile counts them', /Votes due\s*2/.test(await tileText(page, 'votes')), await tileText(page, 'votes'))
+    const rows = await page.locator('[data-vote-due]').evaluateAll((els) => els.map((e) => ({ text: e.textContent.replace(/\s+/g, ' ').trim(), href: e.querySelector('a').getAttribute('href') })))
+    check('the module lists each game with its medal and when voting closes', rows.length === 2 && /Round 1 · vs Rovers/.test(rows[0].text) && /Dunslow Medal/.test(rows[0].text) && /voting closes/.test(rows[0].text), JSON.stringify(rows))
+    check('each has its own Vote link', rows[1].href === '/vote/vtok?fixture=f2&player=p1')
+    check('390px: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
+    await page.screenshot({ path: `${SHOT}/player-votes-390.png`, fullPage: true })
+    await ctx.close()
+    const one = await playerPage(browser, 390, profileFor({ modules: ['votes'], votes: [due[0]] }), { status: 200, body: LADDER })
+    await one.page.locator('[data-votes-banner]').waitFor()
+    check('with one, it says "a vote"', /You have a vote to cast/.test(await one.page.locator('[data-votes-banner]').innerText()))
+    await one.ctx.close()
+    const none = await playerPage(browser, 390, profileFor({ modules: ['availability'], votes: [] }), { status: 200, body: LADDER })
+    await none.page.waitForTimeout(300)
+    check('with nothing due there is no banner, no tile and no module', (await none.page.locator('[data-votes-banner], [data-vote-due]').count()) === 0 && !(await tileIds(none.page)).includes('votes'))
+    await none.ctx.close()
+  })
+
   await safe('A. wide dashboard', async () => {
     console.log('\n── A. On a wide screen it is a dashboard, not one long column ──')
     const { ctx, page } = await playerPage(browser, 1280, profileFor(), { status: 200, body: LADDER })

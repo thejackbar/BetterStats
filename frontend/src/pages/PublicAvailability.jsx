@@ -293,6 +293,46 @@ function AvailabilityModule({ me }) {
   )
 }
 
+// Games the player can still vote on and has not. Each links to that game's
+// ballot on the vote page (which asks for their PIN once).
+function VotesModule({ data }) {
+  const votes = data.votes || []
+  return (
+    <Section title="Votes to cast">
+      <div data-votes>
+        {votes.map((v) => (
+          <div key={`${v.medal}-${v.fixture_id}`} className="flex items-center gap-3 py-2 border-t pb-hairline first:border-t-0" data-vote-due={v.fixture_id}>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold truncate">{v.round ? `${v.round} · ` : ''}vs {v.opponent || 'TBC'}</div>
+              <div className="text-[12px] text-pb-faint">
+                {v.medal}{v.date ? ` · played ${fmtShort(v.date)}` : ''}{v.closes_on ? ` · voting closes ${fmtShort(v.closes_on)}` : ''}
+              </div>
+            </div>
+            <a href={v.link} className="shrink-0 px-3.5 py-2 rounded-lg text-[13px] font-semibold"
+              style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>Vote</a>
+          </div>
+        ))}
+      </div>
+    </Section>
+  )
+}
+
+// A reminder above everything else while a vote is due.
+function VotesBanner({ votes }) {
+  const n = votes.length
+  return (
+    <div className="rounded-xl px-4 py-3 mb-3 flex items-center gap-3" data-votes-banner
+      style={{ background: 'color-mix(in srgb, var(--pb-amber) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-amber) 40%, transparent)' }}>
+      <div className="min-w-0 flex-1 text-sm">
+        <b>{n === 1 ? 'You have a vote to cast.' : `You have ${n} votes to cast.`}</b>
+        <span className="text-pb-dim"> {n === 1 ? 'A game you played is still open for voting.' : 'Games you played are still open for voting.'}</span>
+      </div>
+      <a href={votes[0].link} className="shrink-0 px-3.5 py-2 rounded-lg text-[13px] font-semibold"
+        style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{n === 1 ? 'Vote now' : 'Vote'}</a>
+    </div>
+  )
+}
+
 function SquadModule({ data }) {
   return (
     <Section title="Your squad">
@@ -546,6 +586,10 @@ function dashboardTiles({ me, data, modules, ladder }) {
     const answered = dates.filter((d) => (me.availability?.[d.date]?.status || 'NO_RESPONSE') !== 'NO_RESPONSE').length
     tiles.push({ id: 'availability', label: 'Availability', value: `${answered} of ${dates.length}`, hint: 'next games answered', tone: answered < dates.length ? 'var(--pb-amber)' : 'var(--pb-positive)' })
   }
+  const due = data.votes || []
+  if (has('votes') && due.length) {
+    tiles.push({ id: 'votes', label: 'Votes due', value: due.length, hint: due.length === 1 ? 'game to vote on' : 'games to vote on', tone: 'var(--pb-amber)' })
+  }
   const first = ladder.ladders?.[0]
   const mine = first?.rows.find((r) => r.is_club)
   if (has('ladder') && ladder.status === 'ok' && mine && mine.rank != null) {
@@ -598,6 +642,7 @@ function MyPage({ token, me }) {
   const render = (key) => {
     switch (key) {
       case 'availability': return <AvailabilityModule key={key} me={me} />
+      case 'votes': return <VotesModule key={key} data={data} />
       case 'squad': return <SquadModule key={key} data={data} />
       case 'selected': return <SelectedModule key={key} data={data} />
       case 'training': return <TrainingModule key={key} data={data} />
@@ -618,6 +663,7 @@ function MyPage({ token, me }) {
       {data && modules.length === 0 && (
         <div className="text-sm text-pb-faint" data-no-modules>Your club has not added anything to this page yet.</div>
       )}
+      {data && modules.includes('votes') && (data.votes || []).length > 0 && <VotesBanner votes={data.votes} />}
       {tiles.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5 mb-3" data-tiles>
           {tiles.map((t) => <Tile key={t.id} {...t} />)}

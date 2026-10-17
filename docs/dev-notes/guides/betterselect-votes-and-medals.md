@@ -66,6 +66,7 @@
 35. Public ballot is one screen: 3 tap targets above the team list, `picks` is still the same fixed-length array. The `RaceChart` is hand-rolled inline SVG; do not pull in a chart library for it.
 35a. The vote pages describe the verified voter through `public_votes._me_payload`, which adds `my_page` (a link to the player's own availability-link dashboard) only for a verified player with the club's self-service link on. Never send the availability token to an unidentified visitor, and do not share a sign-in between `bs_vote` and `bs_avail`.
 35b. The public ballot sends `photo_url` per eligible player only for a public player (`is_public` and no `privacy_hidden_at`). Anything new that puts a face on an unauthenticated page applies the same test.
+35c. A player's page reminds them of votes due via `public_availability._votes_due`, using the ballot page's own eligibility and role rules, so any change to who may vote must keep `_voter_role` and `resolve_eligibility` as the single source. Only open games, only games they played, none they have a ballot on. The medal link is built only for the verified player.
 
 **Football twin (v9.34.0)**
 36. Football ballots key on `games` directly (cricket keys on `fixtures`). There is no eligibility source to choose: one team list, read by `services/afl/lineups.py` from `afl_player_game_lines` (PlayHQ `gameView.statistics.{home,away}.players[]`, both sides). It is a plain read of held data: no upstream call, works when PlayHQ is down.

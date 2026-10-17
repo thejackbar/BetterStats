@@ -114,6 +114,35 @@ const run = async () => {
     await ctx.close()
   })
 
+  await safe('vote page autopick', async () => {
+    console.log('\n── The vote page from a reminder ──')
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true })
+    const page = await ctx.newPage(); page.setDefaultTimeout(8000)
+    await voteStubs(page, null)
+    await page.route(/\/api\/public\/votes\/vtok\/fixtures\/f1$/, (r) => json(r, {
+      club: CLUB, fixture: { id: 'f1', opponent: 'Rovers', round: 'Round 1', date: iso(-2), state: 'open' }, ballot_values: [3, 2, 1],
+      allow_self_vote: false, voter_mode: 'players', me: null, role: 'none', reason: 'verify_required', my_ballot: null, players: [],
+    }))
+    await page.goto(`${BASE}/vote/vtok?fixture=f1&player=p1`)
+    await page.getByText('Last 4 digits of your mobile').waitFor()
+    check('from the reminder the player is already picked, only the PIN is asked', /Sam Sledge/.test(await page.locator('body').innerText()))
+    await page.getByText('Not you? Pick a different name').click()
+    await page.waitForTimeout(400)
+    check('"Not you?" goes back to the names and stays there', (await page.getByText('Last 4 digits of your mobile').count()) === 0)
+    await ctx.close()
+    const ctx2 = await browser.newContext({ viewport: { width: 390, height: 900 } })
+    const p2 = await ctx2.newPage(); p2.setDefaultTimeout(8000)
+    await voteStubs(p2, null)
+    await p2.route(/\/api\/public\/votes\/vtok\/fixtures\/f1$/, (r) => json(r, {
+      club: CLUB, fixture: { id: 'f1', opponent: 'Rovers', round: 'Round 1', date: iso(-2), state: 'open' }, ballot_values: [3, 2, 1],
+      allow_self_vote: false, voter_mode: 'players', me: null, role: 'none', reason: 'verify_required', my_ballot: null, players: [],
+    }))
+    await p2.goto(`${BASE}/vote/vtok?fixture=f1`)
+    await p2.getByPlaceholder('Search your name…').waitFor().catch(() => {})
+    check('without ?player the player is not guessed', (await p2.getByText('Last 4 digits of your mobile').count()) === 0)
+    await ctx2.close()
+  })
+
   const availStubs = async (page, { verified }) => {
     await page.route('**/api/**', (r) => json(r, {}))
     const me = {
