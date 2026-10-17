@@ -23,6 +23,7 @@ downgraded club's link simply 404s.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -36,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.modules import MODULE_SELECT, org_has_module
 from app.config.settings import settings
 from app.models.db import Grade, Organisation, Player, PlayerAvailability, get_db
+from app.routers.ladders import _compute_team_ladders
 from app.routers.availability import (
     MAYBE_OFF,
     active_self_service_players,
@@ -45,11 +47,14 @@ from app.routers.availability import (
     phone_last4,
     upcoming_fixtures_by_date,
 )
-from app.services import rate_limit, squad_sides
+from app.services import fines as fines_svc, player_dashboard, rate_limit, squad_sides
 from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.squad_next_game import fixtures_for_player
+from app.services.session_safety import rollback_keeping
 
 router = APIRouter(prefix="/public/availability", tags=["public-availability"])
+
+logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "bs_avail"
 SESSION_DAYS = 30
@@ -359,9 +364,14 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
 
 @router.get("/{token}/me/profile")
 async def get_my_profile(token: str, request: Request, tz: Optional[str] = None, db: AsyncSession = Depends(get_db)):
-    """The verified player's own page: their squads, the sides they have been
-    selected in, and training. Their own data only, behind the same PIN cookie as
-    the availability answers; nobody else's name appears.
+    """The verified player's own page ("My page"): the modules the club has turned
+    on, in the club's order, with the data behind each. Their own data only,
+    behind the same PIN cookie as the availability answers; nobody else's name
+    appears.
+
+    `modules` is the list the page draws, already cut down to what this club may
+    show (see services/player_dashboard) and to what has something to say for
+    this player. A module the club has not turned on is never queried.
 
     A side shows only once it is LOCKED (confirmed). A draft or an unlocked side
     can still change, and telling a player they are in before the selector has
@@ -371,9 +381,97 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
     now = local_now(tz)
     today = now.date() if now else date.today()
 
+    modules = player_dashboard.served_modules(club)
     squads_visible = bool(club.availability_show_squad)
-    squad_names = await _squad_names(db, club, player) if squads_visible else []
+    squad_names = await _squad_names(db, club, player) if squads_visible and "squad" in modules else []
 
+    # Keys an older page bundle reads stay present (empty) when their module is
+    # off, so a stale tab left open across a deploy still renders.
+    selected = await _selected_sides(db, club, player, today, squads_visible) if "selected" in modules else []
+    training = (
+        await _training(db, club, player, today) if "training" in modules
+        else {"upcoming": [], "attended_8_weeks": 0, "last_attended": None}
+    )
+
+    # The newer modules fail on their own: one that cannot be built is dropped
+    # from this response and the rest of the page still loads.
+    season = fees = fines = None
+    if "season" in modules:
+        try:
+            season = await player_dashboard.season_overview(db, club, player)
+        except Exception:
+            logger.exception("player page: season overview failed for %s", player.id)
+            await rollback_keeping(db, club, player)
+            modules = [m for m in modules if m != "season"]
+    if "fees" in modules:
+        try:
+            fees = await player_dashboard.fees_owing(db, club, player)
+        except Exception:
+            logger.exception("player page: fees failed for %s", player.id)
+            await rollback_keeping(db, club, player)
+            modules = [m for m in modules if m != "fees"]
+    if "fines" in modules:
+        try:
+            fines = await fines_svc.player_fines(db, club.id, player.id)
+        except Exception:
+            logger.exception("player page: fines failed for %s", player.id)
+            await rollback_keeping(db, club, player)
+            fines = []
+        if not fines:
+            modules = [m for m in modules if m != "fines"]
+
+    return {
+        "club": _club_branding(club),
+        "player": {"id": str(player.id), "display_name": player.display_name},
+        "modules": modules,
+        "squads": squad_names,
+        "squads_visible": squads_visible,
+        "selected": selected,
+        "training": training,
+        "season": season,
+        "fees": fees,
+        "fines": fines,
+    }
+
+
+@router.get("/{token}/me/ladder")
+async def get_my_ladder(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The competition ladder for each squad the player is in. Read on its own
+    (the ladder module calls it when it opens) because it asks Cricket Australia,
+    which the rest of the page does not. 404 unless the club has the module on
+    and Show squad on, since the ladder names the player's squad."""
+    club = await _club_for_token(db, token)
+    player = await _player_for_session(db, request, club)
+    if "ladder" not in player_dashboard.served_modules(club):
+        raise HTTPException(status_code=404, detail="Not available")
+    team_ids = [r[0] for r in (await db.execute(
+        text("SELECT team_id FROM team_members WHERE player_id = :p AND organisation_id = :org"),
+        {"p": player.id, "org": club.id},
+    )).fetchall()]
+    if not team_ids:
+        return {"ladders": []}
+    data = await _compute_team_ladders(db, club, auto_link=False, only_team_ids=team_ids)
+    show = {"played", "won", "lost", "competitionPoints"}
+    ladders = []
+    for t in data["teams"]:
+        if not t.get("available") or not t.get("views"):
+            continue
+        view = t["views"][0]
+        ladders.append({
+            "team": t["team_name"],
+            "grade": t.get("grade_name"),
+            "view": view["name"],
+            "columns": [c for c in view["columns"] if c["id"] in show],
+            "rows": [
+                {"rank": r["rank"], "team_name": r["team_name"], "is_club": bool(r["is_club"]),
+                 "stats": {k: v for k, v in r["stats"].items() if k in show}}
+                for r in view["rows"][:20]
+            ],
+        })
+    return {"ladders": ladders[:3]}
+
+
+async def _selected_sides(db: AsyncSession, club: Organisation, player: Player, today: date, squads_visible: bool) -> list[dict]:
     my_sides = await squad_sides.load(db, club.id)
     sel_rows = (await db.execute(
         text(
@@ -387,7 +485,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         ),
         {"p": player.id, "org": club.id, "today": today},
     )).fetchall()
-    selected = [
+    return [
         {
             "date": r[1].isoformat() if r[1] else None, "start_time": r[2], "venue": r[3],
             "opponent_name": r[4], "home_away": r[5], "label": r[6], "round": r[7],
@@ -399,8 +497,10 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         for r in sel_rows
     ]
 
-    # Training: the sessions still to come that are for everyone or for a squad
-    # this player is in, and how often they have turned up lately.
+
+async def _training(db: AsyncSession, club: Organisation, player: Player, today: date) -> dict:
+    """The sessions still to come that are for everyone or for a squad this player
+    is in, and how often they have turned up lately."""
     my_team_ids = {r[0] for r in (await db.execute(
         text("SELECT team_id FROM team_members WHERE player_id = :p AND organisation_id = :org"),
         {"p": player.id, "org": club.id},
@@ -427,18 +527,10 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         ),
         {"p": player.id, "org": club.id, "since": since},
     )).first()
-
     return {
-        "club": _club_branding(club),
-        "player": {"id": str(player.id), "display_name": player.display_name},
-        "squads": squad_names,
-        "squads_visible": squads_visible,
-        "selected": selected,
-        "training": {
-            "upcoming": upcoming,
-            "attended_8_weeks": int(att[0] or 0) if att else 0,
-            "last_attended": att[1].isoformat() if att and att[1] else None,
-        },
+        "upcoming": upcoming,
+        "attended_8_weeks": int(att[0] or 0) if att else 0,
+        "last_attended": att[1].isoformat() if att and att[1] else None,
     }
 
 

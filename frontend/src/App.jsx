@@ -205,6 +205,7 @@ const BsNetSession = lazy(() => import('./pages/admin/betterselect/NetSession'))
 const BsVotes = lazy(() => import('./pages/admin/betterselect/AdminVotes'))
 const BsRules = lazy(() => import('./pages/admin/betterselect/AdminSelectionRules'))
 const BsSettings = lazy(() => import('./pages/admin/betterselect/AdminSelectSettings'))
+const BsFines = lazy(() => import('./pages/admin/betterselect/AdminFines'))
 const BetterIQHome = lazy(() => import('./pages/admin/betteriq/BetterIQHome'))
 const IqOpposition = lazy(() => import('./pages/admin/betteriq/OppositionScout'))
 const IqOppositionPlayer = lazy(() => import('./pages/admin/betteriq/OppositionPlayer'))
@@ -595,6 +596,7 @@ export default function App() {
           <Route path="/admin/betterselect/ladders" element={<ProtectedRoute requireModule="select"><BsLadders /></ProtectedRoute>} />
           <Route path="/admin/betterselect/votes" element={<ProtectedRoute requireModule="select"><BsVotes /></ProtectedRoute>} />
           <Route path="/admin/betterselect/settings" element={<ProtectedRoute requireModule="select"><BsSettings /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/fines" element={<ProtectedRoute requireModule="select"><BsFines /></ProtectedRoute>} />
           <Route path="/admin/betterselect/rules" element={<ProtectedRoute requireModule="select"><BsRules /></ProtectedRoute>} />
 
           {/* BetterIQ module */}

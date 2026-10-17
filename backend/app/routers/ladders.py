@@ -101,14 +101,17 @@ def _parse_ladder_payload(raw, club) -> list:
 
 async def _compute_team_ladders(
     db: AsyncSession, org: Organisation, auto_link: bool = True, public_only: bool = False,
-    hidden_grade_ids=(),
+    hidden_grade_ids=(), only_team_ids=None,
 ) -> dict:
     if auto_link:
         await ensure_team_grades(db, org.id)  # self-link any teams missing a grade (admin only)
+    team_q = select(Team).where(Team.organisation_id == org.id, Team.is_active.is_(True))
+    if only_team_ids is not None:
+        # A player's own page asks for their squads' ladders only, so it never
+        # fetches (or caches) a ladder for every team the club has.
+        team_q = team_q.where(Team.id.in_(list(only_team_ids)))
     teams = (await db.execute(
-        select(Team)
-        .where(Team.organisation_id == org.id, Team.is_active.is_(True))
-        .order_by(Team.sequence.asc(), Team.name.asc())
+        team_q.order_by(Team.sequence.asc(), Team.name.asc())
     )).scalars().all()
     grade_names = await _grade_name_map(db, org.id)
     # grade_id -> raw CA grade GUID. The ladder API is keyed on the shared GUID,

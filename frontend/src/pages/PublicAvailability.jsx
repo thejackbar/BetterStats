@@ -252,9 +252,283 @@ function Section({ title, children }) {
   )
 }
 
-// The player's own page: their availability at a glance, their squads, the sides
-// they have been picked in, and training. Only their own data, behind the same
-// PIN cookie as the availability answers.
+const money = (n) => `${n < 0 ? '-' : ''}$${Math.abs(Number(n) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+function Muted({ children, ...rest }) {
+  return <div className="text-sm text-pb-faint" {...rest}>{children}</div>
+}
+
+// A line of label and value, for the small figure grids.
+function Stat({ label, value }) {
+  return (
+    <div className="rounded-lg px-3 py-2" style={{ background: 'var(--pb-surface2)' }}>
+      <div className="font-display font-bold text-[18px] leading-tight">{value ?? '-'}</div>
+      <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint mt-0.5">{label}</div>
+    </div>
+  )
+}
+
+// ─── The modules of the player's own page ───
+// Each one is a Section the club can turn on or off in BetterSelect. They are
+// declared here, at module level, and picked by key from the server's list.
+
+function AvailabilityModule({ me }) {
+  const upcoming = (me.dates || []).slice(0, 6)
+  return (
+    <Section title="Your availability">
+      {upcoming.length === 0 && <Muted>No upcoming games to answer yet.</Muted>}
+      <div className="flex flex-col gap-1.5">
+        {upcoming.map((d) => {
+          const cur = me.availability?.[d.date]?.status || 'NO_RESPONSE'
+          const meta = AVAILABILITY[cur] || AVAILABILITY.NO_RESPONSE
+          return (
+            <div key={d.date} className="flex items-center justify-between gap-3 text-sm">
+              <span>{fmtShort(d.date)}{weekLabel(d) ? <span className="text-pb-faint"> · {weekLabel(d)}</span> : null}</span>
+              <span className="font-semibold" style={{ color: meta.cssVar }}>{meta.glyph} {meta.label}</span>
+            </div>
+          )
+        })}
+      </div>
+    </Section>
+  )
+}
+
+function SquadModule({ data }) {
+  return (
+    <Section title="Your squad">
+      {!data.squads_visible
+        ? <Muted>Your club has not turned on squad names for this page.</Muted>
+        : data.squads.length
+        ? <div className="flex flex-wrap gap-1.5">{data.squads.map((n) => <span key={n} className="text-[13px] font-semibold rounded-full px-3 py-1" style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}>{n}</span>)}</div>
+        : <Muted>You are not in a squad yet. Your club will add you.</Muted>}
+    </Section>
+  )
+}
+
+function SelectedModule({ data }) {
+  const selected = data.selected || []
+  return (
+    <Section title="Selected">
+      {selected.length === 0
+        ? <Muted data-no-selection>Nothing yet. Sides show here once your selectors have locked them in.</Muted>
+        : (
+          <div className="flex flex-col gap-2.5">
+            {selected.map((s) => (
+              <div key={`${s.date}-${s.opponent_name}`} className="rounded-lg px-3 py-2.5" style={{ background: 'color-mix(in srgb, var(--pb-positive) 10%, transparent)' }}>
+                <div className="font-display font-bold text-[15px]">
+                  {fmtShort(s.date)}{s.team_name ? ` · ${s.team_name}` : ''}
+                </div>
+                <div className="text-[13px] text-pb-dim">
+                  {s.home_away === 'AWAY' ? '@ ' : 'vs '}{s.opponent_name || s.label || 'TBC'}{s.start_time ? ` · ${s.start_time}` : ''}{s.venue ? ` · ${s.venue}` : ''}
+                </div>
+                {(s.is_captain || s.is_wicket_keeper) && (
+                  <div className="text-[12px] font-semibold mt-0.5" style={{ color: 'var(--pb-accent)' }}>
+                    {[s.is_captain && 'Captain', s.is_wicket_keeper && 'Keeper'].filter(Boolean).join(' and ')}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+    </Section>
+  )
+}
+
+function TrainingModule({ data }) {
+  const t = data.training || { upcoming: [], attended_8_weeks: 0 }
+  return (
+    <Section title="Training">
+      {t.upcoming.length === 0
+        ? <Muted>No nets listed for you yet.</Muted>
+        : t.upcoming.map((n) => (
+          <div key={`${n.date}-${n.label}`} className="flex justify-between gap-3 text-sm py-0.5">
+            <span>{fmtShort(n.date)}</span><span className="text-pb-dim truncate">{n.label || 'Nets'}</span>
+          </div>
+        ))}
+      <div className="text-[12.5px] text-pb-faint mt-2">
+        {t.attended_8_weeks > 0
+          ? `You were at ${t.attended_8_weeks} session${t.attended_8_weeks === 1 ? '' : 's'} in the last eight weeks${t.last_attended ? `, most recently ${fmtShort(t.last_attended)}` : ''}.`
+          : 'No nets recorded for you in the last eight weeks.'}
+      </div>
+    </Section>
+  )
+}
+
+// The ladder asks Cricket Australia, which the rest of the page does not, so it
+// loads on its own and the rest of the page never waits on it.
+function LadderModule({ token }) {
+  const [state, setState] = useState({ status: 'loading', ladders: [] })
+  useEffect(() => {
+    let alive = true
+    api.availPublicLadder(token)
+      .then((d) => { if (alive) setState({ status: 'ok', ladders: d.ladders || [] }) })
+      .catch(() => { if (alive) setState({ status: 'failed', ladders: [] }) })
+    return () => { alive = false }
+  }, [token])
+  return (
+    <Section title="Ladder">
+      {state.status === 'loading' && <Muted>Loading the ladder…</Muted>}
+      {state.status === 'failed' && <Muted>The ladder could not load right now. Try again in a minute.</Muted>}
+      {state.status === 'ok' && state.ladders.length === 0 && <Muted data-no-ladder>No ladder is linked to your team yet.</Muted>}
+      {state.ladders.map((l) => (
+        <div key={l.team} className="mb-3 last:mb-0" data-ladder={l.team}>
+          <div className="text-[13px] font-semibold mb-1.5">{l.team}{l.grade ? <span className="text-pb-faint font-normal"> · {l.grade}</span> : null}</div>
+          <table className="w-full text-[12.5px]">
+            <thead>
+              <tr className="text-pb-faint font-mono text-[9.5px] uppercase tracking-wide2">
+                <th className="text-left font-normal w-6">#</th>
+                <th className="text-left font-normal">Team</th>
+                {l.columns.map((c) => <th key={c.id} className="text-right font-normal w-9">{c.heading}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {l.rows.map((r, i) => (
+                <tr key={`${r.team_name}-${i}`} data-mine={r.is_club ? 'yes' : 'no'}
+                  className={r.is_club ? 'font-bold' : 'text-pb-dim'}
+                  style={r.is_club ? { background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>
+                  <td className="py-1 pl-1">{r.rank ?? ''}</td>
+                  <td className="py-1 pr-2 truncate max-w-[160px]">{r.team_name}</td>
+                  {l.columns.map((c) => <td key={c.id} className="py-1 text-right">{r.stats[c.id] ?? ''}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </Section>
+  )
+}
+
+function SeasonModule({ data }) {
+  const s = data.season
+  return (
+    <Section title={s?.season ? `Your season: ${s.season}` : 'Your season'}>
+      {!s ? <Muted data-no-season>No games recorded for you yet.</Muted> : (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <Stat label="Matches" value={s.matches} />
+            <Stat label="Runs" value={s.runs} />
+            <Stat label="High score" value={s.high_score} />
+            <Stat label="Bat avg" value={s.batting_average} />
+            <Stat label="Wickets" value={s.wickets} />
+            <Stat label="Catches" value={s.catches} />
+          </div>
+          {s.best_bowling && <div className="text-[12.5px] text-pb-dim mt-2">Best bowling {s.best_bowling}</div>}
+          <div className="text-[11.5px] text-pb-faintest mt-2">
+            {s.auto_shown ? 'Counts the grades you have played. ' : 'Counts the grade types your club shows in its public stats. '}
+            Your latest season with games.
+          </div>
+        </>
+      )}
+    </Section>
+  )
+}
+
+function FeesModule({ data }) {
+  const f = data.fees
+  return (
+    <Section title="Fees">
+      {!f || !f.on_record ? <Muted data-no-fees>No fees are recorded for you this season yet. Ask your club if you think that is wrong.</Muted> : (
+        <>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-sm text-pb-dim">{f.total_outstanding > 0 ? 'You owe' : 'Nothing owing'}</span>
+            <span className="font-display font-bold text-[22px]" style={{ color: f.total_outstanding > 0 ? 'var(--pb-amber)' : 'var(--pb-positive)' }}>
+              {money(f.total_outstanding)}
+            </span>
+          </div>
+          {f.total_outstanding > 0 && (f.membership_outstanding > 0 || f.match_fee_outstanding > 0) && (
+            <div className="text-[12.5px] text-pb-dim mt-1.5">
+              {[f.membership_outstanding > 0 && `Membership ${money(f.membership_outstanding)}`, f.match_fee_outstanding > 0 && `Match fees ${money(f.match_fee_outstanding)}`].filter(Boolean).join(' · ')}
+            </div>
+          )}
+          {f.credit > 0 && <div className="text-[12.5px] text-pb-dim mt-1.5">You are {money(f.credit)} in credit.</div>}
+          <div className="text-[11.5px] text-pb-faintest mt-2">{f.season ? `${f.season}. ` : ''}Paid so far {money(f.total_paid)}.</div>
+        </>
+      )}
+    </Section>
+  )
+}
+
+function CopyRow({ label, value }) {
+  const [done, setDone] = useState(false)
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(value); setDone(true); setTimeout(() => setDone(false), 1500) } catch { /* the value is on screen to type */ }
+  }
+  return (
+    <div className="flex items-center justify-between gap-3 py-1.5 border-t pb-hairline first:border-t-0 text-sm">
+      <div className="min-w-0">
+        <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint">{label}</div>
+        <div className="font-semibold break-all">{value}</div>
+      </div>
+      <button type="button" onClick={copy} className="shrink-0 text-[12px] underline text-pb-faint">{done ? 'Copied' : 'Copy'}</button>
+    </div>
+  )
+}
+
+const PAY_LABELS = [
+  ['payid', 'PayID'], ['payid_name', 'Name that shows'], ['account_name', 'Account name'],
+  ['bsb', 'BSB'], ['account_number', 'Account number'], ['reference_hint', 'Reference'],
+]
+
+function FinesBlock({ f }) {
+  const pay = f.how_to_pay || {}
+  const hasPay = PAY_LABELS.some(([k]) => pay[k]) || pay.other_instructions
+  return (
+    <div className="mb-4 last:mb-0" data-fines-squad={f.squad}>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-sm text-pb-dim">{f.owing > 0 ? `You owe the ${f.squad} fines pot` : f.owing < 0 ? 'You are in credit' : 'You are all square'}</span>
+        <span className="font-display font-bold text-[22px]" style={{ color: f.owing > 0 ? 'var(--pb-amber)' : 'var(--pb-positive)' }}>
+          {money(Math.abs(f.owing))}
+        </span>
+      </div>
+      <div className="text-[12px] text-pb-faint mt-0.5">Fined {money(f.fined)} · paid {money(f.paid)}</div>
+
+      {f.weeks.length > 0 && (
+        <div className="mt-3">
+          <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Week by week</div>
+          {f.weeks.map((w) => (
+            <div key={w.date} className="py-1.5 border-t pb-hairline first:border-t-0">
+              <div className="flex justify-between gap-3 text-sm"><span>{fmtShort(w.date)}</span><span className="font-semibold">{money(w.total)}</span></div>
+              <div className="text-[12px] text-pb-faint">{w.items.map((i) => `${i.reason} ${money(i.amount)}`).join(' · ')}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {f.weeks.length === 0 && <div className="text-[12.5px] text-pb-faint mt-2">No fines yet.</div>}
+
+      {f.payments.length > 0 && (
+        <div className="text-[12.5px] text-pb-dim mt-3">
+          Your payments: {f.payments.map((p) => `${money(p.amount)} on ${fmtShort(p.date)}`).join(', ')}
+        </div>
+      )}
+
+      {f.owing > 0 && (
+        <div className="mt-3 rounded-lg p-3" style={{ background: 'var(--pb-surface2)' }} data-how-to-pay>
+          <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">How to pay</div>
+          {hasPay ? (
+            <>
+              {PAY_LABELS.filter(([k]) => pay[k]).map(([k, label]) => <CopyRow key={k} label={label} value={pay[k]} />)}
+              {pay.other_instructions && <div className="text-[12.5px] text-pb-dim mt-1.5">{pay.other_instructions}</div>}
+            </>
+          ) : <div className="text-[12.5px] text-pb-faint">Your fines master has not added payment details yet. Ask them how to pay.</div>}
+        </div>
+      )}
+      <div className="text-[11.5px] text-pb-faintest mt-2">In the pot so far: {money(f.pot)}.</div>
+    </div>
+  )
+}
+
+function FinesModule({ data }) {
+  return (
+    <Section title="Fines">
+      {(data.fines || []).map((f) => <FinesBlock key={f.squad} f={f} />)}
+    </Section>
+  )
+}
+
+// The player's own page: whichever modules the club has turned on, in the club's
+// order. Only their own data, behind the same PIN cookie as the availability
+// answers. Availability comes from the page's own state; the rest from one call.
 function MyPage({ token, me }) {
   const [data, setData] = useState(null)
   const [failed, setFailed] = useState(false)
@@ -264,78 +538,31 @@ function MyPage({ token, me }) {
     return () => { alive = false }
   }, [token])
 
-  const upcoming = (me.dates || []).slice(0, 6)
+  const render = (key) => {
+    switch (key) {
+      case 'availability': return <AvailabilityModule key={key} me={me} />
+      case 'squad': return <SquadModule key={key} data={data} />
+      case 'selected': return <SelectedModule key={key} data={data} />
+      case 'training': return <TrainingModule key={key} data={data} />
+      case 'ladder': return <LadderModule key={key} token={token} />
+      case 'season': return <SeasonModule key={key} data={data} />
+      case 'fees': return <FeesModule key={key} data={data} />
+      case 'fines': return <FinesModule key={key} data={data} />
+      default: return null
+    }
+  }
+
+  // A server that doesn't send the list is the page as it was before clubs could choose.
+  const modules = data ? (data.modules ?? ['availability', 'squad', 'selected', 'training']) : []
+
   return (
     <div data-my-page>
-      <Section title="Your availability">
-        {upcoming.length === 0 && <div className="text-sm text-pb-faint">No upcoming games to answer yet.</div>}
-        <div className="flex flex-col gap-1.5">
-          {upcoming.map((d) => {
-            const cur = me.availability?.[d.date]?.status || 'NO_RESPONSE'
-            const meta = AVAILABILITY[cur] || AVAILABILITY.NO_RESPONSE
-            return (
-              <div key={d.date} className="flex items-center justify-between gap-3 text-sm">
-                <span>{fmtShort(d.date)}{weekLabel(d) ? <span className="text-pb-faint"> · {weekLabel(d)}</span> : null}</span>
-                <span className="font-semibold" style={{ color: meta.cssVar }}>{meta.glyph} {meta.label}</span>
-              </div>
-            )
-          })}
-        </div>
-      </Section>
-
       {failed && <div className="text-sm text-pb-faint mb-3">Your page could not load. Pull down to try again.</div>}
       {!data && !failed && <div className="text-sm text-pb-faint mb-3">Loading your page…</div>}
-
-      {data && (
-        <>
-          <Section title="Your squad">
-            {data.squads_visible
-              ? (data.squads.length
-                ? <div className="flex flex-wrap gap-1.5">{data.squads.map((n) => <span key={n} className="text-[13px] font-semibold rounded-full px-3 py-1" style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}>{n}</span>)}</div>
-                : <div className="text-sm text-pb-faint">You are not in a squad yet. Your club will add you.</div>)
-              : <div className="text-sm text-pb-faint">Your club has not turned on squad names for this page.</div>}
-          </Section>
-
-          <Section title="Selected">
-            {data.selected.length === 0
-              ? <div className="text-sm text-pb-faint" data-no-selection>Nothing yet. Sides show here once your selectors have locked them in.</div>
-              : (
-                <div className="flex flex-col gap-2.5">
-                  {data.selected.map((s) => (
-                    <div key={`${s.date}-${s.opponent_name}`} className="rounded-lg px-3 py-2.5" style={{ background: 'color-mix(in srgb, var(--pb-positive) 10%, transparent)' }}>
-                      <div className="font-display font-bold text-[15px]">
-                        {fmtShort(s.date)}{s.team_name ? ` · ${s.team_name}` : ''}
-                      </div>
-                      <div className="text-[13px] text-pb-dim">
-                        {s.home_away === 'AWAY' ? '@ ' : 'vs '}{s.opponent_name || s.label || 'TBC'}{s.start_time ? ` · ${s.start_time}` : ''}{s.venue ? ` · ${s.venue}` : ''}
-                      </div>
-                      {(s.is_captain || s.is_wicket_keeper) && (
-                        <div className="text-[12px] font-semibold mt-0.5" style={{ color: 'var(--pb-accent)' }}>
-                          {[s.is_captain && 'Captain', s.is_wicket_keeper && 'Keeper'].filter(Boolean).join(' and ')}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-          </Section>
-
-          <Section title="Training">
-            {data.training.upcoming.length === 0
-              ? <div className="text-sm text-pb-faint">No nets listed for you yet.</div>
-              : data.training.upcoming.map((t) => (
-                <div key={`${t.date}-${t.label}`} className="flex justify-between gap-3 text-sm py-0.5">
-                  <span>{fmtShort(t.date)}</span><span className="text-pb-dim truncate">{t.label || 'Nets'}</span>
-                </div>
-              ))}
-            <div className="text-[12.5px] text-pb-faint mt-2">
-              {data.training.attended_8_weeks > 0
-                ? `You were at ${data.training.attended_8_weeks} session${data.training.attended_8_weeks === 1 ? '' : 's'} in the last eight weeks${data.training.last_attended ? `, most recently ${fmtShort(data.training.last_attended)}` : ''}.`
-                : 'No nets recorded for you in the last eight weeks.'}
-            </div>
-          </Section>
-        </>
+      {data && modules.length === 0 && (
+        <div className="text-sm text-pb-faint" data-no-modules>Your club has not added anything to this page yet.</div>
       )}
+      {data && modules.map(render)}
     </div>
   )
 }

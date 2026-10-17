@@ -27,7 +27,7 @@ from app.models.db import (
     Fixture, PlayerAvailability, PlayerAvailabilityPeriod, Organisation, Player, User, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.services import squad_sides
+from app.services import player_dashboard, squad_sides
 from app.services.junior_fixtures import junior_fixture_ids
 from app.services.name_format import name_sort_key
 from app.services.squad_next_game import fixture_has_started, squad_next_games
@@ -767,6 +767,9 @@ class SelfServiceUpdate(BaseModel):
     require_pin: Optional[bool] = None
     show_squad: Optional[bool] = None
     allow_maybe: Optional[bool] = None
+    # The modules on a player's own page, in order. An empty list is a real
+    # choice (everything off); only None means "not sent".
+    dashboard_modules: Optional[list[str]] = None
 
 
 async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
@@ -777,6 +780,9 @@ async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
         "require_pin": bool(club.availability_require_pin),
         "show_squad": bool(club.availability_show_squad),
         "allow_maybe": allow_maybe(club),
+        # Every module the page can show, with whether this club has it on and
+        # why it cannot be (a missing module, or a switch it depends on).
+        "dashboard_modules": player_dashboard.catalogue_for(club),
         "token": club.availability_link_token,
         # The link is a frontend route; the admin UI prefixes its own origin.
         "path": f"/avail/{club.availability_link_token}" if club.availability_link_token else None,
@@ -810,6 +816,8 @@ async def update_self_service(
         club.availability_show_squad = bool(body.show_squad)
     if body.allow_maybe is not None:
         club.availability_allow_maybe = bool(body.allow_maybe)
+    if body.dashboard_modules is not None:
+        club.player_dashboard_modules = player_dashboard.normalise(body.dashboard_modules)
     if body.enabled is not None:
         club.availability_self_service_enabled = bool(body.enabled)
         if body.enabled and not club.availability_link_token:

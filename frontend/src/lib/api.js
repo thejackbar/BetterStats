@@ -3282,6 +3282,27 @@ export const api = {
   bsRegenerateSelfService: () =>
     request('/availability/self-service/regenerate', { method: 'POST' }),
 
+  // ─── BetterSelect: Fines (admin) ───
+  // A squad's fines tracker. Nothing is deleted: a wrong row is voided, a fine
+  // type that is no longer used is archived.
+  bsFinesSquads: () => request('/fines/squads'),
+  bsFinesSquad: (teamId) => request(`/fines/squads/${teamId}`),
+  bsFinesSettings: (teamId, data) =>
+    request(`/fines/squads/${teamId}/settings`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bsFinesAddType: (teamId, data) =>
+    request(`/fines/squads/${teamId}/types`, { method: 'POST', body: JSON.stringify(data) }),
+  bsFinesPatchType: (typeId, data) =>
+    request(`/fines/types/${typeId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bsFinesAddEntries: (teamId, data) =>
+    request(`/fines/squads/${teamId}/entries`, { method: 'POST', body: JSON.stringify(data) }),
+  bsFinesVoidEntry: (id) => request(`/fines/entries/${id}/void`, { method: 'POST' }),
+  bsFinesRestoreEntry: (id) => request(`/fines/entries/${id}/restore`, { method: 'POST' }),
+  bsFinesAddPayment: (teamId, data) =>
+    request(`/fines/squads/${teamId}/payments`, { method: 'POST', body: JSON.stringify(data) }),
+  bsFinesVoidPayment: (id) => request(`/fines/payments/${id}/void`, { method: 'POST' }),
+  bsFinesRestorePayment: (id) => request(`/fines/payments/${id}/restore`, { method: 'POST' }),
+  bsFinesLedger: (teamId, playerId) => request(`/fines/squads/${teamId}/players/${playerId}/ledger`),
+
   // ─── Public: self-service availability (no admin auth; player cookie) ───
   // Outside the admin surface — players reach these via the magic link + PIN.
   availPublicLanding: (token) => request(`/public/availability/${token}`),
@@ -3292,6 +3313,8 @@ export const api = {
   availPublicMe: (token) => request(`/public/availability/${token}/me${tzQuery()}`),
   // The verified player's own page: squads, locked selections, training.
   availPublicProfile: (token) => request(`/public/availability/${token}/me/profile${tzQuery()}`),
+  // The competition ladder for the player's squads (the page's Ladder module).
+  availPublicLadder: (token) => request(`/public/availability/${token}/me/ladder`),
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
 
