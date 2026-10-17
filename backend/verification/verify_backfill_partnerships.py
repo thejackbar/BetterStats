@@ -14,6 +14,7 @@ Seeded games:
   has       already holds stands                              -> never selected
   no_fow    no fall of wickets stored                         -> never selected
   gone      fall of wickets stored, Cricket Australia 204s    -> counted, not written
+  foreign   card names no team owned by this club             -> no stand, reason says so
 
 Run:  DATABASE_URL=postgresql+asyncpg://root@/backfillpart?host=/var/run/postgresql \
       python verification/verify_backfill_partnerships.py
@@ -21,9 +22,11 @@ Run:  DATABASE_URL=postgresql+asyncpg://root@/backfillpart?host=/var/run/postgre
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 import sys
 import uuid
+from contextlib import redirect_stdout
 from datetime import date
 from pathlib import Path
 
@@ -46,7 +49,7 @@ S = uuid.uuid4(); G = uuid.uuid4()
 T_US, T_OPP = uuid.uuid4(), uuid.uuid4()
 GUIDS = {k: uuid.uuid4() for k in "ABCD"}
 PIDS = {k: uuid.uuid4() for k in "ABCD"}
-GAMES = {k: uuid.uuid4() for k in ("fixable", "mismatch", "has", "no_fow", "gone")}
+GAMES = {k: uuid.uuid4() for k in ("fixable", "mismatch", "has", "no_fow", "gone", "foreign")}
 
 
 def card(fow_rows: list[tuple]) -> dict:
@@ -72,6 +75,8 @@ def card(fow_rows: list[tuple]) -> dict:
 
 GOOD = card([(1, 10, "A"), (2, 20, "B"), (3, 224, "C")])
 BAD = card([(1, 10, "A"), (2, 20, "B")])            # 2 fall of wicket rows, 3 dismissals
+FOREIGN = card([(1, 10, "A"), (2, 20, "B"), (3, 224, "C")])
+FOREIGN["teams"][0]["owningOrganisation"] = {"id": str(THEIRS)}   # no team on the card is this club's
 
 
 async def merge_logs_table() -> None:
@@ -156,7 +161,8 @@ async def main() -> None:
     bf.async_session_maker = Session
 
     asked: list[str] = []
-    by_id = {str(GAMES["fixable"]): GOOD, str(GAMES["mismatch"]): BAD, str(GAMES["gone"]): None}
+    by_id = {str(GAMES["fixable"]): GOOD, str(GAMES["mismatch"]): BAD, str(GAMES["gone"]): None,
+             str(GAMES["foreign"]): FOREIGN}
 
     async def fetch(match_id: str):
         asked.append(match_id)
@@ -172,14 +178,24 @@ async def main() -> None:
     check("dry run: writes nothing", await stands("fixable") == [])
     check("dry run: the board is unchanged", 204 not in await board())
     check("only games with fall of wickets and no stands were asked for",
-          set(asked) == {str(GAMES[k]) for k in ("fixable", "mismatch", "gone")}, str(asked))
+          set(asked) == {str(GAMES[k]) for k in ("fixable", "mismatch", "gone", "foreign")}, str(asked))
 
     asked.clear()
-    t = await bf.run("our-club", pause=0, apply=True, fetch=fetch)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        t = await bf.run("our-club", pause=0, apply=True, fetch=fetch, explain=True)
+    out = buf.getvalue()
     check("apply: three stands written for the fixable game", await stands("fixable") == [10, 10, 204], str(await stands("fixable")))
     check("apply: the shipped records route now lists the 204", 204 in await board(), str(await board()))
     check("apply: the mismatched card is refused and writes no stand", await stands("mismatch") == [])
-    check("apply: counted as refused", t["refused"] == 1, str(t))
+    check("apply: the two games that got no stand are counted", t["refused"] == 2, str(t))
+    check("reason: names the fall of wickets v dismissals mismatch",
+          "2 fall of wickets v 3 dismissals on the card" in out, out)
+    check("reason: names a card with no team owned by the club",
+          "no team on the card is owned by this club" in out, out)
+    check("--explain dumps the rows the derivation read", "fow   2" in out and "bat   3" in out, out)
+    check("a game that did get stands is not reported as refused",
+          f"{GAMES['fixable']}: no stand" not in out, out)
     check("apply: a game Cricket Australia cannot answer for is counted, not written",
           t["no_data"] == 1 and await stands("gone") == [], str(t))
     check("apply: a game that already held stands is untouched", await stands("has") == [10])

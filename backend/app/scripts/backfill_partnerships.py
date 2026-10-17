@@ -24,7 +24,7 @@ adds nothing. It never touches a player's batting, bowling or fielding figures.
 It reads games that hold fall of wickets and no partnership rows. The derivation
 refuses an innings whose fall of wickets does not match the dismissals on the
 batting card (a wrongly paired stand is worse than none), so some games still end
-with no stand; they are listed as "refused".
+with no stand; each is listed with the reason, and `--explain` prints what the derivation read.
 
 CRICKET AUSTRALIA TRAFFIC
 -------------------------
@@ -34,7 +34,7 @@ for the next batch: games that now hold stands drop out of the selection, which 
 the cursor.
 
     python -m app.scripts.backfill_partnerships <org-id-or-slug> [--from 2017-07-01] [--to 2018-06-30]
-                                                [--limit 100] [--pause 0.4] [--apply]
+                                                [--limit 100] [--pause 0.4] [--explain] [--apply]
 
 DRY RUN BY DEFAULT. Without `--apply` it reads, derives, reports and rolls back.
 """
@@ -52,11 +52,66 @@ from app.models.db import async_session_maker
 from app.services import grassroots_scores_client as gr
 from app.services import participant_relink as relink
 from app.services.club_grades import club_game_sql
+from app.services.sync import _derive_partnerships_grassroots, _dismissed_pids_grassroots
 
 DEFAULT_LIMIT = 100
 DEFAULT_PAUSE = 0.4
 
 Fetch = Callable[[str], Awaitable[Optional[dict]]]
+
+
+_NO_BAT = {"absent", "did not bat", "dnb"}
+
+
+def explain_innings(inn: dict) -> str:
+    """Why `_derive_partnerships_grassroots` returns nothing for this innings, in the order it checks.
+
+    "ok" means it derives; the stands may still all be dropped for want of a club batter.
+    """
+    batting = inn.get("batting") or []
+    fow = inn.get("fallOfWickets") or []
+    valid = [b for b in batting
+             if (b.get("dismissalTypeId") or 0) != 0 and (b.get("dismissalType") or "").lower() not in _NO_BAT]
+    if len(valid) < 2:
+        return f"{len(valid)} batter(s) with a result on the card"
+    dismissed = _dismissed_pids_grassroots(batting)
+    if not dismissed:
+        return "no dismissals on the batting card"
+    if len(fow) != len(dismissed):
+        return f"{len(fow)} fall of wickets v {len(dismissed)} dismissals on the card"
+    fow_pids = {f.get("participantId") for f in fow if f.get("participantId")}
+    if fow_pids and not fow_pids.issubset(dismissed):
+        return "a fall of wicket names a batter who was not dismissed"
+    if not _derive_partnerships_grassroots(batting, fow):
+        return "a stand is worth more than its batters scored plus extras, or the score goes backwards"
+    return "ok"
+
+
+def explain_game(card: dict, club_id) -> str:
+    """One line per game: what stopped any stand being written."""
+    if relink._our_team(card, club_id) is None:
+        return "no team on the card is owned by this club"
+    parts = []
+    for inn in card.get("innings") or []:
+        n = inn.get("inningsOrder") or inn.get("inningsNumber") or "?"
+        parts.append(f"innings {n}: {explain_innings(inn)}")
+    if not parts:
+        return "the card has no innings"
+    if all(x.endswith(": ok") for x in parts):
+        return "stands derive but none has a batter this club holds or rosters"
+    return "; ".join(parts)
+
+
+def dump_card(card: dict) -> None:
+    """The fields the derivation reads, compactly, so a refusal can be checked by eye."""
+    for inn in card.get("innings") or []:
+        print(f"      innings {inn.get('inningsOrder') or inn.get('inningsNumber')}"
+              f"  batting team {inn.get('battingTeamId') or inn.get('teamId')}")
+        for b in sorted(inn.get("batting") or [], key=lambda r: r.get("batOrder") or 99):
+            print(f"        bat {b.get('batOrder')!s:>3}  {str(b.get('participantId'))[:8]}  "
+                  f"dt={b.get('dismissalTypeId')!s:<3} {b.get('dismissalType')!s:<16} runs={b.get('runsScored')}")
+        for f in sorted(inn.get("fallOfWickets") or [], key=lambda r: r.get("order") or 99):
+            print(f"        fow {f.get('order')!s:>3}  {str(f.get('participantId'))[:8]}  score={f.get('runs')}")
 
 
 async def select_games(db, org_id, d_from: Optional[date], d_to: Optional[date], limit: int) -> list:
@@ -78,7 +133,7 @@ async def select_games(db, org_id, d_from: Optional[date], d_to: Optional[date],
 
 async def run(org: str, *, d_from: Optional[date] = None, d_to: Optional[date] = None,
               limit: int = DEFAULT_LIMIT, pause: float = DEFAULT_PAUSE, apply: bool = False,
-              fetch: Optional[Fetch] = None) -> dict:
+              explain: bool = False, fetch: Optional[Fetch] = None) -> dict:
     """Returns the counts, so a verification can read them without parsing output."""
     async def _fetch(match_id: str):
         sc = await (fetch or gr.get_match_scorecard)(match_id)
@@ -137,11 +192,13 @@ async def run(org: str, *, d_from: Optional[date] = None, d_to: Optional[date] =
             print(f"  ok  {g['played']}  {g['grade']}  {g['id']}: {verb} {n['partnerships']} stand(s)")
         else:
             tally["refused"] += 1
-            print(f"  --  {g['played']}  {g['grade']}  {g['id']}: refused (fall of wickets does not match the card)")
+            print(f"  --  {g['played']}  {g['grade']}  {g['id']}: no stand written: {explain_game(card, club_id)}")
+            if explain:
+                dump_card(card)
 
     verb = "Added" if apply else "Would add"
     print(f"\n{verb} {tally['stands_added']} stand(s) across {tally['games'] - tally['refused']} game(s); "
-          f"{tally['refused']} refused, {tally['no_data']} with no scorecard, {tally['failed']} failed.")
+          f"{tally['refused']} with no stand written, {tally['no_data']} with no scorecard, {tally['failed']} failed.")
     return tally
 
 
@@ -152,9 +209,12 @@ def main() -> None:
     ap.add_argument("--to", dest="d_to", type=date.fromisoformat, default=None)
     ap.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     ap.add_argument("--pause", type=float, default=DEFAULT_PAUSE)
+    ap.add_argument("--explain", action="store_true",
+                    help="for a game that gets no stand, also print the batting and fall of wickets the derivation read")
     ap.add_argument("--apply", action="store_true", help="write the stands (default is a dry run)")
     a = ap.parse_args()
-    asyncio.run(run(a.org, d_from=a.d_from, d_to=a.d_to, limit=a.limit, pause=a.pause, apply=a.apply))
+    asyncio.run(run(a.org, d_from=a.d_from, d_to=a.d_to, limit=a.limit, pause=a.pause, apply=a.apply,
+                    explain=a.explain))
 
 
 if __name__ == "__main__":
