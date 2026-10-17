@@ -33,6 +33,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_CLUB_ROOM, MANAGE_SOCIAL, require_cap
@@ -110,11 +111,19 @@ async def _get_or_create_settings(db: AsyncSession, club: Organisation) -> ClubR
     row = await db.get(ClubRoomSettings, club.id)
     if row:
         return row
-    row = ClubRoomSettings(organisation_id=club.id)
-    db.add(row)
+    # The editor fires /settings and /public-link together, so on a club's first
+    # visit two requests both find no row. A plain insert lets the second one hit
+    # the primary key and 500 the page; ON CONFLICT DO NOTHING makes the loser a
+    # no-op and the re-read below returns whichever row won.
+    club_id = club.id
+    await db.execute(
+        pg_insert(ClubRoomSettings)
+        .values(organisation_id=club_id, enabled=False, rotation_seconds=15,
+                theme="dark", shuffle=False, public_link_enabled=False, require_pin=True)
+        .on_conflict_do_nothing(index_elements=[ClubRoomSettings.organisation_id])
+    )
     await db.commit()
-    await db.refresh(row)
-    return row
+    return await db.get(ClubRoomSettings, club_id)
 
 
 def _settings_dict(s: ClubRoomSettings) -> dict:

@@ -1609,7 +1609,7 @@ Asked for: add fines should default to whoever was selected in the team that wee
 - Frontend: `AdminFines.jsx` is the shell (tiles, tabs; every panel stays mounted and only hidden, so a half-built session survives a tab change), `AddFinesSession.jsx` (`giveLines` never overwrites a filled line; Max lines are tracked with `isMax` so a second press replaces rather than stacks), `FinesOverview.jsx`, `FinesReport.jsx`, `lib/finesReport.js` (blocks for `textDocs.downloadPdf`), `finesUi.jsx`.
 - Proof: `verify_player_dashboard_and_fines.py` (real Postgres, 104; control on the previous routes fails the 10 new-behaviour checks without crashing), `verify_player_dashboard_fines_browser.mjs` (90: tiles, tabs, prefilled rows, Fine ticked, Fine all, Max all, a second press, over the maximum, date change, no side picked, no maximum set, the exact request bodies, the report and a downloaded PDF, 390px on four tabs).
 
-## v9.120.1.1: the player's My page as a dashboard
+## v9.120.1.2: the player's My page as a dashboard
 
 Asked for: the player's own page "a little more friendly rather than just a straight line of scrolling down the page, more like a reporting dashboard". (An earlier reading of this as the admin Fines screen was wrong; that screen's dashboard in v9.120.1 stays.)
 
