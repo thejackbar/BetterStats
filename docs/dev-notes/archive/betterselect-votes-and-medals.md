@@ -434,3 +434,7 @@ handoff. Every existing endpoint/field keeps its shape — this is additive.
 ## Medal voting-link switch (v9.119.0.1, Oct 2026)
 
 A new `vote_medals` row starts with `enabled = false`. After migration 267 the Settings tab had no control that sent `enabled`, so the "Turn it on under Settings" notice in `ShareVotePanel` pointed at nothing and a new medal could never be switched on from the UI. `VotesSettings.jsx` now has a "Voting link" Off/On row (PATCH `enabled` through `votesSetSettings`), and `ShareVotePanel` takes an `onEnable` prop so the Settings tab's off notice carries a "Turn on voting link" button. Other screens keep the notice that points at Settings. Frontend only; the backend already handled `enabled` and minted `link_token` on first enable.
+
+## Public vote page asks who you are (v9.119.0.2, Oct 2026)
+
+`GET /public/votes/{token}/fixtures/{id}` returns `role: 'none', reason: 'verify_required'` for a caller with no `bs_vote` cookie when the medal has `allow_non_participants` off. `PublicVoting.jsx::openFixture` sent every `role === 'none'` to the ballot step, where `REASON` had no entry for `verify_required`, so a first-time visitor read the generic "You can't vote on this game." and was never offered the name picker. `openFixture` now sends an open fixture with `verify_required` to the `pick` step; the other reasons (`captain_only`, `did_not_play`) still land on the ballot step's message. Proved in Chromium with the API stubbed (a control run on the previous file fails both the "not the dead end" and "asked to find their name" checks).

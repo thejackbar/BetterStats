@@ -80,6 +80,7 @@
 - An existing club's count narrows after 267: empty `grade_ids` must mean every grade (rule 12).
 - A grade-restricted medal shows fixtures at zero ballots, or a fixture disappears from it: grade resolved after narrowing, or `effective_grade_ids` not used (rule 13).
 - Merging two records of one person deletes one of their two ballots: de-dup key lacked `medal_id` (rule 16).
+- A first-time visitor on an open game reads "You can't vote on this game" and is never asked who they are: `role 'none'` with `reason 'verify_required'` must go to the name picker (`pick` step), not the ballot step's message (v9.119.0.2).
 - Football team list names the opposition players: read forgot `our_side` (rule 37).
 - A game's points read 18 where 6 is right (three voters all giving 3-2-1): raw tally used where 'rank' conversion is the default (rule 3).
 - Grade-filtered awards night replays whole-club standings: `grade_id` missing from the board payload (rule 34).

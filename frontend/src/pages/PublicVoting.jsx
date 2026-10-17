@@ -28,6 +28,7 @@ const NOT_OPEN = {
 const REASON = {
   captain_only: 'Only the captain submits votes for this club. Ask your skipper to cast them.',
   did_not_play: 'Only players who played in this game can vote at this club.',
+  verify_required: 'Find your name to vote on this game.',
 }
 
 function Banner({ tone = 'error', children }) {
@@ -170,6 +171,11 @@ export default function PublicVoting() {
       const d = await api.votePublicFixture(token, fid)
       setFixture(d)
       if (d.me && !me) setMe(d.me)
+      // Nobody identified yet and the club only takes players: that is "who are
+      // you?", not "you can't vote", so go to the name picker.
+      if (d.fixture?.state === 'open' && d.role === 'none' && d.reason === 'verify_required') {
+        seedPicks(d); setStep('pick'); return
+      }
       if (d.fixture?.state !== 'open' || d.role === 'none') { seedPicks(d); setStep('ballot'); return }
       if (!d.me && !supporterName) { seedPicks(d); setStep('pick'); return }
       seedPicks(d); setStep('ballot')
