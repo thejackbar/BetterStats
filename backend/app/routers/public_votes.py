@@ -32,7 +32,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import MODULE_SELECT, org_has_module
@@ -139,6 +139,18 @@ def _club_branding(club: Organisation) -> dict:
         "primary_color": club.primary_color,
         "accent_color": club.accent_color,
     }
+
+
+def _me_payload(club: Organisation, player: Player) -> dict:
+    """The verified voter as the vote pages see them. `my_page` is the way back to
+    their own dashboard (the My page tab of the availability link), and is only
+    sent to a verified player and only while the club's self-service link is on.
+    The availability token is never sent to anyone who has not proved who they
+    are here: a club that lets supporters vote must not hand them the player link."""
+    out = {"id": str(player.id), "display_name": player.display_name}
+    if club.availability_self_service_enabled and club.availability_link_token:
+        out["my_page"] = f"/avail/{club.availability_link_token}?tab=mine&player={player.id}"
+    return out
 
 
 async def _verified_player(db: AsyncSession, request: Request, club: Organisation) -> Optional[Player]:
@@ -289,7 +301,7 @@ async def get_landing(
         "allow_non_participants": cfg["allow_non_participants"],
         "allow_self_vote": cfg["allow_self_vote"],
         "ballot_values": cfg["ballot_values"],
-        "me": {"id": str(me.id), "display_name": me.display_name} if me else None,
+        "me": _me_payload(club, me) if me else None,
         "players": [
             {"id": str(p.id), "display_name": p.display_name,
              "has_phone": phone_last4(p.phone) is not None}
@@ -358,7 +370,7 @@ async def verify(token: str, body: VerifyBody, request: Request, response: Respo
 
     rate_limit.clear_failures(lock_key)
     _issue_cookie(response, club.id, player.id)
-    return {"status": "ok", "player": {"id": str(player.id), "display_name": player.display_name}}
+    return {"status": "ok", "player": _me_payload(club, player)}
 
 
 @router.post("/{token}/switch")
@@ -425,6 +437,20 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         if b:
             my_ballot = [str(p.player_id) for p in sorted(b.picks, key=lambda p: p.position)]
 
+    # Their photos, for the list. Only for a player who is public: someone hidden
+    # from the public pages (their own request, or the club's) stays a name here
+    # and does not get their face put on a page with no sign-in.
+    photos: dict[str, str] = {}
+    ids = [uuid.UUID(p["id"]) for p in eligible]
+    if ids:
+        rows = (await db.execute(
+            text("SELECT id, photo_url FROM players WHERE organisation_id = :org "
+                 "AND id = ANY(CAST(:ids AS uuid[])) AND photo_url IS NOT NULL AND photo_url <> '' "
+                 "AND COALESCE(is_public, true) AND privacy_hidden_at IS NULL"),
+            {"org": club.id, "ids": ids},
+        )).fetchall()
+        photos = {str(i): u for i, u in rows}
+
     return {
         "club": _club_branding(club),
         "fixture": {
@@ -437,10 +463,10 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         "ballot_values": cfg["ballot_values"],
         "allow_self_vote": cfg["allow_self_vote"],
         "voter_mode": cfg["voter_mode"],
-        "me": {"id": str(me.id), "display_name": me.display_name} if me else None,
+        "me": _me_payload(club, me) if me else None,
         "role": role,
         "reason": reason,
-        "players": [{"id": p["id"], "name": p["name"]} for p in eligible],
+        "players": [{"id": p["id"], "name": p["name"], "photo_url": photos.get(str(p["id"]))} for p in eligible],
         "my_ballot": my_ballot,
     }
 

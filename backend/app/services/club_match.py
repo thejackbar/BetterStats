@@ -121,6 +121,18 @@ def fixture_involves_club(club, fx: dict) -> bool:
     ) is not None
 
 
+def fixture_is_between_others(club, fx: dict) -> bool:
+    """True only when the payload NAMES both owning clubs and neither is ours.
+
+    The strict form of "not ours", for acting on a stored row (removing it): a
+    side with no organisation id is never enough, because a sponsor-named side
+    of the club's own would read as foreign by name.
+    """
+    if not (fx.get("home_org_id") and fx.get("away_org_id")):
+        return False
+    return not fixture_involves_club(club, fx)
+
+
 def keys_match_any(keys: Iterable[str], *texts: Optional[str]) -> bool:
     """Whole-word test of pre-built keys (``club_match_keys``) against names."""
     return any(_has_word((t or "").lower(), k) for t in texts for k in keys if k)

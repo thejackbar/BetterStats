@@ -10,6 +10,7 @@ import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
 import BookmarkButton from './BookmarkButton'
 import { IS_AFL, PLATFORM_NAME } from '../../lib/sport'
+import { useHalfColours } from '../../lib/useAvailabilityConfig'
 
 // The football app has no bookmarks service, so the star renders nothing there.
 const Bookmark = IS_AFL ? () => null : BookmarkButton
@@ -54,6 +55,7 @@ const CRICKET_GROUPS = [
       { to: '/admin/betterselect/fixtures', label: 'Fixtures', icon: 'fixtures', cap: CAP.MANAGE_FIXTURES, desc: 'Upcoming games and results.' },
       { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: CAP.MANAGE_SELECTIONS, desc: "Who's around each weekend." },
       { to: '/admin/betterselect/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_SELECTIONS, desc: 'Pick and share your XI.' },
+      { to: '/admin/betterselect/whiteboard', label: 'Selection Whiteboard', icon: 'cols', cap: CAP.MANAGE_SELECTIONS, desc: 'Every team for the day side by side. Drag players between them.' },
     ],
   },
   {
@@ -61,17 +63,20 @@ const CRICKET_GROUPS = [
     label: 'Setup',
     desc: 'The rules your competition runs on, and what the board shows.',
     items: [
+      { to: '/admin/betterselect/settings', label: 'Settings', icon: 'settings', cap: CAP.MANAGE_SELECTIONS, desc: 'Two-day game colours, junior grades and the Maybe answer.' },
       { to: '/admin/betterselect/rules', label: 'Selection rules', icon: 'settings', cap: CAP.MANAGE_SELECTIONS, desc: "Your association's age limits, overseas caps and eligibility." },
+      { to: '/admin/betterselect/audit', label: 'Audit History', icon: 'history', cap: CAP.MANAGE_SELECTIONS, desc: 'Who changed which player in selection, availability and squads, and when.' },
     ],
   },
   {
     key: 'club',
     label: 'Club Life',
-    desc: 'Training, best-player voting and competition ladders.',
+    desc: 'Training, best-player voting, competition ladders and fines.',
     items: [
       { to: '/admin/betterselect/nets', label: 'Nets', icon: 'nets', cap: CAP.MANAGE_SELECTIONS, desc: 'Training and net sessions.' },
       { to: '/admin/betterselect/votes', label: 'Votes', icon: 'votes', cap: null, anyCaps: [CAP.MANAGE_VOTES, CAP.VIEW_VOTE_RESULTS], desc: 'Best-player votes, Brownlow style.' },
       { to: '/admin/betterselect/ladders', label: 'Ladders', icon: 'ladders', cap: CAP.MANAGE_SELECTIONS, desc: 'Competition ladders.' },
+      { to: '/admin/betterselect/fines', label: 'Fines', icon: 'money', cap: CAP.MANAGE_SELECTIONS, desc: 'The post-game fines session and the pot, per squad.' },
     ],
   },
 ]
@@ -132,6 +137,7 @@ export default function BetterSelectLayout({ children, title, caption, actions, 
   const [club, setClub] = useState(_clubCache)
   useEffect(() => { loadClubBranding().then(s => { if (s) setClub(s) }) }, [])
   useClubTheme(club)  // inject the club's white-label palette (accent etc.)
+  useHalfColours()    // the club's half-available colours, on the page before the first card
 
   // Nav may include `{ heading }` separators (kept regardless of cap — they
   // carry no `to`/`cap`); ordinary items are filtered by capability, with

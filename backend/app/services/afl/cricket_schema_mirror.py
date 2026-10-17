@@ -99,6 +99,24 @@ SHARED_DDL_MODULES = (
     ("app.services.import_through_ddl", "STATEMENTS"),
     # Migration 331. `organisations.amalgamate_seasons`, on the shared Organisation model.
     ("app.services.amalgamate_seasons_ddl", "STATEMENTS"),
+    # Migration 334. `fixtures.locked_at` / `.locked_by` (the shared ORM Fixture
+    # model maps them; the player's own page, mounted on football, reads them) and
+    # the `selection_events` audit table.
+    ("app.services.selection_lock_ddl", "STATEMENTS"),
+    # Migration 335. `net_sessions.checkin_token` / `.squad_team_ids`, on the
+    # shared ORM NetSession model; the player's page reads net_sessions.
+    ("app.services.net_session_link_ddl", "STATEMENTS"),
+    # Migration 336. `team_sides`: shared routers (the player's availability page)
+    # read it, so the football database needs the (empty) table.
+    ("app.services.team_sides_ddl", "STATEMENTS"),
+    # Migration 337. `fixtures.side_key`, on the shared ORM Fixture model.
+    ("app.services.fixture_side_ddl", "STATEMENTS"),
+    # Migration 338. `fixtures.team_pinned`, on the shared ORM Fixture model.
+    ("app.services.fixture_pin_ddl", "STATEMENTS"),
+    # Migration 339. `audit_events`: the shared squad and availability writers record into it.
+    ("app.services.audit_ddl", "STATEMENTS"),
+    # Migration 340. `organisations.availability_allow_maybe`, on the shared Organisation model.
+    ("app.services.availability_maybe_ddl", "STATEMENTS"),
 )
 
 

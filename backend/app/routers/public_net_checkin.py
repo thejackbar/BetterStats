@@ -49,8 +49,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import MODULE_SELECT, org_has_module
 from app.config.settings import settings
+from sqlalchemy import text
+
 from app.models.db import (
-    NetAttendance, NetCheckInRegistration, Organisation, Player, get_db,
+    NetAttendance, NetCheckInRegistration, NetSession, Organisation, Player, get_db,
 )
 from app.routers.availability import active_self_service_players, phone_last4
 from app.routers.net_manager import check_in_person, live_sessions, touch_session
@@ -152,19 +154,72 @@ async def _club_for_token(db: AsyncSession, token: str) -> Organisation:
     switched off, or the club no longer entitled to BetterSelect — so a link
     that has been rotated off a fence reveals nothing about why it stopped.
     """
+    club, _ = await _resolve(db, token)
+    return club
+
+
+async def _resolve(db: AsyncSession, token: str) -> tuple[Organisation, Optional[NetSession]]:
+    """The club behind a token, and the ONE session it is scoped to, if any.
+
+    Two kinds of token reach this page. The club-wide token joins every live
+    session, as it always has (scope None). A session's own token
+    (``net_sessions.checkin_token``) joins that session alone, so a QR printed
+    for Thursday's juniors cannot check anybody into Tuesday's seniors. Either
+    way an unusable link is a plain 404.
+    """
     if not token:
         raise HTTPException(status_code=404, detail="Unknown link")
     res = await db.execute(
         select(Organisation).where(Organisation.net_checkin_token == token)
     )
     club = res.scalar_one_or_none()
+    scope = None
+    if club is None:
+        scope = (await db.execute(
+            select(NetSession).where(NetSession.checkin_token == token)
+        )).scalar_one_or_none()
+        if scope is not None:
+            club = await db.get(Organisation, scope.organisation_id)
     if (
         club is None
         or not club.net_checkin_enabled
         or not org_has_module(club, MODULE_SELECT)
     ):
         raise HTTPException(status_code=404, detail="This check-in link isn't active")
-    return club
+    return club, scope
+
+
+async def _scoped_sessions(db: AsyncSession, club_id, scope: Optional[NetSession]) -> list:
+    """The sessions a scan on this link should join: every live session for the
+    club-wide link, or the one session (while it is still active) for its own."""
+    if scope is None:
+        return await live_sessions(db, club_id)
+    return [scope] if scope.status == "active" else []
+
+
+async def _eligible_players(db: AsyncSession, club: Organisation, sessions: list) -> tuple[list, list[str]]:
+    """The names on the list for these sessions, and the squads that narrowed it.
+
+    Everyone the self-service list offers, unless EVERY session in play is
+    limited to squads, in which case only members of those squads. One
+    unrestricted session is enough to show the whole list: somebody turning up
+    for it must be findable."""
+    players = await active_self_service_players(db, club)
+    if not sessions or any(not s.squad_team_ids for s in sessions):
+        return players, []
+    team_ids = sorted({t for s in sessions for t in (s.squad_team_ids or [])}, key=str)
+    rows = await db.execute(
+        text("SELECT DISTINCT player_id FROM team_members "
+             "WHERE organisation_id = :org AND team_id = ANY(CAST(:ids AS uuid[]))"),
+        {"org": club.id, "ids": team_ids},
+    )
+    members = {r[0] for r in rows.fetchall()}
+    names = await db.execute(
+        text("SELECT COALESCE(NULLIF(short_name, ''), name) FROM teams "
+             "WHERE organisation_id = :org AND id = ANY(CAST(:ids AS uuid[])) ORDER BY sequence NULLS LAST, name"),
+        {"org": club.id, "ids": team_ids},
+    )
+    return [p for p in players if p.id in members], [n for (n,) in names.fetchall()]
 
 
 def _club_branding(club: Organisation) -> dict:
@@ -206,9 +261,9 @@ async def get_landing(token: str, request: Request, db: AsyncSession = Depends(g
     Deliberately says nothing about who is already checked in — that is the
     club's business, and this page is served to anyone holding the link.
     """
-    club = await _club_for_token(db, token)
-    sessions = await live_sessions(db, club.id)
-    players = await active_self_service_players(db, club)
+    club, scope = await _resolve(db, token)
+    sessions = await _scoped_sessions(db, club.id, scope)
+    players, squad_names = await _eligible_players(db, club, sessions)
 
     me = None
     pid = _read_session(request, club.id)
@@ -229,6 +284,10 @@ async def get_landing(token: str, request: Request, db: AsyncSession = Depends(g
         "require_pin": bool(club.net_checkin_require_pin),
         "allow_registration": bool(club.net_checkin_allow_registration),
         "sessions": [_session_card(s) for s in sessions],
+        # Set when the list is narrowed to the squads this session is for, so the
+        # page can say whose list it is. Empty for everyone.
+        "squads": squad_names,
+        "scoped": scope is not None,
         "players": [
             {
                 "id": str(p.id),
@@ -317,7 +376,7 @@ async def check_in(
     in one of them is not an error — a second tap, or a phone that retried on
     a flaky ground signal, should read the same as the first.
     """
-    club = await _club_for_token(db, token)
+    club, scope = await _resolve(db, token)
     club_id = club.id
     ip = _client_ip(request)
 
@@ -330,7 +389,7 @@ async def check_in(
 
     rate_limit.enforce(f"nets-checkin:{player.id}", CHECKIN_LIMIT, CHECKIN_WINDOW)
 
-    sessions = await live_sessions(db, club_id)
+    sessions = await _scoped_sessions(db, club_id, scope)
     if not sessions:
         raise HTTPException(
             status_code=409,
@@ -383,7 +442,7 @@ async def register(
     holds the link, so the club decides who joins its roster — see the module
     docstring.
     """
-    club = await _club_for_token(db, token)
+    club, scope = await _resolve(db, token)
     club_id = club.id
     if not club.net_checkin_allow_registration:
         raise HTTPException(
@@ -409,7 +468,7 @@ async def register(
         if dob > today or dob < today - timedelta(days=120 * 366):
             raise HTTPException(status_code=422, detail="That date of birth doesn't look right.")
 
-    sessions = await live_sessions(db, club_id)
+    sessions = await _scoped_sessions(db, club_id, scope)
     if not sessions:
         raise HTTPException(
             status_code=409,

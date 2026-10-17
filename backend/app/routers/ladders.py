@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import Grade, Organisation, Season, Team, User, get_db
 from app.routers.auth import get_current_club, get_optional_user, public_junior_hiding, user_can_view_org_private
 from app.routers.teams import ensure_team_grades, _grade_name_map
+from app.services import squad_sides
 from app.services import club_lock, grassroots_scores_client
 from app.services.club_match import side_is_club
 
@@ -100,14 +101,17 @@ def _parse_ladder_payload(raw, club) -> list:
 
 async def _compute_team_ladders(
     db: AsyncSession, org: Organisation, auto_link: bool = True, public_only: bool = False,
-    hidden_grade_ids=(),
+    hidden_grade_ids=(), only_team_ids=None,
 ) -> dict:
     if auto_link:
         await ensure_team_grades(db, org.id)  # self-link any teams missing a grade (admin only)
+    team_q = select(Team).where(Team.organisation_id == org.id, Team.is_active.is_(True))
+    if only_team_ids is not None:
+        # A player's own page asks for their squads' ladders only, so it never
+        # fetches (or caches) a ladder for every team the club has.
+        team_q = team_q.where(Team.id.in_(list(only_team_ids)))
     teams = (await db.execute(
-        select(Team)
-        .where(Team.organisation_id == org.id, Team.is_active.is_(True))
-        .order_by(Team.sequence.asc(), Team.name.asc())
+        team_q.order_by(Team.sequence.asc(), Team.name.asc())
     )).scalars().all()
     grade_names = await _grade_name_map(db, org.id)
     # grade_id -> raw CA grade GUID. The ladder API is keyed on the shared GUID,
@@ -123,21 +127,39 @@ async def _compute_team_ladders(
     # A public club page hides grades the club opted out of sharing.
     # The same goes for a junior grade a club hides from its public Stats.
     hidden = {str(g) for g in hidden_grade_ids}
-    linked = [
-        t for t in teams
-        if t.grade_id and (not public_only or grade_public.get(str(t.grade_id), True))
-        and str(t.grade_id) not in hidden
-    ]
-    unlinked = [{"team_id": str(t.id), "team_name": t.name} for t in teams if not t.grade_id]
+    sq_sides = await squad_sides.load(db, org.id)
 
-    async def one(t: Team) -> dict:
-        raw = await grassroots_scores_client.get_grade_ladder(grade_gr.get(str(t.grade_id), str(t.grade_id)))
+    # One ladder per TEAM. A squad that covers several teams has a ladder for each
+    # (the 1st XI's grade and the 2nd XI's), found by grade name in the newest
+    # season that has it; any other squad keeps its one linked grade.
+    entries: list[tuple] = []     # (team_id key, display name, grade_id)
+    unlinked = []
+    for t in teams:
+        sq = sq_sides.squads.get(str(t.id))
+        if sq is not None and sq.multi:
+            for side in sq.sides:
+                gid = sq_sides.latest_grade_by_key.get(side.key)
+                if gid:
+                    entries.append((f"{t.id}:{side.key}", side.label or side.default_label, gid))
+            continue
+        if t.grade_id:
+            entries.append((str(t.id), t.name, str(t.grade_id)))
+        else:
+            unlinked.append({"team_id": str(t.id), "team_name": t.name})
+    linked = [
+        e for e in entries
+        if (not public_only or grade_public.get(e[2], True)) and e[2] not in hidden
+    ]
+
+    async def one(entry: tuple) -> dict:
+        key, name, gid = entry
+        raw = await grassroots_scores_client.get_grade_ladder(grade_gr.get(gid, gid))
         views = _parse_ladder_payload(raw, org)
         return {
-            "team_id": str(t.id),
-            "team_name": t.name,
-            "grade_id": str(t.grade_id),
-            "grade_name": grade_names.get(str(t.grade_id)),
+            "team_id": key,
+            "team_name": name,
+            "grade_id": gid,
+            "grade_name": grade_names.get(gid),
             "available": bool(views and any(v["rows"] for v in views)),
             "views": views,
         }

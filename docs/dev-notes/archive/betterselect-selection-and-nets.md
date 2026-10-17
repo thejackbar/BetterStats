@@ -1377,3 +1377,234 @@ Verification: `verify_draft_table_browser.mjs` (84 checks: columns, drags in all
 
 Not done: the draft table does not poll for another selector's changes (a 409 on the next save is the first sign); demotions from a call-up are carried through a loaded draft but the table never creates them; past matchdays are not offered (the overview is upcoming only).
 
+
+## v9.113.6: a side size per team (migration 332)
+
+Reported: some teams play 12 a side and some 11, but setting the size on the Selection board wrote the club default, so every team changed and a 12-a-side team showed "short of XI" on the matchday overview.
+
+`teams.default_team_size` (nullable; NULL follows the club, 0 = no limit) holds a team's own number. `selection_pool.side_size(club, team)` is the one resolver. `POST /selection/default-team-size` takes an optional `fixture_id`: a fixture with one of our teams saves on that team (`scope: "team"`), anything else writes the club default (`scope: "club"`). The overview carries `team_size` per fixture, `assemble_selection` returns the fixture's own size as `default_team_size` (plus `team_size_own`), and the Fixtures list `format_size` follows the team. `PATCH /teams/{id}` accepts `default_team_size` (explicit null clears). Per round (one fixture differing from its team) is not built.
+
+Verification: `backend/verification/verify_team_side_size.py` (25 checks; the control on the previous commit fails 17).
+
+
+## v9.113.7: open players first on the pool, and the Draft table pool is pinned
+
+Reported (selector feedback): on the Draft table the pool scrolled out of view with the teams, so a player could not be dragged to a team off the edge; and opening a lower side (an OD6 Gold fixture) buried available players from higher grades behind the side's own squad.
+
+Pool order on the single-team board is now: (1) players marked AVAILABLE for the fixture's date and named in no confirmed XI, no same-day playable game and no other side's draft, from any squad, highest squad first by `open_seq` (their best squad's sequence; 999 for a squad with no rank); (2) the fixture's own squad; (3) as before: players the squad above has not picked, the squad below, the rest of the squad above, everyone else. `open_seq` needs a fixture date, a squad on the right side of the gender wall and an active player; otherwise it is None. Maybe, unavailable and no answer are not open, and a no-answer drop-in keeps its old place after the own squad. `selection_pool._pool_rank(open_seq, tier, drop_in)` and `selectionMeta.poolRank` were changed together; `tier`, `drop_in_from` and auto-fill are untouched.
+
+Draft table: the pool column is `sticky left-0` inside the sideways scroller, with an opaque tint. `selectionDnd` auto-scrolls any `data-autoscroll-x` element while a drag is held within 80px of its edge (a child tagged `data-autoscroll-skip` is not counted in the left edge) and re-reads the drop target after each step.
+
+Verification: `backend/verification/verify_selection_open_pool.py` (22 checks; the control on the previous `selection_pool.py` fails 8) and `verify_selection_drop_in.py` (30, unchanged). `frontend/verification/verify_draft_table_browser.mjs` gained a pinned-pool section at 1100px (91 pass; the control on the previous build fails 4: pool scrolls away, no edge auto-scroll, far drop fails).
+
+## v9.113.8: custom side size
+
+Asked for: women's and junior sides need a number outside 11, 12 and 13. A side size is now 0 (no limit) or any whole number from 1 to 30 (`services/side_size.valid_side_size`, the one rule for the board route, `PATCH /teams/{id}`, the rules screen and club settings). The board's `SizePicker` has a Custom button that opens a number box (Enter saves, Escape cancels, 0, blank and over 30 are not sent) and reads "Custom · n" when the size is off the presets; the rules screen select has a "Custom..." option with a number box.
+
+Open idea, not built: a side that needs a minimum but may name more (women's 8 to 12). "No limit" is the wrong stand-in (no cap, no empty slots, reads as set at zero); the plan is an optional per-team minimum beside the size, where the size stays the maximum.
+
+Verification: `verify_team_side_size.py` (33 checks), `frontend/verification/verify_custom_side_size_browser.mjs` (12 checks, 390px clean).
+
+## v9.113.9: a minimum per team (migration 333)
+
+Asked for: a side that needs 8 but may name 12. `teams.min_team_size` (nullable; NULL = must be full) sits beside `default_team_size`, which stays the MAXIMUM (slots and cap). Rules: a minimum is 1 to 30 and strictly below the size (any in range when the size is 0, no limit); `side_size.effective_min` is the one reader, so a stale minimum never makes a full side read short. `POST /selection/default-team-size` takes `min_size`: absent leaves it alone, explicit null clears, a number sets it; refused (400) for a club default or a fixture with no team; a size write that leaves the minimum no longer below it clears it. `PATCH /teams/{id}` takes `min_team_size` with the same checks against the size the team will have after the write. The overview carries `team_min` per fixture, the pool `team_min`, the Fixtures list `format_min`.
+
+Frontend: `lib/sideSize.js` (`sideFit`, `sideLabel`, `sideProblem`) is the one place a count is judged against size and minimum; the Selection board, confirm prompt, Draft table and overview all use it. The Min box (`MinBox` in `SelectionViews.jsx`) only shows for a fixture with a team. Overview: complete at the minimum; flag reads "short of the minimum" with one, "short of XI" without.
+
+The Min box widened the compact `FixtureBar` (shown below 900px of window height) enough to wrap it, which made the Dual rail XI scroll at 1280x720 (`verify_draft_table_browser.mjs` caught it, control on main was clean); the title's `basis` there is now 120px so the picker, Min box and pill stay on one row.
+
+Not done: a minimum on the club default (a minimum belongs to a team); BetterIQ's best-XI still builds to the size.
+
+Verification: `verify_team_side_size.py` (53 checks), `frontend/verification/verify_side_minimum_browser.mjs` (19 checks, 390px clean).
+
+
+## v9.113.10: pool order for unranked squads; a named keeper is a keeper
+
+Reported after v9.113.7: the pool order still did not look right, and a side whose captain was also its keeper said "No keeper named".
+
+Pool order: `teams.sequence` is guessed from the name (`routers/teams._guess_sequence`), and a name with no ordinal word, age group or grade letter ("OD6 Gold") gets the unranked default 50, so a whole OD ladder shares one sequence. `open_seq` was the squad's raw sequence, so those squads tied. It is now the squad's place from `selection_pool._squad_order`: sequence for ranked squads, then name with numbers read as numbers (OD2 before OD10), the same tie-break the overview's team order uses. The same tie also made every OD squad `tier` 1, so the own-squad rank now keys on `squad_match` (literal membership, 1000) with a tier 1 non-member just behind (1001).
+
+Keeper: the overview and the board's balance counted only players tagged WKT. A keeper is a WKT-tagged player or the one named keeper (`is_wicket_keeper` / `wkId`); captain and keeper may be one person. The Draft table already did this.
+
+Verification: `verify_selection_open_pool.py` now 27 checks (the control on the v9.113.7 file fails the two unranked-OD checks); `verify_draft_table_browser.mjs` 93 (the control on the old overview fails the keeper check).
+
+
+## v9.113.11: a gender filter on the pool
+
+Requested: a gender filter on the selection screens, as the Players page has. `selectionMeta.normGender` and `GENDER_OPTS` are the one reading of a player's gender ('male', 'female', or '' when unrecorded). The Selection board adds a single-choice `gender` facet (Filters panel, with a pill) and the Draft table pool a drop-down; each is drawn only when the pool holds both genders (`showGender`), since a control that can only answer "nobody" is worse than none. It filters the browse list only; it does not touch `gender_ok`, tiers or auto-fill.
+
+Verification: `verify_draft_table_browser.mjs` (102 checks) drives both filters with three women in the stub pool. Not covered: the one-gender club where the control is absent.
+
+## Gisborne feedback round (v9.114.0)
+
+Meeting notes from Gisborne turned into one release. What was built, what was found, and what is still open.
+
+**Found**
+- "Fill from last week" (`GET /selection/{id}/previous-xi`) fell back to ANY prior fixture of the club when the team had no history. A women's side with no XI of its own was handed the men's last XI, which is the "men autofilled into the women's team" report. It now reads the same team (or the fixture's grade) only, and the board no longer carries across anyone the gender wall or a blocking rule bars.
+- The women's half of the gender wall only knew a grade as women's when `grades.fee_format == 'women'`, a BetterFees override that no sync sets. A club that classified a grade as Women's in Manage Grades got no wall. `grade_labels.grade_is_women` now reads both, and a player recorded male is never eligible for a women's fixture.
+- Wrongly attributed fixtures (Jensen Shield South B, 13 Womens B Grade) came from the old first-word name test that commit 3dd806e replaced with owning organisation ids. The rows it had already written were never cleaned up, because `find_stale` only drops games CA no longer lists as upcoming. `find_foreign` adds that case. Not confirmed from Gisborne data: whether CA omits `owningOrganisation` on one side, which would still let a first-word name match through `club_match.fixture_side`.
+- "Women labelled as Macs": no literal in the code, so it is a team name from CA appearances. `teams` is unique on (organisation, name), so a sponsor name on both a men's and a women's side collapses into one squad. `ensure_team_grades` now leaves such a name unlinked instead of linking it to whichever grade played last. Splitting the one squad into two is a data fix for the club and is not automated.
+- "Ready to review but unable to click confirm": the board's button was disabled whenever the side matched the saved XI, and the overview called a full saved side "Ready to review". There was nothing to press. Confirm now saves and locks, and a named, unlocked side offers Lock team.
+
+**Built**: lock and unlock, audit trail and History, Undo, Registered filter, Played this season, first name and surname order, remembered filters, junior hiding, remove-from-squad, Alt-drop copy, squad CSV and PDF export, per-session net links and squads, squad-by-squad check-in, squad under the player's name, My page.
+
+**Open**
+- (Done in v9.115.0, below.) A squad had one grade (`teams.grade_id`).
+- The audit trail records confirmations, locks, unlocks and call-ups. It does not record every drag on an unconfirmed board (that is what Undo and the draft are for).
+- Remembered filters and the Show juniors choice are per browser, not per user across devices.
+- The Draft table does not yet draw locked columns as read-only; the server refuses the write and the error is shown.
+
+## Squads cover several teams (v9.115.0)
+
+Asked for after the Gisborne round: MACs is the squad for the 1st and 2nd XI, the next squad for the 3rds, the last for the 4ths to 6ths; the women's squad can serve two women's teams; juniors can be a squad per year group holding several teams.
+
+**Model.** A squad (`teams` row) stays the pool of players. The new `team_sides` table lists the TEAMS (grades) the squad covers, in order. Keyed on grade name, so it survives a new season's grade rows. The XI number of a team is the squad's Order plus its place in the list, derived on read; collisions between squads are the club's to avoid (the editor shows the numbers). A squad with no rows is the old single-grade squad and reads as before.
+
+**Decisions worth knowing.**
+- One reader (`services/squad_sides`) answers rank, name and squad for a fixture. Before this, call-ups and the pool compared `Team.sequence`, which would have made the 1st and 2nd XI of one squad equal (a blocked clash instead of a call-up).
+- Fixtures carry `team_id` of the SQUAD and are told apart by grade. Saving a squad's teams moves upcoming synced fixtures onto it; hand-typed fixtures that name a squad are not touched.
+- The old Order scale is kept (1st XI = 1; women's 50; juniors 100+) rather than a dense club-wide ranking, so tiers between unranked groups did not start to touch.
+- Label defaults: "1st XI" style for XI numbers 1 to 12, else the grade name. A club can type its own per team.
+
+**Not done.** Past games are not re-assigned. The ladder for a team is read from the newest season that has its grade name. The AFL silo gets the table (shared routers read it) but has no editor for it.
+
+**Also in this release.** The Draft table became Selection Whiteboard with its own menu item.
+
+
+
+## Selection emails from a BetterComms template (v9.113.15)
+
+Request: when captains and selected players can be emailed from BetterSelect, let a club link that email to its own template in Admin.
+- Storage: two keys in `organisations.selection_rules_config`, `captain_email_template_id` and `player_email_template_id` (no migration). `selection_rules.club_config` reads them through `clean_template_id`; `PATCH /selection-rules/settings` validates with `model_fields_set` (absent leaves it, null or empty clears; 400 garbled, 402 without BetterComms, 404 for another club's or a Sales Workspace template).
+- Sending: `selection_notify.linked_template` resolves the template on every send; `render_template` fills `{{variables}}` (`SELECTION_VARIABLES`: first_name, club, team, opponent, match, date, time, when, venue, round, home_away, captain, side, team_sheet, note), escaping values in HTML, blanking any token left over, wrapping a fragment in the club shell with no unsubscribe line (operational mail) and sending a full document as is. `team_sheet` (phones) resolves only for the captain's email, `note` only for players. No subject on the template keeps the standard one. Deleted, empty, or no BetterComms means the standard email goes and the response carries `template_note`; the auto-send on Confirm uses the same path.
+- Screens: Selection rules > "Selection emails" card (`EmailTemplatesCard`, preview via `POST /selection-rules/email-templates/preview` with a made-up side); Admin > Comms > Templates shows Subject to every club and a selection variables panel; the Email dialog shows the template used or the fallback note.
+- Proof: `verify_foreign_fixtures_and_selection_templates.py` (real Postgres, control fails every template check), `frontend/verification/verify_selection_email_templates_browser.mjs` (16 checks, 390px, exact PATCH and preview bodies).
+
+
+## Our team on a fixture is a team of the squad (v9.116.0)
+
+Gisborne: "our team" in Edit fixture was only a list of squads, but the fixture needs one of the squad's teams (the 2nd XI of MACs), which the squad is assigned to.
+
+- A team is chosen per fixture in `fixtures.side_key` (a grade key), not in `grade_id`, because sync overwrites `grade_id` on every run. `SquadSides.resolve` prefers a valid `side_key`; a stale one (the squad no longer has that team) falls back to the grade.
+- The form offers one option per team for a squad covering several, and one plain option for a one-team squad (which sends `side_key` null). Value is `squadId|teamKey`.
+- Not done: last week's XI for a team is still found by grade, so a hand-made fixture with a picked team and no grade will not find a previous XI by grade. Past games with no pick are unchanged.
+- Also: the Selection Whiteboard got the Show juniors switch (it always showed juniors before).
+- Proof: `verify_fixture_side.py` (18 checks, control fails the team checks), `verify_fixture_side_browser.mjs` (10 checks, exact PATCH bodies, 390px), a juniors check in `verify_draft_table_browser.mjs`.
+
+
+## Synced games on the wrong squad (v9.116.1)
+
+Gisborne: a women's fixture ("Macedon Women 1st XI") showed the men's MacIntyre squad although the Womens Squad plays that grade, which skewed Availability and Selection.
+- Cause: sync only set a fixture's squad when empty, by stored teams first and then by team name plus grade number, and an earlier guess stuck forever. Squads linked to one grade the old way were not consulted at all.
+- Fix: sync asks the squad that plays the grade (stored or old link) and moves the fixture when its current squad does not play it. A squad picked by hand sets `fixtures.team_pinned` and is left alone.
+- Existing wrong fixtures are tidied by the next Sync. A synced fixture someone had set by hand before 338 existed is not pinned and will move if its squad does not play its grade.
+- Proof: `verify_fixture_side.py` F and G (control fails the move checks). `verify_shared_fixture_stats.py` (one check) and `verify_quick_sync.py` fail the same way on the previous commit.
+
+
+## Squads board and squad PDF (v9.116.2)
+
+Gisborne: names were cut off on the Squads cards, the squad list should fit one page (landscape, columns), and real squads should come before Unassigned and Not yet played.
+- Card: name takes the row, roles and flags on a second line, add and remove float over the edge on hover (inline on touch).
+- Order: squads first; `select.squads.poolsAt` ('end' default, 'start') puts the pools first. Manual drag ordering of squads was not built: a squad's Order is its XI number and drives selection tiers, so reordering it is a selection change, not a display one.
+- PDF: `textDocs.writePdf` now takes page size and margin, and the new `downloadSheetPdf` places ops itself. The old flowing writer is unchanged in output (minutes suites pass).
+
+
+## Audit History and the Maybe switch (v9.117.0)
+
+Gisborne: a side-menu Audit History with a full trail of players moved between squads, up and down a batting order, made captain or keeper, and any other change in selection, availability and squads, with time, date and who; searchable, filterable, CSV. And an option to turn Maybe off, with one vocabulary (no In/Out) in the bulk bar.
+- Table `audit_events` with plain ids (no foreign keys) and names as they were. One row per player per change, with a sentence for the list. Selection rows come out of `selection_audit.record` by diffing the before and after XI; batting-order moves use a longest-increasing-subsequence so only players who actually moved are reported. Squad rows come from the shared membership helpers, so every screen that moves players is covered. Availability rows come from the admin writers and the player's own link.
+- Not recorded: drafts (autosave), fixture edits, ladder changes. Football's own selection routes do not write to it.
+- Maybe off is per club (`availability_allow_maybe`), enforced on the server, and offered nowhere once off.
+- Proof: `verify_audit_history.py` (51 checks incl. the Maybe refusals; control fails the trail checks), `verify_audit_history_browser.mjs` (24), `verify_availability_maybe_browser.mjs` (11).
+
+
+## Two-day games: both weeks, everywhere (v9.117.3)
+
+Applecross, 24 and 31 Oct: the Selection board header read "Sat 24 Oct" for a two-day game and a player unavailable in week 2 was offered as available. Availability was already stored per DATE (a two-day game contributes `played_on` and `end_on`), so the gap was upstream and downstream of the store.
+- Upstream: `fixtures.sync_fixtures` never wrote `end_on` and `grassroots_scores_client.get_grade_fixtures` read only `matchSchedule[0]`. CA sends one entry per day, a week apart, in no reliable order, so a synced game could even be filed under its second week. `schedule_days(m)` now reads all entries; `played_at` is the earliest day, `end_at` the latest (None for one day), and a match stays upcoming while its LAST day is today or later. Sync writes `end_on` only when the feed gives a later second day; a one-day entry leaves a hand-typed end date alone. Existing fixtures pick up the second day on the next Sync press (the fixtures sync is not scheduled).
+- Downstream: `services/fixture_days.py` is the one definition (`fixture_days`, `combine_status`). The pool, the overview and `selection_seed.unavailable_ids` read every day and take the least favourable answer, in the app's own order (unavailable, no response, maybe, available). The pool row carries `availability_days` ([{date, status}], two-day games only) so a card can say which week. The overview payload carries `end_on`.
+- `upcoming_fixtures_by_date` now judges each day on its own: a started week 1 no longer drops week 2 (the game's `status` is true of day 1 and says nothing about day 2). Two-day entries carry `day1` and `day2`.
+- Screens: Selection header shows both dates ("two days"); the quick editor (`TwoDayAvail` in `ui.jsx`) offers Both weeks plus a row per week and `pickAvail(status, which)` writes one date per week; the self-service page bridges the weeks of a game into one group (`groupByWeek`), draws a Both weeks card (`BothWeeks`, `twoDayPairs`) and tags each date "Week n of 2"; the matrix says Wk 1/2 and Wk 2/2. Answers are still one row per date; "Both weeks" is two writes, each rolled back on its own if it fails.
+- Not changed: the Squads board still reads a squad's availability on a two-day game's first day (`squad_next_games` counts a game once); the overview lists a fixture only while `played_on` is today or later, so a two-day game drops off it once week 1 has passed; BetterIQ's stale-answer count reads week 1 only.
+- Proof: `verify_two_day_availability.py` (real Postgres, 43 checks; control on the previous backend fails 17, among them Jack AVAILABLE, no second date, game filed under day 2, week 2 not offered once week 1 started), `verify_two_day_availability_browser.mjs` (42; control on the previous page fails 33, week 2 hidden behind "See more games"), `verify_two_day_selection_browser.mjs` (17; control fails the header, split line and editor checks). `verify_selection_next_round_draft.py` 47, `verify_selection_drop_in.py` 30, `verify_squad_next_game.py` 68, `verify_fixture_sync_reconcile.py` 37 still pass.
+
+
+## Whiteboard: W1 and W2 on every card (v9.117.4)
+
+Applecross: on the Whiteboard a player picked for a one-day team on the 24th looked available for the two-day 1st XI game too, because the card carried one status and he was away on the 31st. The Whiteboard loads one `GET /selection/{id}` per team and its shared pool took each player from the FIRST team's pool (`merged`), which for a day with a two-day game is a combined (worst of both weeks) status, so he could also read OUT in the pool while free for every one-day team.
+- Frontend only. `weekByPlayer` collects `availability_days` from the pool of every team on the day whose fixture has `end_on` after `played_on`. `WeekChips` draws W1 and W2 on a card when `weekChipsNeeded(days)` (either week not AVAILABLE); free-both players carry none. Colour is the week's status; Unavailable is struck through; the tooltip names each week's date and answer.
+- The shared pool shows TODAY: for a player with a week map the pool card's `availability` is W1's. A team slot keeps its own fixture's pool entry (a two-day team's is the combined status, so OUT there means a week is Unavailable). `warnPick(p, fid)` now judges the team they are going INTO and names the week (`unavailableWeeksText`).
+- The two-day column header reads "Two-day · W1 date + W2 date"; a note under the title explains W1/W2 while the day has one.
+- Not done: the second weekend's tab does not list the two-day game (tabs group by `played_on`), so on that day nothing shows W2 as "today". The single Selection board still uses its text line (`weekSplitLine`), not chips, and does not know a day's other games.
+- Proof: `verify_two_day_whiteboard_browser.mjs` (21 checks; control on the previous build fails 11, including the pool marking him OUT), `verify_draft_table_browser.mjs` 105 still pass.
+
+
+## Two-day games: the weekends are linked, no auto-removal (v9.117.5)
+
+Applecross, Jack in OD4s on the 24th and away for week 2 of the 1st XI game: the 31 Oct Whiteboard tab showed only games STARTING that week, so nothing there said the 1st XI was already using anyone, and the pool was free to offer them for a one-day side. Selectors' rule: anyone picked in the top five (two-day) grades is busy for one-day sides in week 2. And: nobody is removed from a side for being unavailable.
+- `fixture_days.SHARES_A_DAY_SQL` (bind `:ds` to `fixture_days(...)`) is "the other fixture is played on a day this game occupies": its `played_on`, or a later `end_on`. The pool's clash query, the other-draft marker (`in_draft_of`) and `set_selection`'s clash query all use it. A two-day game is never compatible with another (`selection_clash` rule 1), so it stays a clash; the usual call-up rule applies (a higher side may take a player from a lower one, a lower side may not take a player from a higher one).
+- `selection_overview` lists a game while `end_on` is today or later, so a game under way stays on the board for week 2.
+- Whiteboard: `selectionMeta.fixtureTabs(f)` puts a two-day game on the tab of each weekend; tabs are sorted by date. The column header reads "week 2 of 2, started <date>" on the second tab. The shared pool takes each player's answer for the OPEN weekend (`weekIdx`).
+- Removed: the draft carry no longer drops unavailable players, at seed time or on `GET /draft` (`unavailable_ids`, `without_unavailable` deleted; `left_out` stays in the payload, always empty). This reverses rule 69's old clause. `verify_selection_next_round_draft.py` sections J, K, M now assert everyone is kept.
+- Not done: a one-day side cannot be confirmed if a two-day pick on its date is only a DRAFT (drafts never block, only flag), by design.
+- Proof: `verify_two_day_availability.py` 52 (control on the previous app code fails 8: no clash on week 2, a 409 not raised, the call-up not applied, the game dropped off the overview), `verify_two_day_whiteboard_browser.mjs` 28 (control fails 5: no week 2 tab, header, week 2 pool), `verify_draft_table_browser.mjs` 105, `verify_selection_next_round_draft.py` 46.
+
+
+## Whiteboard: W1/W2 pills replaced by a quiet flag (v9.117.6)
+
+First look at v9.117.4 on live data: almost every card carried grey W1 and W2 pills (nobody has answered week 2 yet, and the rule drew them for any week that was not AVAILABLE), names were cut short, and the pills read as buttons.
+- `selectionMeta.weekFlagParts(days)` returns only the weeks that are UNAVAILABLE or MAYBE, and only when the two weeks differ (both away already reads OUT). NO_RESPONSE is never flagged. `WeekFlag` draws plain mono text, "W2 OUT" (red) or "W2 ?" (amber), no background, border or pointer cursor; it replaces the generic OUT tag where a weekend is the reason, with both weeks and their dates in the tooltip. The old `WeekChips` and `weekChipsNeeded` are gone.
+- Header is "Two-day · 24 Oct + 31 Oct" and "Two-day · week 2 of 2, from 24 Oct" on the second tab.
+- Proof: `verify_two_day_whiteboard_browser.mjs` 30 (control on the pill build fails 10), `verify_draft_table_browser.mjs` 105.
+
+
+## Whiteboard: weekend flags in purple (v9.117.7)
+
+The "W2 OUT" and "W2 ?" flags took the red and amber of the OUT tag and the Maybe dot, so a card edge saying "out today" and a flag saying "out in week 2" looked like one signal. `WeekFlag` now uses `WEEK_FLAG_COLOUR` (`var(--pb-chart-4)`, the theme's purple) for both, since it says WHICH weekend, not how bad. Proof: `verify_two_day_whiteboard_browser.mjs` 32 (control on the red build fails 2: the flag colour is the red token, and "W2 ?" is amber).
+
+
+## Half available, and BetterSelect Settings (v9.118.0)
+
+Applecross asked for the availability INDICATOR (the green or red dot and card edge, not the W2 text) to show a player who is free one weekend of a two-day game and away the other as "half available" in its own colour, one colour for week 1 and one for week 2, kept in a BetterSelect Settings screen with the other small switches to clear the screens.
+- Two drawing-only statuses, `HALF_W1` ("only week 1 is a yes") and `HALF_W2`, live in `lib/availability.js` beside the four real ones. They are never stored, sent or used by a rule or filter: `halfStatus(days)` decides (one weekend plainly AVAILABLE and the other plainly UNAVAILABLE; a MAYBE or no answer is NOT half) and `viewStatus(p, days)` is what a dot or edge draws. Every card site that coloured by `p.availability` now draws `viewStatus` (`SelectionViews`, `SelectionMobile`, `AdminSelectionOverview`, the Whiteboard `PlayerCard`, with `weekByPlayer` so one-day teams on a two-day day are covered). Logic still reads `p.availability`.
+- Colours: `selection_rules_config.half_colours` `{w1, w2}`, defaults `#a855f7` and `#06b6d4` (`services/selection_rules.half_colours`, `clean_colour` accepts only `#rrggbb`, stored lower case). Written through `PATCH /selection-rules/settings` (`half_colour_w1`, `half_colour_w2`; absent leaves, null or empty resets, a bad value is a 400); read by the screens through `GET /availability/config`. They reach cards as `--pb-half-w1` and `--pb-half-w2` (`useAvailabilityConfig.paintHalf`); `BetterSelectLayout` mounts `useHalfColours()` so they are set before the first card. No migration.
+- Settings screen (`AdminSelectSettings.jsx`, `/admin/betterselect/settings`, Setup menu, `MANAGE_SELECTIONS`): the two colours, junior grades (the same device preference `select.juniors` the screens read), the Maybe answer (same write as the link panel). The original controls are NOT removed from the screens yet; Selection rules keeps age, side size, fees, training and emails. Candidates to move next: side size, show fees and training, the self-service link switches, the squad-covers-several-teams switch.
+- Proof: `verify_half_colours.py` (real Postgres, 18; control on the previous backend fails 13), `verify_select_settings_browser.mjs` (31, desktop and 390px), `verify_two_day_whiteboard_browser.mjs` (37; control on the previous build fails 5), existing Whiteboard suite 105.
+
+
+## Settings holds the pool controls; team default filters; Filters panel fixed (v9.119.0)
+
+Applecross, from the Selection board: the Filters box looked broken, the "Played within" dropdown and "Show juniors" switch crowded the Availability screen and should live in Settings (with a "played any time" choice), and a team should be able to start on its own filters, written as rules (women's team on Gender = Women, 1st XI only the top two or three squads).
+- Filters panel: it rendered IN FLOW inside the pool card's header, and the card is a fixed-height `useFitHeight` panel, so the player list collapsed to nothing and the panel spilled over the card border. `SelectionFilters` now draws it `fixed` at the spot it would have opened, `maxHeight` = the room below (it moves up in a short window, never taller than 620px), scrolling inside itself, closed by Escape or a click outside. Never `aria-hidden` the wrapper (it hides the dialog from screen readers and role queries).
+- Controls moved: `RecencySelect` ("Played within") and `JuniorsToggle` are off the Selection board, Whiteboard, Availability, Fixtures and Overview. They are still used on Players and the Squads fill-in reach (those are different questions and stay). Junior grades stay the device preference `select.juniors` (`bs_pref:select.juniors`), now written only from Settings.
+- Club windows: `selection_rules_config.played_years` `{selection, availability}`, defaults 3 and 0 (what the screens did before). 0 = any time, -1 = this season (Selection and Whiteboard only: the matrix has no season start, so Settings does not offer it there). Written through `PATCH /selection-rules/settings` (`played_years_selection`, `played_years_availability`, a 400 outside -1..50), read through `GET /availability/config`, which now also carries `team_defaults` and `squads` (the club's active squads in XI order). `useSelectConfig()` is the one reader on the frontend. Typing a name in search still ignores the window.
+- Team rules: `selection_rules_config.team_defaults`, a list of `{id, team_ids, gender, squads, top_squads, played_years}`, written whole through the same PATCH (`team_defaults`; absent leaves, null or [] removes). `services/selection_rules.clean_team_defaults` is the one cleaner: a rule with no real team or nothing to start on is never stored. "Top N" is counted against the squads in XI order at read time (`teamDefaults.js`), so it follows a reorder. The Selection board applies the merged rules for `fixture.team_id` as a LAYER, not by writing the URL: the selector's own gender or squad pick wins, "Show everyone" (`ignoreDefaults`, reset per fixture) turns it off, and the banner always says what is applied. Applies to the Selection board only; the Whiteboard's pool is shared across teams and ignores team rules.
+- Settings page: `AdminSelectSettings.jsx` gained Players listed and Team defaults. The rule editor keeps `_mode` (all, top, chosen) on screen only, since "Chosen" with nothing ticked yet looks like "All" in the data. Never put `toast` in the load effect's dependencies (it is a new object each render and a reload wiped the rule being written); use `toastRef`.
+- Candidates still to move into Settings: side size, show fees and training notes, the self-service link switches.
+- Proof: `verify_select_team_defaults.py` (real Postgres, 24; control on the previous backend fails 23), `verify_select_filters_browser.mjs` (34; the panel, the removed controls, the club window, every team-rule combination, 390px; control on the previous build shows the list shifted from y=483 to y=960), `verify_select_settings_browser.mjs` (65), `verify_two_day_whiteboard_browser.mjs` 37, `verify_draft_table_browser.mjs` 105, `verify_selection_lock_undo_browser.mjs` 37 (both updated to read the window and juniors from Settings). `verify_squads_pools_browser.mjs` fails the same 8 checks on the previous build and this one: not caused by this change.
+
+## v9.120.0: the player's own page as a dashboard, and BetterSelect Fines
+
+Asked for: modules on the page a player opens with the last 4 digits of their phone (their squad's ladder, fees owing, a small season overview), and a per-side "Fines" tracker: after a game a side runs a fines session and the money goes into a pot. It is switchable per side, shows how to pay (PayID, bank transfer) from setup, sits under BetterSelect, and shows on the player's private page.
+
+Choices made with the club owner: the club picks the modules and their order (same set for every player); BetterSelect managers (`MANAGE_SELECTIONS`) enter fines; admins record payments (no "I've paid" flag from the player); fines come from a per-squad fine list AND free entry.
+
+- Migration 341, `services/fines_ddl.py`: `organisations.player_dashboard_modules` (JSONB, NULL = never chosen = the old page plus Fines), and the raw-SQL tables `fine_settings` (one row per squad: enabled and the pay fields), `fine_types`, `fine_entries`, `fine_payments`. No ORM models for the fines tables; only the org column is mapped.
+- `services/fines.py` owns the maths (`squad_totals`, `player_fines`, `parse_amount`). `routers/fines.py` is the admin side (`/fines/...`, behind `require_module("select")` and `MANAGE_SELECTIONS`). The balance is fined minus paid with voided rows left out, derived on every read. `fine_entries.amount` is the price at the time, so repricing a fine type rewrites nothing. Types are archived, rows are voided, nothing is deleted.
+- `services/player_dashboard.py`: the catalogue, `served_modules`, `blocked_reason`, `season_overview` (reads `get_season_by_season` under the same grade scope as the public profile), `fees_owing` (reads `fees.member_financial_snapshot`, the member portal's own maths). `GET /public/availability/{token}/me/profile` now returns `modules` and the data for each; `GET .../me/ladder` is separate because it asks Cricket Australia (`ladders._compute_team_ladders` gained `only_team_ids` so only the player's squads are fetched).
+- Fees needs the fees module AND `availability_require_pin`. The PIN is a mobile's last 4 digits and teammates know each other's, and with it off anyone with the link can open anyone's page, so fees fail closed. Ladder needs Show squad (it names the squad). `squad` stays served with Show squad off and says so, as the page always did.
+- A player sees a squad's Fines block if Fines is on and they are in the squad or have been fined in it (a fill-in). Only their own rows and the squad's pot total are sent; no other player's name or id. The squad name shows on that block even with Show squad off: switching Fines on for a squad is a deliberate act.
+- `merge_carry.CARRIED` and `_OWN_CLUB_TABLES` gained `fine_entries` and `fine_payments`.
+- Frontend: `AdminFines.jsx` (route `/admin/betterselect/fines`, Club Life nav), the Player page chooser in `SelfServiceLinkPanel.jsx`, `MyPage` in `PublicAvailability.jsx` is one top-level component per module. `useToast()` is a new object per toast: `AdminFines` reads it through a ref, because a load keyed on it blanked the squad and wiped a half-typed How to pay form after every toast (found by the browser check).
+- Proof: `verify_player_dashboard_and_fines.py` (real Postgres, 74; control on the previous commit fails 4 on absence without crashing), `verify_player_dashboard_fines_browser.mjs` (49; module order, one ladder request and none when unlisted, exact request bodies for a session, payment, void, type, settings; 390px). Existing `verify_player_page_browser.mjs` still passes on the legacy payload (no `modules`: the page falls back to the original four).
+
+## v9.120.1: Fines dashboard, picked-side rows, session maximum, notes and PDF report
+
+Asked for: add fines should default to whoever was selected in the team that week and pre-fill every row; a "maximum amount" with the ability to fine several people at once ("Fine all", "Max all"); a PDF report afterwards with the notes for each fine; and the page "more like a reporting dashboard" than one long scroll. Read as: the maximum is the most one player can be fined in one session (one date) in a squad; "Max" takes a player to it; the page is the Fines page.
+
+- Migration 342, `services/fines_cap_ddl.py`: `fine_settings.max_per_session` (NULL = no limit), `fine_entries.note`.
+- `GET /fines/squads/{id}/session?date=`: the players in `fixture_lineups` for the squad's fixtures in the Monday to Sunday week of `date` (a two-day game counts by `end_on` too), cancelled games left out, in batting order, plus what each is already fined on that date. No date opens on the squad's latest game with a side picked on or before today. A week with none returns empty lists, not an error.
+- `add_entries` refuses a session that takes any player over the maximum, counting rows already on that date (voided ones free headroom) and quantity, in one pass so nothing is half written (422 naming up to three players). The screen also holds Save back; the server is the real gate.
+- `GET /fines/squads/{id}/report?date_from=&date_to=`: summary per player, sessions with reason and note, payments. `owing_now` is the whole balance, never the range's, so a report cannot understate what is owed. Voided rows are left out. Capped at 5000 rows with `truncated`.
+- Frontend: `AdminFines.jsx` is the shell (tiles, tabs; every panel stays mounted and only hidden, so a half-built session survives a tab change), `AddFinesSession.jsx` (`giveLines` never overwrites a filled line; Max lines are tracked with `isMax` so a second press replaces rather than stacks), `FinesOverview.jsx`, `FinesReport.jsx`, `lib/finesReport.js` (blocks for `textDocs.downloadPdf`), `finesUi.jsx`.
+- Proof: `verify_player_dashboard_and_fines.py` (real Postgres, 104; control on the previous routes fails the 10 new-behaviour checks without crashing), `verify_player_dashboard_fines_browser.mjs` (90: tiles, tabs, prefilled rows, Fine ticked, Fine all, Max all, a second press, over the maximum, date change, no side picked, no maximum set, the exact request bodies, the report and a downloaded PDF, 390px on four tabs).

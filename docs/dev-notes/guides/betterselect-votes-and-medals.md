@@ -38,6 +38,7 @@
 14. Migration 267 turns an existing club's settings row into its first medal, `link_token` included, so ballots already cast and links already shared keep working. A club with ballots or overrides but no settings row also gets a medal, or the `NOT NULL` `medal_id` has nothing to point at.
 15. The DDL lives in one list, `services/vote_medal_ddl.py`, run by both alembic and the lifespan in the same order. Every statement stays idempotent (the lifespan re-runs it every boot). `main.py`'s mirror deliberately does not create the two OLD per-fixture ballot uniques, since 267 drops them.
 16. `merge_players` must reassign vote rows (both vote FKs are ON DELETE CASCADE, so a merge would destroy ballots and votes cast for the removed player). De-dup keeps the keeper's ballot/pick, then moves. The ballot de-dup key includes `medal_id`, or a person who voted for both medals on a fixture loses one legitimate ballot. Votes are deliberately not in the merge undo log: an undone merge leaves votes on the kept player.
+16a. A new medal starts with `enabled = false` (no link, players cannot vote). The only control that turns it on is the "Voting link" row on the Settings tab (and the button in the off notice there); any notice that says "turn it on" must point at a screen that has that control.
 17. asyncpg cannot type a bare `:param IS NULL`. Any "param IS NULL OR col = param" needs `CAST(:param AS uuid)` (see `routers/votes.py` and `services/votes.py` medal filters).
 
 **Eligibility (who can be voted for or vote)**
@@ -63,6 +64,8 @@
 33. `ShareVotePanel` uses client-side URL schemes only (no backend send). "Post to socials" copies the message and links to `/admin/social-post`; no standings-card renderer exists.
 34. Awards night is a forced-dark stage (re-declare `color`, not only the `--pb-*` tokens, since `color` inherits). The router stamps `club_name`, `club_short` (initials fallback), `season_label`, `grade_name`, `grade_id` on the board; `grade_id` is what makes the reveal replay the same grade the leaderboard was scoped to.
 35. Public ballot is one screen: 3 tap targets above the team list, `picks` is still the same fixed-length array. The `RaceChart` is hand-rolled inline SVG; do not pull in a chart library for it.
+35a. The vote pages describe the verified voter through `public_votes._me_payload`, which adds `my_page` (a link to the player's own availability-link dashboard) only for a verified player with the club's self-service link on. Never send the availability token to an unidentified visitor, and do not share a sign-in between `bs_vote` and `bs_avail`.
+35b. The public ballot sends `photo_url` per eligible player only for a public player (`is_public` and no `privacy_hidden_at`). Anything new that puts a face on an unauthenticated page applies the same test.
 
 **Football twin (v9.34.0)**
 36. Football ballots key on `games` directly (cricket keys on `fixtures`). There is no eligibility source to choose: one team list, read by `services/afl/lineups.py` from `afl_player_game_lines` (PlayHQ `gameView.statistics.{home,away}.players[]`, both sides). It is a plain read of held data: no upstream call, works when PlayHQ is down.
@@ -79,6 +82,7 @@
 - An existing club's count narrows after 267: empty `grade_ids` must mean every grade (rule 12).
 - A grade-restricted medal shows fixtures at zero ballots, or a fixture disappears from it: grade resolved after narrowing, or `effective_grade_ids` not used (rule 13).
 - Merging two records of one person deletes one of their two ballots: de-dup key lacked `medal_id` (rule 16).
+- A first-time visitor on an open game reads "You can't vote on this game" and is never asked who they are: `role 'none'` with `reason 'verify_required'` must go to the name picker (`pick` step), not the ballot step's message (v9.119.0.2).
 - Football team list names the opposition players: read forgot `our_side` (rule 37).
 - A game's points read 18 where 6 is right (three voters all giving 3-2-1): raw tally used where 'rank' conversion is the default (rule 3).
 - Grade-filtered awards night replays whole-club standings: `grade_id` missing from the board payload (rule 34).

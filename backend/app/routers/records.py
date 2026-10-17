@@ -21,7 +21,8 @@ from app.services.game_status import appearance_counts_as_match
 from app.services.grade_labels import suggest_category
 from app.services import player_visibility
 from app.services import rate_coverage as rc
-from app.services.aggregations import _with_rate_coverage
+from app.services.aggregations import _with_rate_coverage, raise_board_games_to_grid
+from app.services.session_safety import rollback_keeping
 
 # "This game is our club's", for the per-game record boards.
 #
@@ -1640,12 +1641,45 @@ async def get_records(
             GROUP BY p.id
         """)
         played = {r["player_id"]: int(r["games"] or 0) for r in matches_played_rows}
+        # `most_seasons` is in the list on purpose: on this branch its `matches` column
+        # was the SEASONS count (62 matches for 62 seasons), because the CTE it reads has
+        # no game to count. The played figure is the right one for it as well.
         for board in (top_career_runs, top_batting_avg, most_fifties,
                       most_hundreds, top_career_wickets, top_bowling_avg,
-                      top_allrounders):
+                      top_allrounders, most_seasons):
             for row in board:
                 own = int(row.get("matches") or 0)
                 row["matches"] = max(own, played.get(row["player_id"], 0))
+
+    # THEN RAISED TO WHAT THE PLAYER'S OWN PROFILE SHOWS. Every figure above counts
+    # scorecards held (or CA's season total on the unfiltered path), and the profile's
+    # MATCHES is raised to the by-grade grid, which also counts the matches Cricket
+    # Australia's per-grade totals claim and we hold no scorecard for. So the Records
+    # page read a game or two under the player's own page for most players (Shoalwater
+    # Bay, v9.113.12 did the same for the leaderboards). Same helper, same loader: never
+    # lower, and skipped where "matches" means something narrower (a picked grade, finals
+    # only, captain only). See aggregations.raise_board_games_to_grid.
+    if not (grade_id or grade_name or finals_only or captain_only):
+        try:
+            board_rows = [row for board in (
+                top_career_runs, top_batting_avg, most_fifties, most_hundreds,
+                top_career_wickets, top_bowling_avg, top_allrounders,
+                most_matches, most_seasons) for row in board]
+            # Read the request's own club copies, not the per-innings views: a bound array of
+            # players straight against those was measured 25x worse (see ensure_club_innings).
+            await ensure_club_innings()
+            await ensure_club_pss()
+            await db.execute(text("SET LOCAL enable_nestloop = off"))
+            await _timed("games_to_grid", raise_board_games_to_grid(
+                db, org_id, board_rows, season_id, scope, games_key="matches",
+                rels={"bi": "_club_bi", "bs": "_club_bs", "fs": "_club_fs", "ga": "_club_ga",
+                      "games": "_club_games", "pss": _CLUB_PSS}))
+            await db.execute(text("SET LOCAL enable_nestloop = on"))
+            # The limit ran before the raise, so keep the order the figures now imply.
+            most_matches.sort(key=lambda r: -(r.get("matches") or 0))
+        except Exception:
+            await rollback_keeping(db, viewer)
+            logging.getLogger(__name__).exception("records games vs profile failed for org %s", org_id)
 
     # Players the club has hidden from its public site come off every board
     # here in one pass. Done on the payload rather than inside the ~40

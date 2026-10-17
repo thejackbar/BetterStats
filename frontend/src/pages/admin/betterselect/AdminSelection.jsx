@@ -27,16 +27,21 @@ import { PbSpinner } from '../../../lib/presskit'
 import { availRank } from '../../../lib/availability'
 import { Icon, Avatar, Btn, RoleChips, Tag, Empty, QuickAvailModal, playedWithinYears, RuleTags } from './ui'
 import { useFilters } from './filters'
+import SelectionHistory from './SelectionHistory'
+import usePersistedState from '../../../lib/usePersistedState'
 import SelectionFilters from './SelectionFilters'
+import { useSelectConfig } from '../../../lib/useAvailabilityConfig'
+import { teamDefaultFor, teamDefaultSummary } from './teamDefaults'
 import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
 import { AddPlayersSheet, SlotSheet, MobileBar } from './SelectionMobile'
 import SendSide from './SendSide'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
-import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank } from './selectionMeta'
+import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank, normGender, gameDatesLabel } from './selectionMeta'
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
 import { teamSeq, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
 import { confirmSig, restoreDraft } from './selectionDraft'
+import { sideFit, sideLabel, sideProblem } from '../../../lib/sideSize'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
 // displayed positional *hints* are gone, but the eligibility model is useful).
@@ -117,10 +122,7 @@ function fmtHeader(fx) {
   const title = fx.home_away === 'BYE' ? 'BYE' : `${us} vs ${opp}`
   const bits = []
   if (fx.round) bits.push(`Round ${fx.round}`)
-  if (fx.played_on) {
-    try { bits.push(new Date(fx.played_on + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })) }
-    catch { bits.push(fx.played_on) }
-  }
+  if (fx.played_on) bits.push(gameDatesLabel(fx.played_on, fx.end_on) + (fx.end_on && fx.end_on > fx.played_on ? ' (two days)' : ''))
   if (fx.start_time) bits.push(fx.start_time)
   if (fx.venue) bits.push(`${fx.venue}${fx.home_away === 'AWAY' ? ' (A)' : fx.home_away === 'HOME' ? ' (H)' : ''}`)
   return { title, sub: bits.join(' · '), kicker: `Team sheet${fx.round ? ` · Round ${fx.round}` : ''}` }
@@ -164,16 +166,20 @@ export default function AdminSelection() {
   const toastRef = useRef(toast)
   toastRef.current = toast
   const { theme, toggle: toggleTheme } = useTheme()
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canManage = hasCapability(CAP.MANAGE_SELECTIONS)
+  const [data, setData] = useState(null)
+  // A locked side is read-only for everyone, selectors included, until it is
+  // unlocked. canManage is the capability; canEdit is "may change the board now".
+  const locked = !!data?.fixture?.locked
+  const canEdit = canManage && !locked
   const canEditRef = useRef(canEdit)
   canEditRef.current = canEdit
-
-  const [data, setData] = useState(null)
   const [slots, setSlots] = useState([])
   const [capId, setCapId] = useState(null)
   const [wkId, setWkId] = useState(null)
   const [focus, setFocus] = useState(null)
   const [format, setFormat] = useState(11)
+  const [minFormat, setMinFormat] = useState(null)   // fewest players the side may field, null = must be full
   const [saving, setSaving] = useState(false)
   // The confirmed XI as loaded; "unconfirmed changes" is the board differing
   // from it. Derived, so putting someone back where they were reads as clean.
@@ -194,8 +200,7 @@ export default function AdminSelection() {
   // stops until it is settled.
   const [draftConflict, setDraftConflict] = useState(null)
   const pollDraft = useRef(() => {})
-  const [yearsF, setYearsF] = useState(3)
-  const [sort, setSort] = useState('squad')
+  const [sort, setSort] = usePersistedState('selection.sort', 'squad', (v) => ['squad', 'form', 'name', 'first'].includes(v))
   const [availEdit, setAvailEdit] = useState(null)
   // Phone only. `panel` is which of Pool / XI the bottom bar has up; the two
   // sheets are the "add players" search and one batting-order row's actions.
@@ -254,7 +259,8 @@ export default function AdminSelection() {
         // An autosaved draft replaces the confirmed XI on the board.
         let slotsInit = init
         let demo = {}
-        const dd = dr?.draft
+        // A locked side shows the confirmed XI whatever draft is behind it.
+        const dd = d.fixture?.locked ? null : dr?.draft
         draftOnServer.current = false
         draftVersion.current = 0
         setDraftInfo(null)
@@ -275,6 +281,7 @@ export default function AdminSelection() {
         setCapId(cap)
         setWkId(wk)
         setFormat(size)
+        setMinFormat(d.team_min ?? null)
         setFocus(slotsInit.findIndex((x) => x == null))
         setDemotions(demo)
         setDraftStatus('idle')
@@ -344,10 +351,24 @@ export default function AdminSelection() {
   }, [fixtureId, flushDraft])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { api.bsSelectionOverview().then((d) => setAllFixtures(d.fixtures || [])).catch(() => {}) }, [])
+  // Junior grades stay out of the team switcher unless "Junior grades: Show" is on in Settings.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
+  useEffect(() => { api.bsSelectionOverview({ hideJuniors: !showJuniors }).then((d) => setAllFixtures(d.fixtures || [])).catch(() => {}) }, [showJuniors])
   useEffect(() => { setPrevXI(null); api.bsPreviousXI(fixtureId).then(setPrevXI).catch(() => setPrevXI(null)) }, [fixtureId])
 
   const fx = data?.fixture
+  // The club's settings (Settings): how far back the pool reaches, and this team's
+  // starting filters. A team's rules are a STARTING view, shown as a banner and
+  // switched off for the match with one click; the selector's own filters win.
+  const selCfg = useSelectConfig()
+  const [ignoreDefaults, setIgnoreDefaults] = useState(false)
+  useEffect(() => { setIgnoreDefaults(false) }, [fixtureId])
+  const teamDefault = useMemo(
+    () => (fx?.team_id ? teamDefaultFor(selCfg.teamDefaults, fx.team_id, selCfg.squads) : null),
+    [selCfg.teamDefaults, selCfg.squads, fx?.team_id],
+  )
+  const useDefault = !!teamDefault && !ignoreDefaults
+  const yearsF = useDefault && teamDefault.playedYears != null ? teamDefault.playedYears : (selCfg.playedYears?.selection ?? 3)
   const poolById = useMemo(() => {
     const m = {}
     ;(data?.pool || []).forEach((p) => { m[p.id] = p })
@@ -397,7 +418,8 @@ export default function AdminSelection() {
   const facets = useMemo(() => [
     { key: 'squad', type: 'multi' }, { key: 'avail', type: 'multi' }, { key: 'role', type: 'multi' },
     { key: 'bowling', type: 'multi' }, { key: 'hand', type: 'multi' }, { key: 'form', type: 'multi' },
-    { key: 'status', type: 'single' }, { key: 'hideUnavail', type: 'bool' },
+    { key: 'status', type: 'single' }, { key: 'gender', type: 'single' }, { key: 'hideUnavail', type: 'bool' },
+    { key: 'registered', type: 'single' },
     // Fees + training. Single-choice rather than checkboxes because "shown
     // both ways" is just no filter, and each has a third real answer —
     // unknown — for a club whose modules can't say.
@@ -409,7 +431,7 @@ export default function AdminSelection() {
     // The club's association rules — clear / has a problem / ineligible.
     { key: 'rules', type: 'single' },
   ], [])
-  const filters = useFilters(facets)
+  const filters = useFilters(facets, { persist: 'selection' })
   const { values, search } = filters
 
   // A rule the club made BLOCKING means the pool should be suggesting players
@@ -430,6 +452,9 @@ export default function AdminSelection() {
   // their slot. The count is passed down so the pool can say who is missing.
   const available = useMemo(() => (data?.pool || []).filter((p) => !usedIds.has(p.id) && !p.is_inactive), [data, usedIds])
   const inactiveHidden = useMemo(() => (data?.pool || []).filter((p) => p.is_inactive && !usedIds.has(p.id)).length, [data, usedIds])
+  // Offered only when the pool holds both: a control that can only answer
+  // "nobody" is worse than none.
+  const showGender = useMemo(() => new Set(available.map((p) => normGender(p.gender)).filter(Boolean)).size > 1, [available])
   const pool = useMemo(() => {
     let list = available
     if (search.trim()) list = list.filter((p) => nameMatches(p.display_name, search))
@@ -438,7 +463,11 @@ export default function AdminSelection() {
     if (values.bowling?.length) list = list.filter((p) => values.bowling.includes(classifyBowl(p)))
     if (values.hand?.length) list = list.filter((p) => values.hand.includes(p.batting_hand))
     if (values.form?.length) list = list.filter((p) => { const b = formBucket(p); return b && values.form.includes(b) })
-    if (values.squad?.length) list = list.filter((p) => values.squad.some((s) => (p.squads || []).includes(s)))
+    // Squad and gender: the selector's own pick wins, else the team's default.
+    const squadPick = values.squad?.length ? values.squad : (useDefault && teamDefault.squads.length ? teamDefault.squads : null)
+    if (squadPick) list = list.filter((p) => squadPick.some((s) => (p.squads || []).includes(s)))
+    const genderPick = values.gender || (useDefault ? teamDefault.gender : '')
+    if (genderPick) list = list.filter((p) => normGender(p.gender) === genderPick)
     if (values.hideUnavail) list = list.filter((p) => p.availability !== 'UNAVAILABLE')
     // is_financial / trained_recently are tri-state: true, false, or null when
     // neither BetterFees nor Net Manager could answer and nobody has said by
@@ -457,16 +486,22 @@ export default function AdminSelection() {
     // A name typed into search is someone the selector is looking for, so the
     // "Played ≤ N yrs" window does not hide them. It only trims the browse list.
     // (Players marked inactive stay out either way: see `available`.)
-    if (yearsF && !search.trim()) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
+    if (yearsF && !search.trim()) list = list.filter((p) => playedWithinYears(p.last_played, yearsF, data?.flags?.season_start))
+    // Registered this season, where the club records it (Accounts screen). Absent
+    // is "not told", which is its own answer: the list still to be chased.
+    if (values.registered === 'yes') list = list.filter((p) => p.registered === true)
+    else if (values.registered === 'no') list = list.filter((p) => p.registered === false)
+    else if (values.registered === 'unknown') list = list.filter((p) => p.registered == null)
     if (values.status === 'unselected') list = list.filter((p) => !inAnotherXI(p))
     else if (values.status === 'clash') list = list.filter((p) => inAnotherXI(p))
+    if (sort === 'first') return sortByFirstName(list, (p) => p.display_name)
     const sorters = {
       squad: cmp,
       form: (a, b) => (b.score ?? 0) - (a.score ?? 0) || (a.display_name || '').localeCompare(b.display_name || ''),
       name: (a, b) => (a.display_name || '').localeCompare(b.display_name || ''),
     }
     return list.slice().sort(sorters[sort] || cmp)
-  }, [available, search, values, yearsF, sort, cmp])
+  }, [available, search, values, yearsF, sort, cmp, data, useDefault, teamDefault])
 
   const filled = slots.filter(Boolean)
   const count = filled.length
@@ -554,8 +589,84 @@ export default function AdminSelection() {
     if (t) adoptDraft(t)
     else { setDraftConflict(null); load() }
   }
+  // ── Undo ───────────────────────────────────────────────────────────────────
+  // Every change to the board (a drop, a removal, an auto-fill, a restored
+  // version) is one step back. The stack lives on this device and belongs to the
+  // fixture on screen: loading a fixture, or confirming, starts it afresh.
+  const hist = useRef({ stack: [], prev: null, fixture: null })
+  const [undoDepth, setUndoDepth] = useState(0)
+  useEffect(() => {
+    const h = hist.current
+    if (loadedFor.current !== fixtureId) { h.stack = []; h.prev = null; h.fixture = null; setUndoDepth(0); return }
+    const cur = { slots, capId, wkId, demotions }
+    if (h.fixture !== fixtureId) { h.fixture = fixtureId; h.prev = cur; h.stack = []; setUndoDepth(0); return }
+    const sig = (x) => JSON.stringify([x.slots, x.capId, x.wkId, x.demotions])
+    if (h.prev && sig(h.prev) !== sig(cur)) {
+      h.stack.push(h.prev)
+      if (h.stack.length > 50) h.stack.shift()
+      setUndoDepth(h.stack.length)
+    }
+    h.prev = cur
+  }, [slots, capId, wkId, demotions, data])  // eslint-disable-line react-hooks/exhaustive-deps
+  const undo = useCallback(() => {
+    const h = hist.current
+    if (!canEditRef.current || !h.stack.length) return
+    const prev = h.stack.pop()
+    h.prev = prev   // the effect then sees no difference and records nothing
+    setUndoDepth(h.stack.length)
+    setSlots(prev.slots); setCapId(prev.capId); setWkId(prev.wkId); setDemotions(prev.demotions)
+    setFocus(prev.slots.findIndex((x) => x == null))
+    toastRef.current.info('Undid the last change')
+  }, [])
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return
+      const t = e.target
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      if (!hist.current.stack.length) return
+      e.preventDefault()
+      undo()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [undo])
+
+  // ── Lock, unlock, history ──────────────────────────────────────────────────
+  const [showHistory, setShowHistory] = useState(false)
+  const [locking, setLocking] = useState(false)
+  const lockNow = async () => {
+    setLocking(true)
+    try { await api.bsLockSelection(fixtureId); toast.success('Locked'); load() }
+    catch (e) { toast.error('Could not lock: ' + e.message) }
+    finally { setLocking(false) }
+  }
+  const unlockNow = async () => {
+    if (!window.confirm('Unlock this side so it can be changed? Anyone with selection access will be able to edit it until it is confirmed again.')) return
+    setLocking(true)
+    try { await api.bsUnlockSelection(fixtureId); toast.success('Unlocked'); load() }
+    catch (e) { toast.error('Could not unlock: ' + e.message) }
+    finally { setLocking(false) }
+  }
+  // A version from the history goes onto the board as unconfirmed changes.
+  const restoreVersion = (ev) => {
+    const after = (ev.detail?.after || []).slice().sort((a, b) => (a.batting_order || 999) - (b.batting_order || 999))
+    const inPool = after.filter((x) => poolById[x.player_id])
+    if (!inPool.length) { toast.error('None of those players are in the pool for this match'); return }
+    const size = format > 0 ? Math.max(format, inPool.length) : inPool.length
+    const next = Array(size).fill(null)
+    inPool.forEach((x, i) => { next[i] = x.player_id })
+    setSlots(next)
+    setCapId(inPool.find((x) => x.is_captain)?.player_id ?? null)
+    setWkId(inPool.find((x) => x.is_wicket_keeper)?.player_id ?? null)
+    setDemotions({})
+    setShowHistory(false)
+    const missed = after.length - inPool.length
+    toast.success(`Loaded that side onto the board${missed ? ` (${missed} player${missed === 1 ? ' is' : 's are'} no longer in the pool)` : ''}. Confirm to save it.`)
+  }
+
   const target = format || 0
-  const offCount = target > 0 && count !== target
+  const fit = sideFit(count, target, minFormat || 0)
+  const offCount = fit.off
 
   // ── Slot mutations (plain fns — DnD always calls the latest onDrop) ────────
   const placeInSlot = (slotIdx, playerId) => {
@@ -642,7 +753,7 @@ export default function AdminSelection() {
   // seeding from last week's XI first. Unchanged tier discipline.
   const fillEmpty = (useLastWeek) => {
     if (!canEdit) return
-    if (format === 0) { toast.error('Set a side size (11/12/13) to auto-fill'); return }
+    if (format === 0) { toast.error('Set a side size to auto-fill'); return }
     // Auto-fill never puts anyone in two games; a player in another XI that day
     // (clash or a back to back game) is picked by hand.
     const okToPick = (p) => p && !inAnotherXI(p) && p.availability !== 'UNAVAILABLE'
@@ -653,7 +764,9 @@ export default function AdminSelection() {
         prevXI.player_ids.forEach((pid, i) => {
           if (i >= next.length || next[i]) return
           const p = poolById[pid]
-          if (p && !taken.has(pid) && okToPick(p)) { next[i] = pid; taken.add(pid) }
+          // Last week's side still has to pass this fixture's own rules: someone
+          // the gender wall or a blocking rule bars is not carried across.
+          if (p && !taken.has(pid) && okToPick(p) && p.gender_ok !== false && p.rule_state !== 'block') { next[i] = pid; taken.add(pid) }
         })
       }
       const eligible = (data?.pool || []).filter((p) => p.autofill_eligible && okToPick(p))
@@ -679,6 +792,9 @@ export default function AdminSelection() {
 
   const changeFormat = async (size) => {
     setFormat(size)
+    // The server drops a minimum the new size no longer sits above; mirror it.
+    const minAfter = minFormat && (size === 0 || minFormat < size) ? minFormat : null
+    setMinFormat(minAfter)
     setSlots((prev) => {
       if (size === 0) return prev.filter(Boolean)
       const next = prev.slice(0, size)
@@ -688,22 +804,53 @@ export default function AdminSelection() {
       if (wkId && !kept.has(wkId)) setWkId(null)
       return next
     })
-    if (canEdit) { try { await api.bsSetDefaultTeamSize(size) } catch (e) { toast.error('Could not save side size: ' + e.message) } }
+    if (canEdit) { try { await api.bsSetDefaultTeamSize(size, fixtureId) } catch (e) { toast.error('Could not save side size: ' + e.message) } }
   }
 
-  const pickAvail = async (status) => {
+  // The fewest players this team may field (null clears it). The size stays the
+  // maximum; the server refuses a minimum that is not below it.
+  const changeMin = async (n) => {
+    if (n != null && format > 0 && n >= format) { toast.error(`The minimum has to be lower than the side size of ${format}`); return }
+    const before = minFormat
+    setMinFormat(n)
+    if (canEdit) {
+      try { await api.bsSetDefaultTeamSize(format, fixtureId, n) }
+      catch (e) { setMinFormat(before); toast.error('Could not save the minimum: ' + e.message) }
+    }
+  }
+
+  // `which` is only sent by a two-day game's editor: a date for one week, or
+  // 'both'. Left out it means the fixture's own (only) date.
+  const pickAvail = async (status, which) => {
     const p = availEdit
     setAvailEdit(null)
     if (!p || !fx?.played_on) { if (!fx?.played_on) toast.error('No fixture date to set availability against'); return }
-    setData((d) => ({ ...d, pool: d.pool.map((x) => (x.id === p.id ? { ...x, availability: status } : x)) }))
-    try { await api.bsSetAvailability({ player_id: p.id, date: fx.played_on, status }) }
-    catch (e) { toast.error('Could not update availability: ' + e.message); load() }
+    const twoDay = !!(fx.end_on && fx.end_on > fx.played_on)
+    const dates = !twoDay ? [fx.played_on] : which === 'both' ? [fx.played_on, fx.end_on] : [which || fx.played_on]
+    // Optimistic: set those weeks, then the combined answer is the least
+    // favourable of the weeks (the server does the same on reload).
+    const RANK = { UNAVAILABLE: 0, MAYBE: 1, NO_RESPONSE: 2, AVAILABLE: 3 }
+    setData((d) => ({
+      ...d,
+      pool: d.pool.map((x) => {
+        if (x.id !== p.id) return x
+        const days = twoDay
+          ? (x.availability_days || [fx.played_on, fx.end_on].map((date) => ({ date, status: x.availability || 'NO_RESPONSE' })))
+              .map((w) => (dates.includes(w.date) ? { ...w, status } : w))
+          : null
+        const combined = days ? days.reduce((a, w) => (RANK[w.status] < RANK[a] ? w.status : a), 'AVAILABLE') : status
+        return { ...x, availability: combined, availability_days: days || x.availability_days }
+      }),
+    }))
+    try {
+      for (const date of dates) await api.bsSetAvailability({ player_id: p.id, date, status })
+    } catch (e) { toast.error('Could not update availability: ' + e.message); load() }
   }
 
   const save = async () => {
     if (offCount) {
-      const diff = count > target ? `${count - target} too many` : `${target - count} too few`
-      if (!window.confirm(`You have ${count} player${count === 1 ? '' : 's'} for a ${target}-a-side match — ${diff}.\n\nConfirm anyway?`)) return
+      const diff = sideProblem(count, target, minFormat || 0)
+      if (!window.confirm(`You have ${count} player${count === 1 ? '' : 's'} for a ${sideLabel(target, minFormat || 0)} match — ${diff}.\n\nConfirm anyway?`)) return
     }
     // A warning-level rule is the selector's to weigh, so it asks rather than
     // refuses. A blocking one never gets this far — the server decides, and
@@ -722,14 +869,15 @@ export default function AdminSelection() {
       draftPending.current = null
       await Promise.resolve(draftInflight.current).catch(() => {})
       const players = filled.map((id, i) => ({ player_id: id, batting_order: i + 1, is_captain: id === capId, is_wicket_keeper: id === wkId }))
-      const r = await api.bsSetSelection(fixtureId, players, demoList)
-      toast.success(`Confirmed ${r.count} player${r.count === 1 ? '' : 's'}`)
+      const r = await api.bsSetSelection(fixtureId, players, demoList, { lock: true })
+      toast.success(`Confirmed and locked ${r.count} player${r.count === 1 ? '' : 's'}`)
       load()
     } catch (e) {
       // A blocking rule comes back as a structured 409 listing exactly what
       // broke, which is more use than "save failed".
       const breaches = e?.detail?.breaches || e?.data?.detail?.breaches
-      if (breaches?.length) toast.error(`Can't save — ${breaches.join('; ')}`)
+      if (e?.detail?.code === 'locked') { toast.error(e.detail.message || 'This side is locked'); load() }
+      else if (breaches?.length) toast.error(`Can't save — ${breaches.join('; ')}`)
       else toast.error(e.message.includes('Already selected') ? e.message : 'Save failed: ' + e.message)
     } finally { setSaving(false) }
   }
@@ -791,8 +939,8 @@ export default function AdminSelection() {
     const b = { BAT: 0, ALL: 0, BWL: 0, WKT: 0 }
     filled.forEach((id) => { ['BAT', 'ALL', 'BWL', 'WKT'].forEach((c) => { if (has(id, c)) b[c] += 1 }) })
     const bowlers = filled.filter((id) => has(id, 'BWL') || has(id, 'ALL')).length
-    return { ...b, lightBowling: count >= 8 && bowlers < 5, hasKeeper: filled.some((id) => has(id, 'WKT')) }
-  }, [filled, poolById, count])
+    return { ...b, lightBowling: count >= 8 && bowlers < 5, hasKeeper: filled.some((id) => has(id, 'WKT')) || (!!wkId && filled.includes(wkId)) }
+  }, [filled, poolById, count, wkId])
 
   if (data === null) return <BetterSelectLayout title="Selection"><PbSpinner message="Loading selection…" /></BetterSelectLayout>
 
@@ -808,25 +956,34 @@ export default function AdminSelection() {
   )
 
   const filterBar = (
-    <SelectionFilters filters={filters} sort={sort} setSort={setSort} squadOptions={squadOptions}
-      yearsF={yearsF} setYearsF={setYearsF} count={pool.length} total={available.length}
+    <SelectionFilters filters={filters} sort={sort} setSort={setSort} squadOptions={squadOptions} showGender={showGender}
+      count={pool.length} total={available.length}
+      teamDefault={teamDefault ? { summary: teamDefaultSummary(teamDefault), ignored: ignoreDefaults, toggle: () => setIgnoreDefaults((v) => !v) } : null}
       inactiveHidden={inactiveHidden} flags={data?.flags} rules={data?.rules} />
   )
 
   const vm = {
     title, sub, kicker, teamName, contextLeft, filterBar, squadShort, canEdit,
-    poolById, pool, slots, capId, wkId, focus, format, count, target, balance,
+    poolById, pool, slots, capId, wkId, focus, format, minFormat, count, target, balance,
+    canMin: !!(canEdit && fx?.team_id),
     rules: data?.rules,
     filledSet: usedIds, canAutofill, hasPrev,
     available, view, isPhone, panel, setPanel,
     openAdd: (i) => { if (i != null) setFocus(i); setAddOpen(true) },
     openSlot: (i) => setSlotOpen(i),
-    changeFormat, tapPlayer, placeInSlot, removeAt, swapSlots, setFocus, toggleCap, toggleWk,
+    changeFormat, changeMin, tapPlayer, placeInSlot, removeAt, swapSlots, setFocus, toggleCap, toggleWk,
     autofill: () => fillEmpty(false), fillLastWeek: () => fillEmpty(true), clearXI, setAvailEdit,
   }
 
   const headerLeft = <ViewToggle value={view} onChange={setView} />
-  const confirmLabel = saving ? 'Confirming…' : dirty ? `Confirm${count ? ` (${count})` : ''}` : 'Confirmed'
+  // Confirm saves the side AND locks it. With nothing to save, a side that is
+  // named but not yet locked offers "Lock team" so it is never stuck "ready to
+  // review" with nothing to press.
+  const lockable = !dirty && !locked && count > 0
+  const confirmLabel = saving || locking ? (locking ? 'Locking…' : 'Confirming…')
+    : dirty ? `Confirm${count ? ` (${count})` : ''}` : locked ? 'Locked' : count > 0 ? 'Lock team' : 'Confirmed'
+  const confirmDisabled = saving || locking || locked || (!dirty && !lockable)
+  const confirmAction = lockable ? lockNow : save
   const actions = (
     <div className="flex items-center gap-2.5">
       {/* The site's own top bar already carries the theme toggle on a phone. */}
@@ -835,14 +992,32 @@ export default function AdminSelection() {
         <Icon name={theme === 'light' ? 'moon' : 'sun'} size={16} />
       </button>
       <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}><span className="hidden sm:inline">Share</span></Btn>
-      {canEdit && <Btn variant="soft" sm icon="share" onClick={() => setShowSend(true)} title="Email the confirmed side to the captain or the players"><span className="hidden sm:inline">Email</span></Btn>}
+      {canManage && <Btn variant="soft" sm icon="share" onClick={() => setShowSend(true)} title="Email the confirmed side to the captain or the players"><span className="hidden sm:inline">Email</span></Btn>}
       {/* Below `lg` Confirm lives in the bar pinned to the bottom of the screen. */}
-      {canEdit && <Btn variant="primary" sm icon="check" className="max-lg:hidden" onClick={save} disabled={saving || !dirty}>{confirmLabel}</Btn>}
+      {canManage && <Btn variant="ghost" sm icon="reset" onClick={() => setShowHistory(true)} title="Who changed this side, and what it was before"><span className="hidden sm:inline">History</span></Btn>}
+      {canEdit && <Btn variant="ghost" sm icon="undo" onClick={undo} disabled={!undoDepth} title="Undo the last change (Ctrl or Cmd + Z)" data-undo><span className="hidden sm:inline">Undo</span></Btn>}
+      {canManage && locked && <Btn variant="soft" sm icon="lock" onClick={unlockNow} disabled={locking} data-unlock>Unlock</Btn>}
+      {canManage && !locked && <Btn variant="primary" sm icon="check" className="max-lg:hidden" onClick={confirmAction} disabled={confirmDisabled} data-confirm>{confirmLabel}</Btn>}
     </div>
   )
 
   return (
     <BetterSelectLayout title="Selection" headerLeft={headerLeft} actions={actions}>
+      {locked && (
+        <div role="status" data-locked-banner className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-pb-hairline bg-pb-surface px-3 py-2 text-[12px] text-pb-dim">
+          <Icon name="lock" size={14} />
+          <span className="min-w-0 flex-1 basis-60">
+            <span className="font-semibold text-pb-text">Locked.</span>{' '}
+            {fx?.locked_by ? `${fx.locked_by} locked this side` : 'This side is locked'}
+            {fx?.locked_at ? ` on ${new Date(fx.locked_at).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}.
+            {canManage ? ' Unlock it to make a change.' : ' It can only be changed by someone with selection access.'}
+          </span>
+          {canManage && <button type="button" onClick={unlockNow} disabled={locking} className="shrink-0 font-display font-semibold text-pb-accent hover:underline disabled:opacity-50">Unlock</button>}
+        </div>
+      )}
+      {showHistory && (
+        <SelectionHistory fixtureId={fixtureId} title={title} canRestore={canEdit} onRestore={restoreVersion} onClose={() => setShowHistory(false)} />
+      )}
       {canEdit && draftConflict && (
         <div role="alert" className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3 py-2 text-[12px] text-pb-text"
           style={{ borderColor: 'var(--pb-amber)', background: 'color-mix(in srgb, var(--pb-amber) 10%, var(--pb-surface))' }}>
@@ -893,14 +1068,24 @@ export default function AdminSelection() {
         </DnD>
       </div>
 
-      <MobileBar vm={vm} confirm={canEdit && (
-        <Btn variant="primary" icon="check" className="min-h-[44px] shrink-0" onClick={save} disabled={saving || !dirty}>{confirmLabel}</Btn>
+      <MobileBar vm={vm} confirm={canManage && (
+        <>
+          {canEdit && <Btn variant="ghost" icon="undo" className="min-h-[44px] shrink-0" onClick={undo} disabled={!undoDepth} title="Undo the last change" data-undo><span className="sr-only">Undo</span></Btn>}
+          {locked
+            ? <Btn variant="soft" icon="lock" className="min-h-[44px] shrink-0" onClick={unlockNow} disabled={locking}>Unlock</Btn>
+            : <Btn variant="primary" icon="check" className="min-h-[44px] shrink-0" onClick={confirmAction} disabled={confirmDisabled}>{confirmLabel}</Btn>}
+        </>
       )} />
       {canEdit && addOpen && <AddPlayersSheet vm={vm} onClose={() => setAddOpen(false)} />}
       {canEdit && slotOpen != null && <SlotSheet vm={vm} idx={slotOpen} onClose={() => setSlotOpen(null)} />}
 
       {availEdit && (
-        <QuickAvailModal player={availEdit} dateLabel={fx?.played_on} current={availEdit.availability}
+        <QuickAvailModal player={availEdit}
+          dateLabel={fx?.end_on && fx.end_on > fx.played_on ? undefined : fx?.played_on}
+          current={availEdit.availability}
+          days={fx?.end_on && fx.end_on > fx.played_on
+            ? (availEdit.availability_days || [fx.played_on, fx.end_on].map((date) => ({ date, status: availEdit.availability || 'NO_RESPONSE' })))
+            : null}
           onPick={pickAvail} onClose={() => setAvailEdit(null)} />
       )}
 
@@ -946,7 +1131,7 @@ export default function AdminSelection() {
                 )
               })}
               {count === 0 && <div className="p-4"><Empty>No players selected.</Empty></div>}
-              {offCount && <div className="px-4 py-2 text-[12px] text-pb-amber">{count > target ? `${count - target} over` : `${target - count} short of`} your {target}-a-side format.</div>}
+              {offCount && <div className="px-4 py-2 text-[12px] text-pb-amber">{sideProblem(count, target, minFormat || 0)} for your {sideLabel(target, minFormat || 0)} format.</div>}
               {/* Club rules, on the sheet as well as the board — this is the
                   copy that gets sent to a captain, so it should not be the one
                   place a problem is invisible. */}

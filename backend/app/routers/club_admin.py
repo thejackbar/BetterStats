@@ -35,6 +35,7 @@ from app.auth.modules import (
     BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for, STATUS_PRIORITY,
 )
 from app.services import junior_hiding
+from app.services.side_size import valid_side_size
 from app.services.milestone_rules import (
     DEFAULT_STEPS as MILESTONE_DEFAULT_STEPS, PRESET_STEPS as MILESTONE_PRESETS,
     STATS as MILESTONE_STATS, STEP_LIMITS as MILESTONE_LIMITS, step_problem,
@@ -1123,7 +1124,7 @@ async def patch_settings(
     if data.dormancy_months is not None:
         # Clamp to a sane range: 1 month .. 50 years.
         club.dormancy_months = max(1, min(600, int(data.dormancy_months)))
-    if data.default_team_size is not None and int(data.default_team_size) in (0, 11, 12, 13):
+    if data.default_team_size is not None and valid_side_size(int(data.default_team_size)):
         club.default_team_size = int(data.default_team_size)
     if data.select_show_age is not None:
         club.select_show_age = bool(data.select_show_age)

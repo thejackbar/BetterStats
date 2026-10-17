@@ -14,7 +14,7 @@ export const AVAIL_STATUSES = ['AVAILABLE', 'UNAVAILABLE', 'MAYBE', 'NO_RESPONSE
 export const AVAILABILITY = {
   AVAILABLE: {
     label: 'Available',
-    short: 'In',
+    short: 'Available',
     glyph: '✓',
     // Semantic green — uses --pb-positive (fixed), NOT --pb-accent (the club's
     // white-label colour). "Available = green" must never re-colour per club;
@@ -26,7 +26,7 @@ export const AVAILABILITY = {
   },
   UNAVAILABLE: {
     label: 'Unavailable',
-    short: 'Out',
+    short: 'Unavailable',
     glyph: '✕',
     chip: 'bg-pb-red/20 text-pb-red border-pb-red/40',
     dot: 'bg-pb-red',
@@ -44,7 +44,7 @@ export const AVAILABILITY = {
   },
   NO_RESPONSE: {
     label: 'No response',
-    short: 'No reply',
+    short: 'No response',
     glyph: '–',
     chip: 'bg-pb-surface2 text-pb-faintest border-pb-hairline',
     dot: 'bg-pb-faintest',
@@ -52,6 +52,38 @@ export const AVAILABILITY = {
     rank: 2,
   },
 }
+
+// "Half available": a two-day game is answered one weekend at a time, and a
+// player can be free for one and away for the other. These are not answers (they
+// are never stored or sent); they are how a card DRAWS that case, in a colour the
+// club picks in BetterSelect Settings, so it is neither the green of Available nor
+// the red of Unavailable. `HALF_W1` is "only week 1 is a yes", `HALF_W2` the other.
+AVAILABILITY.HALF_W1 = {
+  label: 'Week 1 only', short: 'Week 1 only', glyph: '½',
+  chip: 'bg-pb-surface2 text-pb-text border-pb-hairline', dot: 'bg-pb-surface2',
+  cssVar: 'var(--pb-half-w1)', rank: 1.5,
+}
+AVAILABILITY.HALF_W2 = {
+  label: 'Week 2 only', short: 'Week 2 only', glyph: '½',
+  chip: 'bg-pb-surface2 text-pb-text border-pb-hairline', dot: 'bg-pb-surface2',
+  cssVar: 'var(--pb-half-w2)', rank: 1.5,
+}
+
+// The half-available state for a two-day game's per-weekend answers
+// ([{date, status}], in order), or '' when it does not apply: one weekend is a
+// plain yes and the other a plain no. A maybe or no answer yet is not "half":
+// those keep their own colour until the player has said.
+export function halfStatus(days) {
+  if (!Array.isArray(days) || days.length < 2) return ''
+  const yes = days.map((d) => d.status === 'AVAILABLE')
+  const no = days.map((d) => d.status === 'UNAVAILABLE')
+  if (yes[0] && no[1]) return 'HALF_W1'
+  if (no[0] && yes[1]) return 'HALF_W2'
+  return ''
+}
+// The status to DRAW for a player: the half state when it applies, else their
+// availability. Colour and dot only; never use this for a rule or a filter.
+export const viewStatus = (p, days) => halfStatus(days ?? p?.availability_days) || p?.availability || 'NO_RESPONSE'
 
 // Statuses in display order (available → maybe → no-response → unavailable),
 // derived from `rank` so this stays in lockstep with the map above.

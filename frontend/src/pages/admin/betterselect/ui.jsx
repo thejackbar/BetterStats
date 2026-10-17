@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../contexts/AuthContext'
 import { ruleBadges } from './selectionRules'
 import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availRank } from '../../../lib/availability'
+import { useAllowMaybe } from '../../../lib/useAvailabilityConfig'
 
 /* ── Icons — simple geometric line glyphs (stroke = currentColor) ────────── */
 const ICON_PATHS = {
@@ -42,6 +43,9 @@ const ICON_PATHS = {
   timer: <><circle cx="12" cy="13" r="8" /><path d="M12 13V9M9 2h6M12 5V2" /></>,
   play: <><path d="M7 5l12 7-12 7z" fill="currentColor" stroke="none" /></>,
   pause: <><rect x="7" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none" /><rect x="13.5" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none" /></>,
+  history: <><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1" /><path d="M3.5 4v4.5H8" /><path d="M12 7.5V12l3 2" /></>,
+  lock: <><rect x="5" y="11" width="14" height="9.5" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
+  undo: <><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></>,
   reset: <><path d="M3.5 12a8.5 8.5 0 1 1 2.5 6" /><path d="M3.5 20v-5h5" /></>,
   sound: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /></>,
   mute: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M22 9l-6 6M16 9l6 6" /></>,
@@ -299,7 +303,21 @@ const BTN_VARIANTS = {
   soft: 'bg-pb-surface2 text-pb-text border border-pb-hairline hover:border-pb-hairline2',
   danger: 'bg-transparent text-pb-red border border-pb-red/40 hover:bg-pb-red/10',
 }
-export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, disabled = false, type = 'button', className = '', title, href, download, target, rel }) {
+/* The "Show juniors" switch. Junior grades are whatever Manage Grades says they
+ * are; they are left out of Availability, Fixtures and Selection until asked
+ * for. One shared preference, remembered on this device (select.juniors). */
+export function JuniorsToggle({ value, onChange, className = '' }) {
+  return (
+    <button type="button" onClick={() => onChange(!value)} aria-pressed={value} data-juniors-toggle
+      title="Junior grades are set in Manage Grades"
+      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${value ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'} ${className}`}>
+      {value ? 'Juniors shown' : 'Show juniors'}
+    </button>
+  )
+}
+
+export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, disabled = false, type = 'button', className = '', title, href, download, target, rel, ...rest }) {
+  // `rest` carries data-* and aria-* attributes through to the element.
   const size = sm ? 'text-[12.5px] px-2.5 py-1.5 gap-1.5' : 'text-[13.5px] px-3.5 py-2 gap-2'
   const cls = `inline-flex items-center justify-center rounded-lg font-display leading-none transition whitespace-nowrap disabled:opacity-40 disabled:cursor-default ${size} ${BTN_VARIANTS[variant] || BTN_VARIANTS.ghost} ${className}`
   const inner = <>{icon && <Icon name={icon} size={sm ? 14 : 16} />}{children}</>
@@ -308,12 +326,12 @@ export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, di
   if (href) {
     return (
       <a href={disabled ? undefined : href} download={download} title={title}
-        target={target} rel={target === '_blank' ? (rel || 'noopener noreferrer') : rel}
+        target={target} rel={target === '_blank' ? (rel || 'noopener noreferrer') : rel} {...rest}
         className={`${cls}${disabled ? ' opacity-40 pointer-events-none' : ''}`}>{inner}</a>
     )
   }
   return (
-    <button type={type} onClick={disabled ? undefined : onClick} disabled={disabled} title={title} className={cls}>
+    <button type={type} onClick={disabled ? undefined : onClick} disabled={disabled} title={title} className={cls} {...rest}>
       {inner}
     </button>
   )
@@ -379,8 +397,11 @@ export const RECENCY_OPTIONS = [
   { value: 5, label: 'Played ≤ 5 yrs' },
   { value: 10, label: 'Played ≤ 10 yrs' },
 ]
-export function playedWithinYears(lastPlayed, years) {
+// `years` of -1 means "played this season": `seasonStart` is the first day of the
+// season the match sits in (the server sends it); without one it filters nothing.
+export function playedWithinYears(lastPlayed, years, seasonStart) {
   if (!years) return true
+  if (years < 0) return !seasonStart || (!!lastPlayed && lastPlayed >= seasonStart)
   if (!lastPlayed) return true // never-played (e.g. a new manual add) — keep
   const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
   return new Date(lastPlayed + 'T00:00:00') >= cutoff
@@ -470,10 +491,58 @@ export function AvailSummary({ players, statusOf = (p) => p.availability ?? p.av
   )
 }
 
+/* A two-day game is answered a week at a time, or for both weeks at once.
+   `days` is [{date, status}] in order; onPick(status, which) where `which` is a
+   date or 'both'. Declared at module level (never inside a render). */
+function TwoDayAvail({ days, onPick, allowMaybe }) {
+  const fmt = (iso) => {
+    try { return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }
+    catch { return iso }
+  }
+  const choices = AVAIL_ORDER.filter((s) => allowMaybe || s !== 'MAYBE')
+  const same = days.every((d) => d.status === days[0].status) ? days[0].status : null
+  const rows = [
+    { key: 'both', which: 'both', title: 'Both weeks', sub: days.map((d) => fmt(d.date)).join(' + '), current: same },
+    ...days.map((d, i) => ({ key: d.date, which: d.date, title: `Week ${i + 1}`, sub: fmt(d.date), current: d.status })),
+  ]
+  return (
+    <div className="p-4 flex flex-col gap-3" data-two-day-avail>
+      {rows.map((r) => (
+        <div key={r.key} data-avail-row={r.key === 'both' ? 'both' : r.key}>
+          <div className="flex items-baseline justify-between gap-2 mb-1.5">
+            <span className="font-display font-bold text-[14px]">{r.title}</span>
+            <span className="text-[11.5px] text-pb-faint">{r.sub}</span>
+          </div>
+          <div className={`grid gap-2 ${choices.length === 4 ? 'grid-cols-4' : 'grid-cols-3'}`}>
+            {choices.map((s) => {
+              const meta = AVAILABILITY[s]
+              const on = r.current === s
+              return (
+                <button key={s} type="button" data-pick={s} onClick={() => onPick(s, r.which)}
+                  title={`${r.title}: ${meta.label}`}
+                  className="min-h-[44px] rounded-lg font-display font-semibold text-[12.5px] px-1 transition"
+                  style={{
+                    border: `1.5px solid ${on ? meta.cssVar : 'var(--pb-hairline2)'}`,
+                    background: on ? `color-mix(in srgb, ${meta.cssVar} 12%, transparent)` : 'transparent',
+                    color: on ? meta.cssVar : 'var(--pb-dim)',
+                  }}>
+                  {meta.glyph} {meta.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /* ── Quick-update availability modal (presentational) ─────────────────────
    onPick(status) is called when a status is chosen; the caller persists it. */
-export function QuickAvailModal({ player, dateLabel, current, onPick, onClose }) {
+export function QuickAvailModal({ player, dateLabel, current, onPick, onClose, days }) {
   const navigate = useNavigate()
+  // A club that has switched Maybe off is only offered the other answers.
+  const allowMaybe = useAllowMaybe()
   // A bottom sheet on a phone (the buttons land under the thumb, and it can only
   // ever be as wide as the screen), a centred card from `sm` up.
   return (
@@ -513,8 +582,12 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose })
             )}
           <button onClick={onClose} className="text-pb-faint hover:text-pb-text w-10 h-10 -mr-2 inline-flex items-center justify-center" aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
+        {Array.isArray(days) && days.length > 1 && (
+          <TwoDayAvail days={days} onPick={onPick} allowMaybe={allowMaybe} />
+        )}
+        {!(Array.isArray(days) && days.length > 1) && (
         <div className="p-4 grid grid-cols-2 gap-2.5">
-          {AVAIL_ORDER.map((s) => {
+          {AVAIL_ORDER.filter((s) => allowMaybe || s !== 'MAYBE').map((s) => {
             const meta = AVAILABILITY[s]
             const on = current === s
             return (
@@ -536,6 +609,7 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose })
             )
           })}
         </div>
+        )}
         <div className="px-4 pb-4 flex items-center gap-1.5 text-[11.5px] text-pb-faint">
           <Icon name="info" size={13} /> Tap a status — saves instantly.
         </div>

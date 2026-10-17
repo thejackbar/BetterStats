@@ -543,6 +543,11 @@ class Organisation(Base):
     # Whether the self-service page tells a player which squad is theirs (migration
     # 325). Off by default: some clubs do not want squads known to the players.
     availability_show_squad = Column(Boolean, nullable=False, server_default="false", default=False)
+    # False = the club records only Available / Unavailable (migration 340).
+    availability_allow_maybe = Column(Boolean, nullable=False, server_default="true", default=True)
+    # The ordered module keys shown on a player's own page (migration 341).
+    # NULL = never chosen, which reads as services/player_dashboard.DEFAULT_MODULES.
+    player_dashboard_modules = Column(JSONB, nullable=True)
     # ─── BetterFantasyCricket: public fantasy link (migration 087) ────────────
     # The per-club magic link members and supporters use to register and play
     # (mirrors availability_link_token). Rotatable; resolves to the club's
@@ -1609,6 +1614,14 @@ class Fixture(Base):
     # names its finals something the heuristic can't read.
     is_final = Column(Boolean, nullable=True)
     notes = Column(Text, nullable=True)
+    # Which of the squad's teams plays this fixture, as a grade key (migration 337).
+    # NULL = work it out from grade_id. Sync never writes it.
+    side_key = Column(Text, nullable=True)
+    # The squad on a synced fixture was picked by hand (migration 338): sync leaves it.
+    team_pinned = Column(Boolean, nullable=False, server_default="false")
+    # Set when the confirmed side is locked (migration 334); NULL = open to edit.
+    locked_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    locked_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -1634,6 +1647,8 @@ class Team(Base):
     sequence = Column(Integer, default=0, nullable=False, server_default="0")  # hierarchy rank (1 = top team)
     grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
     default_formation = Column(Text, nullable=True)
+    default_team_size = Column(Integer, nullable=True)  # NULL = follow the club; 0 = no limit
+    min_team_size = Column(Integer, nullable=True)  # fewest players the side may field; NULL = must be full
     is_active = Column(Boolean, default=True, nullable=False, server_default="true")
     source = Column(Text, nullable=False, server_default="manual")  # 'auto' | 'manual'
     playhq_id = Column(Text, nullable=True)
@@ -1909,6 +1924,13 @@ class NetSession(Base):
     # carries no net column — the default lives in the most recent session).
     settings = Column(JSONB, nullable=True)
     status = Column(Text, nullable=False, server_default="active")  # active | done
+    # This session's own check-in link (migration 335): a QR code printed for it
+    # checks people into it alone, where the club-wide link joins every live
+    # session. NULL until first asked for.
+    checkin_token = Column(Text, nullable=True)
+    # Squads this session is for; NULL/empty = everyone. Narrows the self check-in
+    # list reached by this session's own link.
+    squad_team_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
     # Bumped by every write that changes what the live screen shows, so a
     # second device polling with the version it last saw is told "nothing has
     # changed" in two fields instead of re-reading the whole session. Always

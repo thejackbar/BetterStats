@@ -16,6 +16,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY } from '../../../lib/availability'
 import { moduleBrand } from '../../../lib/moduleBrand'
 import { Icon, Btn, AvailSummary, Empty } from './ui'
+import usePersistedState from '../../../lib/usePersistedState'
 
 const BRAND = moduleBrand('select')
 
@@ -73,13 +74,15 @@ function BetterSelectOverview() {
   const [overview, setOverview] = useState([])
   const [matrix, setMatrix] = useState({ dates: [], players: [], availability: {} })
   const [roster, setRoster] = useState([])
+  // The same remembered Show juniors choice the other BetterSelect screens use.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   useEffect(() => {
     let alive = true
     Promise.all([
-      api.bsListFixtures(true).then((r) => r).catch(() => []),
-      api.bsSelectionOverview().then((d) => d.fixtures || []).catch(() => []),
-      api.bsAvailabilityMatrix().then((d) => d).catch(() => ({ dates: [], players: [], availability: {} })),
+      api.bsListFixtures(true, { hideJuniors: !showJuniors }).then((r) => r).catch(() => []),
+      api.bsSelectionOverview({ hideJuniors: !showJuniors }).then((d) => d.fixtures || []).catch(() => []),
+      api.bsAvailabilityMatrix({ juniors: showJuniors }).then((d) => d).catch(() => ({ dates: [], players: [], availability: {} })),
       api.adminListPlayers().then((r) => r).catch(() => []),
     ]).then(([fx, ov, mx, rs]) => {
       if (!alive) return
@@ -89,7 +92,7 @@ function BetterSelectOverview() {
       setRoster(Array.isArray(rs) ? rs : [])
     })
     return () => { alive = false }
-  }, [])
+  }, [showJuniors])
 
   const playable = useMemo(
     () => (fixtures || []).filter((f) => f.home_away !== 'BYE' && f.played_on),

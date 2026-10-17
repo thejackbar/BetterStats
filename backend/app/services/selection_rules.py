@@ -44,6 +44,7 @@ with it.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -194,7 +195,115 @@ def club_config(org) -> dict:
         # the moment it is confirmed. Off until a club asks: it sends mail and
         # shares phone numbers (services/selection_notify).
         "notify_captain_on_confirm": raw.get("notify_captain_on_confirm") is True,
+        # A BetterComms template (Admin > Comms > Templates) the club wrote for
+        # the captain's email and for the players' email. Unset means the
+        # standard wording. Stored as the template's id; services/selection_notify
+        # looks it up on every send, so a deleted template falls back, loudly.
+        "captain_email_template_id": clean_template_id(raw.get("captain_email_template_id")),
+        "player_email_template_id": clean_template_id(raw.get("player_email_template_id")),
+        # The colour of the availability dot and card edge for a player who is
+        # free for ONE weekend of a two-day game and away for the other ("half
+        # available"): `w1` when only week 1 is a yes, `w2` when only week 2 is.
+        "half_colours": half_colours(raw.get("half_colours")),
+        # How far back a player's last game may be for the screens' pools to
+        # list them without a search: 0 = any time. Selection board and
+        # Whiteboard read `selection`, the Availability matrix `availability`.
+        "played_years": played_years(raw.get("played_years")),
+        # Starting filters for one team's Selection board ("rules"): see
+        # clean_team_defaults.
+        "team_defaults": clean_team_defaults(raw.get("team_defaults")),
     }
+
+
+DEFAULT_PLAYED_YEARS = {"selection": 3, "availability": 0}
+MAX_PLAYED_YEARS = 50
+MAX_TEAM_DEFAULTS = 60
+
+
+def clean_years(raw, fallback=None):
+    """A whole number of years -1..50, or `fallback` for anything else. 0 is "any
+    time" and -1 is "this season" (the pools' existing "Played this season")."""
+    if isinstance(raw, bool):
+        return fallback
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return fallback
+    return n if -1 <= n <= MAX_PLAYED_YEARS else fallback
+
+
+def played_years(raw) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    return {k: clean_years(raw.get(k), v) for k, v in DEFAULT_PLAYED_YEARS.items()}
+
+
+def clean_team_defaults(raw) -> list:
+    """The club's per-team starting filters, normalised. Each rule names the
+    teams it applies to and at least one thing to start on:
+
+      gender        'male' | 'female'   only that gender
+      squads        [squad name]        only players in one of these squads
+      top_squads    N                   only players in the club's top N squads
+                                         (by XI number; follows a reorder)
+      played_years  N                   this team's own "played within" window
+                                         (0 = any time, -1 = this season), instead of the club's
+
+    A rule with no team or nothing to filter on is dropped, never stored half
+    made. These are STARTING points: the board shows them as a banner the
+    selector can switch off for the match, they never remove anyone for good."""
+    out: list = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw[:MAX_TEAM_DEFAULTS]:
+        if not isinstance(item, dict):
+            continue
+        teams = []
+        for t in item.get("team_ids") or []:
+            tid = clean_template_id(t)         # a canonical uuid string, or None
+            if tid and tid not in teams:
+                teams.append(tid)
+        gender = str(item.get("gender") or "").strip().lower()
+        gender = {"male": "male", "men": "male", "female": "female", "women": "female"}.get(gender)
+        squads = []
+        for n in item.get("squads") or []:
+            n = str(n or "").strip()[:120]
+            if n and n not in squads:
+                squads.append(n)
+        top = clean_years(item.get("top_squads"), None)
+        top = top if top and 1 <= top <= 30 else None
+        py = clean_years(item.get("played_years"), None)
+        if not teams or not (gender or squads or top or py is not None):
+            continue
+        rid = str(item.get("id") or "").strip()[:40] or uuid.uuid4().hex[:12]
+        out.append({
+            "id": rid, "team_ids": teams, "gender": gender, "squads": squads[:40],
+            "top_squads": top, "played_years": py,
+        })
+    return out
+
+
+DEFAULT_HALF_COLOURS = {"w1": "#a855f7", "w2": "#06b6d4"}
+
+
+def clean_colour(raw) -> Optional[str]:
+    """A #rrggbb colour, lower case, or None for anything else (so a bad value is
+    never stored and never reaches a style attribute)."""
+    s = str(raw or "").strip().lower()
+    return s if re.fullmatch(r"#[0-9a-f]{6}", s) else None
+
+
+def half_colours(raw) -> dict:
+    """The club's two half-available colours, a default for each one not set."""
+    raw = raw if isinstance(raw, dict) else {}
+    return {k: clean_colour(raw.get(k)) or v for k, v in DEFAULT_HALF_COLOURS.items()}
+
+
+def clean_template_id(raw) -> Optional[str]:
+    """A template id as a canonical string, or None for anything unreadable."""
+    try:
+        return str(uuid.UUID(str(raw))) if raw else None
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def clean_age_basis(raw) -> dict:
@@ -1120,21 +1229,31 @@ async def _team_sequences(db: AsyncSession, org_id, fx) -> tuple[dict[str, int],
     """Every team name (and short name) mapped to its seniority, plus this
     fixture's own. Seniority is what makes "a higher grade" answerable at all;
     a club that hasn't ordered its squads gets no answer, and the rule stays
-    quiet rather than guessing."""
-    rows = (await db.execute(
-        text("SELECT id, name, short_name, sequence FROM teams WHERE organisation_id = :org"),
-        {"org": org_id},
-    )).fetchall()
+    quiet rather than guessing.
+
+    A squad can cover several teams (1st and 2nd XI in one pool): each team's own
+    name ("2nd XI") carries its own XI number, and the squad's name the first."""
+    from app.services import squad_sides   # local: this module is imported by the pool
+    sides = await squad_sides.load(db, org_id)
     seqs: dict[str, int] = {}
-    mine: int | None = None
-    for tid, name, short, seq in rows:
-        if not seq or seq <= 0:
+    for sq in sides.squads.values():
+        if not sq.sequence or sq.sequence <= 0:
             continue
-        for label in (name, short):
+        for label in (sq.name, sq.short_name):
             if label:
-                seqs[label.strip().lower()] = seq
-        if fx.team_id and str(tid) == str(fx.team_id):
-            mine = seq
+                seqs[label.strip().lower()] = sq.top_rank or sq.sequence
+        if sq.multi:
+            for side in sq.sides:
+                if side.rank:
+                    for label in (side.label, side.default_label):
+                        if label:
+                            seqs[label.strip().lower()] = side.rank
+    if fx.team_id:
+        mine = sides.rank(fx.team_id, fx.grade_id, fx.side_key)
+    else:
+        # No squad named: only a squad set up to cover this grade may claim it.
+        owner = sides.squad_for_stored_grade(fx.grade_id) if fx.grade_id else None
+        mine = sides.rank(owner.id, fx.grade_id) if owner else None
     return seqs, mine
 
 
@@ -1169,6 +1288,34 @@ async def _registrations(db: AsyncSession, org_id, season_id) -> dict[str, bool]
         {"org": org_id, "season": season_id},
     )).fetchall()
     return {str(pid): bool(reg) for pid, reg in rows}
+
+
+async def registered_for_fixture(db: AsyncSession, org_id, fx) -> dict[str, bool]:
+    """{player_id: registered} for the season this fixture belongs to, from the
+    registration tick on the Accounts screen (BetterAdmin fees). A player with no
+    member row is absent, not False: the club has not told us either way. Empty
+    for a club that keeps no such records, which is what lets the board drop the
+    filter instead of showing one that can only answer "nobody".
+
+    The season is the fixture's grade's season, else the club's latest, the same
+    two steps the rules engine takes."""
+    season_id = None
+    if getattr(fx, "grade_id", None):
+        season_id = (await db.execute(
+            text("SELECT season_id FROM grades WHERE id = :g"), {"g": fx.grade_id})).scalar()
+    if season_id is None:
+        season_id = (await db.execute(
+            text("SELECT id FROM seasons WHERE organisation_id = :org "
+                 "ORDER BY year DESC NULLS LAST, name DESC LIMIT 1"), {"org": org_id})).scalar()
+    if season_id is None:
+        return {}
+    try:
+        # A savepoint, not a rollback: a rollback would expire the club and the
+        # fixture the caller still holds.
+        async with db.begin_nested():
+            return await _registrations(db, org_id, season_id)
+    except Exception:  # noqa: BLE001 - a club without the fees tables simply has no answer
+        return {}
 
 
 async def _nearby_commitments(db: AsyncSession, org_id, fx, window_days: int) -> dict[str, int]:

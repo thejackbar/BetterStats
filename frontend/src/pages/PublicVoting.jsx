@@ -28,6 +28,7 @@ const NOT_OPEN = {
 const REASON = {
   captain_only: 'Only the captain submits votes for this club. Ask your skipper to cast them.',
   did_not_play: 'Only players who played in this game can vote at this club.',
+  verify_required: 'Find your name to vote on this game.',
 }
 
 function Banner({ tone = 'error', children }) {
@@ -42,6 +43,23 @@ function Banner({ tone = 'error', children }) {
 }
 
 /* ── The one-screen ballot ─────────────────────────────────────────────────── */
+// A player's photo, or their initials when they have none (or it will not load).
+function Face({ player, size = 40, chosen = false }) {
+  const [failed, setFailed] = useState(false)
+  const ring = `1.5px solid ${chosen ? 'var(--pb-accent)' : 'var(--pb-hairline2)'}`
+  const box = { width: size, height: size, minWidth: size, border: ring }
+  if (player?.photo_url && !failed) {
+    return <img src={player.photo_url} alt="" loading="lazy" onError={() => setFailed(true)} data-face="photo"
+      className="rounded-full object-cover bg-pb-surface2 shrink-0" style={box} />
+  }
+  return (
+    <span data-face="initials" className="rounded-full bg-pb-surface2 font-mono text-[11px] font-semibold flex items-center justify-center shrink-0"
+      style={{ ...box, color: chosen ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
+      {initialsOf(player?.name)}
+    </span>
+  )
+}
+
 function Ballot({ fixture, values, votable, picks, setPicks, onSubmit, busy, voterLabel, onBack }) {
   const nextSlot = picks.findIndex((p) => !p)
   const complete = picks.every(Boolean)
@@ -89,10 +107,7 @@ function Ballot({ fixture, values, votable, picks, setPicks, onSubmit, busy, vot
             <button key={p.id} onClick={() => tap(p.id)}
               className="w-full flex items-center gap-3 px-4 py-3 text-left border-b pb-hairline last:border-0 transition-colors"
               style={{ background: chosen ? 'color-mix(in srgb, var(--pb-accent) 7%, transparent)' : 'transparent' }}>
-              <span className="w-8 h-8 rounded-full bg-pb-surface2 font-mono text-[11px] font-semibold flex items-center justify-center shrink-0"
-                style={{ border: `1.5px solid ${chosen ? 'var(--pb-accent)' : 'var(--pb-hairline2)'}`, color: chosen ? 'var(--pb-accent)' : 'var(--pb-dim)' }}>
-                {initialsOf(p.name)}
-              </span>
+              <Face player={p} chosen={chosen} />
               <span className="flex-1 text-[15.5px] font-medium">{p.name}</span>
               <span className="w-[26px] h-[26px] rounded-lg flex items-center justify-center font-mono text-xs font-bold shrink-0"
                 style={chosen
@@ -170,6 +185,11 @@ export default function PublicVoting() {
       const d = await api.votePublicFixture(token, fid)
       setFixture(d)
       if (d.me && !me) setMe(d.me)
+      // Nobody identified yet and the club only takes players: that is "who are
+      // you?", not "you can't vote", so go to the name picker.
+      if (d.fixture?.state === 'open' && d.role === 'none' && d.reason === 'verify_required') {
+        seedPicks(d); setStep('pick'); return
+      }
       if (d.fixture?.state !== 'open' || d.role === 'none') { seedPicks(d); setStep('ballot'); return }
       if (!d.me && !supporterName) { seedPicks(d); setStep('pick'); return }
       seedPicks(d); setStep('ballot')
@@ -260,10 +280,16 @@ export default function PublicVoting() {
               </div>
             </div>
             {me && (
-              <button onClick={async () => {
-                try { await api.votePublicSwitch(token) } catch { /* cookie clear is best-effort */ }
-                setMe(null); setChosen(null); setStep('games')
-              }} className="ml-auto text-xs text-pb-faint hover:text-pb-text underline shrink-0">Not you?</button>
+              <div className="ml-auto flex items-center gap-3 shrink-0">
+                {me.my_page && (
+                  <a href={me.my_page} data-my-page-link
+                    className="text-xs font-semibold underline" style={{ color: 'var(--pb-accent)' }}>My page</a>
+                )}
+                <button onClick={async () => {
+                  try { await api.votePublicSwitch(token) } catch { /* cookie clear is best-effort */ }
+                  setMe(null); setChosen(null); setStep('games')
+                }} className="text-xs text-pb-faint hover:text-pb-text underline">Not you?</button>
+              </div>
             )}
           </div>
         )}
@@ -441,6 +467,11 @@ export default function PublicVoting() {
             </p>
             <button onClick={backToGames} className="mt-6 px-6 py-3 rounded-xl font-semibold text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}>Back to games</button>
+            {me?.my_page && (
+              <div className="mt-4">
+                <a href={me.my_page} data-my-page-done className="text-sm underline text-pb-dim">Go to my page</a>
+              </div>
+            )}
           </div>
         )}
 

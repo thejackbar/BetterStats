@@ -23,6 +23,7 @@ downgraded club's link simply 404s.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -36,16 +37,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.modules import MODULE_SELECT, org_has_module
 from app.config.settings import settings
 from app.models.db import Grade, Organisation, Player, PlayerAvailability, get_db
+from app.routers.ladders import _compute_team_ladders
 from app.routers.availability import (
+    MAYBE_OFF,
     active_self_service_players,
+    allow_maybe,
+    audit_availability,
     local_now,
     phone_last4,
     upcoming_fixtures_by_date,
 )
-from app.services import rate_limit
+from app.services import fines as fines_svc, player_dashboard, rate_limit, squad_sides
+from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.squad_next_game import fixtures_for_player
+from app.services.session_safety import rollback_keeping
 
 router = APIRouter(prefix="/public/availability", tags=["public-availability"])
+
+logger = logging.getLogger(__name__)
 
 COOKIE_NAME = "bs_avail"
 SESSION_DAYS = 30
@@ -176,6 +185,7 @@ async def get_landing(token: str, db: AsyncSession = Depends(get_db)):
     return {
         "club": _club_branding(club),
         "require_pin": bool(club.availability_require_pin),
+        "allow_maybe": allow_maybe(club),
         "players": [
             {"id": str(p.id), "display_name": p.display_name, "has_phone": phone_last4(p.phone) is not None}
             for p in players
@@ -240,20 +250,65 @@ def _grouped_dates(by_date: dict[str, list[dict]]) -> list[dict]:
     return [{"date": d, "fixtures": by_date[d]} for d in sorted(by_date.keys())]
 
 
-async def _player_squads(db: AsyncSession, club: Organisation, player: Player) -> list[tuple[str, Optional[str]]]:
+async def _player_squads(db: AsyncSession, club: Organisation, player: Player) -> list[tuple[str, Optional[frozenset]]]:
+    """(squad id, the grade rows of every team it covers) for each squad the
+    player is in; None where a squad has no grade to read games from."""
     rows = (await db.execute(
         text(
-            "SELECT t.id, t.grade_id FROM team_members tm JOIN teams t ON t.id = tm.team_id "
+            "SELECT t.id FROM team_members tm JOIN teams t ON t.id = tm.team_id "
             "WHERE tm.player_id = :p AND t.organisation_id = :org"
         ),
         {"p": player.id, "org": club.id},
     )).fetchall()
-    return [(str(tid), str(gid) if gid else None) for tid, gid in rows]
+    sides = await squad_sides.load(db, club.id)
+    return [(str(tid), frozenset(sides.grade_ids(tid)) or None) for (tid,) in rows]
 
 
-async def _fixtures_for_player(db: AsyncSession, club: Organisation, squads: list, tz: Optional[str] = None) -> dict[str, list[dict]]:
+async def _in_junior_squad(db: AsyncSession, club: Organisation, player: Player) -> bool:
+    """Is this player in a squad with a team Manage Grades calls junior? Read
+    straight from team_members, whatever the club's show-squad switch says,
+    because it only decides whether junior games stay on THEIR page."""
+    rows = (await db.execute(
+        text(
+            "SELECT t.id, t.name FROM team_members tm JOIN teams t ON t.id = tm.team_id "
+            "WHERE tm.player_id = :p AND t.organisation_id = :org"
+        ),
+        {"p": player.id, "org": club.id},
+    )).fetchall()
+    if not rows:
+        return False
+    categories = await org_grade_category_sets(db, club.id)
+    sides = await squad_sides.load(db, club.id)
+    for tid, tname in rows:
+        # Every team the squad covers, else (no grade) the squad's own name.
+        for name in (sides.grade_names(tid) or [tname]):
+            if "junior" in categories_for_name(categories, name):
+                return True
+    return False
+
+
+async def _squad_names(db: AsyncSession, club: Organisation, player: Player) -> list[str]:
+    """The names of the squads this player is in, top squad first. Read only when
+    the club has the show-squad switch on; with it off nothing about a squad is
+    ever read for the page, so nothing can leak."""
+    rows = (await db.execute(
+        text(
+            "SELECT COALESCE(NULLIF(t.short_name, ''), t.name) FROM team_members tm "
+            "JOIN teams t ON t.id = tm.team_id "
+            "WHERE tm.player_id = :p AND t.organisation_id = :org AND COALESCE(t.is_active, true) "
+            "ORDER BY t.sequence NULLS LAST, t.name"
+        ),
+        {"p": player.id, "org": club.id},
+    )).fetchall()
+    return [r[0] for r in rows]
+
+
+async def _fixtures_for_player(db: AsyncSession, club: Organisation, squads: list, tz: Optional[str] = None,
+                               hide_juniors: bool = False) -> dict[str, list[dict]]:
     """Upcoming fixtures with time, venue, our team and which are this player's."""
-    by_date = await upcoming_fixtures_by_date(db, club.id, with_scope=True, with_detail=True, now_local=local_now(tz))
+    by_date = await upcoming_fixtures_by_date(
+        db, club.id, with_scope=True, with_detail=True, now_local=local_now(tz), hide_juniors=hide_juniors,
+    )
     team_rows = (await db.execute(
         text("SELECT id, name FROM teams WHERE organisation_id = :org"),
         {"org": club.id},
@@ -279,7 +334,9 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
     # A club may not want players to know their squad: with the switch off the
     # squads are never read, so nothing about them can reach the page.
     squads = await _player_squads(db, club, player) if club.availability_show_squad else []
-    by_date = await _fixtures_for_player(db, club, squads, tz)
+    # Junior games stay off a senior player's page (Manage Grades decides what
+    # is junior); a player who is in a junior squad still sees theirs.
+    by_date = await _fixtures_for_player(db, club, squads, tz, hide_juniors=not await _in_junior_squad(db, club, player))
     answers: dict[str, dict] = {}
     if by_date:
         av_res = await db.execute(
@@ -295,10 +352,185 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
     return {
         "club": _club_branding(club),
         "player": {"id": str(player.id), "display_name": player.display_name},
+        "allow_maybe": allow_maybe(club),
         "dates": _grouped_dates(by_date),
         "availability": answers,
         # False for a player in no squad: the page then emphasises no game.
         "has_squad": bool(squads),
+        # Their squads by name, only where the club lets players see them.
+        "squads": await _squad_names(db, club, player) if club.availability_show_squad else [],
+    }
+
+
+@router.get("/{token}/me/profile")
+async def get_my_profile(token: str, request: Request, tz: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+    """The verified player's own page ("My page"): the modules the club has turned
+    on, in the club's order, with the data behind each. Their own data only,
+    behind the same PIN cookie as the availability answers; nobody else's name
+    appears.
+
+    `modules` is the list the page draws, already cut down to what this club may
+    show (see services/player_dashboard) and to what has something to say for
+    this player. A module the club has not turned on is never queried.
+
+    A side shows only once it is LOCKED (confirmed). A draft or an unlocked side
+    can still change, and telling a player they are in before the selector has
+    finished is worse than telling them nothing."""
+    club = await _club_for_token(db, token)
+    player = await _player_for_session(db, request, club)
+    now = local_now(tz)
+    today = now.date() if now else date.today()
+
+    modules = player_dashboard.served_modules(club)
+    squads_visible = bool(club.availability_show_squad)
+    squad_names = await _squad_names(db, club, player) if squads_visible and "squad" in modules else []
+
+    # Keys an older page bundle reads stay present (empty) when their module is
+    # off, so a stale tab left open across a deploy still renders.
+    selected = await _selected_sides(db, club, player, today, squads_visible) if "selected" in modules else []
+    training = (
+        await _training(db, club, player, today) if "training" in modules
+        else {"upcoming": [], "attended_8_weeks": 0, "last_attended": None}
+    )
+
+    # The newer modules fail on their own: one that cannot be built is dropped
+    # from this response and the rest of the page still loads.
+    season = fees = fines = None
+    if "season" in modules:
+        try:
+            season = await player_dashboard.season_overview(db, club, player)
+        except Exception:
+            logger.exception("player page: season overview failed for %s", player.id)
+            await rollback_keeping(db, club, player)
+            modules = [m for m in modules if m != "season"]
+    if "fees" in modules:
+        try:
+            fees = await player_dashboard.fees_owing(db, club, player)
+        except Exception:
+            logger.exception("player page: fees failed for %s", player.id)
+            await rollback_keeping(db, club, player)
+            modules = [m for m in modules if m != "fees"]
+    if "fines" in modules:
+        try:
+            fines = await fines_svc.player_fines(db, club.id, player.id)
+        except Exception:
+            logger.exception("player page: fines failed for %s", player.id)
+            await rollback_keeping(db, club, player)
+            fines = []
+        if not fines:
+            modules = [m for m in modules if m != "fines"]
+
+    return {
+        "club": _club_branding(club),
+        "player": {"id": str(player.id), "display_name": player.display_name},
+        "modules": modules,
+        "squads": squad_names,
+        "squads_visible": squads_visible,
+        "selected": selected,
+        "training": training,
+        "season": season,
+        "fees": fees,
+        "fines": fines,
+    }
+
+
+@router.get("/{token}/me/ladder")
+async def get_my_ladder(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The competition ladder for each squad the player is in. Read on its own
+    (the ladder module calls it when it opens) because it asks Cricket Australia,
+    which the rest of the page does not. 404 unless the club has the module on
+    and Show squad on, since the ladder names the player's squad."""
+    club = await _club_for_token(db, token)
+    player = await _player_for_session(db, request, club)
+    if "ladder" not in player_dashboard.served_modules(club):
+        raise HTTPException(status_code=404, detail="Not available")
+    team_ids = [r[0] for r in (await db.execute(
+        text("SELECT team_id FROM team_members WHERE player_id = :p AND organisation_id = :org"),
+        {"p": player.id, "org": club.id},
+    )).fetchall()]
+    if not team_ids:
+        return {"ladders": []}
+    data = await _compute_team_ladders(db, club, auto_link=False, only_team_ids=team_ids)
+    show = {"played", "won", "lost", "competitionPoints"}
+    ladders = []
+    for t in data["teams"]:
+        if not t.get("available") or not t.get("views"):
+            continue
+        view = t["views"][0]
+        ladders.append({
+            "team": t["team_name"],
+            "grade": t.get("grade_name"),
+            "view": view["name"],
+            "columns": [c for c in view["columns"] if c["id"] in show],
+            "rows": [
+                {"rank": r["rank"], "team_name": r["team_name"], "is_club": bool(r["is_club"]),
+                 "stats": {k: v for k, v in r["stats"].items() if k in show}}
+                for r in view["rows"][:20]
+            ],
+        })
+    return {"ladders": ladders[:3]}
+
+
+async def _selected_sides(db: AsyncSession, club: Organisation, player: Player, today: date, squads_visible: bool) -> list[dict]:
+    my_sides = await squad_sides.load(db, club.id)
+    sel_rows = (await db.execute(
+        text(
+            "SELECT f.id, f.played_on, f.start_time, f.venue, f.opponent_name, f.home_away, f.label, f.round, "
+            "COALESCE(NULLIF(t.short_name, ''), t.name), fl.is_captain, fl.is_wicket_keeper, f.team_id, f.grade_id, f.side_key "
+            "FROM fixture_lineups fl JOIN fixtures f ON f.id = fl.fixture_id "
+            "LEFT JOIN teams t ON t.id = f.team_id "
+            "WHERE fl.player_id = :p AND fl.organisation_id = :org AND f.locked_at IS NOT NULL "
+            "AND f.played_on >= :today AND COALESCE(f.status, '') <> 'CANCELLED' "
+            "ORDER BY f.played_on, f.start_time NULLS LAST LIMIT 10"
+        ),
+        {"p": player.id, "org": club.id, "today": today},
+    )).fetchall()
+    return [
+        {
+            "date": r[1].isoformat() if r[1] else None, "start_time": r[2], "venue": r[3],
+            "opponent_name": r[4], "home_away": r[5], "label": r[6], "round": r[7],
+            # The side's name is the squad's, so it follows the same switch.
+            # (A squad covering several teams names this one by its team.)
+            "team_name": (my_sides.name(r[11], r[12], r[13]) or r[8]) if squads_visible else None,
+            "is_captain": bool(r[9]), "is_wicket_keeper": bool(r[10]),
+        }
+        for r in sel_rows
+    ]
+
+
+async def _training(db: AsyncSession, club: Organisation, player: Player, today: date) -> dict:
+    """The sessions still to come that are for everyone or for a squad this player
+    is in, and how often they have turned up lately."""
+    my_team_ids = {r[0] for r in (await db.execute(
+        text("SELECT team_id FROM team_members WHERE player_id = :p AND organisation_id = :org"),
+        {"p": player.id, "org": club.id},
+    )).fetchall()}
+    sessions = (await db.execute(
+        text(
+            "SELECT session_date, label, squad_team_ids FROM net_sessions "
+            "WHERE organisation_id = :org AND status = 'active' AND session_date >= :today "
+            "ORDER BY session_date, created_at LIMIT 12"
+        ),
+        {"org": club.id, "today": today},
+    )).fetchall()
+    upcoming = [
+        {"date": d.isoformat(), "label": label}
+        for d, label, squad_ids in sessions
+        if not squad_ids or my_team_ids.intersection(squad_ids)
+    ][:5]
+    since = today - timedelta(days=56)
+    att = (await db.execute(
+        text(
+            "SELECT count(*), max(ns.session_date) FROM net_attendance na "
+            "JOIN net_sessions ns ON ns.id = na.session_id "
+            "WHERE na.player_id = :p AND ns.organisation_id = :org AND ns.session_date >= :since"
+        ),
+        {"p": player.id, "org": club.id, "since": since},
+    )).first()
+    return {
+        "upcoming": upcoming,
+        "attended_8_weeks": int(att[0] or 0) if att else 0,
+        "last_attended": att[1].isoformat() if att and att[1] else None,
     }
 
 
@@ -313,6 +545,8 @@ async def set_me(token: str, body: SetBody, request: Request, db: AsyncSession =
     status = (body.status or "").upper()
     if status not in SELF_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
+    if status == "MAYBE" and not allow_maybe(club):
+        raise HTTPException(status_code=400, detail=MAYBE_OFF)
 
     by_date = await upcoming_fixtures_by_date(db, club.id)
     if body.date.isoformat() not in by_date:
@@ -326,6 +560,9 @@ async def set_me(token: str, body: SetBody, request: Request, db: AsyncSession =
         )
     )
     row = res.scalar_one_or_none()
+    # The player's own answer: the trail names the player, not a user.
+    await audit_availability(db, club.id, player.id, body.date, row.status if row else None, status, note,
+                             self_service=True)
     if row:
         row.status = status
         row.note = note

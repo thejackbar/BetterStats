@@ -8,8 +8,14 @@ don't persist until a match is synced — are fetched live from Grassroots via
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import logging
+
+from app.services import club_match
 from app.services import grassroots_scores_client as gr
+from app.services import playhq_client
 from app.services.grade_labels import category_for_name, category_label, org_grade_categories
+
+logger = logging.getLogger(__name__)
 
 
 async def _current_grade_rows(db: AsyncSession, org_id) -> list[tuple]:
@@ -46,8 +52,62 @@ async def _current_grade_rows(db: AsyncSession, org_id) -> list[tuple]:
     return [(r.guid, r.grade_id, r.grade_name, r.season_name) for r in res]
 
 
+async def current_grade_rows_with_live(db: AsyncSession, org_id) -> list[tuple]:
+    """``_current_grade_rows`` plus any grade Cricket Australia lists for the
+    club's latest season that we have not stored yet.
+
+    A club's own grades only reach our tables on a sync, and a junior draw is
+    often published days after the last one, so a pull built on stored grades
+    alone leaves the juniors out until the next sync. The club's current teams
+    name every grade it plays in, in one call. A grade found only this way has
+    no row of ours: its ``our_grade_id`` is ``None``, so callers that stamp a
+    real ``grades.id`` (a persisted fixture) must not use this, and the
+    BetterPosts round pulls, which only read, do.
+
+    Never raises: with CA unreachable the stored grades are the answer, as
+    before."""
+    rows = await _current_grade_rows(db, org_id)
+    try:
+        res = await db.execute(
+            text(
+                """
+                SELECT grassroots_id, name FROM seasons
+                WHERE organisation_id = CAST(:org AS UUID) AND grassroots_id IS NOT NULL
+                  AND year = (
+                      SELECT MAX(year) FROM seasons
+                      WHERE organisation_id = CAST(:org AS UUID) AND year IS NOT NULL
+                  )
+                """
+            ),
+            {"org": str(org_id)},
+        )
+        seasons = [(r.grassroots_id, r.name) for r in res]
+    except Exception:
+        logger.warning("live grade discovery: season lookup failed for %s", org_id, exc_info=True)
+        return rows
+    known = {str(r[0]).lower() for r in rows}
+    extra: list[tuple] = []
+    for raw_season, season_name in seasons:
+        try:
+            teams = await playhq_client.get_teams(str(org_id), raw_season)
+        except Exception:
+            logger.warning("live grade discovery: teams call failed for %s", org_id, exc_info=True)
+            continue
+        for t in teams or []:
+            grade_objs = list(t.get("grades") or [])
+            if t.get("grade"):
+                grade_objs.append(t["grade"])
+            for gd in grade_objs:
+                guid = ((gd or {}).get("id") or "").strip()
+                if not guid or guid.lower() in known:
+                    continue
+                known.add(guid.lower())
+                extra.append((guid, None, gd.get("name") or "Unknown Grade", season_name))
+    return rows + extra
+
+
 async def org_grassroots_fixtures_checked(
-    db: AsyncSession, org, hidden_grade_ids=(), *, force: bool = False
+    db: AsyncSession, org, hidden_grade_ids=(), *, force: bool = False, discover_live: bool = False
 ) -> tuple[list[dict], dict]:
     """``org_grassroots_fixtures`` plus what CA said about every match it knows.
 
@@ -59,17 +119,23 @@ async def org_grassroots_fixtures_checked(
       ``failed``  how many grades could not be read at all (a non-200 or an
                   exception: ``get_grade_matches`` returns ``[]`` for those too,
                   so the cache is the only honest signal).
+      ``others``  match guids, in the grades that were read, that CA lists
+                  between two other clubs (both owning clubs named, neither us).
 
     ``force`` bypasses the 30 minute match-list cache, for the Sync button: an
     admin pressing it expects today's draw, not whatever was fetched earlier.
+
+    ``discover_live`` also reads grades CA lists for the club that we have not
+    stored yet (``current_grade_rows_with_live``). Off by default: those grades
+    have no row of ours, so ``db_grade_id`` comes back ``None`` for them.
     """
-    rows = await _current_grade_rows(db, org.id)
+    rows = await (current_grade_rows_with_live(db, org.id) if discover_live else _current_grade_rows(db, org.id))
     if hidden_grade_ids:
         # Junior grades a club hides from its public Stats (services/
         # junior_hiding): never fetched, so they cost no Grassroots call either.
         hidden = {str(g) for g in hidden_grade_ids}
         rows = [r for r in rows if str(r[1]) not in hidden]
-    listing: dict = {"grades": {}, "failed": 0}
+    listing: dict = {"grades": {}, "failed": 0, "others": set()}
     if not rows:
         return [], listing
     meta = {guid: (grade_id, gname, sname) for guid, grade_id, gname, sname in rows}
@@ -78,6 +144,8 @@ async def org_grassroots_fixtures_checked(
         [guid for guid, _, _, _ in rows], club=org, force=force
     )
     for guid, grade_id, _, _ in rows:
+        if grade_id is None:
+            continue  # found live only: no row of ours to key the listing on
         matches = gr.cached_grade_matches(guid)
         if matches is None:
             listing["failed"] += 1
@@ -85,6 +153,13 @@ async def org_grassroots_fixtures_checked(
             listing["grades"][str(grade_id)] = {
                 m.get("id"): (m.get("status") or "").strip().upper() for m in matches if m.get("id")
             }
+            # A grade is a whole competition. Games CA lists in it between two
+            # OTHER clubs are still "listed", so on that evidence alone a stored
+            # copy of one (kept from before fixtures were filtered by owning
+            # club) never goes stale. Name them so the sync can clear them.
+            for m in matches:
+                if m.get("id") and club_match.fixture_is_between_others(org, gr.match_sides(m)):
+                    listing["others"].add(m["id"])
     for fx in fixtures:
         db_grade_id, gname, sname = meta.get(fx.get("grade_id"), (None, None, None))
         fx["db_grade_id"] = str(db_grade_id) if db_grade_id else None
@@ -97,7 +172,9 @@ async def org_grassroots_fixtures_checked(
     return fixtures, listing
 
 
-async def org_grassroots_fixtures(db: AsyncSession, org, hidden_grade_ids=()) -> list[dict]:
+async def org_grassroots_fixtures(
+    db: AsyncSession, org, hidden_grade_ids=(), *, discover_live: bool = False
+) -> list[dict]:
     """Upcoming/live fixtures for the org, filtered to its own games.
 
     Each fixture carries ``grade_name``/``season_name`` (resolved from the DB
@@ -114,5 +191,7 @@ async def org_grassroots_fixtures(db: AsyncSession, org, hidden_grade_ids=()) ->
     ``hidden_grade_ids`` leaves those grades out, for a public viewer of a club
     that hides its juniors. Admin callers omit it and see every grade.
     """
-    fixtures, _ = await org_grassroots_fixtures_checked(db, org, hidden_grade_ids)
+    fixtures, _ = await org_grassroots_fixtures_checked(
+        db, org, hidden_grade_ids, discover_live=discover_live
+    )
     return fixtures

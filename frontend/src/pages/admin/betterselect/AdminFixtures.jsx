@@ -12,6 +12,7 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
 import { Icon, Btn, Segmented, Empty } from './ui'
+import usePersistedState from '../../../lib/usePersistedState'
 import { useFilters, FilterBar } from './filters'
 
 // Home/Away accent for the left edge of each row — fixed semantic colours
@@ -29,10 +30,21 @@ const EMPTY = {
 
 function FixtureModal({ fixture, onClose, onSaved }) {
   const toast = useToast()
-  const [form, setForm] = useState(() => ({ ...EMPTY, ...(fixture || {}), team_id: fixture?.team_id || '' }))
+  const [form, setForm] = useState(() => ({ ...EMPTY, ...(fixture || {}), team_id: fixture?.team_id || '', side_key: fixture?.side_key || '' }))
   const [saving, setSaving] = useState(false)
   const [teams, setTeams] = useState([])
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  // "Our team" is one of a squad's teams (1st XI, 2nd XI), not the squad. A squad
+  // with a single team is one choice; a squad covering several is one choice per
+  // team, each remembering its squad. Value is "squadId|teamKey".
+  const squadOf = (id) => teams.find((t) => t.id === id)
+  const isMulti = (t) => (t?.sides || []).filter((sd) => sd.stored).length > 1
+  const teamValue = form.team_id ? `${form.team_id}|${isMulti(squadOf(form.team_id)) ? form.side_key : ''}` : ''
+  const pickTeam = (e) => {
+    const [tid, key] = e.target.value.split('|')
+    setForm((f) => ({ ...f, team_id: tid || '', side_key: key || '' }))
+  }
 
   useEffect(() => { api.bsListTeams().then(setTeams).catch(() => {}) }, [])
 
@@ -42,6 +54,7 @@ function FixtureModal({ fixture, onClose, onSaved }) {
       const payload = {
         label: form.label || null, opponent_name: form.opponent_name || null,
         home_away: form.home_away || null, team_id: form.team_id || null,
+        side_key: form.team_id && isMulti(squadOf(form.team_id)) ? (form.side_key || null) : null,
         played_on: form.played_on || null, end_on: form.end_on || null,
         start_time: form.start_time || null, venue: form.venue || null,
         round: form.round || null, notes: form.notes || null,
@@ -71,9 +84,13 @@ function FixtureModal({ fixture, onClose, onSaved }) {
             </Field>
           </div>
           <Field label="Our team">
-            <Select value={form.team_id || ''} onChange={set('team_id')}>
+            <Select value={teamValue} onChange={pickTeam} data-fixture-team>
               <option value="">— No team assigned —</option>
-              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {teams.map((t) => (isMulti(t)
+                ? (t.sides || []).map((sd) => (
+                  <option key={`${t.id}|${sd.key}`} value={`${t.id}|${sd.key}`}>{t.name} › {sd.label || sd.default_label}</option>
+                ))
+                : <option key={t.id} value={`${t.id}|`}>{t.name}</option>))}
             </Select>
           </Field>
           <div className="grid grid-cols-2 gap-3">
@@ -109,8 +126,8 @@ function isoLocal(date) { return `${date.getFullYear()}-${String(date.getMonth()
 function xiState(f) {
   const n = f.lineup_count || 0
   if (n === 0) return 'none'
-  const size = f.format_size || 0
-  if (size && n >= size) return 'complete'
+  const need = f.format_min || f.format_size || 0   // a side with a minimum is complete at the minimum
+  if (need && n >= need) return 'complete'
   return 'progress'
 }
 
@@ -124,13 +141,15 @@ export default function AdminFixtures() {
   const [scope, setScope] = useState('upcoming') // 'upcoming' | 'past' | 'all'
   const [editing, setEditing] = useState(undefined)
   const [syncing, setSyncing] = useState(false)
+  // Whether junior grades show is a Settings choice now, not a switch on this screen.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   // Always fetch the full set; scope (upcoming/past/all) is a client-side cut so
   // switching tabs is instant and "past" needs no extra endpoint.
   const load = useCallback(() => {
     setFixtures(null)
-    api.bsListFixtures(false).then(setFixtures).catch((e) => { toast.error(e.message); setFixtures([]) })
-  }, [toast])
+    api.bsListFixtures(false, { hideJuniors: !showJuniors }).then(setFixtures).catch((e) => { toast.error(e.message); setFixtures([]) })
+  }, [toast, showJuniors])
   useEffect(() => { load() }, [load])
 
   const teamOptions = useMemo(() => {
@@ -158,7 +177,7 @@ export default function AdminFixtures() {
     ] },
     ...(roundOptions.length ? [{ key: 'round', label: 'Round', type: 'multi', options: roundOptions }] : []),
   ], [teamOptions, roundOptions])
-  const filters = useFilters(facets)
+  const filters = useFilters(facets, { persist: 'fixtures' })
   const { values } = filters
 
   // Group by weekend (Monday-anchored). Scope cuts to upcoming/past/all; past
@@ -223,13 +242,13 @@ export default function AdminFixtures() {
       <FilterBar
         filters={filters} facets={facets} showSearch={false}
         count={shownCount} total={fixtures?.length} className="mb-2"
-        right={(
+        right={(<>
           <Segmented value={scope} onChange={setScope} sm options={[
             { value: 'upcoming', label: 'Upcoming' },
             { value: 'past', label: 'Past' },
             { value: 'all', label: 'All' },
           ]} />
-        )}
+        </>)}
       />
       <div className="flex items-center gap-4 mb-4 font-mono text-[10px] text-pb-faint">
         <span className="inline-flex items-center gap-1.5"><span className="w-[3px] h-3 rounded-sm" style={{ background: 'var(--pb-positive)' }} /> Home</span>

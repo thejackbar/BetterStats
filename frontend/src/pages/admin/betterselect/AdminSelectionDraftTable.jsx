@@ -1,4 +1,4 @@
-// BetterSelect → Selection → Draft table.
+// BetterSelect → Selection Whiteboard (it was the Draft table; the code keeps the old name).
 //
 // Every team playing on one matchday side by side, plus the players nobody has
 // picked yet. Drag a player from one team to another (or from the pool onto a
@@ -25,17 +25,21 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
-import { availRank, AVAILABILITY } from '../../../lib/availability'
+import { availRank, AVAILABILITY, halfStatus, viewStatus } from '../../../lib/availability'
+import { useSelectConfig } from '../../../lib/useAvailabilityConfig'
 import { Icon, Avatar, Btn, Tag, RuleTags, playedWithinYears } from './ui'
 import { DnD, useDrag } from './selectionDnd'
-import { nameMatches, roleLine, spark, formMeta } from './selectionMeta'
+import { nameMatches, roleLine, spark, formMeta, normGender, weekFlagParts, unavailableWeeksText, gameDatesLabel, fixtureTabs } from './selectionMeta'
 import { xiCompliance, isBlocked } from './selectionRules'
 import { confirmSig, restoreDraft } from './selectionDraft'
 import { sortTeams, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
 import { useFitHeight, useBoxHeight, rowDensity, ROW_MIN } from './useFitHeight'
+import { sideFit, sideLabel } from '../../../lib/sideSize'
+import usePersistedState from '../../../lib/usePersistedState'
 
 const DRAFT_DELAY_MS = 600
 const DRAFT_RETRY_MS = 5000
+const shortDate = (iso) => { try { return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) } catch { return iso } }
 const tint = (token, pct) => `color-mix(in srgb, ${token} ${pct}%, transparent)`
 
 const sigOf = (c) => JSON.stringify([c.slots, c.cap, c.wk])
@@ -80,13 +84,37 @@ function buildCol(f, d, dr, fallbackSize) {
   slots = tidySlots(slots, size)
   const poolById = {}
   ;(d.pool || []).forEach((p) => { poolById[p.id] = p })
-  return { fid: f.id, fx: f, data: d, poolById, size, slots, cap, wk, demo, baseSig, fromDraft }
+  return { fid: f.id, fx: f, data: d, poolById, size, min: d.team_min || 0, slots, cap, wk, demo, baseSig, fromDraft }
+}
+
+// ── Which weekend ───────────────────────────────────────────────────────────
+// A two-day game is played over two weekends and a player answers each. Beside a
+// name, plain text says which weekend is the problem: "W2 OUT" or "W2 ?", the same
+// quiet style as the OUT tag, in the club's half-available colour for a player
+// who is free one weekend and away the other. Nothing is drawn for a
+// player who has not answered a weekend yet, or whose weekends match.
+function weekFlagText(days) {
+  return weekFlagParts(days).map((w) => `W${w.week} ${w.status === 'UNAVAILABLE' ? 'OUT' : '?'}`).join(' ')
+}
+function WeekFlag({ days }) {
+  const parts = weekFlagParts(days)
+  if (!parts.length) return null
+  const tip = days.map((d, i) => `Week ${i + 1} (${gameDatesLabel(d.date)}): ${(AVAILABILITY[d.status] || AVAILABILITY.NO_RESPONSE).label}`).join('\n')
+  // Half available: the same colour as the card's dot and edge. Otherwise the
+  // colour of the weekend's own answer (a maybe is amber).
+  const colour = AVAILABILITY[halfStatus(days) || (parts.some((w) => w.status === 'UNAVAILABLE') ? 'UNAVAILABLE' : 'MAYBE')].cssVar
+  return (
+    <span data-week-flag title={tip} className="font-mono text-[9.5px] font-semibold shrink-0 cursor-default" style={{ color: colour }}>
+      {weekFlagText(days)}
+    </span>
+  )
 }
 
 // ── A player card (a team's slot, and the pool) ──────────────────────────────
 function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) {
   const fmt = useAdminNameFormat()
-  const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
+  const shown = viewStatus(p, ctx.weekByPlayer[p.id])
+  const meta = AVAILABILITY[shown] || AVAILABILITY.NO_RESPONSE
   const slot = kind === 'slot'
   const dense = slot && density !== 'full'
   const tight = slot && density === 'tight'
@@ -103,7 +131,7 @@ function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) 
       {...(ctx.canEdit ? drag.bind(item) : {})}
       onClick={!slot && ctx.canEdit ? drag.clickGuard(() => ctx.tapPool(p)) : undefined}
       className={`group relative flex items-center gap-2 pl-3 pr-2 rounded-lg border bg-pb-surface2 overflow-hidden transition-colors select-none ${slot ? 'h-full min-h-0' : 'shrink-0 py-1.5'} ${ctx.canEdit ? 'cursor-grab' : ''} ${barred ? 'border-pb-red/45' : 'border-pb-hairline'} hover:border-pb-accent/45`}>
-      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
+      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: shown === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       <Avatar player={p} size={tight ? 20 : dense ? 24 : 30} noLink />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1 min-w-0">
@@ -111,7 +139,10 @@ function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) 
           {isCap && <Tag>C</Tag>}{isWk && <Tag tone="amber">WK</Tag>}
           {alsoIn && <Tag tone="amber" title={`Also named in ${alsoIn}`}>×2</Tag>}
           <RuleTags player={p} />
-          {out && <span className="font-mono text-[9.5px] font-semibold shrink-0" style={{ color: meta.cssVar }}>OUT</span>}
+          {/* "W2 OUT" says more than "OUT" where a weekend is the reason. */}
+          {weekFlagParts(ctx.weekByPlayer[p.id]).length > 0
+            ? <WeekFlag days={ctx.weekByPlayer[p.id]} />
+            : out && <span className="font-mono text-[9.5px] font-semibold shrink-0" style={{ color: meta.cssVar }}>OUT</span>}
         </div>
         {!tight && (
           <div className="flex items-center gap-1.5 min-w-0">
@@ -165,7 +196,7 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
   const status = ctx.status[col]
   const conflict = ctx.conflicts[col]
   const target = c.size
-  const off = target > 0 && filled.length !== target
+  const off = sideFit(filled.length, target, c.min).off
   const hasKeeper = filled.some((id) => (c.poolById[id]?.skill_positions || []).includes('WKT')) || (c.wk && filled.includes(c.wk))
   const bowlers = filled.filter((id) => { const r = c.poolById[id]?.skill_positions || []; return r.includes('BWL') || r.includes('ALL') }).length
   const rules = xiCompliance(c.data.rules, c.poolById, filled)
@@ -185,12 +216,19 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
           <h3 className="font-display font-bold text-[14px] truncate min-w-0 flex-1" title={teamNameOf(fx)}>{ctx.shortTeam(fx)}</h3>
           <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
             style={{ background: off ? 'var(--pb-amber)' : tint('var(--pb-accent)', 18), color: off ? '#1b1205' : 'var(--pb-accent)' }}>
-            {filled.length}{target > 0 ? `/${target}` : ''}
+            {filled.length}{target > 0 ? `/${target}` : ''}{c.min > 0 ? ` · min ${c.min}` : ''}
           </span>
         </div>
         <div className="text-[11.5px] text-pb-faint truncate" title={`${oppLabelOf(fx)}${fx.start_time ? ' · ' + fx.start_time : ''}${fx.venue ? ' · ' + fx.venue : ''}`}>
           {oppLabelOf(fx)}{fx.start_time ? ` · ${fx.start_time}` : ''}
         </div>
+        {fx.end_on && fx.end_on > fx.played_on && (
+          <div className="text-[11px] font-semibold truncate" style={{ color: 'var(--pb-amber)' }} data-two-day-header title="Played over two weekends. A W1 or W2 tag beside a name is that player's answer for that weekend.">
+            {ctx.day === fx.end_on
+              ? `Two-day · week 2 of 2, from ${shortDate(fx.played_on)}`
+              : `Two-day · ${shortDate(fx.played_on)} + ${shortDate(fx.end_on)}`}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-1 mt-1 min-h-[22px]">
           {flags.map((f, i) => (
             <span key={i} title={f.title} className="px-1.5 py-px rounded-full font-display font-semibold text-[10.5px] whitespace-nowrap"
@@ -231,12 +269,16 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
 // ── The pool ────────────────────────────────────────────────────────────────
 function PoolColumn({ ctx, drag }) {
   const hovered = drag.hover === 'pool'
-  const { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad } = ctx.filters
+  const { q, setQ, hideOut, setHideOut, squad, setSquad, gender, setGender } = ctx.filters
   const activeTeam = ctx.activeFid && ctx.cols[ctx.activeFid] ? ctx.shortTeam(ctx.cols[ctx.activeFid].fx) : null
   return (
-    <section data-pool-col data-drop-kind="pool"
-      className={`w-[270px] shrink-0 min-h-0 flex flex-col rounded-xl border bg-pb-surface transition-colors ${hovered ? 'border-pb-red/50' : 'border-pb-hairline'}`}
-      style={hovered ? { background: tint('var(--pb-red)', 5) } : undefined}>
+    // Pinned to the left of the scrolling board (sticky, so the team columns slide
+    // under it): the pool is where a drag starts and ends, so it must stay in
+    // view however far the teams are scrolled. Its tint is mixed into the surface
+    // colour, never transparent, or the columns would show through.
+    <section data-pool-col data-autoscroll-skip data-drop-kind="pool"
+      className={`sticky left-0 z-10 w-[270px] shrink-0 min-h-0 flex flex-col rounded-xl border bg-pb-surface shadow-[6px_0_14px_-8px_rgba(0,0,0,0.4)] transition-colors ${hovered ? 'border-pb-red/50' : 'border-pb-hairline'}`}
+      style={hovered ? { background: 'color-mix(in srgb, var(--pb-red) 5%, var(--pb-surface))' } : undefined}>
       <header className="px-2.5 pt-2 pb-2 border-b pb-hairline flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-display font-bold text-[14px]">Pool</h3>
@@ -248,15 +290,19 @@ function PoolColumn({ ctx, drag }) {
             className="bg-transparent border-0 outline-none text-pb-text text-[13px] w-full placeholder:text-pb-faint" />
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <select value={years} onChange={(e) => setYears(Number(e.target.value))} aria-label="Played within"
-            className="bg-pb-surface2 border border-pb-hairline rounded-md text-[11.5px] px-1.5 py-1 text-pb-dim">
-            {[[1, 'Played ≤ 1 yr'], [2, '≤ 2 yrs'], [3, '≤ 3 yrs'], [5, '≤ 5 yrs'], [0, 'Any time']].map(([v, l]) => <option key={v} value={v} style={{ color: '#000' }}>{l}</option>)}
-          </select>
           {ctx.squadOptions.length > 0 && (
             <select value={squad} onChange={(e) => setSquad(e.target.value)} aria-label="Squad"
               className="bg-pb-surface2 border border-pb-hairline rounded-md text-[11.5px] px-1.5 py-1 text-pb-dim max-w-[110px]">
               <option value="" style={{ color: '#000' }}>All squads</option>
               {ctx.squadOptions.map((s) => <option key={s} value={s} style={{ color: '#000' }}>{ctx.squadShort(s)}</option>)}
+            </select>
+          )}
+          {ctx.showGender && (
+            <select value={gender} onChange={(e) => setGender(e.target.value)} aria-label="Gender"
+              className="bg-pb-surface2 border border-pb-hairline rounded-md text-[11.5px] px-1.5 py-1 text-pb-dim">
+              <option value="" style={{ color: '#000' }}>All genders</option>
+              <option value="male" style={{ color: '#000' }}>Men</option>
+              <option value="female" style={{ color: '#000' }}>Women</option>
             </select>
           )}
           <label className="inline-flex items-center gap-1 text-[11.5px] text-pb-dim cursor-pointer">
@@ -284,7 +330,7 @@ function Board({ ctx, isPhone }) {
   const maxSlots = Math.max(1, ...ctx.order.map((f) => ctx.cols[f].slots.length))
   const density = rowDensity(listH, maxSlots)
   return (
-    <div ref={fitRef} data-draft-table data-fit={fitH != null ? 'on' : 'off'} style={fitH != null ? { height: fitH } : undefined}
+    <div ref={fitRef} data-draft-table data-autoscroll-x data-fit={fitH != null ? 'on' : 'off'} style={fitH != null ? { height: fitH } : undefined}
       className="flex gap-2.5 overflow-x-auto pb-1 items-stretch">
       <PoolColumn ctx={ctx} drag={drag} />
       {ctx.order.map((f, i) => <TeamColumn key={f} col={f} density={density} listRef={i === 0 ? listRef : undefined} ctx={ctx} drag={drag} />)}
@@ -318,9 +364,14 @@ export default function AdminSelectionDraftTable() {
   const [busy, setBusy] = useState(false)
   const [activeFid, setActiveFid] = useState(null)
   const [q, setQ] = useState('')
-  const [years, setYears] = useState(3)
+  // How far back a player may have last played to be listed is a club setting (Settings, Players listed).
+  const years = useSelectConfig().playedYears?.selection ?? 3
   const [hideOut, setHideOut] = useState(false)
   const [squad, setSquad] = useState('')
+  const [gender, setGender] = useState('')
+  // The same remembered Show juniors choice Availability, Fixtures and Selection use.
+  // Whether junior grades show is a Settings choice now, not a switch on this screen.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   const colsRef = useRef(cols)
   colsRef.current = cols
@@ -331,14 +382,15 @@ export default function AdminSelectionDraftTable() {
 
   // ── Loading ───────────────────────────────────────────────────────────────
   useEffect(() => {
-    api.bsSelectionOverview().then(setOverview)
+    api.bsSelectionOverview({ hideJuniors: !showJuniors }).then(setOverview)
       .catch((e) => { toastRef.current.error(e.message); setOverview({ fixtures: [] }) })
-  }, [])
+  }, [showJuniors])
 
   const days = useMemo(() => {
     const m = new Map()
-    ;(overview?.fixtures || []).forEach((f) => { const k = f.played_on || 'tbc'; m.set(k, (m.get(k) || 0) + 1) })
-    return [...m.entries()].map(([day, n]) => ({ day, n }))
+    ;(overview?.fixtures || []).forEach((f) => fixtureTabs(f).forEach((k) => m.set(k, (m.get(k) || 0) + 1)))
+    // A two-day game adds its second weekend, so dates are put in order ('tbc' last).
+    return [...m.entries()].sort(([a], [b]) => (a === 'tbc') - (b === 'tbc') || (a < b ? -1 : a > b ? 1 : 0)).map(([day, n]) => ({ day, n }))
   }, [overview])
   const wanted = params.get('date')
   const day = wanted && days.some((d) => d.day === wanted) ? wanted : days[0]?.day || null
@@ -405,7 +457,7 @@ export default function AdminSelectionDraftTable() {
     // Anything still waiting out the pause for the day we are leaving goes first.
     Object.keys(savers.current).forEach((fid) => flush(fid, false))
     const mine = ++gen.current
-    const fixtures = sortTeams((overview.fixtures || []).filter((f) => (f.played_on || 'tbc') === day))
+    const fixtures = sortTeams((overview.fixtures || []).filter((f) => fixtureTabs(f).includes(day)))
     setCols(null)
     setConflicts({})
     setStatusMap({})
@@ -474,8 +526,11 @@ export default function AdminSelectionDraftTable() {
   const leave = (c, id) => ({ cap: c.cap === id ? null : c.cap, wk: c.wk === id ? null : c.wk })
   const nameOf = (id) => merged[id]?.display_name || 'Player'
 
-  const warnPick = (p) => {
-    if (p.availability === 'UNAVAILABLE') toastRef.current.info(`${p.display_name} is marked unavailable. Adding anyway.`)
+  // Judged on the team they are going INTO: the pool card shows today only, but a
+  // two-day team's own answer is the worse of both weeks.
+  const warnPick = (p, fid) => {
+    const t = (fid && colsRef.current?.[fid]?.poolById?.[p.id]) || p
+    if (t.availability === 'UNAVAILABLE') toastRef.current.info(`${p.display_name} is marked unavailable${unavailableWeeksText(t.availability_days)}. Adding anyway.`)
   }
 
   const placeIn = (fid, idx, id) => {
@@ -495,7 +550,7 @@ export default function AdminSelectionDraftTable() {
       slots[idx] = id
       return put(prev, fid, { slots: tidySlots(slots, c.size), ...(displaced ? leave(c, displaced) : {}) })
     })
-    warnPick(p)
+    warnPick(p, fid)
   }
 
   const removeAt = (fid, idx) => edit((prev) => {
@@ -538,7 +593,7 @@ export default function AdminSelectionDraftTable() {
       return next
     })
     const p = merged[x]
-    if (p && fromFid !== toFid) warnPick(p)
+    if (p && fromFid !== toFid) warnPick(p, toFid)
   }
 
   const firstOpen = (fid) => {
@@ -603,11 +658,38 @@ export default function AdminSelectionDraftTable() {
     order.forEach((f) => (cols?.[f]?.slots || []).forEach((id) => id && s.add(id)))
     return s
   }, [cols, order])
-  const unnamed = useMemo(() => Object.values(merged).filter((p) => !named.has(p.id) && !p.is_inactive), [merged, named])
+  // Each player's two weeks, from any team on the day that is a two-day game
+  // (its pool carries `availability_days`). Empty on a day with no such game.
+  const weekByPlayer = useMemo(() => {
+    const m = {}
+    order.forEach((f) => {
+      const c = cols?.[f]
+      if (!c || !(c.fx?.end_on && c.fx.end_on > c.fx.played_on)) return
+      Object.values(c.poolById || {}).forEach((p) => { if (!m[p.id] && Array.isArray(p.availability_days)) m[p.id] = p.availability_days })
+    })
+    return m
+  }, [cols, order])
+  // The shared pool answers "can they play TODAY": the first team's pool may be
+  // the two-day game, whose status is the worse of both weeks, which would mark
+  // a player OUT for one-day teams they are free for. The open weekend is what the pool shows; the chips show both.
+  // Which weekend is open: the second tab of a two-day game reads W2.
+  const weekIdx = useMemo(() => {
+    for (const f of order) {
+      const x = cols?.[f]?.fx
+      if (x?.end_on && x.end_on > x.played_on) return x.end_on === day ? 1 : 0
+    }
+    return 0
+  }, [cols, order, day])
+  const unnamed = useMemo(() => Object.values(merged)
+    .filter((p) => !named.has(p.id) && !p.is_inactive)
+    .map((p) => (weekByPlayer[p.id] ? { ...p, availability: weekByPlayer[p.id][weekIdx]?.status || p.availability } : p)), [merged, named, weekByPlayer, weekIdx])
+  // Offered only when the pool holds both: a control that can only answer "nobody" is worse than none.
+  const showGender = useMemo(() => new Set(unnamed.map((p) => normGender(p.gender)).filter(Boolean)).size > 1, [unnamed])
   const pool = useMemo(() => {
     let list = unnamed
     if (q.trim()) list = list.filter((p) => nameMatches(p.display_name, q))
     if (squad) list = list.filter((p) => (p.squads || []).includes(squad))
+    if (gender) list = list.filter((p) => normGender(p.gender) === gender)
     if (hideOut) list = list.filter((p) => p.availability !== 'UNAVAILABLE')
     // A name typed into search is someone being looked for, so the recency window
     // only trims the browse list.
@@ -616,7 +698,7 @@ export default function AdminSelectionDraftTable() {
       availRank(a.availability) - availRank(b.availability)
       || (b.score ?? 0) - (a.score ?? 0)
       || (a.display_name || '').localeCompare(b.display_name || ''))
-  }, [unnamed, q, squad, hideOut, years])
+  }, [unnamed, q, squad, gender, hideOut, years])
 
   // ── Confirm ───────────────────────────────────────────────────────────────
   const dirtyIds = order.filter((f) => cols?.[f] && isDirty(cols[f]))
@@ -629,7 +711,7 @@ export default function AdminSelectionDraftTable() {
     s.pending = null
     await Promise.resolve(s.inflight).catch(() => {})
     const players = filledOf(c).map((id, i) => ({ player_id: id, batting_order: i + 1, is_captain: id === c.cap, is_wicket_keeper: id === c.wk }))
-    await api.bsSetSelection(fid, players, [])
+    await api.bsSetSelection(fid, players, [], { lock: true })
     const fresh = await loadCol(c.fx)
     attachSaver(fresh)
     setStatusMap((m) => ({ ...m, [fid]: 'idle' }))
@@ -642,7 +724,7 @@ export default function AdminSelectionDraftTable() {
       const c = colsRef.current[fid]
       const n = filledOf(c).length
       const name = ctxShort(c.fx)
-      if (c.size > 0 && n !== c.size) lines.push(`• ${name}: ${n} player${n === 1 ? '' : 's'} for a ${c.size}-a-side match`)
+      if (sideFit(n, c.size, c.min).off) lines.push(`• ${name}: ${n} player${n === 1 ? '' : 's'} for a ${sideLabel(c.size, c.min)} match`)
       const { warnings } = xiCompliance(c.data.rules, c.poolById, filledOf(c))
       warnings.slice(0, 4).forEach((w) => lines.push(`• ${name}: ${w.player ? w.player + ', ' : ''}${w.detail}`))
     })
@@ -751,11 +833,11 @@ export default function AdminSelectionDraftTable() {
   )
 
   if (overview === null || (day && cols === null)) {
-    return <BetterSelectLayout title="Draft table" actions={actions} wide><PbSpinner message="Loading the draft table…" /></BetterSelectLayout>
+    return <BetterSelectLayout title="Selection Whiteboard" actions={actions} wide><PbSpinner message="Loading the whiteboard…" /></BetterSelectLayout>
   }
   if (!days.length) {
     return (
-      <BetterSelectLayout title="Draft table" actions={actions} wide>
+      <BetterSelectLayout title="Selection Whiteboard" actions={actions} wide>
         <div className="pb-card rounded-xl px-5 py-10 text-center text-pb-faint text-sm">
           No upcoming fixtures. <Link to="/admin/betterselect/fixtures" className="text-pb-accent underline">Add or sync fixtures</Link> first.
         </div>
@@ -764,9 +846,9 @@ export default function AdminSelectionDraftTable() {
   }
   if (isPhone) {
     return (
-      <BetterSelectLayout title="Draft table" actions={actions} wide>
+      <BetterSelectLayout title="Selection Whiteboard" actions={actions} wide>
         <div className="pb-card rounded-xl px-5 py-8 text-center text-sm text-pb-dim">
-          <b className="block text-pb-text font-display text-base mb-1">The draft table needs a wider screen</b>
+          <b className="block text-pb-text font-display text-base mb-1">The Selection Whiteboard needs a wider screen</b>
           Teams sit side by side here, so it is built for a laptop or a tablet held sideways.{' '}
           <Link to="/admin/betterselect/selection" className="text-pb-accent underline">Back to Selection</Link>
         </div>
@@ -776,19 +858,24 @@ export default function AdminSelectionDraftTable() {
 
   const ctx = {
     cols, order, merged, status, conflicts, canEdit, busy, activeFid, setActiveFid,
-    shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length,
-    filters: { q, setQ, years, setYears, hideOut, setHideOut, squad, setSquad },
+    shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length, showGender, weekByPlayer, day,
+    filters: { q, setQ, hideOut, setHideOut, squad, setSquad, gender, setGender },
     tapPool, removeAt, toggleCap, toggleWk, confirmOne, discard, useTheirs, keepMine,
   }
 
   return (
-    <BetterSelectLayout title="Draft table" actions={actions} wide>
+    <BetterSelectLayout title="Selection Whiteboard" actions={actions} wide>
       <div className="flex items-end justify-between gap-x-5 gap-y-2 flex-wrap mb-3">
         <div className="min-w-0">
-          <h2 className="font-display font-bold text-[18px] tracking-tight">Draft table</h2>
+          <h2 className="font-display font-bold text-[18px] tracking-tight">Selection Whiteboard</h2>
           <p className="text-[13px] text-pb-dim mt-0.5">
             Every team for the day side by side. Drag a player from one team to another, or into and out of the pool. Changes save as drafts until you confirm.
           </p>
+          {Object.keys(weekByPlayer).length > 0 && (
+            <p className="text-[12px] text-pb-faint mt-0.5 max-w-[70ch]" data-week-legend>
+              A coloured dot and <b className="font-mono">W2 OUT</b> mean free one weekend of a two-day game, away the other. Colours are in Settings.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Link to="/admin/betterselect/selection" className="inline-flex items-center gap-1.5 text-[12.5px] text-pb-faint hover:text-pb-accent font-display font-semibold">

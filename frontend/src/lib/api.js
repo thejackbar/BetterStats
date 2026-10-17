@@ -5,6 +5,12 @@ import { registerSeasons } from './cricketFormat'
 
 const BASE = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
 
+// ?a=1&b=2 from an object, leaving out anything empty.
+const auditQuery = (p) => {
+  const q = Object.entries(p || {}).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
+  return q ? `?${q}` : ''
+}
+
 // Shown while the backend is briefly unavailable (e.g. during a deploy, when
 // nginx can't reach the backend and would otherwise surface a raw
 // "Bad Gateway"/"Service Unavailable"). Keep this friendly and reassuring.
@@ -3210,8 +3216,10 @@ export const api = {
   getPlayerCaptainStats: (playerId, scope) => request(`/players/${playerId}/captain-stats${scopeQuery(scope)}`),
 
   // ─── BetterSelect: Fixtures ─────────────────────────────
-  bsListFixtures: (upcomingOnly = false) =>
-    request(`/fixtures${upcomingOnly ? '?upcoming_only=true' : ''}`),
+  bsListFixtures: (upcomingOnly = false, { hideJuniors = false } = {}) => {
+    const q = [upcomingOnly && 'upcoming_only=true', hideJuniors && 'hide_juniors=true'].filter(Boolean).join('&')
+    return request(`/fixtures${q ? '?' + q : ''}`)
+  },
   bsCreateFixture: (data) =>
     request('/fixtures', { method: 'POST', body: JSON.stringify(data) }),
   bsUpdateFixture: (id, data) =>
@@ -3253,7 +3261,9 @@ export const api = {
     }) }),
 
   // ─── BetterSelect: Availability ─────────────────────────
-  bsAvailabilityMatrix: () => request(`/availability/matrix${tzQuery()}`),
+  bsAvailabilityConfig: () => request('/availability/config'),
+  bsAvailabilityMatrix: ({ juniors = false } = {}) =>
+    request(`/availability/matrix${tzQuery()}${juniors ? (tzQuery() ? '&' : '?') + 'juniors=true' : ''}`),
   bsSetAvailability: (data) =>
     request('/availability', { method: 'POST', body: JSON.stringify(data) }),
   bsBulkAvailability: (items) =>
@@ -3272,6 +3282,36 @@ export const api = {
   bsRegenerateSelfService: () =>
     request('/availability/self-service/regenerate', { method: 'POST' }),
 
+  // ─── BetterSelect: Fines (admin) ───
+  // A squad's fines tracker. Nothing is deleted: a wrong row is voided, a fine
+  // type that is no longer used is archived.
+  bsFinesSquads: () => request('/fines/squads'),
+  bsFinesSquad: (teamId) => request(`/fines/squads/${teamId}`),
+  bsFinesSettings: (teamId, data) =>
+    request(`/fines/squads/${teamId}/settings`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bsFinesAddType: (teamId, data) =>
+    request(`/fines/squads/${teamId}/types`, { method: 'POST', body: JSON.stringify(data) }),
+  bsFinesPatchType: (typeId, data) =>
+    request(`/fines/types/${typeId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bsFinesAddEntries: (teamId, data) =>
+    request(`/fines/squads/${teamId}/entries`, { method: 'POST', body: JSON.stringify(data) }),
+  bsFinesVoidEntry: (id) => request(`/fines/entries/${id}/void`, { method: 'POST' }),
+  bsFinesRestoreEntry: (id) => request(`/fines/entries/${id}/restore`, { method: 'POST' }),
+  bsFinesAddPayment: (teamId, data) =>
+    request(`/fines/squads/${teamId}/payments`, { method: 'POST', body: JSON.stringify(data) }),
+  bsFinesVoidPayment: (id) => request(`/fines/payments/${id}/void`, { method: 'POST' }),
+  bsFinesRestorePayment: (id) => request(`/fines/payments/${id}/restore`, { method: 'POST' }),
+  bsFinesLedger: (teamId, playerId) => request(`/fines/squads/${teamId}/players/${playerId}/ledger`),
+  // The side picked in the squad's week (who to fine), and the report behind the PDF.
+  bsFinesSession: (teamId, date) => request(`/fines/squads/${teamId}/session${date ? `?date=${date}` : ''}`),
+  bsFinesReport: (teamId, { from, to } = {}) => {
+    const q = new URLSearchParams()
+    if (from) q.set('date_from', from)
+    if (to) q.set('date_to', to)
+    const qs = q.toString()
+    return request(`/fines/squads/${teamId}/report${qs ? `?${qs}` : ''}`)
+  },
+
   // ─── Public: self-service availability (no admin auth; player cookie) ───
   // Outside the admin surface — players reach these via the magic link + PIN.
   availPublicLanding: (token) => request(`/public/availability/${token}`),
@@ -3280,6 +3320,10 @@ export const api = {
   availPublicSwitch: (token) =>
     request(`/public/availability/${token}/switch`, { method: 'POST' }),
   availPublicMe: (token) => request(`/public/availability/${token}/me${tzQuery()}`),
+  // The verified player's own page: squads, locked selections, training.
+  availPublicProfile: (token) => request(`/public/availability/${token}/me/profile${tzQuery()}`),
+  // The competition ladder for the player's squads (the page's Ladder module).
+  availPublicLadder: (token) => request(`/public/availability/${token}/me/ladder`),
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
 
@@ -3433,10 +3477,28 @@ export const api = {
     request(`/public/fantasy/${token}/trades/${tradeId}/respond`, { method: 'POST', body: JSON.stringify({ accept }) }),
 
   // ─── BetterSelect: Selection (lineups) ──────────────────
-  bsSelectionOverview: () => request('/selection/overview'),
+  bsSelectionOverview: ({ hideJuniors = false } = {}) =>
+    request(`/selection/overview${hideJuniors ? '?hide_juniors=true' : ''}`),
   bsGetSelection: (fixtureId) => request(`/selection/${fixtureId}`),
-  bsSetSelection: (fixtureId, players, demotions = []) =>
-    request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players, demotions }) }),
+  // `lock` locks the side as it is confirmed (Confirm on the board does).
+  bsSetSelection: (fixtureId, players, demotions = [], { lock = false } = {}) =>
+    request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players, demotions, lock }) }),
+  bsLockSelection: (fixtureId) => request(`/selection/${fixtureId}/lock`, { method: 'POST' }),
+  bsUnlockSelection: (fixtureId) => request(`/selection/${fixtureId}/unlock`, { method: 'POST' }),
+  bsSelectionHistory: (fixtureId) => request(`/selection/${fixtureId}/history`),
+  // Audit History: the club-wide trail of changes to players.
+  bsAuditEvents: (params = {}) => request(`/audit/events${auditQuery(params)}`),
+  bsAuditFacets: () => request('/audit/facets'),
+  // Same filters as the list. Fetched with the session cookie, then saved as a file.
+  bsAuditExport: async (params = {}) => {
+    const res = await fetch(`${BASE}/audit/export.csv${auditQuery(params)}`, { credentials: 'include' })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `Export failed (${res.status})`)
+    const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')?.[1] || 'audit-history.csv'
+    const url = URL.createObjectURL(await res.blob())
+    const a = document.createElement('a'); a.href = url; a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  },
   // Autosaved, unconfirmed side for a fixture. `opts` goes to fetch, so a
   // leaving page can pass { keepalive: true }.
   // Email the CONFIRMED side: `to` is 'captain' (team sheet with every player's
@@ -3451,8 +3513,14 @@ export const api = {
   // has changed since is refused with 409 (error.detail = the current draft).
   bsDiscardSelectionDraft: (fixtureId, baseVersion = 0, opts = {}) =>
     request(`/selection/${fixtureId}/draft${baseVersion ? `?base_version=${baseVersion}` : ''}`, { method: 'DELETE', ...opts }),
-  bsSetDefaultTeamSize: (size) =>
-    request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size }) }),
+  // With a fixtureId the size is saved on that fixture's team; without one it is
+  // the club default.
+  // `minSize` is only sent when given: undefined leaves the team's minimum
+  // alone, null clears it, a number sets it (the fewest players the side may field).
+  bsSetDefaultTeamSize: (size, fixtureId, minSize) =>
+    request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({
+      size, fixture_id: fixtureId || null, ...(minSize === undefined ? {} : { min_size: minSize }),
+    }) }),
   // The previous fixture's named XI (for Selection's "fill from last week").
   bsPreviousXI: (fixtureId) => request(`/selection/${fixtureId}/previous-xi`),
   // Player ids named in any saved XI for the round containing `on` (a date) —
@@ -3472,6 +3540,12 @@ export const api = {
     request('/selection-rules/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
   bsRuleSettings: (data) =>
     request('/selection-rules/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  // The BetterComms templates a selection email can be linked to (written in
+  // Admin > Comms > Templates), plus the {{variables}} they can use. A preview
+  // fills one in with a made-up match; nothing is sent.
+  bsSelectionEmailTemplates: () => request('/selection-rules/email-templates'),
+  bsPreviewSelectionEmailTemplate: (templateId, to) =>
+    request('/selection-rules/email-templates/preview', { method: 'POST', body: JSON.stringify({ template_id: templateId, to }) }),
   // Per-player exceptions to one rule: a permit, an association clearance, or
   // the tick a free-text rule asks for.
   bsRulePlayers: (id) => request(`/selection-rules/${id}/players`),
@@ -3537,6 +3611,11 @@ export const api = {
   // Self check-in link — the one URL behind both the printed QR code and the
   // NFC tag. The backend returns a PATH; the panel prefixes the origin.
   nmGetCheckInLink: () => request('/nets/checkin-link'),
+  // One session's own link (minted on first ask for an older session) and a new
+  // token for it alone.
+  nmSessionCheckInLink: (id) => request(`/nets/sessions/${id}/checkin-link`),
+  nmRegenerateSessionCheckInLink: (id) =>
+    request(`/nets/sessions/${id}/checkin-link/regenerate`, { method: 'POST' }),
   nmSetCheckInLink: (data) =>
     request('/nets/checkin-link', { method: 'POST', body: JSON.stringify(data) }),
   nmRegenerateCheckInLink: () =>

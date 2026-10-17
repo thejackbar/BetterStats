@@ -9,11 +9,13 @@ import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
+import { useAllowMaybe, useSelectConfig } from '../../../lib/useAvailabilityConfig'
 import {
   Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
-  RecencySelect, playedWithinYears, RuleTags, Chip,
+  playedWithinYears, RuleTags, Chip,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
+import usePersistedState from '../../../lib/usePersistedState'
 import SelfServiceLinkPanel from './SelfServiceLinkPanel'
 
 const ROLE_OPTS = [
@@ -58,7 +60,7 @@ function fixtureSub(dateObj) {
   return fxs.map((f) => {
     const opp = f.opponent_name || f.label || 'TBC'
     const prefix = f.home_away === 'AWAY' ? '@ ' : f.home_away === 'BYE' ? '' : 'vs '
-    const d1d2 = f.two_day ? (f.role === 'day1' ? 'D1 ' : f.role === 'day2' ? 'D2 ' : '') : ''
+    const d1d2 = f.two_day ? (f.role === 'day1' ? 'Wk 1/2 ' : f.role === 'day2' ? 'Wk 2/2 ' : '') : ''
     return `${d1d2}${prefix}${opp}`
   }).join(' · ')
 }
@@ -74,8 +76,13 @@ export default function AdminAvailability() {
   const [avail, setAvail] = useState({}) // {playerId: {date: {status, source, note, ...}}}
 
   // Filters — roster + recency are quiet view controls; the rest are facets.
-  const [roster, setRoster] = useState('current')   // 'current' hides dormant/inactive; 'all' shows everyone
-  const [years, setYears] = useState(0)              // recency: played within N yrs (0 = any)
+  // Remembered on this device so they survive moving to another screen.
+  const [roster, setRoster] = usePersistedState('avail.roster', 'current', (v) => v === 'current' || v === 'all') // 'current' hides dormant/inactive; 'all' shows everyone
+  // How far back a player may have last played to be listed is a club setting (Settings, Players listed).
+  const years = useSelectConfig().playedYears?.availability ?? 0
+  // Junior grades (per Manage Grades) are left out until asked for.
+  // Whether junior grades show is a Settings choice now, not a switch on this screen.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
   const [selectedIds, setSelectedIds] = useState(() => new Set()) // picked in any XI this round
 
   // Selected week (column) — drives the Pick XI handoff and single-week bulk.
@@ -84,7 +91,7 @@ export default function AdminAvailability() {
   // Columns the Availability filter judges. Empty = follow the selected week;
   // otherwise the picked weeks, combined by `colMatch` (every one or any one).
   const [filterCols, setFilterCols] = useState([])
-  const [colMatch, setColMatch] = useState('all')
+  const [colMatch, setColMatch] = usePersistedState('avail.colMatch', 'all', (v) => v === 'all' || v === 'any')
 
   // Date-range: filters which date COLUMNS are shown AND scopes the bulk-fill.
   // `rangeApplied` is what the matrix actually uses; the From/To selects are
@@ -97,6 +104,9 @@ export default function AdminAvailability() {
   // Bulk update
   const [selected, setSelected] = useState(() => new Set())
   const [bulkStatus, setBulkStatus] = useState('AVAILABLE')
+  const allowMaybe = useAllowMaybe()
+  // Switching Maybe off while it was the chosen bulk answer falls back to Available.
+  useEffect(() => { if (!allowMaybe && bulkStatus === 'MAYBE') setBulkStatus('AVAILABLE') }, [allowMaybe, bulkStatus])
   const [bulkReason, setBulkReason] = useState('')
   const [applying, setApplying] = useState(false)
 
@@ -105,7 +115,7 @@ export default function AdminAvailability() {
 
   const load = useCallback(() => {
     setData(null)
-    api.bsAvailabilityMatrix()
+    api.bsAvailabilityMatrix({ juniors: showJuniors })
       .then((d) => {
         setData(d)
         setAvail(d.availability || {})
@@ -117,7 +127,7 @@ export default function AdminAvailability() {
         }
       })
       .catch((e) => { toast.error(e.message); setData({ dates: [], players: [], availability: {} }) })
-  }, [toast])
+  }, [toast, showJuniors])
 
   useEffect(() => { load() }, [load])
 
@@ -140,7 +150,7 @@ export default function AdminAvailability() {
       { value: 'selected', label: 'Selected this round' }, { value: 'unselected', label: 'Not selected' },
     ] },
   ], [squadOptions])
-  const filters = useFilters(facets)
+  const filters = useFilters(facets, { persist: 'availability' })
   const { values, search } = filters
 
   // Staged-range preview (for the panel's "N games" + chips, before Apply).
@@ -315,7 +325,6 @@ export default function AdminAvailability() {
             { value: 'current', label: 'Current squad' },
             { value: 'all', label: 'All' },
           ]} />
-          <RecencySelect value={years} onChange={setYears} />
           <button onClick={() => setRangeOn((v) => !v)}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${rangeOn ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}>
             <Icon name="fixtures" size={14} /> Date range {rangeOn ? '▲' : '▼'}
@@ -379,7 +388,7 @@ export default function AdminAvailability() {
           <span className="font-mono text-[11px] text-pb-accent">{selected.size} selected</span>
           <span className="text-sm text-pb-dim">mark</span>
           <Segmented sm value={bulkStatus} onChange={setBulkStatus}
-            options={AVAIL_ORDER.map((s) => ({ value: s, label: AVAILABILITY[s].short }))} />
+            options={AVAIL_ORDER.filter((s) => allowMaybe || s !== 'MAYBE').map((s) => ({ value: s, label: AVAILABILITY[s].short }))} />
           {rangeApplied ? (
             <span className="inline-flex items-center gap-2 text-sm text-pb-dim">
               across

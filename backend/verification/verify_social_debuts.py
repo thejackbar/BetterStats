@@ -55,7 +55,7 @@ CREATE TABLE v_effective_player_season_stats (player_id uuid, season_id uuid, ma
 async def main():
     eng = create_async_engine(URL)
     org, other = uuid.uuid4(), uuid.uuid4()
-    P = {k: uuid.uuid4() for k in "ABCDEFGHI"}
+    P = {k: uuid.uuid4() for k in "ABCDEFGHIJK"}
     G = {k: uuid.uuid4() for k in ("past", "match_day", "washout", "imported")}
     S_old, S_cur = uuid.uuid4(), uuid.uuid4()
     async with eng.begin() as c:
@@ -75,6 +75,10 @@ async def main():
         await c.execute(text("INSERT INTO v_effective_batting_innings VALUES (:p, :g)"), {"p": P["E"], "g": G["imported"]})  # E: an imported game
         await c.execute(text("INSERT INTO v_effective_player_season_stats VALUES (:p, :s, 12)"), {"p": P["F"], "s": S_old})  # F: an earlier season
         await c.execute(text("INSERT INTO v_effective_player_season_stats VALUES (:p, :s, 1)"), {"p": P["G"], "s": S_cur})   # G: this season only (includes the match)
+        await ga("match_day", "G")
+        await c.execute(text("INSERT INTO v_effective_player_season_stats VALUES (:p, :s, 2)"), {"p": P["J"], "s": S_cur})   # J: the match plus one earlier round with no scorecard
+        await ga("match_day", "J")
+        await c.execute(text("INSERT INTO v_effective_player_season_stats VALUES (:p, :s, 1)"), {"p": P["K"], "s": S_cur})   # K: one round this season, the match not yet played
         await ga("past", "H")           # H belongs to another club's register
 
     org_ns = SimpleNamespace(id=org)
@@ -85,7 +89,7 @@ async def main():
             async with AsyncSession(bind=c) as db:
                 return await sd.social_debuts(db, org_ns, [str(P[i]) for i in ids], before)
 
-    r = await run("ABCDEFGHI", date(2026, 10, 3))
+    r = await run("ABCDEFGHIJK", date(2026, 10, 3))
     deb = {k for k, v in P.items() if str(v) in r["debuts"]}
     known = {k for k, v in P.items() if str(v) in r["known"]}
     ck("a player with nothing on record is a debut", "A" in deb, str(sorted(deb)))
@@ -94,10 +98,15 @@ async def main():
     ck("a washout does not count as a game played", "D" in deb)
     ck("an imported batting line counts as history", "E" not in deb and "E" in known)
     ck("an earlier season's matches count as history", "F" not in deb and "F" in known)
-    ck("the current season's own summary does not", "G" in deb)
+    ck("the current season's own summary does not count the match itself", "G" in deb)
+    ck("a round this season with no scorecard counts as history", "J" not in deb and "J" in known, str(sorted(deb)))
+    ck("a summary with a match and nothing at or after the date is history", "K" not in deb and "K" in known, str(sorted(deb)))
     ck("another club's player is neither a debut nor known", "H" not in deb and "H" not in known)
-    ck("a player id with no row is left out of known", str(uuid.uuid4()) not in r["known"] and len(r["known"]) == 8, str(len(r["known"])))
+    ck("a player id with no row is left out of known", str(uuid.uuid4()) not in r["known"] and len(r["known"]) == 10, str(len(r["known"])))
     ck("the answer names the date it was asked for", r["before"] == "2026-10-03")
+
+    r = await run("K", date(2026, 10, 17))
+    ck("a match still to be played: this season's only round is history", r["debuts"] == [] and r["known"] == [str(P["K"])], str(r))
 
     r = await run("B", date(2026, 9, 1))
     ck("asked as at a date before their first game, B is a debut", r["debuts"] == [str(P["B"])], str(r))

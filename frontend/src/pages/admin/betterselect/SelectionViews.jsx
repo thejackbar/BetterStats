@@ -8,11 +8,13 @@
 // the pointer DnD engine (selectionDnd). Player rows show the real role + style
 // + a quiet form indicator (selectionMeta.roleLine / FormBars) — never the old
 // hardcoded positional hints.
+import { useEffect, useState } from 'react'
+import { sideFit } from '../../../lib/sideSize'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { Icon, Avatar, Dot, Tag, RuleTags } from './ui'
-import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
+import { AVAILABILITY, AVAIL_ORDER, viewStatus } from '../../../lib/availability'
 import { useDrag } from './selectionDnd'
-import { roleLine, formMeta, spark, alsoInLine, dropInLine, inDraftLine } from './selectionMeta'
+import { roleLine, formMeta, spark, alsoInLine, dropInLine, inDraftLine, weekSplitLine } from './selectionMeta'
 import { hasRuleFlag, ruleNotes, isBlocked, xiCompliance } from './selectionRules'
 import { useFitHeight, useBoxHeight, rowDensity, ROW_MIN } from './useFitHeight'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
@@ -97,23 +99,80 @@ function AvailMini({ players }) {
 }
 
 /* ── Shared fixture / balance / size chrome ──────────────────────────────── */
-function SizePicker({ value, onChange }) {
-  const opts = [[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']]
+const SIZE_PRESETS = [[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']]
+const MAX_SIDE = 30
+function SizeBar({ value, onChange }) {
+  // Anything off the presets is a custom number (a junior or women's side may
+  // name 7 or 9). Clicking Custom opens a box to type it in.
+  const isCustom = value > 0 && !SIZE_PRESETS.some(([v]) => v === value)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const open = () => { setDraft(isCustom ? String(value) : ''); setEditing(true) }
+  const commit = () => {
+    const n = Math.floor(Number(draft))
+    setEditing(false)
+    if (Number.isFinite(n) && n >= 1 && n <= MAX_SIDE && n !== value) onChange(n)
+  }
+  const on = 'bg-pb-accent/15 text-pb-accent'
+  const off = 'text-pb-faint hover:text-pb-text'
   return (
     <div className="inline-flex p-[3px] gap-0.5 bg-pb-surface2 rounded-lg border border-pb-hairline whitespace-nowrap">
-      {opts.map(([v, l]) => (
-        <button key={v} type="button" onClick={() => onChange(v)}
-          className={`rounded-md font-display font-semibold text-xs px-2.5 py-1 transition ${v === value ? 'bg-pb-accent/15 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
+      {SIZE_PRESETS.map(([v, l]) => (
+        <button key={v} type="button" onClick={() => { setEditing(false); onChange(v) }}
+          className={`rounded-md font-display font-semibold text-xs px-2.5 py-1 transition ${v === value && !editing ? on : off}`}>{l}</button>
       ))}
+      {editing ? (
+        <input autoFocus type="number" inputMode="numeric" min={1} max={MAX_SIDE} value={draft} placeholder="No."
+          aria-label={`Custom side size, 1 to ${MAX_SIDE}`}
+          onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditing(false) }}
+          className="w-14 rounded-md bg-pb-surface border border-pb-accent text-pb-text font-display font-semibold text-xs px-2 py-1 outline-none pb-num" />
+      ) : (
+        <button type="button" onClick={open} title="Enter your own side size"
+          className={`rounded-md font-display font-semibold text-xs px-2.5 py-1 transition ${isCustom ? on : off}`}>{isCustom ? `Custom · ${value}` : 'Custom'}</button>
+      )}
     </div>
   )
 }
-function PickPill({ count, target }) {
-  const off = target > 0 && count !== target
+// The fewest players the side may field: blank means the side must be full.
+// Only offered for a fixture that belongs to one of our teams (the minimum is
+// saved on the team).
+function MinBox({ value, size, onChange }) {
+  const [draft, setDraft] = useState(value ? String(value) : '')
+  useEffect(() => { setDraft(value ? String(value) : '') }, [value])
+  const commit = () => {
+    const t = draft.trim()
+    if (t === '') { if (value) onChange(null); return }
+    const n = Math.floor(Number(t))
+    if (!Number.isFinite(n) || n < 1 || n > 30) { setDraft(value ? String(value) : ''); return }
+    if (n !== value) onChange(n)
+  }
+  return (
+    <label className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-dim whitespace-nowrap"
+      title={`The fewest players this team may field. Leave blank if the side must be full${size > 0 ? ` (${size})` : ''}.`}>
+      Min
+      <input type="number" inputMode="numeric" min={1} max={30} value={draft} placeholder="none"
+        aria-label="Minimum players for this team"
+        onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(value ? String(value) : ''); e.currentTarget.blur() } }}
+        className="w-14 rounded-md bg-pb-surface2 border border-pb-hairline text-pb-text font-display font-semibold text-xs px-2 py-1 outline-none focus:border-pb-accent pb-num" />
+    </label>
+  )
+}
+function SizePicker({ vm }) {
+  return (
+    <div className="inline-flex items-center gap-2 flex-wrap">
+      <SizeBar value={vm.format} onChange={vm.changeFormat} />
+      {vm.canMin && <MinBox value={vm.minFormat || 0} size={vm.format} onChange={vm.changeMin} />}
+    </div>
+  )
+}
+function PickPill({ count, target, min = 0 }) {
+  const off = sideFit(count, target, min).off
   return (
     <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap"
       style={{ background: off ? 'var(--pb-amber)' : 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: off ? '#1b1205' : 'var(--pb-accent)' }}>
-      {count}{target > 0 ? ` / ${target}` : ''} picked
+      {count}{target > 0 ? ` / ${target}` : ''} picked{min > 0 ? ` · min ${min}` : ''}
     </span>
   )
 }
@@ -126,14 +185,14 @@ export function FixtureBar({ vm, compact = false }) {
       <div data-fixture-bar="compact" className="rounded-xl px-4 py-2 mb-2 border flex flex-wrap items-center gap-x-4 gap-y-1"
         style={{ background: 'color-mix(in srgb, var(--pb-accent) 9%, var(--pb-surface))', borderColor: 'color-mix(in srgb, var(--pb-accent) 26%, transparent)' }}>
         <div className="flex items-center gap-3 min-w-0">{vm.contextLeft}</div>
-        <div className="min-w-0 flex-1 basis-[240px]">
+        <div className="min-w-0 flex-1 basis-[120px]">
           <h2 className="font-display font-bold text-[16px] leading-tight truncate" title={vm.title}>{vm.title}</h2>
           {vm.sub && <div className="text-[12px] text-pb-dim truncate" title={vm.sub}>{vm.sub}</div>}
         </div>
         {vm.canEdit && (
           <div className="flex flex-wrap items-center gap-2">
-            <SizePicker value={vm.format} onChange={vm.changeFormat} />
-            <PickPill count={vm.count} target={vm.target} />
+            <SizePicker vm={vm} />
+            <PickPill count={vm.count} target={vm.target} min={vm.minFormat || 0} />
           </div>
         )}
       </div>
@@ -151,8 +210,8 @@ export function FixtureBar({ vm, compact = false }) {
         </div>
         {vm.canEdit && (
           <div className="flex flex-wrap items-center gap-2.5">
-            <SizePicker value={vm.format} onChange={vm.changeFormat} />
-            <PickPill count={vm.count} target={vm.target} />
+            <SizePicker vm={vm} />
+            <PickPill count={vm.count} target={vm.target} min={vm.minFormat || 0} />
           </div>
         )}
       </div>
@@ -255,10 +314,10 @@ function AvatarAvail({ p, vm, size = 34, dotSize = 10 }) {
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); vm.setAvailEdit(p) }}
             className="absolute -right-[11px] -bottom-[11px] w-8 h-8 inline-flex items-center justify-center rounded-full">
-            <Dot status={p.availability} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} />
+            <Dot status={viewStatus(p)} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} />
           </button>
         )
-        : <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>}
+        : <span className="absolute -right-px -bottom-px"><Dot status={viewStatus(p)} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>}
     </span>
   )
 }
@@ -304,7 +363,7 @@ function SlotControls({ vm, id, idx }) {
 /* ══ Dual rail ══════════════════════════════════════════════════════════════ */
 function DualCard({ p, kind, idx, vm, drag, density = 'full' }) {
   const fmt = useAdminNameFormat()
-  const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
+  const meta = AVAILABILITY[viewStatus(p)] || AVAILABILITY.NO_RESPONSE
   const clash = p.clash?.length > 0
   // A call-up (higher grade taking a player from a lower XI) stays pickable;
   // only a same/higher-grade clash blocks. An "unavailable" player is NOT
@@ -335,7 +394,7 @@ function DualCard({ p, kind, idx, vm, drag, density = 'full' }) {
       className={`group relative flex items-center gap-2.5 pl-3.5 pr-3 ${dense ? 'py-0.5 min-h-0 h-full' : 'py-1.5 shrink-0'} rounded-xl border bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''} ${barred ? 'border-pb-red/45' : 'border-pb-hairline'}`}
       {...(kind === 'pool' && interactive ? drag.bind(dragItem) : {})}
       onClick={kind === 'pool' && interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
-      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
+      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: viewStatus(p) === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       {kind === 'slot' && vm.canEdit && (
         <span {...drag.bind(dragItem)} className="max-sm:hidden cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={14} /></span>
       )}
@@ -358,6 +417,7 @@ function DualCard({ p, kind, idx, vm, drag, density = 'full' }) {
             {warnLine || <span className="text-pb-dim">{roleLine(p)}</span>}
           </div>
         )) : <div className="text-[12px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>}
+        {!dense && weekSplitLine(p) && <div className="text-[11px] font-semibold text-pb-red mt-0.5 truncate" data-week-split>{weekSplitLine(p)}</div>}
         {!dense && (clash
           ? (callUp
               ? <div className="text-[11px] text-pb-amber mt-0.5 truncate">↑ Call-up from {p.clash.join(', ')}</div>
@@ -525,7 +585,7 @@ function SheetRow({ i, id, vm, drag }) {
 
 function TrayCard({ p, vm, drag }) {
   const fmt = useAdminNameFormat()
-  const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
+  const meta = AVAILABILITY[viewStatus(p)] || AVAILABILITY.NO_RESPONSE
   const clash = p.clash?.length > 0
   const callUp = clash && !p.clash_blocks
   // Unavailable players stay pickable (see DualCard) — only a hard clash blocks.
@@ -536,7 +596,7 @@ function TrayCard({ p, vm, drag }) {
     <div className={`group relative flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl border ${barred ? 'border-pb-red/45' : 'border-pb-hairline'} bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''}`}
       {...(interactive ? drag.bind({ kind: 'pool', player: p }) : {})}
       onClick={interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
-      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
+      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: viewStatus(p) === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       <AvatarAvail p={p} vm={vm} dotSize={10} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
@@ -584,7 +644,7 @@ export function TeamSheetView({ vm }) {
           {vm.sub && <div className="text-[13px] text-pb-dim">{vm.sub}</div>}
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          {vm.canEdit && <SizePicker value={vm.format} onChange={vm.changeFormat} />}
+          {vm.canEdit && <SizePicker vm={vm} />}
           <div className="font-display flex items-baseline gap-1"><b className="text-[38px] leading-none text-pb-accent font-bold pb-num">{vm.count}</b><span className="text-[17px] text-pb-faint">/ {vm.target || '∞'}</span></div>
           <div className="hidden sm:flex gap-3.5 font-display">
             {ROLE_CODES.map((c) => {

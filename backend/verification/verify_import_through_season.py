@@ -333,6 +333,18 @@ async def main() -> int:
           {s.get("year") for s in cm["seasons"] if s.get("year")} >= {2003, 2004, 2012, 2013},
           str([(s.get("season_name"), s.get("year")) for s in cm["seasons"]]))
 
+    # The Team tab read every season-less figure as the string 'None' and 500ed.
+    async with Session() as db:
+        try:
+            tb = await agg.get_player_team_breakdown(db, str(M), str(ORG), None, scope=None)
+            err = ""
+        except Exception as exc:  # control run: report the failure, do not crash
+            tb, err = {}, f"{type(exc).__name__}: {str(exc)[:90]}"
+    check("M's Team tab loads with the book's adjustment in it (it used to 500)", bool(tb), err)
+    # No scorecards are held in this fixture, so the 45 online matches sit unplaced too: 45 + 45.
+    check("and its total reads 90 like the header, the book's 45 reported as matches without a grade",
+          (tb.get("total_aggregate_matches"), tb.get("unattributed")) == (90, 90),
+          str((tb.get("total_aggregate_matches"), tb.get("unattributed"))))
     check("S profile (nothing online): exactly the book, 21 games, 28 innings, 74 runs, high score 11",
           (n(cs["bat"], "games"), n(cs["bat"], "innings"), n(cs["bat"], "total_runs"), n(cs["bat"], "high_score"))
           == (21, 28, 74, 11), str({k: cs["bat"].get(k) for k in ("games", "innings", "total_runs", "high_score")}))
@@ -419,6 +431,22 @@ async def main() -> int:
           n(ct2["bat"], "total_runs") == 777, str(ct2["bat"].get("total_runs")))
     check("M: the ordinary import pins the career to the book's 1158 and loses 681 online runs",
           n(cm6["bat"], "total_runs") == 1158, str(cm6["bat"].get("total_runs")))
+
+    print("\n-- a player who already has an ordinary whole-career import is warned before a book is added")
+    async with Session() as db:
+        club = await db.get(Organisation, ORG)
+        warned = await imp.resolve(request(r2["parsed"], r2["mapping"], player_overrides=r2["overrides"],
+                                           through_season="2004/05"), USER, club, db)
+    texts = [w for w in warned["warnings"] if "earlier whole-career import" in w]
+    check("the review names the three players who already have one", bool(texts) and all(
+        n_ in texts[0] for n_ in ("TRAVCICH M", "TRAVCICH S", "OVERTON T")), str(warned["warnings"]))
+    check("and says where to undo it", bool(texts) and "Undo just this player" in texts[0])
+    async with Session() as db:
+        club = await db.get(Organisation, ORG)
+        clean = await imp.resolve(request(r2["parsed"], r2["mapping"], player_overrides=r2["overrides"]),
+                                  USER, club, db)
+    check("an ordinary import over an ordinary import says nothing new",
+          not any("earlier whole-career import" in w for w in clean["warnings"]))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:

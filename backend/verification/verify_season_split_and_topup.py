@@ -392,6 +392,54 @@ async def main() -> None:
             again = await participant_relink.reread_stored_game(s, ORG, gid, card, resolve)
             check("reading it a second time changes nothing", again is None, str(again))
 
+            print("\n-- A RECENT GAME STORED WITH NO DETAIL IS FOUND, EVEN OUTSIDE THE RUN'S WINDOW --")
+            # The reported game: a `games` row with its result and no batting, bowling, fall of
+            # wickets or partnerships (the page still draws a card, rebuilt live from CA).
+            async def mk(days_ago, grade=G_SUM, home=ORG):
+                g = uuid.uuid4()
+                await s.execute(text(
+                    "INSERT INTO games (id, grade_id, played_at, result, home_org_id, away_org_id, status) "
+                    "VALUES (:i, :g, :d, 'LOSS', :o, :x, 'COMPLETED')"),
+                    {"i": g, "g": grade, "d": TODAY - timedelta(days=days_ago), "o": home, "x": OPP})
+                return g
+            empty_recent = await mk(5)
+            empty_old = await mk(40)
+            complete = await mk(5)
+            theirs_only = await mk(5)
+            await s.execute(text(
+                "INSERT INTO batting_innings (game_id, player_id, innings_number, runs, balls, fours, sixes, "
+                " not_out, dismissal_type, did_not_bat) VALUES (:g, :p, 1, 9, 12, 1, 0, false, 'caught', false)"),
+                {"g": complete, "p": HEAVY})
+            await s.execute(text(
+                "INSERT INTO fall_of_wickets (game_id, innings_number, wicket_number, score_at_fall, player_id, "
+                " batter_name) VALUES (:g, 1, 1, 9, :p, 'H Heavy')"), {"g": complete, "p": HEAVY})
+            no_fow = await mk(5)
+            await s.execute(text(
+                "INSERT INTO batting_innings (game_id, player_id, innings_number, runs, balls, fours, sixes, "
+                " not_out, dismissal_type, did_not_bat) VALUES (:g, :p, 1, 9, 12, 1, 0, false, 'caught', false)"),
+                {"g": no_fow, "p": HEAVY})
+            stranger = uuid.uuid4()
+            await s.execute(text("INSERT INTO players (id, organisation_id, name, grassroots_id, status) "
+                                 "VALUES (:i, :o, 'Other, Olly', :g, 'active')"),
+                            {"i": stranger, "o": OTHER, "g": str(stranger)})
+            await s.execute(text(
+                "INSERT INTO batting_innings (game_id, player_id, innings_number, runs, balls, fours, sixes, "
+                " not_out, dismissal_type, did_not_bat) VALUES (:g, :p, 1, 14, 20, 2, 0, false, 'bowled', false)"),
+                {"g": theirs_only, "p": stranger})
+            await s.commit()
+            if not hasattr(participant_relink, "recent_games_without_detail"):
+                check("participant_relink.recent_games_without_detail exists", False, "missing (control run)")
+            else:
+                found = await participant_relink.recent_games_without_detail(s, ORG)
+                check("the recent game with no player detail is picked up", str(empty_recent) in found, str(found))
+                check("a recent game with batting, fall of wickets and partnerships data is left alone",
+                      str(complete) not in found)
+                check("a recent game with batting but no fall of wickets or partnerships is picked up",
+                      str(no_fow) in found)
+                check("a game older than the 14 day window is not", str(empty_old) not in found)
+                check("a shared fixture where only the OTHER club's players have rows still counts as empty for us",
+                      str(theirs_only) in found)
+
     print("\n-- THE CLUB'S 'AMALGAMATE' SWITCH RESTORES ONE SEASON PER YEAR --")
     async with Session() as s:
         await s.execute(text("UPDATE organisations SET amalgamate_seasons = true WHERE id = :o"), {"o": ORG})

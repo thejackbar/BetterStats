@@ -178,7 +178,39 @@ async def totals_under(session: AsyncSession, org_id, pids: Iterable,
         got = await _scoped(session, org_id, ids, scope)
     else:
         got = await _unscoped(session, ids)
+    got = await _matches_like_profile(session, org_id, ids, scope, got)
     return {p: got.get(p) or _empty() for p in ids}
+
+
+_GRID_CHUNK = 300
+
+
+async def _matches_like_profile(session: AsyncSession, org_id, ids: list[str],
+                                scope: Optional[GradeScope], got: dict) -> dict:
+    """Raise each player's `matches` to what their profile's MATCHES reads, never lower.
+
+    The profile header is raised to the by-grade grid (matches Cricket Australia's per-grade
+    totals claim and the club holds no scorecard for), so a player on 99 there and 98 here
+    would be told they had not reached 100 matches while their own page said they had.
+    Same helper the leaderboards, Records and StatLab use; chunked because a whole club's
+    ids go through here at the end of every sync. A failure leaves the figures as they were.
+    """
+    from app.services.aggregations import grid_matches_for_players  # lazy: aggregations imports this module's callers
+    try:
+        # A savepoint, so a failed read rolls back only itself and leaves the caller's
+        # transaction, and the objects it has loaded, as they were.
+        async with session.begin_nested():
+            for i in range(0, len(ids), _GRID_CHUNK):
+                grid = await grid_matches_for_players(
+                    session, org_id, ids[i:i + _GRID_CHUNK], None, scope)
+                for pid, n in grid.items():
+                    row = got.setdefault(pid, _empty())
+                    if n > int(row.get("matches") or 0):
+                        row["matches"] = int(n)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("milestone matches vs profile failed for org %s", org_id)
+    return got
 
 
 async def played_grade_names(session: AsyncSession, org_id, pids: Iterable) -> dict[str, set]:

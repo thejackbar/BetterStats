@@ -15,10 +15,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import instructional_videos
+from app.routers import audit as audit_router
 from app.routers import admin_broadcasts
 from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, fines, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours, role_programs
@@ -4485,6 +4486,79 @@ async def lifespan(app: FastAPI):
         for _stmt in _IMPORT_THROUGH_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 332: a team's own side size. Same one-copy rule: this and
+        # alembic's 332 both run services/team_size_ddl.STATEMENTS.
+        from app.services.team_size_ddl import STATEMENTS as _TEAM_SIZE_DDL
+        for _stmt in _TEAM_SIZE_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 333: a team's minimum side size. Same one-copy rule: this and
+        # alembic's 333 both run services/team_min_size_ddl.STATEMENTS.
+        from app.services.team_min_size_ddl import STATEMENTS as _TEAM_MIN_SIZE_DDL
+        for _stmt in _TEAM_MIN_SIZE_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 334: locking a confirmed side and the selection audit trail.
+        # Same one-copy rule: this and alembic's 334 both run
+        # services/selection_lock_ddl.STATEMENTS.
+        from app.services.selection_lock_ddl import STATEMENTS as _SELECTION_LOCK_DDL
+        for _stmt in _SELECTION_LOCK_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 335: a net session's own check-in link and the squads it is
+        # for. Same one-copy rule: this and alembic's 335 both run
+        # services/net_session_link_ddl.STATEMENTS.
+        from app.services.net_session_link_ddl import STATEMENTS as _NET_SESSION_LINK_DDL
+        for _stmt in _NET_SESSION_LINK_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 336: a squad can cover several teams. Same one-copy rule: this
+        # and alembic's 336 both run services/team_sides_ddl.STATEMENTS.
+        from app.services.team_sides_ddl import STATEMENTS as _TEAM_SIDES_DDL
+        for _stmt in _TEAM_SIDES_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 337: a fixture records which of its squad's teams plays it.
+        # Same one-copy rule: this and alembic's 337 both run
+        # services/fixture_side_ddl.STATEMENTS.
+        from app.services.fixture_side_ddl import STATEMENTS as _FIXTURE_SIDE_DDL
+        for _stmt in _FIXTURE_SIDE_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 338: a synced fixture whose squad was picked by hand is pinned.
+        # Same one-copy rule: this and alembic's 338 both run
+        # services/fixture_pin_ddl.STATEMENTS.
+        from app.services.fixture_pin_ddl import STATEMENTS as _FIXTURE_PIN_DDL
+        for _stmt in _FIXTURE_PIN_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 339: the club-wide audit trail. Same one-copy rule: this and
+        # alembic's 339 both run services/audit_ddl.STATEMENTS.
+        from app.services.audit_ddl import STATEMENTS as _AUDIT_DDL
+        for _stmt in _AUDIT_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 340: a club can switch off the "Maybe" availability answer.
+        # Same one-copy rule: this and alembic's 340 both run
+        # services/availability_maybe_ddl.STATEMENTS.
+        from app.services.availability_maybe_ddl import STATEMENTS as _AVAIL_MAYBE_DDL
+        for _stmt in _AVAIL_MAYBE_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 341: the club-chosen modules on a player's own page, and
+        # BetterSelect Fines. Same one-copy rule: this and alembic's 341 both run
+        # services/fines_ddl.STATEMENTS.
+        from app.services.fines_ddl import STATEMENTS as _FINES_DDL
+        for _stmt in _FINES_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 342: Fines' per-session maximum and the note on each fine.
+        # Same one-copy rule: this and alembic's 342 both run
+        # services/fines_cap_ddl.STATEMENTS.
+        from app.services.fines_cap_ddl import STATEMENTS as _FINES_CAP_DDL
+        for _stmt in _FINES_CAP_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.
@@ -6417,8 +6491,10 @@ app.include_router(fixtures.router, dependencies=[Depends(require_module("select
 app.include_router(teams.router, dependencies=[Depends(require_module("select"))])        # BetterSelect
 app.include_router(availability.router, dependencies=[Depends(require_module("select"))]) # BetterSelect
 app.include_router(selection.router, dependencies=[Depends(require_module("select"))])    # BetterSelect
+app.include_router(audit_router.router, dependencies=[Depends(require_module("select"))])  # BetterSelect: Audit History
 app.include_router(selection_rules.router, dependencies=[Depends(require_module("select"))])  # BetterSelect
 app.include_router(net_manager.router, dependencies=[Depends(require_module("select"))])  # BetterSelect (Net Manager)
+app.include_router(fines.router, dependencies=[Depends(require_module("select"))])        # BetterSelect (Fines)
 app.include_router(votes.router, dependencies=[Depends(require_module("select"))])        # BetterSelect (vote collection)
 # Player-facing self-service availability (magic link + PIN). Unauthenticated by
 # design — it resolves the club from the link token and enforces entitlement +

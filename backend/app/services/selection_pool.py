@@ -11,6 +11,8 @@ years-dormant name appearing as a "promote" suggestion for a men's 2nd XI).
 """
 from __future__ import annotations
 
+import re
+
 from datetime import date, timedelta
 
 from sqlalchemy import select, text
@@ -19,7 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import FixtureLineup, Grade, Player, Season, Team
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 from app.auth.modules import org_has_module
-from app.services import player_age, selection_clash, selection_rules
+from app.services import player_age, selection_clash, selection_rules, squad_sides
+from app.services.fixture_days import SHARES_A_DAY_SQL, combine_status, fixture_days
+from app.services.side_size import effective_min
+from app.services.grade_labels import grade_is_women, org_grade_category_sets
 
 # Autofill scoring constants ─────────────────────────────────────────────────
 # Window for "recent form" — last N batting innings & bowling spells per player.
@@ -34,6 +39,12 @@ AUTOFILL_RECENCY_MONTHS = 12
 # Tuesday/Thursday nets programme plus one missed week, which is the question a
 # selector is actually asking — not "has this person ever attended".
 TRAINING_WINDOW_DAYS = 21
+
+
+
+def _is_male(gender) -> bool:
+    return str(gender or "").strip().lower() in ("male", "m", "man", "men", "boy")
+
 
 
 async def _owing_player_ids(session: AsyncSession, club) -> set[str] | None:
@@ -190,30 +201,77 @@ def _compute_score(skill_positions: list[str] | None,
     return bat_score
 
 
-def _tier_for(fx_seq: int | None, sq_seq: int | None) -> int | None:
+def _tier_for(fx_seq: int | None, sq_seq) -> int | None:
     """Tier 1 = same XI, 2 = one grade below (promotion), 3 = one grade above
-    (drop-down). None = too far / unranked — excluded from autofill."""
+    (drop-down). None = too far / unranked — excluded from autofill.
+
+    ``sq_seq`` is the squad's XI number, or the set of them when the squad covers
+    several teams (a 1st-and-2nd XI squad is tier 1 for either, and one below the
+    2nd XI is the next squad's 3rd)."""
     if not fx_seq or not sq_seq:
         return None
-    if sq_seq == fx_seq:
+    ranks = set(sq_seq) if isinstance(sq_seq, (set, frozenset, list, tuple)) else {sq_seq}
+    ranks.discard(0)
+    if fx_seq in ranks:
         return 1
-    if sq_seq == fx_seq + 1:
+    if fx_seq + 1 in ranks:
         return 2
-    if sq_seq == fx_seq - 1:
+    if fx_seq - 1 in ranks:
         return 3
     return None
 
 
-def _pool_rank(tier: int | None, drop_in: bool) -> int:
-    """Where a player sorts on the board's default (Squad order): the fixture's
-    own squad first (0), then players from the squad ABOVE who have not been
-    picked anywhere that day (1), the squad below (2), the rest of the squad
-    above (3), everyone else (99). The browser applies the same order."""
+def _pool_rank(open_seq: int | None, tier: int | None, drop_in: bool, squad_match: bool = False) -> int:
+    """Where a player sorts on the board's default (Squad order).
+
+    First everyone who says they are available and is named nowhere that day,
+    from any squad, the highest squad first (``open_seq`` is their best squad's
+    sequence, 1st XI = 1). Then, as before: the fixture's own squad (1000),
+    players from the squad above named in no XI that day who have not said no
+    (1001), the squad below (1002), the rest of the squad above (1003), everyone
+    else (1099). The browser applies the same order (selectionMeta.poolRank)."""
+    if open_seq is not None:
+        return open_seq
+    if squad_match:
+        return 1000
     if tier == 1:
-        return 0
+        return 1001
     if drop_in:
-        return 1
-    return tier if tier is not None else 99
+        return 1002
+    if tier in (2, 3):
+        return 1002 + tier
+    return 1099
+
+
+def _squad_order(teams: dict[str, tuple[str, int]]) -> dict[str, int]:
+    """Each live squad's place in the club's hierarchy, 1 = highest.
+
+    Ranked squads go by `sequence`; squads that share a sequence (every side
+    named like "OD3 Gold" is guessed to the same unranked default) are told apart
+    the way every squad list does it: by name with numbers read as numbers, so
+    OD2 is above OD10. `teams` is {team_id: (name, sequence)}."""
+    def key(item):
+        tid, (name, seq) = item
+        return (
+            not (seq or 0) > 0, seq or 0,
+            [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", (name or "").lower())],
+            tid,
+        )
+    return {tid: i + 1 for i, (tid, _) in enumerate(sorted(teams.items(), key=key))}
+
+
+def _open_seq(
+    squad_ranks: list[int], *, has_date: bool, picked_elsewhere: bool, in_lineup: bool,
+    available: bool, eligible: bool,
+) -> int | None:
+    """The place of the player's highest squad (1 = top of the club) when they
+    are an open pick for THIS fixture: marked available, in no XI and in no other
+    side's draft that day, and eligible (right side of the gender wall, not
+    inactive). None when they are not an open pick or we cannot say (no fixture
+    date, no squad)."""
+    if not has_date or not eligible or not available or picked_elsewhere or in_lineup:
+        return None
+    return min(squad_ranks) if squad_ranks else None
 
 
 def _ordered_squads(names, active_teams: dict) -> list[str]:
@@ -416,6 +474,17 @@ async def _latest_season_stats(db: AsyncSession, org_id) -> dict[str, dict]:
     return out
 
 
+def side_size(club, team=None) -> int:
+    """Players in a side's XI (0 = no limit): the team's own number when it has
+    one, else the club's default, else 11. A club runs 12-a-side seconds next
+    to 11-a-side firsts, so this is judged per team, never once for the club."""
+    own = getattr(team, "default_team_size", None) if team is not None else None
+    if own is not None:
+        return own
+    club_size = getattr(club, "default_team_size", None)
+    return club_size if club_size is not None else 11
+
+
 async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     """A fixture's lineup + the pickable pool with per-date availability,
     recency, squad tier, gender wall and a composite form score per player.
@@ -500,31 +569,48 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         player_squad_ids.setdefault(str(pid), set()).add(str(tid))
         squads.setdefault(str(pid), set()).add(active_teams[str(tid)][0])
 
-    # Availability for this fixture's playing date (explicit answer wins; period fallback).
+    # Availability for each day this fixture is played on (explicit answer wins;
+    # period fallback). A two-day game reads both days and the player's status is
+    # the least favourable of them, so a player free in week 1 and away in week 2
+    # is not offered as available. `avail_days` keeps each day for the card.
     avail: dict[str, str] = {}
     avail_reason: dict[str, str] = {}
-    if fx.played_on:
+    avail_days: dict[str, list[dict]] = {}
+    days = fixture_days(fx.played_on, getattr(fx, "end_on", None))
+    if days:
+        per_day: dict[date, dict[str, str]] = {d: {} for d in days}
         av_res = await db.execute(
             text(
-                "SELECT player_id, status FROM player_availability "
-                "WHERE organisation_id = :org AND avail_date = :d"
+                "SELECT player_id, avail_date, status FROM player_availability "
+                "WHERE organisation_id = :org AND avail_date = ANY(CAST(:ds AS date[]))"
             ),
-            {"org": club.id, "d": fx.played_on},
+            {"org": club.id, "ds": days},
         )
-        for pid, status in av_res.fetchall():
-            avail[str(pid)] = status
-        period_map = await resolve_period_statuses(db, club.id, [fx.played_on])
-        for pid, info in period_map.get(fx.played_on.isoformat(), {}).items():
-            if pid not in avail:
-                avail[pid] = info["status"]
-                if info.get("reason"):
-                    avail_reason[pid] = info["reason"]
+        for pid, d, status in av_res.fetchall():
+            per_day[d][str(pid)] = status
+        period_map = await resolve_period_statuses(db, club.id, days)
+        for d in days:
+            for pid, info in period_map.get(d.isoformat(), {}).items():
+                if pid not in per_day[d]:
+                    per_day[d][pid] = info["status"]
+                    if info.get("reason"):
+                        avail_reason.setdefault(pid, info["reason"])
+        for pid in {p for m in per_day.values() for p in m}:
+            statuses = [per_day[d].get(pid, "NO_RESPONSE") for d in days]
+            avail[pid] = combine_status(statuses)
+            if len(days) > 1:
+                avail_days[pid] = [
+                    {"date": d.isoformat(), "status": per_day[d].get(pid, "NO_RESPONSE")} for d in days
+                ]
 
     # Players already selected for ANOTHER fixture on the same date (clash). We
     # also keep each clashing XI's team sequence so the pool can flag whether
     # THIS fixture outranks it (a higher grade can call the player up) or not.
     clash: dict[str, list] = {}
     clash_seqs: dict[str, list] = {}
+    # Squads and the teams they cover: the other fixture's name and XI number below,
+    # this fixture's further on.
+    sq_sides = await squad_sides.load(db, club.id)
     # Per clashing XI, the fixture id + this player's batting slot there, so the
     # board can cascade a bumped player down into a called-up player's vacated
     # slot in the lower team (see routers/selection save).
@@ -535,14 +621,14 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         cl_res = await db.execute(
             text(
                 "SELECT fl.player_id, COALESCE(t.name, f.label, f.opponent_name) AS where_, t.sequence AS seq, "
-                "fl.fixture_id AS fid, fl.batting_order AS bo "
+                "fl.fixture_id AS fid, fl.batting_order AS bo, f.team_id AS tid, f.grade_id AS gid, f.side_key AS skey "
                 "FROM fixture_lineups fl "
                 "JOIN fixtures f ON fl.fixture_id = f.id "
                 "LEFT JOIN teams t ON f.team_id = t.id "
                 "WHERE fl.organisation_id = :org AND f.id <> :fid "
-                "AND f.played_on = :d"
+                "AND " + SHARES_A_DAY_SQL
             ),
-            {"org": club.id, "fid": fx.id, "d": fx.played_on},
+            {"org": club.id, "fid": fx.id, "ds": days},
         )
         cl_rows = cl_res.fetchall()
         # A same-date selection that can be played alongside this game (back to
@@ -551,7 +637,11 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         playable = await selection_clash.compatible_fixtures(
             db, club.id, fx, {r[3] for r in cl_rows}
         )
-        for pid, where_, seq, other_fid, bo in cl_rows:
+        for pid, where_, seq, other_fid, bo, other_tid, other_gid, other_skey in cl_rows:
+            # The other fixture's team, called what its squad calls it ("2nd XI")
+            # and ranked by its own XI number, not its squad's.
+            where_ = sq_sides.name(other_tid, other_gid, other_skey) if other_tid and sq_sides.name(other_tid, other_gid, other_skey) else where_
+            seq = sq_sides.rank(other_tid, other_gid, other_skey) or seq
             verdict = playable.get(str(other_fid))
             if verdict:
                 also_in.setdefault(str(pid), []).append({
@@ -588,10 +678,10 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
                 "CROSS JOIN LATERAL jsonb_array_elements_text("
                 "  CASE WHEN jsonb_typeof(d.draft->'slots') = 'array' THEN d.draft->'slots' "
                 "       ELSE '[]'::jsonb END) AS x(pid) "
-                "WHERE d.organisation_id = :org AND f.played_on = :d AND f.id <> :fid "
+                "WHERE d.organisation_id = :org AND " + SHARES_A_DAY_SQL + " AND f.id <> :fid "
                 "AND x.pid IS NOT NULL"
             ),
-            {"org": club.id, "fid": fx.id, "d": fx.played_on},
+            {"org": club.id, "fid": fx.id, "ds": days},
         )
         for pid_, where_ in dr_res.fetchall():
             names_ = in_other_draft.setdefault(str(pid_), [])
@@ -608,34 +698,63 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     # board can show (and switch between) which of our teams is being picked.
     fx_team_seq: int | None = None
     fx_team_name: str | None = None
+    fx_team_obj = None
+    # A squad can cover several teams (1st and 2nd XI in one pool): the fixture's
+    # own team, its XI number and its name come from its grade within the squad.
     if fx.team_id:
         fx_team_obj = await db.get(Team, fx.team_id)
         if fx_team_obj:
             fx_team_name = fx_team_obj.short_name or fx_team_obj.name
             if (fx_team_obj.sequence or 0) > 0:
                 fx_team_seq = fx_team_obj.sequence
+    fx_team_seq = sq_sides.rank(fx.team_id, fx.grade_id, fx.side_key) or fx_team_seq
+    fx_team_name = sq_sides.name(fx.team_id, fx.grade_id, fx.side_key) or fx_team_name
+    fx_squad_name = sq_sides.squad_name(fx.team_id, fx.grade_id, fx.side_key)
+    locked_by_name = None
+    if fx.locked_at is not None and fx.locked_by:
+        locked_by_name = (await db.execute(
+            text("SELECT COALESCE(NULLIF(display_name, ''), NULLIF(TRIM(CONCAT(first_name, ' ', last_name)), ''), username) "
+                 "FROM users WHERE id = :u"),
+            {"u": fx.locked_by},
+        )).scalar()
     fx_is_women = False
     fx_grade_name: str | None = None
-    if fx.grade_id:
-        fx_grade_obj = await db.get(Grade, fx.grade_id)
+    # Women's-ness is the BetterFees override OR what Manage Grades says the
+    # grade is (its category), so a club that classified "Women's B Grade" there
+    # gets the gender wall without also setting a fee format. A fixture with no
+    # grade of its own reads the grade of its team.
+    grade_categories = await org_grade_category_sets(db, club.id)
+    fx_grade_id = fx.grade_id or (fx_team_obj.grade_id if fx_team_obj else None)
+    if fx_grade_id:
+        fx_grade_obj = await db.get(Grade, fx_grade_id)
         if fx_grade_obj:
-            fx_is_women = (fx_grade_obj.fee_format == "women")
+            fx_is_women = grade_is_women(fx_grade_obj.fee_format, fx_grade_obj.name, grade_categories)
             fx_grade_name = fx_grade_obj.display_name_override or fx_grade_obj.name
+    elif fx_team_obj:
+        fx_is_women = grade_is_women(None, fx_team_obj.name, grade_categories)
 
     # Per-squad-team metadata: sequence + women's-grade flag.
-    squad_meta: dict[str, tuple[int, bool]] = {}
+    squad_meta: dict[str, tuple] = {}
     sq_meta_res = await db.execute(
-        select(Team.id, Team.sequence, Grade.fee_format, Team.short_name, Team.name)
+        select(Team.id, Team.sequence, Grade.fee_format, Team.short_name, Team.name, Grade.name)
         .select_from(Team)
         .outerjoin(Grade, Team.grade_id == Grade.id)
         .where(Team.organisation_id == club.id)
     )
     squad_label: dict[str, str] = {}
-    for tid, seq, fee, short, nm in sq_meta_res.fetchall():
+    for tid, seq, fee, short, nm, grade_nm in sq_meta_res.fetchall():
         if str(tid) not in active_teams:
             continue
-        squad_meta[str(tid)] = (seq or 0, fee == "women")
+        sq_info = sq_sides.squads.get(str(tid))
+        women = grade_is_women(fee, grade_nm or nm, grade_categories)
+        if sq_info is not None and sq_info.multi:
+            # Judged by every team the squad covers, not only the first.
+            women = any(grade_is_women(None, sd.grade_name, grade_categories) for sd in sq_info.sides) or women
+        ranks = sq_info.ranks if sq_info is not None else frozenset()
+        squad_meta[str(tid)] = ((min(ranks) if ranks else (seq or 0)), women, ranks or frozenset(([seq] if seq else [])))
         squad_label[str(tid)] = short or nm or ""
+
+    squad_place = _squad_order(active_teams)
 
     # The two module-derived selection flags. Both can come back None — "we
     # can't tell" — in which case only a per-player override answers, which is
@@ -651,6 +770,12 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     _fixture_team_id = str(fx.team_id) if fx.team_id else None
 
     financial_by_id, trained_by_id = _flag_maps(players, owing_ids, trained_ids)
+    # "Registered for the season", where the club records it (Accounts screen).
+    registered_by_id = await selection_rules.registered_for_fixture(db, club.id, fx)
+    _cfg_month = selection_rules.club_config(club)["season_start_month"]
+    _ref_day = fx.played_on or date.today()
+    season_start = selection_rules.season_window(
+        selection_rules.season_year_for(_ref_day, _cfg_month), _cfg_month)[0]
 
     # The club's own association rules, judged against this fixture. A club
     # that has written none gets an empty context and everything below reads
@@ -687,13 +812,18 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         # supply a tier, so a men's-squad-only player gets none for a women's
         # fixture (gender_ok then False).
         squad_match = bool(_fixture_team_id and _fixture_team_id in my_squads)
-        gender_squads = [s for s in my_squads if squad_meta.get(s, (0, False))[1] == fx_is_women]
+        gender_squads = [s for s in my_squads if squad_meta.get(s, (0, False, frozenset()))[1] == fx_is_women]
         gender_ok = bool(gender_squads)
+        # A player the club has recorded as male never fills a women's side,
+        # whatever squad a mislinked team put them in.
+        if fx_is_women and _is_male(p.gender):
+            gender_ok = False
+            gender_squads = []
         tier_squad: str | None = None
         if fx_team_seq:
             tier = None
             for s in gender_squads:
-                t = _tier_for(fx_team_seq, squad_meta.get(s, (0, False))[0])
+                t = _tier_for(fx_team_seq, squad_meta.get(s, (0, False, frozenset()))[2])
                 if t is not None and (tier is None or t < tier):
                     tier, tier_squad = t, s
         else:
@@ -707,6 +837,14 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             picked_elsewhere=bool(clash.get(pid) or also_in.get(pid) or in_other_draft.get(pid)),
             in_lineup=pid in lineup,
             available=avail.get(pid) != "UNAVAILABLE",
+            eligible=gender_ok and not manual_inactive,
+        )
+        open_seq = _open_seq(
+            [squad_place[s] for s in gender_squads if s in squad_place],
+            has_date=bool(fx.played_on),
+            picked_elsewhere=bool(clash.get(pid) or also_in.get(pid) or in_other_draft.get(pid)),
+            in_lineup=pid in lineup,
+            available=avail.get(pid) == "AVAILABLE",
             eligible=gender_ok and not manual_inactive,
         )
         rb, rw, ss = recent_bat.get(pid), recent_bowl.get(pid), season_stats.get(pid)
@@ -747,6 +885,11 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "squad_team_id": None if manual_inactive else sq_tid,
             "availability": avail.get(pid, "NO_RESPONSE"),
             "availability_reason": avail_reason.get(pid),
+            # Two-day game only: [{date, status}] per day, in order. Absent for a
+            # one-day game, where `availability` already says it all.
+            "availability_days": avail_days.get(pid) or ([
+                {"date": d.isoformat(), "status": "NO_RESPONSE"} for d in days
+            ] if len(days) > 1 else None),
             "last_played": lp.isoformat() if lp else None,
             "photo_url": p.photo_url,
             "batting_hand": p.batting_hand,
@@ -774,6 +917,10 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "clash_blocks": _clash_blocks(fx_team_seq, clash_seqs.get(pid, [])),
             "squad_match": squad_match and not manual_inactive,
             "tier": tier,
+            # Marked available, named in no XI or draft that day: the sequence of
+            # their highest squad (999 = squad has no rank), else None. This is
+            # what the default order puts first.
+            "open_seq": open_seq,
             # The squad above that has not picked this player today, or None.
             "drop_in_from": drop_in_from,
             # Other sides' UNCONFIRMED drafts that name this player that day.
@@ -795,6 +942,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             # unaffected: its verdict rides in rule_flags, which the club
             # asked for explicitly.
             "is_financial": financial if rule_cfg["show_fees"] else None,
+            "registered": registered_by_id.get(pid),
             "financial_source": (
                 "override" if p.is_financial_override is not None
                 else "fees" if owing_ids is not None else None
@@ -823,7 +971,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
 
     _AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2, "UNAVAILABLE": 3}
     pool.sort(key=lambda e: (
-        _pool_rank(e["tier"], bool(e["drop_in_from"])),
+        _pool_rank(e["open_seq"], e["tier"], bool(e["drop_in_from"]), bool(e["squad_match"])),
         -(e["score"] or 0.0),
         _AVAIL_RANK.get(e["availability"], 9),
         (e["display_name"] or "").lower(),
@@ -847,6 +995,10 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "team_name": fx_team_name,
             "grade_name": fx_grade_name,
             "team_sequence": fx_team_seq,
+            "squad_name": fx_squad_name,
+            "locked": fx.locked_at is not None,
+            "locked_at": fx.locked_at.isoformat() if fx.locked_at else None,
+            "locked_by": locked_by_name,
         },
         "lineup": [
             {
@@ -869,6 +1021,12 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "financial": ("fees" if owing_ids is not None else None) if rule_cfg["show_fees"] else None,
             "training": ("nets" if trained_ids is not None else None) if rule_cfg["show_training"] else None,
             "show_fees": rule_cfg["show_fees"],
+            # Where the club records who is registered this season, the board
+            # offers a Registered filter; with no records there is nothing for
+            # it to answer and it is not drawn.
+            "registered": "fees" if registered_by_id else None,
+            # First day of the season the fixture sits in, for "Played this season".
+            "season_start": season_start.isoformat(),
             "show_training": rule_cfg["show_training"],
             "training_window_days": TRAINING_WINDOW_DAYS,
             # The club's own age rule, echoed so the filter can offer only
@@ -906,5 +1064,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "age_basis_label": selection_rules.age_basis_label(rules.age_basis),
         },
         "dormancy_months": months,
-        "default_team_size": club.default_team_size if club.default_team_size is not None else 11,
+        "default_team_size": side_size(club, fx_team_obj),
+        "team_size_own": fx_team_obj.default_team_size if fx_team_obj is not None else None,
+        "team_min": effective_min(fx_team_obj.min_team_size, side_size(club, fx_team_obj)) if fx_team_obj is not None else None,
     }

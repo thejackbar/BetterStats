@@ -29,7 +29,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.db import Base
+from fastapi import HTTPException
+
 from app.routers.admin import _merge_players_core, undo_merge, UndoMergeRequest
+from app.routers.images import get_player_hero_photo, get_player_photo
 
 DB_URL = os.environ.get(
     "DATABASE_URL",
@@ -119,11 +122,11 @@ async def seed(db) -> None:
                              hero_photo_data, hero_photo_mime, email, phone,
                              date_of_birth, shirt_number, squad_team_id, batting_hand,
                              skill_positions, player_role)
-        VALUES (:r, :o, 'Pasindu Acharige', '/api/players/photo', :photo, 'image/jpeg',
-                :hero, 'image/png', 'pasindu@example.com', '0400 999 999',
+        VALUES (:r, :o, 'Pasindu Acharige', CAST(:purl AS text),
+                :photo, 'image/jpeg', :hero, 'image/png', 'pasindu@example.com', '0400 999 999',
                 CAST('2001-04-05' AS date), '77', :team, 'RIGHT',
                 CAST('["BAT","WKT"]' AS jsonb), 'Batter')
-    """), {"r": str(REMOVE), "o": str(ORG), "photo": PHOTO, "hero": HERO, "team": str(TEAM_A)})
+    """), {"r": str(REMOVE), "o": str(ORG), "purl": f"/api/images/players/{REMOVE}/photo?v=ab12cd34", "photo": PHOTO, "hero": HERO, "team": str(TEAM_A)})
 
     # Availability: one date only the roster record has, one both have.
     for pid, d in ((REMOVE, date(2026, 10, 10)), (REMOVE, date(2026, 10, 17)),
@@ -187,6 +190,23 @@ async def scalar(db, sql: str, **params):
     return (await db.execute(text(sql), params)).scalar()
 
 
+def image_url_owner(url):
+    from app.services.merge_profile import image_url_owner as f
+    return f(url)
+
+
+async def fetch(route, url, session_maker):
+    """Follow a stored photo address the way a browser does: take the id out of it
+    and call the shipped image route. Returns the bytes, or 'HTTP <code>'."""
+    pid = (url or "").split("/")[4] if (url or "").count("/") >= 5 else ""
+    async with session_maker() as db:
+        try:
+            resp = await route(pid, db)
+        except HTTPException as e:
+            return f"HTTP {e.status_code}"
+    return bytes(resp.body)
+
+
 async def main() -> int:
     engine = create_async_engine(DB_URL, echo=False)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
@@ -222,8 +242,14 @@ async def main() -> int:
         gone = await scalar(db, "SELECT COUNT(*) FROM players WHERE id = :p", p=str(REMOVE))
     check("the duplicate record is gone", gone == 0)
     check("the headshot is on the kept player", bytes(p["photo_data"] or b"") == PHOTO, repr(p["photo_data"]))
-    check("with its type and address, as one picture",
-          p["photo_mime"] == "image/jpeg" and p["photo_url"] == "/api/players/photo")
+    check("with its type, as one picture", p["photo_mime"] == "image/jpeg")
+    # The address names a player. Copied as-is it names the one just deleted, and
+    # every screen then asks for a picture that has no row: 404, "photo wiped".
+    check("its address names the kept player, not the deleted one",
+          image_url_owner(p["photo_url"]) == str(KEEP), str(p["photo_url"]))
+    served = await fetch(get_player_photo, p["photo_url"], session_maker)
+    check("and the address, followed through the real image route, serves the picture",
+          served == PHOTO, repr(served))
     check("email carried", p["email"] == "pasindu@example.com")
     check("date of birth carried", p["date_of_birth"] == date(2001, 4, 5))
     check("shirt number carried", p["shirt_number"] == "77")
@@ -332,6 +358,75 @@ async def main() -> int:
         linked = await scalar(db, "SELECT COUNT(*) FROM fee_members WHERE player_id = :p", p=str(KEEP))
     check("two member records before, two after", before == 2 and after == 2, f"{before} -> {after}")
     check("the keeper's stays linked to the keeper", linked == 1, str(linked))
+
+    print("\nA keeper holding only a dead photo address still takes the real picture")
+    k3 = uuid.UUID("bbbbbbbb-0000-4000-8000-00000000000e")
+    r3 = uuid.UUID("bbbbbbbb-0000-4000-8000-00000000000f")
+    ghost = uuid.UUID("bbbbbbbb-0000-4000-8000-0000000000aa")
+    async with session_maker() as db:
+        await db.execute(text("""
+            INSERT INTO players (id, organisation_id, name, photo_url) VALUES
+                (:k, :o, 'Keeper, Three', CAST(:dead AS text))"""),
+                         {"k": str(k3), "o": str(ORG), "dead": f"/api/images/players/{ghost}/photo?v=00000000"})
+        await db.execute(text("""
+            INSERT INTO players (id, organisation_id, name, photo_url, photo_data, photo_mime,
+                                 hero_photo_url, hero_photo_data, hero_photo_mime)
+            VALUES (:r, :o, 'Removed Three', CAST(:u AS text), :p, 'image/png', CAST(:h AS text), :hd, 'image/png')"""),
+                         {"r": str(r3), "o": str(ORG), "p": PHOTO, "hd": HERO,
+                          "u": f"/api/images/players/{r3}/photo?v=11111111",
+                          "h": f"/api/images/players/{r3}/hero-photo?v=22222222"})
+        await db.commit()
+    async with session_maker() as db:
+        await _merge_players_core(db, k3, r3, ORG, FakeUser())
+    async with session_maker() as db:
+        p3 = await one(db, "SELECT photo_url, hero_photo_url FROM players WHERE id = :p", p=str(k3))
+    check("the dead address did not count as a picture",
+          await fetch(get_player_photo, p3["photo_url"], session_maker) == PHOTO, str(p3["photo_url"]))
+    check("the action shot's address was rebuilt for the keeper too",
+          await fetch(get_player_hero_photo, p3["hero_photo_url"], session_maker) == HERO, str(p3["hero_photo_url"]))
+
+    print("\nThe repair script fixes photos a merge already broke, and only those")
+    from app.scripts.repair_player_photo_urls import run as repair
+    broken, lost, fine = (uuid.UUID(f"bbbbbbbb-0000-4000-8000-0000000000b{i}") for i in (1, 2, 3))
+    gone = uuid.UUID("bbbbbbbb-0000-4000-8000-0000000000bb")
+    async with session_maker() as db:
+        for pid, name, url, data, hero_url, hero_data in (
+            (broken, "Broken Photo", f"/api/images/players/{gone}/photo?v=aaaaaaaa", PHOTO,
+             f"/api/images/players/{gone}/hero-photo?v=bbbbbbbb", HERO),
+            (lost, "Lost Photo", f"/api/images/players/{gone}/photo?v=cccccccc", None, None, None),
+            (fine, "Fine Photo", f"/api/images/players/{fine}/photo?v=dddddddd", PHOTO, None, None),
+        ):
+            await db.execute(text("""
+                INSERT INTO players (id, organisation_id, name, photo_url, photo_data, photo_mime,
+                                     hero_photo_url, hero_photo_data, hero_photo_mime)
+                VALUES (:i, :o, :n, CAST(:u AS text), :d, 'image/png', CAST(:hu AS text), :hd, 'image/png')"""),
+                             {"i": str(pid), "o": str(ORG), "n": name, "u": url, "d": data, "hu": hero_url, "hd": hero_data})
+        await db.commit()
+    async with session_maker() as db:
+        before = {r.id: (r.photo_url, r.hero_photo_url) for r in (await db.execute(text(
+            "SELECT id, photo_url, hero_photo_url FROM players WHERE id = ANY(CAST(:ids AS uuid[]))"),
+            {"ids": [str(broken), str(lost), str(fine)]})).all()}
+    check("the broken one really does 404 before the repair",
+          await fetch(get_player_photo, before[broken][0], session_maker) == "HTTP 404")
+    await repair(str(ORG), apply=False)
+    async with session_maker() as db:
+        dry = {r.id: (r.photo_url, r.hero_photo_url) for r in (await db.execute(text(
+            "SELECT id, photo_url, hero_photo_url FROM players WHERE id = ANY(CAST(:ids AS uuid[]))"),
+            {"ids": [str(broken), str(lost), str(fine)]})).all()}
+    check("a dry run changes nothing", dry == before)
+    await repair(str(ORG), apply=True)
+    async with session_maker() as db:
+        after = {r.id: (r.photo_url, r.hero_photo_url) for r in (await db.execute(text(
+            "SELECT id, photo_url, hero_photo_url FROM players WHERE id = ANY(CAST(:ids AS uuid[]))"),
+            {"ids": [str(broken), str(lost), str(fine)]})).all()}
+        audits = await scalar(db, "SELECT COUNT(*) FROM audit_logs WHERE org_id = :o AND action = 'repair_player_photo_urls'", o=str(ORG))
+    check("the broken headshot serves its picture after --apply",
+          await fetch(get_player_photo, after[broken][0], session_maker) == PHOTO, str(after[broken][0]))
+    check("and so does its action shot",
+          await fetch(get_player_hero_photo, after[broken][1], session_maker) == HERO, str(after[broken][1]))
+    check("a row with no picture left is left alone", after[lost] == before[lost])
+    check("a healthy row is left alone", after[fine] == before[fine])
+    check("the repair is in the club's activity log", audits == 1, str(audits))
 
     await engine.dispose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

@@ -10,6 +10,58 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { Icon, Btn, Segmented } from './ui'
+import { setAllowMaybe } from '../../../lib/useAvailabilityConfig'
+
+// The modules a club shows on a player's own page ("My page"), in order. Every
+// player sees the same set. A module can be ticked while something it depends on
+// is off (the fees module needs BetterAdmin fees and the PIN); the page simply
+// leaves it out until that is sorted, and the note here says what is missing.
+function PageModules({ modules, canEdit, busy, onChange }) {
+  const on = modules.filter((m) => m.enabled)
+  const off = modules.filter((m) => !m.enabled)
+  const keys = on.map((m) => m.key)
+  const move = (key, dir) => {
+    const i = keys.indexOf(key)
+    const j = i + dir
+    if (i < 0 || j < 0 || j >= keys.length) return
+    const next = [...keys]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    onChange(next)
+  }
+  const row = (m, idx) => (
+    <div key={m.key} data-page-module={m.key} data-on={m.enabled ? 'yes' : 'no'}
+      className="flex items-start gap-3 py-2 border-t pb-hairline first:border-t-0">
+      <input type="checkbox" checked={m.enabled} disabled={!canEdit || busy} aria-label={`Show ${m.label}`}
+        onChange={() => onChange(m.enabled ? keys.filter((k) => k !== m.key) : [...keys, m.key])}
+        className="mt-1 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[13.5px] font-semibold">{m.label}</div>
+        <div className="text-[12px] text-pb-faint">{m.blurb}</div>
+        {m.enabled && m.blocked && (
+          <div className="text-[12px] mt-0.5" style={{ color: 'var(--pb-amber)' }} data-module-blocked>
+            Not showing yet. {m.blocked}
+          </div>
+        )}
+      </div>
+      {m.enabled && canEdit && (
+        <div className="flex shrink-0 gap-1">
+          <Btn sm disabled={busy || idx === 0} onClick={() => move(m.key, -1)} title="Move up" aria-label={`Move ${m.label} up`}>↑</Btn>
+          <Btn sm disabled={busy || idx === on.length - 1} onClick={() => move(m.key, 1)} title="Move down" aria-label={`Move ${m.label} down`}>↓</Btn>
+        </div>
+      )}
+    </div>
+  )
+  return (
+    <div data-page-modules>
+      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Player page</div>
+      <p className="text-[12px] text-pb-faintest mb-1.5">
+        What players see on the My page tab after they sign in. Tick what you want and use the arrows to set the order. It is the same for every player.
+      </p>
+      {on.map(row)}
+      {off.map((m) => row(m, -1))}
+    </div>
+  )
+}
 
 export default function SelfServiceLinkPanel() {
   const { hasCapability } = useAuth()
@@ -115,6 +167,12 @@ export default function SelfServiceLinkPanel() {
                   options={[{ value: 'pin', label: 'Last-4 PIN' }, { value: 'nopin', label: 'No PIN' }]} />
               </div>
             )}
+            <div className="flex items-center gap-2.5" data-allow-maybe-setting>
+              <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Maybe answer</span>
+              <Segmented sm value={cfg.allow_maybe === false ? 'off' : 'on'}
+                onChange={(v) => { update({ allow_maybe: v === 'on' }); setAllowMaybe(v === 'on') }}
+                options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} />
+            </div>
             {enabled && (
               <div className="flex items-center gap-2.5" data-show-squad-setting>
                 <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Show squad</span>
@@ -123,6 +181,11 @@ export default function SelfServiceLinkPanel() {
               </div>
             )}
           </div>
+          {cfg.allow_maybe === false && (
+            <p className="text-[11.5px] text-pb-faintest -mt-2" data-maybe-off-note>
+              Maybe is off: selectors and players can record only Available or Unavailable. Answers already recorded as Maybe still show.
+            </p>
+          )}
           {enabled && (
             <p className="text-[11.5px] text-pb-faintest -mt-2">
               {cfg.show_squad
@@ -173,6 +236,8 @@ export default function SelfServiceLinkPanel() {
                   )}
                 </div>
               </div>
+              <PageModules modules={cfg.dashboard_modules || []} canEdit={canEdit} busy={busy}
+                onChange={(keys) => update({ dashboard_modules: keys })} />
             </>
           )}
         </div>

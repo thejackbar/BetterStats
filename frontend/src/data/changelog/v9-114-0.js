@@ -1,0 +1,22 @@
+export default {
+  version: 'v9.114.0',
+  date: '2026-10-16',
+  sortKey: '2026-10-16T18:00:00Z',
+  title: 'BetterSelect: locked teams, undo, squad lists to print, a page for each player',
+  items: [
+    'Confirm now locks the team. A locked team can\'t be changed until someone with selection access presses Unlock, so a side that has gone out stays as it went out. A team that is picked but not locked yet shows a Lock team button instead of a greyed out Confirm, and the overview reads Locked.',
+    'New Undo button on the selection board (or Ctrl or Cmd + Z). Every drop, removal and auto-fill is one step back, so an accidental change is a single click to reverse.',
+    'New History on the selection board. It lists who confirmed, locked or unlocked a team, who was called up out of it, and the players before and after. Any version can be loaded back onto the board.',
+    'Fill from last week now only uses the same team\'s last side. It used to fall back to any team\'s last side when a team had none of its own, which is how men ended up in a women\'s XI. Players the gender wall or a blocking rule bars are no longer carried across either.',
+    'The women\'s side of the gender wall now follows Manage Grades. A grade set to Women\'s there is a women\'s side without also needing the fee setting, and men recorded as male are never offered for it.',
+    'Selection pool: a Registered filter (only where the club records registrations on the Accounts screen), Played this season, and First name or Surname order. Your chosen order and look-back are remembered.',
+    'Filters on Availability, Fixtures, Selection, Squads and Players now stay put when you move to another screen and come back. Clear all is remembered too.',
+    'Junior grades, as set in Manage Grades, are left off Availability, Fixtures, the selection overview and a senior player\'s availability page. Show juniors brings them back, and a player in a junior squad still sees their own games.',
+    'Squads: a cross on each player takes them out of that one squad, hold Alt as you drop to copy a player into another squad, squad boxes grow to the height of the screen with a Show all button, and each squad can be ordered by availability, first name or surname.',
+    'Squads: Export lists writes a CSV or a PDF with the club name and today\'s date at the top, for one squad or all of them. A squad that isn\'t linked to a grade now says so.',
+    'Linking a squad to a grade no longer guesses when a team name has played in both men\'s and women\'s grades (a sponsor name on two sides). It is left for you to choose instead of being linked to the wrong one.',
+    'Fixture sync now clears out games that belong to another club. If a neighbour\'s game in the same grade was ever stored against your club, the next Sync removes it, or cancels it if you had already picked a team for it. Women\'s sides are no longer matched to the men\'s team of the same number.',
+    'Nets: every session has its own check-in link and QR code, and a session can be set to one or more squads. That link checks people into that session only, and its name list is the squad. The check-in list on the iPad can also be narrowed squad by squad. The club-wide link works as before.',
+    'Players now see their squad under their name on the availability link when the club has Show squad on, and a new My page tab shows their availability, squad, the teams they\'ve been picked in once locked, and training.',
+  ],
+}

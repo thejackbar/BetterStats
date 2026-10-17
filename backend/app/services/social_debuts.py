@@ -7,13 +7,15 @@ reaches us three ways and any one of them is enough to rule a debut out:
 * a named appearance in a game that was played (synced scorecards),
 * a batting or bowling line in the effective views (this is how an imported or
   hand-typed game shows up, which has no `game_appearances` row),
-* a season summary from an EARLIER season with matches in it (the years before
-  the club's scorecards go back).
+* a season summary with matches in it: an earlier season's whole, this season's
+  for the matches beyond the match itself (the years before the club's
+  scorecards go back, and rounds whose scorecards have not synced yet).
 
-The season summary is deliberately limited to earlier seasons. The current
-season's own aggregate already contains the match once it has been played, so
-counting it would stop a lineup for a game that has been synced from ever
-showing a debut.
+An earlier season's summary counts whole. The current season's own aggregate
+already contains the match once it has been played, so it only counts for the
+matches it holds beyond the games on or after the match date that we can see
+for the player: a synced match is not read as its own history, but a round
+played last week with no scorecard yet is.
 
 Abandoned and cancelled fixtures do not count: a player named in a washout never
 took the field. Players are scoped by `players.organisation_id`, so a name in a
@@ -99,6 +101,43 @@ _HISTORY_SQL = text("""
                   AND COALESCE(pss.matches, 0) > 0
                   AND s.year IS NOT NULL
                   AND s.year < :season_year
+            )
+            OR (
+                -- This season's own summary, less the games on or after the
+                -- match date we can see for the player: those are the match
+                -- itself (already synced) and anything after it. A lineup for
+                -- a game still to be played has none, so every match in the
+                -- summary is an earlier one, including rounds whose scorecards
+                -- have not synced yet and so have no appearance or innings.
+                SELECT COALESCE(SUM(COALESCE(pss.matches, 0)), 0)
+                FROM v_effective_player_season_stats pss
+                JOIN seasons s ON s.id = pss.season_id
+                WHERE pss.player_id = p.id
+                  AND s.year = :season_year
+            ) > (
+                SELECT COUNT(DISTINCT later.game_id)
+                FROM (
+                    SELECT ga.game_id
+                    FROM game_appearances ga
+                    JOIN v_effective_games g ON g.id = ga.game_id
+                    WHERE ga.player_id = p.id
+                      AND g.played_at >= :before
+                      AND COALESCE(g.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+                    UNION
+                    SELECT bi.game_id
+                    FROM v_effective_batting_innings bi
+                    JOIN v_effective_games g ON g.id = bi.game_id
+                    WHERE bi.player_id = p.id
+                      AND g.played_at >= :before
+                      AND COALESCE(g.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+                    UNION
+                    SELECT bs.game_id
+                    FROM v_effective_bowling_spells bs
+                    JOIN v_effective_games g ON g.id = bs.game_id
+                    WHERE bs.player_id = p.id
+                      AND g.played_at >= :before
+                      AND COALESCE(g.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+                ) later
             )
         ) AS has_history
     FROM players p

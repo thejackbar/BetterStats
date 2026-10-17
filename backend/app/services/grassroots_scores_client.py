@@ -392,6 +392,36 @@ async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> li
     return out
 
 
+def schedule_days(m: dict) -> list[tuple[str, str]]:
+    """A raw match's playing days as ``[(YYYY-MM-DD, startDateTime)]``, earliest first.
+
+    One entry per day of play; entries are not reliably in day order, so reading
+    only ``matchSchedule[0]`` could file a two-day game under its second week. A
+    bye has no schedule and gives ``[]``. Entries with no readable date are
+    skipped; a repeated day is kept once."""
+    seen: dict[str, str] = {}
+    for entry in m.get("matchSchedule") or []:
+        dt = ((entry or {}).get("startDateTime") or "").strip()
+        day = dt[:10]
+        if len(day) == 10 and day[4] == "-" and day[7] == "-" and day not in seen:
+            seen[day] = dt
+    return sorted(seen.items())
+
+
+def match_sides(m: dict) -> dict:
+    """A raw match-list entry reduced to the fields ``club_match`` reads:
+    ``home_team``/``away_team`` and each side's owning organisation id."""
+    teams = m.get("teams") or []
+    home_t = next((t for t in teams if t.get("isHome")), None)
+    away_t = next((t for t in teams if not t.get("isHome")), None)
+    return {
+        "home_team": (home_t or {}).get("displayName"),
+        "away_team": (away_t or {}).get("displayName"),
+        "home_org_id": ((home_t or {}).get("owningOrganisation") or {}).get("id"),
+        "away_org_id": ((away_t or {}).get("owningOrganisation") or {}).get("id"),
+    }
+
+
 def cached_grade_matches(grade_id: str) -> Optional[list[dict]]:
     """The grade's match list if the last fetch genuinely succeeded, else None.
 
@@ -434,10 +464,15 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True, force:
             continue
         if sid not in keep:
             continue
-        sched = (m.get("matchSchedule") or [{}])
-        dt = (sched[0].get("startDateTime") if sched else "") or ""
-        day = dt[:10]
-        if not day or day < today:
+        # A two-day match carries one schedule entry per day (a week apart, in no
+        # reliable order). The first day is the earliest, the last day is `end_at`;
+        # a match is still upcoming while its last day is today or later.
+        days = schedule_days(m)
+        if not days:
+            continue
+        day, last_day = days[0][0], days[-1][0]
+        dt = days[0][1]
+        if last_day < today:
             continue
         teams = m.get("teams") or []
         home_t = next((t for t in teams if t.get("isHome")), None)
@@ -449,6 +484,7 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True, force:
             "home_team": (home_t or {}).get("displayName"),
             "away_team": (away_t or {}).get("displayName"),
             "played_at": day,
+            "end_at": last_day if last_day != day else None,
             "time": dt[11:16] if len(dt) >= 16 else None,
             "status": "LIVE" if sid == _FIXTURE_STATUS_LIVE else "UPCOMING",
             "round": (m.get("round") or {}).get("name"),

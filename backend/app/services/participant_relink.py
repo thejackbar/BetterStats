@@ -23,12 +23,15 @@ from typing import Awaitable, Callable, Optional
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import BattingInnings, BowlingSpell, FieldingStat, GameAppearance
+from app.models.db import (
+    BattingInnings, BowlingSpell, FallOfWicket, FieldingStat, GameAppearance, Partnership,
+)
 from app.services import dismissal, participant_names
 from app.services.boundary_counts import clean as _bounds
 from app.services.club_grades import club_game_sql
 from app.services.sync import (
-    _GR_DISMISSAL_SHORT, _caught_by_keeper, _innings_keeper_names, _parse_uuid,
+    _GR_DISMISSAL_SHORT, _caught_by_keeper, _derive_partnerships_grassroots,
+    _innings_keeper_names, _parse_uuid,
 )
 
 logger = logging.getLogger(__name__)
@@ -251,6 +254,114 @@ async def attach(db: AsyncSession, org_id, game_id, scorecard: dict, wanted: dic
     return n
 
 
+async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> dict:
+    """Add the fall of wickets and partnerships a stored game lacks, one innings at a time.
+
+    The scorecard route draws batting from live Cricket Australia data but reads fall of wickets and
+    partnerships from OUR rows, so a game stored without them shows an empty partnerships panel and
+    feeds no partnership record. Mirrors what `sync_grassroots_game_level_data` writes (same
+    `_derive_partnerships_grassroots`, same club-innings test), for the innings the scorecard has.
+
+    Per innings and per table, rows are written only when the game has NONE for that innings: a
+    shared fixture's other club may have written them already (they cover both innings), and a
+    partial set is never mixed with a second one. Nothing is overwritten or deleted.
+    """
+    team = _our_team(scorecard, org_id)
+    n = {"fow": 0, "partnerships": 0}
+    if not team:
+        return n
+    gid = game_id if isinstance(game_id, uuid.UUID) else uuid.UUID(str(game_id))
+    our_pids: set = set()
+    roster_guids: set = set()
+    for p in team.get("players") or []:
+        guid = p.get("participantId") or ""
+        if not guid:
+            continue
+        roster_guids.add(guid)
+        pid = resolve(guid)
+        if pid is not None:
+            our_pids.add(pid)
+    have_fow = {r[0] for r in (await db.execute(text(
+        "SELECT DISTINCT innings_number FROM fall_of_wickets WHERE game_id = :g"), {"g": gid})).all()}
+    have_part = {r[0] for r in (await db.execute(text(
+        "SELECT DISTINCT innings_number FROM partnerships WHERE game_id = :g"), {"g": gid})).all()}
+
+    for inn in scorecard.get("innings") or []:
+        inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+        batting_rows = inn.get("batting") or []
+        fow_rows = inn.get("fallOfWickets") or []
+
+        if inn_num not in have_fow:
+            for row in fow_rows:
+                wkt = row.get("order")
+                if wkt is None:
+                    continue
+                pid = resolve(row.get("participantId") or "") if row.get("participantId") else None
+                if pid is not None and pid not in our_pids:
+                    pid = None  # an opposition batter who is also in our players table
+                db.add(FallOfWicket(
+                    game_id=gid, innings_number=inn_num, wicket_number=wkt,
+                    score_at_fall=row.get("runs"), player_id=pid,
+                    batter_name=row.get("playerShortName")))
+                n["fow"] += 1
+
+        if inn_num in have_part:
+            continue
+        inn_team_id = None
+        for key in ("battingTeamId", "teamId"):
+            if inn.get(key):
+                inn_team_id = str(inn[key]).lower()
+                break
+        if inn_team_id is None:
+            for key in ("battingTeam", "team"):
+                o = inn.get(key)
+                if isinstance(o, dict) and o.get("id"):
+                    inn_team_id = str(o["id"]).lower()
+                    break
+        if inn_team_id is not None and team.get("id"):
+            is_club_innings = inn_team_id == str(team["id"]).lower()
+        else:
+            club_n = total_n = 0
+            for br in batting_rows:
+                bp = br.get("participantId")
+                if not bp:
+                    continue
+                total_n += 1
+                c = resolve(bp)
+                if c is not None and c in our_pids:
+                    club_n += 1
+            is_club_innings = total_n > 0 and club_n * 2 > total_n
+
+        for p in _derive_partnerships_grassroots(batting_rows, fow_rows):
+            b1_id = b2_id = b1_name = b2_name = None
+            for src_key, name_key, dst in (("batter1_id", "batter1_name", 1), ("batter2_id", "batter2_name", 2)):
+                v = p.get(src_key)
+                if not v:
+                    continue
+                cand = resolve(v)
+                if cand is not None and cand in our_pids:
+                    if dst == 1:
+                        b1_id = cand
+                    else:
+                        b2_id = cand
+                elif v in roster_guids:
+                    # On our roster but not a player we hold: a fill-in or a redacted junior.
+                    if dst == 1:
+                        b1_name = p.get(name_key)
+                    else:
+                        b2_name = p.get(name_key)
+            if not b1_id and not b2_id and not b1_name and not b2_name:
+                continue
+            db.add(Partnership(
+                game_id=gid, innings_number=inn_num, wicket_number=p["wicket_number"],
+                batter1_id=b1_id, batter2_id=b2_id, batter1_name=b1_name, batter2_name=b2_name,
+                runs=p.get("runs") or 0, batter1_runs=p.get("batter1_runs"),
+                batter2_runs=p.get("batter2_runs"), is_club_innings=is_club_innings))
+            n["partnerships"] += 1
+    await db.flush()
+    return n
+
+
 async def repair_stored_game(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> Optional[dict]:
     """Attach the rows a stored game is missing for players its team sheet names.
 
@@ -299,6 +410,9 @@ async def repair_stored_game(db: AsyncSession, org_id, game_id, scorecard: dict,
 # has an appearance on it, sync called it done. That left one innings of a
 # two-match weekend out of a player's totals while its game page was complete.
 REREAD_DAYS = 14
+# At most this many games a run reads again outside its window (newest first), so a club whose
+# scorers never enter fall of wickets cannot turn every run into a re-read of a fortnight of games.
+MAX_REREAD = 40
 
 
 def played_within(scorecard: dict, days: int = REREAD_DAYS, today: Optional[date] = None) -> bool:
@@ -339,12 +453,50 @@ async def reread_stored_game(db: AsyncSession, org_id, game_id, scorecard: dict,
     if not wanted:
         return None
     n = await attach(db, org_id, gid, scorecard, wanted)
+    n.update(await attach_innings_detail(db, org_id, gid, scorecard, resolve))
     if not sum(n.values()):
         await db.rollback()
         return None
     await db.commit()
     logger.info("GR-sync: re-read %s: added %s", gid, n)
     return n
+
+
+async def recent_games_without_detail(db: AsyncSession, org_id, days: int = REREAD_DAYS) -> set:
+    """Match ids of recent games we hold a `games` row for but little or no stored detail: no batting or
+    bowling row of the CLUB'S OWN players, or no fall of wickets and no partnerships at all.
+
+    An incremental run only reads fixtures newer than the club's last sync (less an
+    overlap), so a game stored while CA had its result but not yet its scorecard
+    detail is outside every later run's window and stays empty. Handing these ids
+    back lets the run read them again; `attach` then fills them in. Only games the
+    club played in (a side, or its own season) and only the last `days` days, so a
+    run never reads further back than it does for a game that is complete.
+
+    "Of the club's own players" matters for a fixture between two synced clubs: the
+    other club's sync may have stored ITS players' rows and none of ours.
+    """
+    res = await db.execute(text("""
+        SELECT g.id::text
+          FROM games g
+          LEFT JOIN grades gr ON gr.id = g.grade_id
+          LEFT JOIN seasons s ON s.id = gr.season_id
+         WHERE g.played_at >= CURRENT_DATE - CAST(:days AS INTEGER)
+           AND g.played_at <= CURRENT_DATE
+           AND (g.home_org_id = CAST(:org AS UUID) OR g.away_org_id = CAST(:org AS UUID)
+                OR s.organisation_id = CAST(:org AS UUID))
+           AND (
+                (NOT EXISTS (SELECT 1 FROM batting_innings bi JOIN players p ON p.id = bi.player_id
+                              WHERE bi.game_id = g.id AND p.organisation_id = CAST(:org AS UUID))
+                 AND NOT EXISTS (SELECT 1 FROM bowling_spells bs JOIN players p ON p.id = bs.player_id
+                                  WHERE bs.game_id = g.id AND p.organisation_id = CAST(:org AS UUID)))
+                OR (NOT EXISTS (SELECT 1 FROM fall_of_wickets f WHERE f.game_id = g.id)
+                    AND NOT EXISTS (SELECT 1 FROM partnerships pt WHERE pt.game_id = g.id))
+           )
+         ORDER BY g.played_at DESC
+         LIMIT :cap
+    """), {"org": str(org_id), "days": days, "cap": MAX_REREAD})
+    return {r[0] for r in res.all()}
 
 
 async def adopt_identity(db: AsyncSession, org_id, adopt: dict) -> int:

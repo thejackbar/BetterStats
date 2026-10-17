@@ -58,7 +58,7 @@ for (let n = 1; n <= 24; n++) {
     id: pid(n), display_name: nm, player_role: null, skill_positions: ROLES[n % ROLES.length],
     squads: [], squad_team_id: null, availability: n === 20 ? 'UNAVAILABLE' : 'AVAILABLE', availability_reason: null,
     last_played: '2099-03-01', photo_url: null, batting_hand: null, bowling_action: null, bowling_type: null,
-    is_opening_batsman: null, gender: 'male', is_overseas: null, age: null, is_dormant: false,
+    is_opening_batsman: null, gender: [17, 18, 19].includes(n) ? 'female' : 'male', is_overseas: null, age: null, is_dormant: false,
     is_inactive: n === 24, is_current: true, selected: false, clash: [], clash_detail: [], also_in: [],
     clash_blocks: false, squad_match: false, tier: 1, gender_ok: true, recent_ok: true, score: 24 - n, recent: [],
     rule_flags: [], rule_notes: [], rule_state: 'ok',
@@ -100,10 +100,10 @@ const run = async () => {
 
   await page.route('**/api/**', (r) => json(r, {}))
   await page.route('**/api/auth/me', (r) => json(r, ME))
-  await page.route('**/api/selection/overview', (r) => json(r, {
+  await page.route(/\/api\/selection\/overview(\?.*)?$/, (r) => json(r, {
     default_team_size: 11,
     fixtures: FX.map((f) => ({
-      ...f, lineup: server.confirmed[f.id].map((p, i) => ({ player_id: p, display_name: 'x', batting_order: i + 1, skill_positions: [], availability: 'AVAILABLE' })),
+      ...f, lineup: server.confirmed[f.id].map((p, i) => ({ player_id: p, display_name: 'x', batting_order: i + 1, skill_positions: [], availability: 'AVAILABLE', is_captain: f.id === F1 && p === pid(1), is_wicket_keeper: f.id === F1 && p === pid(1) })),
       has_draft: !!server.drafts[f.id],
     })),
   }))
@@ -182,7 +182,7 @@ const run = async () => {
 
   // ═══════════════ Draft table ═══════════════
   console.log('\n# the table')
-  await page.goto(`${BASE}/admin/betterselect/selection/draft-table`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
   const loaded = await page.locator('[data-draft-table]').waitFor({ timeout: 15000 }).then(() => true).catch(() => false)
   ok('the draft table opens', loaded)
   if (loaded) {
@@ -287,6 +287,57 @@ const run = async () => {
     ok('switching day shows that day\'s one team', (await page.locator('[data-team-col]').count()) === 1)
   }
 
+  // ═══════════════ Draft table: the pool stays in view ═══════════════
+  console.log('\n# Draft table: the pool is pinned while the teams scroll')
+  await page.setViewportSize({ width: 1100, height: 800 })
+  await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
+  await page.locator('[data-draft-table]').waitFor({ timeout: 15000 })
+  await page.waitForTimeout(500)
+  const scrollInfo = () => page.evaluate(() => {
+    const b = document.querySelector('[data-draft-table]')
+    const p = document.querySelector('[data-pool-col]').getBoundingClientRect()
+    const last = [...document.querySelectorAll('[data-team-col]')].pop().getBoundingClientRect()
+    return { over: b.scrollWidth - b.clientWidth, left: b.scrollLeft, poolX: Math.round(p.left - b.getBoundingClientRect().left), lastRight: Math.round(last.right), boardRight: Math.round(b.getBoundingClientRect().right) }
+  })
+  const before = await scrollInfo()
+  ok('the teams overflow sideways at 1100px (the test is real)', before.over > 20, JSON.stringify(before))
+  await page.evaluate(() => { const b = document.querySelector('[data-draft-table]'); b.scrollLeft = b.scrollWidth })
+  await page.waitForTimeout(200)
+  const away = await scrollInfo()
+  ok('scrolled right: the pool is still at the left edge of the board', away.poolX === 0 && away.left > 20, JSON.stringify(away))
+  ok('scrolled right: the pool is on screen and draggable', await poolCard(1).isVisible() || (await page.locator('[data-pool-col] [data-player-card]').first().isVisible()))
+  // Drag from the pinned pool to the far column: it must auto-scroll to reach it.
+  await page.evaluate(() => { document.querySelector('[data-draft-table]').scrollLeft = 0 })
+  await page.waitForTimeout(150)
+  const firstPool = page.locator('[data-pool-col] [data-player-card]').first()
+  const firstId = await firstPool.getAttribute('data-player-card')
+  const lastCol = page.locator('[data-team-col]').last()
+  const lastId = await lastCol.getAttribute('data-team-col')
+  const a = await centre(firstPool)
+  const board = await page.locator('[data-draft-table]').boundingBox()
+  await page.mouse.move(a.x, a.y); await page.mouse.down()
+  await page.mouse.move(a.x + 12, a.y + 6, { steps: 3 })
+  await page.mouse.move(board.x + board.width - 20, a.y, { steps: 8 })
+  await page.waitForTimeout(1200)               // held at the right edge: the board scrolls under the finger
+  const held = await scrollInfo()
+  ok('held at the right edge: the board scrolls sideways on its own', held.left > 20, JSON.stringify(held))
+  ok('held at the right edge: the pool stays pinned', held.poolX === 0, JSON.stringify(held))
+  const target = await centre(lastCol.locator('[data-slot-row]').first())
+  await page.mouse.move(target.x, target.y, { steps: 6 })
+  await page.mouse.up()
+  await page.waitForTimeout(1200)               // past the autosave delay
+  ok('dropped on the far team from the pinned pool: that team has the player', (await lastCol.locator(`[data-player-card="${firstId}"]`).count()) === 1)
+  ok('and nobody was dropped on the wrong team', lastPut(lastId)?.slots?.includes(firstId) === true)
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // ═══════════════ Overview: one player is captain AND keeper ═══════════════
+  console.log('\n# Overview: a captain who is also the named keeper')
+  await page.goto(`${BASE}/admin/betterselect/selection`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1500)
+  const ovText = await page.locator('body').innerText()
+  ok('the overview loaded with the 1st XI (11 named)', /1st XI/.test(ovText))
+  ok('a named keeper (who is also captain, with no WKT tag) is not "No keeper named"', !/No keeper named/i.test(ovText), 'still says No keeper named')
+
   // ═══════════════ Selection board: the XI fits ═══════════════
   console.log('\n# Selection board: Selected XI fits without scrolling')
   server.confirmed[F1] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(pid)
@@ -339,10 +390,76 @@ const run = async () => {
   })
   ok('the Available pool ends inside the window too', poolFit === true, String(poolFit))
 
+  // ═══════════════ Show juniors (now a Settings choice) ═══════════════
+  console.log('\n# Junior grades (Selection Whiteboard): the switch is in Settings, not here')
+  {
+    const asked = []
+    const onReq = (rq) => { if (/\/api\/selection\/overview/.test(rq.url())) asked.push(rq.url()) }
+    page.on('request', onReq)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
+    await page.locator('[data-draft-table]').waitFor({ timeout: 15000 }).catch(() => {})
+    await page.waitForTimeout(300)
+    ok('the whiteboard no longer carries a Show juniors switch', (await page.locator('[data-juniors-toggle]').count()) === 0)
+    ok('juniors are left out until asked for', asked.length > 0 && asked.every((u) => /hide_juniors=true/.test(u)), asked.join(' '))
+    asked.length = 0
+    // The Settings choice is the remembered device preference the screens read.
+    await page.evaluate(() => { try { localStorage.setItem('bs_pref:select.juniors', 'true') } catch { /* blocked */ } })
+    await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
+    await page.locator('[data-draft-table]').waitFor({ timeout: 15000 }).catch(() => {})
+    await page.waitForTimeout(500)
+    ok('with juniors switched on in Settings, the overview is asked for without the hide flag', asked.length > 0 && asked.every((u) => !/hide_juniors/.test(u)), asked.join(' '))
+    page.off('request', onReq)
+    await page.evaluate(() => { try { localStorage.removeItem('bs_pref:select.juniors') } catch { /* nothing stored */ } })
+  }
+
+  // ═══════════════ Gender filter ═══════════════
+  console.log('\n# Gender filter (Draft table and Selection board)')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
+  await page.locator('[data-draft-table]').waitFor({ timeout: 15000 })
+  await page.waitForTimeout(500)
+  const gSel = page.locator('[data-pool-col] select[aria-label="Gender"]')
+  ok('draft table: the pool offers a Gender filter when it holds men and women', (await gSel.count()) === 1)
+  if (await gSel.count()) {
+    const total = (await page.locator('[data-pool-count]').innerText()).trim()
+    const womenIn = async () => (await Promise.all([17, 18, 19].map((n) => poolCard(n).count()))).reduce((a, b) => a + b, 0)
+    const cards = () => page.locator('[data-pool-col] [data-player-card]').count()
+    const nW = await womenIn(), nAll = await cards()
+    ok('draft table: the pool still holds some women and some men to filter', nW > 0 && nAll > nW, `${nW} of ${nAll}`)
+    await gSel.selectOption('female')
+    await page.waitForTimeout(200)
+    ok('draft table: Women leaves only the women', (await cards()) === nW && (await womenIn()) === nW, `${await cards()} cards`)
+    await gSel.selectOption('male')
+    await page.waitForTimeout(200)
+    ok('draft table: Men leaves nobody who is a woman', (await womenIn()) === 0 && (await cards()) === nAll - nW)
+    await gSel.selectOption('')
+    await page.waitForTimeout(200)
+    ok('draft table: All genders restores the pool', (await page.locator('[data-pool-count]').innerText()).trim() === total)
+  }
+  await page.goto(`${BASE}/admin/betterselect/select/${F1}`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /^Filters/ }).first().waitFor({ timeout: 15000 })
+  await page.waitForTimeout(500)
+  const poolText = () => page.locator('[data-drop-kind="pool"]').first().innerText()
+  ok('board: starts with men and women both in the pool', /PlayerQ/.test(await poolText()) && /PlayerM/.test(await poolText()))
+  await page.getByRole('button', { name: /^Filters/ }).first().click()
+  const womenBtn = page.getByRole('button', { name: 'Women', exact: true })
+  ok('board: the Filters panel has a Gender group with Women', (await womenBtn.count()) === 1)
+  if (await womenBtn.count()) {
+    await womenBtn.click()
+    await page.waitForTimeout(300)
+    const t = await poolText()
+    ok('board: Women shows the women and not the men', /PlayerQ/.test(t) && /PlayerR/.test(t) && !/PlayerM/.test(t), t.slice(0, 120))
+    await page.getByRole('button', { name: 'Men', exact: true }).click()
+    await page.waitForTimeout(300)
+    const t2 = await poolText()
+    ok('board: Men shows the men and not the women', /PlayerM/.test(t2) && !/PlayerQ/.test(t2))
+  }
+
   // ═══════════════ Phone ═══════════════
   console.log('\n# 390px')
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto(`${BASE}/admin/betterselect/selection/draft-table`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(1200)
   const phoneNote = /needs a wider screen/.test(await page.locator('body').innerText())
   ok('the draft table says it needs a wider screen on a phone', phoneNote || CONTROL)

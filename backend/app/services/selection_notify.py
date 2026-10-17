@@ -26,6 +26,13 @@ Rules this module holds to:
   are listed as skipped so the club can reach a parent through BetterComms.
 * Every send writes a ``selection_notices`` row (sent, skipped or failed), so
   the board can say what went where.
+* A club can write its own wording. A BetterComms template (Admin > Comms >
+  Templates) linked to the captain's email or the players' email replaces the
+  standard text; ``{{variables}}`` are filled in from the fixture and the side.
+  Phone numbers only ever resolve in the captain's email, and a template that
+  is gone, empty, or not available to the club falls back to the standard
+  email with a note the selector can read (a missing template never blocks a
+  send).
 * Nothing here raises into a request: the automatic send runs after the confirm
   has committed, on its own session, and swallows its own errors.
 """
@@ -34,6 +41,8 @@ from __future__ import annotations
 import hashlib
 import html
 import logging
+import re
+import uuid
 from datetime import date
 from typing import Optional
 
@@ -66,6 +75,40 @@ REASONS = {
 
 def reason_text(code: Optional[str]) -> str:
     return REASONS.get(code or "", code or "")
+
+
+# Why a linked template was not used. The send still went, in the standard
+# wording, so these are notes and never refusals.
+TEMPLATE_NOTES = {
+    "template_missing": "The template linked to this email has been deleted, so the standard email was used.",
+    "template_empty": "The template linked to this email is empty, so the standard email was used.",
+    "template_no_comms": "Custom templates need BetterComms, which is not on for this club, so the standard email was used.",
+    "template_failed": "The linked template could not be filled in, so the standard email was used.",
+}
+
+# The settings keys that link each email to a template.
+TEMPLATE_KEY = {"captain": "captain_email_template_id", "players": "player_email_template_id"}
+
+# What a template can use. ``to`` says which email resolves it: a variable not
+# listed for an email comes out blank there, so a phone number cannot reach a
+# player by pasting the wrong token into the wrong template.
+SELECTION_VARIABLES = [
+    {"name": "first_name", "desc": "The recipient's first name", "to": ["captain", "players"]},
+    {"name": "club", "desc": "Your club's name", "to": ["captain", "players"]},
+    {"name": "team", "desc": "The team playing, for example 1st XI", "to": ["captain", "players"]},
+    {"name": "opponent", "desc": "The opposition", "to": ["captain", "players"]},
+    {"name": "match", "desc": "Team v opponent in one go", "to": ["captain", "players"]},
+    {"name": "date", "desc": "The match date, for example Sat 24 Oct", "to": ["captain", "players"]},
+    {"name": "time", "desc": "The start time", "to": ["captain", "players"]},
+    {"name": "when", "desc": "Date and start time together", "to": ["captain", "players"]},
+    {"name": "venue", "desc": "Where the match is played", "to": ["captain", "players"]},
+    {"name": "round", "desc": "The round", "to": ["captain", "players"]},
+    {"name": "home_away", "desc": "Home or Away", "to": ["captain", "players"]},
+    {"name": "captain", "desc": "The captain's name", "to": ["captain", "players"]},
+    {"name": "side", "desc": "The side in batting order, names only", "to": ["captain", "players"]},
+    {"name": "team_sheet", "desc": "The side in batting order with each player's mobile. Captain's email only", "to": ["captain"]},
+    {"name": "note", "desc": "The note typed in the Email the players box", "to": ["players"]},
+]
 
 
 # ── The side, as it stands ───────────────────────────────────────────────────
@@ -151,17 +194,16 @@ def _match_lines(fx: dict) -> list[tuple[str, str]]:
     return lines
 
 
-def captain_email(club, sheet: dict, captain: dict) -> tuple[str, str, str]:
-    """(subject, html, text) of the captain's team sheet."""
-    fx, players = sheet["fixture"], sheet["players"]
-    title = _title(fx)
-    first = (captain["name"] or "").split(" ")[0] or "there"
-    missing = [p["name"] for p in players if not _clean_phone(p.get("phone"))]
+def _tag(p: dict) -> str:
+    tags = [t for t, on in (("C", p["is_captain"]), ("WK", p["is_wicket_keeper"])) if on]
+    return f" ({', '.join(tags)})" if tags else ""
 
+
+def _sheet_rows(players: list[dict]) -> tuple[list[str], list[str]]:
+    """The side with each player's mobile: table rows (html) and lines (text)."""
     h_rows, t_rows = [], []
     for i, p in enumerate(players, 1):
-        tags = [t for t, on in (("C", p["is_captain"]), ("WK", p["is_wicket_keeper"])) if on]
-        tag = f" ({', '.join(tags)})" if tags else ""
+        tag = _tag(p)
         phone = _clean_phone(p.get("phone"))
         h_phone = (f'<a href="tel:{html.escape(_tel(phone))}">{html.escape(phone)}</a>'
                    if phone else '<span style="color:#888">no number on file</span>')
@@ -171,6 +213,17 @@ def captain_email(club, sheet: dict, captain: dict) -> tuple[str, str, str]:
             f'<td style="padding:4px 0">{h_phone}</td></tr>'
         )
         t_rows.append(f"{i}. {p['name']}{tag}  {phone or '(no number on file)'}")
+    return h_rows, t_rows
+
+
+def captain_email(club, sheet: dict, captain: dict) -> tuple[str, str, str]:
+    """(subject, html, text) of the captain's team sheet."""
+    fx, players = sheet["fixture"], sheet["players"]
+    title = _title(fx)
+    first = (captain["name"] or "").split(" ")[0] or "there"
+    missing = [p["name"] for p in players if not _clean_phone(p.get("phone"))]
+
+    h_rows, t_rows = _sheet_rows(players)
 
     h_match = "".join(
         f'<tr><td style="padding:2px 10px 2px 0;color:#666">{html.escape(k)}</td>'
@@ -222,6 +275,152 @@ def player_email(club, sheet: dict, player: dict, captain_name: Optional[str],
     )
     body_t = f"Hi {first},\n\nYou have been selected for {title}.\n\n{t_match}\n\n{cap_t}{msg_t}"
     return f"Selected: {title}, {_when(fx)}", body_h, body_t
+
+
+# ── The club's own wording (a BetterComms template) ──────────────────────────
+
+_LEFTOVER = re.compile(r"\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}")
+
+
+def _variable_values(club, sheet: dict, *, to: str, recipient: Optional[dict],
+                     captain_name: Optional[str], message: Optional[str]) -> dict[str, str]:
+    """Plain-text value of every variable this email resolves. A variable the
+    email does not resolve is absent, and comes out blank."""
+    fx, players = sheet["fixture"], sheet["players"]
+    d = fx.get("played_on")
+    vals = {
+        "first_name": ((recipient or {}).get("name") or "").split(" ")[0] or "there",
+        "club": club.name or "",
+        "team": fx.get("team_name") or "",
+        "opponent": fx.get("opponent_name") or fx.get("label") or "",
+        "match": _title(fx),
+        "date": d.strftime("%a %-d %b") if d else "Date to be confirmed",
+        "time": fx.get("start_time") or "",
+        "when": _when(fx),
+        "venue": fx.get("venue") or "",
+        "round": fx.get("round") or "",
+        "home_away": fx["home_away"].title() if fx.get("home_away") in ("HOME", "AWAY") else "",
+        "captain": captain_name or "",
+        "side": ", ".join(f"{p['name']}{_tag(p)}" for p in players),
+    }
+    if to == "captain":
+        vals["team_sheet"] = "\n".join(_sheet_rows(players)[1])
+    else:
+        vals["note"] = (message or "").strip()
+    return vals
+
+
+def _html_values(vals: dict[str, str], sheet: dict, to: str) -> dict[str, str]:
+    """The same values for an HTML body: escaped, with the two block variables
+    drawn as a list and a table."""
+    out = {k: html.escape(v) for k, v in vals.items()}
+    players = sheet["players"]
+    out["side"] = ("<ol style=\"margin:0 0 12px;padding-left:20px\">"
+                   + "".join(f"<li>{html.escape(p['name'])}{html.escape(_tag(p))}</li>" for p in players)
+                   + "</ol>")
+    if to == "captain":
+        out["team_sheet"] = ('<table style="border-collapse:collapse">'
+                             + "".join(_sheet_rows(players)[0]) + "</table>")
+    if "note" in vals:
+        out["note"] = "".join(f"<p>{html.escape(line)}</p>"
+                              for line in vals["note"].splitlines() if line.strip())
+    return out
+
+
+def _fill(src: str, values: dict[str, str]) -> str:
+    """Merge ``{{name}}`` tokens, then blank any left over: braces never reach
+    an inbox, and a token this email does not resolve (a phone number in a
+    player's email) comes out empty rather than as literal text."""
+    from app.routers.comms import _merge
+    return _LEFTOVER.sub("", _merge(src or "", values))
+
+
+def _to_text(doc: str) -> str:
+    from app.routers.comms import _html_to_text
+    doc = re.sub(r"(?is)<(head|style|script)\b.*?</\1>", "", doc or "")
+    doc = re.sub(r"(?i)</(tr|li|h[1-6]|div)>", "\n", doc)
+    return re.sub(r"\n{3,}", "\n\n", _html_to_text(doc))
+
+
+def _shell(club, inner: str) -> str:
+    """A fragment template wrapped in the club's own header and footer. No
+    unsubscribe line: this is operational mail about a match."""
+    from app.routers.comms import _email_logo_src
+    accent = club.accent_color or "#243352"
+    name = html.escape(club.name or "Our Club")
+    logo_src = _email_logo_src(club)
+    logo = (f'<img src="{html.escape(logo_src)}" alt="" height="40" style="height:40px;max-height:40px;display:block">'
+            if logo_src else f'<strong style="color:#fff;font-size:18px">{name}</strong>')
+    return (
+        '<!doctype html><html><body style="margin:0;padding:0;background:#f3f4f6;">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 0;">'
+        '<tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" '
+        'style="max-width:600px;width:100%;background:#ffffff;border-radius:10px;overflow:hidden;'
+        'font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
+        f'<tr><td style="background:{accent};padding:18px 28px;">{logo}</td></tr>'
+        f'<tr><td style="padding:28px;color:#1f2937;font-size:15px;line-height:1.6;">{inner}</td></tr>'
+        f'<tr><td style="padding:18px 28px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;">{name}</td></tr>'
+        '</table></td></tr></table></body></html>'
+    )
+
+
+def render_template(club, tpl: dict, sheet: dict, *, to: str, recipient: Optional[dict],
+                    captain_name: Optional[str], message: Optional[str] = None,
+                    default_subject: str = "") -> tuple[str, str, str]:
+    """(subject, html, text) of a linked template for one recipient.
+
+    ``tpl`` is ``{"subject", "html"}``. A full HTML document goes out as it is,
+    a fragment inside the club's shell. A template with no subject keeps the
+    standard one."""
+    vals = _variable_values(club, sheet, to=to, recipient=recipient,
+                            captain_name=captain_name, message=message)
+    body = _fill(tpl.get("html") or "", _html_values(vals, sheet, to))
+    from app.routers.comms import _is_full_doc
+    doc = body if _is_full_doc(body) else _shell(club, body)
+    subject_vals = {k: v for k, v in vals.items() if k not in ("side", "team_sheet", "note")}
+    subject = " ".join(_fill(tpl.get("subject") or "", subject_vals).split()) or default_subject
+    return subject, doc, _to_text(doc)
+
+
+async def linked_template(db: AsyncSession, club, to: str) -> tuple[Optional[dict], Optional[str]]:
+    """The template linked to this email as ``{"id","name","subject","html"}``,
+    or ``(None, note_code)`` when there is none to use. ``(None, None)`` means
+    nothing is linked, which is the normal case."""
+    from app.auth.modules import org_has_module
+    from app.services import selection_rules
+    tid = selection_rules.club_config(club).get(TEMPLATE_KEY[to])
+    if not tid:
+        return None, None
+    if not org_has_module(club, "comms"):
+        return None, "template_no_comms"
+    row = (await db.execute(
+        text("SELECT id, name, subject, html FROM comms_templates "
+             "WHERE id = :tid AND organisation_id = :org AND sales_template_key IS NULL"),
+        {"tid": uuid.UUID(tid), "org": club.id},
+    )).mappings().first()
+    if row is None:
+        return None, "template_missing"
+    if not re.sub(r"<[^>]*>", "", row["html"] or "").strip():
+        return None, "template_empty"
+    return dict(row), None
+
+
+def sample_sheet() -> dict:
+    """A made-up match and side, for previewing a template. Not a real person."""
+    names = ["Sam Taylor", "Jordan Lee", "Alex Morgan", "Chris Evans", "Pat Quinn", "Riley Brown",
+             "Jamie Cole", "Casey Smith", "Drew Walker", "Morgan Hill", "Robin Clarke"]
+    players = [{"player_id": uuid.uuid4(), "name": n, "phone": f"04{i:02d} 000 {100 + i}", "email": None,
+                "date_of_birth": None, "batting_order": i + 1,
+                "is_captain": i == 0, "is_wicket_keeper": i == 3}
+               for i, n in enumerate(names)]
+    fixture = {"id": None, "played_on": date.today(), "end_on": None, "start_time": "12:30pm",
+               "venue": "Main Oval", "opponent_name": "Sample Opponents CC", "home_away": "HOME",
+               "label": None, "round": "Round 5", "team_name": "1st XI"}
+    return {"fixture": fixture, "players": players}
+
+
+def _note(code: Optional[str]) -> dict:
+    return {"template_note": TEMPLATE_NOTES.get(code or "") or None}
 
 
 # ── Sending ──────────────────────────────────────────────────────────────────
@@ -309,6 +508,17 @@ async def send_to_captain(db: AsyncSession, club, fixture_id, *, user_id=None,
             return out("skipped", "already_sent", **base)
 
     subject, body_h, body_t = captain_email(club, sheet, captain)
+    tpl, note_code = await linked_template(db, club, "captain")
+    if tpl is not None:
+        try:
+            subject, body_h, body_t = render_template(
+                club, tpl, sheet, to="captain", recipient=captain,
+                captain_name=captain["name"], default_subject=subject)
+        except Exception:
+            logger.exception("selection captain template %s failed", tpl.get("id"))
+            note_code = "template_failed"
+            tpl = None
+    base.update(_note(note_code), template=tpl["name"] if tpl else None)
     sent, reason = await _deliver(db, club, to_email=email, to_name=captain["name"],
                                   subject=subject, body_html=body_h, body_text=body_t)
     await _record(db, club, fixture_id, kind="captain", player_id=captain["player_id"],
@@ -338,6 +548,7 @@ async def send_to_players(db: AsyncSession, club, fixture_id, *, user_id=None,
     captain = next((p for p in players if p["is_captain"]), None)
     fp = fingerprint(players)
     sent, skipped, failed = 0, [], []
+    tpl, note_code = await linked_template(db, club, "players")
     for p in players:
         email = (p.get("email") or "").strip()
         reason = None
@@ -348,6 +559,15 @@ async def send_to_players(db: AsyncSession, club, fixture_id, *, user_id=None,
         if reason is None:
             subject, body_h, body_t = player_email(
                 club, sheet, p, captain["name"] if captain else None, message)
+            if tpl is not None:
+                try:
+                    subject, body_h, body_t = render_template(
+                        club, tpl, sheet, to="players", recipient=p,
+                        captain_name=captain["name"] if captain else None,
+                        message=message, default_subject=subject)
+                except Exception:
+                    logger.exception("selection player template %s failed", tpl.get("id"))
+                    tpl, note_code = None, "template_failed"
             ok, reason = await _deliver(db, club, to_email=email, to_name=p["name"],
                                         subject=subject, body_html=body_h, body_text=body_t)
             if ok:
@@ -366,7 +586,8 @@ async def send_to_players(db: AsyncSession, club, fixture_id, *, user_id=None,
                       user_id=user_id)
     await db.commit()
     status = "sent" if sent and not failed else "partial" if sent else "failed" if failed else "skipped"
-    return {"status": status, "sent": sent, "skipped": skipped, "failed": failed}
+    return {"status": status, "sent": sent, "skipped": skipped, "failed": failed,
+            "template": tpl["name"] if tpl else None, **_note(note_code)}
 
 
 async def list_notices(db: AsyncSession, club, fixture_id) -> list[dict]:
