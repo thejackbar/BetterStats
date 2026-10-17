@@ -35,6 +35,7 @@
 14. `organisations.include_fill_ins_in_stats` (migration 147, default on) controls only whether a fill-in's NAME shows in partnerships and fielding cards; batting and bowling always show. Storage: `partnerships.batter1_name/batter2_name`, `fielding_stats.player_name` (only when id is NULL), always-NULL twins on `manual_partnerships`/`manual_fielding_stats` so `v_effective_*` unions line up. `fielding_stats.player_id` FK is `ON DELETE SET NULL`.
 15. Sync uses `our_team_roster_guids` (raw GR strings) to tell "ours but unregistered" from "opposition", because `_team_pid` returning None cannot. A partnership is dropped only when NEITHER side has an id or a name.
 16. Records boards inner-join `players` scoped to the org, so name-only fill-in rows never reach them.
+    Match page shows a stand the records page omits? Run `python -m app.scripts.diagnose_partnership <org> <date> [--runs N]` (read-only): it names the filter that drops each stand (no player id, other club's player row, `is_club_innings` FALSE, no grade or season).
 
 **Manual cards, fall of wickets, partnerships**
 17. `get_scorecard` shares one row builder for synced and manual tables (`BI = ManualBattingInnings if is_manual else BattingInnings`). Any column read there must exist on BOTH tables or every manual card 500s. NULL `caught_behind` means the card does not say and reads as a plain catch (see Flag 1).
