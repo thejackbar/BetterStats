@@ -78,7 +78,10 @@ async function playerPage(browser, width, profile, ladder) {
   await page.locator('[data-my-page]').waitFor()
   return { ctx, page, hits, errors }
 }
-const titles = (page) => page.evaluate(() => [...document.querySelectorAll('[data-my-page] > section > div:first-child')].map((e) => e.textContent.trim().toLowerCase()))
+const titles = (page) => page.evaluate(() => [...document.querySelectorAll('[data-my-page] [data-modules] > section > div:first-child')].map((e) => e.textContent.trim().toLowerCase()))
+const tileIds = (page) => page.evaluate(() => [...document.querySelectorAll('[data-my-page] [data-tile]')].map((e) => e.getAttribute('data-tile')))
+const tileText = (page, id) => page.evaluate((i) => (document.querySelector(`[data-tile="${i}"]`)?.textContent || '').replace(/\s+/g, ' ').trim(), id)
+const sectionXs = (page) => page.evaluate(() => [...new Set([...document.querySelectorAll('[data-my-page] [data-modules] > section')].map((e) => Math.round(e.getBoundingClientRect().left)))])
 
 // ─── C. the admin Fines screen ─────────────────────────────────────────────
 const ME = { id: 'u-1', username: 'admin', email: 'a@b.c', role: 'club_admin', organisation_id: 'o1', club_slug: 'gisborne', capabilities: ['*'], entitlements: { modules: ['select'], core_live: true, status: 'active' } }
@@ -174,7 +177,39 @@ const run = async () => {
     check('fees: what they owe', /You owe\s*\$60\.00/.test(body) && /Membership \$60\.00/.test(body), body)
     check('390px: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
     check('no script errors', errors.length === 0, errors.join('; '))
+    const ids = await tileIds(page)
+    check('headline tiles for the modules that are on, in a fixed order', JSON.stringify(ids) === JSON.stringify(['next', 'availability', 'ladder', 'season', 'fines', 'fees']), JSON.stringify(ids))
+    check('tile: next game says what they answered', /You said Available/.test(await tileText(page, 'next')), await tileText(page, 'next'))
+    check('tile: availability, answered of the next games', /1 of 1/.test(await tileText(page, 'availability')), await tileText(page, 'availability'))
+    check('tile: ladder position, once the ladder has loaded', /#2/.test(await tileText(page, 'ladder')) && /1st XI/.test(await tileText(page, 'ladder')), await tileText(page, 'ladder'))
+    check('tile: runs this season', /412/.test(await tileText(page, 'season')) && /9 wickets/.test(await tileText(page, 'season')), await tileText(page, 'season'))
+    check('tile: fines owing and fees owing', /\$7\.00/.test(await tileText(page, 'fines')) && /\$60\.00/.test(await tileText(page, 'fees')))
+    check('a phone gets one column of modules', (await sectionXs(page)).length === 1, JSON.stringify(await sectionXs(page)))
     await page.screenshot({ path: `${SHOT}/player-dashboard-390.png`, fullPage: true })
+    await ctx.close()
+  })
+
+  await safe('A. wide dashboard', async () => {
+    console.log('\n── A. On a wide screen it is a dashboard, not one long column ──')
+    const { ctx, page } = await playerPage(browser, 1280, profileFor(), { status: 200, body: LADDER })
+    await page.locator('[data-ladder]').waitFor()
+    const box = await page.locator('[data-my-page]').boundingBox()
+    check('the page opens out past the phone column', box.width > 700, String(box.width))
+    check('modules sit in more than one column', (await sectionXs(page)).length >= 2, JSON.stringify(await sectionXs(page)))
+    const order = (await titles(page)).map((x) => x.split(':')[0])
+    check('the club\'s order is kept (down each column in turn)', JSON.stringify(order) === JSON.stringify(['your season', 'fines', 'ladder', 'fees', 'your availability']), JSON.stringify(order))
+    const tilesBox = await page.locator('[data-tiles]').boundingBox()
+    const firstSection = await page.locator('[data-modules] > section').first().boundingBox()
+    check('the tiles sit above the modules', tilesBox.y + tilesBox.height <= firstSection.y)
+    check('1280px: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
+    const tabs = await page.locator('[role=tablist]').boundingBox()
+    check('the Availability / My page switch stays compact', tabs.width < 500, String(tabs.width))
+    await page.screenshot({ path: `${SHOT}/player-dashboard-1280.png`, fullPage: true })
+    // the Availability tab is still a phone-width column
+    await page.locator('[data-tab="weekend"]').click()
+    await page.waitForTimeout(200)
+    const wk = await page.locator('[data-date-card]').first().boundingBox()
+    check('the Availability tab stays one narrow column', wk && wk.width < 480, JSON.stringify(wk))
     await ctx.close()
   })
 
