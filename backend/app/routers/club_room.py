@@ -43,7 +43,7 @@ from app.models.db import (
     SavedReport, Sponsor, User, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.services import club_lock
+from app.services import club_lock, grade_scope
 from app.services.session_safety import rollback_keeping
 
 logger = logging.getLogger(__name__)
@@ -778,17 +778,28 @@ async def _expand_statlab_report(db, club, entry: ClubRoomSlide) -> list[dict]:
     qj = report.query_json or {}
     limit = min(int(qj.get("limit") or STAT_TABLE_LIMIT), STAT_TABLE_LIMIT)
     try:
+        # Grade type / Match type ride in the saved context as `categories` and
+        # `formats`. The live StatLab routes turn them into a scope before the
+        # query runs; without that the slide counted only the club's default
+        # grade types, so a Women's report played as the men's figures.
+        context = _statlab_report_context(qj.get("context"))
+        scope = await grade_scope.resolve_scope(
+            db, str(club.id), _csv_or_none(qj.get("context"), "categories"),
+            formats=_csv_or_none(qj.get("context"), "formats"),
+            competitions=_csv_or_none(qj.get("context"), "competitions"),
+        )
+        context[svc._SCOPE_KEY] = scope
         if qj.get("derived"):
             result = await svc.run_derived(
                 db, name=qj["derived"], org_id=str(club.id), limit=limit, page=1,
-                context=qj.get("context") or {},
+                context=context,
             )
         else:
             result = await svc.run_query(
                 db, org_id=str(club.id), target=qj.get("target", "player_career"),
                 sort_by=qj.get("sortBy", "runs"), sort_dir=qj.get("sortDir", "desc"),
                 limit=limit, page=1, metric_filters=[], filter_tree=qj.get("filterTree"),
-                context=qj.get("context") or {},
+                context=context,
             )
     except Exception:  # noqa: BLE001 — a stale/invalid saved query must never break the show
         return []
@@ -801,6 +812,31 @@ async def _expand_statlab_report(db, club, entry: ClubRoomSlide) -> list[dict]:
         "title": entry.title or report.title, "rows": rows,
         "columns": _report_columns(rows[0], qj.get("sortBy")),
     }]
+
+
+_STATLAB_SCOPE_CONTEXT_KEYS = ("categories", "formats", "competitions")
+
+
+def _csv_or_none(context, key: str) -> str | None:
+    """A saved report's scope pick as the comma-joined string `resolve_scope`
+    reads, or None when the report never set one (so the club default applies,
+    exactly as on the live page)."""
+    value = (context or {}).get(key) if isinstance(context, dict) else None
+    if isinstance(value, (list, tuple)):
+        value = ",".join(str(v) for v in value if v)
+    value = str(value).strip() if value not in (None, "") else ""
+    return value or None
+
+
+def _statlab_report_context(context) -> dict:
+    """A saved report's context without the keys that become the scope, and
+    without any underscore key: `_scope` is ours to set, never a saved row's."""
+    if not isinstance(context, dict):
+        return {}
+    return {
+        k: v for k, v in context.items()
+        if not str(k).startswith("_") and k not in _STATLAB_SCOPE_CONTEXT_KEYS
+    }
 
 
 def _report_columns(first_row: dict, sort_by: str | None) -> list[str]:

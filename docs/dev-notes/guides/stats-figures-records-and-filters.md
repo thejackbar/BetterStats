@@ -71,6 +71,7 @@
 **StatLab**
 35. `context.player_id` is NOT a `PLAYER_CONTEXT_FILTERS` entry (they set `needs_live`); `_with_player_filter` ANDs onto each target's final WHERE, not for family, team innings, derived. `TARGET_GUIDE` (`StatLab.jsx`) says which filters apply per target; keep it in step.
 36. StatLab applies the club default. Scope rides in the context as `_scope` (browsers cannot send underscore keys). Aggregate-only queries carry their own clause (`query_family_career` in the JOIN, `query_family_season`, `derived_most_minutes_in_season`). Family targets cannot answer match type; say so.
+36a. Anything that runs a saved report's `query_json` outside the StatLab routes (the Club Room `statlab_report` slide) must build the scope itself: `resolve_scope` from `context.categories/formats/competitions`, set as `_scope`, scope keys and underscore keys stripped from the saved context. Dropping it plays the club default, not the report's pick (v9.120.2.3, `verify_club_room_statlab_scope.py`).
 37. Multi-select: `grade_names`, `season_ids`, `results`, `dismissals`; keep legacy `grade_name`. `_text_list` never comma-splits (repeated `?c_grade_names=`). Category/format stay one comma string. Share `_RESULT_CASE_SQL`, `_dismissal_match_sql(param)`. `dismissals` in the innings block; `results` in `_RESIDUAL_DISQUALIFYING_LIST_KEYS`, coerce first. Seasons via `_pss_season_filter`.
 
 **Records, awards, grouping**
