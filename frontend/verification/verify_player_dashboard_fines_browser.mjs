@@ -210,6 +210,28 @@ const run = async () => {
     check('390px: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
     await page.screenshot({ path: `${SHOT}/player-votes-390.png`, fullPage: true })
     await ctx.close()
+    // For reference: what they have already cast, with the 3-2-1 picks
+    const cast = [
+      { medal: 'Dunslow Medal', fixture_id: 'f4', opponent: 'SMCC 8th XI', round: 'Round 1', date: iso(-3), open: true, closes_on: iso(4),
+        picks: [{ points: 3, name: 'Ann Anchor' }, { points: 2, name: 'Bob Bystander' }, { points: 1, name: 'Cal Cover' }], link: '/vote/vtok?fixture=f4&player=p1' },
+      { medal: 'Dunslow Medal', fixture_id: 'f3', opponent: 'Ancients', round: 'Round 0', date: iso(-30), open: false, closes_on: null,
+        picks: [{ points: 3, name: 'Bob Bystander' }], link: null },
+    ]
+    const withCast = await playerPage(browser, 390, profileFor({ modules: ['votes'], votes: due, votes_cast: cast }), { status: 200, body: LADDER })
+    await withCast.page.locator('[data-votes-cast]').waitFor()
+    check('already-cast votes sit under the ones still to cast, labelled', /already cast/i.test(await withCast.page.locator('[data-votes-cast]').innerText()))
+    const castText = norm(await withCast.page.locator('[data-vote-cast="f4"]').innerText())
+    check('a cast vote shows who got 3, 2 and 1', /3\s*Ann Anchor/.test(castText) && /2\s*Bob Bystander/.test(castText) && /1\s*Cal Cover/.test(castText), castText)
+    check('an open one can be changed, until when', /Change my votes \(until/.test(castText) && (await withCast.page.locator('[data-vote-cast="f4"] [data-change-vote]').getAttribute('href')) === '/vote/vtok?fixture=f4&player=p1')
+    check('a closed one shows the vote but no change link', (await withCast.page.locator('[data-vote-cast="f3"] [data-change-vote]').count()) === 0 && /3\s*Bob Bystander/.test(norm(await withCast.page.locator('[data-vote-cast="f3"]').innerText())))
+    check('the banner counts only what is still to cast', /You have 2 votes to cast/.test(await withCast.page.locator('[data-votes-banner]').innerText()))
+    check('390px with votes cast: no sideways overflow', (await overflow(withCast.page)) <= 0, String(await overflow(withCast.page)))
+    await withCast.page.screenshot({ path: `${SHOT}/player-votes-cast-390.png`, fullPage: true })
+    await withCast.ctx.close()
+    const castOnly = await playerPage(browser, 390, profileFor({ modules: ['votes'], votes: [], votes_cast: [cast[0]] }), { status: 200, body: LADDER })
+    await castOnly.page.locator('[data-votes-cast]').waitFor()
+    check('with only cast votes the card is "Your votes", with no banner and no tile', /your votes/i.test(await castOnly.page.locator('[data-modules] > section').first().innerText()) && (await castOnly.page.locator('[data-votes-banner]').count()) === 0 && !(await tileIds(castOnly.page)).includes('votes'))
+    await castOnly.ctx.close()
     const one = await playerPage(browser, 390, profileFor({ modules: ['votes'], votes: [due[0]] }), { status: 200, body: LADDER })
     await one.page.locator('[data-votes-banner]').waitFor()
     check('with one, it says "a vote"', /You have a vote to cast/.test(await one.page.locator('[data-votes-banner]').innerText()))

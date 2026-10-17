@@ -33,7 +33,7 @@ from starlette.requests import Request
 
 import verify_selection_same_day as base
 from app.config.settings import settings
-from app.models.db import Fixture, FixtureLineup, Game, GameAppearance, Grade, Organisation, Player, Season, VoteBallot, VoteFixtureOverride, VoteMedal
+from app.models.db import Fixture, FixtureLineup, Game, GameAppearance, Grade, Organisation, Player, Season, VoteBallot, VoteBallotPick, VoteFixtureOverride, VoteMedal
 
 engine = create_async_engine(os.environ["DATABASE_URL"], echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -76,7 +76,11 @@ async def main():
         for fid, pid in ((f1, sam), (f1, ann), (f2, ann), (f3, sam), (f4, sam), (f4, ann)):
             db.add(FixtureLineup(fixture_id=fid, player_id=pid, organisation_id=org, batting_order=1))
         await db.commit()
-        db.add(VoteBallot(organisation_id=org, medal_id=medal, fixture_id=f4, voter_player_id=sam, voter_kind="player"))
+        ballot_f4 = uuid.uuid4()
+        db.add(VoteBallot(id=ballot_f4, organisation_id=org, medal_id=medal, fixture_id=f4, voter_player_id=sam, voter_kind="player"))
+        await db.flush()
+        db.add(VoteBallotPick(ballot_id=ballot_f4, position=1, player_id=ann))
+        db.add(VoteBallotPick(ballot_id=ballot_f4, position=2, player_id=bob))
         await db.commit()
 
     def req_for(pid):
@@ -115,7 +119,7 @@ async def main():
     check("a game he did not play is not listed (Saints)", "Saints" in [x.get("opponent") for x in votes], False)
     check("a game too old to be open is not listed", "Ancients" in [x.get("opponent") for x in votes], False)
     check("a game he has already voted on is not listed", "Done Deal" in [x.get("opponent") for x in votes], False)
-    blob = json.dumps(prof)
+    blob = json.dumps({k: v for k, v in prof.items() if k != "votes_cast"})   # his own picks name others; that is his own data
     check("nobody else's name or id is in his page", any(n in blob for n in ("Ann Anchor", "Bob Bystander", str(ann), str(bob))), False)
     prof_ann = await profile(ann)
     check("Ann owes three (she played Done Deal too, and has not voted there), the one that closes first on top", [x.get("opponent") for x in prof_ann.get("votes") or []], ["Done Deal", "Rovers", "Saints"])
@@ -127,7 +131,7 @@ async def main():
         db.add(VoteBallot(organisation_id=org, medal_id=medal, fixture_id=f1, voter_player_id=sam, voter_kind="player"))
         await db.commit()
     prof = await profile(sam)
-    check("once he has voted nothing is due and the module drops out", (prof.get("votes"), "votes" in (prof.get("modules") or [])), ([], False))
+    check("once he has voted nothing is due, but the module stays to show what he cast", (prof.get("votes"), "votes" in (prof.get("modules") or [])), ([], True))
     check("Ann is unaffected by Sam's ballots", len((await profile(ann)).get("votes") or []), 3)
 
     print("\n# C. When voting is not on")
@@ -227,6 +231,31 @@ async def main():
     check("Ann, who is not on that scorecard, is not", "SMCC 8th XI" in [v.get("opponent") for v in prof_ann.get("votes") or []], False)
     link = next((v["link"] for v in prof.get("votes") or [] if v.get("opponent") == "SMCC 8th XI"), "")
     check("its link opens that fixture (the fixture's id, not the match GUID)", f"fixture={fsync}" in link and str(game) not in link, True)
+
+    print("\n# H. What they have already cast, for reference")
+    await set_org(player_dashboard_modules=None)
+    async with Session() as db:
+        b3 = uuid.uuid4()
+        db.add(VoteBallot(id=b3, organisation_id=org, medal_id=medal, fixture_id=f3, voter_player_id=sam, voter_kind="player"))
+        await db.flush()
+        db.add(VoteBallotPick(ballot_id=b3, position=1, player_id=bob))
+        await db.commit()
+    prof = await profile(sam)
+    cast = {c.get("opponent"): c for c in prof.get("votes_cast") or []}
+    d4 = cast.get("Done Deal") or {}
+    check("a game he has voted on shows his picks, 3 then 2", d4.get("picks"), [{"points": 3, "name": "Ann Anchor"}, {"points": 2, "name": "Bob Bystander"}])
+    check("an open game says so, with when it closes and a link to change the vote", (d4.get("open"), bool(d4.get("closes_on")), d4.get("link")),
+          (True, True, f"/vote/{vtok}?fixture={f4}&player={sam}"))
+    anc = cast.get("Ancients") or {}
+    check("a closed game still shows his vote, but with no link (it cannot be changed)", (anc.get("open"), anc.get("link"), anc.get("picks")), (False, None, [{"points": 3, "name": "Bob Bystander"}]))
+    check("newest game first", [c.get("opponent") for c in prof.get("votes_cast") or []][:2], ["Done Deal", "Ancients"])
+    check("nothing of his is in the to-cast list", "Done Deal" in [v.get("opponent") for v in prof.get("votes") or []], False)
+    prof_ann = await profile(ann)
+    check("Ann sees none of Sam's votes", [c.get("opponent") for c in prof_ann.get("votes_cast") or []], [])
+    check("...and no player's ballot is anywhere in her page but hers", "Bob Bystander" in json.dumps(prof_ann), False)
+    await set_medal(ballot_values=[5, 3, 1])
+    check("the points follow the medal's own ballot values", [p["points"] for p in ((await profile(sam)).get("votes_cast") or [{}])[0].get("picks", [])], [5, 3])
+    await set_medal(ballot_values=[3, 2, 1])
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     for f in base.FAILURES:

@@ -293,26 +293,59 @@ function AvailabilityModule({ me }) {
   )
 }
 
-// Games the player can still vote on and has not. Each links to that game's
-// ballot on the vote page (which asks for their PIN once).
+// Games the player can still vote on and has not, then (for reference) the votes
+// they have already cast with who they gave 3, 2 and 1 to. Each to-cast game links
+// to its ballot on the vote page (which asks for their PIN once); a cast vote on a
+// game still open links to the same ballot to change it.
 function VotesModule({ data }) {
-  const votes = data.votes || []
+  const due = data.votes || []
+  const cast = data.votes_cast || []
   return (
-    <Section title="Votes to cast">
-      <div data-votes>
-        {votes.map((v) => (
-          <div key={`${v.medal}-${v.fixture_id}`} className="flex items-center gap-3 py-2 border-t pb-hairline first:border-t-0" data-vote-due={v.fixture_id}>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold truncate">{v.round ? `${v.round} · ` : ''}vs {v.opponent || 'TBC'}</div>
-              <div className="text-[12px] text-pb-faint">
-                {v.medal}{v.date ? ` · played ${fmtShort(v.date)}` : ''}{v.closes_on ? ` · voting closes ${fmtShort(v.closes_on)}` : ''}
+    <Section title={due.length ? 'Votes to cast' : 'Your votes'}>
+      {due.length > 0 && (
+        <div data-votes>
+          {due.map((v) => (
+            <div key={`${v.medal}-${v.fixture_id}`} className="flex items-center gap-3 py-2 border-t pb-hairline first:border-t-0" data-vote-due={v.fixture_id}>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold truncate">{v.round ? `${v.round} · ` : ''}vs {v.opponent || 'TBC'}</div>
+                <div className="text-[12px] text-pb-faint">
+                  {v.medal}{v.date ? ` · played ${fmtShort(v.date)}` : ''}{v.closes_on ? ` · voting closes ${fmtShort(v.closes_on)}` : ''}
+                </div>
               </div>
+              <a href={v.link} className="shrink-0 px-3.5 py-2 rounded-lg text-[13px] font-semibold"
+                style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>Vote</a>
             </div>
-            <a href={v.link} className="shrink-0 px-3.5 py-2 rounded-lg text-[13px] font-semibold"
-              style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>Vote</a>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+      {cast.length > 0 && (
+        <div className={due.length ? 'mt-4' : ''} data-votes-cast>
+          {due.length > 0 && <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Already cast</div>}
+          {cast.map((c) => (
+            <div key={`${c.medal}-${c.fixture_id}`} className="py-2 border-t pb-hairline first:border-t-0" data-vote-cast={c.fixture_id}>
+              <div className="text-sm font-semibold truncate">{c.round ? `${c.round} · ` : ''}vs {c.opponent || 'TBC'}</div>
+              <div className="text-[12px] text-pb-faint">{c.medal}{c.date ? ` · played ${fmtShort(c.date)}` : ''}</div>
+              {c.picks.length === 0
+                ? <div className="text-[12.5px] text-pb-faint mt-1">No picks recorded.</div>
+                : (
+                  <div className="mt-1.5 flex flex-col gap-0.5">
+                    {c.picks.map((pk, i) => (
+                      <div key={i} className="flex items-baseline gap-2 text-[13px]" data-pick>
+                        <span className="font-mono font-bold w-5 text-right shrink-0" style={{ color: 'var(--pb-accent)' }}>{pk.points ?? ''}</span>
+                        <span className="min-w-0 truncate">{pk.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              {c.open && c.link && (
+                <a href={c.link} data-change-vote className="inline-block text-[12px] underline text-pb-dim mt-1.5">
+                  Change my votes{c.closes_on ? ` (until ${fmtShort(c.closes_on)})` : ''}
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </Section>
   )
 }

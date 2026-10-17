@@ -472,3 +472,12 @@ Reported: Votes not showing on the player page, with Jack Barendse and the Dunsl
 - `_votes_due` examined only the 10 newest unvoted open games. A club has an open game per grade per round (Applecross: a dozen or more teams), so a player's own game was often past the cutoff and never looked at. Now two batched local lookups find the player's games first (`fixture_lineups`, and `game_appearances`/`batting_innings`/`bowling_spells`/`fielding_stats` through `match_ref_id`), and only those get `resolve_eligibility` and `_voter_role`. A game whose list can only come from a live Play.Cricket fetch cannot be found that way, so those are checked directly, capped at 10 per page load (`VOTES_LIVE_EXAMINED`).
 - A club that had saved its own module list (the picker, v9.120.0) had no `votes` in it, so the module was never drawn. `organisations.player_dashboard_modules` is now either the old bare list or `store()`'s `{"on": [...], "known": [...]}`. `known` is every module on offer when the list was saved; a module in `AUTO_ON_WHEN_NEW` (votes) that is not in `known` is added beside Availability. A bare list counts as having known everything except votes. JSONB, no migration.
 - Proof: `verify_player_votes_reminder.py` (own database, 29: 14 newer games for other players, the synced-scorecard path, a legacy list, a list saved now with Votes off, an empty list).
+
+## v9.120.2.2: cast votes shown on the player's page
+
+Asked for: if the player has already voted, show their 3-2-1 votes too, for reference.
+
+- `public_availability._votes_for_player` (was `_votes_due`) returns `(due, cast)`. `cast` is the player's own `VoteBallot` rows on games the medal counts in its 90-day window (open or closed), newest first, at most `VOTES_CAST_SHOWN` (6). Each carries `picks` as `{points, name}` where `points` = `ballot_values[position - 1]` (so a medal counting 5-3-1 shows 5-3-1), `open`, and, only while open, `closes_on` and the `link` to change it. Only their own ballot is read; other players' ballots are never touched.
+- The profile adds `votes_cast`. The `votes` module now stays when there are cast votes even if nothing is due, and drops only when both are empty. The banner and tile count `votes` (to cast) only.
+- Frontend: `VotesModule` is "Votes to cast" then "Already cast", or "Your votes" alone when nothing is due.
+- Proof: `verify_player_votes_reminder.py` (own database, 37; control on the previous route fails the 6 new checks without crashing), `verify_player_dashboard_fines_browser.mjs` (120).

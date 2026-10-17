@@ -365,10 +365,11 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
 
 
 VOTES_LIVE_EXAMINED = 10   # games whose list comes from a live Play.Cricket fetch, per page load
+VOTES_CAST_SHOWN = 6       # the player's own most recent ballots shown for reference
 
 
-async def _votes_due(db: AsyncSession, club: Organisation, player: Player) -> list[dict]:
-    """Games this player can still vote on and has not: open for voting under an
+async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player) -> tuple[list[dict], list[dict]]:
+    """``(due, cast)``. ``due``: games this player can still vote on and has not: open for voting under an
     enabled medal, the player is on that game's votable list (the same list the
     ballot page uses, so a reminder never points at a game they cannot vote on),
     and no ballot from them yet. Nothing about anyone else, and nothing at all
@@ -380,6 +381,10 @@ async def _votes_due(db: AsyncSession, club: Organisation, player: Player) -> li
     A game whose list can only come from a live Play.Cricket fetch cannot be
     found that way; those are checked directly, a few at a time.
 
+    ``cast``: the player's OWN ballots on games this medal counts (open or closed),
+    newest first, with who they gave 3, 2 and 1 to, for reference. Only their own
+    ballot; nobody else's. An open game carries the link to change it.
+
     The link carries the medal's token, so it is only ever built here, for the
     verified player, and the vote page still asks for their PIN."""
     medals = (await db.execute(
@@ -389,19 +394,52 @@ async def _votes_due(db: AsyncSession, club: Organisation, player: Player) -> li
         ).order_by(VoteMedal.name)
     )).scalars().all()
     due: list[dict] = []
+    cast: list[dict] = []
     live_left = VOTES_LIVE_EXAMINED
     for medal in medals:
         cfg = vote_svc.effective_config(medal)
         fixtures, _ = await pv._open_fixtures(db, club, cfg, medal)
-        open_fx = [f for f, state in fixtures if state == "open"]
-        if not open_fx:
+        if not fixtures:
             continue
-        voted = {r[0] for r in (await db.execute(
-            select(VoteBallot.fixture_id).where(
+        fx_by = {f.id: f for f, _state in fixtures}
+        state_by = {f.id: state for f, state in fixtures}
+        open_fx = [f for f, state in fixtures if state == "open"]
+        ballots = (await db.execute(
+            select(VoteBallot).where(
                 VoteBallot.medal_id == medal.id, VoteBallot.voter_player_id == player.id,
-                VoteBallot.fixture_id.in_([f.id for f in open_fx]),
+                VoteBallot.fixture_id.in_(list(fx_by)),
             )
-        )).fetchall()}
+        )).scalars().all()
+        voted = {b.fixture_id for b in ballots}
+
+        if ballots:
+            pick_ids = {pk.player_id for b in ballots for pk in b.picks}
+            names = {pid: nm for pid, nm in (await db.execute(
+                text("SELECT id, COALESCE(display_name_override, name) FROM players WHERE organisation_id = :org AND id = ANY(CAST(:ids AS uuid[]))"),
+                {"org": club.id, "ids": list(pick_ids)},
+            )).fetchall()} if pick_ids else {}
+            values = cfg["ballot_values"]
+            for b in ballots:
+                f = fx_by[b.fixture_id]
+                is_open = state_by[b.fixture_id] == "open"
+                closes = vote_svc.fixture_close_date(f, cfg)
+                cast.append({
+                    "medal": medal.name,
+                    "fixture_id": str(f.id),
+                    "opponent": f.opponent_name or f.label,
+                    "round": vote_svc.round_label_for(f),
+                    "date": f.played_on.isoformat() if f.played_on else None,
+                    "open": is_open,
+                    "closes_on": closes.isoformat() if is_open and closes else None,
+                    # Points by position: who they gave 3, 2 and 1 to (or whatever the medal counts).
+                    "picks": [
+                        {"points": values[pk.position - 1] if 0 < pk.position <= len(values) else None,
+                         "name": names.get(pk.player_id, "Unknown")}
+                        for pk in sorted(b.picks, key=lambda x: x.position)
+                    ],
+                    "link": f"/vote/{medal.link_token}?fixture={f.id}&player={player.id}" if is_open else None,
+                })
+
         todo = [f for f in open_fx if f.id not in voted]
         if not todo:
             continue
@@ -446,7 +484,8 @@ async def _votes_due(db: AsyncSession, club: Organisation, player: Player) -> li
                 "link": f"/vote/{medal.link_token}?fixture={f.id}&player={player.id}",
             })
     due.sort(key=lambda d: (d["closes_on"] or "9999", d["date"] or ""))
-    return due
+    cast.sort(key=lambda c: c["date"] or "", reverse=True)
+    return due, cast[:VOTES_CAST_SHOWN]
 
 
 @router.get("/{token}/me/profile")
@@ -484,13 +523,14 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
     # from this response and the rest of the page still loads.
     season = fees = fines = None
     votes: list[dict] = []
+    votes_cast: list[dict] = []
     if "votes" in modules:
         try:
-            votes = await _votes_due(db, club, player)
+            votes, votes_cast = await _votes_for_player(db, club, player)
         except Exception:
             logger.exception("player page: votes failed for %s", player.id)
             await rollback_keeping(db, club, player)
-        if not votes:
+        if not votes and not votes_cast:
             modules = [m for m in modules if m != "votes"]
     if "season" in modules:
         try:
@@ -528,6 +568,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         "fees": fees,
         "fines": fines,
         "votes": votes,
+        "votes_cast": votes_cast,
     }
 
 
