@@ -90,7 +90,7 @@
 - Per-game counts over CA's aggregate by 1 or 2: Absent/DNB rows. One-off: `DELETE FROM batting_innings WHERE dismissal_type IN ('absent','did not bat','dnb')`.
 - Club silently short results after a failed scorecard pull: watermark stepped over it (rule 27).
 - Club stops syncing when its new season opens: "nothing played" decided from grades not yet created (rule 32).
-- Games missing from a club, run says OK: `gr_matches_seen` is more than `gr_games_new` + `gr_games_skipped_done` + `gr_games_skipped_no_data` (pre-v9.120.3.1) or `gr_games_failed` is above 0. A swallowed per-game error; first read `gr_game_errors` in `/organisations/{id}/sync-logs`. A foreign key on `player_id` means a dangling redirect (rule 55); the cause is a `merge_logs` row whose `keep_player_id` is not in `players`.
+- Games missing from a club, run says OK: `gr_matches_seen` is more than `gr_games_new` + `gr_games_skipped_done` + `gr_games_skipped_no_data` (pre-v9.120.4.1) or `gr_games_failed` is above 0. A swallowed per-game error; first read `gr_game_errors` in `/organisations/{id}/sync-logs`. A foreign key on `player_id` means a dangling redirect (rule 55); the cause is a `merge_logs` row whose `keep_player_id` is not in `players`.
 - `Column expression ... got <property object>` from `select(Player.display_name)`: it is a Python property. Select mapped columns, compute in Python.
 
 ## How to verify a change here
