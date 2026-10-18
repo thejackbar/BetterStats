@@ -1911,7 +1911,7 @@ async def sync_grassroots_game_level_data(
         kept, never the SQL (the run's stats are readable without signing in)."""
         stats["gr_games_failed"] += 1
         sample = stats.setdefault("gr_game_errors", [])
-        if len(sample) < 5:
+        if len(sample) < 20:
             msg = str(err).split("[SQL", 1)[0]
             sample.append({"match": match_id, "error": " ".join(msg.splitlines()[:2]).strip()[:300]})
 
@@ -2631,6 +2631,14 @@ async def sync_grassroots_game_level_data(
                     fow_rows = inn.get("fallOfWickets") or []
                     keeper_names = _innings_keeper_names(fielding_rows)
 
+                    # Players already given a batting row in THIS innings. Cricket Australia
+                    # sometimes lists one participant id twice in an innings (old junior cards:
+                    # two children sharing an id, "A Lowe, Bowled 2" and "A Lowe, Run Out 1").
+                    # The table holds one row per (game, innings, player), so the second insert
+                    # failed the whole game at commit and, with nothing counting it, it was lost
+                    # on every run. Keep the first row on the card, skip the repeat, count it.
+                    bat_seen: set = set()
+
                     for row in batting_rows:
                         pid = _team_pid(_parse_uuid(row.get("participantId") or ""))
                         if pid is None or pid not in our_team_pids:
@@ -2638,6 +2646,10 @@ async def sync_grassroots_game_level_data(
                         dt_id = row.get("dismissalTypeId") or 0
                         if dt_id == 0:
                             continue
+                        if pid in bat_seen:
+                            stats["gr_dup_batting_skipped"] = stats.get("gr_dup_batting_skipped", 0) + 1
+                            continue
+                        bat_seen.add(pid)
                         dt_long = row.get("dismissalType") or ""
                         is_dnb = dt_long.lower() in ("absent", "did not bat", "dnb")
                         if is_dnb:

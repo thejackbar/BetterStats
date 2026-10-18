@@ -20,6 +20,8 @@ return the match list and scorecards. Scenarios:
           person attached to the old record by full name
   self    a player whose id is recorded as merged into ITSELF                -> the same
   loop    two ids recorded as merged into each other (A->B, B->A)            -> the same
+  twice   one participant id listed twice in the same innings                -> stored with the first
+          row, the repeat skipped and counted (it used to fail the whole game on the unique key)
   live    roster names a player whose new id redirects to a record that exists -> still redirected
   plain   an ordinary game                                                     -> stored
   broken  a scorecard the database refuses for another reason                   -> counted as failed,
@@ -88,7 +90,7 @@ GONE = uuid.uuid4()                                   # a kept player who is no 
 OLD_SAM, NEW_SAM = uuid.uuid4(), uuid.uuid4()         # a redirect from an id to itself
 OLD_LOU, NEW_LOU, NEW_LOU2 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()   # two ids merged into each other
 
-G_BAD, G_LIVE, G_PLAIN, G_BROKEN, G_SELF, G_LOOP = (uuid.uuid4() for _ in range(6))
+G_BAD, G_LIVE, G_PLAIN, G_BROKEN, G_SELF, G_LOOP, G_TWICE = (uuid.uuid4() for _ in range(7))
 NAMES = {MATE: "Mick Mate", NEW_KOBI: "Kobi Maynard", NEW_RICK: "Rick Rotundo",
          NEW_SAM: "Sam Selfish", NEW_LOU: "Lou Looper"}
 
@@ -121,6 +123,15 @@ def card_for(match_id, roster, runs_by_pid, days_ago):
             ],
         }],
     }
+
+
+def twice_card(match_id, days_ago):
+    """MATE is listed twice in the innings with different results (as on old junior cards)."""
+    c = card_for(match_id, [MATE], {MATE: 5}, days_ago)
+    c["innings"][0]["batting"].append(
+        {"participantId": str(MATE), "dismissalTypeId": 5, "dismissalType": "Run Out",
+         "runsScored": 1, "ballsFaced": 3, "batOrder": 2})
+    return c
 
 
 def match_entry(match_id, days_ago):
@@ -221,13 +232,14 @@ async def main() -> None:
         str(G_BAD): card_for(G_BAD, [NEW_KOBI, MATE], {NEW_KOBI: 41, MATE: 12}, 4),
         str(G_LIVE): card_for(G_LIVE, [NEW_RICK, MATE], {NEW_RICK: 27, MATE: 9}, 3),
         str(G_PLAIN): card_for(G_PLAIN, [MATE], {MATE: 5}, 2),
+        str(G_TWICE): twice_card(G_TWICE, 3),
         str(G_SELF): card_for(G_SELF, [NEW_SAM, MATE], {NEW_SAM: 18, MATE: 7}, 5),
         str(G_LOOP): card_for(G_LOOP, [NEW_LOU, MATE], {NEW_LOU: 33, MATE: 4}, 6),
         # More runs than the column can hold: the database refuses the game at commit.
         str(G_BROKEN): card_for(G_BROKEN, [MATE], {MATE: 10 ** 12}, 1),
     }
     listing = [match_entry(G_BAD, 4), match_entry(G_LIVE, 3), match_entry(G_PLAIN, 2), match_entry(G_BROKEN, 1),
-               match_entry(G_SELF, 5), match_entry(G_LOOP, 6)]
+               match_entry(G_SELF, 5), match_entry(G_LOOP, 6), match_entry(G_TWICE, 7)]
 
     async def fake_matches(grade_guid, *a, **k):
         return listing
@@ -268,6 +280,8 @@ async def main() -> None:
           await stored(G_SELF) and await runs_of(G_SELF, OLD_SAM) == [18], str(await runs_of(G_SELF, OLD_SAM)))
     check("two ids merged into each other (a loop): the game is stored, the innings on the old record",
           await stored(G_LOOP) and await runs_of(G_LOOP, OLD_LOU) == [33], str(await runs_of(G_LOOP, OLD_LOU)))
+    check("a participant listed twice in one innings: the game is stored with the first row only",
+          await stored(G_TWICE) and await runs_of(G_TWICE, MATE) == [5], str(await runs_of(G_TWICE, MATE)))
     check("a redirect to a player who exists still redirects",
           await stored(G_LIVE) and await runs_of(G_LIVE, OLD_RICK) == [27], str(await runs_of(G_LIVE, OLD_RICK)))
     check("a game the database refuses is not stored", not await stored(G_BROKEN))
@@ -283,14 +297,15 @@ async def main() -> None:
     check("and names it, with the database's own words", len(errors) == 1 and errors[0].get("match") == str(G_BROKEN)
           and "out of int32 range" in (errors[0].get("error") or ""), str(errors))
     check("the stored error carries no SQL", not any(w in (e.get("error") or "") for e in errors for w in ("[SQL", "INSERT")), str(errors))
-    check("five games were stored", stats.get("gr_games_new") == 5, str(stats.get("gr_games_new")))
+    check("the repeat is counted", stats.get("gr_dup_batting_skipped") == 1, str(stats.get("gr_dup_batting_skipped")))
+    check("six games were stored", stats.get("gr_games_new") == 6, str(stats.get("gr_games_new")))
 
     print("\n-- A SECOND RUN CHANGES NOTHING --")
     before = await total_batting()
     again = await sync_grassroots_game_level_data(str(ORG))
     check("no batting is written twice", await total_batting() == before, f"{before} -> {await total_batting()}")
-    check("the five stored games are done, the broken one fails again",
-          again.get("gr_games_skipped_done") == 5 and again.get("gr_games_failed") == 1,
+    check("the six stored games are done, the broken one fails again",
+          again.get("gr_games_skipped_done") == 6 and again.get("gr_games_failed") == 1,
           f"done={again.get('gr_games_skipped_done')} failed={again.get('gr_games_failed')}")
 
     print(f"\n{PASS} passed, {FAIL} failed")
