@@ -646,6 +646,11 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
         # club), so the public club navbar can suppress its club links.
         "is_marketing_org": org_is_outreach(club),
         "capabilities": caps,
+        # The capabilities above held at VIEW level only: the screens draw read only for
+        # them and the server refuses a write (auth/capabilities.require_cap).
+        "view_only_capabilities": (
+            list(getattr(membership, "view_only_caps", None) or []) if role == "club_member" else []
+        ),
         "entitlements": entitlement_summary(club, role),
         # Super-admin club-switch context. can_switch_clubs gates the UI switcher;
         # acting_as_club is true only while scoped to a club other than home.

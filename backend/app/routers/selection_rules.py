@@ -23,6 +23,9 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_SELECTIONS, SELECT_ANY, SELECT_RULES, require_any_cap,
+)  # BetterSelect item permissions
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.auth.modules import org_has_module
 from app.models.db import Organisation, User, get_db
@@ -139,7 +142,7 @@ def _settings_out(club: Organisation) -> dict:
 async def get_rules(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(*SELECT_ANY)),
 ):
     """Everything the settings screen draws: the club's rules, the settings
     around them, and the options a rule can be scoped to."""
@@ -180,7 +183,7 @@ async def patch_settings(
     body: SettingsBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     cfg = dict(club.selection_rules_config or {})
     if body.age_basis is not None:
@@ -268,7 +271,7 @@ async def patch_settings(
 async def email_templates(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(*SELECT_ANY)),
 ):
     """The club's BetterComms templates a selection email can be linked to, and
     the variables they can use. Templates are written in Admin > Comms >
@@ -299,7 +302,7 @@ async def preview_email_template(
     body: TemplatePreviewBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     """A template filled in with a made-up match and side, so a selector can see
     the email before any real player does. Nothing is sent."""
@@ -341,7 +344,7 @@ async def create_rule(
     body: RuleBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     kind = body.kind
     if kind not in rules_svc.RULE_KINDS:
@@ -378,7 +381,7 @@ async def update_rule(
     body: RuleBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     row = await _owned_rule(db, rule_id, club.id)
     fields: dict = {"id": row["id"], "org": club.id}
@@ -418,7 +421,7 @@ async def delete_rule(
     rule_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     row = await _owned_rule(db, rule_id, club.id)
     await db.execute(
@@ -434,7 +437,7 @@ async def reorder_rules(
     body: ReorderBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     """Ids that aren't this club's are ignored rather than rejected — the list
     comes from a browser."""
@@ -455,7 +458,7 @@ async def rule_players(
     rule_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(*SELECT_ANY)),
 ):
     """The club's players and where each stands with this one rule."""
     row = await _owned_rule(db, rule_id, club.id)
@@ -485,7 +488,7 @@ async def set_rule_player(
     body: ClearanceBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     """Clear a player of one rule (a permit, an association clearance, the tick
     a free-text rule asks for), or mark them ineligible under it. A null state
@@ -546,7 +549,7 @@ _STARTER_BOWLING = {
 async def seed_starter(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     """Add the junior bowling limits, if the club hasn't already got some.
 

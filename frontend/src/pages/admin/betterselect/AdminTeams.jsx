@@ -987,9 +987,9 @@ function ManageSquadsModal({ teams, players, onDeleted, onClose }) {
 }
 
 export default function AdminTeams() {
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
-  const canManage = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canManage = canEditCap(CAP.SELECT_SQUADS, CAP.MANAGE_SELECTIONS)
 
   const [teams, setTeams] = useState(null)
   const [players, setPlayers] = useState(null)

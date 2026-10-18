@@ -15,6 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_SELECTIONS, SELECT_AUDIT, require_any_cap,
+)  # BetterSelect item permissions
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Organisation, User, get_db
 from app.routers.auth import get_current_club
@@ -43,7 +46,7 @@ def _filters(q, area, action, user, player_id, team, date_from, date_to, tz) -> 
 async def audit_facets(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(SELECT_AUDIT, MANAGE_SELECTIONS)),
 ):
     return await player_audit.facets(db, club.id)
 
@@ -56,7 +59,7 @@ async def audit_events(
     limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(SELECT_AUDIT, MANAGE_SELECTIONS)),
 ):
     f = _filters(q, area, action, user, player_id, team, date_from, date_to, tz)
     return await player_audit.search(db, club.id, limit=limit, offset=offset, **f)
@@ -69,7 +72,7 @@ async def audit_export(
     date_from: Optional[str] = None, date_to: Optional[str] = None, tz: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(SELECT_AUDIT, MANAGE_SELECTIONS)),
 ):
     """The same rows the list shows for these filters, as a spreadsheet."""
     f = _filters(q, area, action, user, player_id, team, date_from, date_to, tz)

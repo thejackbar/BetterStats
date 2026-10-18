@@ -64,9 +64,9 @@ function PageModules({ modules, canEdit, busy, onChange }) {
 }
 
 export default function SelfServiceLinkPanel() {
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canEdit = canEditCap(CAP.SELECT_AVAILABILITY, CAP.MANAGE_SELECTIONS)
 
   const [open, setOpen] = useState(false)
   const [cfg, setCfg] = useState(null)

@@ -132,11 +132,11 @@ function xiState(f) {
 }
 
 export default function AdminFixtures() {
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
-  const canManage = hasCapability(CAP.MANAGE_FIXTURES)
-  const canSelect = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canManage = canEditCap(CAP.MANAGE_FIXTURES)
+  const canSelect = hasCapability(CAP.SELECT_SELECTION) || hasCapability(CAP.MANAGE_SELECTIONS)
   const [fixtures, setFixtures] = useState(null)
   const [scope, setScope] = useState('upcoming') // 'upcoming' | 'past' | 'all'
   const [editing, setEditing] = useState(undefined)

@@ -27,6 +27,20 @@ const MODULES = [
   { key: 'select', name: 'BetterSelect', blurb: 'Squads, fixtures, availability, selection, nets, votes.' },
   { key: 'admin', name: 'BetterAdmin', blurb: 'Directory, roster, committee, fees.' },
 ]
+const CATALOGUE = [
+  { key: 'stats', name: 'BetterStats', blurb: 'Matches, players.', items: [
+    { id: 'stats.players', name: 'Players', menu: 'Players, Import Players', needs: [] },
+  ] },
+  { key: 'select', name: 'BetterSelect', blurb: 'Squads, availability, selection.', items: [
+    { id: 'select.availability', name: 'Availability', menu: 'Availability', needs: [] },
+    { id: 'select.selection', name: 'Selection', menu: 'Selection, Selection Whiteboard', needs: [{ item: 'select.availability', level: 'view', name: 'Availability' }] },
+    { id: 'select.fines', name: 'Fines', menu: 'Fines', needs: [] },
+    { id: 'select.votes', name: 'Votes', menu: 'Votes', needs: [] },
+  ] },
+  { key: 'admin', name: 'BetterAdmin', blurb: 'Directory, fees.', items: [
+    { id: 'admin.fees', name: 'Fees', menu: 'Accounts, Payments, Membership tiers', needs: [] },
+  ] },
+]
 const ALL_CAPS = ['manage_settings', 'manage_users', 'manage_fees', 'manage_selections', 'manage_fixtures', 'manage_players']
 const SELECT_CAPS = ['manage_players', 'manage_fixtures', 'manage_selections']
 
@@ -36,6 +50,9 @@ function usersList() {
       role: 'club_admin', capabilities: [], is_primary_admin: true, access: { mode: 'full', module_key: null, module_name: null } },
     { id: 'u-full', username: 'fran', display_name: 'Fran Full', email: 'fran@x.test', mobile_number: null, last_login_at: null,
       role: 'club_admin', capabilities: [], is_primary_admin: false, access: { mode: 'full', module_key: null, module_name: null } },
+    { id: 'u-items', username: 'ivy', display_name: 'Ivy Items', email: 'ivy@x.test', mobile_number: null, last_login_at: null,
+      role: 'club_member', capabilities: ['select_fines', 'manage_fees'], is_primary_admin: false,
+      access: { mode: 'items', module_key: null, module_name: null, grants: { 'select.fines': 'manage', 'admin.fees': 'view' }, modules: ['select', 'admin'], item_count: 2 } },
     { id: 'u-locked', username: 'leo', display_name: 'Leo Locked', email: 'leo@x.test', mobile_number: null, last_login_at: null,
       role: 'club_member', capabilities: SELECT_CAPS, is_primary_admin: false, access: { mode: 'module', module_key: 'select', module_name: 'BetterSelect' } },
   ]
@@ -49,6 +66,16 @@ function meFor(kind) {
     can_switch_clubs: false, home_club_id: 'c1', home_club_name: 'Alpha CC', acting_as_club: false,
     linked_clubs: [], can_switch_linked_clubs: false, acting_as_linked_club: false,
     entitlements: { modules: ['select', 'fees'], status: 'active', billing_modules: [] },
+  }
+  const itemsMe = {
+    items: { caps: ['select_availability', 'select_fines', 'manage_fees', 'view_vote_results'], view: ['select_availability', 'manage_fees'],
+      grants: { 'select.availability': 'view', 'select.fines': 'manage', 'admin.fees': 'view', 'select.votes': 'view' }, modules: ['select', 'admin'] },
+    'rules-manage': { caps: ['select_rules'], view: [], grants: { 'select.rules': 'manage' }, modules: ['select'] },
+    'rules-view': { caps: ['select_rules'], view: ['select_rules'], grants: { 'select.rules': 'view' }, modules: ['select'] },
+  }[kind]
+  if (itemsMe) {
+    return { ...base, role: 'club_member', is_primary_admin: false, capabilities: itemsMe.caps, view_only_capabilities: itemsMe.view,
+      access: { mode: 'items', module_key: null, module_name: null, grants: itemsMe.grants, modules: itemsMe.modules, item_count: Object.keys(itemsMe.grants).length } }
   }
   if (kind === 'locked') {
     return { ...base, role: 'club_member', is_primary_admin: false, capabilities: SELECT_CAPS,
@@ -68,9 +95,16 @@ async function stub(page, state) {
     const json = (b, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(b) })
     if (p === '/auth/me') return json(meFor(state.kind))
     if (p === '/club-admin/users' && method === 'GET') return json(usersList())
-    if (p === '/club-admin/users/capabilities') return json({ capabilities: ALL_CAPS, modules: MODULES })
+    if (p === '/club-admin/users/capabilities') return json({ capabilities: ALL_CAPS, modules: MODULES, catalogue: CATALOGUE })
+    if (p === '/availability/config') return json({ allow_maybe: true, played_years: { selection: 3, availability: 0 }, team_defaults: [], squads: [] })
+    if (p === '/selection-rules') return json({ settings: {}, options: { teams: [] }, rules: [] })
     if (p === '/club-admin/users' && method === 'POST') return json({ id: 'u-new', invited: true, access: { mode: 'full' } })
-    if (/^\/club-admin\/users\/[^/]+$/.test(p) && method === 'PATCH') return json({ status: 'ok' })
+    if (/^\/club-admin\/users\/[^/]+$/.test(p) && method === 'PATCH') {
+      const g = body?.access?.grants || {}
+      const added = body?.access?.mode === 'items' && g['select.selection']
+        ? [{ item: 'select.availability', name: 'Availability', level: 'view', because: 'Selection' }] : []
+      return json({ status: 'ok', added })
+    }
     if (p === '/club-admin/settings') return json({ name: 'Alpha CC', slug: 'alpha' })
     if (p === '/club-admin/broadcasts') return json({ items: [], preview: false })
     if (p === '/club-admin/seasons') return json([])
@@ -90,6 +124,8 @@ const browser = await chromium.launch({ executablePath: EXECUTABLE })
 async function open(kind, path, viewport = { width: 1280, height: 900 }) {
   const ctx = await browser.newContext({ viewport })
   const page = await ctx.newPage()
+  page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) console.log(`CONSOLE ${kind} ${path}: ${m.text().slice(0, 200)}`) })
+  page.on('pageerror', e => console.log(`PAGEERROR ${kind} ${path}: ${String(e.message).slice(0, 160)}`))
   const state = { kind, calls: [] }
   await stub(page, state)
   await page.goto(`${BASE}${path}`)
@@ -107,7 +143,7 @@ await section('Primary Admin screen', async () => {
   ck('the Primary Admin is labelled', text.includes('Primary Admin'))
   ck('a limited person is labelled Limited access', text.includes('Limited access'))
   ck('and carries a BetterSelect only badge', (await page.getByTestId('access-badge').allInnerTexts()).join('|').includes('BetterSelect only'))
-  ck('only the limited person has an access badge', (await page.getByTestId('access-badge').count()) === 1)
+  ck('only the two limited people have an access badge', (await page.getByTestId('access-badge').count()) === 2)
   ck('the intro says new users start with everything', /start with access to everything/i.test(text))
 
   // ── open an ordinary admin: picker present, Everything pressed ──
@@ -233,6 +269,104 @@ await section('dashboard and sidebar', async () => {
     locked.paths.filter(p => /plan|sync|wizard/i.test(p)).join(','))
 })
 
+// ── choose items ────────────────────────────────────────────────────────
+await section('choose items editor', async () => {
+  const { ctx, page, state } = await open('primary', '/admin/users')
+  await page.getByText('Fran Full').first().waitFor({ timeout: 15000 })
+  ck('the list shows an items person with a count', (await page.getByTestId('access-badge').allInnerTexts()).join('|').includes('2 menu items'))
+  await page.getByText('Fran Full').first().click()
+  await page.getByTestId('access-picker').waitFor()
+  ck('Choose items is offered', (await page.getByTestId('access-items').count()) === 1)
+  await page.getByTestId('access-items').click()
+  await page.getByTestId('item-switches').waitFor()
+  const mods = await page.locator('[data-testid^="module-"][data-testid$="stats"], [data-testid="module-select"], [data-testid="module-admin"]').count()
+  ck('every module is listed with its items', (await page.getByTestId('item-select.fines').count()) === 1 && (await page.getByTestId('item-admin.fees').count()) === 1 && (await page.getByTestId('item-stats.players').count()) === 1 && mods >= 3)
+  ck('each item names the menu screens it opens', (await page.getByTestId('item-select.selection').innerText()).includes('Selection Whiteboard'))
+  ck('Save is blocked until something is chosen', await page.getByRole('button', { name: /^Save$/ }).isDisabled())
+  ck('and says nothing is chosen', (await page.getByTestId('item-count').innerText()).includes('Nothing chosen yet'))
+
+  await page.getByTestId('item-select.selection-manage').click()
+  ck('Selection at Manage', (await page.getByTestId('item-select.selection-manage').getAttribute('aria-pressed')) === 'true')
+  ck('switches Availability on at View', (await page.getByTestId('item-select.availability-view').getAttribute('aria-pressed')) === 'true')
+  ck('and tells the Primary Admin why', (await page.getByTestId('item-notice').innerText()).includes('Selection needs Availability'), await page.getByTestId('item-notice').innerText().catch(() => 'no notice'))
+  await page.getByTestId('item-select.availability-off').click()
+  ck('an item that something chosen needs cannot be switched off', (await page.getByTestId('item-select.availability-view').getAttribute('aria-pressed')) === 'true')
+  await page.getByTestId('item-select.fines-manage').click()
+  await page.getByTestId('item-admin.fees-view').click()
+  ck('the count follows', (await page.getByTestId('item-count').innerText()).includes('4 menu items chosen'), await page.getByTestId('item-count').innerText())
+  ck('and says what View means', (await page.getByTestId('item-count').innerText()).includes('View lets them look but not change anything'))
+  ck('Save is available once items are chosen', !(await page.getByRole('button', { name: /^Save$/ }).isDisabled()))
+  await page.screenshot({ path: `${SHOTS}/user-access-items.png`, fullPage: true })
+  await page.getByRole('button', { name: /^Save$/ }).click()
+  await page.waitForTimeout(400)
+  const ps = patches(state)
+  const last = ps[ps.length - 1]
+  const want = { 'select.selection': 'manage', 'select.availability': 'view', 'select.fines': 'manage', 'admin.fees': 'view' }
+  const got = last?.body?.access
+  ck('Save sends the exact items and levels', got?.mode === 'items' && JSON.stringify(Object.fromEntries(Object.entries(got.grants || {}).sort())) === JSON.stringify(Object.fromEntries(Object.entries(want).sort())), JSON.stringify(last?.body))
+  ck('to the right user', last?.p === '/club-admin/users/u-full', last?.p)
+  ck('the confirmation names what was added', (await page.locator('body').innerText()).includes('Selection needs Availability, so it is on at View'))
+
+  // a module's own buttons set every item in it
+  await page.getByText('Fran Full').first().click()
+  await page.getByTestId('access-picker').waitFor()
+  await page.getByTestId('access-items').click()
+  await page.getByTestId('module-select-view').click()
+  const pressed = async (id) => (await page.getByTestId(`item-${id}-view`).getAttribute('aria-pressed')) === 'true'
+  ck('All view on a module sets each of its items to View', await pressed('select.fines') && await pressed('select.votes') && await pressed('select.availability'))
+  await page.getByTestId('module-select-off').click()
+  ck('All off on a module switches its items off', (await page.getByTestId('item-select.fines-off').getAttribute('aria-pressed')) === 'true')
+  await ctx.close()
+})
+
+await section('editing an items person and moving between modes', async () => {
+  const { ctx, page, state } = await open('primary', '/admin/users')
+  await page.getByText('Ivy Items').first().waitFor({ timeout: 15000 })
+  await page.getByText('Ivy Items').first().click()
+  await page.getByTestId('item-switches').waitFor()
+  ck('an items person opens on Choose items', (await page.getByTestId('access-items').getAttribute('aria-pressed')) === 'true')
+  ck('with their levels shown', (await page.getByTestId('item-select.fines-manage').getAttribute('aria-pressed')) === 'true' && (await page.getByTestId('item-admin.fees-view').getAttribute('aria-pressed')) === 'true')
+  ck('and the other items off', (await page.getByTestId('item-select.votes-off').getAttribute('aria-pressed')) === 'true')
+  await page.getByTestId('access-full').click()
+  await page.getByRole('button', { name: /^Save$/ }).click()
+  await page.waitForTimeout(300)
+  const p1 = patches(state)
+  ck('choosing Everything clears the items', JSON.stringify(p1[p1.length - 1]?.body?.access) === JSON.stringify({ mode: 'full' }) && p1[p1.length - 1]?.p === '/club-admin/users/u-items', JSON.stringify(p1[p1.length - 1]))
+
+  await page.getByText('Leo Locked').first().click()
+  await page.getByTestId('access-picker').waitFor()
+  await page.getByTestId('access-items').click()
+  await page.getByTestId('item-switches').waitFor()
+  ck('moving a whole-module person to chosen items starts with that module on Manage',
+    (await page.getByTestId('item-select.fines-manage').getAttribute('aria-pressed')) === 'true' &&
+    (await page.getByTestId('item-select.votes-manage').getAttribute('aria-pressed')) === 'true' &&
+    (await page.getByTestId('item-admin.fees-off').getAttribute('aria-pressed')) === 'true')
+  await ctx.close()
+})
+
+await section('an items person: sidebar, dashboard and read-only screens', async () => {
+  const d = await dashboard('items')
+  ck('they see a tile for each module they can open something in', d.main.includes('/admin/betterselect') && d.main.includes('/admin/clubhouse'), d.main.join(','))
+  ck('and none for a module they cannot', !d.main.includes('/admin/betterstats') && !d.main.includes('/admin/bettersocials'), d.main.join(','))
+  ck('no Plan & Billing, Setup Wizard, Users or Settings', !['/admin/account', '/admin/setup', '/admin/users', '/admin/settings'].some(h => d.nav.includes(h)), d.nav.join(','))
+  ck('no plan line and no plan, setup or sync fetches', !/Plan:/.test(d.text) && !d.paths.some(p => /account\/plan|onboarding-wizard|sync/i.test(p)), d.paths.filter(p => /plan|sync|wizard/i.test(p)).join(','))
+
+  const { ctx, page } = await open('items', '/admin/betterselect')
+  await page.waitForTimeout(1800)
+  const links = await page.locator('nav a[href^="/admin/betterselect"]').evaluateAll(as => as.map(a => a.getAttribute('href')))
+  await ctx.close()
+  ck('the BetterSelect menu shows the items they hold', links.includes('/admin/betterselect/availability') && links.includes('/admin/betterselect/fines') && links.includes('/admin/betterselect/votes'), links.join(','))
+  ck('and none they do not', !['/admin/betterselect/teams', '/admin/betterselect/nets', '/admin/betterselect/selection', '/admin/betterselect/rules', '/admin/betterselect/audit', '/admin/betterselect/settings'].some(h => links.includes(h)), links.join(','))
+
+  for (const [kind, expectDisabled] of [['rules-manage', false], ['rules-view', true]]) {
+    const { ctx: c2, page: p2 } = await open(kind, '/admin/betterselect/settings')
+    await p2.locator('select[data-window="selection"]').waitFor({ timeout: 15000 })
+    const disabled = await p2.locator('select[data-window="selection"]').isDisabled()
+    ck(`Settings at ${kind === 'rules-view' ? 'View' : 'Manage'} draws ${expectDisabled ? 'read only' : 'editable'}`, disabled === expectDisabled, `disabled=${disabled}`)
+    await c2.close()
+  }
+})
+
 // ── phone width ────────────────────────────────────────────────────────
 await section('phone width', async () => {
   const { ctx, page } = await open('primary', '/admin/users', { width: 390, height: 844 })
@@ -244,6 +378,22 @@ await section('phone width', async () => {
   const w = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }))
   ck('no horizontal overflow at 390px with the picker open', w.sw <= w.iw + 1, JSON.stringify(w))
   await page.screenshot({ path: `${SHOTS}/user-access-390.png`, fullPage: true })
+  await ctx.close()
+})
+
+await section('phone width, choose items', async () => {
+  const { ctx, page } = await open('primary', '/admin/users', { width: 390, height: 844 })
+  await page.getByText('Fran Full').first().waitFor({ timeout: 15000 })
+  await page.getByText('Fran Full').first().click()
+  await page.getByTestId('access-picker').waitFor()
+  await page.getByTestId('access-items').click()
+  await page.getByTestId('item-switches').waitFor()
+  await page.getByTestId('item-select.selection-manage').click()
+  const w = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }))
+  ck('no horizontal overflow at 390px with the item switches open', w.sw <= w.iw + 1, JSON.stringify(w))
+  const row = await page.getByTestId('item-select.selection').boundingBox()
+  ck('an item row fits inside the screen width', row && row.x >= 0 && row.x + row.width <= w.iw + 1, JSON.stringify(row))
+  await page.screenshot({ path: `${SHOTS}/user-access-items-390.png`, fullPage: true })
   await ctx.close()
 })
 

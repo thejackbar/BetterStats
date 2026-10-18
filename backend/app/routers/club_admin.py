@@ -6061,14 +6061,18 @@ class ClubUserCreate(BaseModel):
     role: str = "club_admin"
     capabilities: list[str] = []
     # What the person can open: omitted or {"mode": "full"} is a full club admin;
-    # {"mode": "module", "module_key": "select"} locks them to one module.
-    # Only the club's Primary Admin (or a Super Admin) may send a lock.
+    # {"mode": "module", "module_key": "select"} locks them to one module;
+    # {"mode": "items", "grants": {"select.availability": "view", ...}} gives them
+    # a choice of menu items. Only the club's Primary Admin (or a Super Admin)
+    # may send a limit.
     access: Optional["UserAccessBody"] = None
 
 
 class UserAccessBody(BaseModel):
+    # "full", "module" (module_key) or "items" (grants: {item id: "view" | "manage"}).
     mode: str = "full"
     module_key: Optional[str] = None
+    grants: Optional[dict[str, str]] = None
 
 
 ClubUserCreate.model_rebuild()
@@ -6119,12 +6123,35 @@ def _checked_access(body: Optional["UserAccessBody"]) -> Optional[dict]:
         return None
     mode = (body.mode or "full").strip().lower()
     if mode == "full":
-        return {"mode": "full", "module_key": None}
-    if mode != access_service.MODE_MODULE:
-        raise HTTPException(422, "Access must be full or one module")
-    if body.module_key not in access_service.MODULE_ACCESS:
-        raise HTTPException(422, "Pick one of the listed modules")
-    return {"mode": mode, "module_key": body.module_key}
+        return {"mode": "full", "module_key": None, "grants": {}}
+    if mode == access_service.MODE_MODULE:
+        if body.module_key not in access_service.MODULE_ACCESS:
+            raise HTTPException(422, "Pick one of the listed modules")
+        return {"mode": mode, "module_key": body.module_key, "grants": {}}
+    if mode == access_service.MODE_ITEMS:
+        try:
+            final, _ = access_service.resolve_grants(body.grants or {})
+        except access_service.AccessError as e:
+            raise HTTPException(e.status, e.message)
+        if not final:
+            raise HTTPException(422, "Pick at least one menu item, or choose Everything")
+        return {"mode": mode, "module_key": None, "grants": dict(body.grants or {})}
+    raise HTTPException(422, "Access must be everything, one module or chosen menu items")
+
+
+async def _apply_access(db: AsyncSession, *, wanted: dict, user_id, club_id, by_user_id) -> dict:
+    """Write a limit (module or items) and return what was stored, or raise the
+    HTTP error for a refusal. Caller commits. {"capabilities": [...], "added": [...]}."""
+    try:
+        if wanted["mode"] == access_service.MODE_ITEMS:
+            return await access_service.set_item_access(
+                db, user_id=user_id, club_id=club_id, grants=wanted["grants"], by_user_id=by_user_id)
+        caps = await access_service.lock_to_module(
+            db, user_id=user_id, club_id=club_id, module_key=wanted["module_key"], by_user_id=by_user_id)
+        return {"capabilities": caps, "added": [], "grants": {}, "view_only": []}
+    except access_service.AccessError as e:
+        await db.rollback()
+        raise HTTPException(e.status, e.message)
 
 
 @router.get("/users")
@@ -6173,7 +6200,12 @@ async def list_capabilities(
 ):
     """All known capability constants — used by the UI to render checkboxes —
     and the modules a Primary Admin can lock someone to."""
-    return {"capabilities": list(ALL_CAPABILITIES), "modules": access_service.module_choices()}
+    return {
+        "capabilities": list(ALL_CAPABILITIES),
+        "modules": access_service.module_choices(),
+        # Every module with its menu items, for the choose-items screen.
+        "catalogue": access_service.item_catalogue(),
+    }
 
 
 @router.post("/users")
@@ -6200,7 +6232,7 @@ async def create_club_user(
         raise HTTPException(400, "A valid email address is required to invite the new admin")
 
     wanted_access = _checked_access(data.access)
-    locks = bool(wanted_access and wanted_access["mode"] == access_service.MODE_MODULE)
+    locks = bool(wanted_access and wanted_access["mode"] in (access_service.MODE_MODULE, access_service.MODE_ITEMS))
     await _users_actor(db, current_user, club, needs_primary=locks)
 
     # Invited as a full club admin (club_admin implies all capabilities). A lock
@@ -6242,14 +6274,11 @@ async def create_club_user(
             "caps": _json.dumps(caps),
         },
     )
+    stored = None
     if locks:
-        try:
-            caps = await access_service.lock_to_module(
-                db, user_id=new_user_id, club_id=club.id,
-                module_key=wanted_access["module_key"], by_user_id=current_user.id)
-        except access_service.AccessError as e:
-            await db.rollback()
-            raise HTTPException(e.status, e.message)
+        stored = await _apply_access(db, wanted=wanted_access, user_id=new_user_id,
+                                     club_id=club.id, by_user_id=current_user.id)
+        caps = stored["capabilities"]
         role = access_service.LOCKED_ROLE
 
     from app.services.audit_log import log_activity
@@ -6271,7 +6300,9 @@ async def create_club_user(
     )
 
     return {"id": str(new_user_id), "username": username, "role": role, "capabilities": caps, "invited": True,
-            "access": access_service.describe(wanted_access if locks else None)}
+            "access": access_service.describe(
+                {**wanted_access, "grants": stored["grants"]} if locks and stored else None),
+            "added": (stored or {}).get("added", [])}
 
 
 @router.patch("/users/{user_id}")
@@ -6331,17 +6362,15 @@ async def update_club_user(
         await db.execute(_text("UPDATE users SET password_hash = :h WHERE id = :id"), {"h": _hash_password(data.password), "id": user_id})
         changes["password"] = True
     if wanted_access is not None:
-        if wanted_access["mode"] == access_service.MODE_MODULE:
-            try:
-                await access_service.lock_to_module(
-                    db, user_id=user_id, club_id=club.id,
-                    module_key=wanted_access["module_key"], by_user_id=current_user.id)
-            except access_service.AccessError as e:
-                await db.rollback()
-                raise HTTPException(e.status, e.message)
+        if wanted_access["mode"] in (access_service.MODE_MODULE, access_service.MODE_ITEMS):
+            stored = await _apply_access(db, wanted=wanted_access, user_id=user_id,
+                                         club_id=club.id, by_user_id=current_user.id)
+            changes["access"] = {**wanted_access, "grants": stored.get("grants") or {}}
+            # What was switched on because something chosen needs it, so the screen can say so.
+            changes["added"] = stored.get("added", [])
         else:
             await access_service.unlock(db, user_id=user_id, club_id=club.id)
-        changes["access"] = wanted_access
+            changes["access"] = wanted_access
 
     from app.services.audit_log import log_activity
     await log_activity(

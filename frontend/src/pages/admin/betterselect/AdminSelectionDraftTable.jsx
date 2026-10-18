@@ -346,12 +346,12 @@ const fmtDay = (iso) => {
 
 // ── Screen ──────────────────────────────────────────────────────────────────
 export default function AdminSelectionDraftTable() {
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
   const toastRef = useRef(toast)
   toastRef.current = toast
   const { theme, toggle: toggleTheme } = useTheme()
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canEdit = canEditCap(CAP.SELECT_SELECTION, CAP.MANAGE_SELECTIONS)
   const isPhone = useMediaQuery('(max-width: 1023px)')
   const [params, setParams] = useSearchParams()
 

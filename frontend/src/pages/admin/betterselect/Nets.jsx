@@ -462,9 +462,9 @@ function CheckInTab({ canEdit, onCount }) {
 
 /* ── Page ─────────────────────────────────────────────────────────────────── */
 export default function Nets() {
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const navigate = useNavigate()
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canEdit = canEditCap(CAP.SELECT_NETS, CAP.MANAGE_SELECTIONS)
   const [tab, setTab] = useState('sessions')
   const [pending, setPending] = useState(0)
 

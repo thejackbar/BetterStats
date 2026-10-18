@@ -157,7 +157,7 @@ export default function AdminSelection() {
   const fmt = useAdminNameFormat()
   const { fixtureId } = useParams()
   const navigate = useNavigate()
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
   // ToastProvider hands out a NEW `toast` object on every render, and showing a
   // toast re-renders it. `load` must not depend on that object, or every toast
@@ -166,7 +166,7 @@ export default function AdminSelection() {
   const toastRef = useRef(toast)
   toastRef.current = toast
   const { theme, toggle: toggleTheme } = useTheme()
-  const canManage = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canManage = canEditCap(CAP.SELECT_SELECTION, CAP.MANAGE_SELECTIONS)
   const [data, setData] = useState(null)
   // A locked side is read-only for everyone, selectors included, until it is
   // unlocked. canManage is the capability; canEdit is "may change the board now".

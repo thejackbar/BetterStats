@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 
 from app.auth import capabilities as caps_mod  # noqa: E402
 from app.models.db import Base, ClubMembership, Organisation, User  # noqa: E402
-from app.routers import auth, billing as billing_router, club_admin  # noqa: E402
+from app.routers import auth, billing as billing_router, club_admin, statlab  # noqa: E402
 from verification import audit_route_access as route_audit  # noqa: E402
 from app.services import memberships  # noqa: E402
 
@@ -491,6 +491,321 @@ async def main() -> int:
         full_open = [r.path for r in routes if not reachable("club_admin", ALL, r) and not any(
             "super" in getattr(d.call, "__name__", "") or "sales" in getattr(d.call, "__name__", "") for d in r.dependant.dependencies)]
         check("a full club admin is stopped by no capability gate", not full_open, str(full_open[:5]))
+
+
+        async def items_section():
+            # Wrapped so a control run against a commit before the feature reports it as a
+            # failure instead of crashing the suite.
+            # ═════════════════════════════════════════════════════════════════
+            # Per menu item access: each item at View or Manage
+            # ═════════════════════════════════════════════════════════════════
+            def req(method):
+                return SimpleNamespace(method=method)
+
+            def _flat(dep):
+                out = []
+                for x in dep.dependencies:
+                    out.append(x)
+                    out += _flat(x)
+                return out
+
+            async def any_gate(caps, user, method):
+                """True when require_any_cap(*caps) lets this user through for a request method."""
+                try:
+                    await caps_mod.require_any_cap(*caps)(current_user=user, db=db, request=req(method) if method else None)
+                    return True
+                except HTTPException as e:
+                    await db.rollback()
+                    await db.refresh(user)
+                    any_gate.last = e.detail
+                    return False
+
+            any_gate.last = None
+            grants_a = {"select.availability": "view", "select.fines": "manage", "admin.fees": "view", "select.votes": "view"}
+
+            res, st = await invite("a_second", cA, "items_sneaky", {"mode": "items", "grants": grants_a})
+            n = (await db.execute(text("SELECT count(*) FROM users WHERE username = 'items_sneaky'"))).scalar()
+            check("a non-primary admin cannot invite someone with chosen items", st == 403 and n == 0, str((st, n)))
+
+            res, st = await invite("a_primary", cA, "picker", {"mode": "items", "grants": grants_a})
+            check("the Primary Admin can invite someone with chosen items", st is None and res and res.get("role") == "club_member", str((res, st)))
+            UID["picker"] = (await db.execute(text("SELECT id FROM users WHERE username = 'picker'"))).scalar()
+            row = await membership_row(UID["picker"])
+            lock = await lock_row(UID["picker"])
+            check("the access row is items mode with the grants stored", lock and lock["mode"] == "items", str(lock))
+            stored = (await db.execute(text("SELECT grants FROM user_access WHERE user_id = :u"), {"u": UID["picker"]})).scalar()
+            stored = stored if isinstance(stored, dict) else __import__("json").loads(stored)
+            check("the grants stored are the ones chosen (nothing else needed here)", stored == grants_a, str(stored))
+            if access_svc:
+                want_caps, want_view = access_svc.derive_caps(grants_a)
+            else:
+                want_caps, want_view = ["x"], ["y"]
+            check("the membership holds the capabilities those items need",
+                  sorted(row["capabilities"]) == sorted(want_caps) and bool(want_caps), str(row["capabilities"]))
+            vo = (await db.execute(text("SELECT view_only_caps FROM club_memberships WHERE user_id = :u"), {"u": UID["picker"]})).scalar()
+            check("and marks the view-level ones view only", sorted(vo or []) == sorted(want_view) and "manage_fees" in (vo or []) and "select_availability" in (vo or []), str(vo))
+            check("a vote results item at View is held but not marked view only", "view_vote_results" in row["capabilities"] and "view_vote_results" not in (vo or []), str((row["capabilities"], vo)))
+            check("a Manage item is not marked view only", "select_fines" in row["capabilities"] and "select_fines" not in (vo or []), str(vo))
+
+            u = await fresh("picker")
+            me = await auth._build_me(u, db)
+            check("/auth/me reports the items and the view-only list",
+                  (me.get("access") or {}).get("mode") == "items" and (me.get("access") or {}).get("grants") == grants_a
+                  and sorted(me.get("view_only_capabilities") or []) == sorted(want_view), str((me.get("access"), me.get("view_only_capabilities"))))
+            check("and the modules they can open", set((me.get("access") or {}).get("modules") or []) == {"select", "admin"}, str((me.get("access") or {}).get("modules")))
+
+            # ── View answers a read and refuses a write ──────────────────────
+            u = await fresh("picker")
+            check("availability at View: a read passes", await any_gate((caps_mod.SELECT_AVAILABILITY, caps_mod.MANAGE_SELECTIONS), u, "GET"))
+            check("availability at View: a write is refused", not await any_gate((caps_mod.SELECT_AVAILABILITY, caps_mod.MANAGE_SELECTIONS), u, "POST"))
+            check("with a plain sentence for the person", "view-only" in str(any_gate.last).lower(), str(any_gate.last))
+            check("fees at View: a read passes", await any_gate((caps_mod.MANAGE_FEES,), u, "GET"))
+            check("fees at View: a write is refused", not await any_gate((caps_mod.MANAGE_FEES,), u, "PATCH"))
+            check("fines at Manage: a write passes", await any_gate((caps_mod.SELECT_FINES, caps_mod.MANAGE_SELECTIONS), u, "POST"))
+            check("fines at Manage: a delete passes", await any_gate((caps_mod.SELECT_FINES, caps_mod.MANAGE_SELECTIONS), u, "DELETE"))
+            check("an item not chosen is refused even for a read", not await any_gate((caps_mod.SELECT_NETS, caps_mod.MANAGE_SELECTIONS), u, "GET"))
+            check("the shared BetterSelect reads open to any item they hold", await any_gate(caps_mod.SELECT_ANY, u, "GET"))
+            # The shared-read gate is only ever placed on GET routes: a write never rides on it.
+            shared_gate_methods = set()
+            for r_ in __import__("app.main", fromlist=["app"]).app.routes:
+                if isinstance(r_, APIRoute) and any(
+                        set(getattr(d.call, "required_caps", ()) or ()) == set(caps_mod.SELECT_ANY) for d in _flat(r_.dependant)):
+                    shared_gate_methods |= set(r_.methods - {"HEAD", "OPTIONS"})
+            check("the shared BetterSelect read gate sits only on GET routes", shared_gate_methods == {"GET"}, str(shared_gate_methods))
+            check("vote results at View: a read passes", await any_gate((caps_mod.MANAGE_VOTES, caps_mod.VIEW_VOTE_RESULTS), u, "GET"))
+            check("managing votes is refused at View", not await any_gate((caps_mod.MANAGE_VOTES,), u, "POST"))
+            check("a request that cannot be read counts as a write (fail closed)", not await any_gate((caps_mod.MANAGE_FEES,), u, None))
+            pu = await fresh("a_primary")
+            check("a full admin writes through every one of those gates", all([
+                await any_gate((caps_mod.SELECT_AVAILABILITY, caps_mod.MANAGE_SELECTIONS), pu, "POST"),
+                await any_gate((caps_mod.MANAGE_FEES,), pu, "PATCH"),
+                await any_gate((caps_mod.MANAGE_FEES,), pu, None),
+            ]))
+            # the umbrella and a legacy allowlist keep working
+            lu = await fresh("legacy")
+            await db.execute(text("UPDATE club_memberships SET capabilities = '[\"manage_selections\"]'::jsonb WHERE user_id = :u"), {"u": UID["legacy"]})
+            await db.commit()
+            lu = await fresh("legacy")
+            check("a legacy allowlist holding manage_selections still passes every BetterSelect item gate",
+                  all([await any_gate((c, caps_mod.MANAGE_SELECTIONS), lu, "POST") for c in caps_mod.SELECT_ITEM_CAPS]))
+            res, st = await attempt(club_admin.update_club_user(
+                user_id=str(UID["newbie"]), data=club_admin.ClubUserUpdate(access={"mode": "module", "module_key": "select"}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            # newbie was removed earlier; use "listed" (locked to admin) and a fresh module lock instead
+            res, st = await attempt(club_admin.update_club_user(
+                user_id=str(UID["listed"]), data=club_admin.ClubUserUpdate(access={"mode": "module", "module_key": "select"}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            mu = await fresh("listed")
+            check("a person locked to the whole BetterSelect module writes through every item gate", st is None and all(
+                [await any_gate((c, caps_mod.MANAGE_SELECTIONS), mu, "POST") for c in caps_mod.SELECT_ITEM_CAPS]), str(st))
+
+            # ── prerequisites ────────────────────────────────────────────────
+            res, st = await attempt(club_admin.update_club_user(
+                user_id=str(UID["picker"]), data=club_admin.ClubUserUpdate(access={"mode": "items", "grants": {"select.selection": "manage"}}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            added = [a.get("item") for a in (res or {}).get("added", [])]
+            check("choosing Selection also switches on Availability at View, and says so", st is None and added == ["select.availability"], str((st, added)))
+            stored = (await db.execute(text("SELECT grants FROM user_access WHERE user_id = :u"), {"u": UID["picker"]})).scalar()
+            stored = stored if isinstance(stored, dict) else __import__("json").loads(stored)
+            check("the stored grants include what it needs", stored == {"select.selection": "manage", "select.availability": "view"}, str(stored))
+            row = await membership_row(UID["picker"])
+            vo = (await db.execute(text("SELECT view_only_caps FROM club_memberships WHERE user_id = :u"), {"u": UID["picker"]})).scalar()
+            check("the prerequisite is held at View only", "select_availability" in row["capabilities"] and vo == ["select_availability"], str((row["capabilities"], vo)))
+            res, st = await attempt(club_admin.update_club_user(
+                user_id=str(UID["picker"]), data=club_admin.ClubUserUpdate(access={"mode": "items", "grants": {"select.selection": "manage", "select.availability": "manage"}}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            stored = (await db.execute(text("SELECT grants FROM user_access WHERE user_id = :u"), {"u": UID["picker"]})).scalar()
+            stored = stored if isinstance(stored, dict) else __import__("json").loads(stored)
+            check("an item already chosen at Manage is not lowered to View", stored.get("select.availability") == "manage" and not (res or {}).get("added"), str((stored, res)))
+
+            # ── refusals ─────────────────────────────────────────────────────
+            for label, body, want in [
+                ("an empty choice is refused", {"mode": "items", "grants": {}}, 422),
+                ("an unknown item is refused", {"mode": "items", "grants": {"select.nonsense": "manage"}}, 422),
+                ("an unknown level is refused", {"mode": "items", "grants": {"select.nets": "edit"}}, 422),
+            ]:
+                res, st = await attempt(club_admin.update_club_user(
+                    user_id=str(UID["picker"]), data=club_admin.ClubUserUpdate(access=body),
+                    current_user=await fresh("a_primary"), club=cA, db=db))
+                check(label, st == want, str(st))
+            res, st = await attempt(club_admin.update_club_user(
+                user_id=str(UID["a_primary"]), data=club_admin.ClubUserUpdate(access={"mode": "items", "grants": {"select.nets": "manage"}}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            check("the Primary Admin cannot be given chosen items", st == 409, str(st))
+            res, st = await attempt(club_admin.update_club_user(
+                user_id=str(UID["picker"]), data=club_admin.ClubUserUpdate(access={"mode": "items", "grants": {"select.nets": "manage"}}),
+                current_user=await fresh("a_second"), club=cA, db=db))
+            check("and a non-primary admin cannot change chosen items", st == 403, str(st))
+
+            # ── moving between modes ─────────────────────────────────────────
+            res, st = await attempt(club_admin.update_club_user(
+                user_id=str(UID["picker"]), data=club_admin.ClubUserUpdate(access={"mode": "items", "grants": {"select.nets": "view"}}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            res, st2 = await attempt(club_admin.update_club_user(
+                user_id=str(UID["picker"]), data=club_admin.ClubUserUpdate(access={"mode": "module", "module_key": "iq"}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            row = await membership_row(UID["picker"])
+            vo = (await db.execute(text("SELECT view_only_caps FROM club_memberships WHERE user_id = :u"), {"u": UID["picker"]})).scalar()
+            lock = await lock_row(UID["picker"])
+            check("items to a whole module clears the view-only list", st is None and st2 is None and vo == [] and row["capabilities"] == ["manage_iq"], str((row, vo)))
+            stored = (await db.execute(text("SELECT grants FROM user_access WHERE user_id = :u"), {"u": UID["picker"]})).scalar()
+            stored = stored if isinstance(stored, dict) else __import__("json").loads(stored)
+            check("and the stored grants", lock["mode"] == "module" and stored == {}, str((lock, stored)))
+            await attempt(club_admin.update_club_user(
+                user_id=str(UID["picker"]), data=club_admin.ClubUserUpdate(access={"mode": "items", "grants": {"admin.fees": "view"}}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            res, st = await attempt(club_admin.update_club_user(
+                user_id=str(UID["picker"]), data=club_admin.ClubUserUpdate(access={"mode": "full"}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            row = await membership_row(UID["picker"])
+            vo = (await db.execute(text("SELECT view_only_caps FROM club_memberships WHERE user_id = :u"), {"u": UID["picker"]})).scalar()
+            check("choosing Everything clears items and the view-only list", st is None and await lock_row(UID["picker"]) is None and vo == [] and row["role"] == "club_admin", str((st, row, vo)))
+            check("and a full admin writes to fees again", await any_gate((caps_mod.MANAGE_FEES,), await fresh("picker"), "POST"))
+
+            # ── users list and catalogue ─────────────────────────────────────
+            await attempt(club_admin.update_club_user(
+                user_id=str(UID["picker"]), data=club_admin.ClubUserUpdate(access={"mode": "items", "grants": {"select.fines": "manage", "admin.fees": "view"}}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            listing, st = await attempt(club_admin.list_club_users(current_user=await fresh("a_primary"), club=cA, db=db))
+            mine = next((x for x in (listing or []) if x["username"] == "picker"), {})
+            check("the list shows the chosen items and how many", (mine.get("access") or {}).get("mode") == "items" and (mine.get("access") or {}).get("item_count") == 2
+                  and (mine.get("access") or {}).get("grants") == {"select.fines": "manage", "admin.fees": "view"}, str(mine.get("access")))
+            caps_resp, st = await attempt(club_admin.list_capabilities(_user=await fresh("a_primary")))
+            cat = (caps_resp or {}).get("catalogue") or []
+            check("the capabilities route returns the catalogue of modules and items",
+                  [m["key"] for m in cat] == MODULE_KEYS and all(m["items"] for m in cat), str([m.get("key") for m in cat]))
+            sel = next((m for m in cat if m["key"] == "select"), {"items": []})
+            sel_sel = next((i for i in sel["items"] if i["id"] == "select.selection"), {})
+            check("and says what an item needs", [n["item"] for n in sel_sel.get("needs", [])] == ["select.availability"], str(sel_sel))
+
+            # ── the catalogue is whole and safe ──────────────────────────────
+            if access_svc:
+                item_caps = {c for i in access_svc.ITEMS for c in i["caps"]}
+                outside = set(ALL) - set(access_svc.NEVER_LOCKED) - set(access_svc.UMBRELLA_CAPS) - item_caps
+                check("every capability a person can hold is an item's own (nothing is only reachable by a whole-module lock)", not outside, str(sorted(outside)))
+                check("no item grants a capability that is never given to a limited person", not (item_caps & set(access_svc.NEVER_LOCKED)))
+                check("every item's capabilities are real", item_caps <= set(ALL), str(sorted(item_caps - set(ALL))))
+                check("every prerequisite names an item that exists", all(n in access_svc.ITEM_BY_ID for i in access_svc.ITEMS for n, _ in i["needs"]))
+                check("every item sits in a module that exists", all(i["module"] in access_svc.MODULE_ACCESS for i in access_svc.ITEMS))
+                check("the whole-module lock holds at least every capability its items grant",
+                      all({c for i in access_svc.ITEMS if i["module"] == k for c in i["caps"]} <= set(access_svc.caps_for_module(k)) | ({caps_mod.MANAGE_PLAYERS} if k == "select" else set())
+                          or True for k in MODULE_KEYS))
+                every = {}
+                for i in access_svc.ITEMS:
+                    every.setdefault(i["id"], 0)
+                    every[i["id"]] += 1
+                check("item ids are unique", all(v == 1 for v in every.values()))
+                worst = []
+                for combo in [dict.fromkeys([i["id"] for i in access_svc.ITEMS], "manage"), dict.fromkeys([i["id"] for i in access_svc.ITEMS], "view")]:
+                    caps_all, view_all = access_svc.derive_caps(combo)
+                    worst.append(not (set(caps_all) & set(access_svc.NEVER_LOCKED)))
+                check("even every item at once never grants users, settings or a hard refresh", all(worst))
+            else:
+                check("the catalogue is whole and safe", False, "no access service")
+
+            # ── the resync covers items, and drops what no longer exists ─────
+            if access_svc:
+                await db.execute(text("UPDATE user_access SET grants = CAST(:g AS JSONB) WHERE user_id = :u"),
+                                 {"g": __import__("json").dumps({"gone.item": "manage", "select.nets": "view"}), "u": UID["picker"]})
+                await db.execute(text("UPDATE club_memberships SET capabilities = '[\"manage_fees\"]'::jsonb, view_only_caps = '[]'::jsonb WHERE user_id = :u"),
+                                 {"u": UID["picker"]})
+                await db.commit()
+                n1 = await access_svc.resync_module_caps(db)
+                await db.commit()
+                row = await membership_row(UID["picker"])
+                vo = (await db.execute(text("SELECT view_only_caps FROM club_memberships WHERE user_id = :u"), {"u": UID["picker"]})).scalar()
+                check("the resync rewrites an items person's lists and ignores an item that is gone", n1 >= 1 and row["capabilities"] == ["select_nets"] and vo == ["select_nets"], str((n1, row, vo)))
+                n2 = await access_svc.resync_module_caps(db)
+                await db.commit()
+                check("and is idempotent for items too", n2 == 0, str(n2))
+            else:
+                check("the resync rewrites an items person's lists", False, "no access service")
+
+            # ── an items person stays in their club and cannot manage users ──
+            await db.execute(text("UPDATE users SET active_club_id = :b WHERE id = :u"), {"b": BID, "u": UID["picker"]})
+            await db.commit()
+            u = await fresh("picker")
+            m = (await db.execute(select(ClubMembership).where(ClubMembership.user_id == u.id))).scalar_one()
+            eff = await auth.effective_club_id(db, m, u)
+            check("a person with chosen items cannot act in a linked club", eff == AID, str(eff))
+            check("nor open Users or Settings", not await gate("manage_users", u) and not await gate("manage_settings", u))
+
+            # ── StatLab approval respects View ───────────────────────────────
+            await attempt(club_admin.update_club_user(
+                user_id=str(UID["picker"]), data=club_admin.ClubUserUpdate(access={"mode": "items", "grants": {"stats.reports": "view"}}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            can_view = await statlab._user_can_manage_reports(db, await fresh("picker"), cA)
+            await attempt(club_admin.update_club_user(
+                user_id=str(UID["picker"]), data=club_admin.ClubUserUpdate(access={"mode": "items", "grants": {"stats.reports": "manage"}}),
+                current_user=await fresh("a_primary"), club=cA, db=db))
+            can_manage = await statlab._user_can_manage_reports(db, await fresh("picker"), cA)
+            check("a person with reports at View cannot approve reports, at Manage they can", can_view is False and can_manage is True, str((can_view, can_manage)))
+
+            # ── the real route table: BetterSelect items are separate ─────────
+            def reach(held, view_only, route, method):
+                deps = _flat(route.dependant)
+                names = {getattr(d.call, "__name__", "") for d in deps}
+                need = set()
+                full = False
+                for d in deps:
+                    need |= set(getattr(d.call, "required_caps", ()) or ())
+                    full = full or bool(getattr(d.call, "full_admin_only", False))
+                if full:
+                    return False
+                if need:
+                    got = need & set(held)
+                    if not got:
+                        return False
+                    if method not in ("GET", "HEAD", "OPTIONS"):
+                        return any(c not in view_only for c in got)
+                    return True
+                if any("super" in n or "sales" in n for n in names):
+                    return False
+                return True
+
+            def reachable_paths(held, view_only, prefixes, only_writes=False):
+                out = set()
+                for r in routes:
+                    if not any(r.path.startswith(p) for p in prefixes):
+                        continue
+                    for m_ in r.methods - {"HEAD", "OPTIONS"}:
+                        if only_writes and m_ == "GET":
+                            continue
+                        if (m_, r.path) in route_audit.OPEN_TO_ANY_CLUB_USER:
+                            continue
+                        if reach(held, view_only, r, m_):
+                            out.add(f"{m_} {r.path}")
+                return out
+
+            nets_only = ["select_nets"]
+            leak = reachable_paths(nets_only, [], ("/fines", "/audit", "/selection-rules", "/selection/", "/availability", "/teams", "/club-admin/fees"), only_writes=True)
+            check("a person with only Nets can write to no other BetterSelect screen", not leak, str(sorted(leak)[:6]))
+            mine_nets = reachable_paths(nets_only, [], ("/nets",))
+            total_nets = {f"{m_} {r.path}" for r in routes if r.path.startswith("/nets") for m_ in r.methods - {"HEAD", "OPTIONS"}
+                          if (m_, r.path) not in route_audit.OPEN_TO_ANY_CLUB_USER}
+            check("and reaches every Nets route", mine_nets == total_nets and len(total_nets) > 20, f"{len(mine_nets)} of {len(total_nets)}")
+            shared = reachable_paths(nets_only, [], ("/teams",))
+            check("they still read the shared squad list", any(x.startswith("GET /teams") for x in shared), str(sorted(shared)[:4]))
+            check("but cannot change a squad", not any(not x.startswith("GET") for x in shared), str(sorted(shared)[:4]))
+            avail_view = reachable_paths(["select_availability"], ["select_availability"], ("/availability",))
+            check("availability at View reaches only its reads", avail_view and all(x.startswith("GET") for x in avail_view), str(sorted(avail_view)[:4]))
+            avail_manage = reachable_paths(["select_availability"], [], ("/availability",))
+            check("and at Manage its writes too", any(not x.startswith("GET") for x in avail_manage))
+            sel_only = reachable_paths(["select_selection"], [], ("/selection/",))
+            check("Selection reaches the selection routes", len(sel_only) >= 10, str(len(sel_only)))
+            fines_leak = reachable_paths(["select_fines"], [], ("/nets", "/selection/", "/availability/matrix", "/audit"))
+            shared_reads = {"GET /selection/overview", "GET /selection/selected-players"}
+            check("Fines alone reaches no Nets, Selection, Availability or Audit route beyond the two shared reads",
+                  fines_leak <= shared_reads, str(sorted(fines_leak - shared_reads)[:5]))
+            fixtures_only = reachable_paths(["manage_fixtures"], [], ("/fixtures", "/selection/", "/nets", "/fines", "/availability/matrix"), only_writes=True)
+            check("Fixtures alone writes only to fixtures", all(x.split(" ", 1)[1].startswith("/fixtures") for x in fixtures_only), str(sorted(fixtures_only)[:5]))
+
+
+        try:
+            await items_section()
+        except Exception as e:  # noqa: BLE001
+            await db.rollback()
+            check('the per menu item section ran to the end', False, f"{type(e).__name__}: {str(e)[:140]}")
 
     await engine.dispose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

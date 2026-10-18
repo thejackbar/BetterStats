@@ -34,8 +34,8 @@ export default function NetSession() {
   const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
-  const { hasCapability } = useAuth()
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const { hasCapability, canEditCap } = useAuth()
+  const canEdit = canEditCap(CAP.SELECT_NETS, CAP.MANAGE_SELECTIONS)
 
   const [live, setLive] = useState(null)       // null = loading, false = not found
   const [roster, setRoster] = useState([])

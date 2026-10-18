@@ -931,6 +931,10 @@ class ClubMembership(Base):
     # role". For super_admin/club_admin the list is ignored (those roles
     # imply all caps). For club_member, this is the explicit allowlist.
     capabilities = Column(JSONB, default=list, nullable=False, server_default="[]")
+    # The subset of `capabilities` held at VIEW level only (services/access.py, migration
+    # 344): a route gated on one of them answers a read and refuses a write. Always []
+    # for club_admin and super_admin.
+    view_only_caps = Column(JSONB, default=list, nullable=False, server_default="[]")
     # The club's primary / owner admin (migration 118). The first club_admin
     # created for a club is primary; it's reassignable to another club_admin (by
     # the current primary or a super admin). Only the primary may request a paid

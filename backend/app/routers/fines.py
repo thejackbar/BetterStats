@@ -26,6 +26,9 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_SELECTIONS, SELECT_FINES, require_any_cap,
+)  # BetterSelect item permissions
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Organisation, Player, User, get_db
 from app.routers.auth import get_current_club
@@ -175,7 +178,7 @@ async def _types(db: AsyncSession, club: Organisation, team_id, archived: bool =
 async def list_squads(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS)),
 ):
     """Every active squad, whether Fines is on for it, and what is still owed."""
     rows = (await db.execute(
@@ -202,7 +205,7 @@ async def get_squad(
     team_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS)),
 ):
     """One squad's tracker: settings, fine list, and every player's fines by date
     with what they owe. The players are the squad plus anyone who has been fined
@@ -285,7 +288,7 @@ async def patch_settings(
     body: SettingsPatch,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS)),
 ):
     """Switch Fines on or off for a squad and set how players pay. A field that is
     not sent is left alone; an empty string clears it."""
@@ -320,7 +323,7 @@ async def create_type(
     body: TypeIn,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS)),
 ):
     squad = await _squad_or_404(db, club, team_id)
     name = _clean(body.name, 80)
@@ -351,7 +354,7 @@ async def patch_type(
     body: TypePatch,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS)),
 ):
     """Rename, reprice, archive or bring back a fine type. Fines already handed out
     keep the name and amount they were given."""
@@ -419,7 +422,7 @@ async def add_entries(
     body: EntriesIn,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS)),
 ):
     """Record a fines session: any number of fines for any number of players on
     one date. Each fine is its own row (so one can be voided on its own). A line
@@ -496,7 +499,7 @@ async def _set_void(db: AsyncSession, club: Organisation, user: User, table: str
 @router.post("/entries/{entry_id}/void")
 async def void_entry(entry_id: str, db: AsyncSession = Depends(get_db),
                      club: Organisation = Depends(get_current_club),
-                     user: User = Depends(require_cap(MANAGE_SELECTIONS))):
+                     user: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS))):
     await _set_void(db, club, user, "fine_entries", entry_id, True)
     return {"status": "ok"}
 
@@ -504,7 +507,7 @@ async def void_entry(entry_id: str, db: AsyncSession = Depends(get_db),
 @router.post("/entries/{entry_id}/restore")
 async def restore_entry(entry_id: str, db: AsyncSession = Depends(get_db),
                         club: Organisation = Depends(get_current_club),
-                        user: User = Depends(require_cap(MANAGE_SELECTIONS))):
+                        user: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS))):
     await _set_void(db, club, user, "fine_entries", entry_id, False)
     return {"status": "ok"}
 
@@ -515,7 +518,7 @@ async def add_payment(
     body: PaymentIn,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS)),
 ):
     """Record money a player has tipped into the pot. More than they owe is
     allowed (it shows as credit)."""
@@ -543,7 +546,7 @@ async def add_payment(
 @router.post("/payments/{payment_id}/void")
 async def void_payment(payment_id: str, db: AsyncSession = Depends(get_db),
                        club: Organisation = Depends(get_current_club),
-                       user: User = Depends(require_cap(MANAGE_SELECTIONS))):
+                       user: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS))):
     await _set_void(db, club, user, "fine_payments", payment_id, True)
     return {"status": "ok"}
 
@@ -551,7 +554,7 @@ async def void_payment(payment_id: str, db: AsyncSession = Depends(get_db),
 @router.post("/payments/{payment_id}/restore")
 async def restore_payment(payment_id: str, db: AsyncSession = Depends(get_db),
                           club: Organisation = Depends(get_current_club),
-                          user: User = Depends(require_cap(MANAGE_SELECTIONS))):
+                          user: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS))):
     await _set_void(db, club, user, "fine_payments", payment_id, False)
     return {"status": "ok"}
 
@@ -562,7 +565,7 @@ async def session_side(
     date_: Optional[date] = Query(None, alias="date"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS)),
 ):
     """Who to fine for a week: the players picked in this squad's side(s) in the
     Monday to Sunday week of `date`, from the selection lineups. With no date, the
@@ -640,7 +643,7 @@ async def report(
     date_to: Optional[date] = None,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS)),
 ):
     """Everything the PDF report needs for a squad over a date range: a summary per
     player, every fine by session with its reason and note, and the payments. Voided
@@ -718,7 +721,7 @@ async def player_ledger(
     player_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_FINES, MANAGE_SELECTIONS)),
 ):
     """Every fine and payment for one player in a squad, newest first, voided ones
     included and marked, so a mistake can be found and undone."""

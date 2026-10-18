@@ -217,12 +217,14 @@ function SetupCard({ flow }) {
 
 export default function AdminDashboard() {
   const { user, hasModule, hasCapability, coreLive, refetch } = useAuth()
-  // A person a Primary Admin locked to one module sees that module's tile and the
-  // quick links their permissions allow. The plan, trial and setup panels are the
-  // Primary Admin's, so they are neither drawn nor fetched for a locked person.
-  const lockedTo = user?.access?.mode === 'module'
-    ? (user.access.module_key === 'socials' ? 'bettersocials' : user.access.module_key)
+  // A person a Primary Admin limited (to one module, or to chosen menu items) sees a tile for
+  // each module they can open something in, and the quick links their permissions allow. The
+  // plan, trial and setup panels are the Primary Admin's, so they are neither drawn nor fetched
+  // for a limited person. `lockedTo` is the list of module keys, or null for full access.
+  const lockedTo = user?.access?.mode && user.access.mode !== 'full'
+    ? (Array.isArray(user.access.modules) ? user.access.modules : (user.access.module_key ? [user.access.module_key] : []))
     : null
+  const isLimited = !!lockedTo  // a stable value for effect dependencies (lockedTo is a list)
   const canSeeSync = hasCapability(CAP.RUN_SYNC) || hasCapability(CAP.MANAGE_MERGES)
   const [settings, setSettings] = useState(null)
   const [seasons, setSeasons] = useState([])
@@ -245,11 +247,11 @@ export default function AdminDashboard() {
   useEffect(() => {
     api.adminGetSettings().then(setSettings).catch(() => {})
     api.adminListSeasons().then(setSeasons).catch(() => {})
-    if (lockedTo) return
+    if (isLimited) return
     api.listMyModuleRequests().then(d => setMyRequests(Array.isArray(d) ? d : [])).catch(() => {})
     api.getSetupFlow().then(setSetupFlow).catch(() => {})
     loadPlan()
-  }, [lockedTo])
+  }, [isLimited])
 
   const planByModule = Object.fromEntries(plan.map(r => [r.module, r]))
 
@@ -428,7 +430,7 @@ export default function AdminDashboard() {
         {/* Better modules — entitled tiles open; locked tiles upsell. */}
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Modules</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
-          {dashboardTiles().filter(t => !lockedTo || t.key === lockedTo).map(tile => {
+          {dashboardTiles().filter(t => !lockedTo || lockedTo.includes(t.key === 'bettersocials' ? 'socials' : t.key)).map(tile => {
             // The billable module key (BetterAdmin = 'admin', BetterSocials =
             // 'socials') doesn't always equal the tile's own key — the
             // BetterSocials group tile is keyed 'bettersocials' (its umbrella

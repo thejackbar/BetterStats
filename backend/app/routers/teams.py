@@ -23,6 +23,9 @@ from sqlalchemy import select, text, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import (
+    MANAGE_SELECTIONS, SELECT_ANY, SELECT_SQUADS, require_any_cap,
+)  # BetterSelect item permissions
+from app.auth.capabilities import (
     MANAGE_FIXTURES, MANAGE_SELECTIONS, require_any_cap,
 )  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
@@ -231,7 +234,7 @@ class TeamUpdate(BaseModel):
     assign_fixtures: Optional[bool] = True
 
 
-@router.get("", dependencies=[Depends(require_any_cap(MANAGE_SELECTIONS, MANAGE_FIXTURES))])
+@router.get("", dependencies=[Depends(require_any_cap(*SELECT_ANY))])
 async def list_teams(
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
@@ -248,7 +251,7 @@ async def list_teams(
     return [_serialize(t, grades, sides.squads.get(str(t.id))) for t in res.scalars().all()]
 
 
-@router.get("/grade-options", dependencies=[Depends(require_any_cap(MANAGE_SELECTIONS, MANAGE_FIXTURES))])
+@router.get("/grade-options", dependencies=[Depends(require_any_cap(*SELECT_ANY))])
 async def grade_options(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -281,7 +284,7 @@ async def create_team(
     body: TeamCreate,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(SELECT_SQUADS, MANAGE_SELECTIONS)),
 ):
     name = body.name.strip()
     if not name:
@@ -340,7 +343,7 @@ async def update_team(
     body: TeamUpdate,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(SELECT_SQUADS, MANAGE_SELECTIONS)),
 ):
     t = await _get_owned_team(db, team_id, club.id)
     data = body.model_dump(exclude_unset=True)
@@ -397,7 +400,7 @@ async def delete_team(
     team_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(SELECT_SQUADS, MANAGE_SELECTIONS)),
 ):
     t = await _get_owned_team(db, team_id, club.id)
     await player_audit.record(db, club_id=club.id, area="squads", action="squad_deleted",
@@ -410,7 +413,7 @@ async def delete_team(
 async def resequence_teams(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(SELECT_SQUADS, MANAGE_SELECTIONS)),
 ):
     """Re-guess the column order for auto-seeded squads with the current
     _guess_sequence heuristic. Only touches source='auto' squads — a manual
@@ -449,7 +452,7 @@ async def seed_candidates(
     seasons: int = 3,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(*SELECT_ANY)),
 ):
     """Distinct team names our players appeared for over the last `seasons`
     seasons (default 3) — the picker behind the auto-seed modal, so an admin
@@ -517,7 +520,7 @@ async def seed_teams(
     body: Optional[SeedTeamsBody] = None,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(SELECT_SQUADS, MANAGE_SELECTIONS)),
 ):
     """Auto-seed teams from the team names our players appeared for in the
     most recent season (the current / upcoming season).
@@ -617,7 +620,7 @@ class MemberAdd(BaseModel):
     player_id: str
 
 
-@router.get("/{team_id}/members", dependencies=[Depends(require_any_cap(MANAGE_SELECTIONS, MANAGE_FIXTURES))])
+@router.get("/{team_id}/members", dependencies=[Depends(require_any_cap(*SELECT_ANY))])
 async def list_team_members(
     team_id: str,
     db: AsyncSession = Depends(get_db),
@@ -686,7 +689,7 @@ async def add_team_member(
     body: MemberAdd,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_SQUADS, MANAGE_SELECTIONS)),
 ):
     team = await _get_owned_team(db, team_id, club.id)
     pid = uuid.UUID(body.player_id)
@@ -709,7 +712,7 @@ async def remove_team_member(
     player_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(SELECT_SQUADS, MANAGE_SELECTIONS)),
 ):
     team = await _get_owned_team(db, team_id, club.id)
     pid = uuid.UUID(player_id)
@@ -743,7 +746,7 @@ async def squad_assign(
     body: SquadAssign,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_SQUADS, MANAGE_SELECTIONS)),
 ):
     """Assign one or many players to squads. A player can sit in several squads,
     so `action` (set/add/move/remove) says whether this replaces their whole set,
@@ -811,7 +814,7 @@ async def auto_assign_suggest(
     min_share: float = 0.2,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(*SELECT_ANY)),
 ):
     """Suggest the squad(s) a player belongs in from where they actually played
     over the last `seasons` seasons. A player can straddle several teams, so this

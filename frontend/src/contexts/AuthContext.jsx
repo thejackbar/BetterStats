@@ -51,7 +51,7 @@ export function AuthProvider({ children }) {
     // is the /auth/me payload alone.
     // A person locked to one module cannot read the plan (it is the Primary Admin's), so they
     // fall back to the /auth/me core_live flag like any club without plan rows.
-    if (IS_AFL || !user || user.role === 'super_admin' || !user.club_id || user.access?.mode === 'module') { setAccountPlan(null); return }
+    if (IS_AFL || !user || user.role === 'super_admin' || !user.club_id || (user.access?.mode && user.access.mode !== 'full')) { setAccountPlan(null); return }
     let alive = true
     fetch(API_BASE + '/club-admin/account/plan', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
@@ -171,6 +171,18 @@ export function AuthProvider({ children }) {
     return Array.isArray(user.capabilities) && user.capabilities.includes(cap)
   }, [user])
 
+  // Can this person CHANGE what a capability covers, not only open it? A capability held at
+  // VIEW level (the Primary Admin chose View for a menu item) opens the screen but the server
+  // refuses writes, so the screen draws read only. Takes any number of capabilities, true when
+  // the person holds one of them at Manage.
+  const canEditCap = useCallback((...caps) => {
+    if (!user) return false
+    if (user.role === 'super_admin' || user.role === 'club_admin') return true
+    const held = Array.isArray(user.capabilities) ? user.capabilities : []
+    const viewOnly = Array.isArray(user.view_only_capabilities) ? user.view_only_capabilities : []
+    return caps.flat().some(c => held.includes(c) && !viewOnly.includes(c))
+  }, [user])
+
   // Module entitlement — the club's explicit module list, sent by the backend
   // on /auth/me + /auth/login as `entitlements.modules`. Super admins act
   // cross-club and are entitled to everything.
@@ -209,7 +221,7 @@ export function AuthProvider({ children }) {
   })()
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, switchClub, acceptInvite, resetPassword, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule, coreLive }}>
+    <AuthContext.Provider value={{ user, login, logout, switchClub, acceptInvite, resetPassword, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, canEditCap, hasModule, coreLive }}>
       {children}
     </AuthContext.Provider>
   )

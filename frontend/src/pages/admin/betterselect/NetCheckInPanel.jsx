@@ -13,9 +13,9 @@ import { CAP } from '../../../lib/capabilities'
 import { Icon, Btn, Segmented } from './ui'
 
 export default function NetCheckInPanel({ onChanged }) {
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canEdit = canEditCap(CAP.SELECT_NETS, CAP.MANAGE_SELECTIONS)
 
   const [open, setOpen] = useState(false)
   const [cfg, setCfg] = useState(null)

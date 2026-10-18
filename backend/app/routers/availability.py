@@ -23,6 +23,9 @@ from sqlalchemy import select, func, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import (
+    MANAGE_SELECTIONS, SELECT_ANY, SELECT_AVAILABILITY, require_any_cap,
+)  # BetterSelect item permissions
+from app.auth.capabilities import (
     MANAGE_SELECTIONS, require_cap,
 )  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
@@ -266,7 +269,7 @@ def allow_maybe(club) -> bool:
 MAYBE_OFF = "Maybe is switched off for this club. Record Available or Unavailable."
 
 
-@router.get("/config", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
+@router.get("/config", dependencies=[Depends(require_any_cap(*SELECT_ANY))])
 async def availability_config(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -394,7 +397,7 @@ async def resolve_period_statuses(
     return out
 
 
-@router.get("/matrix", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
+@router.get("/matrix", dependencies=[Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS))])
 async def availability_matrix(
     tz: Optional[str] = None,
     juniors: bool = False,
@@ -597,7 +600,7 @@ async def set_availability(
     body: AvailabilitySet,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
     player_ids = await _owned_player_ids(db, club.id)
     await _upsert(db, body, club.id, user.id, player_ids, club)
@@ -610,7 +613,7 @@ async def set_availability_bulk(
     body: AvailabilityBulk,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
     player_ids = await _owned_player_ids(db, club.id)
     for item in body.items:
@@ -619,7 +622,7 @@ async def set_availability_bulk(
     return {"status": "ok", "count": len(body.items)}
 
 
-@router.get("", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
+@router.get("", dependencies=[Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS))])
 async def list_for_date(
     on: date,
     db: AsyncSession = Depends(get_db),
@@ -655,7 +658,7 @@ async def list_for_date(
     return out
 
 
-@router.get("/periods", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
+@router.get("/periods", dependencies=[Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS))])
 async def list_periods(
     include_past: bool = False,
     db: AsyncSession = Depends(get_db),
@@ -695,7 +698,7 @@ async def create_period(
     body: PeriodCreate,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
     if body.status not in PERIOD_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
@@ -737,7 +740,7 @@ async def delete_period(
     period_id: int,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
     res = await db.execute(
         select(PlayerAvailabilityPeriod).where(
@@ -793,7 +796,7 @@ async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
     }
 
 
-@router.get("/self-service", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
+@router.get("/self-service", dependencies=[Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS))])
 async def get_self_service(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -808,7 +811,7 @@ async def update_self_service(
     body: SelfServiceUpdate,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
     """Enable/disable the link, flip the PIN requirement and/or whether players
     are shown their squad. A key that is not sent leaves its setting alone.
@@ -834,7 +837,7 @@ async def update_self_service(
 async def regenerate_self_service(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
     """Rotate the token — the old link/QR stops working immediately."""
     club.availability_link_token = secrets.token_urlsafe(24)

@@ -34,7 +34,8 @@ async def _user_can_manage_reports(db: AsyncSession, user: User, club: Organisat
     if not m:
         return False
     if m.club_id == club.id:
-        return membership_has_capability(m.role, m.capabilities, MANAGE_REPORTS)
+        return membership_has_capability(m.role, m.capabilities, MANAGE_REPORTS) and (
+            m.role in PRIVILEGED_ROLES or MANAGE_REPORTS not in (getattr(m, "view_only_caps", None) or []))
     if m.role == "super_admin":
         return True
     if m.role == "club_admin":

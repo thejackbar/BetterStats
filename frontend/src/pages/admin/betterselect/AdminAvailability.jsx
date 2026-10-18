@@ -67,10 +67,10 @@ function fixtureSub(dateObj) {
 
 export default function AdminAvailability() {
   const fmt = useAdminNameFormat()
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canEdit = canEditCap(CAP.SELECT_AVAILABILITY, CAP.MANAGE_SELECTIONS)
 
   const [data, setData] = useState(null)
   const [avail, setAvail] = useState({}) // {playerId: {date: {status, source, note, ...}}}

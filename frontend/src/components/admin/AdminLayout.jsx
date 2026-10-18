@@ -287,7 +287,7 @@ export default function AdminLayout({ children }) {
   useEffect(() => {
     // A person locked to one module has no setup wizard (it is the Primary Admin's), so
     // they are never sent into it on login either.
-    if (!user || user.access?.mode === 'module') { setWizardAvailable(false); return }
+    if (!user || (user.access?.mode && user.access.mode !== 'full')) { setWizardAvailable(false); return }
     let cancelled = false
     ;(async () => {
       try {

@@ -68,7 +68,7 @@ export default function BetterSelectHome() {
 // every shape so the landing page degrades rather than breaks.
 function BetterSelectOverview() {
   const fmt = useAdminNameFormat()
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const navigate = useNavigate()
   const [fixtures, setFixtures] = useState(null)
   const [overview, setOverview] = useState([])
@@ -171,7 +171,7 @@ function BetterSelectOverview() {
   }, [squad, tally, playable, heroDate, lineupLen, hero, fmt])
 
   const heroTitle = hero ? `${hero.team_name || 'Our team'} vs ${hero.opponent_name || hero.label || 'TBC'}` : ''
-  const canSelect = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canSelect = hasCapability(CAP.SELECT_SELECTION) || hasCapability(CAP.MANAGE_SELECTIONS)
 
   if (fixtures === null) return <BetterSelectLayout title="Overview"><PbSpinner message="Loading…" /></BetterSelectLayout>
 

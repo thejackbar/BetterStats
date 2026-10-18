@@ -851,9 +851,9 @@ function EmailTemplatesCard({ settings, onSave, canEdit }) {
 
 /* ── The screen ──────────────────────────────────────────────────────────── */
 export default function AdminSelectionRules() {
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canEdit = canEditCap(CAP.SELECT_RULES, CAP.MANAGE_SELECTIONS)
   const [data, setData] = useState(null)
   const [editing, setEditing] = useState(null)      // {kind, ...rule} or null
   const [exceptions, setExceptions] = useState(null)

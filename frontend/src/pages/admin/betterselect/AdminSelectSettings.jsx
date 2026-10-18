@@ -154,12 +154,12 @@ function TeamRule({ rule, teams, squads, onChange, onDelete, disabled }) {
 const LABEL = 'font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest block mb-1.5'
 
 export default function AdminSelectSettings() {
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
   // `toast` is a new object each render: never a hook dependency (a reload would wipe a rule being written).
   const toastRef = useRef(toast)
   toastRef.current = toast
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canEdit = canEditCap(CAP.SELECT_RULES, CAP.MANAGE_SELECTIONS)
   const [loaded, setLoaded] = useState(false)
   const [maybe, setMaybe] = useState(true)
   const [colours, setColours] = useState(DEFAULTS)

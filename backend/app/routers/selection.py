@@ -26,6 +26,9 @@ from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import (
+    MANAGE_SELECTIONS, SELECT_ANY, SELECT_SELECTION, require_any_cap,
+)  # BetterSelect item permissions
+from app.auth.capabilities import (
     MANAGE_SELECTIONS, require_cap,
 )  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
@@ -118,7 +121,7 @@ async def _get_owned_fixture(db: AsyncSession, fixture_id: str, club_id) -> Fixt
     return f
 
 
-@router.get("/overview", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
+@router.get("/overview", dependencies=[Depends(require_any_cap(*SELECT_ANY))])
 async def selection_overview(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -287,7 +290,7 @@ async def selection_overview(
     return {"fixtures": out, "default_team_size": side_size(club)}
 
 
-@router.get("/selected-players", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
+@router.get("/selected-players", dependencies=[Depends(require_any_cap(*SELECT_ANY))])
 async def selected_players(
     on: Optional[str] = None,
     from_: Optional[str] = Query(None, alias="from"),
@@ -331,7 +334,7 @@ async def selected_players(
     }
 
 
-@router.get("/{fixture_id}", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
+@router.get("/{fixture_id}", dependencies=[Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS))])
 async def get_selection(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
@@ -347,7 +350,7 @@ async def get_selection(
     return await assemble_selection(db, club, fx)
 
 
-@router.get("/{fixture_id}/previous-xi", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
+@router.get("/{fixture_id}/previous-xi", dependencies=[Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS))])
 async def previous_xi(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
@@ -409,7 +412,7 @@ async def set_default_team_size(
     body: TeamSizeSet,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS)),
 ):
     """Persist a lineup size (0 = no limit) so the Selection format selector
     sticks across reloads. With a `fixture_id` of one of our teams the number is
@@ -479,7 +482,7 @@ async def get_draft(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS)),
 ):
     """The autosaved, unconfirmed side for this fixture: ``draft`` (null when
     there is none) and its ``version``. The board polls this to pick up another
@@ -500,7 +503,7 @@ async def save_draft(
     body: DraftSet,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS)),
 ):
     """Autosave the board's working side. Never touches ``fixture_lineups``,
     so none of the checks the confirm path makes (clashes, call-ups, blocking
@@ -594,7 +597,7 @@ async def discard_draft(
     base_version: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS)),
 ):
     """Throw the draft away: the board goes back to the confirmed XI. With
     ``base_version`` it only deletes the draft the caller saw: one another
@@ -622,7 +625,7 @@ async def set_selection(
     body: LineupSet,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS)),
     # Last, so a caller that passes db, club and user positionally is unaffected.
     background_tasks: BackgroundTasks = None,
 ):
@@ -877,7 +880,7 @@ async def lock_selection(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS)),
 ):
     """Lock the side as it stands. Needs a named XI: locking nothing locks
     nobody out of anything and only confuses the overview."""
@@ -900,7 +903,7 @@ async def unlock_selection(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS)),
 ):
     fx = await _get_owned_fixture(db, fixture_id, club.id)
     if fx.locked_at is None:
@@ -915,7 +918,7 @@ async def unlock_selection(
     return {"status": "ok", "locked": False}
 
 
-@router.get("/{fixture_id}/history", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
+@router.get("/{fixture_id}/history", dependencies=[Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS))])
 async def selection_history(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
@@ -938,7 +941,7 @@ async def notify_selection(
     body: NotifyBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS)),
 ):
     """Email the CONFIRMED side: to its captain (with every player's mobile) or
     to each selected player. A draft is never sent. See services/selection_notify."""
@@ -956,7 +959,7 @@ async def selection_notices(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _user: User = Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS)),
 ):
     """What has been emailed about this fixture's confirmed side, newest first."""
     fx = await _get_owned_fixture(db, fixture_id, club.id)
