@@ -1065,10 +1065,16 @@ export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = 
 }
 
 // Weekend Wrap, plus each grade's top 2 run scorers & top 2 wicket takers for
-// our club (r.topBat / r.topBowl — up to 2 {name, line} entries each, sourced
-// from the match scorecard's "our team" innings). A grade with no performer
-// data yet (manually-added row) just renders its header line.
-export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors }) {
+// our club (r.topBat / r.topBowl, up to 2 {name, line} entries each, from the
+// match scorecard) or, with perfSide 'them', for the opposition (r.oppTopBat /
+// r.oppTopBowl). A grade with no performer data yet (manually-added row, or a
+// pull from before the opposition's lists existed) just renders its header line.
+export function perfKeys(side) {
+  return side === 'them' ? { bat: 'oppTopBat', bowl: 'oppTopBowl' } : { bat: 'topBat', bowl: 'topBowl' }
+}
+export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, meta = {}, results = [], club = {}, sponsors, perfSide = 'us' }) {
+  const keys = perfKeys(perfSide)
+  const who = perfSide === 'them' ? 'OPPOSITION ' : ''
   const S = roundScale(width, height)
   const t = sz(S.row)
   const rows = results
@@ -1102,14 +1108,14 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(180), bottom: rrFoot(width, height).reserve, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 1fr', gap: 12, marginBottom: 8 }}>
           <div />
-          <Kicker color={pal.ink} size={12} style={{ opacity: 0.55 }}>TOP RUN SCORERS</Kicker>
-          <Kicker color={pal.ink} size={12} style={{ opacity: 0.55 }}>TOP WICKET TAKERS</Kicker>
+          <Kicker color={pal.ink} size={12} style={{ opacity: 0.55 }}>{who}TOP RUN SCORERS</Kicker>
+          <Kicker color={pal.ink} size={12} style={{ opacity: 0.55 }}>{who}TOP WICKET TAKERS</Kicker>
         </div>
         {rows.map((r, i) => {
           const w = r.outcome === 'W'
           const c = w ? WIN : LOSS
-          const bats = (r.topBat || []).filter((p) => p && (p.name || p.line))
-          const bowls = (r.topBowl || []).filter((p) => p && (p.name || p.line))
+          const bats = (r[keys.bat] || []).filter((p) => p && (p.name || p.line))
+          const bowls = (r[keys.bowl] || []).filter((p) => p && (p.name || p.line))
           return (
             <div key={i} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6, borderBottom: i < rows.length - 1 ? `1px solid ${pal.ink}1a` : 'none' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '6px 150px minmax(0,1fr) 190px', alignItems: 'center', gap: 12 }}>
@@ -1454,22 +1460,34 @@ export const DEFAULT_FIXTURES = [
 export const DEFAULT_RESULTS = [
   { grade: '1ST XI', opp: 'SUBIACO-FLOREAT', oppMono: 'SUB', us: '6/188', them: '184', outcome: 'W', margin: 'BY 4 WICKETS',
     topBat: [{ name: 'J. BARENDSE', line: '64 (71)' }, { name: 'T. MCNAMEE', line: '39 (58)' }],
-    topBowl: [{ name: 'A. ALLISON', line: '4/29 (9.4)' }, { name: 'S. ROBERTS', line: '2/26 (8)' }] },
+    topBowl: [{ name: 'A. ALLISON', line: '4/29 (9.4)' }, { name: 'S. ROBERTS', line: '2/26 (8)' }],
+    oppTopBat: [{ name: 'M. KELLY', line: '71 (88)' }, { name: 'D. PRICE', line: '34 (49)' }],
+    oppTopBowl: [{ name: 'T. HUGHES', line: '3/44 (10)' }, { name: 'R. COLE', line: '2/51 (9)' }] },
   { grade: '2ND XI', opp: 'WILLETTON', oppMono: 'WIL', us: '176', them: '9/201', outcome: 'L', margin: 'BY 25 RUNS',
     topBat: [{ name: 'C. MURRAY', line: '52 (64)' }, { name: 'B. PAYNE', line: '31 (40)' }],
-    topBowl: [{ name: 'D. GOODMAN', line: '3/38 (10)' }, { name: 'R. HALL', line: '2/45 (9)' }] },
+    topBowl: [{ name: 'D. GOODMAN', line: '3/38 (10)' }, { name: 'R. HALL', line: '2/45 (9)' }],
+    oppTopBat: [{ name: 'S. GRANT', line: '66 (72)' }, { name: 'P. NOLAN', line: '41 (50)' }],
+    oppTopBowl: [{ name: 'J. WEBB', line: '4/32 (10)' }, { name: 'L. FORD', line: '2/40 (9)' }] },
   { grade: '3RD XI', opp: 'GOSNELLS', oppMono: 'GOS', us: '3/142', them: '139', outcome: 'W', margin: 'BY 7 WICKETS',
     topBat: [{ name: 'J. ROBSON', line: '48 (63)' }, { name: 'K. SHEJWAL', line: '43 (58)' }],
-    topBowl: [{ name: 'M. FERNANDO', line: '3/25 (9)' }, { name: 'L. DIXON', line: '3/31 (8)' }] },
+    topBowl: [{ name: 'M. FERNANDO', line: '3/25 (9)' }, { name: 'L. DIXON', line: '3/31 (8)' }],
+    oppTopBat: [{ name: 'B. ADAMS', line: '38 (61)' }, { name: 'C. LANE', line: '27 (44)' }],
+    oppTopBowl: [{ name: 'G. SHAW', line: '2/36 (9)' }, { name: 'O. REID', line: '1/39 (8)' }] },
   { grade: '4TH XI', opp: 'MELVILLE', oppMono: 'MEL', us: '154', them: '4/192', outcome: 'L', margin: 'BY 38 RUNS',
     topBat: [{ name: 'H. WAHID', line: '29 (33)' }, { name: 'N. DEGRUSSA', line: '22 (30)' }],
-    topBowl: [{ name: 'C. THIRD', line: '2/40 (9)' }, { name: 'J. ALLEN', line: '1/28 (7)' }] },
+    topBowl: [{ name: 'C. THIRD', line: '2/40 (9)' }, { name: 'J. ALLEN', line: '1/28 (7)' }],
+    oppTopBat: [{ name: 'F. DEAN', line: '78 (82)' }, { name: 'K. ORR', line: '44 (51)' }],
+    oppTopBowl: [{ name: 'W. PARK', line: '3/29 (10)' }, { name: 'E. HILL', line: '2/33 (9)' }] },
   { grade: 'T20', opp: 'BAYSWATER', oppMono: 'BAY', us: '5/176', them: '8/164', outcome: 'W', margin: 'BY 12 RUNS',
     topBat: [{ name: 'J. BARENDSE', line: '58 (39)' }, { name: 'T. MCNAMEE', line: '27 (21)' }],
-    topBowl: [{ name: 'A. ALLISON', line: '3/22 (4)' }, { name: 'S. ROBERTS', line: '2/31 (4)' }] },
+    topBowl: [{ name: 'A. ALLISON', line: '3/22 (4)' }, { name: 'S. ROBERTS', line: '2/31 (4)' }],
+    oppTopBat: [{ name: 'N. BELL', line: '49 (37)' }, { name: 'H. COX', line: '31 (24)' }],
+    oppTopBowl: [{ name: 'V. LONG', line: '2/28 (4)' }, { name: 'I. WARD', line: '2/35 (4)' }] },
   { grade: "WOMEN'S 1ST", opp: 'FREMANTLE', oppMono: 'FRE', us: '4/138', them: '135', outcome: 'W', margin: 'BY 6 WICKETS',
     topBat: [{ name: 'C. MURRAY', line: '46 (55)' }, { name: 'B. PAYNE', line: '33 (42)' }],
-    topBowl: [{ name: 'D. GOODMAN', line: '2/19 (7)' }, { name: 'R. HALL', line: '2/24 (6)' }] },
+    topBowl: [{ name: 'D. GOODMAN', line: '2/19 (7)' }, { name: 'R. HALL', line: '2/24 (6)' }],
+    oppTopBat: [{ name: 'A. FOX', line: '44 (58)' }, { name: 'M. DAY', line: '29 (40)' }],
+    oppTopBowl: [{ name: 'S. KING', line: '2/22 (8)' }, { name: 'T. LOWE', line: '1/30 (7)' }] },
 ]
 
 // MINIFICATION MANGLES `Component.name`, so a layer label derived from it

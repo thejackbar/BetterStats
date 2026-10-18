@@ -177,7 +177,7 @@ def _perf_name(raw: str | None) -> str:
 
 
 def _top_batters(bat_rows: list) -> list[dict]:
-    """Our club's top 2 run scorers from one innings (most runs, fewer balls breaks ties)."""
+    """The top 2 run scorers in one innings's batting (most runs, fewer balls breaks ties)."""
     cands = [
         b for b in (bat_rows or [])
         if (b.get("dismissalType") or "").lower() not in _DNB_TYPES
@@ -199,7 +199,11 @@ def _top_batters(bat_rows: list) -> list[dict]:
 
 
 def _top_bowlers(bowl_rows: list) -> list[dict]:
-    """Our club's top 2 wicket takers from one innings (most wickets, fewest runs breaks ties)."""
+    """The top 2 wicket takers in one innings's bowling (most wickets, fewest runs breaks ties).
+
+    An innings's ``bowling`` lists whoever BOWLED in it, which is the side that
+    was fielding. A side's own bowlers are therefore in the OTHER side's
+    innings; see ``_result_row``."""
     def overs_val(o):
         try:
             return float(str(o or 0).replace(",", "."))
@@ -364,8 +368,16 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
         return None
 
     our_inn = inn_by_team.get(our_id) or {}
+    opp_inn = inn_by_team.get(opp_id) or {}
+    # An innings's batting is the side that batted it; its bowling is the side
+    # that FIELDED it. Our bowlers are in the innings the opposition batted, and
+    # the opposition's in ours. Reading `our_inn["bowling"]` for "our wicket
+    # takers" put the opposition's figures next to our batters (North Perth,
+    # October 2026).
     top_bat = _top_batters(our_inn.get("batting") or [])
-    top_bowl = _top_bowlers(our_inn.get("bowling") or [])
+    top_bowl = _top_bowlers(opp_inn.get("bowling") or [])
+    opp_top_bat = _top_batters(opp_inn.get("batting") or [])
+    opp_top_bowl = _top_bowlers(our_inn.get("bowling") or [])
 
     outcome = "T"
     for st in summary_teams:
@@ -393,6 +405,9 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
         "margin": _margin_from_text(ms.get("result") or ms.get("statusText")),
         "topBat": top_bat,
         "topBowl": top_bowl,
+        # The same two lists for the other side, for a post that shows them.
+        "oppTopBat": opp_top_bat,
+        "oppTopBowl": opp_top_bowl,
         # Transient — resolved into "oppLogo" (and dropped) by the caller,
         # once every row's crest is known, via one batched org lookup.
         "_oppOrgId": opp_org.get("id"),
