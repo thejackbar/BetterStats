@@ -3007,6 +3007,7 @@ export const api = {
     request(`/club-admin/club-room/media/${id}`, { method: 'DELETE' }),
   clubRoomListReports: () => request('/club-admin/club-room/reports'),
   clubRoomHonourSources: () => request('/club-admin/club-room/honour-sources'),
+  clubRoomGradeTypes: () => request('/club-admin/club-room/grade-types'),
   clubRoomPlay: () => request('/club-admin/club-room/play'),
   clubRoomGetPublicLink: () => request('/club-admin/club-room/public-link'),
   clubRoomSetPublicLink: (data) =>

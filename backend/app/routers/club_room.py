@@ -42,8 +42,9 @@ from app.models.db import (
     ClubHonourBoard, ClubHonourEntry, ClubRoomMedia, ClubRoomSettings, ClubRoomSlide, Organisation,
     SavedReport, Sponsor, User, get_db,
 )
-from app.routers.auth import get_current_club, get_current_user
+from app.routers.auth import get_current_club, get_current_user, public_junior_hiding
 from app.services import club_lock, grade_scope
+from app.services.grade_labels import CATEGORY_LABELS
 from app.services.session_safety import rollback_keeping
 
 logger = logging.getLogger(__name__)
@@ -74,9 +75,9 @@ _RECORDS_CACHE_TTL = 90
 _records_cache: dict[tuple, tuple[float, dict]] = {}
 
 
-async def _get_records_cached(db, org_id: str, season_id: str | None) -> dict:
+async def _get_records_cached(db, org_id: str, season_id: str | None, categories: str | None = None) -> dict:
     import time as _time
-    key = (org_id, season_id)
+    key = (org_id, season_id, categories)
     hit = _records_cache.get(key)
     now = _time.time()
     if hit and now - hit[0] < _RECORDS_CACHE_TTL:
@@ -91,7 +92,7 @@ async def _get_records_cached(db, org_id: str, season_id: str | None) -> dict:
     # the TV as well (the show also runs on the logged-out /room link).
     data = await get_records(
         org_id=org_id, season_id=season_id, grade_id=None, grade_name=None,
-        finals_only=False, captain_only=False, gender=None, categories=None,
+        finals_only=False, captain_only=False, gender=None, categories=categories,
         formats=None, competitions=None, debug_timing=False, db=db, viewer=None,
     )
     _records_cache[key] = (now, data)
@@ -486,6 +487,23 @@ async def list_reports_for_picker(
     return [{"id": str(r.id), "title": r.title, "description": r.description} for r in rows.scalars().all()]
 
 
+@router.get("/grade-types")
+async def list_grade_types(
+    current_user: User = Depends(require_cap(MANAGE_CLUB_ROOM)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The grade types this club actually has, for the Leaderboard and Records
+    slides' "Grade type" picker, and which of them its default counts. A club
+    with no Masters grade is not offered Masters."""
+    available = await grade_scope.org_available_categories(db, club.id)
+    default = list(await grade_scope.club_default_categories(db, club.id))
+    return {
+        "available": [{"key": k, "label": CATEGORY_LABELS.get(k, k)} for k in available],
+        "default": default,
+    }
+
+
 @router.get("/honour-sources")
 async def list_honour_sources(
     current_user: User = Depends(require_cap(MANAGE_CLUB_ROOM)),
@@ -700,6 +718,26 @@ async def _season_label(db, season_id: str | None) -> str:
     return s.name if s else "All-time"
 
 
+# A leaderboard or records slide can be narrowed to one grade type. The pick is
+# `config.categories`: one grade category key (senior reads as "Men's"), or
+# "all". Not set means the club's own default, which is what every other stats
+# screen uses. Anything else is treated as not set, never as "show everything".
+_GRADE_TYPE_KEYS = set(CATEGORY_LABELS) | {"all"}
+
+
+def _grade_type(cfg: dict) -> str | None:
+    value = str((cfg or {}).get("categories") or "").strip().lower()
+    return value if value in _GRADE_TYPE_KEYS else None
+
+
+def _grade_type_label(categories: str | None) -> str | None:
+    """What the slide says it is showing. None when the club default applies, so
+    a slide nobody narrowed looks exactly as it did."""
+    if not categories:
+        return None
+    return "All grades" if categories == "all" else CATEGORY_LABELS.get(categories)
+
+
 async def _expand_leaderboard(db, club, entry: ClubRoomSlide) -> list[dict]:
     from app.services.aggregations import (
         get_batting_leaderboard_extended, get_bowling_leaderboard_extended, get_fielding_leaderboard,
@@ -710,16 +748,24 @@ async def _expand_leaderboard(db, club, entry: ClubRoomSlide) -> list[dict]:
     limit = min(int(cfg.get("limit") or STAT_TABLE_LIMIT), 20)
     org_id = str(club.id)
 
+    # The same scope the public leaderboard builds for a logged-out viewer: the
+    # slide's grade type (or the club default), minus any junior grade the club
+    # hides from the public. The TV also runs on the logged-out /room link.
+    categories = _grade_type(cfg)
+    hiding = await public_junior_hiding(db, None, org_id, with_players=False)
+    scope = await grade_scope.resolve_scope(
+        db, org_id, categories, hidden_grade_ids=hiding.grade_ids)
+
     if stat_group == "bowling":
         sort_by = cfg.get("sort_by") if cfg.get("sort_by") in _BOWLING_SORTS else "total_wickets"
-        rows = await get_bowling_leaderboard_extended(db, org_id, season_id, None, sort_by, limit)
+        rows = await get_bowling_leaderboard_extended(db, org_id, season_id, None, sort_by, limit, scope=scope)
     elif stat_group == "fielding":
         sort_by = cfg.get("sort_by") if cfg.get("sort_by") in _FIELDING_SORTS else "total_catches_non_wk"
-        rows = await get_fielding_leaderboard(db, org_id, season_id, None, sort_by, limit)
+        rows = await get_fielding_leaderboard(db, org_id, season_id, None, sort_by, limit, scope=scope)
     else:
         stat_group = "batting"
         sort_by = cfg.get("sort_by") if cfg.get("sort_by") in _BATTING_SORTS else "total_runs"
-        rows = await get_batting_leaderboard_extended(db, org_id, season_id, None, sort_by, limit)
+        rows = await get_batting_leaderboard_extended(db, org_id, season_id, None, sort_by, limit, scope=scope)
 
     if not rows:
         return []
@@ -728,6 +774,7 @@ async def _expand_leaderboard(db, club, entry: ClubRoomSlide) -> list[dict]:
         "title": entry.title or f"{stat_group.title()} Leaderboard",
         "stat_group": stat_group, "sort_by": sort_by,
         "season_label": await _season_label(db, season_id),
+        "grade_type_label": _grade_type_label(categories),
         "rows": rows,
     }]
 
@@ -747,7 +794,8 @@ async def _expand_records(db, club, entry: ClubRoomSlide) -> list[dict]:
     season_id = cfg.get("season_id") or None
     limit = min(int(cfg.get("limit") or 8), 15)
 
-    data = await _get_records_cached(db, str(club.id), season_id)
+    categories = _grade_type(cfg)
+    data = await _get_records_cached(db, str(club.id), season_id, categories)
     rows = (_dig(data, category) or [])[:limit]
     if not rows:
         return []
@@ -756,6 +804,7 @@ async def _expand_records(db, club, entry: ClubRoomSlide) -> list[dict]:
         "type": "records", "id": f"rec-{entry.id}",
         "title": entry.title or label, "category": category,
         "season_label": await _season_label(db, season_id),
+        "grade_type_label": _grade_type_label(categories),
         "rows": rows,
     }]
 
@@ -994,6 +1043,8 @@ def _entry_summary(entry: ClubRoomSlide) -> str:
     elif entry.slide_type == "records":
         cat = str(cfg.get("category") or "batting.top_career_runs")
         detail = cat.split(".")[-1].replace("_", " ").title()
+    if entry.slide_type in ("leaderboard", "records") and _grade_type_label(_grade_type(cfg)):
+        detail = f"{detail} · {_grade_type_label(_grade_type(cfg))}"
     elif entry.slide_type == "honours":
         kind = cfg.get("kind")
         detail = _HONOUR_KINDS.get(kind) or ("one board" if cfg.get("board_id") else "all your boards")

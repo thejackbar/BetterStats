@@ -477,7 +477,7 @@ function LeaderboardSlide({ slide, clubLogoUrl }) {
   return (
     <div className="w-full h-full flex flex-col px-14 py-12">
       <div className="mb-6 shrink-0">
-        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label}</div>
+        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label}{slide.grade_type_label ? ` · ${slide.grade_type_label}` : ''}</div>
         <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
       </div>
       <div className="flex gap-5 mb-6 shrink-0">
@@ -549,7 +549,7 @@ function RecordsSlide({ slide, clubLogoUrl }) {
   return (
     <div className="w-full h-full flex flex-col px-14 py-12">
       <div className="mb-7 shrink-0">
-        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label} · Club Record</div>
+        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label}{slide.grade_type_label ? ` · ${slide.grade_type_label}` : ''} · Club Record</div>
         <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
       </div>
       {leader && (

@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { useToast } from '../../contexts/ToastContext'
+import { CATEGORY_LABELS } from '../../lib/gradeCategories'
 
 const SLIDE_TYPE_INFO = {
   sponsors: { label: 'Sponsors', desc: 'One sponsor, every sponsor in rotation, or every sponsor on one screen.', module: null },
@@ -71,6 +72,7 @@ export default function AdminClubRoom() {
   const [seasons, setSeasons] = useState([])
   const [reports, setReports] = useState([])
   const [honourSources, setHonourSources] = useState({ boards: [], groups: [] })
+  const [gradeTypes, setGradeTypes] = useState({ available: [], default: [] })
   const dragItem = useRef(null)
   const fileInputRef = useRef(null)
 
@@ -81,6 +83,7 @@ export default function AdminClubRoom() {
     api.adminListSeasons().then(setSeasons).catch(() => {})
     api.clubRoomListReports().then(setReports).catch(() => {})
     api.clubRoomHonourSources().then(setHonourSources).catch(() => {})
+    api.clubRoomGradeTypes().then(setGradeTypes).catch(() => {})
   }, [])
 
   async function load() {
@@ -368,6 +371,7 @@ export default function AdminClubRoom() {
                             seasons={seasons}
                             reports={reports}
                             honourSources={honourSources}
+                            gradeTypes={gradeTypes}
                             customMedia={customMedia}
                             socialMedia={socialMedia}
                           />
@@ -503,8 +507,10 @@ function slideSummary(slide, info) {
     if (cfg.mode === 'grid') return `${info.label} · all on one screen`
     return `${info.label} · rotating`
   }
-  if (slide.slide_type === 'leaderboard') return `${info.label} · ${cfg.stat_group || 'batting'}`
-  if (slide.slide_type === 'records') return `${info.label} · ${(RECORD_CATEGORIES.find(c => c.key === cfg.category) || {}).label || ''}`
+  const grade = cfg.categories ? (cfg.categories === 'all' ? 'All grades' : CATEGORY_LABELS[cfg.categories]) : null
+  const withGrade = text => (grade ? `${text} · ${grade}` : text)
+  if (slide.slide_type === 'leaderboard') return withGrade(`${info.label} · ${cfg.stat_group || 'batting'}`)
+  if (slide.slide_type === 'records') return withGrade(`${info.label} · ${(RECORD_CATEGORIES.find(c => c.key === cfg.category) || {}).label || ''}`)
   if (slide.slide_type === 'statlab_report') return info.label
   if (slide.slide_type === 'honours') {
     if (cfg.kind === 'premierships') return `${info.label} · premiership squads`
@@ -516,7 +522,27 @@ function slideSummary(slide, info) {
   return info.label
 }
 
-function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports, honourSources, customMedia, socialMedia }) {
+// Which grade type a leaderboard or records slide counts. Not set means the
+// club's own default, which is what the rest of the stats screens use. Only the
+// grade types this club has are offered, so there is no pick that shows nothing.
+function GradeTypeField({ value, onChange, gradeTypes }) {
+  const available = gradeTypes?.available || []
+  if (available.length === 0) return null
+  const known = value && value !== 'all' && !available.some(a => a.key === value)
+  return (
+    <div className="col-span-2">
+      <label className={labelCls}>Grade type</label>
+      <select value={value || ''} onChange={e => onChange(e.target.value || undefined)} className={fieldCls}>
+        <option value="">Club default</option>
+        {available.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
+        {known && <option value={value}>{CATEGORY_LABELS[value] || value} (none in your grades)</option>}
+        <option value="all">All grades</option>
+      </select>
+    </div>
+  )
+}
+
+function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports, honourSources, gradeTypes, customMedia, socialMedia }) {
   const cfg = draft.config
 
   if (slide.slide_type === 'honours') {
@@ -615,6 +641,7 @@ function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports
             {sortOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
           </select>
         </div>
+        <GradeTypeField value={cfg.categories} onChange={v => setConfig({ categories: v })} gradeTypes={gradeTypes} />
         <div>
           <label className={labelCls}>Season</label>
           <select value={cfg.season_id || ''} onChange={e => setConfig({ season_id: e.target.value })} className={fieldCls}>
@@ -640,6 +667,7 @@ function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports
             {RECORD_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
           </select>
         </div>
+        <GradeTypeField value={cfg.categories} onChange={v => setConfig({ categories: v })} gradeTypes={gradeTypes} />
         <div>
           <label className={labelCls}>Season</label>
           <select value={cfg.season_id || ''} onChange={e => setConfig({ season_id: e.target.value })} className={fieldCls}>
