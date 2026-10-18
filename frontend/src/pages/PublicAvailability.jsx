@@ -358,7 +358,11 @@ function VotesBanner({ votes }) {
       style={{ background: 'color-mix(in srgb, var(--pb-amber) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-amber) 40%, transparent)' }}>
       <div className="min-w-0 flex-1 text-sm">
         <b>{n === 1 ? 'You have a vote to cast.' : `You have ${n} votes to cast.`}</b>
-        <span className="text-pb-dim"> {n === 1 ? 'A game you played is still open for voting.' : 'Games you played are still open for voting.'}</span>
+        {/* Name the game and the medal: a club can run several medals on one game, and a vote
+            already cast for one of them does not cover the others. */}
+        <span className="text-pb-dim"> {n === 1
+          ? `${votes[0].medal}: ${votes[0].round ? `${votes[0].round} · ` : ''}vs ${votes[0].opponent || 'TBC'} is still open for voting.`
+          : 'Games you played are still open for voting.'}</span>
       </div>
       <a href={votes[0].link} className="shrink-0 px-3.5 py-2 rounded-lg text-[13px] font-semibold"
         style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{n === 1 ? 'Vote now' : 'Vote'}</a>
@@ -656,8 +660,13 @@ function MyPage({ token, me }) {
   const [ladder, setLadder] = useState({ status: 'loading', ladders: [] })
   useEffect(() => {
     let alive = true
-    api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
-    return () => { alive = false }
+    const load = () => api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
+    load()
+    // Coming back with the browser's Back button restores this page as it was, so a vote
+    // cast in between would still read as due. Read it again when that happens.
+    const onShow = (e) => { if (e.persisted) load() }
+    window.addEventListener('pageshow', onShow)
+    return () => { alive = false; window.removeEventListener('pageshow', onShow) }
   }, [token])
 
   // A server that doesn't send the list is the page as it was before clubs could choose.
