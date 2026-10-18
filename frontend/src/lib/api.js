@@ -3060,6 +3060,11 @@ export const api = {
   // Honours
   webAdminListHonours: () => request('/club-admin/website/honours'),
   webAdminHonourCategories: () => request('/club-admin/website/honour-categories'),
+  webAdminHonourAchievements: (category, subcategory) => {
+    const q = new URLSearchParams({ category })
+    if (subcategory) q.set('subcategory', subcategory)
+    return request(`/club-admin/website/honour-achievements?${q}`)
+  },
   webAdminCreateBoard: (data) =>
     request('/club-admin/website/honours/boards', { method: 'POST', body: JSON.stringify(data) }),
   webAdminUpdateBoard: (id, data) =>

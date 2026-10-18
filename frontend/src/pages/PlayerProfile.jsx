@@ -31,6 +31,7 @@ import {
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from 'recharts'
 import MilestoneSplitNote from '../components/MilestoneSplitNote'
+import { capBadgeText } from '../lib/capAward'
 
 const MAIN_TABS = [
   { key: 'batting',       label: 'BATTING' },
@@ -78,6 +79,8 @@ function formatRange(inst, seasons) {
 function formatAchievementBadge(a, seasons, awardDefs) {
   const label = resolveAwardLabel(awardDefs, a.category, a.subcategory, a.achievement) || a.subcategory || a.category
   if (a.category === 'Milestone' && a.subcategory === 'Cap Number' && a.detail) return `${label} ${a.detail}`
+  const cap = capBadgeText(a, label)
+  if (cap) return cap
   if (a._instances && a._instances.length > 1) {
     const ranges = a._instances.map(i => formatRange(i, seasons)).filter(Boolean)
     if (ranges.length) return `${label} ${ranges.join(', ')}`

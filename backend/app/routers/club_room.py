@@ -893,7 +893,7 @@ async def _expand_honour_boards(db, club, cfg: dict) -> list[dict]:
         if b.source_category:
             entries += [
                 {"label": _honour_label(a["year"]), "name": a["name"], "detail": a["detail"]}
-                for a in await _auto_entries(club.id, b.source_category, b.source_subcategory, db)
+                for a in await _auto_entries(club.id, b.source_category, b.source_subcategory, db, b.source_achievement)
             ]
         if not entries:
             continue

@@ -841,6 +841,8 @@ class ClubHonourBoard(Base):
     # category (optionally narrowed by subcategory) instead of manual entries.
     source_category = Column(Text, nullable=True)
     source_subcategory = Column(Text, nullable=True)
+    # Optional exact award name inside the category ("A Grade Cap Number"); NULL = all.
+    source_achievement = Column(Text, nullable=True)
     # How many columns to lay the entries out in on the public site (1–4).
     columns = Column(Integer, nullable=False, server_default="1", default=1)
     display_order = Column(Integer, nullable=False, server_default="0", default=0)

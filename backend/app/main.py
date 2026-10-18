@@ -4559,6 +4559,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _FINES_CAP_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 343: an honour board's "only awards named" filter. Same
+        # one-copy rule: this and alembic's 343 both run
+        # services/honour_board_achievement_ddl.STATEMENTS.
+        from app.services.honour_board_achievement_ddl import STATEMENTS as _HONOUR_ACH_DDL
+        for _stmt in _HONOUR_ACH_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 312: super-admin messages on the club admin dashboard.
         # Same one-copy rule: this and alembic's 312 both run
         # services/admin_broadcast_ddl.STATEMENTS.
