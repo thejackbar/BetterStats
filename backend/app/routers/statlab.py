@@ -638,6 +638,11 @@ async def delete_report(
     r = await db.get(SavedReport, report_id)
     if not r or r.org_id != club.id:
         raise HTTPException(status_code=404, detail="Report not found")
+    # The author may delete their own report; anyone else needs the capability
+    # that approves reports. Before, any signed-in club user could delete any of
+    # the club's saved reports.
+    if r.owner_user_id != current_user.id and not await _user_can_manage_reports(db, current_user, club):
+        raise HTTPException(status_code=403, detail="Only the report's author or a reports manager can delete it")
     await db.delete(r)
     await db.commit()
     return {"ok": True}

@@ -41,6 +41,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from stripe import error as stripe_error
 
+from app.auth.capabilities import (
+    require_full_admin,
+)  # route gates added by the access audit
 from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, account_plan_status
 from app.models.db import BillingInvoice, ClubMembership, Organisation, User, get_db
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
@@ -105,7 +108,7 @@ def _with_core(keys: list[str]) -> list[str]:
     return keys if "core" in keys else [*keys, "core"]
 
 
-@router.post("/quote", dependencies=[Depends(require_billing_checkout_enabled)])
+@router.post("/quote", dependencies=[Depends(require_full_admin()), Depends(require_billing_checkout_enabled)])
 async def get_quote(
     body: QuoteIn,
     club: Organisation = Depends(get_current_club),
@@ -305,7 +308,7 @@ async def create_checkout_session(
     return {"url": session["url"]}
 
 
-@router.get("/invoices")
+@router.get("/invoices", dependencies=[Depends(require_full_admin())])
 async def list_invoices(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
@@ -433,7 +436,7 @@ async def _remove_payment_method_for(club: Organisation, pm_id: str) -> dict:
     return await _load_payment_methods(club)
 
 
-@router.get("/payment-methods")
+@router.get("/payment-methods", dependencies=[Depends(require_full_admin())])
 async def list_payment_methods(
     club: Organisation = Depends(get_current_club),
 ):
@@ -607,7 +610,7 @@ async def _require_super_for_invoicing(db, current_user, club) -> None:
         )
 
 
-@router.get("/invoice-billing")
+@router.get("/invoice-billing", dependencies=[Depends(require_full_admin())])
 async def get_invoice_billing(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),

@@ -28,6 +28,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select, func, delete as sa_delete, text as _t, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_MANUAL_ENTRIES, require_cap,
+)  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
 from app.models.db import (
     Grade,
@@ -389,7 +392,7 @@ def _player_display_name(player: Player) -> str:
 # ─── Lookup helpers ──────────────────────────────────────────────────────────
 
 
-@router.get("/known-values")
+@router.get("/known-values", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def list_known_opposition_and_venues(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -443,7 +446,7 @@ async def list_known_opposition_and_venues(
     return {"oppositions": oppositions, "venues": venues}
 
 
-@router.get("/grades")
+@router.get("/grades", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def list_grades_with_season(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -468,7 +471,7 @@ async def list_grades_with_season(
     ]
 
 
-@router.get("/seasons/for-date")
+@router.get("/seasons/for-date", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def season_for_date(
     played_at: str,
     current_user: User = Depends(get_current_user),
@@ -694,7 +697,7 @@ async def delete_manual_grade(
 # ─── Season adjustments ──────────────────────────────────────────────────────
 
 
-@router.get("/season-adjustments")
+@router.get("/season-adjustments", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def list_season_adjustments(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -854,7 +857,7 @@ async def delete_season_adjustment(
 # ─── Career adjustments ──────────────────────────────────────────────────────
 
 
-@router.get("/career-adjustments")
+@router.get("/career-adjustments", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def list_career_adjustments(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -991,7 +994,7 @@ async def delete_career_adjustment(
 # ─── Manual games ────────────────────────────────────────────────────────────
 
 
-@router.get("/games")
+@router.get("/games", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def list_manual_games(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -1030,7 +1033,7 @@ async def list_manual_games(
 # club downloaded instead of the template. Keep this route first. The example
 # rows and columns live in GAME_CSV_COLUMNS / the CSV-import section below;
 # module constants resolve at call time, so declaring the route here is fine.
-@router.get("/games/template.csv")
+@router.get("/games/template.csv", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def games_template(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -1094,7 +1097,7 @@ async def games_template(
     )
 
 
-@router.get("/games/{game_id}")
+@router.get("/games/{game_id}", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def get_manual_game(
     game_id: str,
     current_user: User = Depends(get_current_user),
@@ -1889,7 +1892,7 @@ async def delete_manual_game(
 # ─── Audit log + undo ────────────────────────────────────────────────────────
 
 
-@router.get("/audit")
+@router.get("/audit", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def list_audit(
     limit: int = 200,
     current_user: User = Depends(get_current_user),
@@ -2342,7 +2345,7 @@ def _parse_bowling_figures(v) -> Optional[str]:
     return f"{int(m.group(1))}-{int(m.group(2))}"
 
 
-@router.get("/season-adjustments/template.csv")
+@router.get("/season-adjustments/template.csv", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def season_adjustments_template(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),

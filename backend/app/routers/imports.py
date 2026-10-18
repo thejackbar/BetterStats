@@ -32,6 +32,9 @@ from pydantic import BaseModel
 from sqlalchemy import select, delete as sa_delete, func, text, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_MANUAL_ENTRIES, require_cap,
+)  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
 from app.models.db import (
     Grade, ImportBatch, ImportedStat, Organisation, Player, Season, User, get_db,
@@ -1104,7 +1107,7 @@ async def undo_import_for_player(
     }
 
 
-@router.get("/template.csv")
+@router.get("/template.csv", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def template(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -1125,7 +1128,7 @@ async def template(
     )
 
 
-@router.get("/summary-template.csv")
+@router.get("/summary-template.csv", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def summary_template(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),

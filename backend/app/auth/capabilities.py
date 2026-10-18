@@ -140,6 +140,9 @@ def require_cap(capability: str):
             )
         return current_user
 
+    # Read by verification/audit_route_access.py, which fails on a club route
+    # that declares no capability. Not used at request time.
+    _dep.required_caps = (capability,)
     return _dep
 
 
@@ -169,4 +172,34 @@ def require_any_cap(*capabilities: str):
             )
         return current_user
 
+    _dep.required_caps = tuple(capabilities)
+    return _dep
+
+
+def require_full_admin():
+    """Passes only for a Club Admin or Super Admin: not for a person a Primary
+    Admin locked to one module. For club-wide screens that belong to no module
+    (Plan & Billing, the setup wizard), which `membership_has_capability` cannot
+    express because no capability stands for them."""
+    from app.routers.auth import get_current_user
+    from app.models.db import ClubMembership, User, get_db
+
+    async def _dep(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        row = await db.execute(
+            select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+        )
+        membership = row.scalar_one_or_none()
+        if not membership:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No club membership found")
+        if membership.role not in PRIVILEGED_ROLES:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only a full club admin can do this",
+            )
+        return current_user
+
+    _dep.full_admin_only = True
     return _dep

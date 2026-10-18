@@ -93,6 +93,16 @@
 51. `/auth/me` carries `linked_clubs` (home first, only active clubs), `can_switch_linked_clubs` and `acting_as_linked_club`. `acting_as_club` stays Super Admin only (`trialStatus.js` reads it). The football silo shares the router, so the DDL is in `cricket_schema_mirror.SHARED_DDL_MODULES`. Load a club WITH its `module_subscriptions` before reading entitlements: a second `db.get(..., options=)` for an object already in the session returns the cached copy and skips read-time trial expiry (`_build_me` did this for a club at home).
 52. Known limit: the acted-as club is stored per user, not per tab. Two tabs of one admin share it, so a tab left open on club A acts on club B after a switch elsewhere. The banner is the mitigation. A per-request `X-Club-Id` check would close it.
 
+**J. Who can open what: module-locked users (migration 344, v9.121.0)**
+53. Everyone starts with full access. A `club_admin` with no `user_access` row has every capability. A Primary Admin (or a Super Admin) can lock a colleague to ONE module (`stats`, `select`, `socials`, `iq`, `fantasy`, `admin`). `services/access.py` is the only place that knows what a lock means, and `user_access(user_id, club_id, mode, module_key)` is the source of truth. A locked person's membership is role `club_member` and its `capabilities` list is a CACHE derived from `MODULE_ACCESS`: rewritten on lock and by `resync_module_caps` on every boot, so a capability added to a module reaches existing users on deploy. Never edit that list by hand and never write a second module-to-capability map.
+54. Only the Primary Admin or a Super Admin changes access (`_users_actor(needs_primary=True)`). The Primary Admin and Super Admins are never locked. The first admin to sign up is the Primary Admin (every signup path calls `ensure_primary_admin`). Never give a club user the `super_admin` role, which reaches every club.
+55. A locked person stays in their own club: only `club_admin` switches (`effective_club_id`). A switched-in admin cannot list, invite, edit or remove the linked club's users (`_users_actor` refuses when the membership club is not the request's club). Another admin cannot edit, reset the password of, or remove the Primary Admin.
+56. Every signed-in route declares what it needs: `require_cap`, `require_any_cap`, `require_full_admin` (club-wide screens that belong to no module: Plan & Billing, the setup wizard) or staff-only. A route with no declaration goes on `OPEN_TO_ANY_CLUB_USER` in `verification/audit_route_access.py` with a reason (a person's own inbox and settings, data the public site already shows, or a check inside the handler). The audit fails on an undeclared route and on a stale entry. A new gate never changes what a full admin can do, so tighten rather than loosen. The gates carry `required_caps` (and `full_admin_only`) so the audit can read them.
+57. A new capability goes in exactly one module in `MODULE_ACCESS`, or in `NEVER_LOCKED` (`manage_settings`, `manage_users`, `run_hard_refresh`). The suite checks the two cover `ALL_CAPABILITIES`. A new menu item carries the capability its router enforces.
+58. The Users PATCH reads `access` through `model_fields_set`: absent leaves a lock alone, `{"mode": "full"}` clears it. A name edit must not clear a lock.
+59. The frontend hides what a locked person cannot open (`fullAdmin: true` nav items, dashboard tiles by `user.access`) and does not fetch what they cannot read (plan, setup flow, sync log). The server is the gate; the screen only presents.
+60. Not built, agreed in principle: per menu item switches at View or Manage, role templates such as Captain, per-club roles at a linked club (a link making someone eligible rather than granting access), and a certification gate on junior data. Ten BetterSelect items share `manage_selections`, so per-item switches need finer permissions first.
+
 ## Traps and failure signatures
 
 - Season "2025/26" twice, rows sum to the header: fixture filed under the first club's season (rule 30).
@@ -101,6 +111,7 @@
 - Career doubled (7 became 63; 86 = 56 + 30) or second club shows only unique grades: rules 26, 29. Cutover: Sync Now mints per-club rows and moves aggregate seasons; game-level rows re-attach only on a Full Rebuild.
 - Club delete "did nothing": rule 42. Archived club "already registered": rule 43.
 - Audit noise: match a per-game table only after `FROM`/`JOIN` (`st.batting_innings` is a COLUMN on `player_season_stats`).
+- A limited person sees a tile or link they cannot use, or a screen 403s for them: rules 56, 59. A new route fails `audit_route_access`: declare its capability or list it with a reason (rule 56). A locked user lost a capability after a deploy: the module map changed and the boot resync rewrote the list (rule 53).
 - A check reading zero is not a pass: fixtures need a `result`, a `game_appearances` row and a `match_format`. Reading one row of a split season can pass on the bug (use `grade_total()`).
 
 ## How to verify a change here
@@ -117,6 +128,7 @@ Suites (`backend/verification/`, real Postgres, shipped route bodies, control ru
 - `verify_player_season_fold.py`: control fails on 2 rows for 2025/26.
 - `verify_association_backfill.py`: neutered phases fail, `commit` ignored fails, ambiguity guard removed shows a side picked. Deadlock is not reproducible single-threaded; the suite pins the fix structurally.
 - `verify_match_coverage.py` and the competitions suite for the grouping trigger. Member leak: two clubs, one shared fixture.
+- `verify_user_access.py` (60 checks): full access by default, only the Primary Admin or a Super Admin locks, each of the six modules grants exactly its own capabilities, a locked person cannot act in a linked club, a switched-in admin cannot manage the linked club's users, the Primary Admin cannot be removed or edited by another admin, the boot resync, and the real route table. Control against the commit before: 21 pass, 39 fail, none crash. `audit_route_access.py` fails on an undeclared signed-in route. Browser: `frontend/verification/verify_user_access_browser.mjs` (43 checks; control 10 pass, 14 fail). Harness traps: the club passed to a route body must not be an ORM object (a rollback after a refusal expires it); give `users.failed_login_count` its database default, which `create_all` omits.
 - Harness: ORM-built tables, views from the migrations; smoke-execute every patched read scoped and unscoped (caught "missing FROM-clause entry for table g" in captain by-season CTEs, which need no clause).
 
 ## Operator commands and scripts
@@ -145,6 +157,7 @@ Suites (`backend/verification/`, real Postgres, shipped route bodies, control ru
 
 | Original section (heading, original CLAUDE.md line range) | Disposition | Where captured |
 |---|---|---|
+| Module-locked club users (v9.121.0, migration 344), archive only | rules extracted | Rules 53 to 60 |
 | NEVER DELETE OR OVERWRITE WHAT A CLUB TYPED IN BY HAND (v9.68.2), L1771-1826 | rules extracted | Rules 1 to 8 |
 | A FIXTURE BELONGS TO BOTH CLUBS (v9.62.0), L2996-3111 | rules extracted | Rules 9 to 16 |
 |   sub: What Shoalwater Bay reported | rules extracted | Rules 12 to 16 |

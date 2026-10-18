@@ -4446,6 +4446,24 @@ async def lifespan(app: FastAPI):
         for _stmt in _CLUB_LINK_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 344: users locked to one module. Same one-copy rule: this
+        # list and alembic's 344 both run services/access_ddl.STATEMENTS.
+        from app.services.access_ddl import STATEMENTS as _ACCESS_DDL
+        for _stmt in _ACCESS_DDL:
+            await conn.execute(text(_stmt))
+        # A locked person's capability list is a cache derived from
+        # services/access.MODULE_ACCESS; rewrite it on every boot so a module that
+        # gains a capability reaches existing users. In its own savepoint: a
+        # failure here is logged and must not abort the rest of the boot DDL.
+        try:
+            async with conn.begin_nested():
+                from app.services import access as _access
+                _rewritten = await _access.resync_module_caps(conn)
+            if _rewritten:
+                logger.info("access: rewrote the capability list of %d locked users", _rewritten)
+        except Exception:
+            logger.exception("access: could not resync locked users' capability lists")
+
         # Migration 323: the points a Fantasy manager who joins mid-season
         # starts on. Same one-copy rule: this list and alembic's 323 both run
         # services/fantasy_late_join_ddl.STATEMENTS.

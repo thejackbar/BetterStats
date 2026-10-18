@@ -22,6 +22,9 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_SELECTIONS, require_cap,
+)  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import (
     Fixture, PlayerAvailability, PlayerAvailabilityPeriod, Organisation, Player, User, get_db,
@@ -263,7 +266,7 @@ def allow_maybe(club) -> bool:
 MAYBE_OFF = "Maybe is switched off for this club. Record Available or Unavailable."
 
 
-@router.get("/config")
+@router.get("/config", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def availability_config(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -391,7 +394,7 @@ async def resolve_period_statuses(
     return out
 
 
-@router.get("/matrix")
+@router.get("/matrix", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def availability_matrix(
     tz: Optional[str] = None,
     juniors: bool = False,
@@ -616,7 +619,7 @@ async def set_availability_bulk(
     return {"status": "ok", "count": len(body.items)}
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def list_for_date(
     on: date,
     db: AsyncSession = Depends(get_db),
@@ -652,7 +655,7 @@ async def list_for_date(
     return out
 
 
-@router.get("/periods")
+@router.get("/periods", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def list_periods(
     include_past: bool = False,
     db: AsyncSession = Depends(get_db),
@@ -790,7 +793,7 @@ async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
     }
 
 
-@router.get("/self-service")
+@router.get("/self-service", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def get_self_service(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),

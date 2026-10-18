@@ -22,6 +22,9 @@ from pydantic import BaseModel
 from sqlalchemy import select, text, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_FIXTURES, MANAGE_SELECTIONS, require_any_cap,
+)  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.services import player_audit, squad_sides
 from app.services.grade_labels import grade_is_women, grade_key, org_grade_category_sets
@@ -228,7 +231,7 @@ class TeamUpdate(BaseModel):
     assign_fixtures: Optional[bool] = True
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_any_cap(MANAGE_SELECTIONS, MANAGE_FIXTURES))])
 async def list_teams(
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
@@ -245,7 +248,7 @@ async def list_teams(
     return [_serialize(t, grades, sides.squads.get(str(t.id))) for t in res.scalars().all()]
 
 
-@router.get("/grade-options")
+@router.get("/grade-options", dependencies=[Depends(require_any_cap(MANAGE_SELECTIONS, MANAGE_FIXTURES))])
 async def grade_options(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -614,7 +617,7 @@ class MemberAdd(BaseModel):
     player_id: str
 
 
-@router.get("/{team_id}/members")
+@router.get("/{team_id}/members", dependencies=[Depends(require_any_cap(MANAGE_SELECTIONS, MANAGE_FIXTURES))])
 async def list_team_members(
     team_id: str,
     db: AsyncSession = Depends(get_db),

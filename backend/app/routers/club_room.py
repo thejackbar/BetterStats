@@ -36,6 +36,9 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_CLUB_ROOM, MANAGE_SOCIAL, require_any_cap,
+)  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_CLUB_ROOM, MANAGE_SOCIAL, require_cap
 from app.auth.modules import org_has_module
 from app.models.db import (
@@ -181,7 +184,7 @@ async def _save_media(db, club, current_user, data: bytes, mime: str, source: st
 
 # ─── Settings + playlist ──────────────────────────────────────────────────
 
-@router.get("/settings")
+@router.get("/settings", dependencies=[Depends(require_any_cap(MANAGE_CLUB_ROOM, MANAGE_SOCIAL))])
 async def get_settings(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -1206,7 +1209,7 @@ async def build_play_payload(db: AsyncSession, club: Organisation) -> dict:
     }
 
 
-@router.get("/play")
+@router.get("/play", dependencies=[Depends(require_any_cap(MANAGE_CLUB_ROOM, MANAGE_SOCIAL))])
 async def play(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),

@@ -12,6 +12,7 @@ import uuid
 from app.models.db import User, ClubMembership, Organisation, get_db
 from app.config.settings import settings
 from app.services import player_audit, junior_hiding
+from app.services import access as access_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -661,6 +662,12 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
         # module subscription (any club_admin may request a trial). True for a super
         # admin so the UI never blocks them.
         "is_primary_admin": bool(is_super or (membership and getattr(membership, "is_primary_admin", False))),
+        # "full" for everyone except a person a Primary Admin locked to one
+        # module (services/access.py), who reads {"mode": "module", "module_key": ...}.
+        "access": access_service.describe(
+            await access_service.get_access(db, current_user.id, membership.club_id)
+            if membership and role == "club_member" else None
+        ),
     }
 
 

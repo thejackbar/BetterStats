@@ -49,7 +49,9 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     // BetterFootball has no per-module account plan endpoint; its Core gate
     // is the /auth/me payload alone.
-    if (IS_AFL || !user || user.role === 'super_admin' || !user.club_id) { setAccountPlan(null); return }
+    // A person locked to one module cannot read the plan (it is the Primary Admin's), so they
+    // fall back to the /auth/me core_live flag like any club without plan rows.
+    if (IS_AFL || !user || user.role === 'super_admin' || !user.club_id || user.access?.mode === 'module') { setAccountPlan(null); return }
     let alive = true
     fetch(API_BASE + '/club-admin/account/plan', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))

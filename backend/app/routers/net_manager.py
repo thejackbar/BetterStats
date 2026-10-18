@@ -56,6 +56,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import (
+    MANAGE_SELECTIONS, require_cap,
+)  # route gates added by the access audit
+from app.auth.capabilities import (
     MANAGE_PLAYERS, MANAGE_SELECTIONS, require_any_cap, require_cap,
 )
 from app.models.db import (
@@ -539,7 +542,7 @@ async def _commit_live(db: AsyncSession, s: NetSession) -> dict:
 
 
 # ── Roster (check-in source) ──────────────────────────────────────────────────
-@router.get("/roster")
+@router.get("/roster", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def net_roster(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -590,7 +593,7 @@ async def net_roster(
 
 
 # ── Club default timer settings ──────────────────────────────────────────────
-@router.get("/settings")
+@router.get("/settings", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def get_settings(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -614,7 +617,7 @@ async def put_settings(
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
-@router.get("/sessions")
+@router.get("/sessions", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def list_sessions(
     limit: int = Query(40, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -688,7 +691,7 @@ async def create_session(
     return await _live_payload(db, s)
 
 
-@router.get("/sessions/{session_id}")
+@router.get("/sessions/{session_id}", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def get_session(
     session_id: str,
     db: AsyncSession = Depends(get_db),
@@ -698,7 +701,7 @@ async def get_session(
     return await _live_payload(db, s)
 
 
-@router.get("/sessions/{session_id}/live")
+@router.get("/sessions/{session_id}/live", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def live_session(
     session_id: str,
     since: Optional[int] = Query(None, description="The version this device last saw"),
@@ -1165,7 +1168,7 @@ async def _attendance_rows(db: AsyncSession, club_id, days: int) -> tuple[int, l
     return session_count, players
 
 
-@router.get("/reports/attendance")
+@router.get("/reports/attendance", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def attendance_report(
     days: int = Query(120, ge=0, le=3650, description="0 = all time"),
     db: AsyncSession = Depends(get_db),
@@ -1195,7 +1198,7 @@ def _safe_slug(text_in: Optional[str], fallback: str) -> str:
     return slug[:48] or fallback
 
 
-@router.get("/reports/attendance.csv")
+@router.get("/reports/attendance.csv", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def attendance_report_csv(
     days: int = Query(120, ge=0, le=3650, description="0 = all time"),
     db: AsyncSession = Depends(get_db),
@@ -1227,7 +1230,7 @@ async def attendance_report_csv(
     )
 
 
-@router.get("/sessions/{session_id}/attendance.csv")
+@router.get("/sessions/{session_id}/attendance.csv", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def session_attendance_csv(
     session_id: str,
     db: AsyncSession = Depends(get_db),
@@ -1258,7 +1261,7 @@ async def session_attendance_csv(
     )
 
 
-@router.get("/players/{player_id}/attendance")
+@router.get("/players/{player_id}/attendance", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def player_attendance(
     player_id: str,
     db: AsyncSession = Depends(get_db),
@@ -1340,7 +1343,7 @@ async def _checkin_link_payload(db: AsyncSession, club: Organisation) -> dict:
     }
 
 
-@router.get("/checkin-link")
+@router.get("/checkin-link", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def get_checkin_link(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -1454,7 +1457,7 @@ def _registration_card(r: NetCheckInRegistration, player_name: Optional[str] = N
     }
 
 
-@router.get("/registrations")
+@router.get("/registrations", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def list_registrations(
     status: str = Query("pending"),
     limit: int = Query(100, ge=1, le=500),
@@ -1638,7 +1641,7 @@ def _guest_key(name: str) -> str:
     return " ".join((name or "").split()).casefold()
 
 
-@router.get("/guests")
+@router.get("/guests", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def list_unresolved_guests(
     days: int = Query(GUEST_WINDOW_DAYS, ge=0, le=3650),
     db: AsyncSession = Depends(get_db),

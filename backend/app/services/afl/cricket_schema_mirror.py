@@ -64,6 +64,9 @@ SHARED_DDL_MODULES = (
     ("app.services.role_program_ddl", "STATEMENTS"),
     ("app.services.comms_segment_ddl", "STATEMENTS"),
     ("app.services.asset_register_ddl", "ASSET_REGISTER_SQL"),
+    # Migration 344. The shared `require_cap` and `/auth/me` read it for a football
+    # club's locked-down users too.
+    ("app.services.access_ddl", "STATEMENTS"),
     ("app.services.notification_ddl", "STATEMENTS"),
     ("app.services.committee_sync_ddl", "STATEMENTS"),
     ("app.services.pillar_plan_ddl", "PILLAR_PLAN_SPLIT_SQL"),

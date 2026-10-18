@@ -25,6 +25,9 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_SELECTIONS, require_cap,
+)  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
@@ -115,7 +118,7 @@ async def _get_owned_fixture(db: AsyncSession, fixture_id: str, club_id) -> Fixt
     return f
 
 
-@router.get("/overview")
+@router.get("/overview", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def selection_overview(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -284,7 +287,7 @@ async def selection_overview(
     return {"fixtures": out, "default_team_size": side_size(club)}
 
 
-@router.get("/selected-players")
+@router.get("/selected-players", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def selected_players(
     on: Optional[str] = None,
     from_: Optional[str] = Query(None, alias="from"),
@@ -328,7 +331,7 @@ async def selected_players(
     }
 
 
-@router.get("/{fixture_id}")
+@router.get("/{fixture_id}", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def get_selection(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
@@ -344,7 +347,7 @@ async def get_selection(
     return await assemble_selection(db, club, fx)
 
 
-@router.get("/{fixture_id}/previous-xi")
+@router.get("/{fixture_id}/previous-xi", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def previous_xi(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
@@ -912,7 +915,7 @@ async def unlock_selection(
     return {"status": "ok", "locked": False}
 
 
-@router.get("/{fixture_id}/history")
+@router.get("/{fixture_id}/history", dependencies=[Depends(require_cap(MANAGE_SELECTIONS))])
 async def selection_history(
     fixture_id: str,
     db: AsyncSession = Depends(get_db),
