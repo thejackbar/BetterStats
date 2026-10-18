@@ -121,6 +121,15 @@ export default function SyncRunCard({ entry, isLatest = false }) {
         </p>
       )}
 
+      {/* Games the scorecard pass hit but could not save. They are skipped, not
+          retried, and the run still reads OK, so say so. See sync.py _game_failed. */}
+      {!isError && s.gr_games_failed > 0 && (
+        <p className="font-mono text-[10px] text-pb-amber mb-1.5">
+          {s.gr_games_failed} {s.gr_games_failed === 1 ? 'game' : 'games'} could not be saved this run and
+          {s.gr_games_failed === 1 ? ' was' : ' were'} skipped. Contact support so we can look into it.
+        </p>
+      )}
+
       {isError ? (
         <p className="font-mono text-[10px] text-pb-red">{entry.error}</p>
       ) : s.no_fixtures_in_window ? (

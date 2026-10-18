@@ -17,7 +17,7 @@ from app.models.db import (
     PlayerSeasonStats, PlayerSeasonGradeStats, Milestone,
     SyncRun, async_session_maker
 )
-from app.services import auto_sync, dismissal, participant_names, playhq_client
+from app.services import auto_sync, dismissal, merge_redirects, participant_names, playhq_client
 from app.services.boundary_counts import clean as _bounds
 from app.services.game_status import NOT_PLAYED_STATUSES, not_played_game_sql
 from app.services.grade_labels import suggest_categories, suggest_category
@@ -1027,6 +1027,14 @@ async def _sync_organisation_impl(
                         seen.add(target)
                         target = raw_redirects[target]
                     merged_away[removed_id] = uuid.UUID(target)
+                # A redirect to a player who no longer exists would skip this
+                # person's season stats and stop them being created; ignore it
+                # and treat the id as new (services/merge_redirects.py).
+                merged_away, _gone = await merge_redirects.drop_dangling(session, merged_away)
+                if _gone:
+                    logger.warning(
+                        f"Sync: {len(_gone)} merge redirect(s) lead to a player that no longer exists "
+                        f"and are ignored: {sorted(str(k) for k in _gone)[:10]}")
             except Exception:
                 await session.rollback()
                 merged_away = {}
@@ -1887,12 +1895,25 @@ async def sync_grassroots_game_level_data(
         "gr_games_new": 0, "gr_games_skipped_done": 0, "gr_games_skipped_no_data": 0,
         "gr_batting": 0, "gr_bowling": 0, "gr_fielding": 0,
         "gr_partnerships": 0, "gr_fow": 0, "gr_appearances": 0,
-        "gr_matches_out_of_window": 0,
+        "gr_matches_out_of_window": 0, "gr_games_failed": 0,
     }
     org_uuid = _parse_uuid(org_id_str)
     if not org_uuid:
         logger.warning(f"GR-sync: invalid org_id_str {org_id_str!r}")
         return stats
+
+    def _game_failed(match_id: str, err: Exception) -> None:
+        """A game that never reached the database. Counted, and the first few
+        errors kept in the run's stats, because a game that failed here used to
+        add to no counter at all: it was neither stored, skipped as done nor
+        skipped for no data, so a club could lose whole matches while the run
+        read as a success. Only the driver's message and its DETAIL line are
+        kept, never the SQL (the run's stats are readable without signing in)."""
+        stats["gr_games_failed"] += 1
+        sample = stats.setdefault("gr_game_errors", [])
+        if len(sample) < 5:
+            msg = str(err).split("[SQL", 1)[0]
+            sample.append({"match": match_id, "error": " ".join(msg.splitlines()[:2]).strip()[:300]})
 
     # ── DISCOVERY PHASE ────────────────────────────────────────────────────────
     # Short-lived session: enumerate grades and known players. Read-only.
@@ -1967,6 +1988,15 @@ async def sync_grassroots_game_level_data(
                 seen.add(target)
                 target = raw_redirects[target]
             merged_away[removed] = target
+        # A redirect to a player who is gone makes every insert for that id break
+        # its foreign key and roll the whole game back. Leave such an id out, so
+        # it reads as unknown (matched by name, or created by the aggregate pass).
+        merged_away, _dangling = await merge_redirects.drop_dangling(session, merged_away)
+        if _dangling:
+            stats["gr_dangling_redirects"] = len(_dangling)
+            logger.warning(
+                f"GR-sync: {len(_dangling)} merge redirect(s) lead to a player that no longer exists "
+                f"and are ignored: {sorted(str(k) for k in _dangling)[:10]}")
         logger.info(f"GR-sync: {len(merged_away)} merged-away player redirects loaded")
 
     def _team_pid(guid: Optional[uuid.UUID]) -> Optional[uuid.UUID]:
@@ -2487,6 +2517,7 @@ async def sync_grassroots_game_level_data(
                                 await session.flush()
                             except Exception as e:
                                 logger.warning(f"GR-sync: grade flush failed for {grade_guid_str}: {e}")
+                                _game_failed(match_id_str, e)
                                 continue  # session auto-rollback on context exit
                         grade_id_by_guid[grade_guid_str] = grade_uuid
 
@@ -2549,6 +2580,7 @@ async def sync_grassroots_game_level_data(
                         await session.flush()
                     except Exception as e:
                         logger.warning(f"GR-sync: game flush failed for {match_id_str}: {e}")
+                        _game_failed(match_id_str, e)
                         continue  # session auto-rollback on context exit
 
                 bat_count = bowl_count = field_count = part_count = fow_count = appear_count = 0
@@ -2849,6 +2881,7 @@ async def sync_grassroots_game_level_data(
                 stats["gr_appearances"] += appear_count
         except Exception as e:
             logger.error(f"GR-sync: per-game exception for {match_id_str}: {e}")
+            _game_failed(match_id_str, e)
             # session has already auto-closed; just move on
 
     logger.info(f"GR-sync complete: {stats} for org {org_uuid}")

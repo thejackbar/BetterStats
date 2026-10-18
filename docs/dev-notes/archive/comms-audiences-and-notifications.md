@@ -856,7 +856,7 @@ Not done: a family or guardian address is another person's and is not blocked; a
 **Verified against a real Postgres** (`verify_privacy_email.py`, 25 checks: the three addresses, the audience, all three send categories, the provider guard and the real `get_email_provider()`, an address and a contact added after the removal, a club trying to un-suppress, an ordinary bounce still removable, restore) **with a control run** against the previous commit: 14 fail (he stays in the audience, the gate and the real provider send to him). `verify_comms_segments_merge` 96, `verify_comms_recipients` 22, `verify_audience_clubs` 19, `verify_club_trial_segments` 73, `verify_notifications` 146, privacy suites unchanged.
 
 
-## A capped club's email took ten days, and subscribing did not lift the cap (v9.120.5)
+## A capped club's email took ten days, and subscribing did not lift the cap (v9.120.6)
 
 Reported: Applecross CC sent "Important Reminder - Thursday 8/10" to 669 players on Thu 8 Oct. The sender saw it on 13 Oct, another recipient on 18 Oct (his reply quotes "Sun, 18 Oct 2026, 8:15am", which is 00:15 UTC, the resume job). Production on 18 Oct: campaign `sending`, 300 sent, 369 deferred, club on `sandbox` with no overrides (50 a day).
 

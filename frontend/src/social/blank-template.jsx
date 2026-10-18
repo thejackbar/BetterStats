@@ -379,10 +379,12 @@ function DataBlock({ item, palette, data = {} }) {
   if (item.kind === 'scorecard') {
     const sc = data.scorecard
     const m = sc?.meta || {}
-    const side = (t, label) => {
+    // A side's `bowling` is the bowling in the innings it BATTED, so it lists
+    // the other side's bowlers. This side's own best bowler is in `other`.
+    const side = (t, label, other) => {
       if (!t) return null
       const topBat = (t.batting || []).slice().sort((a, b) => (b.r || 0) - (a.r || 0))[0]
-      const topBowl = (t.bowling || []).slice().sort((a, b) => (b.w || 0) - (a.w || 0))[0]
+      const topBowl = ((other && other.bowling) || []).slice().sort((a, b) => (b.w || 0) - (a.w || 0))[0]
       return (
         <div style={{ padding: '14px 0', borderTop: `1px solid ${rule}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -399,8 +401,8 @@ function DataBlock({ item, palette, data = {} }) {
     return (
       <div style={wrap}>
         <Head>{(m.result || 'SCORECARD').toUpperCase()}</Head>
-        {side(sc?.home, 'HOME')}
-        {side(sc?.away, 'AWAY')}
+        {side(sc?.home, 'HOME', sc?.away)}
+        {side(sc?.away, 'AWAY', sc?.home)}
       </div>
     )
   }

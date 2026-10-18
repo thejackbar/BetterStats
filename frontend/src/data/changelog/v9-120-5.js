@@ -1,13 +1,12 @@
 export default {
   version: 'v9.120.5',
   date: '2026-10-24',
-  // Above v9.120.4's sortKey. Check origin/main at merge time.
-  sortKey: '2026-10-24T10:00:00Z',
-  title: 'Emails to a big list no longer take days, and subscribing lifts your sending limit',
+  // Above v9.120.4.1's sortKey. Check origin/main at merge time.
+  sortKey: '2026-10-24T11:00:00Z',
+  title: 'Results posts show your own bowlers, and a lapsed players filter',
   items: [
-    'A club that subscribes to BetterAdmin now moves to the Production sending limit on its own, instead of staying on the 50-a-day trial limit until someone asked for it. If a club cancels or pauses, it goes back to the trial limit. A failed payment on its own changes nothing.',
-    'Emails held back by a daily limit now go out every morning. Before, a club on the 50-a-day limit only got a batch every second day, so a 669-person email took more than a week to reach everyone. The day now starts at midnight UTC (8am in Perth) and the next batch runs at 8:15am Perth time.',
-    'Before you press Send, the email screen tells you if your sending limit means only some people get it today, how many are held back and when the next batch goes. The same note shows on a sent email while people are still waiting.',
-    'Clubs that already subscribe to BetterAdmin and were still on the 50-a-day limit are lifted to Production in one pass by support.',
+    'Fixed results posts that listed the opposition\'s bowlers under your club. Wrap + Leaders, the Final Score posts, the Glass Card and the scorecard block on the Blank canvas now show your own bowling figures next to your own batters.',
+    'Wrap + Leaders has a new Players shown switch, Our club or Opposition. The heading on the post says which one it is. Pull the round again to load the opposition\'s figures for matches you had already pulled.',
+    'The recency dropdown on the BetterSelect Players page and the squad lists has a new group, Last played more than 1, 2, 3, 5 or 10 years ago, next to the Played within choices. It is for finding players who have not played for a while. A player who has never played is not counted as lapsed, so use the Never played filter for them.',
   ],
 }
