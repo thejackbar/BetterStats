@@ -12,7 +12,7 @@ const SLIDE_TYPE_INFO = {
   leaderboard: { label: 'Leaderboard', desc: 'Top run-scorers, wicket-takers or fielders, podium-style.', module: null },
   records: { label: 'Club Records', desc: 'A record category, like Most Runs or Best Bowling Figures.', module: null },
   statlab_report: { label: 'Custom StatLab Report', desc: 'Any report saved and approved in StatLab.', module: null },
-  honours: { label: 'Honour Boards', desc: 'Your honour boards, premiership squads, or office bearers and life members.', module: null },
+  honours: { label: 'Honour Boards', desc: 'Your honour boards, awards from your records (such as cap numbers), premiership squads, or office bearers and life members.', module: null },
   social_posts: { label: 'Recent Social Posts', desc: 'Posts saved from the Post Designer with "Save to Club Room".', module: 'socials' },
   custom_images: { label: 'Custom Images', desc: 'Any images you upload below, like action shots or club notices.', module: null },
 }
@@ -513,6 +513,7 @@ function slideSummary(slide, info) {
   if (slide.slide_type === 'records') return withGrade(`${info.label} · ${(RECORD_CATEGORIES.find(c => c.key === cfg.category) || {}).label || ''}`)
   if (slide.slide_type === 'statlab_report') return info.label
   if (slide.slide_type === 'honours') {
+    if (cfg.kind === 'awards') return `${info.label} · ${cfg.achievement || cfg.category || 'awards from your records'}`
     if (cfg.kind === 'premierships') return `${info.label} · premiership squads`
     if (cfg.kind === 'office_bearers') return `${info.label} · ${cfg.group || 'office bearers and life members'}`
     return `${info.label} · ${cfg.board_id ? 'one board' : 'all your boards'}`
@@ -542,6 +543,74 @@ function GradeTypeField({ value, onChange, gradeTypes }) {
   )
 }
 
+// "Awards from your records": list what the club has recorded in an award
+// category, optionally only the awards of one exact name (A Grade Cap Number).
+// The slide's own title above names the board; with none set the award name does.
+function AwardsSourceFields({ cfg, setConfig, honourSources }) {
+  const categories = honourSources.award_categories || []
+  const [names, setNames] = useState([])
+  useEffect(() => {
+    if (!cfg.category) { setNames([]); return }
+    let live = true
+    api.clubRoomAwardNames(cfg.category, cfg.subcategory)
+      .then(r => { if (live) setNames(r) })
+      .catch(() => { if (live) setNames([]) })
+    return () => { live = false }
+  }, [cfg.category, cfg.subcategory])
+  const idx = categories.findIndex(c => c.category === cfg.category && (c.subcategory || null) === (cfg.subcategory || null))
+  const listId = 'club-room-award-names'
+  const typed = (cfg.achievement || '').trim().toLowerCase()
+  // A name that matches nothing makes the slide vanish from the show, so say so here.
+  const matchesNothing = !!typed && names.length > 0 && !names.some(n => n.achievement.trim().toLowerCase() === typed)
+  return (
+    <div className="space-y-2">
+      <div>
+        <label className={labelCls}>Award category</label>
+        <select
+          value={cfg.category && idx >= 0 ? String(idx) : ''}
+          onChange={e => {
+            if (e.target.value === '') return setConfig({ category: undefined, subcategory: undefined, achievement: undefined })
+            const c = categories[Number(e.target.value)]
+            setConfig({ category: c.category, subcategory: c.subcategory || undefined, achievement: undefined })
+          }}
+          className={fieldCls}
+        >
+          <option value="">Choose a category</option>
+          {categories.map((c, i) => (
+            <option key={i} value={i}>{c.subcategory ? `${c.category} · ${c.subcategory}` : c.category} ({c.count})</option>
+          ))}
+        </select>
+        {categories.length === 0 && (
+          <p className="text-pb-faintest text-[11px] mt-1">No awards recorded yet. Import or add them on the Awards page first.</p>
+        )}
+      </div>
+      {cfg.category && (
+        <div>
+          <label className={labelCls}>Only awards named (optional)</label>
+          <input
+            value={cfg.achievement || ''}
+            onChange={e => setConfig({ achievement: e.target.value || undefined })}
+            list={listId}
+            placeholder="e.g. A Grade Cap Number"
+            className={fieldCls}
+          />
+          <datalist id={listId}>
+            {names.map(n => <option key={n.achievement} value={n.achievement}>{n.count}</option>)}
+          </datalist>
+          <p className="text-pb-faintest text-[11px] mt-1">
+            Leave blank to list every award in the category. Matches the award name exactly, so men's and ladies' lists need different award names.
+          </p>
+          {matchesNothing && (
+            <p className="text-amber-400 text-[11px] mt-1">
+              No award in this category has exactly that name, so this slide would be skipped. Pick one from the list.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports, honourSources, gradeTypes, customMedia, socialMedia }) {
   const cfg = draft.config
 
@@ -553,6 +622,7 @@ function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports
           <label className={labelCls}>What to show</label>
           <select value={kind} onChange={e => setConfig({ kind: e.target.value })} className={fieldCls}>
             <option value="boards">Our honour boards</option>
+            <option value="awards">Awards from your records (e.g. cap numbers)</option>
             <option value="premierships">Premiership squads</option>
             <option value="office_bearers">Office bearers and life members</option>
           </select>
@@ -571,6 +641,7 @@ function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports
             )}
           </div>
         )}
+        {kind === 'awards' && <AwardsSourceFields cfg={cfg} setConfig={setConfig} honourSources={honourSources} />}
         {kind === 'office_bearers' && (
           <div>
             <label className={labelCls}>Group</label>

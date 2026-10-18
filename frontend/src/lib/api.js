@@ -3008,6 +3008,11 @@ export const api = {
   clubRoomListReports: () => request('/club-admin/club-room/reports'),
   clubRoomHonourSources: () => request('/club-admin/club-room/honour-sources'),
   clubRoomGradeTypes: () => request('/club-admin/club-room/grade-types'),
+  clubRoomAwardNames: (category, subcategory) => {
+    const q = new URLSearchParams({ category })
+    if (subcategory) q.set('subcategory', subcategory)
+    return request(`/club-admin/club-room/award-names?${q}`)
+  },
   clubRoomPlay: () => request('/club-admin/club-room/play'),
   clubRoomGetPublicLink: () => request('/club-admin/club-room/public-link'),
   clubRoomSetPublicLink: (data) =>

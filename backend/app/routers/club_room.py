@@ -32,7 +32,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,7 +58,7 @@ SLIDE_TYPES = {
     "sponsors", "fixtures", "social_posts", "custom_images",
     "leaderboard", "records", "statlab_report", "honours",
 }
-HONOUR_KINDS = {"boards", "premierships", "office_bearers"}
+HONOUR_KINDS = {"boards", "premierships", "office_bearers", "awards"}
 STAT_TABLE_LIMIT = 12  # rows shown on a leaderboard/records/report slide
 
 # records.get_records() computes EVERY record category in one call (batting,
@@ -518,7 +518,53 @@ async def list_honour_sources(
         .order_by(ClubHonourBoard.display_order, ClubHonourBoard.title)
     )).scalars().all()
     groups = list(dict.fromkeys(b["group"] for b in await _office_bearer_boards(db, club)))
-    return {"boards": [{"id": str(b.id), "title": b.title} for b in boards], "groups": groups}
+    return {
+        "boards": [{"id": str(b.id), "title": b.title} for b in boards],
+        "groups": groups,
+        "award_categories": await _award_categories(db, club),
+    }
+
+
+async def _award_categories(db, club) -> list[dict]:
+    """The award categories (with counts) a club has recorded, for the "Awards
+    from your records" source. Read here, not from the website admin routes, so a
+    club-room admin needs no website permission to pick one."""
+    rows = (await db.execute(text("""
+        SELECT category, subcategory, COUNT(*) AS n
+        FROM player_achievements
+        WHERE org_id = :org AND category IS NOT NULL AND category <> ''
+        GROUP BY category, subcategory
+        ORDER BY category, subcategory NULLS FIRST
+    """), {"org": str(club.id)})).mappings().all()
+    return [{"category": r["category"], "subcategory": r["subcategory"], "count": r["n"]} for r in rows]
+
+
+@router.get("/award-names")
+async def list_award_names(
+    category: str,
+    subcategory: str | None = None,
+    current_user: User = Depends(require_cap(MANAGE_CLUB_ROOM)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The award names (with counts) inside one category, for the "Only awards
+    named" picker. Typing a name that is not listed still works. Grouped without
+    regard to case, because the board match ignores it."""
+    params = {"org": str(club.id), "cat": category}
+    sub_clause = ""
+    if subcategory:
+        sub_clause = " AND subcategory = :sub"
+        params["sub"] = subcategory
+    rows = (await db.execute(text("""
+        SELECT MODE() WITHIN GROUP (ORDER BY TRIM(achievement)) AS achievement, COUNT(*) AS n
+        FROM player_achievements
+        WHERE org_id = :org AND category = :cat AND COALESCE(TRIM(achievement), '') <> ''
+    """ + sub_clause + """
+        GROUP BY LOWER(TRIM(achievement))
+        ORDER BY n DESC, LOWER(TRIM(achievement))
+        LIMIT 200
+    """), params)).mappings().all()
+    return [{"achievement": r["achievement"], "count": r["n"]} for r in rows]
 
 
 # ─── Play — resolves the saved playlist into a flat, ready-to-render list ──
@@ -1004,11 +1050,39 @@ async def _expand_honour_office_bearers(db, club, cfg: dict) -> list[dict]:
     return out
 
 
+async def _expand_honour_awards(db, club, cfg: dict, title: str | None) -> list[dict]:
+    """One slide listing the awards a club has recorded in a category, optionally
+    only the ones of one exact name ("A Grade Cap Number"). It reads them through
+    the same `website._auto_entries` an auto honour board uses, so a cap reads
+    "Cap 186" here too and the TV cannot disagree with the website's boards.
+    Nothing to list (or no category picked) is skipped, like an empty board."""
+    from app.routers.website import _auto_entries
+
+    category = str(cfg.get("category") or "").strip()
+    if not category:
+        return []
+    subcategory = str(cfg.get("subcategory") or "").strip() or None
+    achievement = str(cfg.get("achievement") or "").strip() or None
+    rows = await _auto_entries(club.id, category, subcategory, db, achievement)
+    entries = [{"label": _honour_label(r["year"]), "name": r["name"], "detail": r["detail"]} for r in rows]
+    if not entries:
+        return []
+    return [{
+        "eyebrow": "Honour board", "title": (title or "").strip() or achievement or category,
+        "subtitle": None,
+        # 270 names are a long scroll in one column: spread a long list.
+        "columns": 3 if len(entries) > 60 else 2 if len(entries) > 14 else 1,
+        "entries": entries,
+    }]
+
+
 async def _expand_honours(db, club, entry: ClubRoomSlide) -> list[dict]:
     cfg = entry.config or {}
     kind = cfg.get("kind") if cfg.get("kind") in HONOUR_KINDS else "boards"
     if kind == "premierships":
         slides = await _expand_honour_premierships(db, club)
+    elif kind == "awards":
+        slides = await _expand_honour_awards(db, club, cfg, entry.title)
     elif kind == "office_bearers":
         slides = await _expand_honour_office_bearers(db, club, cfg)
     else:
@@ -1047,7 +1121,10 @@ def _entry_summary(entry: ClubRoomSlide) -> str:
         detail = f"{detail} · {_grade_type_label(_grade_type(cfg))}"
     elif entry.slide_type == "honours":
         kind = cfg.get("kind")
-        detail = _HONOUR_KINDS.get(kind) or ("one board" if cfg.get("board_id") else "all your boards")
+        if kind == "awards":
+            detail = str(cfg.get("achievement") or cfg.get("category") or "").strip() or "awards from your records"
+        else:
+            detail = _HONOUR_KINDS.get(kind) or ("one board" if cfg.get("board_id") else "all your boards")
     return f"{label} · {detail}" if detail else label
 
 
