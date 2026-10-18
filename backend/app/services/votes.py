@@ -207,30 +207,48 @@ def medal_covers(allowed: Optional[set[str]], grade_id) -> bool:
     return bool(grade_id) and str(grade_id) in allowed
 
 
+_ACTIVE_GRADES_SQL = """
+    SELECT gr.id, gr.name, s.year
+    FROM grades gr
+    JOIN seasons s ON s.id = gr.season_id
+    WHERE s.organisation_id = :org
+      AND s.year = (
+          SELECT MAX(s2.year) FROM seasons s2
+          WHERE s2.organisation_id = :org
+            AND EXISTS (SELECT 1 FROM grades g2 WHERE g2.season_id = s2.id)
+      )
+"""
+
+
 async def club_grade_options(db: AsyncSession, org_id) -> list[dict]:
-    """The grades a medal can be scoped to: each distinct grade NAME once,
-    carrying its most recent season's id as the value to store. Offering the
-    same name once per season would make the picker unusable for a club with a
-    decade of history, and every one of those rows would mean the same thing."""
+    """The teams a medal can be scoped to: each ACTIVE grade name once.
+
+    Active means the grades of the club's most recent season year that has any
+    grades. A club that has played for a decade has a decade of per-season
+    "Colts" rows, and a grade that stopped being played years ago has no
+    business in a picker for this year's medal. Year rather than a single season
+    row, because a club with a winter and a summer competition has two seasons
+    in the same year and both are current. Falls back a year at a time when the
+    newest season has no grades yet (between a season starting and its first
+    sync), so the picker is never empty for a club that has grades at all.
+
+    Each name carries its newest row's id as the value to store, and the
+    server expands that through the name (``medal_grade_ids``)."""
     res = await db.execute(
         text(
-            """
-            SELECT DISTINCT ON (gr.name) gr.name, gr.id
-            FROM grades gr
-            JOIN seasons s ON s.id = gr.season_id
-            WHERE s.organisation_id = :org
-            ORDER BY gr.name, s.year DESC NULLS LAST
-            """
+            "SELECT DISTINCT ON (a.name) a.name, a.id FROM ("
+            + _ACTIVE_GRADES_SQL
+            + ") a ORDER BY a.name, a.year DESC NULLS LAST"
         ),
         {"org": org_id},
     )
     return [{"id": str(gid), "name": name} for name, gid in res.fetchall()]
 
 
-async def medal_grade_names(db: AsyncSession, org_id, medals: list[VoteMedal]) -> dict[str, list[str]]:
-    """medal id → the grade NAMES it counts, so a screen can show and re-tick a
-    medal's selection even when the stored id belongs to an older season's
-    grade row than the one the picker offers."""
+async def medal_grade_pairs(db: AsyncSession, org_id, medals: list[VoteMedal]) -> dict[str, list[dict]]:
+    """medal id → the stored grades it counts as ``{id, name}``, de-duplicated by
+    name, so a screen can show and re-tick a medal's selection even when the
+    stored id belongs to an older season's grade row than the picker offers."""
     ids: set[str] = set()
     for m in medals:
         ids.update(clean_grade_ids(m.grade_ids))
@@ -245,16 +263,63 @@ async def medal_grade_names(db: AsyncSession, org_id, medals: list[VoteMedal]) -
         {"org": org_id, "ids": [uuid.UUID(g) for g in ids]},
     )
     name_by_id = {str(gid): name for gid, name in res.fetchall()}
-    out: dict[str, list[str]] = {}
+    out: dict[str, list[dict]] = {}
     for m in medals:
-        seen, names = set(), []
+        seen, rows = set(), []
         for gid in clean_grade_ids(m.grade_ids):
             nm = name_by_id.get(gid)
             if nm and nm not in seen:
                 seen.add(nm)
-                names.append(nm)
-        out[str(m.id)] = names
+                rows.append({"id": gid, "name": nm})
+        out[str(m.id)] = rows
     return out
+
+
+async def medal_grade_names(db: AsyncSession, org_id, medals: list[VoteMedal]) -> dict[str, list[str]]:
+    """medal id → the grade NAMES it counts."""
+    pairs = await medal_grade_pairs(db, org_id, medals)
+    return {mid: [r["name"] for r in rows] for mid, rows in pairs.items()}
+
+
+def clean_grade_voter_modes(raw) -> dict[str, str]:
+    """A per-team voter mode map, with anything unusable dropped: a non-string
+    or blank team name, and any value that is not a known mode. A dropped entry
+    falls back to the medal's own mode, which is the safe direction (the team
+    follows the club default) rather than guessing what was meant."""
+    out: dict[str, str] = {}
+    if not isinstance(raw, dict):
+        return out
+    for name, mode in raw.items():
+        if not isinstance(name, str):
+            continue
+        key = name.strip()[:120]
+        if key and mode in VOTER_MODES:
+            out[key] = mode
+    return out
+
+
+def voter_mode_for_grade(cfg: dict, grade_name: Optional[str]) -> str:
+    """Who votes on a game in this team: the team's own setting, else the medal's."""
+    if grade_name:
+        mode = (cfg.get("grade_voter_modes") or {}).get(grade_name)
+        if mode in VOTER_MODES:
+            return mode
+    return cfg["voter_mode"]
+
+
+async def cfg_for_fixture(db: AsyncSession, cfg: dict, fixture: Fixture) -> dict:
+    """``cfg`` with ``voter_mode`` resolved for this fixture's team. A copy, so
+    the medal's own config is untouched. Costs nothing when no team has its own
+    setting, which is every club until one is set."""
+    if not cfg.get("grade_voter_modes"):
+        return cfg
+    gid = (await effective_grade_ids(db, [fixture])).get(str(fixture.id))
+    name = None
+    if gid:
+        name = (await db.execute(
+            text("SELECT name FROM grades WHERE id = :id"), {"id": gid},
+        )).scalar_one_or_none()
+    return {**cfg, "voter_mode": voter_mode_for_grade(cfg, name)}
 
 
 def clean_ballot_values(raw) -> list[int]:
@@ -282,6 +347,7 @@ def effective_config(s: Optional[VoteMedal]) -> dict:
         "enabled": bool(s.enabled) if s else False,
         "require_pin": bool(s.require_pin) if s else True,
         "voter_mode": (s.voter_mode if s and s.voter_mode in VOTER_MODES else "players"),
+        "grade_voter_modes": clean_grade_voter_modes(getattr(s, "grade_voter_modes", None) if s else None),
         "ballot_values": clean_ballot_values(s.ballot_values if s else None),
         "counting_method": (s.counting_method if s and s.counting_method in COUNTING_METHODS else "rank"),
         "tie_policy": (s.tie_policy if s and s.tie_policy in TIE_POLICIES else "share"),

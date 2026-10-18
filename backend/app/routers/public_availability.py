@@ -459,7 +459,8 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
                     continue
                 live_left -= 1
             elig = await vote_svc.resolve_eligibility(db, club, f, cfg, ov.eligibility_source if ov else None)
-            role, _reason = pv._voter_role(cfg, player, elig["players"])
+            role, _reason = pv._voter_role(
+                await vote_svc.cfg_for_fixture(db, cfg, f), player, elig["players"])
             if role != "player":
                 continue
             closes = vote_svc.fixture_close_date(f, cfg)
