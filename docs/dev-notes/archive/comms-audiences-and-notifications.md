@@ -855,3 +855,26 @@ Not done: a family or guardian address is another person's and is not blocked; a
 
 **Verified against a real Postgres** (`verify_privacy_email.py`, 25 checks: the three addresses, the audience, all three send categories, the provider guard and the real `get_email_provider()`, an address and a contact added after the removal, a club trying to un-suppress, an ordinary bounce still removable, restore) **with a control run** against the previous commit: 14 fail (he stays in the audience, the gate and the real provider send to him). `verify_comms_segments_merge` 96, `verify_comms_recipients` 22, `verify_audience_clubs` 19, `verify_club_trial_segments` 73, `verify_notifications` 146, privacy suites unchanged.
 
+
+## A capped club's email took ten days, and subscribing did not lift the cap (v9.120.5)
+
+Reported: Applecross CC sent "Important Reminder - Thursday 8/10" to 669 players on Thu 8 Oct. The sender saw it on 13 Oct, another recipient on 18 Oct (his reply quotes "Sun, 18 Oct 2026, 8:15am", which is 00:15 UTC, the resume job). Production on 18 Oct: campaign `sending`, 300 sent, 369 deferred, club on `sandbox` with no overrides (50 a day).
+
+Three faults, none a provider outage:
+
+1. **Subscribing never touched `organisations.comms_tier`.** Migration 131 reset every club to Sandbox ("earns production only via a super-admin approval") and nothing in Stripe, invoice or super-admin billing wrote the tier. A club on a BetterAdmin trial cannot request a lift at all (402, `request_limit_increase`), so a paying club had to find the Settings card, ask, and wait. Nothing told it.
+2. **The club's daily window was a rolling 24 hours.** `_run_send` stamps `sent_at` when the batch FINISHES (a few seconds after the 00:15 UTC start). The next day's job asks for sends since `now - 24h`, which is a few seconds BEFORE yesterday's stamp, so yesterday's batch still counted and the allowance was 0. A club capped at 50 got a batch every other day. 300 sent in ten days is exactly six batches (8, 10, 12, 14, 16, 18 Oct).
+3. **No signal.** The send screen did not say 50 of 669 go today, and a sent email showed no waiting count.
+
+What changed:
+
+- `comms_limits.tier_after_comms_status` / `apply_comms_subscription_tier`, called from `module_subscriptions` (`upsert_subscription`, `set_status`, `remove_module`) for the `comms` key only. Active lifts Sandbox to Production; paused, cancelled or the module removed returns Production to Sandbox; trial and past_due change nothing; suspended and the outreach org are never touched. Only a TRANSITION counts, so a Stripe renewal (re-sets `active`) cannot undo a super admin who set a club back to Sandbox by hand. Because it lives in the writers, no billing path has to remember it.
+- `comms_limits.club_sends_today` counts from midnight UTC; `club_daily_remaining` and `preflight` use it. The ACCOUNT ceiling (`account_daily_remaining`) stays a rolling 24 hours because that mirrors AWS. `RESUME_HOUR_UTC` / `RESUME_MINUTE_UTC` are the one definition of when the resume job fires and when the club is told the next batch goes (`next_resume_at`).
+- `send_campaign` and `GET /comms/limits` return `sending_now`, `deferred`, `next_batch_at`. `CommsCompose` warns before Send when the audience exceeds today's allowance (and in the confirm dialog), and a sent or sending email shows a "waiting" tile and note while `stats.deferred > 0`. `CommsSettings` Sandbox copy now says subscribing lifts the limit.
+- `python -m app.scripts.sync_comms_tiers all [--apply]`: one-off lift for clubs already subscribed (a transition hook cannot see them). Lists, and never demotes, Production clubs with no active subscription (a super admin may have lifted them by hand).
+
+Production recovery for Applecross (not code): set `comms_tier = 'production'`, then run `resume_deferred_campaigns()` through `docker compose exec betterstats-backend`. Running the resume BEFORE lifting the tier defers everyone again.
+
+**Verified against a real Postgres** (`verify_comms_tier_follows_subscription.py`, 48 checks: the rule as a table, the shipped writers committed and re-read, the shipped `send_campaign` and `resume_deferred_campaigns` over three days with a fake provider and a controlled clock, resume start times of 0, 1, 4 and 30 seconds late, subscribing mid-send, the backfill dry run and apply) **with a control run** against the previous commit: 18 fail on exactly the reported behaviour (a Sandbox club sends 50, then 0, then 50: cumulative 50 after day 1 and 100 after day 2; converting a trial never lifts the tier; the send reports nothing about what is held back).
+
+Not done: a tier lift by a super admin does not trigger an immediate resume, so the held-back recipients wait for the next 00:15 UTC run unless the resume is run by hand. `_run_send` has no overlap guard: a resume that starts while the same campaign's first run is still sending can pick up its `queued` recipients, so a hand-run resume should not be fired during a live send.

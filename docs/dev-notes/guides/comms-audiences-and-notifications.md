@@ -5,10 +5,11 @@
 - Adding a segment field or rule, a merge variable (`{{trial_days_left}}`, `{{club}}`) or a Lists/Segments facet.
 - Touching `frontend/src/pages/admin/clubhouse/crudShell.jsx`, `segmentEngine.jsx`, `CommsLists.jsx`, `CommsCampaigns`/`CommsCompose`/`CommsTemplates`, `components/admin/EmailEditorTabs.jsx`.
 - Anything in club notifications: `notification_events.py`, `notification_scan.py`, `notifications.py`, `milestone_scan.py`, `NotificationBell`, `NotificationModal`, `/club-admin/notifications/*`.
-- Symptoms: `a[r.key] is not iterable`; a segment matching everyone; Comms reaching far fewer people than the Directory; a certificate warning raised twice or never; a bell that opens nothing; a club admin missing from the internal list.
+- Anything in sending limits: `comms_limits.py`, `comms_tier`, `_run_send`, `resume_deferred_campaigns`, `sync_comms_tiers`.
+- Symptoms: an email that reached everyone days late; `a[r.key] is not iterable`; a segment matching everyone; Comms reaching far fewer people than the Directory; a certificate warning raised twice or never; a bell that opens nothing; a club admin missing from the internal list.
 - Shipping a release (changelog file format).
 
-**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/comms-audiences-and-notifications.md`. Grep hints: `facetOptionsFrom`, `decides what it is told`, `Certificate stages`, `One CRUD shape`, `Design / Preview`, `Notification Centre`, `Naming a club`, `nobody at the club ever ran`, `How many clubs an audience`, `one internal list`, `trial, as an audience`, `no sync step`.
+**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/comms-audiences-and-notifications.md`. Grep hints: `facetOptionsFrom`, `decides what it is told`, `Certificate stages`, `One CRUD shape`, `Design / Preview`, `Notification Centre`, `Naming a club`, `nobody at the club ever ran`, `capped club's email took ten days`, `How many clubs an audience`, `one internal list`, `trial, as an audience`, `no sync step`.
 
 **Related guides**: none confirmed (check `docs/dev-notes/guides/` for CRM, accounts/onboarding and verification-harness guides).
 
@@ -85,6 +86,12 @@
 43. Nobody who asked to be taken off the public site (`players.privacy_hidden_at`) is ever emailed, from any module. `services/privacy_email.py` derives their addresses LIVE (player email, linked fee-member email, linked contacts, claimed-account email, and `email_suppressions.source = 'privacy_request'`), so a new address is covered with nothing re-run. Three layers, keep all three: `email_service.get_email_provider()` returns a `PrivacyGuardedProvider` (every send in the app goes through it; a NEW sender must use `get_email_provider()`, never a provider class directly), `email_suppression.deliverable()` (all categories, transactional included), and `comms_segments._not_removed_person()` inside `sendable_where` (independent sub-queries over ALIASED tables: a correlated EXISTS on `Player` is correlated away when the outer query joins it and the statement loses its FROM).
 44. `hide_at_request` suppresses the addresses (reason `manual`, source `privacy_request`) and sets `comms_contacts.excluded`; it never deletes a contact. `remove_suppression` and `DELETE /comms/suppressions` refuse those rows (409). `restore_public` lifts the suppression but leaves contacts excluded, so a restore never re-emails by itself. Family and guardian addresses are other people's and are not blocked.
 
+**Sending limits (v9.120.5)**
+
+45. A club's tier follows its BetterComms module: going `active` lifts Sandbox to Production, `paused`/`cancelled`/removed returns it, trial and past_due change nothing, suspended and the outreach org are never touched. The rule is `comms_limits.tier_after_comms_status`, applied inside `module_subscriptions` writers on a TRANSITION only (a renewal must not undo a hand-set Sandbox). A club that was already active before it shipped needs `app.scripts.sync_comms_tiers`.
+46. A club's daily cap counts from midnight UTC (`club_sends_today`), not a rolling 24 hours: `sent_at` is stamped when a batch finishes, so a rolling window made the 00:15 UTC resume skip every other day. The account ceiling stays rolling (it mirrors AWS). Fire time and "next batch" copy share `RESUME_HOUR_UTC` / `RESUME_MINUTE_UTC`.
+47. Anything that holds a send back must say so: `send_campaign` and `GET /comms/limits` return `sending_now`, `deferred`, `next_batch_at`; the compose screen and a sent email show them.
+
 ## Traps and failure signatures
 
 - `a[r.key] is not iterable`: `facetOptionsFrom` spread `opts[f.key]` for every `FACETS` key but `opts` was a hardcoded literal predating `role`. Throws for empty and `null` lists; `Cannot read properties of undefined (reading 'add')` once a contact has a role. Not the rows. Fix: rule 27. 
@@ -108,6 +115,7 @@
 
 ## Open follow-ups
 
+- A tier lift by a super admin does not trigger an immediate resume (waits for 00:15 UTC). `_run_send` has no overlap guard (a resume during a live send of the same campaign can double-send its `queued` rows).
 - Nothing asserts a key added to `FACETS`, `MODE_FILTERS` or the engagement filter reaches every consumer (only `FACETS` covered).
 - Nothing prunes old notifications (retention is a person's decision). No per-event digest frequency, SMS or push. `member_reminders` still emails the MEMBER about their own lapsing qualification (different audience). Reconcile does not refresh names on existing contacts (deliberate).
 - `crm.trial_days_remaining_by_club` still negates its signed figure for the CRM expired badge (off-by-one from rule 17).

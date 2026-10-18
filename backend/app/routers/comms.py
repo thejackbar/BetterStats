@@ -1696,7 +1696,13 @@ async def send_campaign(
     task = asyncio.create_task(_run_send(str(c.id), str(club.id)))
     _SEND_TASKS.add(task)
     task.add_done_callback(_SEND_TASKS.discard)
+    # What the club should expect: today's allowance goes now, the rest waits for
+    # the daily resume job (comms_limits.next_resume_at). Without this a capped
+    # club believed an urgent reminder had gone to everyone.
+    sending_now = min(len(contacts), max(0, pf["allowance"]))
     return {"status": "sending", "recipients": len(contacts),
+            "sending_now": sending_now, "deferred": len(contacts) - sending_now,
+            "next_batch_at": comms_limits.next_resume_at().isoformat(),
             "allowance": pf["allowance"], "daily_cap": pf["daily_cap"],
             "sent_today": pf["sent_today"],
             "live": get_email_provider().name != "console"}
@@ -1974,6 +1980,7 @@ async def get_limits(
     ).order_by(CommsLimitRequest.requested_at.desc()).limit(10))).scalars().all()
     return {
         **pf,
+        "next_batch_at": comms_limits.next_resume_at().isoformat(),
         "can_request": pf["tier"] == comms_limits.TIER_SANDBOX and open_req is None,
         "open_request": _limit_request_out(open_req) if open_req else None,
         "history": [_limit_request_out(r) for r in history],
