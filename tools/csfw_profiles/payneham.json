@@ -115,9 +115,30 @@
     29
   ],
   "format_by_type": {
+    "0": "One Day",
+    "2": "One Day",
+    "3": "One Day",
     "4": "One Day",
     "6": "Two Day",
-    "7": "Two Day"
+    "7": "Two Day",
+    "8": "One Day",
+    "9": "One Day",
+    "10": "One Day",
+    "11": "One Day",
+    "12": "One Day",
+    "13": "Two Day",
+    "14": "Two Day",
+    "16": "One Day",
+    "17": "One Day",
+    "18": "One Day",
+    "19": "One Day",
+    "20": "One Day",
+    "21": "One Day",
+    "23": "One Day",
+    "24": "One Day",
+    "25": "Two Day",
+    "27": "Two Day",
+    "28": "One Day"
   },
   "byes": [
     "Bye"
@@ -132,5 +153,12 @@
     "5": "",
     "6": "DRAW",
     "7": "DRAW"
-  }
+  },
+  "mixed_format_types": [
+    8,
+    13,
+    14,
+    25,
+    27
+  ]
 }

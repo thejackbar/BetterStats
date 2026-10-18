@@ -85,7 +85,7 @@ reads the active profile's format table, and a final's format is measured only
 where the profile names BOTH a one-day and a two-day type (Payneham names only
 Limited Over, so its finals stay blank: an ATCA Final is a turf final).
 
-Verification: `tools/verify_csfw_extract.py` (62 checks) builds archives in a
+Verification: `tools/verify_csfw_extract.py` (64 checks) builds archives in a
 layout the extractor was never written against (every table moved and resized,
 every field shifted), with two databases, a bye, an unprofiled club and two
 layouts in one folder, and runs the shipped code over them.
@@ -169,6 +169,19 @@ Match Types tabs).** Applied in `tools/csfw_profiles/payneham.json`:
   or NE Jnr CA (8%), so those and 14 later types (21 rows) go back to the club
   on a follow-up sheet (`--questions --open-only`). Until answered ~3,000 games
   carry no format. Never apply a blanket answer the data contradicts.
+
+**Formats, second round (Oct 2026).** Payneham answered the 21 follow-up rows:
+One Day for everything except East Torrens CA, YMCA CA, SACA Junior U16 and ATCA
+Junior U15 (Two Day), and marked those four plus NE Jnr CA "could be a mix".
+`mixed_format_types` in the profile handles that per game: a scorecard with a
+second innings recorded is proof of a multi-innings game, so it is Two Day
+whatever the type's default. Nothing proves One Day (a two-day game can end on
+first innings), so a mixed type with no second innings keeps the club's answer if
+that was One Day and is left BLANK if it was Two Day. That moved 130 NE Jnr CA
+games to Two Day and left 65 games with no format (old two-day competitions with
+no second innings recorded, and six types too small to ask about). Everything
+except the format column is unchanged, and the three seasons the club
+spot-checked (2016/17, 2019/20, 2022/23) still give 156, 226 and 193.
 
 Result for the whole archive: 8,852 games, 1928/29 to 2025/26, 55 grades, 75
 games for `DATA2025` as CSFW shows. One game (1932) has team 0, no team recorded.

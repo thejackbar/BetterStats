@@ -434,6 +434,10 @@ FINALS_TYPES = frozenset({6, 7, 8, 9})
 # Match type filter leaves those games out entirely.
 FORMAT_BY_TYPE = {1: "Two Day", 4: "One Day"}
 
+# MATCH TYPES THE CLUB SAYS CAN RUN AS EITHER FORMAT (a profile's
+# `mixed_format_types`). Empty for Shoalwater Bay, whose types state one.
+MIXED_FORMAT_TYPES: frozenset = frozenset()
+
 # The SAME results in BetterStats' own stored vocabulary, which is uppercase
 # (`WIN`/`LOSS`/`DRAW`/`TIE` - every reader in the app compares against those
 # literals, e.g. `aggregations._club_results`). A human-readable "Won" matches
@@ -777,7 +781,7 @@ def match_type_label(code) -> str:
 
 
 def match_format_for(type_code, season_two_day_teams, team, total_overs,
-                     season_one_day_max) -> str:
+                     season_one_day_max, second_innings: bool = False) -> str:
     """The format to import for one match, in BetterStats' own vocabulary.
 
     A type that STATES the format answers for itself. A finals type does not -
@@ -795,6 +799,10 @@ def match_format_for(type_code, season_two_day_teams, team, total_overs,
     only A grade, only those two seasons - rather than resting on a threshold
     invented here.
     """
+    if type_code in MIXED_FORMAT_TYPES:
+        if second_innings:
+            return "Two Day"
+        return "One Day" if FORMAT_BY_TYPE.get(type_code) == "One Day" else ""
     if type_code in FORMAT_BY_TYPE:
         return FORMAT_BY_TYPE[type_code]
     if type_code in FINALS_TYPES and {"Two Day", "One Day"} <= set(FORMAT_BY_TYPE.values()):
@@ -1466,8 +1474,10 @@ def build_game_rows(seasons: list, club: str,
             # type says WHICH final rather than how long it ran, so the format
             # is settled per match - see `match_format_for`.
             type_code = played[0].get("type_code")
+            # a second innings on the card is proof of a multi-innings game
+            second = any(l["us"]["played"] or l["them"]["played"] for l in played[1:])
             fmt = match_format_for(type_code, two_day_teams, team,
-                                   total_overs(played), one_day_max)
+                                   total_overs(played), one_day_max, second)
             # The club's own result, in the app's own vocabulary. An abandoned
             # match comes back blank: it was played and it counts as a match,
             # but it is not a win, a loss or a draw.
@@ -1731,6 +1741,12 @@ class Profile:
     match_types: dict = field(default_factory=dict)
     finals_types: frozenset = frozenset()
     format_by_type: dict = field(default_factory=dict)
+    # Types the club says can be run as either format. For these the format is
+    # settled per game from its own scorecard: a recorded second innings is
+    # proof of a multi-innings game, so Two Day. Nothing proves One Day (a
+    # two-day game can end on first innings), so without one a game takes the
+    # club's answer if that was One Day, and is left blank if it was Two Day.
+    mixed_format_types: frozenset = frozenset()
     # A CLUB KEEPS SEVERAL DATABASES (a CSFW file holds at most 160 match
     # records), and a team NUMBER means something only inside one of them: at
     # Payneham team 1 is the senior men's 1st XI in one and the women's side in
@@ -1768,7 +1784,7 @@ BUILTIN_PROFILES = [SHOALWATER]
 
 _PROFILE_KEYS = {"name", "club", "team_names", "legacy_team_names", "match_types",
                  "finals_types", "format_by_type", "databases", "byes", "club_name",
-                 "absent", "result_labels", "import_results"}
+                 "absent", "result_labels", "import_results", "mixed_format_types"}
 
 
 def _int_keys(d: dict) -> dict:
@@ -1780,12 +1796,17 @@ def load_profile(path: Path) -> Profile:
     bad = sorted(set(d) - _PROFILE_KEYS)
     if bad:
         raise ValueError(f"{path.name}: unknown profile field(s): {', '.join(bad)}")
+    # keywords throughout: a field added in the middle of Profile must never
+    # shift a positional argument into the wrong place
     return Profile(
-        d.get("name", path.stem), d.get("club", ""),
-        _int_keys(d.get("team_names", {})), _int_keys(d.get("legacy_team_names", {})),
-        _int_keys(d.get("match_types", {})), frozenset(d.get("finals_types", [])),
-        _int_keys(d.get("format_by_type", {})),
-        {label.strip(): _int_keys(names) for label, names in d.get("databases", {}).items()},
+        name=d.get("name", path.stem), club=d.get("club", ""),
+        team_names=_int_keys(d.get("team_names", {})),
+        legacy_team_names=_int_keys(d.get("legacy_team_names", {})),
+        match_types=_int_keys(d.get("match_types", {})),
+        finals_types=frozenset(d.get("finals_types", [])),
+        format_by_type=_int_keys(d.get("format_by_type", {})),
+        mixed_format_types=frozenset(d.get("mixed_format_types", [])),
+        databases={label.strip(): _int_keys(names) for label, names in d.get("databases", {}).items()},
         byes=tuple(x.strip().lower() for x in d.get("byes", [])),
         club_name=d.get("club_name", ""), absent=d.get("absent", ""),
         result_labels=_int_keys(d.get("result_labels", {})),
@@ -1817,8 +1838,9 @@ _BASE_IMPORT_RESULTS = dict(IMPORT_RESULTS)
 
 def activate(profile: Profile) -> None:
     """Make `profile` the tables everything reads."""
-    global FINALS_TYPES, ACTIVE
+    global FINALS_TYPES, MIXED_FORMAT_TYPES, ACTIVE
     ACTIVE = profile
+    MIXED_FORMAT_TYPES = profile.mixed_format_types
     GRADE_NAMES.clear()
     GRADE_NAMES.update(profile.team_names)
     LEGACY_GRADE_NAMES.clear()

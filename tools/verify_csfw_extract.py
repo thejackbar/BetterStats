@@ -588,5 +588,47 @@ with tempfile.TemporaryDirectory() as td:
               (prof.match_types, sorted(prof.finals_types)),
               ({0: "Friendly", 3: "Cup Final", 4: "Limited Over"}, [3]))
 
+# ---------------------------------------------------------------------------
+# 9. A match type that can be run as either format is settled game by game
+# ---------------------------------------------------------------------------
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    src = td / "src"
+    src.mkdir()
+    d = datetime.date(2025, 11, 1)
+    fx = [(0, d, 1, "Alpha 1"), (1, d, 1, "Alpha 2"),          # type 8, a second innings recorded
+          (2, d, 2, "Beta"),                                    # type 8, one innings
+          (3, d, 3, "Gamma 1"), (4, d, 3, "Gamma 2"),          # type 13, a second innings recorded
+          (5, d, 4, "Delta")]                                   # type 13, one innings
+    bat = [(0, 0, 10, 11)]
+    mt = {0: dict(type=8, result=0, us=(100, 10), them=(90, 10), bat=bat),
+          1: dict(type=8, result=0, us=(60, 5), them=(40, 10), bat=bat),
+          2: dict(type=8, result=0, us=(100, 10), them=(90, 10), bat=bat),
+          3: dict(type=13, result=0, us=(100, 10), them=(90, 10), bat=bat),
+          4: dict(type=13, result=0, us=(60, 5), them=(40, 10), bat=bat),
+          5: dict(type=13, result=0, us=(100, 10), them=(90, 10), bat=bat)}
+    if lay2 is not None:
+        (src / "DATA2025.AV").write_bytes(build_av(lay2, "Newtown", 2025, fx, mt, PLAYERS))
+    (td / "layout.json").write_text(json.dumps(V2))
+    base = {"name": "t", "club": "newtown", "team_names": {"1": "A", "2": "B", "3": "C", "4": "D"},
+            "match_types": {"8": "Junior", "13": "Old comp"},
+            "format_by_type": {"8": "One Day", "13": "Two Day"}}
+    (td / "plain.json").write_text(json.dumps(base))
+    (td / "mixed.json").write_text(json.dumps({**base, "mixed_format_types": [8, 13]}))
+
+    def formats(profile):
+        out = td / ("o_" + profile.stem)
+        code, _ = run("--layout", td / "layout.json", "--profile", profile, src, "-o", out)
+        rows = read_csv(out / "manual_games_scorecards.csv") if code == 0 else []
+        return {r["opposition"]: r["match_format"] for r in rows}
+
+    check("without it, every game of a type takes the type's one format (the old behaviour)",
+          formats(td / "plain.json"),
+          {"Alpha": "One Day", "Beta": "One Day", "Gamma": "Two Day", "Delta": "Two Day"})
+    check("for a mixed type a recorded second innings makes the game Two Day, and the rest keep the club's "
+          "One Day, or stay blank where the club's answer was Two Day (nothing proves a two-day game ran one day)",
+          formats(td / "mixed.json"),
+          {"Alpha": "Two Day", "Beta": "One Day", "Gamma": "Two Day", "Delta": ""})
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
