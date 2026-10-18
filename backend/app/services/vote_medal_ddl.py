@@ -138,3 +138,18 @@ VOTE_MEDAL_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS ix_vote_nudges_medal_fixture_player "
     "ON vote_nudges(medal_id, fixture_id, player_id, sent_at)",
 ]
+
+
+# A medal can override who votes for one team (grade NAME -> 'players' |
+# 'captain'). Keyed by name for the same reason ``grade_ids`` expands through
+# names: grades are per-season rows, so a key on an id would stop applying the
+# day next season's grades are created. Empty = every team follows
+# ``voter_mode``. Run by migration 345 and the lifespan mirror.
+VOTE_GRADE_MODE_STATEMENTS = [
+    "ALTER TABLE vote_medals ADD COLUMN IF NOT EXISTS grade_voter_modes "
+    "JSONB NOT NULL DEFAULT '{}'::jsonb",
+]
+
+VOTE_GRADE_MODE_DOWNGRADE = [
+    "ALTER TABLE vote_medals DROP COLUMN IF EXISTS grade_voter_modes",
+]

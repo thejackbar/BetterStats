@@ -1790,6 +1790,9 @@ class VoteMedal(Base):
     # has thought about grades. No FK on purpose: a grade merged away or
     # deleted just stops matching rather than blocking the delete.
     grade_ids = Column(JSONB, nullable=False, default=list, server_default="[]")
+    # Per-team override of ``voter_mode`` (migration 345): grade NAME ->
+    # 'players' | 'captain'. A team with no entry follows ``voter_mode``.
+    grade_voter_modes = Column(JSONB, nullable=False, default=dict, server_default="{}")
     position = Column(Integer, nullable=False, default=0, server_default="0")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

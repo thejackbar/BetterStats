@@ -496,6 +496,7 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         db, club, fx, cfg, ov.eligibility_source if ov else None,
     )
     eligible = elig["players"]
+    cfg = await vote_svc.cfg_for_fixture(db, cfg, fx)
     state = vote_svc.fixture_vote_state(fx, cfg, ov.status if ov else None, bool(eligible))
     me = await _verified_player(db, request, club)
     role, reason = _voter_role(cfg, me, eligible)
@@ -572,6 +573,7 @@ async def submit_ballot(token: str, fixture_id: str, body: BallotBody, request: 
         db, club, fx, cfg, ov.eligibility_source if ov else None,
     )
     eligible = elig["players"]
+    cfg = await vote_svc.cfg_for_fixture(db, cfg, fx)
     state = vote_svc.fixture_vote_state(fx, cfg, ov.status if ov else None, bool(eligible))
     if state != "open":
         detail = {

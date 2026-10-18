@@ -1,6 +1,6 @@
 // Settings tab — ONE medal's setup. The public-link block lives in
 // ShareVotePanel (one sharing surface); everything else (name, grades,
-// voter_mode, allow_non_participants, allow_self_vote, ballot_values,
+// voter_mode (plus grade_voter_modes, one override per team), allow_non_participants, allow_self_vote, ballot_values,
 // counting_method, tie_policy, eligibility_source, auto_close_days) patches
 // the medal.
 import { useCallback, useEffect, useState } from 'react'
@@ -17,6 +17,7 @@ const SOURCES = [
   { value: 'playhq', label: 'Play.Cricket team list', hint: 'The side your club published on Play.Cricket. Ready on match day.' },
 ]
 const ballotLabel = (v) => (v || []).join('-')
+const MODE_LABEL = { players: 'All players', captain: 'Captain only' }
 
 function Row({ label, hint, children }) {
   return (
@@ -74,18 +75,45 @@ export default function VotesSettings({
   // The picker works on grade NAMES, not the ids it sends: grades are per-season
   // rows, so a medal's stored id often belongs to an older season than the one
   // the picker offers. The server expands names back out when it counts.
+  // A ticked grade that is no longer played is not offered by the picker but
+  // is still counted, so its id rides along until the club unticks it below.
   const toggleGrade = (option) => {
     const chosen = new Set(cfg.grade_names || [])
     if (chosen.has(option.name)) chosen.delete(option.name)
     else chosen.add(option.name)
     update({
-      grade_ids: gradeOptions.filter((g) => chosen.has(g.name)).map((g) => g.id),
+      grade_ids: [
+        ...gradeOptions.filter((g) => chosen.has(g.name)).map((g) => g.id),
+        ...(cfg.inactive_grades || []).map((g) => g.id),
+      ],
     })
+  }
+  const dropInactiveGrade = (grade) => {
+    const ids = [
+      ...gradeOptions.filter((g) => (cfg.grade_names || []).includes(g.name)).map((g) => g.id),
+      ...(cfg.inactive_grades || []).filter((g) => g.id !== grade.id).map((g) => g.id),
+    ]
+    // No grades ticked means every grade, so removing the last one widens the medal.
+    if (!ids.length && !window.confirm(
+      `${grade.name} is the only grade ticked. Removing it makes this medal count every grade. Continue?`,
+    )) return
+    update({ grade_ids: ids })
+  }
+  const setTeamMode = (name, mode) => {
+    const next = { ...(cfg.grade_voter_modes || {}) }
+    if (mode === 'default') delete next[name]
+    else next[name] = mode
+    update({ grade_voter_modes: next })
   }
 
   if (!cfg) return <PbSpinner message="Loading settings…" />
 
   const chosenGrades = new Set(cfg.grade_names || [])
+  const inactiveGrades = cfg.inactive_grades || []
+  const teamModes = cfg.grade_voter_modes || {}
+  // The teams this medal counts: the ticked ones, or every active team when
+  // none is ticked.
+  const scopeTeams = gradeOptions.filter((g) => chosenGrades.size === 0 || chosenGrades.has(g.name))
 
   const ballot = ballotDraft || (cfg.ballot_values || []).map(String)
   const setPos = (i, v) => setBallotDraft(ballot.map((x, j) => (j === i ? v.replace(/\D/g, '').slice(0, 3) : x)))
@@ -117,8 +145,8 @@ export default function VotesSettings({
             )}
           </div>
         </Row>
-        <Row label="Grades it counts" hint="Leave every grade unticked to count the whole club. Ticking a grade counts it in every season, so you don't have to redo this each year.">
-          {gradeOptions.length === 0 ? (
+        <Row label="Grades it counts" hint="Only the grades your club is playing this season are listed. Leave every grade unticked to count the whole club. Ticking a grade counts it in every season, so you don't have to redo this each year.">
+          {gradeOptions.length === 0 && inactiveGrades.length === 0 ? (
             <div className="text-[12.5px] text-pb-faint">
               No grades yet — this medal counts every game the club plays.
             </div>
@@ -137,6 +165,22 @@ export default function VotesSettings({
                   )
                 })}
               </div>
+              {inactiveGrades.length > 0 && (
+                <div className="mt-2.5">
+                  <div className="text-[11px] text-pb-faintest mb-1">
+                    Still ticked, but not played this season. Untick to stop counting them.
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {inactiveGrades.map((g) => (
+                      <button key={g.id} onClick={() => dropInactiveGrade(g)} disabled={!canManage || busy}
+                        title="Stop counting this grade"
+                        className="px-2.5 py-1 rounded-full text-[12.5px] border pb-hairline bg-pb-surface2 text-pb-faint hover:text-pb-text">
+                        {g.name} ✕
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="text-[11px] text-pb-faintest mt-1.5">
                 {chosenGrades.size === 0
                   ? 'Counting every grade.'
@@ -145,10 +189,28 @@ export default function VotesSettings({
             </>
           )}
         </Row>
-        <Row label="Who votes" hint="Every player in the game, or just the captain.">
+        <Row label="Who votes" hint="Every player in the game, or just the captain. This is the default for every team; set a team below to do it differently.">
           <Segmented sm value={cfg.voter_mode} onChange={(v) => update({ voter_mode: v })}
             options={[{ value: 'players', label: 'All players' }, { value: 'captain', label: 'Captain only' }]} />
         </Row>
+        {scopeTeams.length > 0 && (
+          <Row label="Who votes, by team" hint="Some teams count every player's vote, others only the captain's. Pick per team, or leave a team on the default above.">
+            <div className="flex flex-col gap-1.5">
+              {scopeTeams.map((g) => (
+                <div key={g.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                  <span className="text-sm min-w-0 break-words">{g.name}</span>
+                  <select value={teamModes[g.name] || 'default'} onChange={(e) => setTeamMode(g.name, e.target.value)}
+                    disabled={!canManage || busy}
+                    className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-pb-accent">
+                    <option value="default">Default ({MODE_LABEL[cfg.voter_mode]})</option>
+                    <option value="players">{MODE_LABEL.players}</option>
+                    <option value="captain">{MODE_LABEL.captain}</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+          </Row>
+        )}
         <Row label="Non-playing voters" hint="Let the coach, president or supporters vote too. They enter their name on the voting page; you can delete any ballot you don't recognise.">
           <Segmented sm value={cfg.allow_non_participants ? 'yes' : 'no'} onChange={(v) => update({ allow_non_participants: v === 'yes' })}
             options={[{ value: 'no', label: 'Players only' }, { value: 'yes', label: 'Allowed' }]} />
