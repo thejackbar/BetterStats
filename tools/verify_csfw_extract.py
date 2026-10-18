@@ -599,14 +599,16 @@ with tempfile.TemporaryDirectory() as td:
     fx = [(0, d, 1, "Alpha 1"), (1, d, 1, "Alpha 2"),          # type 8, a second innings recorded
           (2, d, 2, "Beta"),                                    # type 8, one innings
           (3, d, 3, "Gamma 1"), (4, d, 3, "Gamma 2"),          # type 13, a second innings recorded
-          (5, d, 4, "Delta")]                                   # type 13, one innings
+          (5, d, 4, "Delta"),                                   # type 13, one innings
+          (6, d, 4, "Washout")]                                 # no type, no score
     bat = [(0, 0, 10, 11)]
     mt = {0: dict(type=8, result=0, us=(100, 10), them=(90, 10), bat=bat),
           1: dict(type=8, result=0, us=(60, 5), them=(40, 10), bat=bat),
           2: dict(type=8, result=0, us=(100, 10), them=(90, 10), bat=bat),
           3: dict(type=13, result=0, us=(100, 10), them=(90, 10), bat=bat),
           4: dict(type=13, result=0, us=(60, 5), them=(40, 10), bat=bat),
-          5: dict(type=13, result=0, us=(100, 10), them=(90, 10), bat=bat)}
+          5: dict(type=13, result=0, us=(100, 10), them=(90, 10), bat=bat),
+          6: dict(type=200, result=4, us=(-1, -1), them=(-1, -1), bat=[])}
     if lay2 is not None:
         (src / "DATA2025.AV").write_bytes(build_av(lay2, "Newtown", 2025, fx, mt, PLAYERS))
     (td / "layout.json").write_text(json.dumps(V2))
@@ -624,11 +626,36 @@ with tempfile.TemporaryDirectory() as td:
 
     check("without it, every game of a type takes the type's one format (the old behaviour)",
           formats(td / "plain.json"),
-          {"Alpha": "One Day", "Beta": "One Day", "Gamma": "Two Day", "Delta": "Two Day"})
+          {"Alpha": "One Day", "Beta": "One Day", "Gamma": "Two Day", "Delta": "Two Day", "Washout": ""})
     check("for a mixed type a recorded second innings makes the game Two Day, and the rest keep the club's "
           "One Day, or stay blank where the club's answer was Two Day (nothing proves a two-day game ran one day)",
           formats(td / "mixed.json"),
-          {"Alpha": "Two Day", "Beta": "One Day", "Gamma": "Two Day", "Delta": ""})
+          {"Alpha": "Two Day", "Beta": "One Day", "Gamma": "Two Day", "Delta": "", "Washout": ""})
+
+    # the games left with no format are listed for the club, and its answers come back per game
+    out = td / "o_mixed"
+    review = read_csv(out / "games_without_format.csv") if (out / "games_without_format.csv").exists() else []
+    check("the games with no format are listed for review (and an abandoned no-type game is not)",
+          [(r["Opposition"], r["Match type"], r["Second innings on the card"]) for r in review],
+          [("Delta", "Old comp", "No")])
+    check("each listed game says why it is blank and has a game key to match its answer to",
+          (bool(review and review[0]["Why blank"]), review[0]["Game key"] if review else None),
+          (True, "2025-004"))
+    if review:
+        review[0]["Your answer"] = "One Day"
+        filled = td / "review_filled.csv"
+        with filled.open("w", newline="", encoding="utf-8-sig") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(review[0].keys()))
+            w.writeheader()
+            w.writerows(review)
+        out2 = td / "o_answered"
+        run("--layout", td / "layout.json", "--profile", td / "mixed.json", "--answers", filled,
+            src, "-o", out2)
+        got = {r["opposition"]: r["match_format"] for r in read_csv(out2 / "manual_games_scorecards.csv")}
+        check("the club's answer for one game sets that game's format, and nothing else moves",
+              got, {"Alpha": "Two Day", "Beta": "One Day", "Gamma": "Two Day", "Delta": "One Day", "Washout": ""})
+        check("once every listed game is answered the review sheet is not written",
+              (out2 / "games_without_format.csv").exists(), False)
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

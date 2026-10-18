@@ -438,6 +438,10 @@ FORMAT_BY_TYPE = {1: "Two Day", 4: "One Day"}
 # `mixed_format_types`). Empty for Shoalwater Bay, whose types state one.
 MIXED_FORMAT_TYPES: frozenset = frozenset()
 
+# THE CLUB'S ANSWER FOR A SINGLE GAME, by game key, where neither the type nor
+# the scorecard could say (see `unresolved` in build_game_rows). Wins over both.
+GAME_FORMATS: dict = {}
+
 # The SAME results in BetterStats' own stored vocabulary, which is uppercase
 # (`WIN`/`LOSS`/`DRAW`/`TIE` - every reader in the app compares against those
 # literals, e.g. `aggregations._club_results`). A human-readable "Won" matches
@@ -1453,7 +1457,7 @@ def innings_columns(leg: dict, n: int) -> dict:
 
 
 def build_game_rows(seasons: list, club: str,
-                    absent_is_out: bool = True) -> list:
+                    absent_is_out: bool = True, unresolved: list | None = None) -> list:
     """One row per player per match, in the Manual Games importer's own columns.
 
     This is the richer of the two ways in: it lands real per-game scorecards
@@ -1462,6 +1466,9 @@ def build_game_rows(seasons: list, club: str,
     workbook and the season CSV.  Blank means the format does not record it -
     balls faced and run outs are not in these files at all - and a blank is
     right where a zero would read as a recorded nought.
+
+    `unresolved`, when given, collects one entry per game left with no format,
+    for the club to review (`write_format_review`).
     """
     rows = []
     for s in seasons:
@@ -1478,6 +1485,26 @@ def build_game_rows(seasons: list, club: str,
             second = any(l["us"]["played"] or l["them"]["played"] for l in played[1:])
             fmt = match_format_for(type_code, two_day_teams, team,
                                    total_overs(played), one_day_max, second)
+            fmt = GAME_FORMATS.get(mid, fmt)
+            # (an abandoned game with no score and no match type has nothing to
+            # be a format OF, so it is not worth asking the club about)
+            nothing = not any(l["has_play"] for l in played) and type_code not in MATCH_TYPES
+            if not fmt and unresolved is not None and not nothing:
+                first = played[0]
+                unresolved.append({
+                    "Game key": mid, "Date": date.isoformat() if date else "",
+                    "Season": s["season"], "Team": grade_label(team), "Opposition": opponent,
+                    "Venue": first.get("ground", ""),
+                    "Match type": MATCH_TYPES.get(type_code, f"type {type_code}"),
+                    "Result": RESULT_LABELS.get(first["result_code"], ""),
+                    "Score": " v ".join(
+                        f"{x['total']}/{x['wickets']}" if x["played"] else "no score"
+                        for x in (first["us"], first["them"])),
+                    "Second innings on the card": "Yes" if second else "No",
+                    "Why blank": ("This match type can be run as either format and the card "
+                                  "shows no second innings" if type_code in MIXED_FORMAT_TYPES
+                                  else "No format was given for this match type"),
+                })
             # The club's own result, in the app's own vocabulary. An abandoned
             # match comes back blank: it was played and it counts as a match,
             # but it is not a win, a loss or a draw.
@@ -1747,6 +1774,10 @@ class Profile:
     # two-day game can end on first innings), so without one a game takes the
     # club's answer if that was One Day, and is left blank if it was Two Day.
     mixed_format_types: frozenset = frozenset()
+    # a format for one game, by game key: what the club said about each game the
+    # extraction left blank. A key is year (or file stem) plus the game's order
+    # in its season, so it holds only while the files do not change.
+    game_formats: dict = field(default_factory=dict)
     # A CLUB KEEPS SEVERAL DATABASES (a CSFW file holds at most 160 match
     # records), and a team NUMBER means something only inside one of them: at
     # Payneham team 1 is the senior men's 1st XI in one and the women's side in
@@ -1784,7 +1815,8 @@ BUILTIN_PROFILES = [SHOALWATER]
 
 _PROFILE_KEYS = {"name", "club", "team_names", "legacy_team_names", "match_types",
                  "finals_types", "format_by_type", "databases", "byes", "club_name",
-                 "absent", "result_labels", "import_results", "mixed_format_types"}
+                 "absent", "result_labels", "import_results", "mixed_format_types",
+                 "game_formats"}
 
 
 def _int_keys(d: dict) -> dict:
@@ -1806,6 +1838,7 @@ def load_profile(path: Path) -> Profile:
         finals_types=frozenset(d.get("finals_types", [])),
         format_by_type=_int_keys(d.get("format_by_type", {})),
         mixed_format_types=frozenset(d.get("mixed_format_types", [])),
+        game_formats=dict(d.get("game_formats", {})),
         databases={label.strip(): _int_keys(names) for label, names in d.get("databases", {}).items()},
         byes=tuple(x.strip().lower() for x in d.get("byes", [])),
         club_name=d.get("club_name", ""), absent=d.get("absent", ""),
@@ -1841,6 +1874,8 @@ def activate(profile: Profile) -> None:
     global FINALS_TYPES, MIXED_FORMAT_TYPES, ACTIVE
     ACTIVE = profile
     MIXED_FORMAT_TYPES = profile.mixed_format_types
+    GAME_FORMATS.clear()
+    GAME_FORMATS.update(profile.game_formats)
     GRADE_NAMES.clear()
     GRADE_NAMES.update(profile.team_names)
     LEGACY_GRADE_NAMES.clear()
@@ -2139,6 +2174,25 @@ _ANSWER_HELP = {
 }
 
 
+FORMAT_REVIEW_COLUMNS = ["Ref", "Game key", "Date", "Season", "Team", "Opposition", "Venue",
+                         "Match type", "Result", "Score", "Second innings on the card",
+                         "Why blank", "How to answer", "Your answer"]
+
+
+def write_format_review(unresolved: list, path: Path) -> None:
+    """The games with no format, as a short sheet for the club to fill in.
+
+    One row per game, with enough on it (date, team, opposition, score, match
+    type) to recognise the match. `--answers` reads the filled copy.
+    """
+    with path.open("w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.DictWriter(fh, fieldnames=FORMAT_REVIEW_COLUMNS)
+        w.writeheader()
+        for i, r in enumerate(sorted(unresolved, key=lambda r: (r["Date"], r["Team"])), 1):
+            w.writerow({"Ref": f"G{i}", **r, "How to answer": "Type Two Day or One Day",
+                        "Your answer": ""})
+
+
 def _read_answer_file(path: Path) -> tuple:
     """(sheet rows, {team id: name} from a Teams tab, {type id: name} from a Match
     Types tab). A CSV has the sheet only; a workbook may add the two tabs, which
@@ -2198,10 +2252,20 @@ def apply_answers(profile: Profile, path: Path) -> tuple:
         if re.search(r"final", name, re.I):
             prof.finals_types = prof.finals_types | {code}
     absent, notes, spellings = None, [], {}
+    prof.game_formats = dict(profile.game_formats)
     for r in rows:
         ans = (r.get("Your answer") or "").strip()
         item, num = (r.get("Item") or "").strip(), (r.get("Number") or "").strip()
         if not ans:
+            continue
+        if (r.get("Game key") or "").strip():
+            # a row of the games-without-format sheet: one game's format
+            if re.search(r"two", ans, re.I):
+                prof.game_formats[r["Game key"].strip()] = "Two Day"
+            elif re.search(r"one|limited", ans, re.I):
+                prof.game_formats[r["Game key"].strip()] = "One Day"
+            else:
+                notes.append(f"{r.get('Ref')}: could not read {ans!r} as Two Day or One Day")
             continue
         if item == "Team" and num.isdigit():
             tab = teams_tab.get(int(num))
@@ -2507,8 +2571,12 @@ def main() -> None:
     notes = profile.notes or generic_notes(club, seasons, profile)
     write_xlsx(sheets, checks, args.out / "match_detail.xlsx", notes)
     write_csv(stats, args.out / "betterimport_season_stats.csv")
-    games = build_game_rows(seasons, club, absent_is_out)
+    unresolved = []
+    games = build_game_rows(seasons, club, absent_is_out, unresolved)
     write_csv(games, args.out / "manual_games_scorecards.csv")
+    if unresolved:
+        write_format_review(unresolved, args.out / "games_without_format.csv")
+        print(f"{len(unresolved)} games have no format: see games_without_format.csv")
 
     print(f"\n{seasons[0]['season']} to {seasons[-1]['season']}")
     for name, rows in sheets.items():

@@ -85,7 +85,7 @@ reads the active profile's format table, and a final's format is measured only
 where the profile names BOTH a one-day and a two-day type (Payneham names only
 Limited Over, so its finals stay blank: an ATCA Final is a turf final).
 
-Verification: `tools/verify_csfw_extract.py` (64 checks) builds archives in a
+Verification: `tools/verify_csfw_extract.py` (68 checks) builds archives in a
 layout the extractor was never written against (every table moved and resized,
 every field shifted), with two databases, a bye, an unprofiled club and two
 layouts in one folder, and runs the shipped code over them.
@@ -182,6 +182,17 @@ games to Two Day and left 65 games with no format (old two-day competitions with
 no second innings recorded, and six types too small to ask about). Everything
 except the format column is unchanged, and the three seasons the club
 spot-checked (2016/17, 2019/20, 2022/23) still give 156, 226 and 193.
+
+**Games left with no format are listed for the club.** Every extraction writes
+`games_without_format.csv` when any game has none (one row per game: key, date,
+season, team, opposition, venue, match type, result, score, whether the card
+shows a second innings, and why it is blank), so the club reviews 62 rows instead
+of filtering a 123,000-row file. An abandoned game with no score and no match type
+is left out: it has nothing to be a format of. The club types Two Day or One Day in
+`Your answer`; `--answers` (CSV or workbook) stores each as `game_formats` keyed by
+game key and the next run applies it, and the sheet is not written once every game
+is answered. A game key is year (or file stem) plus the game's order in its season,
+so the answers hold only while the files do not change.
 
 Result for the whole archive: 8,852 games, 1928/29 to 2025/26, 55 grades, 75
 games for `DATA2025` as CSFW shows. One game (1932) has team 0, no team recorded.
