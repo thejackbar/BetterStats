@@ -9,7 +9,8 @@ database refuses the foreign key, and the WHOLE game rolls back. The failure was
 swallowed per game with no counter, so a club lost every match that named that
 one person and the run still read as a success (Oak Park St Francis de Sales,
 October 2026: both 1st XI and both 3rd XI games, each naming a player whose new
-participant id redirected to a missing record).
+participant id was in a redirect LOOP). A loop, or a record merged into itself, is
+the same thing: sync's cycle break ends on the id itself, which the merge deleted.
 
 ``drop_dangling`` splits a redirect map into the ones that still lead somewhere
 and the ones that do not, so the caller can treat a dangling id as what it is:
