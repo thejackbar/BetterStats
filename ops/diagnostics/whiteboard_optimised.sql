@@ -19,18 +19,18 @@
 --     10 times SLOWER than today's window query. Not used.
 --   * More work_mem barely helps (the sort spills to disk, but the cost is the
 --     amount of history read, not the sort).
---   * Two-phase: read a recent window first, and only go back through the full
---     history for the players that window cannot answer. The answer is identical,
---     not approximate: a player with 4 or more qualifying innings inside the window
---     has the same last 4 as in the full history, because every row inside the
---     window is newer than every row outside it. BUT it only saves time when few
---     players need the full-history pass. Section 2 prints that count first. On my
---     test copy it was 4x faster when 16 of 1,500 players needed it, and no faster
---     (slower for bowling and last played) when 1,300 of 1,500 did, which is what a
---     club with many historic names looks like. Trust the printed count and times
---     for this club, not mine.
---   * Lineups (section 1) are a plain win: the overview reads 3,300 rows instead of
---     109,000, about 4x faster on my copy, same rows out.
+--   * Two-phase (section 2): read a recent window first, then go back through the
+--     full history only for players the window cannot answer. RESULT ON THE REAL
+--     APPLECROSS DATABASE: not worth it. 1,471 of 1,668 players needed the full
+--     pass, so it ran no faster than today's query (batting 223 ms vs 198, bowling
+--     84 vs 67, last played 108 vs 79). Its "differs" counts (336, 124) are not
+--     missing data: a player who bats twice or bowls several spells in one game has
+--     rows with the SAME date, today's query orders those arbitrarily, and any other
+--     plan breaks the tie differently (on my copy, changing only the tiebreak of
+--     today's own query moved 571 players' series). Last played has no ties and
+--     differed on 0. Kept here as the measurement, not as a recommendation.
+--   * Lineups (section 1) read fewer rows with the same rows out, but on Applecross
+--     the whole statement is 5 ms, so it does not matter. Harmless, not a fix.
 --   * The availability read in the overview (A6) is cheap in the database, and a
 --     version filtered to lineup players measured SLOWER, so it is left alone.
 --   * The other big saving is not SQL: the statements marked B* in
