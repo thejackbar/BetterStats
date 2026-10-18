@@ -6,8 +6,10 @@ all four, complete. Every run since the first one after those games read as a su
 `gr_games_new` 0 and 4 of the 36 matches it saw counted nowhere.
 
 Cause: Cricket Australia reissued participant ids for 2026/27, and a few of those new ids sit in
-`merge_logs` as a redirect to the club's old record. Two of the redirects led to a player that
-does not exist. Sync attached the game's rows to that missing id, the foreign key refused them,
+`merge_logs` as a redirect to the club's old record. In production two of them (Kobi Maynard and
+Brayden Moore, found by following every chain, 18 Oct) form a LOOP: the redirect chain circles back,
+and sync's cycle break resolves the id to ITSELF, a player the merge had already deleted. A redirect
+to a record that is simply gone gives the same result. Sync attached the game's rows to that missing id, the foreign key refused them,
 the per-game `except` swallowed the error, and the game rolled back. Every game naming that one
 person was lost, on every run, with no counter and no flag.
 
@@ -16,6 +18,8 @@ return the match list and scorecards. Scenarios:
 
   bad     roster names a player whose new id redirects to a missing record  -> stored, the
           person attached to the old record by full name
+  self    a player whose id is recorded as merged into ITSELF                -> the same
+  loop    two ids recorded as merged into each other (A->B, B->A)            -> the same
   live    roster names a player whose new id redirects to a record that exists -> still redirected
   plain   an ordinary game                                                     -> stored
   broken  a scorecard the database refuses for another reason                   -> counted as failed,
@@ -81,8 +85,12 @@ OLD_KOBI, NEW_KOBI = uuid.uuid4(), uuid.uuid4()       # old record, and the id C
 OLD_RICK, NEW_RICK = uuid.uuid4(), uuid.uuid4()
 GONE = uuid.uuid4()                                   # a kept player who is no longer in `players`
 
-G_BAD, G_LIVE, G_PLAIN, G_BROKEN = (uuid.uuid4() for _ in range(4))
-NAMES = {MATE: "Mick Mate", NEW_KOBI: "Kobi Maynard", NEW_RICK: "Rick Rotundo"}
+OLD_SAM, NEW_SAM = uuid.uuid4(), uuid.uuid4()         # a redirect from an id to itself
+OLD_LOU, NEW_LOU, NEW_LOU2 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()   # two ids merged into each other
+
+G_BAD, G_LIVE, G_PLAIN, G_BROKEN, G_SELF, G_LOOP = (uuid.uuid4() for _ in range(6))
+NAMES = {MATE: "Mick Mate", NEW_KOBI: "Kobi Maynard", NEW_RICK: "Rick Rotundo",
+         NEW_SAM: "Sam Selfish", NEW_LOU: "Lou Looper"}
 
 
 def card_for(match_id, roster, runs_by_pid, days_ago):
@@ -170,12 +178,18 @@ async def seed() -> None:
         await ex("INSERT INTO grades (id, season_id, name, grassroots_id, category, categories) "
                  "VALUES (:i, :s, '1st XI', :g, 'senior', ARRAY['senior'])", i=GRADE, s=SEASON, g=GRADE_GUID)
         # The club's players, each under the id CA issued them in an earlier season.
-        for pid, nm in ((MATE, "Mate, Mick"), (OLD_KOBI, "Maynard, Kobi"), (OLD_RICK, "Rotundo, Rick")):
+        for pid, nm in ((MATE, "Mate, Mick"), (OLD_KOBI, "Maynard, Kobi"), (OLD_RICK, "Rotundo, Rick"),
+                        (OLD_SAM, "Selfish, Sam"), (OLD_LOU, "Looper, Lou")):
             await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, status) "
                      "VALUES (:i, :o, :n, :g, 'active')", i=pid, o=ORG, n=nm, g=str(pid))
         # This season's new ids are redirects. Kobi's leads to a record that is gone; Rick's to one
         # that exists. Neither new id is a player.
-        for removed, keep, nm in ((NEW_KOBI, GONE, "Kobi Maynard"), (NEW_RICK, OLD_RICK, "Rick Rotundo")):
+        # Sam's id is recorded as merged into itself; Lou's is merged into a second new id that is merged
+        # straight back (a loop). Production had this shape for two players: the cycle break in sync
+        # resolves each to itself, and neither is a player.
+        for removed, keep, nm in ((NEW_KOBI, GONE, "Kobi Maynard"), (NEW_RICK, OLD_RICK, "Rick Rotundo"),
+                                  (NEW_SAM, NEW_SAM, "Sam Selfish"),
+                                  (NEW_LOU, NEW_LOU2, "Lou Looper"), (NEW_LOU2, NEW_LOU, "Lou Looper")):
             await ex("INSERT INTO merge_logs (org_id, keep_player_id, keep_player_name, removed_player_id, "
                      " removed_player_name) VALUES (:o, :k, 'kept', :r, :n)", o=ORG, k=keep, r=removed, n=nm)
         await s.commit()
@@ -207,10 +221,13 @@ async def main() -> None:
         str(G_BAD): card_for(G_BAD, [NEW_KOBI, MATE], {NEW_KOBI: 41, MATE: 12}, 4),
         str(G_LIVE): card_for(G_LIVE, [NEW_RICK, MATE], {NEW_RICK: 27, MATE: 9}, 3),
         str(G_PLAIN): card_for(G_PLAIN, [MATE], {MATE: 5}, 2),
+        str(G_SELF): card_for(G_SELF, [NEW_SAM, MATE], {NEW_SAM: 18, MATE: 7}, 5),
+        str(G_LOOP): card_for(G_LOOP, [NEW_LOU, MATE], {NEW_LOU: 33, MATE: 4}, 6),
         # More runs than the column can hold: the database refuses the game at commit.
         str(G_BROKEN): card_for(G_BROKEN, [MATE], {MATE: 10 ** 12}, 1),
     }
-    listing = [match_entry(G_BAD, 4), match_entry(G_LIVE, 3), match_entry(G_PLAIN, 2), match_entry(G_BROKEN, 1)]
+    listing = [match_entry(G_BAD, 4), match_entry(G_LIVE, 3), match_entry(G_PLAIN, 2), match_entry(G_BROKEN, 1),
+               match_entry(G_SELF, 5), match_entry(G_LOOP, 6)]
 
     async def fake_matches(grade_guid, *a, **k):
         return listing
@@ -230,6 +247,11 @@ async def main() -> None:
         live, dangling = await merge_redirects.drop_dangling(
             s, {NEW_KOBI: GONE, NEW_RICK: OLD_RICK})                    # scorecard pass: UUID -> UUID
         check("the same, with UUID keys", list(dangling) == [NEW_KOBI] and list(live) == [NEW_RICK])
+        live, dangling = await merge_redirects.drop_dangling(s, {NEW_SAM: NEW_SAM})
+        check("an id redirected to itself, when it is not a player, is dangling", list(dangling) == [NEW_SAM], str(live))
+        live, dangling = await merge_redirects.drop_dangling(s, {OLD_SAM: OLD_SAM})
+        check("...but a player who is recorded as merged into themselves is not (they are there)",
+              list(live) == [OLD_SAM] and not dangling, str(dangling))
         check("an empty map is two empty halves", await merge_redirects.drop_dangling(s, {}) == ({}, {}))
 
     print("\n-- A FULL RUN --")
@@ -242,13 +264,18 @@ async def main() -> None:
     check("that player's innings is on his old record, matched by full name",
           await runs_of(G_BAD, OLD_KOBI) == [41], str(await runs_of(G_BAD, OLD_KOBI)))
     check("and the rest of the side is there too", await runs_of(G_BAD, MATE) == [12])
+    check("a player recorded as merged into himself: the game is stored, his innings on the old record",
+          await stored(G_SELF) and await runs_of(G_SELF, OLD_SAM) == [18], str(await runs_of(G_SELF, OLD_SAM)))
+    check("two ids merged into each other (a loop): the game is stored, the innings on the old record",
+          await stored(G_LOOP) and await runs_of(G_LOOP, OLD_LOU) == [33], str(await runs_of(G_LOOP, OLD_LOU)))
     check("a redirect to a player who exists still redirects",
           await stored(G_LIVE) and await runs_of(G_LIVE, OLD_RICK) == [27], str(await runs_of(G_LIVE, OLD_RICK)))
     check("a game the database refuses is not stored", not await stored(G_BROKEN))
     check("and nothing of it is left behind", await runs_of(G_BROKEN, MATE) == [])
 
     print("\n-- THE RUN SAYS SO --")
-    check("the run counts the redirect it ignored", stats.get("gr_dangling_redirects") == 1,
+    check("the run counts the redirects it ignored (the missing one, the self one, both ends of the loop)",
+          stats.get("gr_dangling_redirects") == 4,
           str(stats.get("gr_dangling_redirects")))
     check("it counts exactly the one game that failed", stats.get("gr_games_failed") == 1,
           str(stats.get("gr_games_failed")))
@@ -256,14 +283,14 @@ async def main() -> None:
     check("and names it, with the database's own words", len(errors) == 1 and errors[0].get("match") == str(G_BROKEN)
           and "out of int32 range" in (errors[0].get("error") or ""), str(errors))
     check("the stored error carries no SQL", not any(w in (e.get("error") or "") for e in errors for w in ("[SQL", "INSERT")), str(errors))
-    check("three games were stored", stats.get("gr_games_new") == 3, str(stats.get("gr_games_new")))
+    check("five games were stored", stats.get("gr_games_new") == 5, str(stats.get("gr_games_new")))
 
     print("\n-- A SECOND RUN CHANGES NOTHING --")
     before = await total_batting()
     again = await sync_grassroots_game_level_data(str(ORG))
     check("no batting is written twice", await total_batting() == before, f"{before} -> {await total_batting()}")
-    check("the three stored games are done, the broken one fails again",
-          again.get("gr_games_skipped_done") == 3 and again.get("gr_games_failed") == 1,
+    check("the five stored games are done, the broken one fails again",
+          again.get("gr_games_skipped_done") == 5 and again.get("gr_games_failed") == 1,
           f"done={again.get('gr_games_skipped_done')} failed={again.get('gr_games_failed')}")
 
     print(f"\n{PASS} passed, {FAIL} failed")
