@@ -1,8 +1,8 @@
 export default {
-  version: 'v9.120.4',
-  date: '2026-10-23',
-  // Above v9.120.3.1's sortKey. Check origin/main at merge time.
-  sortKey: '2026-10-23T11:00:00Z',
+  version: 'v9.120.5',
+  date: '2026-10-24',
+  // Above v9.120.4.1's sortKey. Check origin/main at merge time.
+  sortKey: '2026-10-24T11:00:00Z',
   title: 'Results posts show your own bowlers, and a lapsed players filter',
   items: [
     'Fixed results posts that listed the opposition\'s bowlers under your club. Wrap + Leaders, the Final Score posts, the Glass Card and the scorecard block on the Blank canvas now show your own bowling figures next to your own batters.',

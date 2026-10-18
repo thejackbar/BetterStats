@@ -982,7 +982,7 @@ Seven requests from one club meeting, built together.
 - Not proven: the actual two players were not looked at (no production data from this session), so a different cause (a duplicate player record, history under another id) would still tag them.
 - Verified: `backend/verification/verify_social_debuts.py` on a real Postgres with stub tables, 18 passed. Control run on the previous service fails exactly the three new checks (unsynced round this season, summary-only player, match still to be played) and passes the other 15. The real `v_effective_*` views are not exercised.
 
-### Results posts listed the opposition's bowlers under our batters; Players shown switch (v9.120.4)
+### Results posts listed the opposition's bowlers under our batters; Players shown switch (v9.120.5)
 Reported by North Perth (support email, October 2026): "The results posts show our batters' stats alongside the opposition's bowlers, instead of our own bowling figures." Asked for: an option to show your club's players or the opposition's on a results post.
 
 Cause. An innings' `batting` is the side that batted it and its `bowling` is the side that was fielding, so a side's own bowlers are in the innings the OTHER side batted. The scorecard builder knows this (`build_team` documents it and the scorecard layouts label a side's `bowling` as the other team's), and `social_rounds._rank_our_side` reads it correctly. Three readers did not:

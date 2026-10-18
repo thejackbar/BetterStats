@@ -1618,7 +1618,7 @@ Asked for: the player's own page "a little more friendly rather than just a stra
 - Layout: the container is `max-w-md` except on the My page tab, which is `md:max-w-5xl`; the tab switch stays `md:max-w-sm`. Modules use CSS columns (`md:columns-2 lg:columns-3`, `break-inside-avoid` on each `Section`), not a grid: the cards differ a lot in height and a grid leaves holes. The club's order runs down each column in turn. A phone is one column.
 - Proof: `verify_player_dashboard_fines_browser.mjs` (104): tile ids and values, one column at 390px, more than one column and the tiles above the modules at 1280px, the Availability tab still a narrow column, no overflow at either width.
 
-### Recency filter: last played MORE than N years ago (v9.120.4)
+### Recency filter: last played MORE than N years ago (v9.120.5)
 Asked for by North Perth (support email, October 2026): "a filter for how long since players last played a game, for example more than 1, 3 or 5 years vs the less than filter that exists at the moment". The filter that exists is `RecencySelect` ("Played <= N yrs") on the Players page and the squad lists.
 
 - `RECENCY_OPTIONS` gains a group: "Last played > 1, 2, 3, 5 and 10 yrs ago", value `RECENCY_OVER` (1000) + N. One number still carries the choice, so no list changed its state shape; `playedWithinYears` hands a value above `RECENCY_OVER` to `playedOverYears`. The Selection board and Availability windows come from settings (0 to 10 and -1) and cannot reach that range. `RecencySelect` draws an option's `group` as an `<optgroup>`; ungrouped options stay loose, so the fill-in pool's own options are untouched. Default title is now "Filter by when players last played".
