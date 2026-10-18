@@ -205,6 +205,10 @@ def club_config(org) -> dict:
         # free for ONE weekend of a two-day game and away for the other ("half
         # available"): `w1` when only week 1 is a yes, `w2` when only week 2 is.
         "half_colours": half_colours(raw.get("half_colours")),
+        # What the club calls the two weeks of a two-day game: "W1" and "W2" until
+        # it says otherwise (many clubs say A and B). Shown wherever a week is
+        # named ("W1 Only", "W2 OUT"); never stored against an answer.
+        "week_names": week_names(raw.get("week_names")),
         # How far back a player's last game may be for the screens' pools to
         # list them without a search: 0 = any time. Selection board and
         # Whiteboard read `selection`, the Availability matrix `availability`.
@@ -296,6 +300,23 @@ def half_colours(raw) -> dict:
     """The club's two half-available colours, a default for each one not set."""
     raw = raw if isinstance(raw, dict) else {}
     return {k: clean_colour(raw.get(k)) or v for k, v in DEFAULT_HALF_COLOURS.items()}
+
+
+DEFAULT_WEEK_NAMES = {"w1": "W1", "w2": "W2"}
+WEEK_NAME_MAX = 10
+
+
+def clean_week_name(raw) -> Optional[str]:
+    """A short label for one week: trimmed, inner whitespace collapsed, control
+    characters dropped, at most WEEK_NAME_MAX characters. None for blank."""
+    s = " ".join(re.sub(r"[\x00-\x1f\x7f]", " ", str(raw or "")).split())[:WEEK_NAME_MAX].strip()
+    return s or None
+
+
+def week_names(raw) -> dict:
+    """The club's two week names, a default for each one not set."""
+    raw = raw if isinstance(raw, dict) else {}
+    return {k: clean_week_name(raw.get(k)) or v for k, v in DEFAULT_WEEK_NAMES.items()}
 
 
 def clean_template_id(raw) -> Optional[str]:

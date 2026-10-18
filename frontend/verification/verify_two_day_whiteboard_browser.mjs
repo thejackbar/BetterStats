@@ -113,8 +113,8 @@ const run = async () => {
 
   const jackInOneDay = cardIn(F2, JACK)
   ok('Jack is in the one-day team', (await jackInOneDay.count()) === 1)
-  ok('his one-day card says "W2 OUT"', (await flagText(jackInOneDay)) === 'W2 OUT', await flagText(jackInOneDay))
-  ok('...in red, as plain text (no pill, no button, not clickable-looking)', await jackInOneDay.locator('[data-week-flag]').evaluate((el) => {
+  ok('his one-day card says "W1 ONLY" (free week 1, away week 2)', (await flagText(jackInOneDay)) === 'W1 ONLY', await flagText(jackInOneDay))
+  ok('...as plain text (no pill, no button, not clickable-looking)', await jackInOneDay.locator('[data-week-flag]').evaluate((el) => {
     const cs = getComputedStyle(el)
     return el.tagName === 'SPAN' && !el.closest('button') && cs.cursor !== 'pointer' && cs.backgroundColor === 'rgba(0, 0, 0, 0)' && cs.borderTopWidth === '0px'
   }, null, { timeout: 1500 }).catch(() => false))
@@ -131,9 +131,9 @@ const run = async () => {
   ok('control: no answer for week 2 yet is NOT half available either', (await barOf(poolCard(W2NONE))) === green, await barOf(poolCard(W2NONE)))
   ok('...and no separate OUT tag on top of it (he is free that day)', !hasPlainOut(await text(jackInOneDay)), await text(jackInOneDay))
   const tip = (await jackInOneDay.locator('[data-week-flag]').getAttribute('title', { timeout: 1500 }).catch(() => '')) || ''
-  ok('the tooltip names both weeks and dates', /Week 2 .*Unavailable/.test(tip) && /Week 1 .*Available/.test(tip), tip)
+  ok('the tooltip names both weeks and dates', /W2 .*Unavailable/.test(tip) && /W1 .*Available/.test(tip), tip)
   ok('a player free both weeks has no flag', (await flags(poolCard(FREE)).count()) === 0)
-  ok('a player away this week but free next says "W1 OUT"', (await flagText(poolCard(W1OUT))) === 'W1 OUT', await flagText(poolCard(W1OUT)))
+  ok('a player away this week but free next says "W2 ONLY" (the same words as their colour)', (await flagText(poolCard(W1OUT))) === 'W2 ONLY', await flagText(poolCard(W1OUT)))
   ok('a maybe for week 2 says "W2 ?"', (await flagText(poolCard(W2MAYBE))) === 'W2 ?', await flagText(poolCard(W2MAYBE)))
   ok('no answer for week 2 yet is NOT flagged (that is everyone before it is collected)', (await flags(poolCard(W2NONE)).count()) === 0)
   ok('only the three players with something to say are flagged', (await page.locator('[data-week-flag]').count()) === 3, String(await page.locator('[data-week-flag]').count()))
@@ -148,7 +148,7 @@ const run = async () => {
   await page.waitForTimeout(300)
   ok('Jack is in the pool', (await poolCard(JACK).count()) === 1)
   ok('...not marked plain OUT (free today)', !hasPlainOut(await text(poolCard(JACK))), await text(poolCard(JACK)))
-  ok('...and still says "W2 OUT"', (await flagText(poolCard(JACK))) === 'W2 OUT', await flagText(poolCard(JACK)))
+  ok('...and still says "W1 ONLY"', (await flagText(poolCard(JACK))) === 'W1 ONLY', await flagText(poolCard(JACK)))
 
   console.log('\n# dropping him into the two-day team')
   const centre = async (loc) => { const b = await loc.boundingBox(); return b ? { x: b.x + b.width / 2, y: b.y + b.height / 2 } : null }
@@ -159,8 +159,8 @@ const run = async () => {
   }
   await page.waitForTimeout(500)
   ok('he lands in the two-day team', (await cardIn(F1, JACK).count()) === 1)
-  ok('the warning names the week he is away', /unavailable for week 2/i.test(await page.locator('body').innerText()), (await page.locator('body').innerText()).slice(0, 200))
-  ok('in the two-day team the card says "W2 OUT"', (await flagText(cardIn(F1, JACK))) === 'W2 OUT', await text(cardIn(F1, JACK)))
+  ok('the warning names the week he is away', /unavailable for W2/i.test(await page.locator('body').innerText()), (await page.locator('body').innerText()).slice(0, 200))
+  ok('in the two-day team the card says "W1 ONLY"', (await flagText(cardIn(F1, JACK))) === 'W1 ONLY', await text(cardIn(F1, JACK)))
 
   console.log('\n# the second weekend shows the same game, linked')
   const tabs = await page.locator('[data-day]').evaluateAll((els) => els.map((e) => e.getAttribute('data-day')))
@@ -169,9 +169,9 @@ const run = async () => {
   await page.waitForTimeout(600)
   ok('the two-day 1st XI is a column on the week 2 tab', (await col(F1).count()) === 1)
   ok('control: the one-day 2nd XI from week 1 is not', (await col(F2).count()) === 0)
-  ok('it says it is week 2 and when it started', /week 2 of 2, from/i.test(await text(col(F1).locator('[data-two-day-header]'))), await text(col(F1).locator('[data-two-day-header]')))
+  ok('it says it is week 2 and when it started', /W2, from/i.test(await text(col(F1).locator('[data-two-day-header]'))), await text(col(F1).locator('[data-two-day-header]')))
   ok('players already in it are in the column, not the pool (they are busy in week 2)', (await poolCard(1).count()) === 0 && (await cardIn(F1, 1).count()) === 1)
-  ok('a player away in week 2 reads OUT in the week 2 pool', (await poolCard(JACK).count()) === 1 && /\bOUT\b/.test(await text(poolCard(JACK))), await text(poolCard(JACK)))
+  ok('a player away in week 2 reads W1 ONLY in the week 2 pool', (await poolCard(JACK).count()) === 1 && /W1 ONLY/.test(await text(poolCard(JACK))), await text(poolCard(JACK)))
   ok('a player away in week 1 only is NOT out in the week 2 pool', !hasPlainOut(await text(poolCard(W1OUT))), await text(poolCard(W1OUT)))
   await page.screenshot({ path: join(SHOTS, 'whiteboard_week2.png') })
 

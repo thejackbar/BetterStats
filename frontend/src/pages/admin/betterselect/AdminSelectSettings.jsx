@@ -1,7 +1,8 @@
 // BetterSelect → Setup → Settings.
 //
 // The small switches that change how BetterSelect looks and behaves, in one place
-// instead of on the screens they affect. Today: the colours that mark a player
+// instead of on the screens they affect. Today: what the club calls the two
+// weeks of a two-day game, the colours that mark a player
 // who is free for one weekend of a two-day game and away for the other ("half
 // available"), how far back a player may have last played to be listed, starting
 // filters for each team ("Team defaults"), whether junior grades are shown, and
@@ -15,7 +16,8 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import usePersistedState from '../../../lib/usePersistedState'
-import { setAllowMaybe, setHalfColours, setSelectConfig, useHalfColours } from '../../../lib/useAvailabilityConfig'
+import { setAllowMaybe, setHalfColours, setSelectConfig, setWeekNames, useHalfColours } from '../../../lib/useAvailabilityConfig'
+import { DEFAULT_WEEK_NAMES } from '../../../lib/availability'
 import { PbSpinner } from '../../../lib/presskit'
 import { Btn, Dot, Segmented } from './ui'
 
@@ -63,6 +65,29 @@ function HalfColour({ weekKey, title, hint, value, onChange, disabled }) {
           onChange={(e) => { setText(e.target.value); if (/^#[0-9a-f]{6}$/i.test(e.target.value.trim())) onChange(e.target.value.trim().toLowerCase()) }}
           className={`w-[92px] bg-pb-surface2 border rounded-lg px-2 py-1.5 font-mono text-[12.5px] focus:outline-none focus:border-pb-accent ${valid ? 'border-pb-hairline' : 'border-pb-red'}`} />
         <Btn sm variant="ghost" onClick={() => onChange(DEFAULTS[weekKey])} disabled={disabled || value === DEFAULTS[weekKey]}>Reset</Btn>
+      </div>
+    </Row>
+  )
+}
+
+// What the club calls one week of a two-day game. Saved when the box is left or
+// Enter is pressed; blank goes back to the default (W1 / W2).
+function WeekName({ weekKey, label, hint, value, onSave, disabled }) {
+  const [text, setText] = useState(value)
+  useEffect(() => setText(value), [value])
+  const commit = () => {
+    const next = text.replace(/\s+/g, ' ').trim().slice(0, 10) || DEFAULT_WEEK_NAMES[weekKey]
+    setText(next)
+    if (next !== value) onSave(next)
+  }
+  return (
+    <Row label={label} hint={hint}>
+      <div className="flex items-center gap-2.5" data-week-name={weekKey}>
+        <input type="text" value={text} disabled={disabled} maxLength={10} aria-label={label}
+          onChange={(e) => setText(e.target.value)} onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }}
+          className="w-[110px] bg-pb-surface2 border border-pb-hairline rounded-lg px-2 py-1.5 font-mono text-[12.5px] focus:outline-none focus:border-pb-accent" />
+        <Btn sm variant="ghost" onClick={() => onSave(DEFAULT_WEEK_NAMES[weekKey])} disabled={disabled || value === DEFAULT_WEEK_NAMES[weekKey]}>Reset</Btn>
       </div>
     </Row>
   )
@@ -163,6 +188,7 @@ export default function AdminSelectSettings() {
   const [loaded, setLoaded] = useState(false)
   const [maybe, setMaybe] = useState(true)
   const [colours, setColours] = useState(DEFAULTS)
+  const [names, setNames] = useState(DEFAULT_WEEK_NAMES)
   const [windows, setWindows] = useState({ selection: 3, availability: 0 })
   const [rules, setRules] = useState([])
   const [teams, setTeams] = useState([])
@@ -177,6 +203,7 @@ export default function AdminSelectSettings() {
         if (!alive) return
         setMaybe(cfg?.allow_maybe !== false)
         setColours({ ...DEFAULTS, ...(rules?.settings?.half_colours || cfg?.half_colours || {}) })
+        setNames({ ...DEFAULT_WEEK_NAMES, ...(rules?.settings?.week_names || cfg?.week_names || {}) })
         setWindows({ selection: 3, availability: 0, ...(cfg?.played_years || {}) })
         setRules(cfg?.team_defaults || [])
         setTeams((rules?.options?.teams || []).map((t) => ({ value: t.value, label: t.label })))
@@ -197,6 +224,18 @@ export default function AdminSelectSettings() {
     } catch (e) {
       setColours(before); setHalfColours(before)
       toast.error(e.message || 'Could not save the colour')
+    }
+  }
+  const saveName = async (key, value) => {
+    const before = names
+    const next = { ...names, [key]: value }
+    setNames(next); setWeekNames(next)               // every open screen follows at once
+    try {
+      const s = await api.bsRuleSettings({ [`week_name_${key}`]: value === DEFAULT_WEEK_NAMES[key] ? null : value })
+      if (s?.week_names) { setNames(s.week_names); setWeekNames(s.week_names) }
+    } catch (e) {
+      setNames(before); setWeekNames(before)
+      toast.error(e.message || 'Could not save the name')
     }
   }
   const saveWindow = async (key, n) => {
@@ -238,16 +277,20 @@ export default function AdminSelectSettings() {
       <div className="flex flex-col gap-4 max-w-[980px]" data-select-settings>
         <Card>
           <Head title="Two-day games"
-            sub="A two-day game is answered one weekend at a time. A player who is free for one weekend and away for the other is half available. Their dot and card edge use these colours instead of the green of Available or the red of Unavailable, so you can see them at a glance." />
-          <HalfColour weekKey="w1" title="Available for week 1 only" hint="Free the first weekend of a two-day game, away the second."
+            sub="A two-day game is answered one weekend at a time. Say what your club calls the two weeks (many use A and B). A player who is free for one weekend and away for the other is half available. Their dot and card edge use the colours below instead of the green of Available or the red of Unavailable, so you can see them at a glance." />
+          <WeekName weekKey="w1" label="Name of the first week" hint={`Shown as "${names.w1} Only", "${names.w1} OUT". Up to 10 characters.`}
+            value={names.w1} onSave={(v) => saveName('w1', v)} disabled={!canEdit} />
+          <WeekName weekKey="w2" label="Name of the second week" hint={`Shown as "${names.w2} Only", "${names.w2} ?".`}
+            value={names.w2} onSave={(v) => saveName('w2', v)} disabled={!canEdit} />
+          <HalfColour weekKey="w1" title={`Available for ${names.w1} only`} hint="Free the first weekend of a two-day game, away the second."
             value={colours.w1} onChange={(v) => saveColour('w1', v)} disabled={!canEdit} />
-          <HalfColour weekKey="w2" title="Available for week 2 only" hint="Away the first weekend, free the second."
+          <HalfColour weekKey="w2" title={`Available for ${names.w2} only`} hint="Away the first weekend, free the second."
             value={colours.w2} onChange={(v) => saveColour('w2', v)} disabled={!canEdit} />
           <div className="flex items-center gap-4 pt-2.5 border-t border-pb-hairline text-[12px] text-pb-faint flex-wrap">
             <span>On a card:</span>
             <span className="inline-flex items-center gap-1.5"><Dot status="AVAILABLE" size={10} /> Available</span>
-            <span className="inline-flex items-center gap-1.5"><Dot status="HALF_W1" size={10} /> Week 1 only</span>
-            <span className="inline-flex items-center gap-1.5"><Dot status="HALF_W2" size={10} /> Week 2 only</span>
+            <span className="inline-flex items-center gap-1.5"><Dot status="HALF_W1" size={10} /> {names.w1} Only</span>
+            <span className="inline-flex items-center gap-1.5"><Dot status="HALF_W2" size={10} /> {names.w2} Only</span>
             <span className="inline-flex items-center gap-1.5"><Dot status="UNAVAILABLE" size={10} /> Unavailable</span>
           </div>
         </Card>

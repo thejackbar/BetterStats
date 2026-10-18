@@ -81,8 +81,12 @@ def _next_entry(team_id: str, grade_id, fixtures: list[dict]) -> Optional[dict]:
 
 
 def _shape(f: dict, scope: str) -> dict:
+    # A two-day game's second date, so the board can ask for both weeks. The
+    # entry is the first day's (`flat` drops day 2), which carries both dates.
+    end_on = f.get("day2") if f.get("role") == "day1" else None
     return {
         "date": f["date"],
+        "end_on": end_on,
         "fixture_id": f.get("id"),
         "opponent_name": f.get("opponent_name"),
         "label": f.get("label"),
@@ -92,7 +96,7 @@ def _shape(f: dict, scope: str) -> dict:
 
 
 def squad_next_games(by_date: dict[str, list[dict]], teams: Iterable[tuple]) -> dict[str, dict]:
-    """{team_id: {date, fixture_id, opponent_name, label, home_away, scope}}.
+    """{team_id: {date, end_on, fixture_id, opponent_name, label, home_away, scope}}.
 
     `teams` is (team_id, grade_id) pairs, ids as strings; `grade_id` may be one id
     or a set of them for a squad that covers several teams. `scope` says what the
@@ -123,7 +127,7 @@ def squad_next_games(by_date: dict[str, list[dict]], teams: Iterable[tuple]) -> 
             out[team_id] = _shape(club_first, "club")
         else:
             out[team_id] = {
-                "date": None, "fixture_id": None, "opponent_name": None,
+                "date": None, "end_on": None, "fixture_id": None, "opponent_name": None,
                 "label": None, "home_away": None, "scope": "none",
             }
     return out

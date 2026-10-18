@@ -58,9 +58,12 @@ def club_first_date(by_date: dict) -> str | None:
     return sorted(by_date)[0] if by_date else None
 
 
-def fx(fid, team=None, grade=None, opp=None, role="single", home_away="HOME", label=None):
-    return {"id": fid, "label": label, "opponent_name": opp, "home_away": home_away,
-            "role": role, "two_day": role != "single", "team_id": team, "grade_id": grade}
+def fx(fid, team=None, grade=None, opp=None, role="single", home_away="HOME", label=None, day1=None, day2=None):
+    out = {"id": fid, "label": label, "opponent_name": opp, "home_away": home_away,
+           "role": role, "two_day": role != "single", "team_id": team, "grade_id": grade}
+    if role in ("day1", "day2"):
+        out["day1"], out["day2"] = day1, day2   # as `upcoming_fixtures_by_date` builds them
+    return out
 
 
 def pure_checks() -> None:
@@ -118,7 +121,29 @@ def pure_checks() -> None:
     check("no upcoming fixtures at all: every squad has no date",
           all(v["date"] is None for v in out5.values()))
     check("shape is stable (every key present)",
-          all(set(v) == {"date", "fixture_id", "opponent_name", "label", "home_away", "scope"} for v in out.values()))
+          all(set(v) == {"date", "end_on", "fixture_id", "opponent_name", "label", "home_away", "scope"}
+              for v in out.values()))
+
+    # A two-day game hands the board its second date so the squad can be asked
+    # about both weeks. Control: the first day's date alone (what the board used)
+    # cannot say there is a second week.
+    wk1, wk2 = "2026-10-24", "2026-10-31"
+    two_day = {
+        wk1: [fx("f-2d", team=None, grade=g_1, opp="Bedford Morley", role="day1", day1=wk1, day2=wk2),
+              fx("f-3-1d", team=None, grade=g_3, opp="Kenwick 3s")],
+        wk2: [fx("f-2d", team=None, grade=g_1, opp="Bedford Morley", role="day2", day1=wk1, day2=wk2)],
+    }
+    out6 = svc.squad_next_games(two_day, teams)
+    check("control: a one-day game gives no second date", out6[thirds].get("end_on") is None, str(out6[thirds]))
+    check("control: the first day's date alone cannot tell a two-day game from a one-day one",
+          out6[firsts]["date"] == wk1 and out6[thirds]["date"] == wk1)
+    check("two-day game: the squad's next game carries its second date", out6[firsts].get("end_on") == wk2, str(out6[firsts]))
+    check("two-day game: it is still ONE game on its first day", out6[firsts]["date"] == wk1 and out6[firsts]["fixture_id"] == "f-2d")
+    # Day 1 already started: only day 2 is left in the list, and day 2 never counts
+    # as a game start (`flat` drops it), so nothing claims a second date it cannot back.
+    left = {wk2: [fx("f-2d", team=None, grade=g_1, opp="Bedford Morley", role="day2", day1=wk1, day2=wk2)]}
+    out7 = svc.squad_next_games(left, teams)
+    check("only day 2 left: no end_on is invented", out7[firsts].get("end_on") is None, str(out7[firsts]))
 
 
 async def route_checks(db_url: str) -> None:
@@ -176,6 +201,11 @@ async def route_checks(db_url: str) -> None:
                       source="manual", played_on=tue, opponent_name="Jarrah T20"))
         s.add(Fixture(id=uuid.uuid4(), organisation_id=org_id, grade_id=g_3, team_id=None,
                       source="manual", played_on=sat, opponent_name="Willetton 3s"))
+        # A two-day game for the T20 squad, a week later: its squad must be told
+        # about BOTH weeks (`end_on`) once it is the squad's next game.
+        s.add(Fixture(id=uuid.uuid4(), organisation_id=org_id, grade_id=g_t20, team_id=t_t20,
+                      source="manual", played_on=tue + timedelta(days=14), end_on=tue + timedelta(days=21),
+                      opponent_name="Bedford Morley"))
         await s.commit()
         club = await s.get(Organisation, org_id)
         body = await av.availability_matrix(db=s, club=club)
@@ -186,8 +216,21 @@ async def route_checks(db_url: str) -> None:
     check("matrix carries squad_next", bool(sn), str(sn))
     check("route: 3rd XI reads Saturday", (sn.get(str(t_3)) or {}).get("date") == sat.isoformat(), str(sn.get(str(t_3))))
     check("route: T20 squad reads Tuesday", (sn.get(str(t_t20)) or {}).get("date") == tue.isoformat())
+    check("route: a one-day next game carries no second date", (sn.get(str(t_3)) or {}).get("end_on") is None)
+    check("route: control, the T20's next game is the one-day Tuesday, no end_on",
+          (sn.get(str(t_t20)) or {}).get("end_on") is None)
     check("route: control, old rule (dates[0]) gives the 3rd XI Tuesday",
           body["dates"][0]["date"] == tue.isoformat())
+    # Once Tuesday's T20 is out of the way the two-day game is the squad's next.
+    async with Session() as s:
+        await s.execute(text("DELETE FROM fixtures WHERE organisation_id = :o AND opponent_name = 'Jarrah T20'"), {"o": org_id})
+        await s.commit()
+        club = await s.get(Organisation, org_id)
+        sn2 = (await av.availability_matrix(db=s, club=club)).get("squad_next") or {}
+    two = sn2.get(str(t_t20)) or {}
+    check("route: the T20 squad's next game is now the two-day one, on its first day",
+          two.get("date") == (tue + timedelta(days=14)).isoformat(), str(two))
+    check("route: ...and carries the second week's date", two.get("end_on") == (tue + timedelta(days=21)).isoformat(), str(two))
     async with Session() as s:
         plain = await av.upcoming_fixtures_by_date(s, org_id)
         try:

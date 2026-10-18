@@ -1,12 +1,14 @@
 // The club settings every BetterSelect screen reads: whether the club offers
-// "Maybe", the half-available colours, how far back the player pools reach, the
-// per-team starting filters and the squads in XI order. Fetched once per page
-// load and shared, so every screen and panel agrees without each asking.
+// "Maybe", the half-available colours, what it calls the two weeks of a two-day
+// game, how far back the player pools reach, the per-team starting filters and
+// the squads in XI order. Fetched once per page load and shared, so every screen
+// and panel agrees without each asking.
 import { useEffect, useState } from 'react'
 import { api } from './api'
+import { DEFAULT_WEEK_NAMES, applyWeekNames } from './availability'
 
 let current = {
-  allow_maybe: true, half_colours: null, played_years: { selection: 3, availability: 0 },
+  allow_maybe: true, half_colours: null, week_names: DEFAULT_WEEK_NAMES, played_years: { selection: 3, availability: 0 },
   team_defaults: [], squads: [], loaded: false,
 }
 let loading = null
@@ -23,6 +25,7 @@ function paintHalf(c) {
 function publish(next) {
   current = { ...current, ...next }
   if ('half_colours' in next) paintHalf(next.half_colours)
+  if ('week_names' in next) applyWeekNames(next.week_names)
   listeners.forEach((fn) => fn(current))
 }
 
@@ -33,6 +36,7 @@ function ensureLoaded() {
   loading = api.bsAvailabilityConfig().then((c) => publish({
     allow_maybe: c?.allow_maybe !== false,
     half_colours: c?.half_colours || null,
+    week_names: { ...DEFAULT_WEEK_NAMES, ...(c?.week_names || {}) },
     ...(c?.played_years ? { played_years: c.played_years } : {}),
     team_defaults: c?.team_defaults || [],
     squads: c?.squads || [],
@@ -53,8 +57,12 @@ function useConfig() {
 
 /* The Settings screen calls these so every open screen follows a change. */
 export function setHalfColours(c) { publish({ half_colours: c }) }
+export function setWeekNames(n) { publish({ week_names: { ...DEFAULT_WEEK_NAMES, ...(n || {}) } }) }
 export function setAllowMaybe(v) { publish({ allow_maybe: v !== false }) }
 export function setSelectConfig(next) { publish(next) }
+
+/* What the club calls the two weeks of a two-day game ({ w1, w2 }, W1 and W2 by default). */
+export function useWeekNames() { return useConfig().week_names || DEFAULT_WEEK_NAMES }
 
 export function useAllowMaybe() { return useConfig().allow_maybe !== false }
 

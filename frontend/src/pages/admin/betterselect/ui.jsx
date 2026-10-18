@@ -11,8 +11,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../contexts/AuthContext'
 import { ruleBadges } from './selectionRules'
-import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availRank } from '../../../lib/availability'
-import { useAllowMaybe } from '../../../lib/useAvailabilityConfig'
+import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availRank, weekPatterns, weekPatternOf, weekFlag, weekNameOf } from '../../../lib/availability'
+import { useAllowMaybe, useWeekNames } from '../../../lib/useAvailabilityConfig'
+import { gameDatesLabel } from './selectionMeta'
 
 /* ── Icons — simple geometric line glyphs (stroke = currentColor) ────────── */
 const ICON_PATHS = {
@@ -523,10 +524,27 @@ export function AvailSummary({ players, statusOf = (p) => p.availability ?? p.av
   )
 }
 
+/* The tag beside a player for a two-day game: "W2 ONLY", "W1 OUT", "W2 ?". One
+   component for every screen, so the same words are always the same colour as
+   the card's dot and edge. Plain text, never a pill or anything clickable. */
+export function WeekFlag({ days, className = '' }) {
+  const names = useWeekNames()
+  const f = weekFlag(days, names)
+  if (!f) return null
+  const tip = days.map((d, i) => `${weekNameOf(names, i)} (${gameDatesLabel(d.date)}): ${(AVAILABILITY[d.status] || AVAILABILITY.NO_RESPONSE).label}`).join('\n')
+  return (
+    <span data-week-flag title={tip} className={`font-mono font-semibold shrink-0 cursor-default ${className || 'text-[9.5px]'}`}
+      style={{ color: (AVAILABILITY[f.status] || AVAILABILITY.NO_RESPONSE).cssVar }}>
+      {f.text}
+    </span>
+  )
+}
+
 /* A two-day game is answered a week at a time, or for both weeks at once.
    `days` is [{date, status}] in order; onPick(status, which) where `which` is a
    date or 'both'. Declared at module level (never inside a render). */
 function TwoDayAvail({ days, onPick, allowMaybe }) {
+  const names = useWeekNames()
   const fmt = (iso) => {
     try { return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }
     catch { return iso }
@@ -535,10 +553,41 @@ function TwoDayAvail({ days, onPick, allowMaybe }) {
   const same = days.every((d) => d.status === days[0].status) ? days[0].status : null
   const rows = [
     { key: 'both', which: 'both', title: 'Both weeks', sub: days.map((d) => fmt(d.date)).join(' + '), current: same },
-    ...days.map((d, i) => ({ key: d.date, which: d.date, title: `Week ${i + 1}`, sub: fmt(d.date), current: d.status })),
+    ...days.map((d, i) => ({ key: d.date, which: d.date, title: weekNameOf(names, i), sub: fmt(d.date), current: d.status })),
   ]
+  // The four things a player actually says about a two-day game. Each is two
+  // per-date answers, so it goes out as one onPick per week.
+  const pattern = weekPatternOf(days.map((d) => d.status))
+  const patterns = days.length === 2 ? weekPatterns(names) : []
   return (
     <div className="p-4 flex flex-col gap-3" data-two-day-avail>
+      {patterns.length > 0 && (
+        <div data-week-patterns>
+          <div className="flex items-baseline justify-between gap-2 mb-1.5">
+            <span className="font-display font-bold text-[14px]">Which weeks?</span>
+            <span className="text-[11.5px] text-pb-faint">{days.map((d) => fmt(d.date)).join(' + ')}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {patterns.map((w) => {
+              const meta = AVAILABILITY[w.tone]
+              const on = pattern === w.key
+              return (
+                <button key={w.key} type="button" data-week-pattern={w.key}
+                  onClick={() => days.forEach((d, i) => onPick(w.statuses[i], d.date))}
+                  className="min-h-[48px] rounded-lg font-display font-semibold text-[13.5px] px-2 transition"
+                  style={{
+                    border: `1.5px solid ${on ? meta.cssVar : 'var(--pb-hairline2)'}`,
+                    background: on ? `color-mix(in srgb, ${meta.cssVar} 14%, transparent)` : 'transparent',
+                    color: on ? meta.cssVar : 'var(--pb-dim)',
+                  }}>
+                  {w.title}
+                </button>
+              )
+            })}
+          </div>
+          <div className="text-[11.5px] text-pb-faint mt-2">{allowMaybe ? 'Or set each week below, for a Maybe or a different answer each week.' : 'Or set each week below.'}</div>
+        </div>
+      )}
       {rows.map((r) => (
         <div key={r.key} data-avail-row={r.key === 'both' ? 'both' : r.key}>
           <div className="flex items-baseline justify-between gap-2 mb-1.5">
@@ -551,7 +600,7 @@ function TwoDayAvail({ days, onPick, allowMaybe }) {
               const on = r.current === s
               return (
                 <button key={s} type="button" data-pick={s} onClick={() => onPick(s, r.which)}
-                  title={`${r.title}: ${meta.label}`}
+                  title={`${r.title === 'Both weeks' ? r.title : r.title + ' (' + r.sub + ')'}: ${meta.label}`}
                   className="min-h-[44px] rounded-lg font-display font-semibold text-[12.5px] px-1 transition"
                   style={{
                     border: `1.5px solid ${on ? meta.cssVar : 'var(--pb-hairline2)'}`,

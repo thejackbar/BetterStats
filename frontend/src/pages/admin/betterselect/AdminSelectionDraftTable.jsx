@@ -24,12 +24,13 @@ import { useMediaQuery } from '../../../hooks/useMediaQuery'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
+import { useWeekNames } from '../../../lib/useAvailabilityConfig'
 import { PbSpinner } from '../../../lib/presskit'
-import { availRank, AVAILABILITY, halfStatus, viewStatus } from '../../../lib/availability'
+import { availRank, AVAILABILITY, halfStatus, viewStatus, weekFlag } from '../../../lib/availability'
 import { useSelectConfig } from '../../../lib/useAvailabilityConfig'
-import { Icon, Avatar, Btn, Tag, RuleTags, playedWithinYears } from './ui'
+import { Icon, Avatar, Btn, Tag, RuleTags, WeekFlag, playedWithinYears } from './ui'
 import { DnD, useDrag } from './selectionDnd'
-import { nameMatches, roleLine, spark, formMeta, normGender, weekFlagParts, unavailableWeeksText, gameDatesLabel, fixtureTabs } from './selectionMeta'
+import { nameMatches, roleLine, spark, formMeta, normGender, unavailableWeeksText, gameDatesLabel, fixtureTabs } from './selectionMeta'
 import { xiCompliance, isBlocked } from './selectionRules'
 import { confirmSig, restoreDraft } from './selectionDraft'
 import { sortTeams, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
@@ -89,26 +90,10 @@ function buildCol(f, d, dr, fallbackSize) {
 
 // ── Which weekend ───────────────────────────────────────────────────────────
 // A two-day game is played over two weekends and a player answers each. Beside a
-// name, plain text says which weekend is the problem: "W2 OUT" or "W2 ?", the same
-// quiet style as the OUT tag, in the club's half-available colour for a player
-// who is free one weekend and away the other. Nothing is drawn for a
-// player who has not answered a weekend yet, or whose weekends match.
-function weekFlagText(days) {
-  return weekFlagParts(days).map((w) => `W${w.week} ${w.status === 'UNAVAILABLE' ? 'OUT' : '?'}`).join(' ')
-}
-function WeekFlag({ days }) {
-  const parts = weekFlagParts(days)
-  if (!parts.length) return null
-  const tip = days.map((d, i) => `Week ${i + 1} (${gameDatesLabel(d.date)}): ${(AVAILABILITY[d.status] || AVAILABILITY.NO_RESPONSE).label}`).join('\n')
-  // Half available: the same colour as the card's dot and edge. Otherwise the
-  // colour of the weekend's own answer (a maybe is amber).
-  const colour = AVAILABILITY[halfStatus(days) || (parts.some((w) => w.status === 'UNAVAILABLE') ? 'UNAVAILABLE' : 'MAYBE')].cssVar
-  return (
-    <span data-week-flag title={tip} className="font-mono text-[9.5px] font-semibold shrink-0 cursor-default" style={{ color: colour }}>
-      {weekFlagText(days)}
-    </span>
-  )
-}
+// name, plain text says which weekend is the problem ("W2 ONLY", "W1 OUT",
+// "W2 ?"): the shared `WeekFlag` every BetterSelect screen uses, in the colour of
+// the card's own dot and edge. Nothing is drawn for a player who has not answered
+// a weekend yet, or whose weekends match.
 
 // ── A player card (a team's slot, and the pool) ──────────────────────────────
 function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) {
@@ -140,7 +125,7 @@ function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) 
           {alsoIn && <Tag tone="amber" title={`Also named in ${alsoIn}`}>×2</Tag>}
           <RuleTags player={p} />
           {/* "W2 OUT" says more than "OUT" where a weekend is the reason. */}
-          {weekFlagParts(ctx.weekByPlayer[p.id]).length > 0
+          {weekFlag(ctx.weekByPlayer[p.id])
             ? <WeekFlag days={ctx.weekByPlayer[p.id]} />
             : out && <span className="font-mono text-[9.5px] font-semibold shrink-0" style={{ color: meta.cssVar }}>OUT</span>}
         </div>
@@ -223,9 +208,9 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
           {oppLabelOf(fx)}{fx.start_time ? ` · ${fx.start_time}` : ''}
         </div>
         {fx.end_on && fx.end_on > fx.played_on && (
-          <div className="text-[11px] font-semibold truncate" style={{ color: 'var(--pb-amber)' }} data-two-day-header title="Played over two weekends. A W1 or W2 tag beside a name is that player's answer for that weekend.">
+          <div className="text-[11px] font-semibold truncate" style={{ color: 'var(--pb-amber)' }} data-two-day-header title={`Played over two weekends. A ${ctx.weekNames.w1} or ${ctx.weekNames.w2} tag beside a name is that player's answer for that weekend.`}>
             {ctx.day === fx.end_on
-              ? `Two-day · week 2 of 2, from ${shortDate(fx.played_on)}`
+              ? `Two-day · ${ctx.weekNames.w2}, from ${shortDate(fx.played_on)}`
               : `Two-day · ${shortDate(fx.played_on)} + ${shortDate(fx.end_on)}`}
           </div>
         )}
@@ -349,6 +334,7 @@ export default function AdminSelectionDraftTable() {
   const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
   const toastRef = useRef(toast)
+  const weekNames = useWeekNames()
   toastRef.current = toast
   const { theme, toggle: toggleTheme } = useTheme()
   const canEdit = canEditCap(CAP.SELECT_SELECTION, CAP.MANAGE_SELECTIONS)
@@ -530,7 +516,7 @@ export default function AdminSelectionDraftTable() {
   // two-day team's own answer is the worse of both weeks.
   const warnPick = (p, fid) => {
     const t = (fid && colsRef.current?.[fid]?.poolById?.[p.id]) || p
-    if (t.availability === 'UNAVAILABLE') toastRef.current.info(`${p.display_name} is marked unavailable${unavailableWeeksText(t.availability_days)}. Adding anyway.`)
+    if (t.availability === 'UNAVAILABLE') toastRef.current.info(`${p.display_name} is marked unavailable${unavailableWeeksText(t.availability_days, weekNames)}. Adding anyway.`)
   }
 
   const placeIn = (fid, idx, id) => {
@@ -857,6 +843,7 @@ export default function AdminSelectionDraftTable() {
   }
 
   const ctx = {
+    weekNames,
     cols, order, merged, status, conflicts, canEdit, busy, activeFid, setActiveFid,
     shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length, showGender, weekByPlayer, day,
     filters: { q, setQ, hideOut, setHideOut, squad, setSquad, gender, setGender },
@@ -873,7 +860,7 @@ export default function AdminSelectionDraftTable() {
           </p>
           {Object.keys(weekByPlayer).length > 0 && (
             <p className="text-[12px] text-pb-faint mt-0.5 max-w-[70ch]" data-week-legend>
-              A coloured dot and <b className="font-mono">W2 OUT</b> mean free one weekend of a two-day game, away the other. Colours are in Settings.
+              A coloured dot and <b className="font-mono">{weekNames.w2} ONLY</b> mean free one weekend of a two-day game, away the other. Colours and names are in Settings.
             </p>
           )}
         </div>

@@ -83,7 +83,7 @@ const run = async () => {
       ok('header names week 1', b0.includes(await fmt(WK1)))
       ok('header names week 2', b0.includes(await fmt(WK2)), b0.slice(0, 300))
       ok('header says it is a two-day game', /two days/i.test(b0))
-      ok('the card for the player away in week 2 says which week', /Week 1 Available · Week 2 Unavailable/.test(b0), b0.slice(0, 400))
+      ok('the card for the player away in week 2 says which week (W1 ONLY)', /W1 ONLY/.test(b0), b0.slice(0, 400))
       ok('a player free both weeks shows no split line', (await page.locator('[data-week-split]').count()) === 1)
     } else {
       ok('control: header does not say two days', !/two days/i.test(b0))
@@ -108,7 +108,7 @@ const run = async () => {
       await page.waitForTimeout(500)
       ok('week 2 answer writes the week-2 date only', writes.length === 1 && writes[0].date === WK2 && writes[0].status === 'AVAILABLE', JSON.stringify(writes))
       const b1 = await body()
-      ok('the split line goes once both weeks agree', !/Week 1 Available · Week 2 Unavailable/.test(b1))
+      ok('the split line goes once both weeks agree', !/W1 ONLY/.test(b1))
       // Both weeks.
       await cara.locator('[data-avail-dot]').first().click()
       await page.waitForTimeout(250)
