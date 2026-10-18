@@ -151,6 +151,9 @@ export default function PublicVoting() {
 
   const [step, setStep] = useState('loading') // loading|dead|games|pick|pin|name|ballot|done
   const [landing, setLanding] = useState(null)
+  // Bumped when who is voting changes, so the games list is read again: it is cut
+  // down to the games the verified player was in, and was fetched before they said who they were.
+  const [landingKey, setLandingKey] = useState(0)
   const [me, setMe] = useState(null)
   const [supporterName, setSupporterName] = useState('')
   const [fixture, setFixture] = useState(null)
@@ -173,7 +176,7 @@ export default function PublicVoting() {
       .then((d) => { if (!alive) return; setLanding(d); setMe(d.me); setStep((s) => (s === 'loading' ? 'games' : s)) })
       .catch(() => alive && setStep('dead'))
     return () => { alive = false }
-  }, [token, teamParam, roundParam, qParam])
+  }, [token, teamParam, roundParam, qParam, landingKey])
 
   useEffect(() => { if (step === 'pin') pinRef.current?.focus() }, [step])
 
@@ -225,6 +228,7 @@ export default function PublicVoting() {
     try {
       const r = await api.votePublicVerify(token, player.id, pinValue)
       setMe(r.player)
+      setLandingKey((k) => k + 1)
       if (fixture) {
         const d = await api.votePublicFixture(token, fixture.fixture.id)
         setFixture(d); seedPicks(d); setStep('ballot')
@@ -301,7 +305,7 @@ export default function PublicVoting() {
                 )}
                 <button onClick={async () => {
                   try { await api.votePublicSwitch(token) } catch { /* cookie clear is best-effort */ }
-                  setMe(null); setChosen(null); setStep('games')
+                  setMe(null); setChosen(null); setLandingKey((k) => k + 1); setStep('games')
                 }} className="text-xs text-pb-faint hover:text-pb-text underline">Not you?</button>
               </div>
             )}
@@ -331,7 +335,10 @@ export default function PublicVoting() {
             )}
             {landing.fixtures.length === 0 && (
               <div className="rounded-xl border pb-hairline px-4 py-10 text-center text-pb-faint text-sm">
-                {teamParam || roundParam || qParam ? 'No games match these filters.' : 'No games to vote on yet. Check back after the weekend.'}
+                {teamParam || roundParam || qParam
+                  ? 'No games match these filters.'
+                  : me ? 'None of your games are open for voting right now. Check back after the weekend.'
+                  : 'No games to vote on yet. Check back after the weekend.'}
               </div>
             )}
             <div className="flex flex-col gap-3">
@@ -349,7 +356,7 @@ export default function PublicVoting() {
                       </div>
                       <span className="font-mono text-[10px] shrink-0"
                         style={{ color: open ? 'var(--pb-positive)' : 'var(--pb-faintest)' }}>
-                        {open ? 'VOTE →' : STATE_LABEL[f.state]}
+                        {open ? (f.voted ? 'VOTED · CHANGE →' : 'VOTE →') : STATE_LABEL[f.state]}
                       </span>
                     </div>
                   </button>

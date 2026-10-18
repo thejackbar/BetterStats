@@ -56,6 +56,9 @@ WRITE_WINDOW = 60
 # How far back the public page lists fixtures — voting windows are days, not
 # months, so a bounded scan keeps the landing cheap.
 LOOKBACK_DAYS = 90
+# Games whose votable list can only come from a live Play.Cricket fetch, checked
+# per page load when narrowing a verified player's list to games they played.
+LIVE_EXAMINED = 10
 
 
 class VerifyBody(BaseModel):
@@ -163,9 +166,60 @@ async def _verified_player(db: AsyncSession, request: Request, club: Organisatio
     return player
 
 
+async def own_local_fixture_ids(db: AsyncSession, player: Player, fixtures: list[Fixture]) -> set[uuid.UUID]:
+    """Fixtures (by ``Fixture.id``) this player is on in data we already hold: a
+    saved XI, or a synced scorecard through ``match_ref_id`` (never ``fixture.id``,
+    which is not the game id for a synced fixture). Two batched lookups, so a
+    club with a dozen open games per round does not pay a full eligibility check
+    per game. A game whose list only exists as a live Play.Cricket fetch is not
+    found here; the callers check those directly, a few at a time."""
+    if not fixtures:
+        return set()
+    in_lineup = {r[0] for r in (await db.execute(
+        text("SELECT fixture_id FROM fixture_lineups WHERE player_id = :p AND fixture_id = ANY(CAST(:ids AS uuid[]))"),
+        {"p": player.id, "ids": [f.id for f in fixtures]},
+    )).fetchall()}
+    refs = {f.id: vote_svc.match_ref_id(f) for f in fixtures}
+    on_scorecard = {r[0] for r in (await db.execute(
+        text(
+            "SELECT game_id FROM game_appearances WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
+            "UNION SELECT game_id FROM batting_innings WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
+            "UNION SELECT game_id FROM bowling_spells WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
+            "UNION SELECT game_id FROM fielding_stats WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[]))"
+        ),
+        {"p": player.id, "g": list(refs.values())},
+    )).fetchall()}
+    return {f.id for f in fixtures if f.id in in_lineup or refs[f.id] in on_scorecard}
+
+
+async def _fixtures_player_is_on(
+    db: AsyncSession, club: Organisation, cfg: dict, medal: VoteMedal, player: Player, fixtures: list[Fixture],
+) -> list[Fixture]:
+    """``fixtures`` cut down to the games this player is on the votable list of:
+    the ballot page's own list (``resolve_eligibility``), so the games offered to
+    a verified player are exactly the ones they could open a ballot on. Nobody
+    is shown a game they did not play."""
+    local = await own_local_fixture_ids(db, player, fixtures)
+    overrides = await vote_svc.overrides_by_fixture(db, medal.id, [f.id for f in fixtures])
+    live_left = LIVE_EXAMINED
+    keep: list[Fixture] = []
+    for f in fixtures:
+        ov = overrides.get(str(f.id))
+        override_source = ov.eligibility_source if ov else None
+        if f.id not in local:
+            if vote_svc.effective_source(cfg, override_source) != "playhq" or live_left <= 0:
+                continue
+            live_left -= 1
+        elig = await vote_svc.resolve_eligibility(db, club, f, cfg, override_source)
+        if str(player.id) in {p["id"] for p in elig["players"]}:
+            keep.append(f)
+    return keep
+
+
 async def _open_fixtures(
     db: AsyncSession, club: Organisation, cfg: dict, medal: VoteMedal,
     grade_id: Optional[str] = None, round_key: Optional[str] = None, q: Optional[str] = None,
+    only_for: Optional[Player] = None,
 ) -> tuple[list[tuple[Fixture, str]], dict]:
     """Recent played fixtures THIS MEDAL counts, with their voting state,
     newest first, plus the filter option lists (``grades``/``rounds``).
@@ -180,6 +234,10 @@ async def _open_fixtures(
     fixtures to find their own. The option lists are always built from the
     WHOLE lookback window regardless of the other filters, so they don't
     collapse to the current selection.
+
+    ``only_for`` (a verified player) keeps only the games that player is on the
+    votable list of, and the option lists are built from those games too, so
+    the dropdowns never offer a team or round they have nothing in.
     """
     today = date.today()
     res = await db.execute(
@@ -206,6 +264,8 @@ async def _open_fixtures(
         f for f in every_fixture
         if vote_svc.medal_covers(medal_grades, grade_by_fixture.get(str(f.id)))
     ]
+    if only_for is not None:
+        all_fixtures = await _fixtures_player_is_on(db, club, cfg, medal, only_for, all_fixtures)
     if not all_fixtures:
         return [], {"grades": [], "rounds": []}
     grade_names: dict[str, str] = {}
@@ -290,7 +350,20 @@ async def get_landing(
     cfg = vote_svc.effective_config(s)
     players = await active_self_service_players(db, club)
     me = await _verified_player(db, request, club)
-    fixtures, filter_opts = await _open_fixtures(db, club, cfg, s, grade_id=team, round_key=round_key, q=q)
+    # A verified player is only offered the games they played. Someone who has not
+    # said who they are (a coach or supporter, where the club allows them) gets
+    # the club's list, since there is no player to narrow it by.
+    fixtures, filter_opts = await _open_fixtures(
+        db, club, cfg, s, grade_id=team, round_key=round_key, q=q, only_for=me,
+    )
+    voted: set[uuid.UUID] = set()
+    if me and fixtures:
+        voted = {r[0] for r in (await db.execute(
+            select(VoteBallot.fixture_id).where(
+                VoteBallot.medal_id == s.id, VoteBallot.voter_player_id == me.id,
+                VoteBallot.fixture_id.in_([f.id for f, _ in fixtures]),
+            )
+        )).fetchall()}
     return {
         "club": _club_branding(club),
         # Named so a player following one of several club links knows which
@@ -321,6 +394,7 @@ async def get_landing(
                 "date": f.played_on.isoformat() if f.played_on else None,
                 "home_away": f.home_away,
                 "state": state,
+                "voted": f.id in voted,
             }
             for f, state in fixtures
             if state in ("open", "awaiting_team", "closed", "locked")
@@ -466,7 +540,11 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         "me": _me_payload(club, me) if me else None,
         "role": role,
         "reason": reason,
-        "players": [{"id": p["id"], "name": p["name"], "photo_url": photos.get(str(p["id"]))} for p in eligible],
+        # Someone who cannot vote on this game (did not play it, or the club needs a
+        # name first) is not handed its team list.
+        "players": [] if role == "none" else [
+            {"id": p["id"], "name": p["name"], "photo_url": photos.get(str(p["id"]))} for p in eligible
+        ],
         "my_ballot": my_ballot,
     }
 

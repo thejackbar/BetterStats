@@ -445,25 +445,12 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
             continue
         overrides = await vote_svc.overrides_by_fixture(db, medal.id, [f.id for f in todo])
 
-        in_lineup = {r[0] for r in (await db.execute(
-            text("SELECT fixture_id FROM fixture_lineups WHERE player_id = :p AND fixture_id = ANY(CAST(:ids AS uuid[]))"),
-            {"p": player.id, "ids": [f.id for f in todo]},
-        )).fetchall()}
-        refs = {f.id: vote_svc.match_ref_id(f) for f in todo}
-        on_scorecard = {r[0] for r in (await db.execute(
-            text(
-                "SELECT game_id FROM game_appearances WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
-                "UNION SELECT game_id FROM batting_innings WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
-                "UNION SELECT game_id FROM bowling_spells WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
-                "UNION SELECT game_id FROM fielding_stats WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[]))"
-            ),
-            {"p": player.id, "g": list(refs.values())},
-        )).fetchall()}
+        own = await pv.own_local_fixture_ids(db, player, todo)
 
         for f in todo:
             ov = overrides.get(str(f.id))
             source = vote_svc.effective_source(cfg, ov.eligibility_source if ov else None)
-            local = f.id in in_lineup or refs[f.id] in on_scorecard
+            local = f.id in own
             if not local:
                 # Only a live team-list fetch could still put them on this game's list.
                 if source != "playhq" or live_left <= 0:

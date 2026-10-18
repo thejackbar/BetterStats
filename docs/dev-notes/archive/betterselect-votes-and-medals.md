@@ -481,3 +481,15 @@ Asked for: if the player has already voted, show their 3-2-1 votes too, for refe
 - The profile adds `votes_cast`. The `votes` module now stays when there are cast votes even if nothing is due, and drops only when both are empty. The banner and tile count `votes` (to cast) only.
 - Frontend: `VotesModule` is "Votes to cast" then "Already cast", or "Your votes" alone when nothing is due.
 - Proof: `verify_player_votes_reminder.py` (own database, 37; control on the previous route fails the 6 new checks without crashing), `verify_player_dashboard_fines_browser.mjs` (120).
+
+## v9.120.6.1: the voting page only lists the games the voter played
+
+Reported: the player page said a vote was due when it had already been cast, and "Back to games" on the voting page listed every other game in the club.
+
+- Cause of the second: `public_votes.get_landing` never looked at who was asking, and the page read it once, before the PIN step, so even a verified voter got the whole club's list (and kept it after verifying).
+- `get_landing` passes the verified player to `_open_fixtures(only_for=...)`. `_fixtures_player_is_on` keeps a game only when the player is on its `resolve_eligibility` list (the ballot page's own list), found local-first through `own_local_fixture_ids` (saved XI, then synced scorecard through `match_ref_id`) with at most `LIVE_EXAMINED` (10) live Play.Cricket checks per load. The `grades`/`rounds` option lists are built after the cut. A visitor who has not said who they are, including a coach or supporter where the club allows them, still gets the club's list.
+- Each landing fixture carries `voted` (the caller's own ballot on this medal). `fixture_state` returns `players: []` when `role == 'none'`.
+- `public_availability._votes_for_player` now calls the same `own_local_fixture_ids`, so the reminder and the voting page share one definition of "games this player is on".
+- `PublicVoting.jsx` re-reads the landing after a successful verify and after "Not you?" (`landingKey`), shows `VOTED · CHANGE →` on a voted game, and says "None of your games are open" for a verified voter with an empty list.
+- The first symptom did not reproduce with one medal (a ballot always removes its game from `votes`; `verify_player_votes_reminder.py` 37/37 on a real Postgres). Two things can still show a due vote after voting and are handled: a club with two enabled medals counts one ballot per medal (rule 9), so the banner now names the medal and game; and the browser's Back button restores the player page from its cache, so `MyPage` reloads on `pageshow` when `persisted`. If it recurs with one medal and a fresh load, check for two `fixtures` rows for one match.
+- Proof: `backend/verification/verify_vote_landing_own_games.py` (own database, 16; control on the previous route bodies fails 9), `frontend/verification/verify_vote_landing_own_games_browser.mjs` (6, control on the previous page fails 3, 390px no overflow), `verify_player_votes_reminder.py` (37) and `scripts/verify_vote_medals.py` (59) unchanged.
