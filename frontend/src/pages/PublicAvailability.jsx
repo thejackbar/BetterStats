@@ -11,7 +11,7 @@
 import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import { AVAILABILITY } from '../lib/availability'
+import { AVAILABILITY, weekPatterns, weekPatternOf, DEFAULT_WEEK_NAMES } from '../lib/availability'
 
 // The three answers a player can give (NO_RESPONSE is the absence of one).
 const ALL_CHOICES = ['AVAILABLE', 'MAYBE', 'UNAVAILABLE']
@@ -166,43 +166,53 @@ function FixtureList({ fixtures }) {
   )
 }
 
-// One answer for both weeks of a two-day game. Each week keeps its own answer
-// underneath (a player can be free for week 1 and away for week 2); this is the
-// quick way to say the same thing twice.
+// One tap for a two-day game: both weeks, week 1 only, week 2 only, or neither.
+// Each week keeps its own answer underneath (a player can be free for week 1 and
+// away for week 2, or say Maybe); this is the quick way to say the usual things.
 function BothWeeks({ pair, me, choices, onPick, busy }) {
+  const weekNames = { ...DEFAULT_WEEK_NAMES, ...(me.week_names || {}) }
   const a = me.availability?.[pair.day1]?.status || 'NO_RESPONSE'
   const b = me.availability?.[pair.day2]?.status || 'NO_RESPONSE'
   const same = a === b ? a : null
+  const pattern = weekPatternOf([a, b])
   const names = [...new Set(pair.fixtures.map((f) => f.team_name).filter(Boolean))]
+  const btn = (meta, active, extra) => (active
+    ? { background: meta.cssVar, color: 'var(--pb-bg)', ...extra }
+    : { background: `color-mix(in srgb, ${meta.cssVar} 12%, transparent)`, color: meta.cssVar, border: `1px solid color-mix(in srgb, ${meta.cssVar} 30%, transparent)`, ...extra })
+  // The data-both values keep the old same-answer names for the two that are one
+  // (AVAILABLE, UNAVAILABLE); the half answers are W1 and W2.
+  const attr = { both: 'AVAILABLE', w1: 'W1', w2: 'W2', none: 'UNAVAILABLE' }
   return (
     <div data-both-weeks={pair.key} className="rounded-xl border p-3.5"
       style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 45%, transparent)', background: 'color-mix(in srgb, var(--pb-amber) 6%, transparent)' }}>
       <div className="flex items-baseline justify-between gap-2 mb-0.5">
-        <div className="font-display font-bold text-[16px]">Two-day game: both weeks</div>
+        <div className="font-display font-bold text-[16px]">Two-day game: which weeks?</div>
         <Tag tone="var(--pb-amber)">2 weeks</Tag>
       </div>
       <div className="text-[12.5px] text-pb-dim mb-2.5">
         {fmtShort(pair.day1)} and {fmtShort(pair.day2)}{names.length ? ` · ${names.join(', ')}` : ''}
       </div>
-      <div className={`grid ${choices.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
-        {choices.map((s) => {
-          const meta = AVAILABILITY[s]
-          const active = same === s
-          return (
-            <button key={s} type="button" data-both={s} onClick={() => onPick(pair, s)} disabled={busy}
-              className="py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
-              style={active
-                ? { background: meta.cssVar, color: 'var(--pb-bg)' }
-                : { background: `color-mix(in srgb, ${meta.cssVar} 12%, transparent)`, color: meta.cssVar, border: `1px solid color-mix(in srgb, ${meta.cssVar} 30%, transparent)` }}>
-              {meta.glyph} {meta.label}
-            </button>
-          )
-        })}
+      <div className="grid grid-cols-2 gap-2">
+        {weekPatterns(weekNames).map((w) => (
+          <button key={w.key} type="button" data-both={attr[w.key]} data-week-pattern={w.key}
+            onClick={() => onPick(pair, w.statuses)} disabled={busy}
+            className="py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
+            style={btn(AVAILABILITY[w.tone], pattern === w.key)}>
+            {w.title}
+          </button>
+        ))}
+        {choices.includes('MAYBE') && (
+          <button type="button" data-both="MAYBE" onClick={() => onPick(pair, ['MAYBE', 'MAYBE'])} disabled={busy}
+            className="col-span-2 py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
+            style={btn(AVAILABILITY.MAYBE, same === 'MAYBE')}>
+            {AVAILABILITY.MAYBE.glyph} Maybe for both weeks
+          </button>
+        )}
       </div>
       <div className="text-[12px] mt-2" data-both-summary style={{ color: same ? 'var(--pb-faint)' : 'var(--pb-amber)' }}>
         {same
           ? `Same answer for both weeks. You can still change one week below.`
-          : `Week 1: ${(AVAILABILITY[a] || AVAILABILITY.NO_RESPONSE).label} · Week 2: ${(AVAILABILITY[b] || AVAILABILITY.NO_RESPONSE).label}`}
+          : `${weekNames.w1}: ${(AVAILABILITY[a] || AVAILABILITY.NO_RESPONSE).label} · ${weekNames.w2}: ${(AVAILABILITY[b] || AVAILABILITY.NO_RESPONSE).label}`}
       </div>
     </div>
   )
@@ -237,10 +247,13 @@ function fmtShort(d) {
   try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) } catch { return d }
 }
 
-// "Week 1 of 2" for the days of a two-day game, '' for an ordinary date.
-function weekLabel(d) {
+// "W1 · 2-day game" (the club's own week name) for the days of a two-day game,
+// '' for an ordinary date.
+function weekLabel(d, names) {
   const f = (d.fixtures || []).find((x) => x.two_day)
-  return f ? (f.role === 'day2' ? 'Week 2 of 2' : 'Week 1 of 2') : ''
+  if (!f) return ''
+  const n = { ...DEFAULT_WEEK_NAMES, ...(names || {}) }
+  return `${f.role === 'day2' ? n.w2 : n.w1} · 2-day game`
 }
 
 function Section({ title, children, className = '' }) {
@@ -283,7 +296,7 @@ function AvailabilityModule({ me }) {
           const meta = AVAILABILITY[cur] || AVAILABILITY.NO_RESPONSE
           return (
             <div key={d.date} className="flex items-center justify-between gap-3 text-sm">
-              <span>{fmtShort(d.date)}{weekLabel(d) ? <span className="text-pb-faint"> · {weekLabel(d)}</span> : null}</span>
+              <span>{fmtShort(d.date)}{weekLabel(d, me.week_names) ? <span className="text-pb-faint"> · {weekLabel(d, me.week_names)}</span> : null}</span>
               <span className="font-semibold" style={{ color: meta.cssVar }}>{meta.glyph} {meta.label}</span>
             </div>
           )
@@ -875,14 +888,16 @@ export default function PublicAvailability() {
     }
   }
 
-  // Both weeks of a two-day game in one tap. Two writes, one per date (the store
-  // is per date), each rolled back on its own if it fails.
-  const setBoth = async (pair, status) => {
+  // Both weeks of a two-day game in one tap. `statuses` is [week 1, week 2] (a
+  // lone status means the same for both). Two writes, one per date (the store is
+  // per date), each rolled back on its own if it fails.
+  const setBoth = async (pair, statuses) => {
     const dates = [pair.day1, pair.day2]
+    const per = Array.isArray(statuses) ? statuses : [statuses, statuses]
     const prior = Object.fromEntries(dates.map((d) => [d, me.availability?.[d]]))
-    setMe((m) => ({ ...m, availability: { ...(m.availability || {}), ...Object.fromEntries(dates.map((d) => [d, { status, source: 'self' }])) } }))
+    setMe((m) => ({ ...m, availability: { ...(m.availability || {}), ...Object.fromEntries(dates.map((d, i) => [d, { status: per[i], source: 'self' }])) } }))
     setSavingDate(pair.key)
-    const results = await Promise.allSettled(dates.map((d) => api.availPublicSet(token, { date: d, status })))
+    const results = await Promise.allSettled(dates.map((d, i) => api.availPublicSet(token, { date: d, status: per[i] })))
     const failed = dates.filter((_, i) => results[i].status === 'rejected')
     if (failed.length) {
       setMe((m) => {
@@ -1033,7 +1048,7 @@ export default function PublicAvailability() {
               {weeks.slice(0, weeksOpen).flat().map((d) => {
                 const cur = me.availability?.[d.date]?.status || 'NO_RESPONSE'
                 const startsPair = Object.values(pairs).filter((pr) => pr.day1 === d.date)
-                const wk = weekLabel(d)
+                const wk = weekLabel(d, me.week_names)
                 return (
                   <Fragment key={d.date}>
                   {startsPair.map((pr) => (

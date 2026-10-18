@@ -77,6 +77,10 @@ class SettingsBody(BaseModel):
     # string puts it back to the platform colour (model_fields_set below).
     half_colour_w1: Optional[str] = None
     half_colour_w2: Optional[str] = None
+    # What the club calls week 1 and week 2 of a two-day game ("A" and "B").
+    # Absent leaves one alone; null or blank puts it back to W1 / W2.
+    week_name_w1: Optional[str] = None
+    week_name_w2: Optional[str] = None
     # How far back a player may have last played to be listed (0 = any time).
     played_years_selection: Optional[int] = None
     played_years_availability: Optional[int] = None
@@ -133,6 +137,7 @@ def _settings_out(club: Organisation) -> dict:
         "captain_email_template_id": cfg["captain_email_template_id"],
         "player_email_template_id": cfg["player_email_template_id"],
         "half_colours": cfg["half_colours"],
+        "week_names": cfg["week_names"],
         "played_years": cfg["played_years"],
         "team_defaults": cfg["team_defaults"],
     }
@@ -245,6 +250,19 @@ async def patch_settings(
             cfg["half_colours"] = halves
         else:
             cfg.pop("half_colours", None)
+    for key, field in (("w1", "week_name_w1"), ("w2", "week_name_w2")):
+        if field not in body.model_fields_set:
+            continue
+        names = dict(cfg.get("week_names") or {})
+        name = rules_svc.clean_week_name(getattr(body, field))
+        if name is None:
+            names.pop(key, None)          # an explicit clear: W1 / W2
+        else:
+            names[key] = name
+        if names:
+            cfg["week_names"] = names
+        else:
+            cfg.pop("week_names", None)
     for key, field in (("selection", "played_years_selection"), ("availability", "played_years_availability")):
         if field not in body.model_fields_set:
             continue

@@ -9,7 +9,7 @@ import { nameMatchesSearch } from '../../../lib/nameFormat'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
-import { useAllowMaybe, useSelectConfig } from '../../../lib/useAvailabilityConfig'
+import { useAllowMaybe, useSelectConfig, useWeekNames } from '../../../lib/useAvailabilityConfig'
 import {
   Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
   playedWithinYears, RuleTags, Chip,
@@ -54,13 +54,13 @@ function fmtYear(d) {
 }
 
 // Build the prototype's "vs Willetton" fixture sub-label from a date's fixtures.
-function fixtureSub(dateObj) {
+function fixtureSub(dateObj, names) {
   const fxs = dateObj.fixtures || []
   if (!fxs.length) return ''
   return fxs.map((f) => {
     const opp = f.opponent_name || f.label || 'TBC'
     const prefix = f.home_away === 'AWAY' ? '@ ' : f.home_away === 'BYE' ? '' : 'vs '
-    const d1d2 = f.two_day ? (f.role === 'day1' ? 'Wk 1/2 ' : f.role === 'day2' ? 'Wk 2/2 ' : '') : ''
+    const d1d2 = f.two_day ? (f.role === 'day1' ? `${names?.w1 || 'W1'} ` : f.role === 'day2' ? `${names?.w2 || 'W2'} ` : '') : ''
     return `${d1d2}${prefix}${opp}`
   }).join(' · ')
 }
@@ -105,6 +105,7 @@ export default function AdminAvailability() {
   const [selected, setSelected] = useState(() => new Set())
   const [bulkStatus, setBulkStatus] = useState('AVAILABLE')
   const allowMaybe = useAllowMaybe()
+  const weekNames = useWeekNames()
   // Switching Maybe off while it was the chosen bulk answer falls back to Available.
   useEffect(() => { if (!allowMaybe && bulkStatus === 'MAYBE') setBulkStatus('AVAILABLE') }, [allowMaybe, bulkStatus])
   const [bulkReason, setBulkReason] = useState('')
@@ -430,7 +431,7 @@ export default function AdminAvailability() {
               </th>
               {dates.map((d) => {
                 const sel = d.date === selDate
-                const sub = fixtureSub(d)
+                const sub = fixtureSub(d, weekNames)
                 return (
                   <th key={d.date} onClick={() => { setSelDate(d.date); setFilterCols([]) }}
                     className="sticky top-0 z-20 px-3 py-2.5 border-b border-l pb-hairline text-center cursor-pointer"
@@ -544,7 +545,7 @@ export default function AdminAvailability() {
         const pl = (data.players || []).find((p) => p.id === modal.pid)
         const cur = avail[modal.pid]?.[modal.date]?.status || 'NO_RESPONSE'
         const dObj = dates.find((d) => d.date === modal.date)
-        const sub = dObj ? fixtureSub(dObj) : ''
+        const sub = dObj ? fixtureSub(dObj, weekNames) : ''
         return (
           <QuickAvailModal
             player={pl}

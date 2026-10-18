@@ -36,9 +36,9 @@ import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
 import { formatSeason } from '../../../lib/cricketFormat'
-import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
+import { AVAILABILITY, AVAIL_ORDER, combineStatus, halfStatus } from '../../../lib/availability'
 import {
-  Icon, Avatar, Dot, AvailDot, RoleChips, Btn, Search, Chip, Empty, AvailSummary, QuickAvailModal,
+  Icon, Avatar, Dot, AvailDot, RoleChips, Btn, Search, Chip, Empty, AvailSummary, QuickAvailModal, WeekFlag,
   RecencySelect, playedWithinYears, monthsAgoISO,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
@@ -102,6 +102,8 @@ function fmtDay(d) {
 // What a column's availability is measured against. A squad reads ITS next game
 // (the matrix's `squad_next`); the unassigned pools have no grade, so they read
 // the club's first upcoming date. `date` is null when there is nothing to read.
+// A two-day game carries its second date (`endDate`): the column is answered and
+// judged on both weeks, never on the first alone.
 function nextGameInfo(col, squadNext, firstDate) {
   if (col.unassigned) {
     return { date: firstDate, scope: 'club', text: firstDate ? `Club's next game · ${fmtDay(firstDate)}` : null }
@@ -109,10 +111,12 @@ function nextGameInfo(col, squadNext, firstDate) {
   const n = squadNext?.[col.id]
   if (!n) return { date: firstDate, scope: 'club', text: firstDate ? `Club's next game · ${fmtDay(firstDate)}` : null }
   if (!n.date) return { date: null, scope: 'none', text: 'No upcoming game for this grade' }
-  if (n.scope === 'club') return { date: n.date, scope: 'club', text: `Club's next game · ${fmtDay(n.date)} (squad has no grade)` }
+  const endDate = n.end_on && n.end_on > n.date ? n.end_on : null
+  const days = endDate ? `${fmtDay(n.date)} + ${fmtDay(endDate)}` : fmtDay(n.date)
+  if (n.scope === 'club') return { date: n.date, endDate, scope: 'club', text: `Club's next game · ${days} (squad has no grade)` }
   const opp = n.opponent_name || n.label
   const prefix = n.home_away === 'AWAY' ? '@ ' : n.home_away === 'BYE' ? '' : 'vs '
-  return { date: n.date, scope: 'squad', opponent: opp ? `${prefix}${opp}` : null, text: `Next game · ${fmtDay(n.date)}${opp ? ` · ${prefix}${opp}` : ''}` }
+  return { date: n.date, endDate, scope: 'squad', opponent: opp ? `${prefix}${opp}` : null, text: `${endDate ? 'Next game (2 days)' : 'Next game'} · ${days}${opp ? ` · ${prefix}${opp}` : ''}` }
 }
 
 /* ── Team create/edit modal (grade linking preserved) ─────────────────────── */
@@ -426,7 +430,7 @@ function AddToSquadMenu({ p, teams, onAddToSquad }) {
 }
 
 /* ── A draggable player card ───────────────────────────────────────────────── */
-function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEnd, onEditAvail, teams, onAddToSquad, onRemove }) {
+function PlayerCard({ p, status, days, dormantCutoff, draggable, onDragStart, onDragEnd, onEditAvail, teams, onAddToSquad, onRemove }) {
   const fmt = useAdminNameFormat()
   const meta = AVAILABILITY[status] || AVAILABILITY.NO_RESPONSE
   const badge = recencyBadge(p, dormantCutoff)
@@ -442,7 +446,11 @@ function PlayerCard({ p, status, dormantCutoff, draggable, onDragStart, onDragEn
           narrow squad column still reads as names. Touch screens have no hover,
           so there the buttons stay in the row. */}
       <span className="flex-1 min-w-0 flex flex-col leading-tight">
-        <span className="text-[13px] font-medium truncate" title={fmt(p.display_name || p.name)}>{fmt(p.display_name || p.name)}</span>
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[13px] font-medium truncate" data-card-name title={fmt(p.display_name || p.name)}>{fmt(p.display_name || p.name)}</span>
+          {/* A two-day game: which weekend is the answer for ("W2 ONLY", "W1 OUT"). */}
+          {days && <WeekFlag days={days} />}
+        </span>
         {(p.status === 'inactive' || badge || (p.skill_positions || []).length > 0) && (
           <span className="flex items-center gap-1 mt-0.5 min-w-0 overflow-hidden">
             <RoleChips roles={p.skill_positions} muted />
@@ -473,8 +481,14 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
   // A long squad can be opened out to its full length instead of scrolling in a box.
   const [tall, setTall] = useState(false)
   const hasKeeper = members.some(isKeeper)
-  // Every status on this column is read against the column's own date.
-  const statusOf = useCallback((id) => statusAt(id, next.date), [statusAt, next.date])
+  // Every status on this column is read against the column's own date, or both
+  // dates when its next game is a two-day one (the least favourable week).
+  const statusOf = useCallback((id) => statusAt(id, next.date, next.endDate), [statusAt, next.date, next.endDate])
+  // What a card DRAWS: a player free one week and away the other gets the
+  // half-available colour (lib/availability `halfStatus`). Drawing only: counts,
+  // sort and filters read `statusOf`.
+  const daysOf = (id) => (next.endDate ? [next.date, next.endDate].map((date) => ({ date, status: statusAt(id, date) })) : null)
+  const drawStatusOf = (id) => (next.endDate ? halfStatus(daysOf(id)) || statusOf(id) : statusOf(id))
   const nAvail = members.filter((m) => statusOf(m.id) === 'AVAILABLE').length
   // The card handlers belong to the cards, not the column — spreading them onto
   // the column div hands React two props no DOM element knows, which it warns
@@ -534,7 +548,7 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
           <div className="overflow-auto flex-1 p-2 flex flex-col gap-1.5 pb-scroll" data-squad-list={tall ? 'tall' : 'fit'}
             style={{ maxHeight: tall ? 'none' : 'max(360px, 62vh)' }}>
             {sorted.map((p) => (
-              <PlayerCard key={p.id} p={p} status={statusOf(p.id)} dormantCutoff={dormantCutoff} draggable={canManage}
+              <PlayerCard key={p.id} p={p} status={drawStatusOf(p.id)} days={daysOf(p.id)} dormantCutoff={dormantCutoff} draggable={canManage}
                 onDragStart={() => onCardDragStart(p.id)} onDragEnd={onCardDragEnd}
                 onEditAvail={onEditAvail && next.date ? () => onEditAvail(p, next) : undefined}
                 teams={teams} onAddToSquad={onAddToSquad}
@@ -1062,7 +1076,10 @@ export default function AdminTeams() {
   // own next game, so the 3s' Saturday is not the T20's Tuesday. No date reads
   // as no answer, never as another game's.
   const statusOf = useCallback(
-    (id, date = firstDate) => (date && availability[id]?.[date]?.status) || 'NO_RESPONSE',
+    (id, date = firstDate, endDate = null) => {
+      const at = (d) => (d && availability[id]?.[d]?.status) || 'NO_RESPONSE'
+      return endDate ? combineStatus([at(date), at(endDate)]) : at(date)
+    },
     [availability, firstDate],
   )
   const nextOf = useCallback((col) => nextGameInfo(col, squadNext, firstDate), [squadNext, firstDate])
@@ -1213,7 +1230,7 @@ export default function AdminTeams() {
     }
     if (search.trim()) list = list.filter((p) => matchesName(p, search))
     if (values.role?.length) list = list.filter((p) => (p.skill_positions || []).some((r) => values.role.includes(r)))
-    if (values.avail?.length) { const dt = nextOf(col).date; list = list.filter((p) => values.avail.includes(statusOf(p.id, dt))) }
+    if (values.avail?.length) { const nx = nextOf(col); list = list.filter((p) => values.avail.includes(statusOf(p.id, nx.date, nx.endDate))) }
     if (values.selected === 'selected') list = list.filter((p) => selectedIds.has(p.id))
     else if (values.selected === 'unselected') list = list.filter((p) => !selectedIds.has(p.id))
     return list
@@ -1271,14 +1288,21 @@ export default function AdminTeams() {
   const collapseAll = () => setCollapseOverride(new Map(columns.map((c) => [c.key, true])))
   const expandAll = () => setCollapseOverride(new Map(columns.map((c) => [c.key, false])))
 
-  const pickAvail = async (status) => {
+  // `which` is only sent by a two-day game's editor: one week's date, or 'both'.
+  // Left out it means the column's own (only) date. Availability stays one row
+  // per date, so a two-week answer is one write per date.
+  const pickAvail = async (status, which) => {
     const edit = availEdit
     setAvailEdit(null)
     if (!edit) return
-    const { player: p, date } = edit
+    const { player: p, date, endDate } = edit
     if (!date) { toast.error('No upcoming fixtures to set availability against'); return }
-    setAvailability((a) => ({ ...a, [p.id]: { ...(a[p.id] || {}), [date]: { status } } }))
-    try { await api.bsSetAvailability({ player_id: p.id, date, status }) }
+    const dates = !endDate ? [date] : which === 'both' ? [date, endDate] : [which || date]
+    setAvailability((a) => ({
+      ...a,
+      [p.id]: { ...(a[p.id] || {}), ...Object.fromEntries(dates.map((d) => [d, { status }])) },
+    }))
+    try { for (const d of dates) await api.bsSetAvailability({ player_id: p.id, date: d, status }) }
     catch (e) { toast.error('Could not update availability: ' + e.message); loadMatrix() }
   }
 
@@ -1325,13 +1349,19 @@ export default function AdminTeams() {
       {addTo !== undefined && (
         <BulkAddModal fixedTeam={addTo} teams={teams || []} players={players || []}
           dormantCutoff={dormantCutoff}
-          statusOf={(id, teamId) => statusOf(id, teamId ? nextOf({ id: teamId }).date : firstDate)}
+          statusOf={(id, teamId) => { const nx = teamId ? nextOf({ id: teamId }) : null; return statusOf(id, nx ? nx.date : firstDate, nx ? nx.endDate : null) }}
           onAssign={addToSquad} onClose={() => setAddTo(undefined)} />
       )}
       {availEdit && (
         <QuickAvailModal player={availEdit.player}
-          dateLabel={`${fmtDay(availEdit.date)}${availEdit.opponent ? ` · ${availEdit.opponent}` : ''}`}
-          current={statusOf(availEdit.player.id, availEdit.date)} onPick={pickAvail} onClose={() => setAvailEdit(null)} />
+          dateLabel={availEdit.endDate
+            ? `Two-day game${availEdit.opponent ? ` · ${availEdit.opponent}` : ''}`
+            : `${fmtDay(availEdit.date)}${availEdit.opponent ? ` · ${availEdit.opponent}` : ''}`}
+          current={statusOf(availEdit.player.id, availEdit.date)}
+          days={availEdit.endDate
+            ? [availEdit.date, availEdit.endDate].map((date) => ({ date, status: statusOf(availEdit.player.id, date) }))
+            : null}
+          onPick={pickAvail} onClose={() => setAvailEdit(null)} />
       )}
       {exporting && (
         <ExportSquadsModal teams={teams || []} players={players || []} initial={exporting} initialOrder={sortMode}
@@ -1414,7 +1444,7 @@ export default function AdminTeams() {
                         onCardDragEnd: () => { dragRef.current = null; setOver(null) },
                       }}
                       onAdd={() => setAddTo(col.team)} onEdit={() => setEditing(col.team)} onDelete={() => del(col.team)}
-                      onEditAvail={canManage ? (player, nx) => setAvailEdit({ player, date: nx.date, opponent: nx.opponent || null }) : undefined} />
+                      onEditAvail={canManage ? (player, nx) => setAvailEdit({ player, date: nx.date, endDate: nx.endDate || null, opponent: nx.opponent || null }) : undefined} />
                     {col.unassigned && !isCollapsed(col) && (
                       <div className="text-[10.5px] text-pb-faintest mt-1 px-1 space-y-0.5">
                         {facetsOn && members.length < total && (

@@ -289,6 +289,7 @@ async def availability_config(
     return {
         "allow_maybe": allow_maybe(club),
         "half_colours": cfg["half_colours"],
+        "week_names": cfg["week_names"],
         "played_years": cfg["played_years"],
         "team_defaults": cfg["team_defaults"],
         "squads": [{"id": str(i), "name": (n or "").strip(), "sequence": q} for i, n, q in rows],

@@ -35,8 +35,9 @@ const run = async () => {
     const patches = [], selfService = []
     let failSave = false
     const saved = { w1: '#a855f7', w2: '#06b6d4' }
+    const savedNames = { w1: 'W1', w2: 'W2' }
     const T1 = '11111111-1111-4111-8111-111111111111', T2 = '22222222-2222-4222-8222-222222222222'
-    const cfgNow = () => ({ allow_maybe: true, half_colours: { ...saved }, played_years: { selection: 3, availability: 0 }, team_defaults: [],
+    const cfgNow = () => ({ allow_maybe: true, half_colours: { ...saved }, week_names: { ...savedNames }, played_years: { selection: 3, availability: 0 }, team_defaults: [],
       squads: [{ id: 'a', name: 'Club 1st XI', sequence: 1 }, { id: 'b', name: 'Club 2nd XI', sequence: 2 }] })
     await page.route('**/api/**', (r) => json(r, {}))
     await page.route('**/api/auth/me', (r) => json(r, ME))
@@ -47,8 +48,9 @@ const run = async () => {
       const b = JSON.parse(r.request().postData() || '{}')
       patches.push(b)
       if (failSave) return json(r, { detail: 'Could not save' }, 500)
+      for (const k of ['w1', 'w2']) if (`week_name_${k}` in b) savedNames[k] = b[`week_name_${k}`] || (k === 'w1' ? 'W1' : 'W2')
       for (const k of ['w1', 'w2']) if (`half_colour_${k}` in b) saved[k] = b[`half_colour_${k}`] || (k === 'w1' ? '#a855f7' : '#06b6d4')
-      return json(r, { half_colours: { ...saved }, played_years: { selection: b.played_years_selection ?? 3, availability: b.played_years_availability ?? 0 }, team_defaults: b.team_defaults || [] })
+      return json(r, { half_colours: { ...saved }, week_names: { ...savedNames }, played_years: { selection: b.played_years_selection ?? 3, availability: b.played_years_availability ?? 0 }, team_defaults: b.team_defaults || [] })
     })
     await page.route(/\/api\/availability\/self-service$/, async (r) => {
       if (r.request().method() === 'POST') selfService.push(JSON.parse(r.request().postData() || '{}'))
@@ -66,6 +68,33 @@ const run = async () => {
     ok('both colours are shown with their current value', (await hexOf('w1').inputValue()) === '#a855f7' && (await hexOf('w2').inputValue()) === '#06b6d4')
     ok('a sample dot sits beside each', (await page.locator('[data-half-sample]').count()) === 2)
     ok('the screen explains what half available means', /half available/i.test(await body()))
+
+    // What the club calls the weeks.
+    const nameBox = (k) => page.locator(`[data-week-name="${k}"] input`)
+    ok('both week names are shown, W1 and W2 to start', (await nameBox('w1').inputValue()) === 'W1' && (await nameBox('w2').inputValue()) === 'W2')
+    patches.length = 0
+    await nameBox('w1').fill('A')
+    await nameBox('w1').press('Enter')
+    await page.waitForTimeout(400)
+    ok('naming the first week "A" sends only that key', patches.length === 1 && Object.keys(patches[0]).join() === 'week_name_w1' && patches[0].week_name_w1 === 'A', JSON.stringify(patches))
+    ok('the colour rows and the legend follow at once', /Available for A only/.test(await body()) && /A Only/.test(await body()), (await body()).slice(0, 300))
+    ok('the second week still reads W2', /Available for W2 only/.test(await body()))
+    patches.length = 0
+    await nameBox('w2').fill('  B  ')
+    await nameBox('w2').blur()
+    await page.waitForTimeout(400)
+    ok('the second week is trimmed and saved as "B"', patches.length === 1 && patches[0].week_name_w2 === 'B' && !('week_name_w1' in patches[0]), JSON.stringify(patches))
+    patches.length = 0
+    await nameBox('w1').fill('')
+    await nameBox('w1').blur()
+    await page.waitForTimeout(400)
+    ok('a blank name sends null (back to W1)', patches.length === 1 && patches[0].week_name_w1 === null, JSON.stringify(patches))
+    ok('...and the box reads W1 again', (await nameBox('w1').inputValue()) === 'W1')
+    patches.length = 0
+    await page.locator('[data-week-name="w2"]').getByRole('button', { name: 'Reset' }).click()
+    await page.waitForTimeout(400)
+    ok('Reset sends null for that name only', patches.length === 1 && patches[0].week_name_w2 === null && !('week_name_w1' in patches[0]), JSON.stringify(patches))
+    ok('a name is capped at ten characters', (await nameBox('w1').getAttribute('maxlength')) === '10')
 
     // Change week 1.
     patches.length = 0

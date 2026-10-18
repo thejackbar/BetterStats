@@ -48,7 +48,7 @@ from app.routers.availability import (
     phone_last4,
     upcoming_fixtures_by_date,
 )
-from app.services import fines as fines_svc, player_dashboard, rate_limit, squad_sides
+from app.services import fines as fines_svc, player_dashboard, rate_limit, selection_rules as rules_svc, squad_sides
 from app.services import votes as vote_svc
 from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.squad_next_game import fixtures_for_player
@@ -188,6 +188,7 @@ async def get_landing(token: str, db: AsyncSession = Depends(get_db)):
         "club": _club_branding(club),
         "require_pin": bool(club.availability_require_pin),
         "allow_maybe": allow_maybe(club),
+        "week_names": rules_svc.club_config(club)["week_names"],
         "players": [
             {"id": str(p.id), "display_name": p.display_name, "has_phone": phone_last4(p.phone) is not None}
             for p in players
@@ -355,6 +356,7 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
         "club": _club_branding(club),
         "player": {"id": str(player.id), "display_name": player.display_name},
         "allow_maybe": allow_maybe(club),
+        "week_names": rules_svc.club_config(club)["week_names"],
         "dates": _grouped_dates(by_date),
         "availability": answers,
         # False for a player in no squad: the page then emphasises no game.
