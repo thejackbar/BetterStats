@@ -386,21 +386,43 @@ export function Empty({ children, className = '' }) {
 }
 
 /* ── Player recency filter (shared, deliberately quiet) ──────────────────────
- * "Played within N years (by last appearance)". Used on every player list so
- * the long tail of historical-only players can be hidden — rendered as a small
- * subtle dropdown, never a prominent chip row. */
+ * "Played within N years (by last appearance)", or the other way round: "last
+ * played MORE than N years ago", for finding the lapsed. Used on every player
+ * list so the long tail of historical-only players can be hidden or looked at
+ * on its own — rendered as a small subtle dropdown, never a prominent chip row.
+ *
+ * One number carries the choice, so a list keeps a single `years` state: 0 is
+ * any time, 1 to 10 is "within that many years", and RECENCY_OVER + N is "last
+ * played more than N years ago". The Selection board's own windows (settings,
+ * 0 to 10 and -1) never reach the second range. */
+export const RECENCY_OVER = 1000
 export const RECENCY_OPTIONS = [
   { value: 0, label: 'Played: any time' },
-  { value: 1, label: 'Played ≤ 1 yr' },
-  { value: 2, label: 'Played ≤ 2 yrs' },
-  { value: 3, label: 'Played ≤ 3 yrs' },
-  { value: 5, label: 'Played ≤ 5 yrs' },
-  { value: 10, label: 'Played ≤ 10 yrs' },
+  { value: 1, label: 'Played ≤ 1 yr', group: 'Played within' },
+  { value: 2, label: 'Played ≤ 2 yrs', group: 'Played within' },
+  { value: 3, label: 'Played ≤ 3 yrs', group: 'Played within' },
+  { value: 5, label: 'Played ≤ 5 yrs', group: 'Played within' },
+  { value: 10, label: 'Played ≤ 10 yrs', group: 'Played within' },
+  { value: RECENCY_OVER + 1, label: 'Last played > 1 yr ago', group: 'Not played for a while' },
+  { value: RECENCY_OVER + 2, label: 'Last played > 2 yrs ago', group: 'Not played for a while' },
+  { value: RECENCY_OVER + 3, label: 'Last played > 3 yrs ago', group: 'Not played for a while' },
+  { value: RECENCY_OVER + 5, label: 'Last played > 5 yrs ago', group: 'Not played for a while' },
+  { value: RECENCY_OVER + 10, label: 'Last played > 10 yrs ago', group: 'Not played for a while' },
 ]
+// Last played MORE than `years` years ago. The exact complement of "within" on
+// the cutoff day. A player with no game at all is not lapsed (a new manual add
+// has never played), so is left out; "Played: any time" still lists them.
+export function playedOverYears(lastPlayed, years) {
+  if (!lastPlayed) return false
+  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
+  return new Date(lastPlayed + 'T00:00:00') < cutoff
+}
 // `years` of -1 means "played this season": `seasonStart` is the first day of the
 // season the match sits in (the server sends it); without one it filters nothing.
+// A RECENCY_OVER + N value means "last played more than N years ago".
 export function playedWithinYears(lastPlayed, years, seasonStart) {
   if (!years) return true
+  if (years > RECENCY_OVER) return playedOverYears(lastPlayed, years - RECENCY_OVER)
   if (years < 0) return !seasonStart || (!!lastPlayed && lastPlayed >= seasonStart)
   if (!lastPlayed) return true // never-played (e.g. a new manual add) — keep
   const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
@@ -419,13 +441,23 @@ export function monthsAgoISO(months) {
   const pad = (n) => String(n).padStart(2, '0')
   return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`
 }
-export function RecencySelect({ value, onChange, title = 'Hide players who haven’t played recently', className = '', options = RECENCY_OPTIONS }) {
+export function RecencySelect({ value, onChange, title = 'Filter by when players last played', className = '', options = RECENCY_OPTIONS }) {
+  const opt = (o) => <option key={o.value} value={o.value} className="bg-pb-surface text-pb-text">{o.label}</option>
+  // Options that name a `group` sit under a heading, in the order given; the rest stay loose.
+  const groups = []
+  options.forEach((o) => {
+    const last = groups[groups.length - 1]
+    if (o.group && last && last.group === o.group) last.items.push(o)
+    else groups.push({ group: o.group || null, items: [o] })
+  })
   return (
     <select value={value} onChange={(e) => onChange(Number(e.target.value))} title={title}
       className={`bg-transparent text-[11.5px] rounded-md border px-1.5 py-1 focus:outline-none focus:border-pb-accent transition-colors ${
         value ? 'text-pb-accent border-pb-accent/40' : 'text-pb-faint border-pb-hairline hover:text-pb-text'
       } ${className}`}>
-      {options.map((o) => <option key={o.value} value={o.value} className="bg-pb-surface text-pb-text">{o.label}</option>)}
+      {groups.map((g, i) => (g.group
+        ? <optgroup key={`${g.group}-${i}`} label={g.group} className="bg-pb-surface text-pb-text">{g.items.map(opt)}</optgroup>
+        : g.items.map(opt)))}
     </select>
   )
 }

@@ -30,7 +30,7 @@ import {
   FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
   ResultMarginHero, ResultBroadcast, ResultVersusColumns, ResultStar, ResultInningsBars, ResultTicket,
   ResultsList, ResultsListLeaders, ResultsScoreboard, ResultsRecord, ResultsHeadline, ResultsBoard, ResultsSplit,
-  DEFAULT_FIXTURES, DEFAULT_RESULTS,
+  DEFAULT_FIXTURES, DEFAULT_RESULTS, perfKeys,
 } from '../../social/round-templates'
 import { SplitPoster, autoPanelColor } from '../../social/split-template'
 import { LineupCard, LINEUP_CARD_DEFAULTS, cardWashDefault } from '../../social/lineup-card-template'
@@ -1465,6 +1465,9 @@ export default function AdminSocialPost() {
   // Categories switched OFF on each import (empty = everything the pull found).
   const [fxOff, setFxOff] = useState([])
   const [rrOff, setRrOff] = useState([])
+  // Whose top performers the Wrap + Leaders roundup lists: our club's ('us') or the
+  // opposition's ('them'). One choice for the whole post.
+  const [rrPerfSide, setRrPerfSide] = useState('us')
   // Fixtures / results roundups spread across a carousel: rows are split evenly
   // across `count` derived pages, `idx` is the page being previewed.
   const [roundPages, setRoundPages] = useState({ fixtures: { count: 1, idx: 0 }, results: { count: 1, idx: 0 } })
@@ -2085,13 +2088,18 @@ export default function AdminSocialPost() {
     const margin = marginMatch ? `BY ${marginMatch[1].trim()}` : ''
 
     // POTM = top run-scorer on the winning side (falls back to ours on a tie).
+    // A side's `bowling` is the bowling in the innings that side BATTED, so it
+    // lists the OTHER side's bowlers (the server builds it that way for the
+    // scorecard layouts). That player's own spell is therefore in the other
+    // side's list.
     const winTeam = winner === 'OPPONENT' ? them : us
+    const loseTeam = winner === 'OPPONENT' ? us : them
     const topBat = [...(winTeam.batting || [])]
       .filter((b) => !b.didNotBat)
       .sort((a, b) => Number(b.r) - Number(a.r))[0]
     const motmPlayer = topBat ? playerForPid(topBat.pid) : null
     const sameBowl = topBat
-      ? (winTeam.bowling || []).find((bw) => (bw.pid && topBat.pid && String(bw.pid).toLowerCase() === String(topBat.pid).toLowerCase()) || (bw.last && topBat.last && bw.last === topBat.last))
+      ? (loseTeam.bowling || []).find((bw) => (bw.pid && topBat.pid && String(bw.pid).toLowerCase() === String(topBat.pid).toLowerCase()) || (bw.last && topBat.last && bw.last === topBat.last))
       : null
 
     setResult((r) => ({
@@ -2109,7 +2117,10 @@ export default function AdminSocialPost() {
       motmBowl: sameBowl ? `${sameBowl.w}/${sameBowl.r}` : '',
       motmPlayerId: motmPlayer?.id || '',
       topBatters: { team: topBatters(us), opponent: topBatters(them) },
-      topBowlers: { team: topBowlers(us), opponent: topBowlers(them) },
+      // Each side's bowlers are in the OTHER side's list (see above): ours bowled
+      // while they batted. `topBowlers(us)` here put the opposition's figures in
+      // the "Our Bowlers" box, next to our batters.
+      topBowlers: { team: topBowlers(them), opponent: topBowlers(us) },
     }))
     setMatch((m) => ({
       ...m,
@@ -3113,6 +3124,7 @@ export default function AdminSocialPost() {
   if (tmpl.kind === 'results') {
     extraProps.meta = roundMeta
     extraProps.results = roundPagesOn ? chunkEven(results, roundPage.count)[roundPage.idx] || [] : results
+    if (tmpl.hasLeaders) extraProps.perfSide = rrPerfSide
     extraProps.club = clubMark
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
@@ -3240,6 +3252,7 @@ export default function AdminSocialPost() {
     setMsOpts({ title: '', showDates: true })
     setFixtures(DEFAULT_FIXTURES.map((f) => ({ ...f })))
     setResults(DEFAULT_RESULTS.map((r) => ({ ...r })))
+    setRrPerfSide('us')
     setRoundPages({ fixtures: { count: 1, idx: 0 }, results: { count: 1, idx: 0 } })
     setScorecardMatch(DEFAULT_SCORECARD)
     setScUrlInput('')
@@ -5616,6 +5629,24 @@ export default function AdminSocialPost() {
                   onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
                   onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
                   off={rrOff} onToggleCat={toggleRrCat} />
+                {tmpl.hasLeaders && (
+                  <div className="mb-3" data-testid="rr-perf-side">
+                    <span className="block font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-1">Players shown</span>
+                    <div className="inline-flex rounded border pb-hairline overflow-hidden" role="radiogroup" aria-label="Whose players to show">
+                      {[{ k: 'us', label: `Our club` }, { k: 'them', label: 'Opposition' }].map((o) => {
+                        const on = rrPerfSide === o.k
+                        return (
+                          <button key={o.k} type="button" role="radio" aria-checked={on} data-testid={`rr-perf-${o.k}`}
+                            onClick={() => setRrPerfSide(o.k)}
+                            className={`px-3 py-1 text-xs font-mono ${on ? 'bg-pb-accent text-[var(--pb-on-accent)]' : 'text-pb-faint hover:text-pb-text'}`}>
+                            {o.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="text-[11px] text-pb-faintest mt-1">Top scorers and wicket takers from {rrPerfSide === 'them' ? 'the opposition' : 'your club'} in each match.</p>
+                  </div>
+                )}
                 <div className="flex flex-col gap-2">
                   {results.map((r, i) => {
                     const set = (patch) => setResults(rows => rows.map((x, j) => j === i ? { ...x, ...patch } : x))
@@ -5652,9 +5683,9 @@ export default function AdminSocialPost() {
                         </div>
                         {tmpl.hasLeaders && (
                           <div className="grid gap-2 pt-1 mt-0.5 border-t pb-hairline" style={{ gridTemplateColumns: '1fr 1fr' }}>
-                            {['topBat', 'topBowl'].map((key) => (
+                            {[['bat', perfKeys(rrPerfSide).bat], ['bowl', perfKeys(rrPerfSide).bowl]].map(([kind, key]) => (
                               <div key={key} className="flex flex-col gap-1">
-                                <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">{key === 'topBat' ? 'Our top scorers' : 'Our top wickets'}</span>
+                                <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">{rrPerfSide === 'them' ? 'Their' : 'Our'} {kind === 'bat' ? 'top scorers' : 'top wickets'}</span>
                                 {[0, 1].map((slot) => {
                                   const entry = (r[key] || [])[slot] || { name: '', line: '' }
                                   const setSlot = (patch) => setResults(rows => rows.map((x, j) => {
@@ -5666,10 +5697,10 @@ export default function AdminSocialPost() {
                                   return (
                                     <div key={slot} className="grid gap-1" style={{ gridTemplateColumns: '1fr 76px' }}>
                                       <input value={entry.name || ''} onChange={e => setSlot({ name: e.target.value.toUpperCase() })}
-                                        placeholder={key === 'topBat' ? 'J. BARENDSE' : 'A. ALLISON'}
+                                        placeholder={kind === 'bat' ? 'J. BARENDSE' : 'A. ALLISON'}
                                         className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
                                       <input value={entry.line || ''} onChange={e => setSlot({ line: e.target.value })}
-                                        placeholder={key === 'topBat' ? '64 (71)' : '4/29 (9.4)'}
+                                        placeholder={kind === 'bat' ? '64 (71)' : '4/29 (9.4)'}
                                         className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
                                     </div>
                                   )
