@@ -95,6 +95,55 @@ async def diagnose(org_ref: str, who: str, show_all: bool) -> None:
                       f" source={r['stored_source']}" + (f"   (washouts taken off: {gap})" if gap else ""))
             print(f"  TOTAL                        stored={total_stored}  profile={total_view}")
 
+            print("\n-- per season: games we HOLD for him (what a filtered header counts) against the profile")
+            held = (await session.execute(text(f"""
+                WITH held AS (
+                    SELECT bi.game_id FROM v_effective_batting_innings bi WHERE bi.player_id = CAST(:pid AS UUID)
+                    UNION SELECT bs.game_id FROM v_effective_bowling_spells bs WHERE bs.player_id = CAST(:pid AS UUID)
+                    UNION SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
+                    UNION SELECT ga.game_id FROM game_appearances ga
+                          WHERE ga.player_id = CAST(:pid AS UUID) AND {appearance_counts_as_match('ga')}
+                )
+                SELECT se.year, se.name AS season, COUNT(DISTINCT g.id) AS held,
+                       COALESCE((SELECT SUM(v.matches) FROM v_effective_player_season_stats v
+                                 WHERE v.player_id = CAST(:pid AS UUID) AND v.season_id = se.id), 0) AS profile
+                FROM held h
+                JOIN v_effective_games g ON g.id = h.game_id
+                JOIN seasons se ON se.id = g.season_id
+                WHERE {club_game_sql('g', 'org')}
+                GROUP BY se.id, se.year, se.name ORDER BY se.year DESC, se.name"""), {"pid": pid, "org": org})).mappings().all()
+            for r in held:
+                diff = int(r["held"]) - int(r["profile"])
+                print(f"  {r['season']:<28} held={r['held']!s:<4} profile={int(r['profile'])!s:<4}"
+                      + (f"   held is {diff:+d}" if diff else ""))
+            print(f"  TOTAL                        held={sum(int(r['held']) for r in held)}"
+                  f"  profile={sum(int(r['profile']) for r in held)}")
+            over = [r["season"] for r in held if int(r["held"]) > int(r["profile"])]
+            if over:
+                print("\n-- every held game in the seasons where held is higher (look for a twin, a status, or a source)")
+                for g in (await session.execute(text(f"""
+                    WITH held AS (
+                        SELECT bi.game_id FROM v_effective_batting_innings bi WHERE bi.player_id = CAST(:pid AS UUID)
+                        UNION SELECT bs.game_id FROM v_effective_bowling_spells bs WHERE bs.player_id = CAST(:pid AS UUID)
+                        UNION SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
+                        UNION SELECT ga.game_id FROM game_appearances ga
+                              WHERE ga.player_id = CAST(:pid AS UUID) AND {appearance_counts_as_match('ga')}
+                    )
+                    SELECT g.played_at::text AS d, se.name AS season, gr.name AS grade, g.source, g.status, g.result,
+                           g.home_team, g.away_team, g.id::text AS id,
+                           (SELECT COUNT(*) FROM v_effective_batting_innings b WHERE b.game_id = g.id AND b.player_id = CAST(:pid AS UUID)
+                               AND NOT COALESCE(b.did_not_bat, FALSE)) AS bat,
+                           (SELECT COUNT(*) FROM v_effective_bowling_spells w WHERE w.game_id = g.id AND w.player_id = CAST(:pid AS UUID)) AS bowl,
+                           (SELECT COUNT(*) FROM v_effective_fielding_stats f WHERE f.game_id = g.id AND f.player_id = CAST(:pid AS UUID)) AS field
+                    FROM held h
+                    JOIN v_effective_games g ON g.id = h.game_id
+                    JOIN seasons se ON se.id = g.season_id
+                    LEFT JOIN grades gr ON gr.id = g.grade_id
+                    WHERE {club_game_sql('g', 'org')} AND se.name = ANY(CAST(:seasons AS text[]))
+                    ORDER BY g.played_at DESC"""), {"pid": pid, "org": org, "seasons": over})).mappings():
+                    print(f"  {g['d']}  {g['season']!s:<16} {g['grade']!s:<14} src={g['source']!s:<7} status={g['status']!s:<10}"
+                          f" {g['home_team']} v {g['away_team']}  rows bat={g['bat']} bowl={g['bowl']} field={g['field']}  {g['id']}")
+
             print("\n-- games the player was named in that could have been a washout")
             where_extra = "" if show_all else f"""
               AND (g.status IS NULL
