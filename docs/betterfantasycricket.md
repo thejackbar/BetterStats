@@ -186,14 +186,20 @@ Each player carries a price for the season. Draft mode ignores price.
   map it onto a price band. A player with no usable history gets a role baseline.
 - **Budget.** A fixed salary cap (default 100.0 credits) sized so a balanced 12
   is affordable but a manager cannot field every premium player.
-- **Live movement.** After each scored round, every player who played has their
-  price step towards what their recent form is worth. Form is their points over
-  their last 3 played rounds, with 2 rounds at the points their starting price
-  implies mixed in so one big or small game cannot swing a price alone. The price
-  form is worth is `4.0 + form x 0.12` (the scale the baseline uses), and the price
-  moves half the gap, rounded to 0.1, **never more than $0.5 up or down in a round**
-  and never below $4.0. A player who did not play does not move. Ownership is not
-  used (there is no per-round ownership history to replay).
+- **Live movement.** After each scored round, every player who played moves by how
+  they did against the OTHER players who played that round, for their price. The
+  round's own scoring gives a line through everyone's (price, points per game), steadied
+  towards the scale the starting prices use when few played. A player's surprise is
+  their points less what the line gives for their price, so across a round it nets out
+  to nothing and prices cannot all drift up or down whatever the club's scoring runs at
+  (a flat track, a low-scoring grade). The move is the surprise over 200, rounded to
+  0.1: a century is the full **$0.5** (the cap), an 80 from a cheap player about 0.2, an
+  ordinary good day 0.1, and double the score is about double the move. A player who did
+  not play does not move, nobody goes below $4.0, and a round with fewer than 6 players
+  moves nobody. Ownership is not used (there is no per-round ownership history).
+  The first version measured a score against what the STARTING price implies, which for a
+  player on the floor price is about nothing, so 41, 82 and 150 points all hit the cap and
+  nearly everyone rose; it was replaced for that reason.
   Prices are derived: `fantasy_pricing.recompute_prices` replays every scored round
   onto each player's `base_price`, so settling a round again, unsettling it or a
   late scorecard gives the same prices as if it had been scored once. The nightly
@@ -208,6 +214,11 @@ Each player carries a price for the season. Draft mode ignores price.
   and the bank always agree. (This replaced the FPL half-the-rise rule.)
 - **Arrows.** A green ▲ or red ▼ with the amount sits beside a price on My Team,
   Pick Squad, Transfers, the Players list and profile, and the admin pool table.
+- **Movers.** The Players list, Pick Squad and Transfers each have All / ▲ Risers /
+  ▼ Fallers chips (biggest move first) and Biggest rise / Biggest fall sorts. The admin
+  Price movements page (BetterFantasyCricket > Price movements) lists every player's
+  start, current, last-round and season move and their last six rounds, filtered by
+  risers, fallers, role and last round or season.
 
 ## Salary-cap engine
 

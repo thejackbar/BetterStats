@@ -1106,14 +1106,17 @@ def start_scheduler():
         id="webinar_reminders",
         replace_existing=True,
     )
-    # BetterComms daily maintenance — 00:15 UTC, just after AWS's daily send
-    # quota resets at midnight UTC: trip the bounce/complaint breaker, then resume
-    # any campaigns whose overflow was deferred to today's fresh allowance.
+    # BetterComms daily maintenance — 00:15 UTC, just after each club's daily
+    # send window rolls over at midnight UTC: trip the bounce/complaint breaker,
+    # then resume any campaigns whose overflow was deferred to today's fresh
+    # allowance. The time lives in comms_limits so the "rest goes out at" the
+    # club is shown is the time this fires.
+    from app.services import comms_limits as _comms_limits
     scheduler.add_job(
         comms_daily_maintenance,
         trigger="cron",
-        hour=0,
-        minute=15,
+        hour=_comms_limits.RESUME_HOUR_UTC,
+        minute=_comms_limits.RESUME_MINUTE_UTC,
         timezone="UTC",
         id="comms_daily_maintenance",
         replace_existing=True,

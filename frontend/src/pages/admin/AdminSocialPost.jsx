@@ -30,7 +30,7 @@ import {
   FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
   ResultMarginHero, ResultBroadcast, ResultVersusColumns, ResultStar, ResultInningsBars, ResultTicket,
   ResultsList, ResultsListLeaders, ResultsScoreboard, ResultsRecord, ResultsHeadline, ResultsBoard, ResultsSplit,
-  DEFAULT_FIXTURES, DEFAULT_RESULTS,
+  DEFAULT_FIXTURES, DEFAULT_RESULTS, perfKeys,
 } from '../../social/round-templates'
 import { SplitPoster, autoPanelColor } from '../../social/split-template'
 import { LineupCard, LINEUP_CARD_DEFAULTS, cardWashDefault } from '../../social/lineup-card-template'
@@ -44,6 +44,7 @@ import {
 } from '../../social/milestoneItems'
 import MilestonePicker from '../../components/admin/socialpost/MilestonePicker'
 import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
+import { MAKEUP_KINDS, MAKEUP_LABELS, FANTASY_MAKEUP, makeupSize, poolKinds, pickMakeup, shortfallText } from '../../social/totwMakeup'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
@@ -729,6 +730,17 @@ function sortByGrade(rows) {
   })
 }
 
+// Round import category toggles (Men's / Juniors / Women's ...). A row carries
+// the grade's categories, a list, since "Girls Under 14" is junior AND women's;
+// it stays while ANY of them is on. A row with none (football, an older pull)
+// is never hidden.
+const ROUND_CAT_ORDER = ['senior', 'junior', 'womens', 'masters', 'mixed']
+const ROUND_CAT_LABELS = { senior: "Men's", junior: 'Juniors', womens: "Women's", masters: 'Masters', mixed: 'Mixed / Other' }
+function filterByCats(rows, off) {
+  if (!off || !off.length) return rows
+  return rows.filter(r => !(r.categories && r.categories.length) || r.categories.some(c => !off.includes(c)))
+}
+
 // Top 3 bowlers (most wickets, then fewest runs / best economy).
 function topBowlers(t) {
   const overs = (o) => parseFloat(String(o || '0').replace(/[^0-9.]/g, '')) || 0
@@ -807,22 +819,25 @@ function OppLogoChip({ logo, loading, onClear }) {
 // live feed with no link, or a pasted match link resolves that link's own round
 // (onFetchLink). A pasted playhq.com link comes back as a `notice` — a different
 // id namespace, so the correction renders as its own amber box.
-function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice }) {
+function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice, off = [], onToggleCat }) {
   const [link, setLink] = useState('')
   const rowsOf = (d) => (d ? d[rowsKey] || [] : [])
+  // Which categories the pull holds, counted on the day being shown.
+  const present = ROUND_CAT_ORDER.filter(k => dates.some(d => rowsOf(d).some(r => (r.categories || []).includes(k))))
+  const countOn = (k) => rowsOf(dates[idx]).filter(r => (r.categories || []).includes(k)).length
   const fetchLink = () => { const q = link.trim(); if (q) onFetchLink(q) }
   return (
     <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
       <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
-      <div className="flex gap-2 items-center">
+      <div className="flex flex-col gap-2">
         <button onClick={onPull} disabled={status === 'loading'}
           className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
           style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
           {status === 'loading' ? 'Loading…' : 'Pull latest round'}
         </button>
         {dates.length > 1 && (
-          <select value={idx} onChange={e => onPick(+e.target.value)}
-            className="flex-1 min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono">
+          <select value={idx} onChange={e => onPick(+e.target.value)} aria-label="Match-day"
+            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono">
             {dates.map((d, i) => (
               <option key={d.date || i} value={i}>{d.label}{d.round ? ` · ${d.round}` : ''} ({rowsOf(d).length})</option>
             ))}
@@ -845,8 +860,32 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
           <p className="font-mono text-[9px] text-amber-400/80 mt-1 leading-relaxed">Open your match on play.cricket.com.au and copy the address from there.</p>
         </div>
       )}
+      {status === 'ok' && dates.length > 0 && present.length > 0 && onToggleCat && (
+        <div className="mt-3" data-testid="round-cat-toggles">
+          <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-1.5">Include</p>
+          <div className="flex flex-wrap gap-1.5">
+            {present.map(k => {
+              const on = !off.includes(k)
+              return (
+                <button key={k} type="button" onClick={() => onToggleCat(k)} aria-pressed={on}
+                  className="px-2.5 py-1 rounded border font-mono text-[10px] tracking-wide2 transition-colors"
+                  style={on
+                    ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+                    : { background: 'transparent', color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' }}>
+                  {ROUND_CAT_LABELS[k]} ({countOn(k)})
+                </button>
+              )
+            })}
+          </div>
+          {present.length === 1 && (
+            <p className="font-mono text-[9px] mt-1.5 text-pb-faintest leading-relaxed">
+              Only {ROUND_CAT_LABELS[present[0]]} grades came back for this pull. Other grades show up here once the competition has published their {hint}.
+            </p>
+          )}
+        </div>
+      )}
       {status === 'ok' && dates.length > 0 && (
-        <p className="font-mono text-[9px] mt-1.5 text-green-400">✓ {rowsOf(dates[idx]).length} loaded · {dates[idx]?.label}</p>
+        <p className="font-mono text-[9px] mt-1.5 text-green-400">✓ {filterByCats(rowsOf(dates[idx]), off).length} loaded · {dates[idx]?.label}</p>
       )}
       {status && status !== 'loading' && status !== 'ok' && (
         <p className="font-mono text-[9px] mt-1.5 text-pb-faint">
@@ -857,19 +896,67 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
   )
 }
 
-// Team of the week — pull the round (latest, or the one a pasted match link
-// names) and set how many of its best performers go on the post.
-function TotwImportBox({ status, notice, data, onPull, onFetchLink }) {
+// Team of the week — pull the round (the club's latest, the days it was played
+// on, or the one a pasted match link names) and set how many of its best
+// performers go on the post.
+const TOTW_SCOPE_OPTS = [['all', 'All teams'], ['junior', 'Juniors'], ['senior', 'Seniors']]
+const TOTW_RANGE_KEY = 'bs_social_totw_range'
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+function lastSevenDays() {
+  const to = new Date(), from = new Date()
+  from.setDate(from.getDate() - 6)
+  return { from: isoDay(from), to: isoDay(to) }
+}
+// The period a club last pulled, so a round that always runs Tuesday to Sunday
+// is not typed in again each week. Per browser, and only a convenience.
+function readTotwRange() {
+  try {
+    const r = JSON.parse(localStorage.getItem(TOTW_RANGE_KEY) || 'null')
+    if (r && typeof r.from === 'string' && typeof r.to === 'string') return { from: r.from, to: r.to }
+  } catch { /* storage blocked or not JSON: start empty */ }
+  return { from: '', to: '' }
+}
+function writeTotwRange(r) {
+  try { localStorage.setItem(TOTW_RANGE_KEY, JSON.stringify(r)) } catch { /* private window */ }
+}
+
+function TotwImportBox({ status, notice, data, onPull, onFetchLink, range, onRange, onPullRange }) {
   const [link, setLink] = useState('')
   const fetchLink = () => { const q = link.trim(); if (q) onFetchLink(q) }
+  const dateCls = 'w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono'
+  const btnCls = 'px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50'
   return (
     <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
       <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from a round</p>
       <button onClick={onPull} disabled={status === 'loading'}
-        className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
+        className={btnCls}
         style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
         {status === 'loading' ? 'Loading…' : 'Pull latest round'}
       </button>
+      {onPullRange && range && (
+        <div data-testid="totw-range">
+          <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mt-3 mb-1.5">…or pick the days the round was played</p>
+          <div className="flex flex-wrap gap-2">
+            <label className="flex-1 min-w-[9rem] flex flex-col gap-1">
+              <span className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2">From</span>
+              <input type="date" value={range.from} max={range.to || undefined}
+                onChange={e => onRange({ ...range, from: e.target.value })} className={dateCls} />
+            </label>
+            <label className="flex-1 min-w-[9rem] flex flex-col gap-1">
+              <span className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2">To</span>
+              <input type="date" value={range.to} min={range.from || undefined}
+                onChange={e => onRange({ ...range, to: e.target.value })} className={dateCls} />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            <button onClick={onPullRange} disabled={status === 'loading' || !range.from || !range.to}
+              className={btnCls} style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>Pull this period</button>
+            <button type="button" onClick={() => onRange(lastSevenDays())}
+              className="px-3 py-1.5 rounded border pb-hairline text-xs font-mono tracking-wide2 text-pb-text">Last 7 days</button>
+          </div>
+          <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">Every completed match your club played in this period counts, whatever day it was on.</p>
+        </div>
+      )}
       <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mt-3 mb-1.5">…or paste any match link from that round</p>
       <div className="flex gap-2">
         <input value={link} onChange={e => setLink(e.target.value)}
@@ -877,7 +964,7 @@ function TotwImportBox({ status, notice, data, onPull, onFetchLink }) {
           placeholder="Match link from play.cricket.com.au"
           className="flex-1 min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
         <button onClick={fetchLink} disabled={status === 'loading'}
-          className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
+          className={btnCls}
           style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>Fetch</button>
       </div>
       {notice?.kind === 'playhq' && (
@@ -888,7 +975,7 @@ function TotwImportBox({ status, notice, data, onPull, onFetchLink }) {
       )}
       {status === 'ok' && data && (
         <p className="font-mono text-[9px] mt-1.5 text-green-400">
-          ✓ {data.players.length} performers from {data.matches} {data.matches === 1 ? 'match' : 'matches'} · {[data.round, data.label].filter(Boolean).join(' · ')}
+          ✓ {data.players.length} performers from {data.matches} {data.matches === 1 ? 'match' : 'matches'} · {[data.scope && data.scope !== 'all' ? (data.scope === 'junior' ? 'Juniors' : 'Seniors') : '', data.round, data.label].filter(Boolean).join(' · ')}
         </p>
       )}
       {status && status !== 'loading' && status !== 'ok' && (
@@ -896,6 +983,35 @@ function TotwImportBox({ status, notice, data, onPull, onFetchLink }) {
       )}
       <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">
         Points are the same as the player of the match: 1 a run, 20 a wicket, 2 a maiden, 8 an outfield catch, stumping or run out, 4 a keeper catch. A player who played in two grades counts once, on their better day.
+      </p>
+    </div>
+  )
+}
+
+// Which of the club's teams the team of the week is drawn from. Changing it
+// pulls the same round again, since a player's better day is decided among the
+// matches in scope.
+function TotwScopePicker({ scope, onChange, data, busy }) {
+  const counts = data?.scopeMatches
+  return (
+    <div className="mb-4" data-testid="totw-scope">
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-1.5">Teams</p>
+      <div className="flex flex-wrap gap-1.5">
+        {TOTW_SCOPE_OPTS.map(([k, label]) => {
+          const on = scope === k
+          return (
+            <button key={k} type="button" onClick={() => onChange(k)} aria-pressed={on} disabled={busy}
+              className="px-3 min-h-8 rounded border font-mono text-[10px] tracking-wide2 transition-colors disabled:opacity-60"
+              style={on
+                ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+                : { background: 'transparent', color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' }}>
+              {label}{counts && k !== 'all' ? ` (${counts[k]})` : ''}
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">
+        Juniors are the grades marked Juniors on the Grades screen (under-age teams and girls' age groups). Seniors are every other grade, men's and women's. Fix a grade there if it lands on the wrong side.
       </p>
     </div>
   )
@@ -918,6 +1034,78 @@ function TotwSizeStepper({ count, poolSize, onChange }) {
         <p className="font-mono text-[9px] mt-1.5 text-amber-400">A team of the week is at least {TOTW_MIN} players.{poolSize != null && poolSize < TOTW_MIN ? ` Only ${poolSize} played that round.` : ''}</p>
       )}
     </div>
+  )
+}
+
+// Best performers (a size) or a set make-up (so many of each seat). In the
+// make-up the size is the sum of the seats, so there is no separate stepper.
+function TotwTeamShape({ mode, onMode, makeup, onMakeup, data, count, onSize }) {
+  const pool = data?.players || null
+  const have = pool ? poolKinds(pool) : null
+  const total = makeupSize(makeup)
+  const result = pool && mode === 'makeup' ? pickMakeup(pool, makeup) : null
+  const warn = result ? shortfallText(result.short, result.picks.length, result.wanted) : ''
+  const btn = 'w-8 h-8 rounded border pb-hairline font-mono text-base text-pb-text disabled:opacity-30'
+  const tab = (on) => (on
+    ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+    : { background: 'transparent', color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' })
+  const seats = [...MAKEUP_KINDS, 'ANY']
+  return (
+    <div data-testid="totw-shape">
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {[['best', 'Best performers'], ['makeup', 'Set the make-up']].map(([k, label]) => (
+          <button key={k} type="button" aria-pressed={mode === k} onClick={() => onMode(k)}
+            className="px-3 min-h-8 rounded border font-mono text-[10px] tracking-wide2 transition-colors" style={tab(mode === k)}>{label}</button>
+        ))}
+      </div>
+      {mode === 'best' ? (
+        <TotwSizeStepper count={count} poolSize={pool ? pool.length : null} onChange={onSize} />
+      ) : (
+        <div data-testid="totw-makeup">
+          <div className="flex flex-col gap-1.5">
+            {seats.map(k => {
+              const n = Number(makeup[k]) || 0
+              return (
+                <div key={k} className="flex items-center gap-2" data-testid={`totw-seat-${k}`}>
+                  <span className="text-xs text-pb-text w-32 shrink-0">{MAKEUP_LABELS[k]}</span>
+                  <button className={btn} disabled={n <= 0} onClick={() => onMakeup({ ...makeup, [k]: n - 1 })} aria-label={`Fewer ${MAKEUP_LABELS[k].toLowerCase()}`}>−</button>
+                  <span className="font-mono text-sm text-pb-text w-6 text-center" data-testid={`totw-seat-${k}-count`}>{n}</span>
+                  <button className={btn} disabled={total >= TOTW_MAX} onClick={() => onMakeup({ ...makeup, [k]: n + 1 })} aria-label={`More ${MAKEUP_LABELS[k].toLowerCase()}`}>+</button>
+                  {have && k !== 'ANY' && <span className="font-mono text-[9px] text-pb-faintest">{have[k]} played</span>}
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
+            <span className="font-mono text-[10px] text-pb-faint" data-testid="totw-makeup-total">Team of {total} · {TOTW_MIN} to {TOTW_MAX}</span>
+            <button type="button" onClick={() => onMakeup({ ...FANTASY_MAKEUP })}
+              className="px-3 min-h-8 rounded border pb-hairline font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">Fantasy mix 4 · 1 · 3 · 3</button>
+          </div>
+          {total < TOTW_MIN && (
+            <p className="font-mono text-[9px] mt-1.5 text-amber-400">A team of the week is at least {TOTW_MIN} players.</p>
+          )}
+          {warn && <p className="font-mono text-[9px] mt-1.5 text-amber-400 leading-relaxed" data-testid="totw-makeup-warn">{warn}</p>}
+          <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">
+            Each place goes to the best performer of that kind. A keeper is whoever the scorecard lists as one (or took a keeper catch or stumping), an all-rounder scored 20 or more and took a wicket, and the rest are batters or bowlers by what earned them more points. Best of the rest takes the next best performer of any kind.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// The whole Team of the Week pull panel: which teams, which round, what shape.
+// One component so the full editor and the phone quick-post cannot drift apart.
+function TotwControls({ t }) {
+  return (
+    <>
+      <TotwScopePicker scope={t.plan.scope} onChange={t.onScope} data={t.import.data} busy={t.import.status === 'loading'} />
+      <TotwImportBox status={t.import.status} notice={t.import.notice} data={t.import.data}
+        onPull={t.onPull} onFetchLink={t.onFetchLink}
+        range={t.plan.range} onRange={t.onRange} onPullRange={t.onPullRange} />
+      <TotwTeamShape mode={t.plan.mode} onMode={t.onMode} makeup={t.plan.makeup} onMakeup={t.onMakeup}
+        data={t.import.data} count={t.count} onSize={t.onSize} />
+    </>
   )
 }
 
@@ -1405,6 +1593,9 @@ export default function AdminSocialPost() {
   // exactly as they do on a lineup.
   const [totwImport, setTotwImport] = useState({ status: null, data: null, notice: null })
   const [totwOpts, setTotwOpts] = useState({ showPoints: false })
+  // How the pool is pulled and shaped: which teams (all, juniors, seniors), the
+  // period for a round that is not a weekend, and best performers or a set make-up.
+  const [totwPlan, setTotwPlan] = useState(() => ({ scope: 'all', range: readTotwRange(), mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
   // Milestones: the club's recorded list, which are ticked (in post order), the
   // window and search that narrow the picker, and what the post says about them.
   const [msImport, setMsImport] = useState({ status: null, report: null })
@@ -1424,6 +1615,12 @@ export default function AdminSocialPost() {
   // Play.cricket round import (the multi-match analogue of the scorecard import).
   const [fxImport, setFxImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
   const [rrImport, setRrImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
+  // Categories switched OFF on each import (empty = everything the pull found).
+  const [fxOff, setFxOff] = useState([])
+  const [rrOff, setRrOff] = useState([])
+  // Whose top performers the Wrap + Leaders roundup lists: our club's ('us') or the
+  // opposition's ('them'). One choice for the whole post.
+  const [rrPerfSide, setRrPerfSide] = useState('us')
   // Fixtures / results roundups spread across a carousel: rows are split evenly
   // across `count` derived pages, `idx` is the page being previewed.
   const [roundPages, setRoundPages] = useState({ fixtures: { count: 1, idx: 0 }, results: { count: 1, idx: 0 } })
@@ -2044,13 +2241,18 @@ export default function AdminSocialPost() {
     const margin = marginMatch ? `BY ${marginMatch[1].trim()}` : ''
 
     // POTM = top run-scorer on the winning side (falls back to ours on a tie).
+    // A side's `bowling` is the bowling in the innings that side BATTED, so it
+    // lists the OTHER side's bowlers (the server builds it that way for the
+    // scorecard layouts). That player's own spell is therefore in the other
+    // side's list.
     const winTeam = winner === 'OPPONENT' ? them : us
+    const loseTeam = winner === 'OPPONENT' ? us : them
     const topBat = [...(winTeam.batting || [])]
       .filter((b) => !b.didNotBat)
       .sort((a, b) => Number(b.r) - Number(a.r))[0]
     const motmPlayer = topBat ? playerForPid(topBat.pid) : null
     const sameBowl = topBat
-      ? (winTeam.bowling || []).find((bw) => (bw.pid && topBat.pid && String(bw.pid).toLowerCase() === String(topBat.pid).toLowerCase()) || (bw.last && topBat.last && bw.last === topBat.last))
+      ? (loseTeam.bowling || []).find((bw) => (bw.pid && topBat.pid && String(bw.pid).toLowerCase() === String(topBat.pid).toLowerCase()) || (bw.last && topBat.last && bw.last === topBat.last))
       : null
 
     setResult((r) => ({
@@ -2068,7 +2270,10 @@ export default function AdminSocialPost() {
       motmBowl: sameBowl ? `${sameBowl.w}/${sameBowl.r}` : '',
       motmPlayerId: motmPlayer?.id || '',
       topBatters: { team: topBatters(us), opponent: topBatters(them) },
-      topBowlers: { team: topBowlers(us), opponent: topBowlers(them) },
+      // Each side's bowlers are in the OTHER side's list (see above): ours bowled
+      // while they batted. `topBowlers(us)` here put the opposition's figures in
+      // the "Our Bowlers" box, next to our batters.
+      topBowlers: { team: topBowlers(them), opponent: topBowlers(us) },
     }))
     setMatch((m) => ({
       ...m,
@@ -2238,24 +2443,39 @@ export default function AdminSocialPost() {
     }
   }, [playerForPid])
 
-  const applyTotw = useCallback((data, size) => {
+  // The team off the pool: the top `size`, or (with a make-up) the best of each
+  // seat. `cursor` is how far down the ranking the team reaches, so the stepper
+  // carries on from there.
+  const applyTotw = useCallback((data, size, makeup) => {
     const pool = data?.players || []
-    const n = Math.max(TOTW_MIN, Math.min(TOTW_MAX, size))
-    totwCursor.current = Math.min(n, pool.length) - 1
-    setSelectedPlayers(pool.slice(0, n).map(totwSelection))
+    let chosen
+    if (makeup) {
+      chosen = pickMakeup(pool, makeup).picks
+      totwCursor.current = chosen.reduce((c, pl) => Math.max(c, pool.indexOf(pl)), -1)
+    } else {
+      const n = Math.max(TOTW_MIN, Math.min(TOTW_MAX, size))
+      chosen = pool.slice(0, n)
+      totwCursor.current = Math.min(n, pool.length) - 1
+    }
+    setSelectedPlayers(chosen.map(pl => totwSelection(pl, pool.indexOf(pl))))
     setMatch(m => ({ ...m, round: data.round || m.round, date: data.label || m.date, season: data.season || m.season }))
   }, [totwSelection])
 
-  // A pasted link names the round; none means the club's latest match-day.
-  // A playhq.com link cannot (different id namespace) and comes back kind
-  // 'playhq' for the amber correction, same as the roundups.
-  const loadTotw = useCallback(async (q) => {
+  // A period names the round by the days it was played; a pasted link names it
+  // by one of its matches; none means the club's latest match-day. A playhq.com
+  // link cannot (different id namespace) and comes back kind 'playhq' for the
+  // amber correction, same as the roundups. `source` is remembered so changing
+  // the teams re-pulls the same round.
+  const loadTotw = useCallback(async (q, over = {}) => {
+    const scope = over.scope ?? totwPlan.scope
+    const dateFrom = over.dateFrom || ''
+    const dateTo = over.dateTo || ''
     setTotwImport(s => ({ ...s, status: 'loading', notice: null }))
     try {
-      const data = await api.getSocialTotw(q || '')
+      const data = await api.getSocialTotw(q || '', { dateFrom, dateTo, scope })
       if (data.kind === 'round' && data.players?.length) {
-        setTotwImport({ status: 'ok', data, notice: null })
-        applyTotw(data, TOTW_DEFAULT)
+        setTotwImport({ status: 'ok', data, notice: null, source: { q: q || '', dateFrom, dateTo } })
+        applyTotw(data, TOTW_DEFAULT, totwPlan.mode === 'makeup' ? totwPlan.makeup : null)
         return
       }
       if (data.kind === 'playhq') {
@@ -2266,7 +2486,29 @@ export default function AdminSocialPost() {
     } catch (e) {
       setTotwImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
     }
-  }, [applyTotw])
+  }, [applyTotw, totwPlan])
+
+  const pullTotwRange = () => {
+    const { from, to } = totwPlan.range
+    if (!from || !to) { setTotwImport(s => ({ ...s, status: 'Pick a start date and an end date.' })); return }
+    writeTotwRange(totwPlan.range)
+    loadTotw('', { dateFrom: from, dateTo: to })
+  }
+  const changeTotwScope = (scope) => {
+    if (scope === totwPlan.scope) return
+    setTotwPlan(pl => ({ ...pl, scope }))
+    const src = totwImport.source
+    if (src && totwImport.data) loadTotw(src.q, { dateFrom: src.dateFrom, dateTo: src.dateTo, scope })
+  }
+  const changeTotwMode = (mode) => {
+    if (mode === totwPlan.mode) return
+    setTotwPlan(pl => ({ ...pl, mode }))
+    if (totwImport.data) applyTotw(totwImport.data, selectedPlayers.length || TOTW_DEFAULT, mode === 'makeup' ? totwPlan.makeup : null)
+  }
+  const changeTotwMakeup = (makeup) => {
+    setTotwPlan(pl => ({ ...pl, makeup }))
+    if (totwImport.data && totwPlan.mode === 'makeup') applyTotw(totwImport.data, TOTW_DEFAULT, makeup)
+  }
 
   // The club's recorded milestones (the same report as Admin > Milestones). The
   // first load ticks the newest in the window so a post exists straight away; a
@@ -2324,10 +2566,18 @@ export default function AdminSocialPost() {
     setSelectedPlayers([...prev, ...add])
   }
 
+  // Everything the Team of the Week panel needs, in one prop for TotwControls.
+  const totwControls = {
+    plan: totwPlan, import: totwImport, count: selectedPlayers.length,
+    onScope: changeTotwScope, onMode: changeTotwMode, onMakeup: changeTotwMakeup, onSize: changeTotwSize,
+    onRange: (range) => setTotwPlan(pl => ({ ...pl, range })),
+    onPull: () => loadTotw(''), onFetchLink: (q) => loadTotw(q), onPullRange: pullTotwRange,
+  }
+
   // ── Play.cricket fixtures / results round import ────────────────────────────
-  const applyFxDate = useCallback((d, season) => {
+  const applyFxDate = useCallback((d, season, off) => {
     if (!d) return
-    setFixtures(sortByGrade((d.fixtures || []).map(f => ({ ...f }))))
+    setFixtures(sortByGrade(filterByCats(d.fixtures || [], off).map(f => ({ ...f }))))
     setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
   }, [])
   const importFixtures = useCallback(async () => {
@@ -2337,13 +2587,13 @@ export default function AdminSocialPost() {
       const dates = data.dates || []
       if (!dates.length) { setFxImport({ status: 'empty', dates: [], idx: 0, season: data.season }); return }
       setFxImport({ status: 'ok', dates, idx: 0, season: data.season })
-      applyFxDate(dates[0], data.season)
+      applyFxDate(dates[0], data.season, fxOff)
     } catch (e) { setFxImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
-  }, [applyFxDate])
+  }, [applyFxDate, fxOff])
 
-  const applyRrDate = useCallback((d, season) => {
+  const applyRrDate = useCallback((d, season, off) => {
     if (!d) return
-    setResults(sortByGrade((d.results || []).map(r => ({ ...r }))))
+    setResults(sortByGrade(filterByCats(d.results || [], off).map(r => ({ ...r }))))
     setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
   }, [])
   const importResults = useCallback(async () => {
@@ -2353,9 +2603,9 @@ export default function AdminSocialPost() {
       const dates = data.dates || []
       if (!dates.length) { setRrImport({ status: 'empty', dates: [], idx: 0, season: data.season }); return }
       setRrImport({ status: 'ok', dates, idx: 0, season: data.season })
-      applyRrDate(dates[0], data.season)
+      applyRrDate(dates[0], data.season, rrOff)
     } catch (e) { setRrImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
-  }, [applyRrDate])
+  }, [applyRrDate, rrOff])
 
   // Same round pull, resolved from a pasted match link instead of the live
   // feed's latest — any one match link from a round names the whole round.
@@ -2369,7 +2619,7 @@ export default function AdminSocialPost() {
         const dates = data.dates || []
         if (!dates.length) { setFxImport(s => ({ ...s, status: 'empty', notice: null })); return }
         setFxImport({ status: 'ok', dates, idx: 0, season: data.season, notice: null })
-        applyFxDate(dates[0], data.season)
+        applyFxDate(dates[0], data.season, fxOff)
         return
       }
       if (data.kind === 'playhq') {
@@ -2380,7 +2630,7 @@ export default function AdminSocialPost() {
     } catch (e) {
       setFxImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
     }
-  }, [applyFxDate])
+  }, [applyFxDate, fxOff])
 
   const importResultsFromLink = useCallback(async (q) => {
     setRrImport(s => ({ ...s, status: 'loading', notice: null }))
@@ -2390,7 +2640,7 @@ export default function AdminSocialPost() {
         const dates = data.dates || []
         if (!dates.length) { setRrImport(s => ({ ...s, status: 'empty', notice: null })); return }
         setRrImport({ status: 'ok', dates, idx: 0, season: data.season, notice: null })
-        applyRrDate(dates[0], data.season)
+        applyRrDate(dates[0], data.season, rrOff)
         return
       }
       if (data.kind === 'playhq') {
@@ -2401,7 +2651,19 @@ export default function AdminSocialPost() {
     } catch (e) {
       setRrImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
     }
-  }, [applyRrDate])
+  }, [applyRrDate, rrOff])
+
+  // Switch a category on or off and re-fill from the day being shown.
+  const toggleFxCat = (k) => {
+    const next = fxOff.includes(k) ? fxOff.filter(x => x !== k) : [...fxOff, k]
+    setFxOff(next)
+    applyFxDate(fxImport.dates[fxImport.idx], fxImport.season, next)
+  }
+  const toggleRrCat = (k) => {
+    const next = rrOff.includes(k) ? rrOff.filter(x => x !== k) : [...rrOff, k]
+    setRrOff(next)
+    applyRrDate(rrImport.dates[rrImport.idx], rrImport.season, next)
+  }
 
   // Drag-and-drop reorder for the roundup row cards (▲▼ and ✕ keep working).
   const fxDrag = useRowDrag(setFixtures)
@@ -3060,13 +3322,18 @@ export default function AdminSocialPost() {
   if (tmpl.kind === 'results') {
     extraProps.meta = roundMeta
     extraProps.results = roundPagesOn ? chunkEven(results, roundPage.count)[roundPage.idx] || [] : results
+    if (tmpl.hasLeaders) extraProps.perfSide = rrPerfSide
     extraProps.club = clubMark
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'totw') {
     // The competition stays as typed: a team of the week spans grades, so the
     // 'COMPETITION' placeholder the other posts fall back to would print on it.
-    extraProps.totw = { round: matchData.round, date: matchData.date, comp: match.competition, showPoints: totwOpts.showPoints }
+    extraProps.totw = {
+      round: matchData.round, date: matchData.date, comp: match.competition, showPoints: totwOpts.showPoints,
+      // JUNIOR or SENIOR above the round on a scoped team, nothing on the club's whole week.
+      heading: { junior: 'JUNIOR', senior: 'SENIOR' }[totwImport.data?.scope] || undefined,
+    }
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'milestones') {
@@ -3179,6 +3446,7 @@ export default function AdminSocialPost() {
     setPotmImport({ status: null, data: null, playerIdx: 0, include: { bat: true, bowl: true, field: true } })
     setTotwImport({ status: null, data: null, notice: null })
     setTotwOpts({ showPoints: false })
+    setTotwPlan(pl => ({ scope: 'all', range: pl.range, mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
     totwCursor.current = -1
     setMsImport({ status: null, report: null })
     setMsPicks([])
@@ -3187,6 +3455,7 @@ export default function AdminSocialPost() {
     setMsOpts({ title: '', showDates: true })
     setFixtures(DEFAULT_FIXTURES.map((f) => ({ ...f })))
     setResults(DEFAULT_RESULTS.map((r) => ({ ...r })))
+    setRrPerfSide('us')
     setRoundPages({ fixtures: { count: 1, idx: 0 }, results: { count: 1, idx: 0 } })
     setScorecardMatch(DEFAULT_SCORECARD)
     setScUrlInput('')
@@ -4154,7 +4423,8 @@ export default function AdminSocialPost() {
                     <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
                       status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
                       onPull={importFixtures} onFetchLink={importFixturesFromLink} notice={fxImport.notice}
-                      onPick={(i) => { setFxImport((s) => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season) }} />
+                      onPick={(i) => { setFxImport((s) => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season, fxOff) }}
+                      off={fxOff} onToggleCat={toggleFxCat} />
                   </div>
                 )}
                 {activeTab === 'results' && (
@@ -4162,7 +4432,8 @@ export default function AdminSocialPost() {
                     <RoundImportBox hint="recent results" rowsKey="results"
                       status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
                       onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
-                      onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season) }} />
+                      onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
+                      off={rrOff} onToggleCat={toggleRrCat} />
                   </div>
                 )}
 
@@ -4176,9 +4447,7 @@ export default function AdminSocialPost() {
 
                 {activeTab === 'totw' && (
                   <div className="pb-card p-4">
-                    <TotwImportBox status={totwImport.status} notice={totwImport.notice} data={totwImport.data}
-                      onPull={() => loadTotw('')} onFetchLink={loadTotw} />
-                    <TotwSizeStepper count={selectedPlayers.length} poolSize={totwImport.data?.players?.length ?? null} onChange={changeTotwSize} />
+                    <TotwControls t={totwControls} />
                   </div>
                 )}
 
@@ -5119,11 +5388,7 @@ export default function AdminSocialPost() {
             {activeTab === 'totw' && (
               <section className="pb-card p-4" data-testid="totw-section">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Team of the Week</h2>
-                <TotwImportBox status={totwImport.status} notice={totwImport.notice} data={totwImport.data}
-                  onPull={() => loadTotw('')} onFetchLink={loadTotw} />
-                <Field label="Team size">
-                  <TotwSizeStepper count={selectedPlayers.length} poolSize={totwImport.data?.players?.length ?? null} onChange={changeTotwSize} />
-                </Field>
+                <TotwControls t={totwControls} />
                 <label className="flex items-center gap-2 mt-3 text-xs font-mono text-pb-text cursor-pointer">
                   <input type="checkbox" checked={totwOpts.showPoints} onChange={(e) => setTotwOpts(o => ({ ...o, showPoints: e.target.checked }))} />
                   Show points on the post
@@ -5492,7 +5757,8 @@ export default function AdminSocialPost() {
                 <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
                   status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
                   onPull={importFixtures} onFetchLink={importFixturesFromLink} notice={fxImport.notice}
-                  onPick={(i) => { setFxImport(s => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season) }} />
+                  onPick={(i) => { setFxImport(s => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season, fxOff) }}
+                  off={fxOff} onToggleCat={toggleFxCat} />
                 <div className="flex flex-col gap-2">
                   {fixtures.map((f, i) => {
                     const set = (patch) => setFixtures(rows => rows.map((r, j) => j === i ? { ...r, ...patch } : r))
@@ -5500,30 +5766,30 @@ export default function AdminSocialPost() {
                       <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5"
                         onDragOver={fxDrag.onDragOver(i)} onDrop={fxDrag.onDrop(i)}
                         style={fxDrag.overIdx === i ? { borderColor: 'var(--pb-accent)' } : undefined}>
-                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px 1fr 58px 20px' }}>
+                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px minmax(0,1fr) 58px 20px' }}>
                           <span draggable onDragStart={fxDrag.onDragStart(i)} onDragEnd={fxDrag.onDragEnd} title="Drag to reorder"
                             className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setFixtures, i, -1)} onDown={() => moveRow(setFixtures, i, 1)} isFirst={i === 0} isLast={i === fixtures.length - 1} />
                           <input value={f.grade} onChange={e => set({ grade: e.target.value })} placeholder={IS_AFL ? 'Grade · SENIORS' : 'Grade · 1ST XI'}
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={f.ha} onChange={e => set({ ha: e.target.value })}
-                            className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
                             <option value="H">Home</option><option value="A">Away</option>
                           </select>
                           <button onClick={() => setFixtures(rows => rows.filter((_, j) => j !== i))}
-                            className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                            title="Remove this row" aria-label="Remove this row" className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
                         </div>
-                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 64px' }}>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'minmax(0,1fr) 64px' }}>
                           <OppRowSearch value={f.opp} onType={v => set({ opp: v })} onPick={org => pickRowOpp('fx', i, org)} />
                           <input value={f.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
                         </div>
                         <OppLogoChip logo={f.oppLogo} loading={f.oppLogoLoading} onClear={() => set({ oppLogo: null })} />
                         <div className="grid grid-cols-2 gap-1.5">
                           <input value={f.time} onChange={e => set({ time: e.target.value })} placeholder="12:30 PM"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <input value={f.venue} onChange={e => set({ venue: e.target.value })} placeholder="Venue"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
                         </div>
                       </div>
                     )
@@ -5558,7 +5824,26 @@ export default function AdminSocialPost() {
                 <RoundImportBox hint="recent results" rowsKey="results"
                   status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
                   onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
-                  onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season) }} />
+                  onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
+                  off={rrOff} onToggleCat={toggleRrCat} />
+                {tmpl.hasLeaders && (
+                  <div className="mb-3" data-testid="rr-perf-side">
+                    <span className="block font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-1">Players shown</span>
+                    <div className="inline-flex rounded border pb-hairline overflow-hidden" role="radiogroup" aria-label="Whose players to show">
+                      {[{ k: 'us', label: `Our club` }, { k: 'them', label: 'Opposition' }].map((o) => {
+                        const on = rrPerfSide === o.k
+                        return (
+                          <button key={o.k} type="button" role="radio" aria-checked={on} data-testid={`rr-perf-${o.k}`}
+                            onClick={() => setRrPerfSide(o.k)}
+                            className={`px-3 py-1 text-xs font-mono ${on ? 'bg-pb-accent text-[var(--pb-on-accent)]' : 'text-pb-faint hover:text-pb-text'}`}>
+                            {o.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="text-[11px] text-pb-faintest mt-1">Top scorers and wicket takers from {rrPerfSide === 'them' ? 'the opposition' : 'your club'} in each match.</p>
+                  </div>
+                )}
                 <div className="flex flex-col gap-2">
                   {results.map((r, i) => {
                     const set = (patch) => setResults(rows => rows.map((x, j) => j === i ? { ...x, ...patch } : x))
@@ -5566,38 +5851,38 @@ export default function AdminSocialPost() {
                       <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5"
                         onDragOver={rrDrag.onDragOver(i)} onDrop={rrDrag.onDrop(i)}
                         style={rrDrag.overIdx === i ? { borderColor: 'var(--pb-accent)' } : undefined}>
-                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px 1fr 72px 20px' }}>
+                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px minmax(0,1fr) 72px 20px' }}>
                           <span draggable onDragStart={rrDrag.onDragStart(i)} onDragEnd={rrDrag.onDragEnd} title="Drag to reorder"
                             className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setResults, i, -1)} onDown={() => moveRow(setResults, i, 1)} isFirst={i === 0} isLast={i === results.length - 1} />
                           <input value={r.grade} onChange={e => set({ grade: e.target.value })} placeholder={IS_AFL ? 'Grade · SENIORS' : 'Grade · 1ST XI'}
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={r.outcome} onChange={e => set({ outcome: e.target.value })}
-                            className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
                             <option value="W">Won</option><option value="L">Lost</option><option value="T">Tie/NR</option>
                           </select>
                           <button onClick={() => setResults(rows => rows.filter((_, j) => j !== i))}
-                            className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                            title="Remove this row" aria-label="Remove this row" className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
                         </div>
-                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 64px' }}>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'minmax(0,1fr) 64px' }}>
                           <OppRowSearch value={r.opp} onType={v => set({ opp: v })} onPick={org => pickRowOpp('rr', i, org)} />
                           <input value={r.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
                         </div>
                         <OppLogoChip logo={r.oppLogo} loading={r.oppLogoLoading} onClear={() => set({ oppLogo: null })} />
-                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 1fr 1.2fr' }}>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr)' }}>
                           <input value={r.us} onChange={e => set({ us: e.target.value })} placeholder="Us 6/188"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <input value={r.them} onChange={e => set({ them: e.target.value })} placeholder="Them 184"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <input value={r.margin} onChange={e => set({ margin: e.target.value })} placeholder="BY 4 WICKETS"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                         </div>
                         {tmpl.hasLeaders && (
-                          <div className="grid gap-2 pt-1 mt-0.5 border-t pb-hairline" style={{ gridTemplateColumns: '1fr 1fr' }}>
-                            {['topBat', 'topBowl'].map((key) => (
+                          <div className="grid gap-2 pt-1 mt-0.5 border-t pb-hairline" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)' }}>
+                            {[['bat', perfKeys(rrPerfSide).bat], ['bowl', perfKeys(rrPerfSide).bowl]].map(([kind, key]) => (
                               <div key={key} className="flex flex-col gap-1">
-                                <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">{key === 'topBat' ? 'Our top scorers' : 'Our top wickets'}</span>
+                                <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">{rrPerfSide === 'them' ? 'Their' : 'Our'} {kind === 'bat' ? 'top scorers' : 'top wickets'}</span>
                                 {[0, 1].map((slot) => {
                                   const entry = (r[key] || [])[slot] || { name: '', line: '' }
                                   const setSlot = (patch) => setResults(rows => rows.map((x, j) => {
@@ -5607,13 +5892,13 @@ export default function AdminSocialPost() {
                                     return { ...x, [key]: arr }
                                   }))
                                   return (
-                                    <div key={slot} className="grid gap-1" style={{ gridTemplateColumns: '1fr 76px' }}>
+                                    <div key={slot} className="grid gap-1" style={{ gridTemplateColumns: 'minmax(0,1fr) 76px' }}>
                                       <input value={entry.name || ''} onChange={e => setSlot({ name: e.target.value.toUpperCase() })}
-                                        placeholder={key === 'topBat' ? 'J. BARENDSE' : 'A. ALLISON'}
-                                        className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                                        placeholder={kind === 'bat' ? 'J. BARENDSE' : 'A. ALLISON'}
+                                        className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
                                       <input value={entry.line || ''} onChange={e => setSlot({ line: e.target.value })}
-                                        placeholder={key === 'topBat' ? '64 (71)' : '4/29 (9.4)'}
-                                        className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                                        placeholder={kind === 'bat' ? '64 (71)' : '4/29 (9.4)'}
+                                        className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
                                     </div>
                                   )
                                 })}

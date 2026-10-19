@@ -68,6 +68,12 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     ("team_members", "player_id", "uuid", ("team_id",)),
     ("family_members", "player_id", "uuid", ("family_id",)),
     ("player_name_aliases", "player_id", "uuid", ("alias_key",)),
+    # The record of a confirmed side being emailed to a player or their captain.
+    ("selection_notices", "player_id", "uuid", None),
+    # BetterSelect Fines: what a player was fined and what they tipped in. A
+    # balance is derived from the two, so both must move together.
+    ("fine_entries", "player_id", "uuid", None),
+    ("fine_payments", "player_id", "uuid", None),
     ("comms_contacts", "player_id", "uuid", None),
     ("crm_people", "player_id", "uuid", None),
     ("fee_members", "player_id", "uuid", ("organisation_id",)),
@@ -130,6 +136,7 @@ _OWN_CLUB_TABLES = {
     "net_checkin_registrations", "fixture_lineups", "team_members",
     "player_name_aliases", "comms_contacts", "crm_people", "fee_members",
     "fantasy_pool_players", "fantasy_drafts", "fantasy_waiver_claims",
+    "fine_entries", "fine_payments",
 }
 
 _CAST = {"int": "int[]", "uuid": "uuid[]"}

@@ -19,13 +19,51 @@ export function alsoInLine(p) { return alsoIn(p).map((a) => a.text || a.team_nam
 // the grade below. The server decides (selection_pool._drop_in_from) and names
 // the squad; this only words it.
 export function dropInLine(p) { return p?.drop_in_from ? `Not picked in ${p.drop_in_from}` : '' }
-// The board's default order, mirroring selection_pool._pool_rank: those players
-// first, then the fixture's own squad (1), the squad below (2), the rest of the
-// squad above (3), everyone else.
 // Another side's UNCONFIRMED draft already names this player that day. Never
 // blocks a pick (only a confirmed XI does); it just says someone has plans.
 export function inDraftLine(p) { return Array.isArray(p?.in_draft_of) && p.in_draft_of.length ? `In ${p.in_draft_of.join(', ')} draft (not confirmed)` : '' }
-export function poolRank(p) { return p?.drop_in_from ? 0 : (p?.tier ?? 99) }
+// The day tabs a fixture belongs on: its own date, and for a two-day game its
+// second weekend too, so both weekends show the game and the two are linked.
+export function fixtureTabs(f) {
+  const first = f?.played_on || 'tbc'
+  return f?.end_on && f?.played_on && f.end_on > f.played_on ? [first, f.end_on] : [first]
+}
+// " for W2" / " for W1 and W2" for the weeks marked UNAVAILABLE, '' when none.
+// `names` is the club's week names ({ w1, w2 }, W1 and W2 by default).
+export function unavailableWeeksText(days, names) {
+  if (!Array.isArray(days)) return ''
+  const n = [names?.w1 || 'W1', names?.w2 || 'W2']
+  const w = days.map((d, i) => (d.status === 'UNAVAILABLE' ? n[i] : '')).filter(Boolean)
+  if (!w.length) return ''
+  return ` for ${w.join(' and ')}`
+}
+// "Sat 24 Oct" or, for a two-day game, "Sat 24 Oct + Sat 31 Oct".
+export function gameDatesLabel(playedOn, endOn) {
+  const f = (iso) => {
+    try { return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }
+    catch { return iso }
+  }
+  if (!playedOn) return ''
+  return endOn && endOn > playedOn ? `${f(playedOn)} + ${f(endOn)}` : f(playedOn)
+}
+// The board's default order, mirroring selection_pool._pool_rank: everyone who
+// says they are available and is named nowhere that day first, highest squad
+// first (`open_seq`: the place of their highest squad in the club). Then the
+// fixture's own squad (members, then anyone ranked level with it), players the
+// squad above has not picked, the squad below, the rest of the squad above, and
+// everyone else.
+export function poolRank(p) {
+  if (p?.open_seq != null) return p.open_seq
+  if (p?.squad_match) return 1000
+  if (p?.tier === 1) return 1001
+  if (p?.drop_in_from) return 1002
+  if (p?.tier === 2 || p?.tier === 3) return 1002 + p.tier
+  return 1099
+}
+
+// A player's gender as the filters read it: 'male', 'female', or '' when unrecorded.
+export function normGender(g) { const s = String(g || '').toLowerCase(); return s.startsWith('f') ? 'female' : s.startsWith('m') ? 'male' : '' }
+export const GENDER_OPTS = [{ value: '', label: 'All' }, { value: 'male', label: 'Men' }, { value: 'female', label: 'Women' }]
 
 export function alsoInTight(p) { return alsoIn(p).some((a) => a.tight) }
 
@@ -165,7 +203,8 @@ export const HAND_KINDS = [
 export const SORTS = [
   { value: 'squad', label: 'Squad order' },
   { value: 'form', label: 'Form' },
-  { value: 'name', label: 'Name (A–Z)' },
+  { value: 'name', label: 'Surname (A–Z)' },
+  { value: 'first', label: 'First name (A–Z)' },
 ]
 
 // Normalise a recent series to 0..1 bar heights for a mini sparkline.

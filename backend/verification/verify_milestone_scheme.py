@@ -2,7 +2,8 @@
 
 Asked for on the Milestones screen: runs have been 500 then every 1,000 and
 wickets 50 then every 100 for every club. A club can now pick runs every 250,
-500 or 1,000 and wickets every 25, 50 or 100.
+500 or 1,000 and wickets every 25, 50 or 100 (or type its own step; see
+verify_milestone_grade_schemes.py for custom steps and per-grade increments).
 
 Asserted against a real Postgres through the shipped route bodies and services:
 
@@ -134,6 +135,10 @@ async def build_schema() -> None:
         from app.services.milestone_scheme_ddl import STATEMENTS
         for stmt in STATEMENTS:
             await conn.execute(text(stmt))
+        # Migration 330: matches/catches steps and the per-grade table.
+        from app.services.milestone_grade_scheme_ddl import STATEMENTS as GRADE_STATEMENTS
+        for stmt in GRADE_STATEMENTS:
+            await conn.execute(text(stmt))
         json_cols = (await conn.execute(text(
             "SELECT table_name, column_name FROM information_schema.columns "
             "WHERE table_schema = 'public' AND data_type = 'json'"))).all()
@@ -236,9 +241,10 @@ async def main() -> None:
     print("\n── a club on the default sees what it always saw ──")
     admin, recs, dash = await surfaces(OURS)
     check("the report says runs every 1,000 and wickets every 100",
-          admin["scheme"] == {"runs_step": 1000, "wickets_step": 100}, str(admin.get("scheme")))
+          admin["scheme"] == {"runs_step": 1000, "wickets_step": 100, "matches_step": 50, "catches_step": 50}, str(admin.get("scheme")))
     check("the report lists the options it offers",
-          admin["scheme_options"] == {"runs_steps": [250, 500, 1000], "wickets_steps": [25, 50, 100]})
+          admin["scheme_options"] == {"runs_steps": [250, 500, 1000], "wickets_steps": [25, 50, 100],
+                                      "matches_steps": [25, 50, 100], "catches_steps": [25, 50, 100]})
     check("740 runs is NOT in reach (next rung 1,000, 260 away)", not rows(admin["upcoming"], "runs", P_740))
     check("73 wickets is NOT in reach (next rung 100, 27 away)", not rows(admin["upcoming"], "wickets", P_73W))
     check("493 runs is 7 from 500", targets(admin["upcoming"], "runs", P_493) == [500])
@@ -248,7 +254,7 @@ async def main() -> None:
 
     print("\n── runs every 250 ──")
     out = await save(runs_step=250)
-    check("the route returns the saved steps", out == {"runs_step": 250, "wickets_step": 100}, str(out))
+    check("the route returns the saved steps", out == {"runs_step": 250, "wickets_step": 100, "matches_step": 50, "catches_step": 50}, str(out))
     admin, recs, dash = await surfaces(OURS)
     check("the report now reads 250", admin["scheme"]["runs_step"] == 250)
     check("740 runs is now 10 from 750 on the report", targets(admin["upcoming"], "runs", P_740) == [750])
@@ -274,12 +280,12 @@ async def main() -> None:
 
     print("\n── another club is unaffected ──")
     a2, r2, d2 = await surfaces(OTHER)
-    check("its scheme is still the default", a2["scheme"] == {"runs_step": 1000, "wickets_step": 100})
+    check("its scheme is still the default", a2["scheme"] == {"runs_step": 1000, "wickets_step": 100, "matches_step": 50, "catches_step": 50})
     check("its 740 runs is still out of reach", not rows(a2["upcoming"], "runs", P_OTHER))
 
     print("\n── wickets every 25, runs left alone by an unsent key ──")
     out = await save(wickets_step=25)
-    check("runs stayed 250 (key not sent)", out == {"runs_step": 250, "wickets_step": 25}, str(out))
+    check("runs stayed 250 (key not sent)", out == {"runs_step": 250, "wickets_step": 25, "matches_step": 50, "catches_step": 50}, str(out))
     admin, recs, dash = await surfaces(OURS)
     check("73 wickets is now 2 from 75", targets(admin["upcoming"], "wickets", P_73W) == [75])
     check("…on the dashboard too", targets(dash, "wickets", P_73W) == [75])
@@ -287,20 +293,20 @@ async def main() -> None:
           targets(admin["upcoming"], "wickets", P_48W) == [50])
 
     print("\n── a value that is not offered is refused ──")
-    for bad in ({"runs_step": 300}, {"wickets_step": 10}, {"runs_step": 100}):
+    for bad in ({"runs_step": 130}, {"wickets_step": 7}, {"runs_step": 50}, {"wickets_step": 5000}):
         try:
             await save(**bad)
             check(f"{bad} refused", False, "accepted")
         except HTTPException as e:
             check(f"{bad} refused with 422", e.status_code == 422, str(e.status_code))
     admin, _, _ = await surfaces(OURS)
-    check("…and nothing was saved by the refusals", admin["scheme"] == {"runs_step": 250, "wickets_step": 25})
+    check("…and nothing was saved by the refusals", (admin["scheme"]["runs_step"], admin["scheme"]["wickets_step"]) == (250, 25))
 
     print("\n── going back hides the extra rungs without deleting them ──")
     await save(runs_step=None, wickets_step=None)
     admin, recs, dash = await surfaces(OURS)
     check("an explicit null puts both back to the default",
-          admin["scheme"] == {"runs_step": 1000, "wickets_step": 100}, str(admin["scheme"]))
+          admin["scheme"] == {"runs_step": 1000, "wickets_step": 100, "matches_step": 50, "catches_step": 50}, str(admin["scheme"]))
     check("the 250 and 750 rungs are no longer shown",
           {r["milestone_value"] for r in rows(admin["achieved"], "runs", P_1100)} == {500, 1000})
     check("…on the public Records page too",

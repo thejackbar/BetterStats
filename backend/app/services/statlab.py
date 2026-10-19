@@ -34,7 +34,7 @@ import uuid
 # (an imported season, a manual season/career adjustment) — see its own
 # docstring in aggregations.py. Shared so the two modules can't drift on
 # what counts as a residual.
-from app.services.aggregations import _RESIDUAL_SOURCES
+from app.services.aggregations import _RESIDUAL_SOURCES, grid_matches_for_players
 from app.services.game_status import appearance_counts_as_match
 from app.services import rate_coverage as rc
 from app.services.dismissal import not_out_sql
@@ -424,6 +424,69 @@ _MATCH_PLAYER_CLAUSE = (
     "UNION SELECT bs.game_id::text FROM v_effective_bowling_spells bs WHERE bs.player_id = CAST(:ctx_player_id AS UUID) "
     "UNION SELECT fs.game_id::text FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:ctx_player_id AS UUID))"
 )
+
+
+# ─── The profile's matches figure, for the player tables ──────────────────────
+# A player's MATCHES on their profile is raised to the by-grade grid, which also counts
+# the matches Cricket Australia's per-grade totals claim and we hold no scorecard for
+# (v9.113.12 did this for the leaderboards). StatLab's player_career table read the
+# scorecards held, or CA's season total on its fast path, so the same player read lower
+# here than on their page. The figure is a SORT and FILTER metric run in SQL (`matches >=
+# 100`, ORDER BY, LIMIT), so it cannot be raised after the query: it is computed per
+# player first and joined into the query as a lookup, and `matches` becomes the larger of
+# the two inside the SQL.
+#
+# ONLY WHERE `matches` MEANS "all the matches": the club scope (a grade type, a match type
+# or a competition: the grid answers those) and at most one season. Any other filter is a
+# question about particular games (a result, an opposition, a date range, a dismissal, a
+# grade, finals) and the figure then legitimately counts only those, so it is left alone.
+_GRID_SAFE_CONTEXT_KEYS = {_SCOPE_KEY, "player_id", "season_id"}
+# The grid loader's cost grows with the players asked about. A club past this many
+# players with no single-player filter is left on its own count (see
+# aggregations.BOARD_GRID_MAX_ROWS for the same reasoning).
+_GRID_MAX_PLAYERS = 5000
+
+
+def _grid_context(context: dict | None) -> tuple[bool, str | None]:
+    """``(applies, season_id)``: whether `matches` may be raised to the grid for this context."""
+    active = {k: v for k, v in (context or {}).items() if v not in (None, "", [], (), {})}
+    if any(k not in _GRID_SAFE_CONTEXT_KEYS for k in active):
+        return False, None
+    return True, active.get("season_id")
+
+
+async def _grid_lookup(session: AsyncSession, org_id: str, context: dict | None) -> dict | None:
+    """``{player_id (text): grid matches}`` for the players this query lists, or None when it does not apply."""
+    ok, season_id = _grid_context(context)
+    if not ok:
+        return None
+    one = _context_player_id(context)
+    if one:
+        ids = [one]
+    else:
+        res = await session.execute(
+            text("SELECT id::text FROM players WHERE organisation_id = CAST(:o AS UUID)"), {"o": org_id})
+        ids = [r[0] for r in res.all()]
+        if len(ids) > _GRID_MAX_PLAYERS:
+            return None
+    if not ids:
+        return {}
+    return await grid_matches_for_players(session, org_id, ids, season_id, _ctx_scope(context))
+
+
+def _grid_cte_and_params(grid: dict | None, params: dict) -> str:
+    """A `grid_m` CTE (text player_id, matches) bound from `grid`; '' when there is none.
+
+    Written with a leading comma so a caller pastes it between two CTEs."""
+    if not grid:
+        return ""
+    params["grid_ids"] = list(grid.keys())
+    params["grid_vals"] = [int(v) for v in grid.values()]
+    return ("""
+            , grid_m AS (
+                SELECT t.player_id, t.matches
+                FROM unnest(CAST(:grid_ids AS text[]), CAST(:grid_vals AS integer[])) AS t(player_id, matches)
+            )""")
 
 
 def _residual_disqualified(context: dict, ic: list[str]) -> bool:
@@ -1381,6 +1444,21 @@ async def query_player_career(
     where_sql = _with_player_filter(where_sql, context, params, _PLAYER_ROW_CLAUSE)
     needs_live = used_ctx or bool(ic) or bool(pc)
 
+    # `matches` as the player's own profile reads it, where that is what it means (see
+    # `_grid_context`). A lookup joined in, so the metric filter, sort and limit all see it.
+    grid = await _grid_lookup(session, org_id, context)
+    grid_cte = _grid_cte_and_params(grid, params)
+
+    def grid_matches(expr: str, id_expr: str) -> str:
+        if not grid:
+            return expr
+        return (f"GREATEST({expr}, COALESCE((SELECT gm.matches FROM grid_m gm "
+                f"WHERE gm.player_id = {id_expr}::text), 0))")
+
+    fast_matches = ("GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(MAX(gm.matches), 0))"
+                    if grid else "COALESCE(SUM(pss.matches), 0)")
+    fast_grid_join = "LEFT JOIN grid_m gm ON gm.player_id = p.id::text" if grid else ""
+
     if needs_live:
         # Live aggregation over per-innings rows so context filters take effect.
         cte = _player_agg_innings_cte(
@@ -1414,12 +1492,12 @@ async def query_player_career(
             return f"(COALESCE({col}, 0) + COALESCE(resid.{col.split('.')[-1]}, 0))" if residual_ok else f"COALESCE({col}, 0)"
 
         sql = f"""
-            {cte}{resid_with},
+            {cte}{resid_with}{grid_cte},
             agg AS (
                 SELECT
                     {resid_id}::text AS player_id,
                     {resid_name} AS player_name,
-                    {_r('appear.matches')}                                            AS matches,
+                    {grid_matches(_r('appear.matches'), resid_id)}                    AS matches,
                     1                                                                  AS seasons_played,
                     {_r('bat.batting_innings')}                                       AS batting_innings,
                     {_r('bat.runs')}                                                  AS runs,
@@ -1482,13 +1560,13 @@ async def query_player_career(
                 FROM v_effective_bowling_spells bs
                 JOIN players cp ON cp.id = bs.player_id AND cp.organisation_id = :org_id
                 GROUP BY bs.player_id
-            ),
+            ){grid_cte},
             agg AS (
                 SELECT
                     p.id::text                                                                    AS player_id,
                     COALESCE(p.display_name_override, p.name)                                    AS player_name,
                     COUNT(DISTINCT pss.season_id)                                                AS seasons_played,
-                    COALESCE(SUM(pss.matches), 0)                                                AS matches,
+                    {fast_matches}                                                               AS matches,
                     COALESCE(SUM(pss.batting_innings), 0)                                        AS batting_innings,
                     COALESCE(SUM(pss.runs), 0)                                                   AS runs,
                     COALESCE(SUM(pss.not_outs), 0)                                               AS not_outs,
@@ -1538,6 +1616,7 @@ async def query_player_career(
                 JOIN players p ON p.id = pss.player_id
                 LEFT JOIN covered_bat cb ON cb.player_id = p.id
                 LEFT JOIN covered_bowl cw ON cw.player_id = p.id
+                {fast_grid_join}
                 -- LEFT: career-level rows (a manual career adjustment, an
                 -- import career residual) have no season and must still count
                 -- toward career totals, exactly as the player profile counts

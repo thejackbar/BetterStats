@@ -29,6 +29,8 @@ function compareVersions(a, b) {
 
 // `cap: null` means everyone gets it (dashboard, read-only listing pages).
 // `cap: <CAP>` hides the link from users without that capability.
+// `fullAdmin: true` hides it from a person locked to one module (club-wide screens that
+// belong to no module, like Plan & Billing); the server refuses them either way.
 // BetterSelect / BetterSocials / BetterFees are NOT here — each is its own
 // module surface (own layout + nav), reached from the dashboard module tiles.
 // Items within each headed section are kept in ALPHABETICAL order (by label)
@@ -43,7 +45,7 @@ const NAV_SECTIONS = [
   {
     items: [
       { to: '/admin', label: 'Dashboard', exact: true, cap: null },
-      { to: '/admin/setup', label: 'Setup Wizard', cap: null, badge: 'setupLeft' },
+      { to: '/admin/setup', label: 'Setup Wizard', cap: null, fullAdmin: true, badge: 'setupLeft' },
     ],
   },
   {
@@ -53,7 +55,7 @@ const NAV_SECTIONS = [
       // No capability: every admin may choose what reaches their own inbox.
       // The club-wide half of that screen is gated inside it, and on the server.
       { to: '/admin/notifications', label: 'Notifications', cap: null },
-      { to: '/admin/account', label: 'Plan & Billing', cap: null },
+      { to: '/admin/account', label: 'Plan & Billing', cap: null, fullAdmin: true },
       { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
       { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
     ],
@@ -149,10 +151,13 @@ export default function AdminLayout({ children }) {
   // Filter nav: drop links the user lacks the cap for. Empty sections are
   // dropped too so a heading never renders with nothing under it. (Club admins
   // hold every capability, so in practice they see the full set.)
+  // A person a Primary Admin locked to one module has the club_member role.
+  const isFullAdmin = user?.role === 'club_admin' || user?.role === 'super_admin'
   const visibleSections = NAV_SECTIONS.map(s => ({
     ...s,
     items: s.items.filter(i =>
       (i.cap == null || hasCapability(i.cap)) &&
+      (!i.fullAdmin || isFullAdmin) &&
       (i.flag !== 'memberPortal' || memberPortalVisible)),
   })).filter(s => s.items.length > 0)
 
@@ -280,7 +285,9 @@ export default function AdminLayout({ children }) {
   // acting-as club selected) just hides the header shortcut; the sidebar
   // Setup Wizard item is the unconditional entry point.
   useEffect(() => {
-    if (!user) { setWizardAvailable(false); return }
+    // A person locked to one module has no setup wizard (it is the Primary Admin's), so
+    // they are never sent into it on login either.
+    if (!user || (user.access?.mode && user.access.mode !== 'full')) { setWizardAvailable(false); return }
     let cancelled = false
     ;(async () => {
       try {

@@ -145,6 +145,10 @@ async def build_schema() -> None:
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
+        # Migration 330: the per-grade milestone increments the grade scan reads.
+        from app.services.milestone_grade_scheme_ddl import STATEMENTS as _MGS
+        for _stmt in _MGS:
+            await conn.execute(text(_stmt))
         # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
         await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # create_all does not add the server defaults some raw-SQL migrations

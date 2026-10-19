@@ -113,7 +113,17 @@ GAMES = {
     "abandoned":          ("ABANDONED", None, None, {}, False),
     # The player recorded a real line in an otherwise empty game: keeps it.
     "no_play_but_player_bowled": ("COMPLETED", "WIN", None, {"bowl": [PLAYER]}, True),
+    # Next round's XI, published mid-week. Sync stores the fixture and a
+    # `game_appearances` row for every named player, so before UPCOMING joined the
+    # rule each of these added a match to every player in the side (Leederville,
+    # Oct 2026: two extra games for most of the club, nobody having done anything).
+    "upcoming_named_side":  ("UPCOMING", None, None, {}, False),
+    "upcoming_next_week":   ("UPCOMING", None, None, {}, False),
+    # An UPCOMING status that went stale after the game was played: the scorecard
+    # rows and totals are behind it, so it is a match.
+    "upcoming_but_played":  ("UPCOMING", "WIN", TWO_INNINGS, {"bat": [BATTER], "bowl": [BOWLER]}, True),
 }
+FUTURE = {"upcoming_named_side", "upcoming_next_week"}
 
 
 async def build_schema() -> None:
@@ -171,7 +181,7 @@ async def seed(session) -> None:
         await ex("INSERT INTO games (id, grade_id, played_at, result, home_org_id, away_org_id, "
                  " match_format, status, innings_totals) "
                  "VALUES (:i, :g, :d, :r, :o, :x, 'One Day', :s, CAST(:t AS JSONB))",
-                 i=gid, g=G_1ST, d=date(2025, 1, day), r=result, o=ORG, x=OPPONENT,
+                 i=gid, g=G_1ST, d=(date(2099, 1, day) if name in FUTURE else date(2025, 1, day)), r=result, o=ORG, x=OPPONENT,
                  s=status, t=json.dumps(totals) if totals is not None else None)
         day += 1
         # The club's side is named in every game.

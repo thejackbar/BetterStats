@@ -64,6 +64,9 @@ SHARED_DDL_MODULES = (
     ("app.services.role_program_ddl", "STATEMENTS"),
     ("app.services.comms_segment_ddl", "STATEMENTS"),
     ("app.services.asset_register_ddl", "ASSET_REGISTER_SQL"),
+    # Migration 344. The shared `require_cap` and `/auth/me` read it for a football
+    # club's locked-down users too.
+    ("app.services.access_ddl", "STATEMENTS"),
     ("app.services.notification_ddl", "STATEMENTS"),
     ("app.services.committee_sync_ddl", "STATEMENTS"),
     ("app.services.pillar_plan_ddl", "PILLAR_PLAN_SPLIT_SQL"),
@@ -94,6 +97,29 @@ SHARED_DDL_MODULES = (
     # Migration 322. `club_links`: the shared `/auth/me` reads it for a Club
     # Admin, so the football database needs the (empty) table.
     ("app.services.club_link_ddl", "STATEMENTS"),
+    # Migration 328. `import_batches.through_year` / `.through_label`, on the shared
+    # ORM ImportBatch model football's result imports also write through.
+    ("app.services.import_through_ddl", "STATEMENTS"),
+    # Migration 331. `organisations.amalgamate_seasons`, on the shared Organisation model.
+    ("app.services.amalgamate_seasons_ddl", "STATEMENTS"),
+    # Migration 334. `fixtures.locked_at` / `.locked_by` (the shared ORM Fixture
+    # model maps them; the player's own page, mounted on football, reads them) and
+    # the `selection_events` audit table.
+    ("app.services.selection_lock_ddl", "STATEMENTS"),
+    # Migration 335. `net_sessions.checkin_token` / `.squad_team_ids`, on the
+    # shared ORM NetSession model; the player's page reads net_sessions.
+    ("app.services.net_session_link_ddl", "STATEMENTS"),
+    # Migration 336. `team_sides`: shared routers (the player's availability page)
+    # read it, so the football database needs the (empty) table.
+    ("app.services.team_sides_ddl", "STATEMENTS"),
+    # Migration 337. `fixtures.side_key`, on the shared ORM Fixture model.
+    ("app.services.fixture_side_ddl", "STATEMENTS"),
+    # Migration 338. `fixtures.team_pinned`, on the shared ORM Fixture model.
+    ("app.services.fixture_pin_ddl", "STATEMENTS"),
+    # Migration 339. `audit_events`: the shared squad and availability writers record into it.
+    ("app.services.audit_ddl", "STATEMENTS"),
+    # Migration 340. `organisations.availability_allow_maybe`, on the shared Organisation model.
+    ("app.services.availability_maybe_ddl", "STATEMENTS"),
 )
 
 

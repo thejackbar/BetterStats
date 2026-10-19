@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { CAP } from '../../lib/capabilities'
+import { CAP, selectCaps } from '../../lib/capabilities'
 import { api } from '../../lib/api'
 import { useClubTheme } from '../../hooks/useClubTheme'
 import { Icon } from '../../pages/admin/betterselect/ui'
@@ -10,6 +10,7 @@ import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
 import BookmarkButton from './BookmarkButton'
 import { IS_AFL, PLATFORM_NAME } from '../../lib/sport'
+import { useHalfColours } from '../../lib/useAvailabilityConfig'
 
 // The football app has no bookmarks service, so the star renders nothing there.
 const Bookmark = IS_AFL ? () => null : BookmarkButton
@@ -43,7 +44,7 @@ const CRICKET_GROUPS = [
     desc: 'Your player pool and how it splits into teams.',
     items: [
       { to: '/admin/betterselect/players', label: 'Players', icon: 'player', cap: CAP.MANAGE_PLAYERS, desc: 'Your BetterSelect player pool.' },
-      { to: '/admin/betterselect/teams', label: 'Squads', icon: 'teams', cap: CAP.MANAGE_SELECTIONS, desc: 'Set up your teams and squads.' },
+      { to: '/admin/betterselect/teams', label: 'Squads', icon: 'teams', cap: null, anyCaps: selectCaps(CAP.SELECT_SQUADS), desc: 'Set up your teams and squads.' },
     ],
   },
   {
@@ -52,8 +53,9 @@ const CRICKET_GROUPS = [
     desc: 'The weekly cycle — fixtures, availability and picking the XI.',
     items: [
       { to: '/admin/betterselect/fixtures', label: 'Fixtures', icon: 'fixtures', cap: CAP.MANAGE_FIXTURES, desc: 'Upcoming games and results.' },
-      { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: CAP.MANAGE_SELECTIONS, desc: "Who's around each weekend." },
-      { to: '/admin/betterselect/selection', label: 'Selection', icon: 'selection', cap: CAP.MANAGE_SELECTIONS, desc: 'Pick and share your XI.' },
+      { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: null, anyCaps: selectCaps(CAP.SELECT_AVAILABILITY), desc: "Who's around each weekend." },
+      { to: '/admin/betterselect/selection', label: 'Selection', icon: 'selection', cap: null, anyCaps: selectCaps(CAP.SELECT_SELECTION), desc: 'Pick and share your XI.' },
+      { to: '/admin/betterselect/whiteboard', label: 'Selection Whiteboard', icon: 'cols', cap: null, anyCaps: selectCaps(CAP.SELECT_SELECTION), desc: 'Every team for the day side by side. Drag players between them.' },
     ],
   },
   {
@@ -61,17 +63,20 @@ const CRICKET_GROUPS = [
     label: 'Setup',
     desc: 'The rules your competition runs on, and what the board shows.',
     items: [
-      { to: '/admin/betterselect/rules', label: 'Selection rules', icon: 'settings', cap: CAP.MANAGE_SELECTIONS, desc: "Your association's age limits, overseas caps and eligibility." },
+      { to: '/admin/betterselect/settings', label: 'Settings', icon: 'settings', cap: null, anyCaps: selectCaps(CAP.SELECT_RULES), desc: 'Two-day game colours, junior grades and the Maybe answer.' },
+      { to: '/admin/betterselect/rules', label: 'Selection rules', icon: 'settings', cap: null, anyCaps: selectCaps(CAP.SELECT_RULES), desc: "Your association's age limits, overseas caps and eligibility." },
+      { to: '/admin/betterselect/audit', label: 'Audit History', icon: 'history', cap: null, anyCaps: selectCaps(CAP.SELECT_AUDIT), desc: 'Who changed which player in selection, availability and squads, and when.' },
     ],
   },
   {
     key: 'club',
     label: 'Club Life',
-    desc: 'Training, best-player voting and competition ladders.',
+    desc: 'Training, best-player voting, competition ladders and fines.',
     items: [
-      { to: '/admin/betterselect/nets', label: 'Nets', icon: 'nets', cap: CAP.MANAGE_SELECTIONS, desc: 'Training and net sessions.' },
+      { to: '/admin/betterselect/nets', label: 'Nets', icon: 'nets', cap: null, anyCaps: selectCaps(CAP.SELECT_NETS), desc: 'Training and net sessions.' },
       { to: '/admin/betterselect/votes', label: 'Votes', icon: 'votes', cap: null, anyCaps: [CAP.MANAGE_VOTES, CAP.VIEW_VOTE_RESULTS], desc: 'Best-player votes, Brownlow style.' },
-      { to: '/admin/betterselect/ladders', label: 'Ladders', icon: 'ladders', cap: CAP.MANAGE_SELECTIONS, desc: 'Competition ladders.' },
+      { to: '/admin/betterselect/ladders', label: 'Ladders', icon: 'ladders', cap: null, anyCaps: selectCaps(CAP.SELECT_SQUADS), desc: 'Competition ladders.' },
+      { to: '/admin/betterselect/fines', label: 'Fines', icon: 'money', cap: null, anyCaps: selectCaps(CAP.SELECT_FINES), desc: 'The post-game fines session and the pot, per squad.' },
     ],
   },
 ]
@@ -124,7 +129,7 @@ export const NAV = [
   ]),
 ]
 
-export default function BetterSelectLayout({ children, title, caption, actions, headerLeft }) {
+export default function BetterSelectLayout({ children, title, caption, actions, headerLeft, wide = false }) {
   const { user, logout, hasCapability } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
@@ -132,6 +137,7 @@ export default function BetterSelectLayout({ children, title, caption, actions, 
   const [club, setClub] = useState(_clubCache)
   useEffect(() => { loadClubBranding().then(s => { if (s) setClub(s) }) }, [])
   useClubTheme(club)  // inject the club's white-label palette (accent etc.)
+  useHalfColours()    // the club's half-available colours, on the page before the first card
 
   // Nav may include `{ heading }` separators (kept regardless of cap — they
   // carry no `to`/`cap`); ordinary items are filtered by capability, with
@@ -256,7 +262,7 @@ export default function BetterSelectLayout({ children, title, caption, actions, 
             </div>
           </div>
         </header>
-        <main className="flex-1 p-4 md:p-6 max-w-[1400px] w-full mx-auto">{children}</main>
+        <main className={`flex-1 p-4 md:p-6 w-full mx-auto ${wide ? 'max-w-none min-w-0' : 'max-w-[1400px]'}`}>{children}</main>
       </div>
     </div>
   )

@@ -54,6 +54,12 @@ try:
     from app.routers import club_links as links_router  # noqa: E402
 except Exception:
     links_router = None
+try:
+    # /auth/me reads user_access for a club_member, and the lifespan creates it.
+    from app.services import access_ddl  # noqa: E402
+    DDL += list(access_ddl.STATEMENTS)
+except Exception:  # control run against a commit before migration 344
+    pass
 from app.services import committee  # noqa: E402
 from app.routers import statlab  # noqa: E402
 from app.auth import modules as modules_mod  # noqa: E402

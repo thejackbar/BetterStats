@@ -16,8 +16,8 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
-import { AVAILABILITY, availRank } from '../../../lib/availability'
-import { Icon, Avatar, Dot, Tag } from './ui'
+import { AVAILABILITY, availRank, viewStatus, weekFlag } from '../../../lib/availability'
+import { Icon, Avatar, Dot, Tag, WeekFlag } from './ui'
 import { roleLine, nameMatches, alsoInLine, dropInLine, inDraftLine } from './selectionMeta'
 import { FlagTags, RuleNotes, AgeTag } from './SelectionViews'
 
@@ -84,7 +84,7 @@ export function BottomSheet({ title, subtitle, onClose, tall = false, children, 
 /* ── Search the club and add to the XI ───────────────────────────────────── */
 function AddRow({ p, onAdd }) {
   const fmt = useAdminNameFormat()
-  const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
+  const meta = AVAILABILITY[viewStatus(p)] || AVAILABILITY.NO_RESPONSE
   const blocked = p.clash?.length > 0 && p.clash_blocks
   const callUp = p.clash?.length > 0 && !p.clash_blocks
   return (
@@ -92,7 +92,7 @@ function AddRow({ p, onAdd }) {
       className={`w-full text-left flex items-center gap-3 px-4 py-2.5 min-h-[60px] border-b pb-hairline transition-colors ${blocked ? 'opacity-50' : 'active:bg-pb-surface2'}`}>
       <span className="relative shrink-0">
         <Avatar player={p} size={38} noLink />
-        <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={11} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
+        <span className="absolute -right-px -bottom-px"><Dot status={viewStatus(p)} size={11} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
       </span>
       <span className="flex-1 min-w-0">
         <span className="flex items-center gap-1.5 min-w-0">
@@ -100,9 +100,10 @@ function AddRow({ p, onAdd }) {
           <AgeTag p={p} /><FlagTags p={p} />
         </span>
         <span className="block text-[12px] text-pb-dim truncate">
-          <span style={{ color: p.availability === 'NO_RESPONSE' ? undefined : meta.cssVar }}>{meta.label}</span>
+          <span style={{ color: viewStatus(p) === 'NO_RESPONSE' ? undefined : meta.cssVar }}>{meta.label}</span>
           {' · '}{roleLine(p)}
         </span>
+        {weekFlag(p.availability_days) && <span className="block truncate" data-week-split><WeekFlag days={p.availability_days} className="text-[11px]" /></span>}
         {blocked
           ? <span className="block text-[11px] text-pb-red truncate">⛔ Picked for {p.clash.join(', ')}</span>
           : callUp

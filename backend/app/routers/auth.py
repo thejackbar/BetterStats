@@ -11,7 +11,8 @@ import uuid
 
 from app.models.db import User, ClubMembership, Organisation, get_db
 from app.config.settings import settings
-from app.services import junior_hiding
+from app.services import player_audit, junior_hiding
+from app.services import access as access_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -69,6 +70,8 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     user = await db.get(User, uuid.UUID(user_id))
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    # Who is acting, for the audit trail's shared writers (see services/player_audit).
+    player_audit.set_actor(user)
     return user
 
 
@@ -643,6 +646,11 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
         # club), so the public club navbar can suppress its club links.
         "is_marketing_org": org_is_outreach(club),
         "capabilities": caps,
+        # The capabilities above held at VIEW level only: the screens draw read only for
+        # them and the server refuses a write (auth/capabilities.require_cap).
+        "view_only_capabilities": (
+            list(getattr(membership, "view_only_caps", None) or []) if role == "club_member" else []
+        ),
         "entitlements": entitlement_summary(club, role),
         # Super-admin club-switch context. can_switch_clubs gates the UI switcher;
         # acting_as_club is true only while scoped to a club other than home.
@@ -659,6 +667,12 @@ async def _build_me(current_user: User, db: AsyncSession) -> dict:
         # module subscription (any club_admin may request a trial). True for a super
         # admin so the UI never blocks them.
         "is_primary_admin": bool(is_super or (membership and getattr(membership, "is_primary_admin", False))),
+        # "full" for everyone except a person a Primary Admin locked to one
+        # module (services/access.py), who reads {"mode": "module", "module_key": ...}.
+        "access": access_service.describe(
+            await access_service.get_access(db, current_user.id, membership.club_id)
+            if membership and role == "club_member" else None
+        ),
     }
 
 

@@ -9,11 +9,15 @@ Three jobs, all reading data we already hold (``comms_recipients`` for sends,
     always ≤ the AWS ceiling — see services/platform_settings). Each club also has
     a per-day cap from its tier. A send is allowed up to
     ``min(account_remaining, club_remaining)``; the overflow is deferred to the
-    next day (see routers/comms.py::_run_send).
+    next day (see routers/comms.py::_run_send). The club's day starts at
+    midnight UTC (``_club_day_start``), the account ceiling is a rolling 24h.
 
   * **Tiers.** A club is ``sandbox`` (low cap, new/unproven), ``production``
-    (raised after a super admin approves a request), or ``suspended`` (cap 0,
-    set by the breaker). Per-club ``comms_sandbox_cap`` / ``comms_production_cap``
+    (a paying BetterAdmin subscriber, or raised after a super admin approves a
+    request), or ``suspended`` (cap 0, set by the breaker). The BetterComms
+    module going active lifts Sandbox to Production, and paused or cancelled
+    returns Production to Sandbox (``apply_comms_subscription_tier``, called
+    from ``module_subscriptions``). Per-club ``comms_sandbox_cap`` / ``comms_production_cap``
     override the global default for each tier. The marketing-outreach org is
     uncapped (BetterCricket's own domain).
 
@@ -29,14 +33,18 @@ recipient are dropped from per-club counts, which is the safe direction).
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 from typing import Optional
 
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.modules import STATUS_ACTIVE, STATUS_CANCELLED, STATUS_PAUSED
 from app.config.settings import settings
 from app.models.db import CommsRecipient, Organisation
 from app.services.marketing_org import org_is_outreach
+
+logger = logging.getLogger(__name__)
 
 # Tier vocabulary. Kept tiny and stable; the super-admin UI mirrors it.
 TIER_SANDBOX = "sandbox"
@@ -50,16 +58,88 @@ def normalise_tier(tier: Optional[str]) -> str:
     return t if t in TIERS else TIER_SANDBOX
 
 
+# ─── tier follows the BetterAdmin subscription ───────────────────────────────
+
+_LAPSED_STATUSES = frozenset({STATUS_PAUSED, STATUS_CANCELLED})
+
+
+def tier_after_comms_status(current_tier: Optional[str], previous_status: Optional[str],
+                            new_status: Optional[str]) -> Optional[str]:
+    """The tier a club should move to when its BetterComms module changes status,
+    or ``None`` to leave it alone. Production sending is a paid feature, so:
+
+      * becoming ``active`` lifts a Sandbox club to Production;
+      * becoming ``paused`` or ``cancelled`` returns a Production club to Sandbox;
+      * trial and past_due change nothing (a late payment that clears must not
+        flip a club between tiers), and a suspended club stays suspended (only a
+        super admin reinstates it).
+
+    Only a TRANSITION counts. A renewal re-sets ``active`` on an already active
+    module, and must not undo a super admin who put the club back on Sandbox by
+    hand."""
+    tier = normalise_tier(current_tier)
+    if tier == TIER_SUSPENDED:
+        return None
+    if new_status == STATUS_ACTIVE and previous_status != STATUS_ACTIVE and tier == TIER_SANDBOX:
+        return TIER_PRODUCTION
+    if (new_status in _LAPSED_STATUSES and previous_status not in _LAPSED_STATUSES
+            and tier == TIER_PRODUCTION):
+        return TIER_SANDBOX
+    return None
+
+
+def apply_comms_subscription_tier(org: Organisation, previous_status: Optional[str],
+                                  new_status: Optional[str]) -> Optional[str]:
+    """Move ``org.comms_tier`` per ``tier_after_comms_status`` (no commit, the
+    caller's transaction owns it). Returns the new tier, or None when unchanged.
+    The marketing-outreach org is uncapped whatever its tier, so it is skipped."""
+    if org_is_outreach(org):
+        return None
+    new_tier = tier_after_comms_status(getattr(org, "comms_tier", None), previous_status, new_status)
+    if new_tier is None:
+        return None
+    logger.info("BetterComms: %s tier %s -> %s (comms module %s -> %s)",
+                getattr(org, "name", org), getattr(org, "comms_tier", None), new_tier,
+                previous_status, new_status)
+    org.comms_tier = new_tier
+    return new_tier
+
+
 def _now() -> _dt.datetime:
     return _dt.datetime.now(_dt.timezone.utc)
 
 
 def _day_window_start() -> _dt.datetime:
-    """Start of the daily send window. AWS's daily quota is a ROLLING 24-hour
-    window (not a calendar midnight), so we mirror that — it also sidesteps every
-    timezone boundary bug (a club sending in the morning no longer sees 0 because
-    UTC midnight hasn't rolled)."""
+    """Start of the ACCOUNT-wide daily send window. AWS's daily quota is a
+    ROLLING 24-hour window (not a calendar midnight), so the platform ceiling
+    mirrors that. A club's own cap does NOT use this: see ``_club_day_start``."""
     return _now() - _dt.timedelta(hours=24)
+
+
+def _club_day_start() -> _dt.datetime:
+    """Start of a club's daily window: midnight UTC today.
+
+    The club cap is our own policy, not an AWS quota, so it resets on a fixed
+    clock that the daily resume job (00:15 UTC) is aligned to. It used to be a
+    rolling 24 hours, and the resume job then found yesterday's batch (stamped
+    when it FINISHED, a few seconds after 00:15) still inside the window, so a
+    club capped at 50 got a batch every OTHER day. A 669-recipient send from a
+    Sandbox club took 18 days instead of 14, and nobody was told."""
+    return _now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+# The daily resume job (jobs/scheduler.py comms_daily_maintenance) runs at this
+# UTC time, just after the club day rolls over. One definition, so the "rest
+# goes out at" the club is shown is the time the job actually fires.
+RESUME_HOUR_UTC = 0
+RESUME_MINUTE_UTC = 15
+
+
+def next_resume_at(now: Optional[_dt.datetime] = None) -> _dt.datetime:
+    """The next moment deferred recipients are picked up again (00:15 UTC)."""
+    now = now or _now()
+    at = now.replace(hour=RESUME_HOUR_UTC, minute=RESUME_MINUTE_UTC, second=0, microsecond=0)
+    return at if at > now else at + _dt.timedelta(days=1)
 
 
 def _month_window_start() -> _dt.datetime:
@@ -156,6 +236,12 @@ async def sends_today(session: AsyncSession, org_id=None) -> int:
     return await _sends_since(session, _day_window_start(), org_id=org_id)
 
 
+async def club_sends_today(session: AsyncSession, org_id) -> int:
+    """Recipients this club has sent since midnight UTC: what its daily cap is
+    measured against. The account ceiling keeps the rolling ``sends_today``."""
+    return await _sends_since(session, _club_day_start(), org_id=org_id)
+
+
 async def sends_this_month(session: AsyncSession, org_id=None) -> int:
     """Count of recipients sent in the trailing 30 days (rolling monthly window)."""
     return await _sends_since(session, _month_window_start(), org_id=org_id)
@@ -180,7 +266,7 @@ async def club_daily_remaining(session: AsyncSession, org: Organisation,
     cap = tier_daily_cap(org, defaults)
     if cap is None:
         return None
-    used = await sends_today(session, org_id=org.id)
+    used = await club_sends_today(session, org.id)
     return max(0, cap - used)
 
 
@@ -280,7 +366,7 @@ async def preflight(session: AsyncSession, org: Organisation) -> dict:
     tier = normalise_tier(getattr(org, "comms_tier", None))
     cap = tier_daily_cap(org, defaults)
     mcap = monthly_cap(org, defaults)
-    used = await sends_today(session, org_id=org.id)
+    used = await club_sends_today(session, org.id)
     used_month = await sends_this_month(session, org_id=org.id)
     account_remaining = await account_daily_remaining(session)
     allowance = await send_allowance(session, org, defaults)

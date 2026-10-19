@@ -3,7 +3,7 @@
 // further ones cost the points hit.
 import { useMemo, useState } from 'react'
 import { api } from '../../lib/api'
-import { StatTile, DISP, tintBg, mix, money, pts, Btn, Avatar, Field, ROLE_LABEL, ROLE_SHORT, ROLE_ORDER, GREEN, RED, AMBER, PriceTag, PriceArrow } from './ui'
+import { StatTile, DISP, tintBg, mix, money, pts, Btn, Avatar, Field, ROLE_LABEL, ROLE_SHORT, ROLE_ORDER, GREEN, RED, AMBER, PriceTag, PriceArrow, MoverChips, byMover, moverEmpty } from './ui'
 import { ScreenTitle, SectionLabel, PlayerRow } from './shell'
 
 // What selling a player returns: his price now. A rise since you bought him adds to
@@ -15,6 +15,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
   const [tin, setTin] = useState(null)
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('all')   // desktop pool table filter
+  const [move, setMove] = useState('all')                // price movers: all | up | down
   const [busy, setBusy] = useState(false)
 
   const poolById = useMemo(() => Object.fromEntries((pool || []).map(p => [p.player_id, p])), [pool])
@@ -32,11 +33,10 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
     if (!out || !squad) return []
     const have = new Set(squad.players.map(p => p.player_id))
     const term = search.trim().toLowerCase()
-    return (pool || [])
+    const l = (pool || [])
       .filter(p => p.role === out.role && !have.has(p.player_id) && !queuedIn.has(p.player_id) && (!term || p.name.toLowerCase().includes(term)))
-      .sort((a, b) => b.price - a.price)
-      .slice(0, 40)
-  }, [out, pool, squad, search]) // eslint-disable-line react-hooks/exhaustive-deps
+    return (move === 'all' ? l.sort((a, b) => b.price - a.price) : byMover(l, move)).slice(0, 40)
+  }, [out, pool, squad, search, move]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!squad) return <Empty nav={nav} />
 
@@ -73,9 +73,9 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
   if (desktop) {
     const have = new Set(squad.players.map(p => p.player_id))
     const term = search.trim().toLowerCase()
-    const table = (pool || [])
+    const filtered = (pool || [])
       .filter(p => (roleFilter === 'all' || p.role === roleFilter) && (!term || p.name.toLowerCase().includes(term)))
-      .sort((a, b) => b.total_points - a.total_points)
+    const table = move === 'all' ? filtered.sort((a, b) => b.total_points - a.total_points) : byMover(filtered, move)
     const pick = (p) => {
       if (have.has(p.player_id)) return
       if (!out) { flash('Tap a player to sell first.'); return }
@@ -136,6 +136,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
                   return <button key={k} onClick={() => setRoleFilter(k)} style={{ font: `${on ? 700 : 600} 10px 'Hanken Grotesk'`, color: on ? 'var(--ink)' : 'var(--dim)', background: on ? 'var(--pb-accent, #06B6D4)' : 'var(--surface2)', padding: '5px 10px', borderRadius: 7, border: 'none', cursor: 'pointer' }}>{l}</button>
                 })}
               </div>
+              <div style={{ marginLeft: 8 }}><MoverChips value={move} onChange={setMove} /></div>
               <div style={{ marginLeft: 'auto', width: 180 }}><Field placeholder="⌕ Search" value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '7px 12px', fontSize: 11.5 }} /></div>
             </div>
             {out && <div style={{ font: `600 11px 'Hanken Grotesk'`, color: 'var(--accent-strong)', marginBottom: 8 }}>Replacing {out.name} · pick a {ROLE_LABEL[out.role].toLowerCase()}</div>}
@@ -208,7 +209,9 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
             Replace with · {ROLE_LABEL[out.role].toLowerCase()}s
           </SectionLabel>
           <Field placeholder="⌕ Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '10px 12px', fontSize: 12.5, marginBottom: 8 }} />
+          <div style={{ marginBottom: 8 }}><MoverChips value={move} onChange={setMove} /></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {!shortlist.length && move !== 'all' && <p style={{ font: `500 12.5px 'Hanken Grotesk'`, color: 'var(--faint)', padding: '6px 2px' }}>{moverEmpty(move)}</p>}
             {shortlist.map(p => {
               const on = tin?.player_id === p.player_id
               const over = bank + outSell - Number(p.price) < -1e-6

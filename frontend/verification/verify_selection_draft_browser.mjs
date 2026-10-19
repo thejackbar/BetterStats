@@ -67,8 +67,10 @@ const run = async () => {
   }
   const json = (r, body, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
   await page.route('**/api/**', (r) => json(r, {}))
+  // Names print through the club's format (default "Last, First"); these checks look them up as typed.
+  await page.route(/\/api\/club-admin\/settings$/, (r) => json(r, { player_name_format: 'first_last' }))
   await page.route('**/api/auth/me', (r) => json(r, ME))
-  await page.route('**/api/selection/overview', (r) => json(r, { fixtures: server.overview, default_team_size: 11 }))
+  await page.route(/\/api\/selection\/overview(\?.*)?$/, (r) => json(r, { fixtures: server.overview, default_team_size: 11 }))
   await page.route(/\/api\/selection\/[^/]+\/previous-xi/, (r) => json(r, { source_fixture_id: null, player_ids: [], captain_id: null, wicket_keeper_id: null }))
   await page.route(/\/api\/selection\/selected-players/, (r) => json(r, { player_ids: [] }))
   await page.route(new RegExp(`/api/selection/${FID}/draft(\\?.*)?$`), async (r) => {
@@ -113,7 +115,7 @@ const run = async () => {
     await page.waitForTimeout(300)
   }
   const confirmBtn = () => {
-    const loc = page.getByRole('button', { name: /^confirm/i }).first()
+    const loc = page.getByRole('button', { name: /^(confirm|lock team)/i }).first()
     // Presence-safe: against a build without the Confirm button this reports
     // "<absent>" instead of timing out, so a control run fails checks, not the script.
     return { innerText: () => loc.innerText({ timeout: 1500 }).catch(() => '<absent>'), click: () => loc.click({ timeout: 1500 }).catch(() => {}) }
@@ -177,9 +179,9 @@ const run = async () => {
   const ids = (wire.confirms[0]?.players || []).map((p) => p.player_id)
   ok('it carries Cara and Alex, numbered 1 and 2', ids.length === 2 && ids.includes(ID['Cara Free']) && ids.includes(ID['Alex Backtoback']) && wire.confirms[0].players.map((p) => p.batting_order).join() === '1,2', JSON.stringify(wire.confirms[0]))
   ok('the stand-in server cleared its draft', server.draft === null)
-  ok('after confirming the button reads "Confirmed"', /Confirmed/.test(await confirmBtn().innerText()), await confirmBtn().innerText())
+  ok('after confirming the button offers "Lock team" (this stand-in server does not lock)', /Lock team/.test(await confirmBtn().innerText()), await confirmBtn().innerText())
   ok('no draft write landed after the confirm', server.draft === null)
-  ok('toast says Confirmed', /Confirmed 2 players/.test(await body()))
+  ok('toast says Confirmed and locked', /Confirmed and locked 2 players/.test(await body()))
 
   console.log('\n# Discard changes goes back to the confirmed XI')
   await card('Bob Blocked').click().catch(() => {})
@@ -191,14 +193,14 @@ const run = async () => {
   await page.getByRole('button', { name: /Discard changes/ }).click({ timeout: 1500 }).catch(() => {})
   await page.waitForTimeout(1200)
   ok('DELETE sent', wire.draftDeletes === d2 + 1)
-  ok('banner gone and button "Confirmed"', !/Draft\./.test(await body()) && /Confirmed/.test(await confirmBtn().innerText()))
+  ok('banner gone and button "Lock team"', !/Draft\./.test(await body()) && /Lock team/.test(await confirmBtn().innerText()))
   ok('both confirmed players are back on the board', !(await body()).includes('Confirm (') && wire.confirms.length === 1)
 
   console.log('\n# a second selector: their draft reaches a board with nothing unsent')
   const poll = async () => { await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); await page.waitForTimeout(700) }
   await page.setViewportSize({ width: 1440, height: 1000 })
   await open()
-  ok('board starts on the confirmed XI', /Confirmed/.test(await confirmBtn().innerText()), await confirmBtn().innerText())
+  ok('board starts on the confirmed XI', /Lock team/.test(await confirmBtn().innerText()), await confirmBtn().innerText())
   const putsBeforeSam = wire.draftPuts.length
   otherSaves([ID['Cara Free'], null, ID['Alex Backtoback']])
   await poll()
@@ -249,7 +251,7 @@ const run = async () => {
   console.log('\n# the draft vanishing (confirmed or discarded elsewhere)')
   server.draft = null; server.version = 0
   await poll()
-  ok('a board with nothing unsent drops back to the confirmed XI', /Confirmed/.test(await confirmBtn().innerText()) && !/Draft\./.test(await body()), await confirmBtn().innerText())
+  ok('a board with nothing unsent drops back to the confirmed XI', /Lock team/.test(await confirmBtn().innerText()) && !/Draft\./.test(await body()), await confirmBtn().innerText())
   ok('and says why', /confirmed or discarded by someone else/.test(await body()))
 
   console.log('\n# the matchday overview marks a fixture with a draft')

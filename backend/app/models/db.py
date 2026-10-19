@@ -340,6 +340,10 @@ class Organisation(Base):
     # default. Signed-in club admins still see everything. Read through
     # services/junior_hiding.py, never directly.
     hide_juniors = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Count a club's winter and summer seasons of one year as ONE season
+    # (migration 331). Off by default: "Winter 2026" and "Summer 2026/27" are two
+    # seasons. Read through services/season_kind.py's callers, never directly.
+    amalgamate_seasons = Column(Boolean, nullable=False, server_default="false", default=False)
     # The club's own names for the four sponsor tiers (migration 318), e.g.
     # {"major": "Naming Partner"}. NULL means the stock names. Read through
     # services/sponsor_tiers.resolve_labels, never directly.
@@ -381,6 +385,10 @@ class Organisation(Base):
     # the default scheme. Read through services/milestone_rules.load_scheme.
     milestone_runs_step = Column(Integer, nullable=True)
     milestone_wickets_step = Column(Integer, nullable=True)
+    # Matches and catches steps (migration 330), and the per-grade table that
+    # sits beside them (services/grade_milestone_schemes).
+    milestone_matches_step = Column(Integer, nullable=True)
+    milestone_catches_step = Column(Integer, nullable=True)
     # ─── AFL — optional public leaderboard categories (migration 217) ────────
     # Games and Goals are always shown; a club decides whether Best on Ground
     # and its two vote-tally leaderboards (Club/Competition Best & Fairest —
@@ -535,6 +543,11 @@ class Organisation(Base):
     # Whether the self-service page tells a player which squad is theirs (migration
     # 325). Off by default: some clubs do not want squads known to the players.
     availability_show_squad = Column(Boolean, nullable=False, server_default="false", default=False)
+    # False = the club records only Available / Unavailable (migration 340).
+    availability_allow_maybe = Column(Boolean, nullable=False, server_default="true", default=True)
+    # The ordered module keys shown on a player's own page (migration 341).
+    # NULL = never chosen, which reads as services/player_dashboard.DEFAULT_MODULES.
+    player_dashboard_modules = Column(JSONB, nullable=True)
     # ─── BetterFantasyCricket: public fantasy link (migration 087) ────────────
     # The per-club magic link members and supporters use to register and play
     # (mirrors availability_link_token). Rotatable; resolves to the club's
@@ -828,6 +841,8 @@ class ClubHonourBoard(Base):
     # category (optionally narrowed by subcategory) instead of manual entries.
     source_category = Column(Text, nullable=True)
     source_subcategory = Column(Text, nullable=True)
+    # Optional exact award name inside the category ("A Grade Cap Number"); NULL = all.
+    source_achievement = Column(Text, nullable=True)
     # How many columns to lay the entries out in on the public site (1–4).
     columns = Column(Integer, nullable=False, server_default="1", default=1)
     display_order = Column(Integer, nullable=False, server_default="0", default=0)
@@ -916,6 +931,10 @@ class ClubMembership(Base):
     # role". For super_admin/club_admin the list is ignored (those roles
     # imply all caps). For club_member, this is the explicit allowlist.
     capabilities = Column(JSONB, default=list, nullable=False, server_default="[]")
+    # The subset of `capabilities` held at VIEW level only (services/access.py, migration
+    # 344): a route gated on one of them answers a read and refuses a write. Always []
+    # for club_admin and super_admin.
+    view_only_caps = Column(JSONB, default=list, nullable=False, server_default="[]")
     # The club's primary / owner admin (migration 118). The first club_admin
     # created for a club is primary; it's reassignable to another club_admin (by
     # the current primary or a super admin). Only the primary may request a paid
@@ -1601,6 +1620,14 @@ class Fixture(Base):
     # names its finals something the heuristic can't read.
     is_final = Column(Boolean, nullable=True)
     notes = Column(Text, nullable=True)
+    # Which of the squad's teams plays this fixture, as a grade key (migration 337).
+    # NULL = work it out from grade_id. Sync never writes it.
+    side_key = Column(Text, nullable=True)
+    # The squad on a synced fixture was picked by hand (migration 338): sync leaves it.
+    team_pinned = Column(Boolean, nullable=False, server_default="false")
+    # Set when the confirmed side is locked (migration 334); NULL = open to edit.
+    locked_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    locked_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -1626,6 +1653,8 @@ class Team(Base):
     sequence = Column(Integer, default=0, nullable=False, server_default="0")  # hierarchy rank (1 = top team)
     grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
     default_formation = Column(Text, nullable=True)
+    default_team_size = Column(Integer, nullable=True)  # NULL = follow the club; 0 = no limit
+    min_team_size = Column(Integer, nullable=True)  # fewest players the side may field; NULL = must be full
     is_active = Column(Boolean, default=True, nullable=False, server_default="true")
     source = Column(Text, nullable=False, server_default="manual")  # 'auto' | 'manual'
     playhq_id = Column(Text, nullable=True)
@@ -1761,6 +1790,12 @@ class VoteMedal(Base):
     # has thought about grades. No FK on purpose: a grade merged away or
     # deleted just stops matching rather than blocking the delete.
     grade_ids = Column(JSONB, nullable=False, default=list, server_default="[]")
+    # Per-team override of ``voter_mode`` (migration 345): grade NAME ->
+    # 'players' | 'captain'. A team with no entry follows ``voter_mode``.
+    grade_voter_modes = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    # How the medal weights its grades (migration 346): {"mode": 'off' | 'auto'
+    # | 'manual', "manual": {grade NAME: multiplier}}. Empty = unweighted.
+    grade_weighting = Column(JSONB, nullable=False, default=dict, server_default="{}")
     position = Column(Integer, nullable=False, default=0, server_default="0")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
@@ -1901,6 +1936,13 @@ class NetSession(Base):
     # carries no net column — the default lives in the most recent session).
     settings = Column(JSONB, nullable=True)
     status = Column(Text, nullable=False, server_default="active")  # active | done
+    # This session's own check-in link (migration 335): a QR code printed for it
+    # checks people into it alone, where the club-wide link joins every live
+    # session. NULL until first asked for.
+    checkin_token = Column(Text, nullable=True)
+    # Squads this session is for; NULL/empty = everyone. Narrows the self check-in
+    # list reached by this session's own link.
+    squad_team_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
     # Bumped by every write that changes what the live screen shows, so a
     # second device polling with the version it last saw is told "nothing has
     # changed" in two fields instead of re-reading the whole session. Always
@@ -2631,6 +2673,11 @@ class ImportBatch(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     committed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     undone_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # A historical summary that stops at a season (migration 328): the START year
+    # of the last season the sheet covers, and the club's wording for it. NULL =
+    # an ordinary import that claims the whole career.
+    through_year = Column(Integer, nullable=True)
+    through_label = Column(Text, nullable=True)
 
     organisation = relationship("Organisation")
 

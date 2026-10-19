@@ -197,11 +197,15 @@ const BsTeams = lazy(() => import('./pages/admin/betterselect/AdminTeams'))
 const BsAvailability = lazy(() => import('./pages/admin/betterselect/AdminAvailability'))
 const BsSelection = lazy(() => import('./pages/admin/betterselect/AdminSelection'))
 const BsSelectionOverview = lazy(() => import('./pages/admin/betterselect/AdminSelectionOverview'))
+const BsSelectionDraftTable = lazy(() => import('./pages/admin/betterselect/AdminSelectionDraftTable'))
+const BsAuditHistory = lazy(() => import('./pages/admin/betterselect/AuditHistory'))
 const BsLadders = lazy(() => import('./pages/admin/betterselect/AdminLadders'))
 const BsNets = lazy(() => import('./pages/admin/betterselect/Nets'))
 const BsNetSession = lazy(() => import('./pages/admin/betterselect/NetSession'))
 const BsVotes = lazy(() => import('./pages/admin/betterselect/AdminVotes'))
 const BsRules = lazy(() => import('./pages/admin/betterselect/AdminSelectionRules'))
+const BsSettings = lazy(() => import('./pages/admin/betterselect/AdminSelectSettings'))
+const BsFines = lazy(() => import('./pages/admin/betterselect/AdminFines'))
 const BetterIQHome = lazy(() => import('./pages/admin/betteriq/BetterIQHome'))
 const IqOpposition = lazy(() => import('./pages/admin/betteriq/OppositionScout'))
 const IqOppositionPlayer = lazy(() => import('./pages/admin/betteriq/OppositionPlayer'))
@@ -219,6 +223,7 @@ const FantasyHome = lazy(() => import('./pages/admin/fantasy/FantasyHome'))
 const FantasySettings = lazy(() => import('./pages/admin/fantasy/FantasySettings'))
 const FantasyScoring = lazy(() => import('./pages/admin/fantasy/FantasyScoring'))
 const FantasyPool = lazy(() => import('./pages/admin/fantasy/FantasyPool'))
+const FantasyPrices = lazy(() => import('./pages/admin/fantasy/FantasyPrices'))
 const FantasyPlayers = lazy(() => import('./pages/admin/fantasy/FantasyPlayers'))
 const FantasyLeagues = lazy(() => import('./pages/admin/fantasy/FantasyLeagues'))
 
@@ -278,6 +283,12 @@ const PublicEventRegister = lazy(() => import('./pages/PublicEventRegister'))
 const PublicMemberPortal = lazy(() => import('./pages/PublicMemberPortal'))
 // Public, login-free merch storefront
 const PublicMerchStore = lazy(() => import('./pages/PublicMerchStore'))
+
+// A redirect that keeps the query string, so an old link with ?date= still lands on that day.
+function RedirectKeepingSearch({ to }) {
+  const { search } = useLocation()
+  return <Navigate to={`${to}${search}`} replace />
+}
 
 const PageLoader = () => (
   <div className="flex justify-center py-24">
@@ -516,6 +527,7 @@ export default function App() {
           <Route path="/admin/fantasy/settings" element={<ProtectedRoute requireModule="fantasy"><FantasySettings /></ProtectedRoute>} />
           <Route path="/admin/fantasy/scoring" element={<ProtectedRoute requireModule="fantasy"><FantasyScoring /></ProtectedRoute>} />
           <Route path="/admin/fantasy/pool" element={<ProtectedRoute requireModule="fantasy"><FantasyPool /></ProtectedRoute>} />
+          <Route path="/admin/fantasy/prices" element={<ProtectedRoute requireModule="fantasy"><FantasyPrices /></ProtectedRoute>} />
           <Route path="/admin/fantasy/players" element={<ProtectedRoute requireModule="fantasy"><FantasyPlayers /></ProtectedRoute>} />
           <Route path="/admin/fantasy/leagues" element={<ProtectedRoute requireModule="fantasy"><FantasyLeagues /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute requireActivePlan><AdminSettings /></ProtectedRoute>} />
@@ -574,11 +586,17 @@ export default function App() {
           <Route path="/admin/betterselect/teams" element={<ProtectedRoute requireModule="select"><BsTeams /></ProtectedRoute>} />
           <Route path="/admin/betterselect/availability" element={<ProtectedRoute requireModule="select"><BsAvailability /></ProtectedRoute>} />
           <Route path="/admin/betterselect/selection" element={<ProtectedRoute requireModule="select"><BsSelectionOverview /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/whiteboard" element={<ProtectedRoute requireModule="select"><BsSelectionDraftTable /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/audit" element={<ProtectedRoute requireModule="select"><BsAuditHistory /></ProtectedRoute>} />
+          {/* Its old address, from before it had its own place in the menu. */}
+          <Route path="/admin/betterselect/selection/draft-table" element={<RedirectKeepingSearch to="/admin/betterselect/whiteboard" />} />
           <Route path="/admin/betterselect/select/:fixtureId" element={<ProtectedRoute requireModule="select"><BsSelection /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets" element={<ProtectedRoute requireModule="select"><BsNets /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets/:id" element={<ProtectedRoute requireModule="select"><BsNetSession /></ProtectedRoute>} />
           <Route path="/admin/betterselect/ladders" element={<ProtectedRoute requireModule="select"><BsLadders /></ProtectedRoute>} />
           <Route path="/admin/betterselect/votes" element={<ProtectedRoute requireModule="select"><BsVotes /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/settings" element={<ProtectedRoute requireModule="select"><BsSettings /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/fines" element={<ProtectedRoute requireModule="select"><BsFines /></ProtectedRoute>} />
           <Route path="/admin/betterselect/rules" element={<ProtectedRoute requireModule="select"><BsRules /></ProtectedRoute>} />
 
           {/* BetterIQ module */}

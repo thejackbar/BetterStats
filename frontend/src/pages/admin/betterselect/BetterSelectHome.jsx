@@ -16,6 +16,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY } from '../../../lib/availability'
 import { moduleBrand } from '../../../lib/moduleBrand'
 import { Icon, Btn, AvailSummary, Empty } from './ui'
+import usePersistedState from '../../../lib/usePersistedState'
 
 const BRAND = moduleBrand('select')
 
@@ -67,19 +68,21 @@ export default function BetterSelectHome() {
 // every shape so the landing page degrades rather than breaks.
 function BetterSelectOverview() {
   const fmt = useAdminNameFormat()
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const navigate = useNavigate()
   const [fixtures, setFixtures] = useState(null)
   const [overview, setOverview] = useState([])
   const [matrix, setMatrix] = useState({ dates: [], players: [], availability: {} })
   const [roster, setRoster] = useState([])
+  // The same remembered Show juniors choice the other BetterSelect screens use.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   useEffect(() => {
     let alive = true
     Promise.all([
-      api.bsListFixtures(true).then((r) => r).catch(() => []),
-      api.bsSelectionOverview().then((d) => d.fixtures || []).catch(() => []),
-      api.bsAvailabilityMatrix().then((d) => d).catch(() => ({ dates: [], players: [], availability: {} })),
+      api.bsListFixtures(true, { hideJuniors: !showJuniors }).then((r) => r).catch(() => []),
+      api.bsSelectionOverview({ hideJuniors: !showJuniors }).then((d) => d.fixtures || []).catch(() => []),
+      api.bsAvailabilityMatrix({ juniors: showJuniors }).then((d) => d).catch(() => ({ dates: [], players: [], availability: {} })),
       api.adminListPlayers().then((r) => r).catch(() => []),
     ]).then(([fx, ov, mx, rs]) => {
       if (!alive) return
@@ -89,7 +92,7 @@ function BetterSelectOverview() {
       setRoster(Array.isArray(rs) ? rs : [])
     })
     return () => { alive = false }
-  }, [])
+  }, [showJuniors])
 
   const playable = useMemo(
     () => (fixtures || []).filter((f) => f.home_away !== 'BYE' && f.played_on),
@@ -168,7 +171,7 @@ function BetterSelectOverview() {
   }, [squad, tally, playable, heroDate, lineupLen, hero, fmt])
 
   const heroTitle = hero ? `${hero.team_name || 'Our team'} vs ${hero.opponent_name || hero.label || 'TBC'}` : ''
-  const canSelect = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canSelect = hasCapability(CAP.SELECT_SELECTION) || hasCapability(CAP.MANAGE_SELECTIONS)
 
   if (fixtures === null) return <BetterSelectLayout title="Overview"><PbSpinner message="Loading…" /></BetterSelectLayout>
 

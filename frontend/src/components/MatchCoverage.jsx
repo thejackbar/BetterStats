@@ -12,14 +12,15 @@ function CoverageExplainer({ coverage }) {
          style={{ background: 'var(--pb-surface2)' }}>
       <p className="mb-2">
         <strong className="text-pb-text">Two records of the same career.</strong>{' '}
-        Cricket Australia's own season figures count {career_matches} matches in
-        this career. They do not say which grade a match was played in, so they
-        cannot be split by competition, grade type or format.
+        The career total is {career_matches} matches: Cricket Australia's season
+        figures plus any history the club has added from its own records. Neither
+        says which grade a match was played in, so the total cannot be split by
+        competition, grade type or format.
       </p>
       <p className="mb-2">
         Anything you filter, such as a competition, a grade type or a format, is counted from
-        the {breakdown_matches} matches we hold a scorecard for, not from Cricket
-        Australia's count. That is why the parts do not add up to {career_matches}.
+        the {breakdown_matches} matches we hold a scorecard for, not from the career
+        total. That is why the parts do not add up to {career_matches}.
       </p>
       {short && (
         <p className="mb-2">
@@ -28,7 +29,7 @@ function CoverageExplainer({ coverage }) {
           scorecard for {without_scorecard === 1 ? 'it' : 'them'} at all. There is nothing
           waiting to be filed. {without_scorecard === 1 ? 'The match is' : 'The matches are'}{' '}
           not in the records as {without_scorecard === 1 ? 'a game' : 'games'}, only in
-          Cricket Australia's season count.
+          the season counts and the club's own history.
         </p>
       )}
       {extra_scorecards > 0 && (
@@ -36,12 +37,14 @@ function CoverageExplainer({ coverage }) {
           Here it runs the other way: we hold {extra_scorecards} more{' '}
           {extra_scorecards === 1 ? 'scorecard' : 'scorecards'} than the season totals
           count, so a filtered figure can be higher than the career total rather than
-          lower. A fixture marked completed with nothing on its scorecard is not
-          counted here, but a game that started and was then stopped is.
+          lower. The Matches figure at the top counts them. A fixture marked
+          completed with nothing on its scorecard is not counted here, but a game
+          that started and was then stopped is.
         </p>
       )}
       <p className="mb-0">
-        Both figures are real. Neither is adjusted to match the other.
+        Both figures are real. The Matches figure at the top is never lower than
+        the by-grade total on the Analysis tab.
       </p>
     </div>
   )
@@ -111,7 +114,7 @@ export function MatchCoverageNote({ coverage, filtered = false, className = '' }
   // class of mistake this note exists to prevent, one level down.
   const headline = filtered
     ? `Filtered figures are counted from the ${breakdown_matches} matches we hold `
-      + `a scorecard for, not the ${career_matches} in Cricket Australia's season totals.`
+      + `a scorecard for, not the ${career_matches} in the career total.`
     : short
       ? `${breakdown_matches} of these ${career_matches} matches can be broken down by competition, grade or format.`
       : `Filtering counts ${breakdown_matches} matches, ${extra_scorecards} more than the ${career_matches} in the season totals.`
@@ -193,5 +196,34 @@ export function GradeTotalNote({ rows = [], unattributed = 0, coverage = null,
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * One line saying the career figures include scorecards Cricket Australia's own
+ * season totals have not counted yet (the backend raises a total to the cards we
+ * hold, never lowers it: services/held_topup.py). Drawn only when something was
+ * added; the backend sends `topped_up` on a career block only then.
+ */
+export function TopUpNote({ batting, bowling, fielding, className = '' }) {
+  const parts = []
+  const b = batting?.topped_up
+  if (b && (b.innings || b.runs)) {
+    parts.push(`${b.innings} batting innings (${b.runs} ${b.runs === 1 ? 'run' : 'runs'})`)
+  }
+  const w = bowling?.topped_up
+  if (w && (w.spells || w.wickets)) {
+    parts.push(`${w.spells} bowling ${w.spells === 1 ? 'spell' : 'spells'} (${w.wickets} ${w.wickets === 1 ? 'wicket' : 'wickets'})`)
+  }
+  const f = fielding?.topped_up
+  const dismissals = f ? (f.catches || 0) + (f.run_outs || 0) + (f.stumpings || 0) : 0
+  if (dismissals > 0) {
+    parts.push(`${dismissals} fielding ${dismissals === 1 ? 'dismissal' : 'dismissals'}`)
+  }
+  if (!parts.length) return null
+  return (
+    <p className={`font-mono text-[10px] text-pb-dim ${className}`}>
+      Includes {parts.join(', ')} from scorecards we hold that Cricket Australia's season totals have not counted yet.
+    </p>
   )
 }

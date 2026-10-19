@@ -9,9 +9,12 @@ player shared with another club doesn't carry their other club's numbers here.
 """
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.aggregations import grid_matches_for_players
 from app.services.bowling_style import bowling_class, bowling_label
 
 
@@ -44,8 +47,19 @@ async def list_all_players(session: AsyncSession, org_id: str) -> list[dict]:
         ),
         {"org": org_id},
     )
+    rows = list(res.mappings())
+    # Raised to the by-grade grid like the player's own page (never lower), so a scouting
+    # roster and the profile read one number. All grades, no scope: the figure above is CA's
+    # all-grades total. A failure leaves the figures as they were.
+    raised: dict = {}
+    try:
+        async with session.begin_nested():
+            raised = await grid_matches_for_players(
+                session, org_id, [r["player_id"] for r in rows], None, None)
+    except Exception:
+        logging.getLogger(__name__).exception("iq roster games vs profile failed for org %s", org_id)
     out = []
-    for r in res.mappings():
+    for r in rows:
         sp = r["skill_positions"] or []
         keeper = ("WKT" in sp) or bool(r["player_role"] and "KEEP" in (r["player_role"] or "").upper())
         out.append({
@@ -56,7 +70,7 @@ async def list_all_players(session: AsyncSession, org_id: str) -> list[dict]:
             "bowling_style": bowling_label(r["bowling_action"], r["bowling_type"]),
             "bowling_class": bowling_class(r["bowling_type"]),
             "squad": r["squad"],
-            "matches": int(r["matches"] or 0),
+            "matches": max(int(r["matches"] or 0), int(raised.get(r["player_id"]) or 0)),
             "runs": int(r["runs"] or 0),
             "wickets": int(r["wickets"] or 0),
             "last_year": r["last_year"],

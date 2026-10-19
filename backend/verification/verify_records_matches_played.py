@@ -67,9 +67,12 @@ KID = uuid.UUID("a3000000-0000-0000-0000-000000000003")
 KEEPER = uuid.UUID("a3000000-0000-0000-0000-000000000004")
 
 # What the fixture is built to give R Spinks (see seed()).
+# CA's season total (20, plus the two manual games the view adds) is above the 11 scorecards held,
+# so his PROFILE reads the by-grade grid total, 22. Since v9.113.13 the Records boards read that too
+# (they used to read the 11 held); the held figure is still what a PICKED GRADE reads.
 SPINKS_BATTED = 6      # g1-g5 and manual m1
 SPINKS_INNINGS = 10    # g1 once, g2-g5 twice (two-day matches), m1 once
-SPINKS_PLAYED = 11     # the six above + bowled-only, fielded-only, named-only,
+SPINKS_PLAYED = 11     # (scorecards held) the six above + bowled-only, fielded-only, named-only,
                        # DNB-row, and manual m2 (a DNB row and a spell, no bat)
 
 
@@ -207,6 +210,15 @@ async def main() -> None:
     async with Session() as session:
         await seed(session)
 
+    from app.routers.players import get_player_stats
+    async with Session() as session:
+        prof = await get_player_stats(
+            player_id=str(SPINKS), db=session, season_id=None, grade_id=None, last_n_games=None,
+            start_date=None, end_date=None, categories="senior", formats=None, competitions=None, grades=None)
+    SPINKS_PROFILE = prof["career_batting"]["games"]
+    check("his profile reads the grid total, above the scorecards held",
+          SPINKS_PROFILE > SPINKS_PLAYED, str(SPINKS_PROFILE))
+
     print("\n-- the reported case: a senior selection takes the game-level branch --")
     async with Session() as session:
         scoped = await records(session, categories="senior")
@@ -218,8 +230,9 @@ async def main() -> None:
     if runs_row:
         check("his innings are still his batting innings",
               runs_row["innings"] == SPINKS_INNINGS, str(runs_row))
-        check(f"his matches are matches PLAYED ({SPINKS_PLAYED}), not batted in ({SPINKS_BATTED})",
-              runs_row["matches"] == SPINKS_PLAYED, f"got {runs_row['matches']}")
+        check(f"his matches are matches PLAYED, not batted in ({SPINKS_BATTED}), and read what his profile reads",
+              runs_row["matches"] == SPINKS_PROFILE and runs_row["matches"] > SPINKS_BATTED,
+              f"got {runs_row['matches']}, profile {SPINKS_PROFILE}")
         check("so matches can now sit either side of innings, as on his profile",
               runs_row["matches"] > 0)
 
@@ -235,8 +248,8 @@ async def main() -> None:
         "most_matches": row(scoped["team"]["most_matches"], SPINKS),
     }
     for name, r in mates.items():
-        check(f"{name}: Spinks is on it and reads {SPINKS_PLAYED} matches",
-              r is not None and r["matches"] == SPINKS_PLAYED,
+        check(f"{name}: Spinks is on it and reads his profile's {SPINKS_PROFILE} matches",
+              r is not None and r["matches"] == SPINKS_PROFILE,
               str(None if r is None else r.get("matches")))
 
     print("\n-- a player who bats in every match he plays does not move --")

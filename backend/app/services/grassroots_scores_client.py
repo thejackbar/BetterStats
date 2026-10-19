@@ -20,6 +20,7 @@ from typing import Optional
 import httpx
 
 from app.config.settings import settings
+from app.services import club_match
 
 logger = logging.getLogger(__name__)
 
@@ -373,12 +374,16 @@ async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> li
         if since and day < since:
             continue
         teams = m.get("teams") or []
-        home = next((t.get("displayName") for t in teams if t.get("isHome")), None)
-        away = next((t.get("displayName") for t in teams if not t.get("isHome")), None)
+        home_t = next((t for t in teams if t.get("isHome")), None)
+        away_t = next((t for t in teams if not t.get("isHome")), None)
         out.append({
             "id": m.get("id"),
-            "home_team": home,
-            "away_team": away,
+            "home_team": (home_t or {}).get("displayName"),
+            "away_team": (away_t or {}).get("displayName"),
+            # The owning clubs, so "is this our match" can be answered by id
+            # rather than by a word the team name may share with another club.
+            "home_org_id": ((home_t or {}).get("owningOrganisation") or {}).get("id"),
+            "away_org_id": ((away_t or {}).get("owningOrganisation") or {}).get("id"),
             "played_at": day,
             "round": (m.get("round") or {}).get("name"),
             "venue": (m.get("venue") or {}).get("name"),
@@ -387,7 +392,51 @@ async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> li
     return out
 
 
-async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> list[dict]:
+def schedule_days(m: dict) -> list[tuple[str, str]]:
+    """A raw match's playing days as ``[(YYYY-MM-DD, startDateTime)]``, earliest first.
+
+    One entry per day of play; entries are not reliably in day order, so reading
+    only ``matchSchedule[0]`` could file a two-day game under its second week. A
+    bye has no schedule and gives ``[]``. Entries with no readable date are
+    skipped; a repeated day is kept once."""
+    seen: dict[str, str] = {}
+    for entry in m.get("matchSchedule") or []:
+        dt = ((entry or {}).get("startDateTime") or "").strip()
+        day = dt[:10]
+        if len(day) == 10 and day[4] == "-" and day[7] == "-" and day not in seen:
+            seen[day] = dt
+    return sorted(seen.items())
+
+
+def match_sides(m: dict) -> dict:
+    """A raw match-list entry reduced to the fields ``club_match`` reads:
+    ``home_team``/``away_team`` and each side's owning organisation id."""
+    teams = m.get("teams") or []
+    home_t = next((t for t in teams if t.get("isHome")), None)
+    away_t = next((t for t in teams if not t.get("isHome")), None)
+    return {
+        "home_team": (home_t or {}).get("displayName"),
+        "away_team": (away_t or {}).get("displayName"),
+        "home_org_id": ((home_t or {}).get("owningOrganisation") or {}).get("id"),
+        "away_org_id": ((away_t or {}).get("owningOrganisation") or {}).get("id"),
+    }
+
+
+def cached_grade_matches(grade_id: str) -> Optional[list[dict]]:
+    """The grade's match list if the last fetch genuinely succeeded, else None.
+
+    ``get_grade_matches`` returns ``[]`` both for "no matches" and for a failed
+    call, but only a real 200 is cached. Reading the cache therefore tells a
+    caller that must act on ABSENCE (the fixtures sync removing games CA no
+    longer lists) whether the list can be trusted. Never fetches.
+    """
+    hit = _grade_matches_cache.get(grade_id)
+    if hit and time.time() - hit[0] < _GRADE_MATCHES_TTL:
+        return hit[1]
+    return None
+
+
+async def get_grade_fixtures(grade_id: str, *, include_live: bool = True, force: bool = False) -> list[dict]:
     """Upcoming (and optionally live) fixtures for one grade, normalised.
 
     Reuses ``get_grade_matches`` (same in-process cache). Returns a list of
@@ -402,7 +451,7 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> lis
     note) — pulled here too since a fixtures/results round pull is otherwise
     the one surface with no crest at all.
     """
-    matches = await get_grade_matches(grade_id)
+    matches = await get_grade_matches(grade_id, force=force)
     today = date.today().isoformat()
     keep = {_FIXTURE_STATUS_UPCOMING}
     if include_live:
@@ -415,10 +464,15 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> lis
             continue
         if sid not in keep:
             continue
-        sched = (m.get("matchSchedule") or [{}])
-        dt = (sched[0].get("startDateTime") if sched else "") or ""
-        day = dt[:10]
-        if not day or day < today:
+        # A two-day match carries one schedule entry per day (a week apart, in no
+        # reliable order). The first day is the earliest, the last day is `end_at`;
+        # a match is still upcoming while its last day is today or later.
+        days = schedule_days(m)
+        if not days:
+            continue
+        day, last_day = days[0][0], days[-1][0]
+        dt = days[0][1]
+        if last_day < today:
             continue
         teams = m.get("teams") or []
         home_t = next((t for t in teams if t.get("isHome")), None)
@@ -430,6 +484,7 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> lis
             "home_team": (home_t or {}).get("displayName"),
             "away_team": (away_t or {}).get("displayName"),
             "played_at": day,
+            "end_at": last_day if last_day != day else None,
             "time": dt[11:16] if len(dt) >= 16 else None,
             "status": "LIVE" if sid == _FIXTURE_STATUS_LIVE else "UPCOMING",
             "round": (m.get("round") or {}).get("name"),
@@ -447,17 +502,25 @@ async def get_grades_fixtures(
     grade_ids: list[str],
     match_keys: Optional[list[str]] = None,
     *,
+    club=None,
     include_live: bool = True,
+    force: bool = False,
 ) -> list[dict]:
     """Aggregate ``get_grade_fixtures`` across grades, de-duplicated and sorted.
 
-    ``match_keys`` (lowercased club name keys, e.g. from ``club_match_keys``)
-    optionally restricts results to fixtures involving that club (substring match
-    on either side). Grades are fetched concurrently; the underlying per-grade
-    cache makes repeat calls cheap.
+    ``club`` (the Organisation) restricts results to fixtures involving that
+    club: by the owning organisation id on each side, falling back to the club's
+    name only for a fixture whose payload carries no organisation id
+    (``services.club_match.fixture_involves_club``). A grade is a whole
+    competition, so without this a club sees every other club's games in it.
+
+    ``match_keys`` (lowercased club name keys) is the older name-only form, kept
+    for a caller with no Organisation to hand: a whole-word match on either side.
+    Grades are fetched concurrently; the underlying per-grade cache makes repeat
+    calls cheap.
     """
     results = await asyncio.gather(
-        *[get_grade_fixtures(g, include_live=include_live) for g in grade_ids],
+        *[get_grade_fixtures(g, include_live=include_live, force=force) for g in grade_ids],
         return_exceptions=True,
     )
     out: list[dict] = []
@@ -471,10 +534,11 @@ async def get_grades_fixtures(
             fid = fx.get("id")
             if not fid or fid in seen:
                 continue
-            if match_keys:
-                hl = (fx.get("home_team") or "").lower()
-                al = (fx.get("away_team") or "").lower()
-                if not any(k in hl or k in al for k in match_keys):
+            if club is not None:
+                if not club_match.fixture_involves_club(club, fx):
+                    continue
+            elif match_keys:
+                if not club_match.keys_match_any(match_keys, fx.get("home_team"), fx.get("away_team")):
                     continue
             seen.add(fid)
             out.append(fx)

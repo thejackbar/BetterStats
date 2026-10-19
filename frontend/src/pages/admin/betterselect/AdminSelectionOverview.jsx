@@ -20,8 +20,9 @@ import { useTheme } from '../../../contexts/ThemeContext'
 import { api } from '../../../lib/api'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
-import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
+import { AVAILABILITY, AVAIL_ORDER, viewStatus } from '../../../lib/availability'
 import { Icon, Avatar, Dot, Tag, RoleChips } from './ui'
+import usePersistedState from '../../../lib/usePersistedState'
 
 const ROLE_CODES = ['BAT', 'ALL', 'BWL', 'WKT']
 const tint = (token, pct) => `color-mix(in srgb, ${token} ${pct}%, transparent)`
@@ -50,7 +51,13 @@ function gradeBadge(fx) {
 
 function summarize(fx, defaultTarget) {
   const players = fx.lineup || []
-  const target = defaultTarget || 11
+  // Each side is judged against its own size (a club can run 12-a-side seconds
+  // next to 11-a-side firsts); the club default only fills in when it has none.
+  const min = fx.team_min || 0
+  const rawSize = fx.team_size ?? defaultTarget ?? 11
+  // No limit with a minimum has no cap, so the minimum is the whole need.
+  const target = rawSize || (min ? 0 : (defaultTarget || 11))
+  const need = min || target
   const has = (p, c) => (p.skill_positions || []).includes(c)
   const count = players.length
   const bal = { BAT: 0, ALL: 0, BWL: 0, WKT: 0 }
@@ -62,16 +69,18 @@ function summarize(fx, defaultTarget) {
     avail[a] = (avail[a] || 0) + 1
     if (a === 'UNAVAILABLE') unavailableNames.push(shortName(p.display_name))
   })
-  const keeperPresent = bal.WKT > 0
   const capP = players.find((p) => p.is_captain)
   const wkP = players.find((p) => p.is_wicket_keeper)
+  // A keeper is a player tagged WKT OR the one named keeper: the captain can be
+  // the keeper, and a named keeper with no WKT tag is still the keeper.
+  const keeperPresent = bal.WKT > 0 || !!wkP
   const capName = capP ? shortName(capP.display_name) : null
   const wkName = wkP ? shortName(wkP.display_name) : null
   const wkOut = !!(wkP && wkP.availability === 'UNAVAILABLE')
   const bowlers = bal.ALL + bal.BWL
 
   const flags = []
-  if (count > 0 && count < target) flags.push({ tone: 'amber', text: `${target - count} short of XI` })
+  if (count > 0 && count < need) flags.push({ tone: 'amber', text: min ? `${need - count} short of the minimum` : `${need - count} short of XI` })
   if (wkOut) flags.push({ tone: 'red', text: 'Keeper out' })
   unavailableNames.forEach((n) => { if (!(wkOut && n === wkName)) flags.push({ tone: 'red', text: `${n} unavailable` }) })
   if (count >= 8 && !keeperPresent) flags.push({ tone: 'amber', text: 'No keeper named' })
@@ -81,11 +90,12 @@ function summarize(fx, defaultTarget) {
   let status, statusLabel
   if (count === 0) { status = 'progress'; statusLabel = 'Not started' }
   else if (flags.some((f) => f.tone === 'red')) { status = 'attention'; statusLabel = 'Needs attention' }
-  else if (count >= target && flags.length === 0) { status = 'ready'; statusLabel = 'Squad set' }
-  else if (count >= target) { status = 'review'; statusLabel = 'Ready to review' }
+  else if (fx.locked && count >= need) { status = 'ready'; statusLabel = 'Locked' }
+  else if (count >= need && flags.length === 0) { status = 'ready'; statusLabel = 'Squad set' }
+  else if (count >= need) { status = 'review'; statusLabel = 'Ready to review' }
   else { status = 'progress'; statusLabel = 'In progress' }
 
-  return { count, target, bal, bowlers, avail, keeperPresent, capName, wkName, wkOut, flags, status, statusLabel }
+  return { count, target, min, need, bal, bowlers, avail, keeperPresent, capName, wkName, wkOut, flags, status, statusLabel }
 }
 
 function fmtDay(iso) {
@@ -135,16 +145,16 @@ function AvailBar({ avail }) {
 
 function PlayerRow({ p, n }) {
   const fmt = useAdminNameFormat()
-  const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
+  const meta = AVAILABILITY[viewStatus(p)] || AVAILABILITY.NO_RESPONSE
   const out = p.availability === 'UNAVAILABLE'
   const concern = out || p.availability === 'MAYBE'
   return (
     <div className={`relative flex items-center gap-2 px-2 py-1 rounded-lg min-h-[34px] hover:bg-pb-surface2 ${out ? 'opacity-60' : ''}`}>
       <span className="font-mono text-[11px] font-semibold text-pb-faintest w-[16px] text-right shrink-0 pb-num">{n}</span>
-      <span className="w-[3px] self-stretch rounded-full my-0.5 shrink-0" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
+      <span className="w-[3px] self-stretch rounded-full my-0.5 shrink-0" style={{ background: viewStatus(p) === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       <span className="relative shrink-0">
         <Avatar player={p} size={22} />
-        <span className="absolute -right-0.5 -bottom-0.5"><Dot status={p.availability} size={8} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
+        <span className="absolute -right-0.5 -bottom-0.5"><Dot status={viewStatus(p)} size={8} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>
       </span>
       <span className="font-display font-semibold text-[13.5px] truncate flex-1 min-w-0">{fmt(p.display_name)}</span>
       {p.is_captain && <Tag>C</Tag>}{p.is_wicket_keeper && <Tag tone="amber">WK</Tag>}
@@ -166,8 +176,11 @@ function FixtureRow({ fx, target, open, onToggle }) {
   const squad = fx.team_name || fx.grade_name || 'Team'
   const worst = a.flags.find((f) => f.tone === 'red') || a.flags.find((f) => f.tone === 'amber')
   const extra = a.flags.length - (worst ? 1 : 0)
-  const complete = a.count >= a.target
-  const cta = fx.has_draft ? 'Continue draft' : a.count === 0 ? 'Build XI' : a.status === 'attention' ? 'Review XI' : 'Edit XI'
+  const complete = a.count >= a.need
+  const cta = fx.has_draft ? 'Continue draft' : a.count === 0 ? 'Build XI'
+    : fx.locked ? 'View XI'
+      : a.status === 'attention' ? 'Review XI'
+        : a.status === 'review' || a.status === 'ready' ? 'Review and lock' : 'Edit XI'
   const when = daysUntil(fx.played_on)
   const sv = STATUS_VAR[a.status]
 
@@ -205,7 +218,7 @@ function FixtureRow({ fx, target, open, onToggle }) {
           )}
           <span className="font-display font-bold text-[15px] pb-num whitespace-nowrap"
             style={{ color: a.count === 0 ? 'var(--pb-faint)' : complete ? 'var(--pb-accent)' : 'var(--pb-amber)' }}>
-            {a.count}<span className="text-xs text-pb-faint font-medium">/{a.target}</span>
+            {a.count}<span className="text-xs text-pb-faint font-medium">/{a.need}{a.min > 0 && a.target > a.need ? ` to ${a.target}` : ''}</span>
           </span>
           <Pill color={sv} className="hidden sm:inline-flex"><span className="w-1.5 h-1.5 rounded-full bg-current" />{a.statusLabel}</Pill>
           <button onClick={(e) => { e.stopPropagation(); onToggle(fx.id) }} title={open ? 'Collapse' : 'Peek'}
@@ -271,7 +284,7 @@ function FixtureRow({ fx, target, open, onToggle }) {
           <div className="flex items-center justify-between gap-3 flex-wrap px-4 py-2.5 border-t pb-hairline" style={{ background: 'color-mix(in srgb, var(--pb-surface2) 45%, transparent)' }}>
             <div className="flex items-center gap-2.5 min-w-0">
               <AvailBar avail={a.avail} />
-              <span className="text-xs text-pb-dim whitespace-nowrap">{a.count} selected{a.count > a.target ? ` · ${a.count - a.target} in reserve` : ''}</span>
+              <span className="text-xs text-pb-dim whitespace-nowrap">{a.count} selected{a.target > 0 && a.count > a.target ? ` · ${a.count - a.target} in reserve` : ''}</span>
             </div>
             <button onClick={goBuild}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-display font-semibold text-[13px] transition hover:brightness-105 active:scale-[0.98]"
@@ -293,11 +306,13 @@ export default function AdminSelectionOverview() {
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
   const [openKeys, setOpenKeys] = useState(() => new Set())
+  // Whether junior grades show is a Settings choice now, not a switch on this screen.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   const load = useCallback(() => {
     setData(null)
-    api.bsSelectionOverview().then(setData).catch((e) => { toast.error(e.message); setData({ fixtures: [] }) })
-  }, [toast])
+    api.bsSelectionOverview({ hideJuniors: !showJuniors }).then(setData).catch((e) => { toast.error(e.message); setData({ fixtures: [] }) })
+  }, [toast, showJuniors])
   useEffect(() => { load() }, [load])
 
   const target = data?.default_team_size ?? 11
@@ -332,6 +347,9 @@ export default function AdminSelectionOverview() {
     visible.forEach((v) => { const k = v.fx.played_on || 'tbc'; if (!map.has(k)) map.set(k, []); map.get(k).push(v) })
     return [...map.entries()].map(([day, items]) => ({ day, items, attention: items.filter((i) => i.status === 'attention').length }))
   }, [visible])
+
+  // The first matchday with more than one team: where the draft table is worth opening.
+  const draftDay = useMemo(() => groups.find((g) => g.day !== 'tbc' && g.items.length > 1)?.day || null, [groups])
 
   const allOpen = visible.length > 0 && visible.every((v) => openKeys.has(v.fx.id))
   const toggleAll = () => setOpenKeys(allOpen ? new Set() : new Set(visible.map((v) => v.fx.id)))
@@ -391,6 +409,13 @@ export default function AdminSelectionOverview() {
           })}
         </div>
         <span className="flex-1" />
+        {draftDay && (
+          <Link to={`/admin/betterselect/whiteboard?date=${draftDay}`}
+            title="Every team for the day side by side, drag players between them"
+            className="max-lg:hidden inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-pb-hairline2 text-pb-dim hover:text-pb-accent hover:border-pb-accent/50 font-display font-semibold text-[12.5px] whitespace-nowrap">
+            <Icon name="cols" size={14} />Selection Whiteboard
+          </Link>
+        )}
         <button onClick={toggleAll} className="inline-flex items-center gap-1.5 text-pb-faint hover:text-pb-accent font-display font-semibold text-[12.5px] whitespace-nowrap">
           <Icon name={allOpen ? 'cols' : 'sheet'} size={14} />{allOpen ? 'Collapse all' : 'Expand all'}
         </button>
@@ -410,6 +435,13 @@ export default function AdminSelectionOverview() {
             <span className="font-mono text-[11px] text-pb-faint whitespace-nowrap">{g.items.length} {g.items.length === 1 ? 'team' : 'teams'}</span>
             {g.attention > 0 && <span className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-red font-semibold whitespace-nowrap"><span className="w-1.5 h-1.5 rounded-full bg-current" />{g.attention} need attention</span>}
             <span className="flex-1 h-px bg-pb-hairline min-w-[16px]" />
+            {g.day !== 'tbc' && g.items.length > 1 && (
+              <Link to={`/admin/betterselect/whiteboard?date=${g.day}`} data-draft-table-link
+                title="Every team for this day side by side, drag players between them"
+                className="hidden lg:inline-flex items-center gap-1.5 text-[12px] font-display font-semibold text-pb-faint hover:text-pb-accent whitespace-nowrap">
+                <Icon name="cols" size={13} />Whiteboard
+              </Link>
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             {g.items.map(({ fx }) => (

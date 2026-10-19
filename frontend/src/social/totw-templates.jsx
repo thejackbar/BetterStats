@@ -113,7 +113,9 @@ function Face({ p, team, palette, fit = 'contain', pos = 'center top' }) {
 // Plain functions returning their root `div`, called inline: a component child of
 // the layer root only takes a z-index if it spreads `style`, and a `div` always does.
 function masthead({ pal, team, meta, width, big }) {
-  const round = [meta.round, meta.date].filter(Boolean).join(' · ')
+  // `meta.heading` is 'JUNIOR' or 'SENIOR' on a scoped team and absent otherwise,
+  // so an unscoped post stays byte for byte what it was.
+  const round = [meta.heading, meta.round, meta.date].filter(Boolean).join(' · ')
   return (
     <div data-layer="Masthead" style={{
       position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 26px',

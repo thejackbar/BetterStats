@@ -26,13 +26,13 @@ function fmtDate(d) {
 }
 
 export default function UnrosteredGuests({ onPromoted }) {
-  const { hasModule, hasCapability } = useAuth()
+  const { hasModule, hasCapability, canEditCap } = useAuth()
   const toast = useToast()
   // Guests only exist because of net sessions, and the endpoint sits behind
   // require_module("select") — so a club without BetterSelect is never sent to
   // an endpoint that would 402 at it.
   const entitled = hasModule?.('select')
-  const canEdit = hasCapability(CAP.MANAGE_PLAYERS) || hasCapability(CAP.MANAGE_SELECTIONS)
+  const canEdit = canEditCap(CAP.MANAGE_PLAYERS, CAP.SELECT_NETS, CAP.MANAGE_SELECTIONS)
 
   const [data, setData] = useState(null)
   const [open, setOpen] = useState(false)

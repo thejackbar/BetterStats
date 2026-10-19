@@ -596,21 +596,6 @@ function tableOps(b) {
 
 export function downloadPdf({ filename, title, subtitle, body, blocks, header }) {
   const ops = layout(docBlocks({ title, subtitle, body, blocks, header }))
-  // One XObject per distinct image, collected before paging so every page's
-  // /Resources can name them all — a band or a crest is only ever on page one
-  // today, but a page whose resources omit an XObject it draws renders blank
-  // with no error anywhere.
-  const images = []
-  const imageMeta = new Map()
-  const imageIndex = (op) => {
-    let i = images.indexOf(op.jpeg)
-    if (i < 0) {
-      i = images.push(op.jpeg) - 1
-      imageMeta.set(op.jpeg, { pxWidth: op.pxWidth, pxHeight: op.pxHeight })
-    }
-    return i
-  }
-
   // Paged before anything is drawn. A table header repeats on each page it runs
   // onto, or the columns on page two mean nothing.
   const pages = [[]]
@@ -663,32 +648,62 @@ export function downloadPdf({ filename, title, subtitle, body, blocks, header })
     y -= h
   }
 
+  writePdf({ pages, title, filename })
+}
+
+// The page: A4 portrait by default, landscape on request. Everything drawn below
+// is placed against these numbers, never against the portrait constants.
+function pageGeom(landscape, margin = MARGIN) {
+  const w = landscape ? PAGE_H : PAGE_W
+  const h = landscape ? PAGE_W : PAGE_H
+  return { w, h, margin, col: w - margin * 2 }
+}
+
+// Pages of ready-placed ops in, a PDF file out. Shared by the flowing documents
+// above and the one-page squad sheet, which places its own ops.
+function writePdf({ pages, title, filename, landscape = false, margin = MARGIN }) {
+  const G = pageGeom(landscape, margin)
+  // One XObject per distinct image, collected before paging so every page's
+  // /Resources can name them all — a band or a crest is only ever on page one
+  // today, but a page whose resources omit an XObject it draws renders blank
+  // with no error anywhere.
+  const images = []
+  const imageMeta = new Map()
+  const imageIndex = (op) => {
+    let i = images.indexOf(op.jpeg)
+    if (i < 0) {
+      i = images.push(op.jpeg) - 1
+      imageMeta.set(op.jpeg, { pxWidth: op.pxWidth, pxHeight: op.pxHeight })
+    }
+    return i
+  }
+
   const streams = pages.map(page => {
     let s = []
     for (const op of page) {
       if (op.kind === 'rule') {
-        s = s.concat(ascii(`0.78 0.78 0.78 RG 0.6 w ${MARGIN} ${(op.y + 3).toFixed(2)} m ${(PAGE_W - MARGIN).toFixed(2)} ${(op.y + 3).toFixed(2)} l S\n`))
+        s = s.concat(ascii(`0.78 0.78 0.78 RG 0.6 w ${G.margin} ${(op.y + 3).toFixed(2)} m ${(G.w - G.margin).toFixed(2)} ${(op.y + 3).toFixed(2)} l S\n`))
         continue
       }
       if (op.kind === 'band') {
         const [r, g, b2] = rgb01(hex6(op.colour))
         s = s.concat(ascii(`${r.toFixed(3)} ${g.toFixed(3)} ${b2.toFixed(3)} rg `
-          + `${MARGIN} ${op.y.toFixed(2)} ${COL.toFixed(2)} ${op.height.toFixed(2)} re f\n0 g\n`))
+          + `${G.margin} ${op.y.toFixed(2)} ${G.col.toFixed(2)} ${op.height.toFixed(2)} re f\n0 g\n`))
         continue
       }
       if (op.kind === 'image') {
         // `cm` scales the unit square the image is drawn into, so the two
         // numbers are the printed SIZE in points, not the pixel dimensions.
         const w = op.width, h = op.height
-        const ix = MARGIN + (COL - w) / 2
+        const ix = G.margin + (G.col - w) / 2
         s = s.concat(ascii(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${ix.toFixed(2)} ${op.y.toFixed(2)} cm `
           + `/Im${imageIndex(op)} Do Q\n`))
         continue
       }
       if (op.kind === 'row') {
-        let x = MARGIN
+        let x = G.margin
         if (op.header) {
-          s = s.concat(ascii(`0.95 0.95 0.95 rg ${MARGIN} ${op.y.toFixed(2)} ${COL.toFixed(2)} ${op.height.toFixed(2)} re f\n`))
+          s = s.concat(ascii(`0.95 0.95 0.95 rg ${G.margin} ${op.y.toFixed(2)} ${G.col.toFixed(2)} ${op.height.toFixed(2)} re f\n`))
         }
         // The cell borders, drawn as a box per column.
         s = s.concat(ascii('0.75 0.75 0.75 RG 0.5 w\n'))
@@ -696,7 +711,7 @@ export function downloadPdf({ filename, title, subtitle, body, blocks, header })
           s = s.concat(ascii(`${x.toFixed(2)} ${op.y.toFixed(2)} ${op.widths[i].toFixed(2)} ${op.height.toFixed(2)} re S\n`))
           x += op.widths[i]
         }
-        x = MARGIN
+        x = G.margin
         for (let i = 0; i < op.lines.length; i++) {
           let ty = op.y + op.height - op.pad - op.size
           for (const line of op.lines[i]) {
@@ -709,16 +724,26 @@ export function downloadPdf({ filename, title, subtitle, body, blocks, header })
         }
         continue
       }
+      if (op.kind === 'hline') {
+        const [r, g, b2] = rgb01(hex6(op.colour) || '#bbbbbb')
+        s = s.concat(ascii(`${r.toFixed(3)} ${g.toFixed(3)} ${b2.toFixed(3)} RG ${op.width || 0.6} w `
+          + `${op.x1.toFixed(2)} ${op.y.toFixed(2)} m ${op.x2.toFixed(2)} ${op.y.toFixed(2)} l S\n`))
+        continue
+      }
       if (!op.text) continue
       const font = op.bold ? '/F2' : '/F1'
       const x = op.centre
-        ? MARGIN + (COL - textWidth(op.text, op.size, op.bold)) / 2
-        : MARGIN + (op.indent || 0)
-      if (op.grey) s = s.concat(ascii('0.42 0.42 0.42 rg\n'))
+        ? G.margin + (G.col - textWidth(op.text, op.size, op.bold)) / 2
+        : op.rightX != null
+          ? op.rightX - textWidth(op.text, op.size, op.bold)
+          : (op.x != null ? op.x : G.margin + (op.indent || 0))
+      const ink = op.colour && hex6(op.colour) ? rgb01(hex6(op.colour)) : null
+      if (ink) s = s.concat(ascii(`${ink[0].toFixed(3)} ${ink[1].toFixed(3)} ${ink[2].toFixed(3)} rg\n`))
+      else if (op.grey) s = s.concat(ascii('0.42 0.42 0.42 rg\n'))
       s = s.concat(ascii(`BT ${font} ${op.size} Tf ${x.toFixed(2)} ${op.y.toFixed(2)} Td `))
       s = s.concat(pdfString(op.text))
       s = s.concat(ascii(' Tj ET\n'))
-      if (op.grey) s = s.concat(ascii('0 g\n'))
+      if (ink || op.grey) s = s.concat(ascii('0 g\n'))
     }
     return new Uint8Array(s)
   })
@@ -754,7 +779,7 @@ export function downloadPdf({ filename, title, subtitle, body, blocks, header })
 
   pages.forEach((_, i) => {
     const id = pageIds[i]
-    put(id, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> ${xobjects} >> /Contents ${id + 1} 0 R >>`)
+    put(id, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${G.w} ${G.h}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> ${xobjects} >> /Contents ${id + 1} 0 R >>`)
     put(id + 1, new Uint8Array([
       ...ascii(`<< /Length ${streams[i].length} >>\nstream\n`),
       ...streams[i],
@@ -798,3 +823,26 @@ export function downloadPdf({ filename, title, subtitle, body, blocks, header })
 
   save(concat(chunks), 'application/pdf', `${filename}.pdf`)
 }
+
+
+// One-page landscape sheet for lists that should be pinned up whole: the caller
+// has already placed every op (x, y, size, text) on a page of `pageGeom(true)`.
+// Header ops reuse the document layout (title, subtitle, club band, crest).
+export function downloadSheetPdf({ filename, title, subtitle, header, place, margin = 32 }) {
+  const G = pageGeom(true, margin)
+  const top = layout(docBlocks({ title, subtitle, body: '', blocks: [], header }))
+  // The header flows down from the top margin the same way a document's does.
+  const ops = []
+  let y = G.h - G.margin
+  for (const op of top) {
+    if (op.kind === 'gap') { y -= op.height || 0; continue }
+    const h = (op.kind === 'band' || op.kind === 'image') ? op.height
+      : op.kind === 'rule' ? (op.gap || 0) : (op.size || 0) * 1.32 + (op.gap || 0)
+    ops.push({ ...op, y: (op.kind === 'band' || op.kind === 'image') ? y - op.height : y - (op.size || 0) * 1.02 })
+    y -= Number.isFinite(h) ? h : 0
+  }
+  const pages = place({ G, top: y, width: G.col, height: y - G.margin })
+  pages[0] = [...ops, ...pages[0]]
+  writePdf({ pages, title, filename, landscape: true, margin })
+}
+export { textWidth as sheetTextWidth }

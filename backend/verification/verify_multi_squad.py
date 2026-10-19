@@ -89,7 +89,28 @@ async def main():
             stmt = _create_stmt(t)
             if stmt:
                 await conn.execute(text(stmt))
+        # The board's draft table and the lock / audit DDL assemble_selection reads.
+        from app.services.selection_draft_ddl import STATEMENTS as _DRAFT_DDL
+        from app.services.selection_lock_ddl import STATEMENTS as _LOCK_DDL
+        from app.services.team_sides_ddl import STATEMENTS as _SIDES_DDL
+        for stmt in list(_DRAFT_DDL) + list(_LOCK_DDL) + list(_SIDES_DDL):
+            await conn.execute(text(stmt))
         for stmt in SELECTION_RULE_STATEMENTS:
+            await conn.execute(text(stmt))
+        # Lifespan-only tables the grade classification (junior hiding, women's
+        # side) reads through grade_alias_map; copied from the lifespan.
+        for stmt in (
+            """CREATE TABLE IF NOT EXISTS season_aliases (
+                id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                alias_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                undone_at TIMESTAMPTZ)""",
+            """CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL, canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL, undone_at TIMESTAMPTZ)""",
+        ):
             await conn.execute(text(stmt))
 
     org_id = uuid.uuid4()

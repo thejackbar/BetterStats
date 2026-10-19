@@ -79,6 +79,10 @@
 40. `PlayerLink.jsx` is the one link: ours `/admin/betteriq/trends?player=`, opposition `/admin/betteriq/opposition-player?opponent=&player=` (or `&playerName=` for name-only rows, resolved once the dossier builds). Payload id is `player_id`.
 41. `viz.Radar` has hover/focus tooltips and `legend`; pass `details` from `buildRadar`. Averages 2dp (`fmt2`). Catches use `total_catches_non_wk`/`total_catches_wk`. Add a `<Note>` "how this is worked out" to any opaque blended rating.
 42. `iq_ask.py` tools: `upcoming_fixtures`, `opposition_report`, `opponent_danger_players` (via `get_or_start_dossier`, reports `building` when cold). Prompt: resolve the fixture first, keep picks team-relevant via `squad` (lower-grade record vs opponent is a "possible promotion"), point unlinked opponents at "Match club". `MAX_STEPS = 8`.
+43. `upcoming_fixtures` is a capped, filterable page, never "the draw": `iq.list_opponents(upcoming_limit, upcoming_opponent, upcoming_grade, upcoming_from, upcoming_to)` returns `upcoming_total` (the true count) and, on a filtered call only, `upcoming_cancelled` (sync-cancelled games, which stay out of the list because `status = UPCOMING`). The tool says when it is partial and the prompt forbids calling a partial list "all". The Opposition page still calls with the defaults (12). Archive: grep `upcoming_fixtures was capped`.
+42b. Ask IQ reads OUR picked side through `our_selected_xi(fixture_id)` (wraps `iq_selection.selection_analysis`; `status` confirmed, `draft_only` from `selection_drafts`, or `not_selected`), never `current_squad` or a grade filter, which is the whole club. Proof: `backend/verification/verify_iq_our_selected_xi.py`. Archive: grep `could not see our own picked XI`.
+42c. Ask IQ reads PLAYED games through `recent_games` and `match_performances` (`iq_review.list_recent_games`, `game_performances`), never by saying it only covers upcoming fixtures; a pasted match link works because the tool pulls the UUID out of it. A club's XI and its grade often differ ('3rd XI' is '5th Grade'), so `team` matches both, the XI coming from `fixtures.playhq_id`. A wicket carries the dismissed batter's band and `value` (tail low, top order or set batter high); the prompt's 3-2-1 rules lean on that. Archive: grep `Ask IQ judges played games`.
+42d. Match Review team scores come from `games.innings_totals` through `iq_review.exact_scores` (extras included, all or nothing). The bat-only sum is a fallback and sets `score_exact` false, and the synthesis states no score then. Never print an approximate score beside a result. Proof: `backend/verification/verify_iq_match_performances.py`.
 42a. Ask IQ can ask back. `ask_user` (options 2 to 5, cleaned by `_clarify_from`) ends the turn with `{answer, clarify:{question, options[{label, value}]}}`; the page shows buttons and sends the pick's `value` as the next message. History turns carry `clarified`; the turn after one is not offered `ask_user`, so a thread asks at most once. The prompt limits it to choices that change the answer (grade, season, format, which club), using real options from the tools. Each pick is a normal ask against the 20 an hour limit.
 
 ## Traps and failure signatures
@@ -94,6 +98,7 @@
 - Zones editor wiped role/danger flags: whole-row overwrite (rule 36).
 - Saved scouting intel vanished after the favoured/risky split: dropped `shots[]` read fallback (rule 37).
 - Upcoming fixtures with no XI vanish from Selection: inner join (rule 9).
+- Match Review reads a won chase as the lower score: batters-only totals, extras missing (rule 42d).
 - Stale synthesis after a code change: `DOSSIER_VERSION` not bumped (rule 15).
 - Dossier never finishes: task not held in `_BUILD_TASKS`, or reused the request session (rule 14).
 - A "3rd XI" scout full of 1st XI or T20 numbers, header "whole club": the dossier ignored the fixture grade or the Grade Type / Match Type scope (rule 22a).
@@ -107,6 +112,7 @@ The archive records no dedicated suites for BetterIQ. Check by hand against a re
 - Force an add-on to raise: `team_overview` must still return the core.
 - Bump check: `DOSSIER_VERSION`/`DEEP_VERSION` after shape changes.
 - `backend/verification/verify_iq_dossier_scope.py` (own database): the 3rds fixture under Men's and Two day must exclude the 1st XI's T20, a T20 game inside the same grade, and the juniors; a 4th grade fixture they have no side in must say `scoped_empty`, never the whole club. Run it against the previous commit for the control.
+- `backend/verification/verify_iq_our_selected_xi.py` (own database, shipped `our_selected_xi`; the previous `iq_ask.py` is the control).
 - `backend/verification/verify_iq_ask_clarify.py` (no database, scripted model) and `frontend/scripts/verify-ask-iq-clarify.mjs` (real page, stubbed `/iq/ask`) for the clarify buttons.
 - `backend/verification/verify_iq_opponent_lineup.py` (real Postgres, stubbed match record; `SHOW=1` prints the generated text, read it) and `frontend/scripts/verify-opp-lineup.mjs` for the named XI.
 - Frontend: first visit defaults season to All; deep links; `CheatSheet` print layout.

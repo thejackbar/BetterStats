@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
 import { dashboardTiles, statusLabel, statusIsLive, MODULE_TOGGLES } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
+import { CAP } from '../../lib/capabilities'
 import AdminLayout from '../../components/admin/AdminLayout'
 import SyncRunCard from '../../components/admin/SyncRunCard'
 import AdminBroadcastBanner from '../../components/admin/AdminBroadcastBanner'
@@ -215,7 +216,16 @@ function SetupCard({ flow }) {
 }
 
 export default function AdminDashboard() {
-  const { user, hasModule, coreLive, refetch } = useAuth()
+  const { user, hasModule, hasCapability, coreLive, refetch } = useAuth()
+  // A person a Primary Admin limited (to one module, or to chosen menu items) sees a tile for
+  // each module they can open something in, and the quick links their permissions allow. The
+  // plan, trial and setup panels are the Primary Admin's, so they are neither drawn nor fetched
+  // for a limited person. `lockedTo` is the list of module keys, or null for full access.
+  const lockedTo = user?.access?.mode && user.access.mode !== 'full'
+    ? (Array.isArray(user.access.modules) ? user.access.modules : (user.access.module_key ? [user.access.module_key] : []))
+    : null
+  const isLimited = !!lockedTo  // a stable value for effect dependencies (lockedTo is a list)
+  const canSeeSync = hasCapability(CAP.RUN_SYNC) || hasCapability(CAP.MANAGE_MERGES)
   const [settings, setSettings] = useState(null)
   const [seasons, setSeasons] = useState([])
   const [myRequests, setMyRequests] = useState([])
@@ -237,10 +247,11 @@ export default function AdminDashboard() {
   useEffect(() => {
     api.adminGetSettings().then(setSettings).catch(() => {})
     api.adminListSeasons().then(setSeasons).catch(() => {})
+    if (isLimited) return
     api.listMyModuleRequests().then(d => setMyRequests(Array.isArray(d) ? d : [])).catch(() => {})
     api.getSetupFlow().then(setSetupFlow).catch(() => {})
     loadPlan()
-  }, [])
+  }, [isLimited])
 
   const planByModule = Object.fromEntries(plan.map(r => [r.module, r]))
 
@@ -250,7 +261,7 @@ export default function AdminDashboard() {
   // for a super admin (cross-club, never gated), and never for a legacy club
   // with no Core row (coreLive fails open to true).
   const [remindDismissed, setRemindDismissed] = useState(false)
-  const allExpired = !!user && user.role !== 'super_admin' && !coreLive &&
+  const allExpired = !!user && !lockedTo && user.role !== 'super_admin' && !coreLive &&
     !(user.entitlements?.modules || []).length
 
   // Live sync progress — driven entirely by re-fetching sync_runs, so it's
@@ -259,7 +270,7 @@ export default function AdminDashboard() {
   // whatever the backend says right now, not something remembered locally).
   // Polls only while the latest run is still going.
   useEffect(() => {
-    if (!user?.club_id) return undefined
+    if (!user?.club_id || !canSeeSync) return undefined
     let cancelled = false
     let intervalId = null
     const poll = async () => {
@@ -279,7 +290,7 @@ export default function AdminDashboard() {
     poll()
     intervalId = setInterval(poll, 4000)
     return () => { cancelled = true; if (intervalId) clearInterval(intervalId) }
-  }, [user?.club_id])
+  }, [user?.club_id, canSeeSync])
 
   // Instant self-service trial start for a billable module (BetterAdmin covers
   // fees + comms + merch as one) — no queue, no approval (see
@@ -318,15 +329,15 @@ export default function AdminDashboard() {
   // Core admin tasks (BetterStats / Core — always available). BetterSocials is
   // now represented by its own module tile, so it's dropped from here.
   const quickLinks = [
-    { to: '/admin/players', label: 'Manage Players', desc: 'Edit display names' },
-    { to: '/admin/yearbook', label: 'Yearbooks', desc: 'Publish season yearbooks' },
-    { to: '/admin/awards', label: 'Awards', desc: 'Add season awards & achievements' },
-    { to: '/admin/merge', label: 'Merge Players', desc: 'Fix duplicate player entries' },
-    { to: '/admin/milestones', label: 'Milestones', desc: 'Upcoming & achieved milestones report' },
-    { to: '/admin/sync', label: 'Data Sync', desc: 'Trigger sync & view sync log' },
+    { to: '/admin/players', label: 'Manage Players', desc: 'Edit display names', cap: CAP.MANAGE_PLAYERS },
+    { to: '/admin/yearbook', label: 'Yearbooks', desc: 'Publish season yearbooks', cap: CAP.MANAGE_YEARBOOKS },
+    { to: '/admin/awards', label: 'Awards', desc: 'Add season awards & achievements', cap: CAP.MANAGE_AWARDS },
+    { to: '/admin/merge', label: 'Merge Players', desc: 'Fix duplicate player entries', cap: CAP.MANAGE_MERGES },
+    { to: '/admin/milestones', label: 'Milestones', desc: 'Upcoming & achieved milestones report', cap: CAP.MANAGE_MILESTONES },
+    { to: '/admin/sync', label: 'Data Sync', desc: 'Trigger sync & view sync log', cap: CAP.RUN_SYNC },
     { to: '/admin/games', label: 'View Matches', desc: 'Browse match results' },
-    { to: '/admin/settings', label: 'Club Settings', desc: 'Name, colours, contact' },
-  ]
+    { to: '/admin/settings', label: 'Club Settings', desc: 'Name, colours, contact', cap: CAP.MANAGE_SETTINGS },
+  ].filter(l => !l.cap || hasCapability(l.cap))
 
   return (
     <AdminLayout>
@@ -354,7 +365,7 @@ export default function AdminDashboard() {
             )}
           </p>
         )}
-        <p className="text-pb-faintest text-xs mb-4">
+        {!lockedTo && <p className="text-pb-faintest text-xs mb-4">
           {isSuper ? (
             'Super admin — all modules available'
           ) : billingModules.length ? (
@@ -379,7 +390,7 @@ export default function AdminDashboard() {
               {renewalDate && <> · renews {new Date(renewalDate).toLocaleDateString('en-AU')}</>}
             </>
           )}
-        </p>
+        </p>}
 
         {/* Only for a Club Admin whose club a Super Admin has linked to others;
             renders nothing otherwise. */}
@@ -419,7 +430,7 @@ export default function AdminDashboard() {
         {/* Better modules — entitled tiles open; locked tiles upsell. */}
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Modules</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
-          {dashboardTiles().map(tile => {
+          {dashboardTiles().filter(t => !lockedTo || lockedTo.includes(t.key === 'bettersocials' ? 'socials' : t.key)).map(tile => {
             // The billable module key (BetterAdmin = 'admin', BetterSocials =
             // 'socials') doesn't always equal the tile's own key — the
             // BetterSocials group tile is keyed 'bettersocials' (its umbrella

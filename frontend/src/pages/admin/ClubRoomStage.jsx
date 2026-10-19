@@ -68,6 +68,12 @@ function buildStageTokens(data) {
   }
 }
 
+const SLIDE_TYPE_NAMES = {
+  sponsors: 'Sponsors', fixtures: 'Fixtures & Lineups', leaderboard: 'Leaderboard', records: 'Club Records',
+  statlab_report: 'Custom StatLab Report', social_posts: 'Recent Social Posts', custom_images: 'Custom Images',
+  honours: 'Honour Boards',
+}
+
 const PLACE = [
   { label: '1ST', accent: '#f4c542' },
   { label: '2ND', accent: 'var(--pb-dim)' },
@@ -249,6 +255,23 @@ export default function ClubRoomStage({ fetchPlay, onExit, exitLabel = 'Back to 
         {data.logo_url && <img src={data.logo_url} alt="" className="w-8 h-8 rounded object-contain bg-pb-surface2 p-1" />}
         <span className="text-sm font-bold">{data.club_name}</span>
       </div>
+      {/* The show carries on without an entry it could not build; the person
+          setting it up is told which row, the TV in the club room is not. */}
+      {onExit && data.skipped?.length > 0 && (
+        <div className="absolute bottom-4 left-7 right-7 z-10 text-xs font-mono text-amber-400 space-y-0.5 rounded-lg px-3 py-2"
+          style={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline2)' }}>
+          <div>
+            Skipped because {data.skipped.length === 1 ? 'it' : 'they'} could not load. Open{' '}
+            {data.skipped.length === 1 ? 'that row' : 'those rows'} in the playlist to check:
+          </div>
+          {data.skipped.map(x => (
+            <div key={x.id}>
+              {x.row ? `Row ${x.row}: ` : ''}
+              {x.title ? `${x.title} (${x.summary || SLIDE_TYPE_NAMES[x.slide_type] || x.slide_type})` : (x.summary || SLIDE_TYPE_NAMES[x.slide_type] || x.slide_type)}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="absolute top-6 right-7 flex items-center gap-3 z-10">
         {paused && <span className="font-mono text-[10px] tracking-wide2 text-amber-400 uppercase">Paused</span>}
         <div className="flex items-center gap-1.5">
@@ -454,7 +477,7 @@ function LeaderboardSlide({ slide, clubLogoUrl }) {
   return (
     <div className="w-full h-full flex flex-col px-14 py-12">
       <div className="mb-6 shrink-0">
-        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label}</div>
+        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label}{slide.grade_type_label ? ` · ${slide.grade_type_label}` : ''}</div>
         <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
       </div>
       <div className="flex gap-5 mb-6 shrink-0">
@@ -526,7 +549,7 @@ function RecordsSlide({ slide, clubLogoUrl }) {
   return (
     <div className="w-full h-full flex flex-col px-14 py-12">
       <div className="mb-7 shrink-0">
-        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label} · Club Record</div>
+        <div className="font-mono text-[13px] tracking-wide4 text-pb-accent uppercase">{slide.season_label}{slide.grade_type_label ? ` · ${slide.grade_type_label}` : ''} · Club Record</div>
         <div className="text-[40px] font-extrabold tracking-tight leading-tight">{slide.title}</div>
       </div>
       {leader && (

@@ -6,7 +6,7 @@
 // below are those bolt-on modules, each rendered as a tile on the admin
 // dashboard.
 
-import { CAP } from './capabilities'
+import { CAP, SELECT_ITEM_CAPS } from './capabilities'
 
 export const MODULE = {
   SELECT: 'select',
@@ -29,7 +29,7 @@ export const MODULE_INFO = [
     blurb: 'Availability and smart team selection — plan your weekends.',
     to: '/admin/betterselect',
     built: true,
-    caps: [CAP.MANAGE_FIXTURES, CAP.MANAGE_SELECTIONS],
+    caps: [CAP.MANAGE_FIXTURES, CAP.MANAGE_SELECTIONS, ...SELECT_ITEM_CAPS, CAP.MANAGE_VOTES, CAP.VIEW_VOTE_RESULTS],
   },
   {
     key: MODULE.SOCIALS,

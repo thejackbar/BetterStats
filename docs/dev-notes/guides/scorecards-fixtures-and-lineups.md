@@ -35,6 +35,8 @@
 14. `organisations.include_fill_ins_in_stats` (migration 147, default on) controls only whether a fill-in's NAME shows in partnerships and fielding cards; batting and bowling always show. Storage: `partnerships.batter1_name/batter2_name`, `fielding_stats.player_name` (only when id is NULL), always-NULL twins on `manual_partnerships`/`manual_fielding_stats` so `v_effective_*` unions line up. `fielding_stats.player_id` FK is `ON DELETE SET NULL`.
 15. Sync uses `our_team_roster_guids` (raw GR strings) to tell "ours but unregistered" from "opposition", because `_team_pid` returning None cannot. A partnership is dropped only when NEITHER side has an id or a name.
 16. Records boards inner-join `players` scoped to the org, so name-only fill-in rows never reach them.
+    Match page shows a stand the records page omits? Run `python -m app.scripts.diagnose_partnership <org> <date> [--runs N]` (read-only): it names the filter that drops each stand (no player id, other club's player row, `is_club_innings` FALSE, no grade or season).
+    No stands before 2023 though the games hold fall of wickets? Sync only derives stands for a game it stores, and `repair_stored_game` (older than 14 days) does not rebuild them. `python -m app.scripts.backfill_partnerships <org> [--from --to --limit] [--apply]` adds them through `attach_innings_detail`: dry run by default, rows only, one paced Cricket Australia request per game, capped per run (default 100).
 
 **Manual cards, fall of wickets, partnerships**
 17. `get_scorecard` shares one row builder for synced and manual tables (`BI = ManualBattingInnings if is_manual else BattingInnings`). Any column read there must exist on BOTH tables or every manual card 500s. NULL `caught_behind` means the card does not say and reads as a plain catch (see Flag 1).
@@ -134,3 +136,6 @@ none specific to this area. A Full Rebuild (`POST /club-admin/hard-refresh`) is 
 | - v8.79.1 crests and header; v8.79.2 winner and ordering | rules extracted | Rules 21 to 23 |
 | - v8.79.3 cross-club leak in team classification | rules extracted | Rules 4, 18; Open follow-ups |
 | - Yearbook auto-generation after Full Rebuild (misfiled) | rules extracted | Rule 35; Flag 9 |
+
+- Never decide "is this team ours" from a name fragment. `services/club_match.fixture_side` / `side_is_club` / `team_is_club`: owning organisation id first, name (whole words, fuller name wins) only for a side with no id. `club_match_keys` includes the club's FIRST WORD, so a substring test on it matched "North Beach" for "North Perth". The match page reads from the club in `?org=` when that club played in the game (`games._viewing_club`), never always from the club that synced it first. Check: `verify_north_perth_report.py`.
+- A stored synced fixture is cleared when CA lists it between two OTHER clubs (`fixtures_reconcile.find_foreign`, from `listing["others"]`; strict, both owning organisation ids required): removed, or CANCELLED when work sits on it. CA still lists the game, so staleness alone never catches it. Archive: grep `Other clubs' games kept on a club's stored Fixtures`. Check: `verify_foreign_fixtures_and_selection_templates.py`.

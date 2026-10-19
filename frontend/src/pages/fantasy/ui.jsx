@@ -256,6 +256,28 @@ export function PriceArrow({ change }) {
   )
 }
 
+// Movers: filter a player list down to the players whose price rose or fell after the
+// last scored round, biggest move first (`byMover`), with the chips that pick the mode.
+export const MOVER_MODES = [['all', 'All'], ['up', '▲ Risers'], ['down', '▼ Fallers']]
+export function MoverChips({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+      {MOVER_MODES.map(([k, l]) => {
+        const on = value === k
+        const c = k === 'up' ? GREEN : k === 'down' ? RED : null
+        return (
+          <button key={k} onClick={() => onChange(k)} title="Price moves after the last scored round"
+            style={{ font: `${on ? 700 : 600} 11px 'Hanken Grotesk'`, color: on ? 'var(--ink)' : (c || 'var(--dim)'), background: on ? (c || 'var(--pb-accent, #06B6D4)') : 'var(--surface2)', padding: '6px 11px', borderRadius: 8, border: 'none', cursor: 'pointer' }}>{l}</button>
+        )
+      })}
+    </div>
+  )
+}
+export const byMover = (list, mode) => (mode === 'all' ? list
+  : list.filter(p => (mode === 'up' ? Number(p.price_change) > 0 : Number(p.price_change) < 0))
+    .sort((a, b) => (mode === 'up' ? Number(b.price_change) - Number(a.price_change) : Number(a.price_change) - Number(b.price_change)) || b.price - a.price))
+export const moverEmpty = (mode) => `No ${mode === 'up' ? 'risers' : 'fallers'} after the last scored round.`
+
 // A price with its movement arrow beside it.
 export const PriceTag = ({ price, change }) => <>{money(price)}<PriceArrow change={change} /></>
 

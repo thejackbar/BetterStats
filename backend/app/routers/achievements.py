@@ -35,6 +35,7 @@ TEMPLATE_ROWS = [
     ("2025_26", "Office Bearer", "Executive Committee", "President", "Mark Hullett", ""),
     ("2025_26", "Office Bearer", "Captains", "1st XI Captain", "Matthew Edwards", ""),
     ("2025_26", "Premiership", "Women's A Grade", "Premiership", "Grace Camarda", "captain"),
+    ("2013_14", "Milestone", "Cap Number", "A Grade Cap Number", "Sample Player", "186"),
     ("2025_26", "Association Award", "WASTCA", "3rd Grade Bowling Aggregate", "Chris Cooper", "25 Wickets"),
     ("2025_26", "Hall of Fame", "ACC", "Hall of Fame", "Matt Campbell", "#37"),
     ("2025_26", "Milestone", "Games", "100 Games", "Aamir Abbas", ""),

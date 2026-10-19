@@ -138,6 +138,20 @@ async def build_schema() -> None:
             for name, sql in stmts:
                 await conn.execute(text(f"DROP VIEW IF EXISTS {name} CASCADE"))
                 await conn.execute(text(sql.replace("OR REPLACE ", "")))
+        # Lifespan DDL the confirm path writes to (migration 334): the lock
+        # columns and the audit trail table.
+        try:
+            from app.services.selection_lock_ddl import STATEMENTS as LOCK_DDL
+            for stmt in LOCK_DDL:
+                await conn.execute(text(stmt))
+        except ImportError:
+            pass
+        try:
+            from app.services.team_sides_ddl import STATEMENTS as SIDES_DDL
+            for stmt in SIDES_DDL:
+                await conn.execute(text(stmt))
+        except ImportError:
+            pass
 
 
 async def main():

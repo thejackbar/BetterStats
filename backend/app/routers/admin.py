@@ -9,6 +9,9 @@ import json
 import logging
 from difflib import SequenceMatcher
 
+from app.auth.capabilities import (
+    MANAGE_MERGES, MANAGE_SOCIAL, require_cap,
+)  # route gates added by the access audit
 from app.services.session_safety import rollback_keeping
 
 log = logging.getLogger(__name__)
@@ -86,7 +89,7 @@ async def _enrich_player(db: AsyncSession, p: Player) -> dict:
     }
 
 
-@router.get("/player-info")
+@router.get("/player-info", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def get_player_info(player_id: str, org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Return enriched stats for a single player (used by manual merge UI)."""
     p = await db.get(Player, uuid.UUID(player_id))
@@ -230,7 +233,7 @@ def _name_variant_pairs(players: list, ignored: set, already: set) -> list:
     return scored[:MAX_VARIANT_PAIRS]
 
 
-@router.get("/merge-candidates")
+@router.get("/merge-candidates", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Return pairs of players within an org that look like duplicates.
 
@@ -346,7 +349,7 @@ async def ignore_pair(req: IgnorePairRequest, db: AsyncSession = Depends(get_db)
     return {"status": "ignored"}
 
 
-@router.get("/merge-history")
+@router.get("/merge-history", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def get_merge_history(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Return recent merges for an org that can be undone."""
     rows = await db.execute(
@@ -920,7 +923,7 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
     return out
 
 
-@router.get("/grade-merge-candidates")
+@router.get("/grade-merge-candidates", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def get_grade_merge_candidates(
     org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)
 ):
@@ -1661,7 +1664,7 @@ async def seed_club_competitions(
     return result
 
 
-@router.get("/grade-merge-history")
+@router.get("/grade-merge-history", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def grade_merge_history(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     rows = await db.execute(
         text("""
@@ -2046,7 +2049,7 @@ def _team_id_from_inn(inn: dict) -> str | None:
     return None
 
 
-@router.get("/social/scorecard/{match_id}", dependencies=[Depends(require_module("socials"))])
+@router.get("/social/scorecard/{match_id}", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db),
                                _user=Depends(get_current_user), club=Depends(get_current_club)):
     """Fetch a Grassroots scorecard and return it in the social template format.
@@ -2062,7 +2065,7 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
         raise HTTPException(500, f"Scorecard parse error: {exc}") from exc
 
 
-@router.get("/social/match-lookup", dependencies=[Depends(require_module("socials"))])
+@router.get("/social/match-lookup", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def social_match_lookup(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
     """Work out which match an admin means from whatever they pasted.
 
@@ -2084,7 +2087,7 @@ async def social_match_lookup(q: str = "", db: AsyncSession = Depends(get_db), c
         raise HTTPException(500, f"Match lookup error: {exc}") from exc
 
 
-@router.get("/social/fixtures", dependencies=[Depends(require_module("socials"))])
+@router.get("/social/fixtures", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_fixtures(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
     """Upcoming/live fixtures across the club's grades, grouped by match-day, for
     the BetterSocials Fixtures roundup posts (the multi-match analogue of the
@@ -2105,7 +2108,7 @@ async def get_social_fixtures(q: str = "", db: AsyncSession = Depends(get_db), c
         raise HTTPException(500, f"Fixtures import error: {exc}") from exc
 
 
-@router.get("/social/results", dependencies=[Depends(require_module("socials"))])
+@router.get("/social/results", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_results(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
     """Recent completed results across the club's grades, grouped by match-day,
     for the BetterSocials Results roundup posts. Scores come from each match's
@@ -2126,7 +2129,7 @@ async def get_social_results(q: str = "", db: AsyncSession = Depends(get_db), cl
         raise HTTPException(500, f"Results import error: {exc}") from exc
 
 
-@router.get("/social/potm/{match_id}", dependencies=[Depends(require_module("socials"))])
+@router.get("/social/potm/{match_id}", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
     """Player-of-the-match shortlist for one match — our side's batting, bowling
     and fielding lines from the Grassroots scorecard, ranked by a simple points
@@ -2141,18 +2144,23 @@ async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), clu
         raise HTTPException(500, f"Player of the match error: {exc}") from exc
 
 
-@router.get("/social/totw", dependencies=[Depends(require_module("socials"))])
-async def get_social_totw(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+@router.get("/social/totw", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
+async def get_social_totw(
+    q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
+    date_from: str = "", date_to: str = "", scope: str = "all",
+):
     """Team-of-the-week pool for the BetterSocials post: every completed club
     match in one round, each performance scored with the same points as the
     player of the match, pooled across grades and ranked best first.
 
-    ``q`` (optional) is a pasted match link/ID naming the round; with none it is
-    the club's latest match-day and the games within a weekend of it. The post
-    takes the top 6 to 14 off the front of the list."""
+    ``date_from`` and ``date_to`` (ISO days) name the round as a period, for a
+    club whose round runs Tuesday to Sunday. Otherwise ``q`` (optional) is a
+    pasted match link/ID naming the round, and with none it is the club's latest
+    match-day and the games within a weekend of it. ``scope`` is ``all``,
+    ``junior`` or ``senior``. The post takes its team off the front of the list."""
     from app.services.social_rounds import social_totw
     try:
-        return await social_totw(db, club, q)
+        return await social_totw(db, club, q, date_from, date_to, scope)
     except HTTPException:
         raise
     except Exception as exc:
@@ -2160,7 +2168,7 @@ async def get_social_totw(q: str = "", db: AsyncSession = Depends(get_db), club=
         raise HTTPException(500, f"Team of the week error: {exc}") from exc
 
 
-@router.get("/social/debuts", dependencies=[Depends(require_module("socials"))])
+@router.get("/social/debuts", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_debuts(
     player_ids: str = "", before: str = "",
     db: AsyncSession = Depends(get_db), club=Depends(get_current_club),

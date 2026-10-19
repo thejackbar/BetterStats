@@ -7,6 +7,9 @@ Admin can hand out to a club member.
   capabilities array on their membership is ignored.
 - club_member: capabilities is an explicit allowlist. Empty array means
   "logged in but can't do anything destructive" — basically view-only.
+  `view_only_caps` marks the capabilities in that list held at VIEW level
+  (services/access.py): a route that needs one answers a read (GET) and refuses
+  a write.
 
 Adding a new capability: append a constant below, wire it to whichever
 endpoints/UI it gates. Old memberships keep working — they'll just lack
@@ -14,7 +17,7 @@ the new cap until a Main Admin grants it.
 """
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +42,14 @@ MANAGE_FAMILIES = "manage_families"           # create/edit player family groupi
 MANAGE_MANUAL_ENTRIES = "manage_manual_entries"  # historical manual stat entry + edit + undo
 MANAGE_FEES = "manage_fees"                   # fee tracking: members, schedule, match days
 MANAGE_FIXTURES = "manage_fixtures"           # BetterSelect: fixtures (partner sync + manual create/edit)
-MANAGE_SELECTIONS = "manage_selections"       # BetterSelect: teams, availability, team selection
+MANAGE_SELECTIONS = "manage_selections"       # BetterSelect: every item below at once (the umbrella a module lock grants)
+SELECT_SQUADS = "select_squads"               # BetterSelect: squads and ladders
+SELECT_AVAILABILITY = "select_availability"   # BetterSelect: who can play each weekend
+SELECT_SELECTION = "select_selection"         # BetterSelect: naming the side, and the whiteboard
+SELECT_NETS = "select_nets"                   # BetterSelect: training and net sessions
+SELECT_FINES = "select_fines"                 # BetterSelect: the post-game fines session and pot
+SELECT_RULES = "select_rules"                 # BetterSelect: settings and selection rules
+SELECT_AUDIT = "select_audit"                 # BetterSelect: who changed what in selection and availability
 MANAGE_VOTES = "manage_votes"                 # BetterSelect: vote collection — config, ballots, lock/reopen
 VIEW_VOTE_RESULTS = "view_vote_results"       # BetterSelect: see vote tallies + the season leaderboard
 MANAGE_IQ = "manage_iq"                       # BetterIQ: opposition analysis + scouting dossiers
@@ -74,6 +84,13 @@ ALL_CAPABILITIES = (
     MANAGE_FEES,
     MANAGE_FIXTURES,
     MANAGE_SELECTIONS,
+    SELECT_SQUADS,
+    SELECT_AVAILABILITY,
+    SELECT_SELECTION,
+    SELECT_NETS,
+    SELECT_FINES,
+    SELECT_RULES,
+    SELECT_AUDIT,
     MANAGE_VOTES,
     VIEW_VOTE_RESULTS,
     MANAGE_IQ,
@@ -91,9 +108,38 @@ ALL_CAPABILITIES = (
 )
 
 
+# BetterSelect's items each have a capability of their own, and MANAGE_SELECTIONS
+# is the umbrella that satisfies any of them (full admins, a person locked to the
+# whole module, and the legacy allowlists all hold it). A route gates on
+# `require_any_cap(SELECT_<ITEM>, MANAGE_SELECTIONS)`.
+SELECT_ITEM_CAPS = (
+    SELECT_SQUADS, SELECT_AVAILABILITY, SELECT_SELECTION, SELECT_NETS,
+    SELECT_FINES, SELECT_RULES, SELECT_AUDIT,
+)
+# Shared reads every BetterSelect screen leans on (squad lists, the availability
+# config, the rules, who is already picked): open to a holder of any BetterSelect
+# item, so switching one item on does not need the others.
+SELECT_ANY = (MANAGE_SELECTIONS, MANAGE_FIXTURES) + SELECT_ITEM_CAPS
+
+
 # ─── Role helpers ────────────────────────────────────────────────────────────
 
 PRIVILEGED_ROLES = ("super_admin", "club_admin")  # roles that imply all caps
+
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+VIEW_ONLY_MESSAGE = "You have view-only access to this. Ask your Primary Admin for edit access."
+
+
+def _is_read(request) -> bool:
+    """True for a read. A missing request counts as a write: fail closed."""
+    return request is not None and getattr(request, "method", None) in SAFE_METHODS
+
+
+def membership_can_write(role: str, caps: list[str] | None, view_only: list[str] | None, capability: str) -> bool:
+    """Holds the capability AND not only at view level."""
+    if role in PRIVILEGED_ROLES:
+        return True
+    return capability in (caps or []) and capability not in (view_only or [])
 
 
 def membership_has_capability(role: str, caps: list[str] | None, capability: str) -> bool:
@@ -126,6 +172,7 @@ def require_cap(capability: str):
     async def _dep(
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
+        request: Request = None,
     ) -> User:
         row = await db.execute(
             select(ClubMembership).where(ClubMembership.user_id == current_user.id)
@@ -138,14 +185,60 @@ def require_cap(capability: str):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing capability: {capability}",
             )
+        if not _is_read(request) and not membership_can_write(
+                membership.role, membership.capabilities, getattr(membership, "view_only_caps", None), capability):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=VIEW_ONLY_MESSAGE)
         return current_user
 
+    # Read by verification/audit_route_access.py, which fails on a club route
+    # that declares no capability. Not used at request time.
+    _dep.required_caps = (capability,)
     return _dep
 
 
 def require_any_cap(*capabilities: str):
     """Like require_cap, but passes if the membership holds ANY of the given
     capabilities — e.g. a page a manager or a designated viewer can both open."""
+    from app.routers.auth import get_current_user
+    from app.models.db import ClubMembership, User, get_db
+
+    async def _dep(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+        request: Request = None,
+    ) -> User:
+        row = await db.execute(
+            select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+        )
+        membership = row.scalar_one_or_none()
+        if not membership:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No club membership found")
+        held = [
+            cap for cap in capabilities
+            if membership_has_capability(membership.role, membership.capabilities, cap)
+        ]
+        if not held:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing capability: one of {', '.join(capabilities)}",
+            )
+        if not _is_read(request) and not any(
+            membership_can_write(membership.role, membership.capabilities,
+                                 getattr(membership, "view_only_caps", None), cap)
+            for cap in held
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=VIEW_ONLY_MESSAGE)
+        return current_user
+
+    _dep.required_caps = tuple(capabilities)
+    return _dep
+
+
+def require_full_admin():
+    """Passes only for a Club Admin or Super Admin: not for a person a Primary
+    Admin locked to one module. For club-wide screens that belong to no module
+    (Plan & Billing, the setup wizard), which `membership_has_capability` cannot
+    express because no capability stands for them."""
     from app.routers.auth import get_current_user
     from app.models.db import ClubMembership, User, get_db
 
@@ -159,14 +252,12 @@ def require_any_cap(*capabilities: str):
         membership = row.scalar_one_or_none()
         if not membership:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No club membership found")
-        if not any(
-            membership_has_capability(membership.role, membership.capabilities, cap)
-            for cap in capabilities
-        ):
+        if membership.role not in PRIVILEGED_ROLES:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Missing capability: one of {', '.join(capabilities)}",
+                detail="Only a full club admin can do this",
             )
         return current_user
 
+    _dep.full_admin_only = True
     return _dep

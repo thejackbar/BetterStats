@@ -239,11 +239,13 @@ async def main() -> int:
         check("dropped by the junior-excluding club default (0 / 0)",
               (g, r) == (0, 0), f"{g}/{r}")
 
-        print("\n── a label-less career lump stays unclassifiable and is kept")
-        for lbl, sc in (("Juniors", jnr), ("Men's", men), ("Women's", wom)):
+        print("\n── a label-less career lump: kept by the default and by Men's, never claimed by a pick that leaves senior out")
+        for lbl, sc, want in (("Juniors", jnr, (0, 0)), ("Men's", men, (9, 250)),
+                              ("Women's", wom, (0, 0)), ("Masters", mas, (0, 0)),
+                              ("the club default", default, (9, 250))):
             g, r = await resid(s, LUMP, sc)
-            check(f"the career lump is kept under {lbl} (9 / 250)",
-                  (g, r) == (9, 250), f"{g}/{r}")
+            check(f"the career lump reads {want[0]} / {want[1]} under {lbl}",
+                  (g, r) == want, f"{g}/{r}")
 
         print("\n── a residual with a REAL senior grade_id (unchanged branch)")
         g, r = await resid(s, GID_SEN, jnr)

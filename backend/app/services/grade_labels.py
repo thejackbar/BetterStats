@@ -461,3 +461,17 @@ def category_for_name(categories: dict[str, str], name) -> str:
     differ slightly from anything we've stored."""
     key = strip_sponsor_suffix(name).lower()
     return categories.get(key) or suggest_category(name)
+
+
+def grade_is_women(fee_format, name, categories) -> bool:
+    """Is this grade (or, with no grade, team name) a women's side?
+
+    True on the BetterFees override ``fee_format == 'women'``, or when Manage
+    Grades classifies it women's and not mixed. Anything unclassified reads as
+    not women's, the gender wall's long-standing default."""
+    if fee_format == "women":
+        return True
+    if not name:
+        return False
+    cats = categories_for_name(categories, name)
+    return "womens" in cats and "mixed" not in cats

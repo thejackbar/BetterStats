@@ -31,6 +31,7 @@ from app.models.db import (
     ClubHonourEntry, ClubNews, ClubPage, Organisation, Player, get_db,
 )
 from app.routers.auth import get_current_club
+from app.services import cap_awards
 from app.services.sanitize_html import html_to_text, sanitize_html
 
 public_router = APIRouter(prefix="/clubs", tags=["website"])
@@ -178,8 +179,9 @@ _ACH_SEASON_JOIN = """
 """
 
 
-async def _auto_entries(org_id, category, subcategory, db: AsyncSession) -> list[dict]:
-    """Entries auto-pulled from an achievements category (e.g. "Hall of Fame")."""
+async def _auto_entries(org_id, category, subcategory, db: AsyncSession, achievement=None) -> list[dict]:
+    """Entries auto-pulled from an achievements category (e.g. "Hall of Fame"),
+    optionally only the awards of one exact name (e.g. "A Grade Cap Number")."""
     if not category:
         return []
     params = {"org": str(org_id), "cat": category}
@@ -187,11 +189,14 @@ async def _auto_entries(org_id, category, subcategory, db: AsyncSession) -> list
     if subcategory:
         sub_clause = " AND pa.subcategory = :sub"
         params["sub"] = subcategory
+    if (achievement or "").strip():
+        sub_clause += " AND LOWER(TRIM(pa.achievement)) = LOWER(:ach)"
+        params["ach"] = achievement.strip()
     rows = (await db.execute(text("""
         SELECT pa.player_id::text AS player_id,
                COALESCE(p.display_name_override, p.name, pa.player_name) AS name,
                COALESCE(s.name, pa.season) AS season_name,
-               pa.detail, pa.achievement
+               pa.detail, pa.achievement, pa.category, pa.subcategory
         FROM player_achievements pa
         LEFT JOIN players p ON p.id = pa.player_id
     """ + _ACH_SEASON_JOIN + """
@@ -207,18 +212,31 @@ async def _auto_entries(org_id, category, subcategory, db: AsyncSession) -> list
         ach = (r["achievement"] or "").strip()
         # Avoid echoing the board's own name ("Hall of Fame — Hall of Fame").
         detail = r["detail"] or (ach if ach and ach.lower() != cat_l else None)
+        # A cap shows as "Cap 186", but only when the award is known to be one.
+        number = None
+        if cap_awards.is_cap_award(r["category"], r["subcategory"], ach):
+            number = cap_awards.cap_number(r["detail"])
+            if number is not None:
+                detail = cap_awards.cap_label(r["detail"])
         out.append({
             "name": r["name"],
             "player_id": r["player_id"],
             "year": yr if yr and yr > 0 else None,
             "detail": detail,
             "auto": True,
+            "_cap": number,
         })
-    out.sort(key=lambda e: (-(e["year"] or 0), (e["name"] or "").lower()))
+    if out and all(e["_cap"] is not None for e in out):
+        # A board made of cap numbers reads in the order they were handed out.
+        out.sort(key=lambda e: (e["_cap"], (e["name"] or "").lower()))
+    else:
+        out.sort(key=lambda e: (-(e["year"] or 0), (e["name"] or "").lower()))
+    for e in out:
+        e.pop("_cap", None)
     return out
 
 
-async def _auto_count(org_id, category, subcategory, db: AsyncSession) -> int:
+async def _auto_count(org_id, category, subcategory, db: AsyncSession, achievement=None) -> int:
     if not category:
         return 0
     params = {"org": str(org_id), "cat": category}
@@ -226,6 +244,9 @@ async def _auto_count(org_id, category, subcategory, db: AsyncSession) -> int:
     if subcategory:
         sub_clause = " AND subcategory = :sub"
         params["sub"] = subcategory
+    if (achievement or "").strip():
+        sub_clause += " AND LOWER(TRIM(achievement)) = LOWER(:ach)"
+        params["ach"] = achievement.strip()
     return (await db.execute(text(
         "SELECT COUNT(*) FROM player_achievements WHERE org_id = :org AND category = :cat" + sub_clause
     ), params)).scalar() or 0
@@ -564,7 +585,7 @@ async def get_website_honours(slug: str, request: Request, db: AsyncSession = De
         )).scalars().all()
         merged = [_entry(e) for e in entries]
         if b.source_category:
-            merged += await _auto_entries(org.id, b.source_category, b.source_subcategory, db)
+            merged += await _auto_entries(org.id, b.source_category, b.source_subcategory, db, b.source_achievement)
         if not merged:
             continue  # hide an empty auto board (e.g. category with no winners yet)
         out.append({
@@ -1054,7 +1075,7 @@ async def admin_list_honours(
         out.append({
             **_board_admin(b),
             "entries": [_entry(e) for e in entries],
-            "auto_count": await _auto_count(club.id, b.source_category, b.source_subcategory, db),
+            "auto_count": await _auto_count(club.id, b.source_category, b.source_subcategory, db, b.source_achievement),
         })
     return out
 
@@ -1064,6 +1085,7 @@ def _board_admin(b: ClubHonourBoard) -> dict:
         "id": str(b.id), "title": b.title, "description": b.description,
         "display_order": b.display_order, "columns": b.columns or 1,
         "source_category": b.source_category, "source_subcategory": b.source_subcategory,
+        "source_achievement": b.source_achievement,
     }
 
 
@@ -1094,11 +1116,40 @@ async def admin_honour_categories(
     ]
 
 
+@admin_router.get("/honour-achievements")
+async def admin_honour_achievements(
+    category: str,
+    subcategory: Optional[str] = None,
+    _: object = Depends(require_cap(MANAGE_WEBSITE)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The award names (with counts) inside one category, for the board's
+    "only awards named" picker. Typing a name that is not listed still works."""
+    params = {"org": str(club.id), "cat": category}
+    sub_clause = ""
+    if subcategory:
+        sub_clause = " AND subcategory = :sub"
+        params["sub"] = subcategory
+    rows = (await db.execute(text("""
+        SELECT MODE() WITHIN GROUP (ORDER BY TRIM(achievement)) AS achievement, COUNT(*) AS n
+        FROM player_achievements
+        WHERE org_id = :org AND category = :cat AND COALESCE(TRIM(achievement), '') <> ''
+    """ + sub_clause + """
+        GROUP BY LOWER(TRIM(achievement))
+        ORDER BY n DESC, LOWER(TRIM(achievement))
+        LIMIT 200
+    """), params)).mappings().all()
+    return [{"achievement": r["achievement"], "count": r["n"]} for r in rows]
+
+
 class BoardBody(BaseModel):
     title: str
     description: Optional[str] = None
     source_category: Optional[str] = None
     source_subcategory: Optional[str] = None
+    # Exact award name inside the category. Not sent = leave it alone on an edit.
+    source_achievement: Optional[str] = None
     columns: Optional[int] = None
 
 
@@ -1120,12 +1171,13 @@ async def admin_create_board(
         description=(data.description or "").strip() or None, display_order=max_order + 1,
         source_category=(data.source_category or "").strip() or None,
         source_subcategory=(data.source_subcategory or "").strip() or None,
+        source_achievement=(data.source_achievement or "").strip() or None,
         columns=_clamp_columns(data.columns) if data.columns is not None else 1,
     )
     db.add(board)
     await db.commit()
     return {**_board_admin(board), "entries": [],
-            "auto_count": await _auto_count(club.id, board.source_category, board.source_subcategory, db)}
+            "auto_count": await _auto_count(club.id, board.source_category, board.source_subcategory, db, board.source_achievement)}
 
 
 @admin_router.put("/honours/boards/{board_id}")
@@ -1144,11 +1196,13 @@ async def admin_update_board(
     b.description = (data.description or "").strip() or None
     b.source_category = (data.source_category or "").strip() or None
     b.source_subcategory = (data.source_subcategory or "").strip() or None
+    if "source_achievement" in data.model_fields_set:
+        b.source_achievement = (data.source_achievement or "").strip() or None
     if data.columns is not None:
         b.columns = _clamp_columns(data.columns)
     await db.commit()
     return {**_board_admin(b),
-            "auto_count": await _auto_count(club.id, b.source_category, b.source_subcategory, db)}
+            "auto_count": await _auto_count(club.id, b.source_category, b.source_subcategory, db, b.source_achievement)}
 
 
 @admin_router.delete("/honours/boards/{board_id}")

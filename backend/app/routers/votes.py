@@ -56,6 +56,12 @@ class MedalUpdate(BaseModel):
     enabled: Optional[bool] = None
     require_pin: Optional[bool] = None
     voter_mode: Optional[str] = None
+    # Per-team override, grade NAME -> mode. Sent whole: a name left out reverts
+    # to the medal's voter_mode, and {} clears every override.
+    grade_voter_modes: Optional[dict[str, str]] = None
+    # {"mode": 'off' | 'auto' | 'manual', "manual": {grade name: multiplier}},
+    # sent whole. {} turns weighting off.
+    grade_weighting: Optional[dict] = None
     ballot_values: Optional[list[int]] = None
     counting_method: Optional[str] = None
     tie_policy: Optional[str] = None
@@ -65,7 +71,10 @@ class MedalUpdate(BaseModel):
     eligibility_source: Optional[str] = None
 
 
-def _settings_payload(m: Optional[VoteMedal], grade_names: Optional[dict] = None) -> dict:
+def _settings_payload(
+    m: Optional[VoteMedal], grade_names: Optional[dict] = None,
+    inactive_grades: Optional[dict] = None,
+) -> dict:
     """One medal's config as the screens read it. Still called ``settings`` on
     the wire — it is the same shape the pre-medals endpoint returned, plus the
     medal's own identity, so a screen that only wants the ballot rules is
@@ -73,10 +82,15 @@ def _settings_payload(m: Optional[VoteMedal], grade_names: Optional[dict] = None
 
     ``grade_names`` carries the NAMES behind ``grade_ids`` so the picker can
     show a medal's selection even when the stored id belongs to an older
-    season's grade row than the one it offers (see ``medal_grade_ids``)."""
+    season's grade row than the one it offers (see ``medal_grade_ids``).
+
+    ``inactive_grades`` carries the ticked grades that are no longer played
+    (``{id, name}``), which the picker no longer offers but must still show, or
+    a medal would keep counting a team nobody can see or untick."""
     cfg = vote_svc.effective_config(m)
     cfg["token"] = m.link_token if m else None
     cfg["grade_names"] = (grade_names or {}).get(str(m.id), []) if m else []
+    cfg["inactive_grades"] = (inactive_grades or {}).get(str(m.id), []) if m else []
     return cfg
 
 
@@ -109,6 +123,22 @@ def _apply_medal_fields(m: VoteMedal, body: MedalUpdate) -> None:
         if body.voter_mode not in vote_svc.VOTER_MODES:
             raise HTTPException(status_code=400, detail="Invalid voter mode")
         m.voter_mode = body.voter_mode
+    if body.grade_voter_modes is not None:
+        for mode in body.grade_voter_modes.values():
+            if mode not in vote_svc.VOTER_MODES:
+                raise HTTPException(status_code=400, detail="Invalid voter mode")
+        m.grade_voter_modes = vote_svc.clean_grade_voter_modes(body.grade_voter_modes)
+    if body.grade_weighting is not None:
+        gw = body.grade_weighting
+        if gw and gw.get("mode") not in vote_svc.WEIGHT_MODES:
+            raise HTTPException(status_code=400, detail="Invalid weighting mode")
+        for w in (gw.get("manual") or {}).values() if isinstance(gw.get("manual"), dict) else []:
+            if isinstance(w, bool) or not isinstance(w, (int, float)) or not (vote_svc.MIN_WEIGHT <= w <= vote_svc.MAX_WEIGHT):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A grade's weight has to be between {vote_svc.MIN_WEIGHT:g} and {vote_svc.MAX_WEIGHT:g}",
+                )
+        m.grade_weighting = vote_svc.clean_grade_weighting(gw) if gw else {}
     if body.counting_method is not None:
         if body.counting_method not in vote_svc.COUNTING_METHODS:
             raise HTTPException(status_code=400, detail="Invalid counting method")
@@ -141,14 +171,20 @@ def _apply_medal_fields(m: VoteMedal, body: MedalUpdate) -> None:
             m.link_token = secrets.token_urlsafe(24)
 
 
+async def _medal_payloads(db: AsyncSession, club: Organisation, medals: list[VoteMedal]) -> list[dict]:
+    pairs = await vote_svc.medal_grade_pairs(db, club.id, medals)
+    active = {g["name"] for g in await vote_svc.club_grade_options(db, club.id)}
+    names = {mid: [r["name"] for r in rows] for mid, rows in pairs.items()}
+    inactive = {mid: [r for r in rows if r["name"] not in active] for mid, rows in pairs.items()}
+    return [_settings_payload(m, names, inactive) for m in medals]
+
+
 async def _medals_payload(db: AsyncSession, club: Organisation) -> list[dict]:
-    medals = await vote_svc.list_medals(db, club.id)
-    names = await vote_svc.medal_grade_names(db, club.id, medals)
-    return [_settings_payload(m, names) for m in medals]
+    return await _medal_payloads(db, club, await vote_svc.list_medals(db, club.id))
 
 
 async def _one_medal_payload(db: AsyncSession, club: Organisation, m: VoteMedal) -> dict:
-    return _settings_payload(m, await vote_svc.medal_grade_names(db, club.id, [m]))
+    return (await _medal_payloads(db, club, [m]))[0]
 
 
 @router.get("/medals")
@@ -205,6 +241,58 @@ async def update_medal(
     await db.commit()
     await db.refresh(medal)
     return await _one_medal_payload(db, club, medal)
+
+
+@router.get("/medals/{medal_id}/weighting")
+async def medal_weighting(
+    medal_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_any_cap(MANAGE_VOTES, VIEW_VOTE_RESULTS)),
+):
+    """The grade weighting table for one medal's Settings tab: each team it
+    counts, how many games it has this season (from the fixtures), the weight
+    auto-weighting WOULD give it, and the weight in force under the medal's
+    current mode. Auto weights are always shown, so a club can see what
+    switching it on would do before it does."""
+    medal = await vote_svc.get_medal(db, club.id, medal_id)
+    if not medal:
+        raise HTTPException(status_code=404, detail="Medal not found")
+    cfg = vote_svc.effective_config(medal)
+    year = vote_svc.season_year_for(date.today())
+    auto = await vote_svc.resolve_grade_weights(
+        db, club.id, {**cfg, "grade_weighting": {"mode": "auto", "manual": {}}}, medal, year,
+    )
+    mode = cfg["grade_weighting"]["mode"]
+    manual = cfg["grade_weighting"]["manual"]
+    in_force = {"off": {}, "auto": auto["weights"], "manual": manual}[mode]
+
+    active = await vote_svc.club_grade_options(db, club.id)
+    ticked = set((await vote_svc.medal_grade_names(db, club.id, [medal])).get(str(medal.id), []))
+    scope = [g for g in active if not ticked or g["name"] in ticked]
+    scope.sort(key=lambda g: (g["display_order"] is None, g["display_order"] or 0, g["name"]))
+    top = auto["top_grade"]
+    top_value = cfg["ballot_values"][0]
+    rows = []
+    for g in scope:
+        games = auto["games"].get(g["name"], 0)
+        w = in_force.get(g["name"], 1.0)
+        rows.append({
+            "name": g["name"],
+            "games": games,
+            "auto_weight": round(auto["weights"][g["name"]], 2) if g["name"] in auto["weights"] else None,
+            "weight": round(w, 2),
+            "is_top": g["name"] == top,
+            "top_vote": round(top_value * w, 2),
+        })
+    return {
+        "year": year,
+        "season_label": vote_svc.season_label(year),
+        "mode": mode,
+        "top_grade": top,
+        "ballot_values": cfg["ballot_values"],
+        "rows": rows,
+    }
 
 
 @router.delete("/medals/{medal_id}")
@@ -558,7 +646,8 @@ async def fixture_detail(
 
     values = cfg["ballot_values"]
     totals = vote_svc.tally_ballots(ballots, values)
-    awarded = vote_svc.award_weekly_points(totals, cfg)
+    weight = await vote_svc.fixture_weight(db, club.id, cfg, s, fx)
+    awarded = vote_svc.weighted_points(vote_svc.award_weekly_points(totals, cfg), weight)
     results = sorted(
         (
             {"player_id": pid, "name": names.get(pid, "Unknown"),
@@ -579,9 +668,15 @@ async def fixture_detail(
             "state": state,
             "override": ov.status if ov else None,
             "voters_expected": len(eligible),
+            "weight": round(weight, 2),
         },
         "outstanding": outstanding,
-        "settings": _settings_payload(s),
+        # voter_mode is this fixture's team's, so the ballot form defaults to
+        # the right voters for the game it is open on.
+        "settings": {
+            **_settings_payload(s),
+            "voter_mode": (await vote_svc.cfg_for_fixture(db, cfg, fx))["voter_mode"],
+        },
         "eligibility": {
             "requested": elig["requested"],
             "used": elig["used"],

@@ -69,6 +69,7 @@ export default function PublicNetCheckIn() {
   const [requirePin, setRequirePin] = useState(true)
   const [allowRegistration, setAllowRegistration] = useState(true)
   const [sessions, setSessions] = useState([])
+  const [squadNames, setSquadNames] = useState([])   // set when this link's list is limited to some squads
   const [players, setPlayers] = useState([])
   const [search, setSearch] = useState('')
   const [chosen, setChosen] = useState(null)
@@ -88,6 +89,7 @@ export default function PublicNetCheckIn() {
     setRequirePin(!!d.require_pin)
     setAllowRegistration(!!d.allow_registration)
     setSessions(d.sessions || [])
+    setSquadNames(d.squads || [])
     setPlayers(d.players || [])
     return d
   }, [token])
@@ -246,6 +248,7 @@ export default function PublicNetCheckIn() {
             {sessions.length > 0 && (
               <p className="text-center text-pb-faint text-sm mb-4">
                 Checking in to <span className="text-pb-text font-medium">{sessions.map(sessionLine).join(' and ')}</span>
+                {squadNames.length > 0 && <span data-squad-note> · {squadNames.join(', ')} squad{squadNames.length === 1 ? '' : 's'}</span>}
               </p>
             )}
             <Banner>{error}</Banner>

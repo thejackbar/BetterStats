@@ -11,6 +11,26 @@ from app.config.settings import settings
 from app.services import email_service
 
 
+async def _deliver(msg: "email_service.EmailMessage", what: str) -> "email_service.SendResult":
+    """Send and report, never raise. The console provider only logs, so it is
+    reported as a failure here: callers that tell a person "email sent" must not
+    count it as one."""
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        provider = email_service.get_email_provider()
+        if provider.name == "console":
+            log.warning("Could not send %s to %s: no live email provider is configured", what, msg.to_email)
+            return email_service.SendResult(ok=False, error="no live email provider is configured")
+        result = await provider.send(msg)
+        if not result.ok:
+            log.error("Could not send %s to %s: %s", what, msg.to_email, result.error)
+        return result
+    except Exception as e:
+        log.exception("Could not send %s to %s", what, msg.to_email)
+        return email_service.SendResult(ok=False, error=str(e))
+
+
 def _greeting(display_name: str) -> str:
     # Callers pass whatever name they have on file (often a full "First
     # Last" display name, e.g. the Invite admin form only collects one
@@ -73,8 +93,8 @@ async def send_invite_email(*, email: str, display_name: str, club_name: str, li
         logging.getLogger(__name__).exception("Could not send invite email to %s", email)
 
 
-async def send_password_reset_email(*, email: str, display_name: str, club_name: str, link: str) -> None:
-    """Best-effort, same delivery/error-handling shape as send_invite_email above.
+async def send_password_reset_email(*, email: str, display_name: str, club_name: str, link: str) -> "email_service.SendResult":
+    """Never raises; returns the SendResult so the admin screen can say whether it went.
     Sent when a club admin clicks "Send password reset email" for an existing
     account (routers/club_admin.py::send_password_reset_link) — the account
     already has a working password, this just offers a way to replace it."""
@@ -118,13 +138,7 @@ async def send_password_reset_email(*, email: str, display_name: str, club_name:
         reply_to=settings.email_reply_to,
         configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
     )
-    try:
-        result = await email_service.get_email_provider().send(msg)
-        if not result.ok:
-            raise RuntimeError(result.error)
-    except Exception:
-        import logging
-        logging.getLogger(__name__).exception("Could not send password reset email to %s", email)
+    return await _deliver(msg, "password reset email")
 
 
 async def send_self_password_reset_email(*, email: str, display_name: str, club_name: str, link: str) -> None:
@@ -169,10 +183,4 @@ async def send_self_password_reset_email(*, email: str, display_name: str, club_
         reply_to=settings.email_reply_to,
         configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
     )
-    try:
-        result = await email_service.get_email_provider().send(msg)
-        if not result.ok:
-            raise RuntimeError(result.error)
-    except Exception:
-        import logging
-        logging.getLogger(__name__).exception("Could not send self-serve password reset email to %s", email)
+    return await _deliver(msg, "self-serve password reset email")

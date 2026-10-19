@@ -17,10 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth.modules import (
-    ALL_MODULES, MODULE_CORE, STATUS_ACTIVE, STATUS_TRIAL, sub_is_live, sub_is_trial_expired,
-    org_default_trial_days, expand_billing_module,
+    ALL_MODULES, MODULE_COMMS, MODULE_CORE, STATUS_ACTIVE, STATUS_CANCELLED, STATUS_TRIAL,
+    sub_is_live, sub_is_trial_expired, org_default_trial_days, expand_billing_module,
 )
 from app.models.db import OrgModuleSubscription, Organisation
+from app.services import comms_limits
 
 
 def _now() -> datetime:
@@ -47,6 +48,15 @@ def _find(org, module_key: str):
     return next((s for s in (org.module_subscriptions or []) if s.module_key == module_key), None)
 
 
+def _follow_comms_tier(org, module_key: str, previous_status, new_status) -> None:
+    """BetterComms sending limits follow the BetterComms module (BetterAdmin
+    covers it): going active lifts a Sandbox club to Production, paused or
+    cancelled returns it. Every status write below calls this, so no billing
+    path (Stripe, invoice, a super admin's convert) has to remember to."""
+    if module_key == MODULE_COMMS:
+        comms_limits.apply_comms_subscription_tier(org, previous_status, new_status)
+
+
 def upsert_subscription(
     org,
     module_key: str,
@@ -61,6 +71,7 @@ def upsert_subscription(
     then refresh the cache. The caller supplies the full desired state."""
     now = now or _now()
     sub = _find(org, module_key)
+    previous_status = sub.status if sub is not None else None
     if sub is None:
         sub = OrgModuleSubscription(organisation_id=org.id, module_key=module_key, started_at=now)
         org.module_subscriptions.append(sub)
@@ -70,6 +81,7 @@ def upsert_subscription(
     sub.trial_ends_at = trial_ends_at
     sub.updated_at = now
     recompute_overrides_cache(org, now)
+    _follow_comms_tier(org, module_key, previous_status, status)
     return sub
 
 
@@ -104,11 +116,13 @@ def set_status(org, module_key: str, status: str, *, renewal_date=..., now: date
             org, module_key, status=status,
             renewal_date=None if renewal_date is ... else renewal_date, now=now,
         )
+    previous_status = sub.status
     sub.status = status
     if renewal_date is not ...:
         sub.renewal_date = renewal_date
     sub.updated_at = now
     recompute_overrides_cache(org, now)
+    _follow_comms_tier(org, module_key, previous_status, status)
     return sub
 
 
@@ -147,8 +161,11 @@ def remove_module(org, module_key: str, *, now: datetime | None = None) -> bool:
     sub = _find(org, module_key)
     if sub is None:
         return False
+    previous_status = sub.status
     org.module_subscriptions.remove(sub)
     recompute_overrides_cache(org, now or _now())
+    # A module taken away is a lapse as far as the sending limit goes.
+    _follow_comms_tier(org, module_key, previous_status, STATUS_CANCELLED)
     return True
 
 

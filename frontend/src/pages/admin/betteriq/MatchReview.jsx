@@ -102,6 +102,9 @@ function GameReviewDetail({ review }) {
             <div className="iq-headline iq-num" style={{ fontSize: 28, color: 'var(--pb-dim)' }}>{g.their_score ?? '—'}</div>
           </div>
         </div>
+        {g.score_exact === false && g.our_score && (
+          <div className="text-pb-faint text-[12px] mt-2">Approximate: built from the batting and bowling cards, so extras are left out.</div>
+        )}
       </Card>
 
       {/* turning point (synthesised) */}

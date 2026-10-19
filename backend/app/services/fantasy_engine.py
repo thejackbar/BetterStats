@@ -35,7 +35,7 @@ from app.models.db import Organisation
 from app.services import fantasy_squad, fantasy_draft, fantasy_pricing, fantasy_queue
 from app.services import grassroots_scores_client as gr
 from app.services import playhq_client
-from app.services.club_match import club_match_keys
+from app.services.club_match import team_is_club
 from app.services.club_grades import club_game_sql, club_grade_rows
 from app.services.fantasy_scoring import (
     DEFAULT_RULES, DEFAULT_SCORING, classify_role, score_player_round,
@@ -204,8 +204,6 @@ async def _live_calendar_spans(session: AsyncSession, fs, refresh: bool) -> tupl
         return [], 0
 
     org = await session.get(Organisation, fs.organisation_id)
-    keys = club_match_keys(org) if org is not None else []
-    org_id = str(fs.organisation_id).lower()
     batches = await asyncio.gather(
         *[gr.get_grade_matches(g, force=refresh) for g in guids], return_exceptions=True,
     )
@@ -215,11 +213,7 @@ async def _live_calendar_spans(session: AsyncSession, fs, refresh: bool) -> tupl
             continue
         for m in matches:
             teams = m.get("teams") or []
-            ours = any(
-                str((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id
-                or (keys and any(k in (t.get("displayName") or "").lower() for k in keys))
-                for t in teams
-            )
+            ours = org is not None and any(team_is_club(org, t) for t in teams)
             if not ours:
                 continue
             days: list[date] = []
@@ -631,11 +625,13 @@ async def _round_player_scores(session: AsyncSession, fs, rnd) -> dict[str, dict
             {"wickets": w["wickets"] or 0, "maidens": w["maidens"]}
         )
     for f in fielding.mappings():
+        # One row per innings the player fielded in (a two-day game gives two), so
+        # these add up; assigning kept only the last innings.
         c = _cell(str(f["player_id"]), f["game_id"])
-        c["catches_wk"] = f["catches_wk"]
-        c["stumpings"] = f["stumpings"]
-        c["catches_nonwk"] = max((f["catches"] or 0) - (f["catches_wk"] or 0), 0)
-        c["run_outs"] = f["run_outs"]
+        c["catches_wk"] += f["catches_wk"] or 0
+        c["stumpings"] += f["stumpings"] or 0
+        c["catches_nonwk"] += max((f["catches"] or 0) - (f["catches_wk"] or 0), 0)
+        c["run_outs"] += f["run_outs"] or 0
     for a in appearances.mappings():
         _cell(str(a["player_id"]), a["game_id"])  # ensures the appearance point
 

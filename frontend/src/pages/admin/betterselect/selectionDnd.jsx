@@ -3,11 +3,16 @@
 // the old HTML5 `draggable` board, whose right→left drag was broken and which
 // didn't work on touch at all.
 //
-// Drop zones tag themselves with `data-drop-kind` ("slot" | "pool") and, for
-// slots, `data-drop-idx`. Draggables spread `useDrag().bind(item)` where item is
+// Drop zones tag themselves with `data-drop-kind` ("slot" | "pool" | "col") and,
+// for slots, `data-drop-idx`. A board with several sides (the draft table) also
+// sets `data-drop-col` to say which one; without it the hit is exactly what it
+// always was. Draggables spread `useDrag().bind(item)` where item is
 // `{ kind:'pool', player }` or `{ kind:'slot', idx, player }`. A 6px threshold
 // distinguishes a drag from a tap so tap-to-place (the primary mobile gesture)
-// still fires. Only grip handles set `touch-action:none`, so the pool lists
+// still fires. A horizontally scrolling board tags its scroller `data-autoscroll-x`
+// and the engine scrolls it sideways while a drag is held near its left or right
+// edge; a child tagged `data-autoscroll-skip` (a pinned pool) is not part of the
+// left edge. Only grip handles set `touch-action:none`, so the pool lists
 // keep scrolling on touch — whole-card drag is a desktop nicety.
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
@@ -29,7 +34,33 @@ export function DnD({ onDrop, children }) {
       if (!z) return null
       const kind = z.getAttribute('data-drop-kind')
       const idx = z.getAttribute('data-drop-idx')
-      return { kind, idx: idx == null ? null : Number(idx), key: kind + (idx == null ? '' : ':' + idx) }
+      const col = z.getAttribute('data-drop-col')
+      return { kind, idx: idx == null ? null : Number(idx), col, key: kind + (col ? ':' + col : '') + (idx == null ? '' : ':' + idx) }
+    }
+    // Hold a drag near the edge of a sideways scroller and it scrolls, so a
+    // column that is off screen can still be dropped on.
+    const EDGE = 80, MAX_STEP = 24
+    let raf = 0
+    const tick = () => {
+      raf = 0
+      const r = ref.current
+      if (!r.active || !r.item) return
+      let scrolled = false
+      document.querySelectorAll('[data-autoscroll-x]').forEach((el) => {
+        const b = el.getBoundingClientRect()
+        if (r.lastY < b.top || r.lastY > b.bottom) return
+        const skip = el.querySelector('[data-autoscroll-skip]')
+        const leftEdge = b.left + (skip ? skip.getBoundingClientRect().width : 0)
+        let dx = 0
+        if (r.lastX > b.right - EDGE) dx = Math.ceil(MAX_STEP * Math.min(1, (r.lastX - (b.right - EDGE)) / EDGE))
+        else if (r.lastX >= leftEdge && r.lastX < leftEdge + EDGE) dx = -Math.ceil(MAX_STEP * Math.min(1, (leftEdge + EDGE - r.lastX) / EDGE))
+        if (!dx) return
+        const before = el.scrollLeft
+        el.scrollLeft = before + dx
+        if (el.scrollLeft !== before) scrolled = true
+      })
+      if (scrolled) { const t = hit(r.lastX, r.lastY); setHover(t ? t.key : null) }
+      raf = requestAnimationFrame(tick)
     }
     const move = (e) => {
       const r = ref.current
@@ -40,6 +71,8 @@ export function DnD({ onDrop, children }) {
       // across the board doesn't highlight every row's text under the pointer.
       if (!r.active) { r.active = true; r.didDrag = true; document.body.style.userSelect = 'none' }
       if (e.cancelable) e.preventDefault()
+      r.lastX = e.clientX; r.lastY = e.clientY
+      if (!raf) raf = requestAnimationFrame(tick)
       const t = hit(e.clientX, e.clientY)
       setHover(t ? t.key : null)
       setDrag({ item: r.item, x: e.clientX, y: e.clientY })
@@ -49,6 +82,7 @@ export function DnD({ onDrop, children }) {
       if (!r.item) return
       if (r.active) { const t = hit(e.clientX, e.clientY); if (t) onDropRef.current(t, r.item) }
       r.item = null; r.active = false
+      cancelAnimationFrame(raf); raf = 0
       document.body.style.userSelect = ''
       setDrag(null); setHover(null)
     }
@@ -56,6 +90,7 @@ export function DnD({ onDrop, children }) {
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', up)
     return () => {
+      cancelAnimationFrame(raf)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)

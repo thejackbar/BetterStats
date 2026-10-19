@@ -19,6 +19,13 @@ is pinned to the club's stated total and can't exceed it (Wayne Giles → 473, n
 698). ``reconcile_imported_totals`` runs on commit AND as the final pass of every
 org sync, so the residual auto-shrinks as GR coverage grows — no re-import.
 
+A sheet can also say it STOPS at a season (a club history book that ends with
+2004/05): ``import_batches.through_year``. Such a sheet is a career as at that
+season, not as at today, so it is compared only against the online data up to
+and including that season, and whatever the online sources hold after it is
+added on top untouched. Without that, a player whose online record starts in
+2012 would swallow a 2004/05 book whole (online total > book total, residual 0).
+
 The arithmetic core (``reconcile_player`` and friends) is pure and DB-free so it
 can be exercised headless — see ``scripts/verify_import_reconcile.py``.
 """
@@ -209,7 +216,7 @@ def summarize(club: dict, gr: dict, import_seasons, gr_season_ids) -> dict:
     }
 
 
-async def fetch_gr_by_player(session, org_uuid, pids) -> dict:
+async def fetch_gr_by_player(session, org_uuid, pids, through_year: Optional[int] = None) -> dict:
     """Per-player GR coverage for an org: {pid: {"season_ids": set, "totals": dict}}.
 
     Scoped exactly like the effective view's ``api`` branch (player's org ==
@@ -217,6 +224,15 @@ async def fetch_gr_by_player(session, org_uuid, pids) -> dict:
     with what the profile actually reads. Used for ungraded uploads (no
     ``grade_label``) — reconciled against the player's whole GR history across
     every grade, same as always.
+
+    ``through_year`` (a historical summary that stops at a season): ``totals``
+    then holds only the seasons that START in or before that year, which is
+    what the sheet can overlap with. ``season_ids`` still lists EVERY season GR
+    holds, because it answers a different question (is this season already
+    covered online, so a sheet row for it must be dropped) and a sheet row that
+    strays past its own cut-off must not be added on top of a season GR has. A
+    season whose year cannot be read counts as inside the cut-off: GR wins, so
+    the book never adds to something online might already hold.
     """
     from sqlalchemy import select, or_
     from app.models.db import Player, Season, PlayerSeasonStats
@@ -233,12 +249,32 @@ async def fetch_gr_by_player(session, org_uuid, pids) -> dict:
             .where(PlayerSeasonStats.player_id.in_(list(pids)))
         )
     ).scalars().all()
+    year_by_season = await season_years(session, org_uuid) if through_year is not None else {}
     out: dict = {}
     for pss in rows:
         g = out.setdefault(pss.player_id, {"season_ids": set(), "totals": None})
         g["season_ids"].add(pss.season_id)
-        g["totals"] = accumulate(g["totals"], pss_to_metrics(pss))
+        if within_cutoff(year_by_season.get(pss.season_id), through_year):
+            g["totals"] = accumulate(g["totals"], pss_to_metrics(pss))
     return out
+
+
+def within_cutoff(season_year, through_year) -> bool:
+    """True when a season (by start year) is inside a sheet's cut-off.
+
+    No cut-off means everything is inside. A season whose year is unknown is
+    treated as inside (see ``fetch_gr_by_player``).
+    """
+    if through_year is None or season_year is None:
+        return True
+    return int(season_year) <= int(through_year)
+
+
+def through_label_for(year: Optional[int]) -> Optional[str]:
+    """2004 -> "2004/05": the season a cut-off year ends."""
+    if year is None:
+        return None
+    return f"{int(year)}/{(int(year) + 1) % 100:02d}"
 
 
 def _psgs_to_metrics(row) -> dict:
@@ -610,7 +646,7 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
     import uuid as _uuid
 
     from sqlalchemy import select, delete
-    from app.models.db import ImportedStat, ImportEffectiveDelta, async_session_maker
+    from app.models.db import ImportBatch, ImportedStat, ImportEffectiveDelta, async_session_maker
 
     try:
         org_uuid = _uuid.UUID(str(org_id_str))
@@ -619,11 +655,16 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
 
     async with async_session_maker() as session:
         # Load this org's uploaded truth, grouped by player.
-        truth_rows = (
+        # Each row carries its batch's cut-off (None = an ordinary import).
+        truth_pairs = (
             await session.execute(
-                select(ImportedStat).where(ImportedStat.organisation_id == org_uuid)
+                select(ImportedStat, ImportBatch.through_year)
+                .join(ImportBatch, ImportBatch.id == ImportedStat.import_batch_id)
+                .where(ImportedStat.organisation_id == org_uuid)
             )
-        ).scalars().all()
+        ).all()
+        truth_rows = [r for r, _cut in truth_pairs]
+        cut_by_row = {r.id: cut for r, cut in truth_pairs}
 
         # Always clear the org's derived deltas first (so undoing the last import
         # leaves a clean slate).
@@ -640,35 +681,48 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
         team_labelled = is_team_labelled(_grade_key(r.grade_label) for r in truth_rows)
         by_group: dict = {}
         for r in truth_rows:
-            key = (r.player_id, None if team_labelled else _grade_key(r.grade_label))
-            by_group.setdefault(key, []).append(r)
+            cut = cut_by_row.get(r.id)
+            # A sheet that stops at a season is a whole-book summary, so it is
+            # compared against the player's whole online record up to that
+            # season, never one grade's coverage of it (a grade-scoped fetch
+            # cannot be cut off by year).
+            grade = None if (team_labelled or cut is not None) else _grade_key(r.grade_label)
+            by_group.setdefault((r.player_id, grade, cut), []).append(r)
         year_by_season = await season_years(session, org_uuid)
 
-        ungraded_pids = [pid for pid, grade in by_group.keys() if grade is None]
-        grade_labels = sorted({grade for _pid, grade in by_group.keys() if grade is not None})
+        ungraded_pids = sorted({pid for pid, grade, cut in by_group.keys() if grade is None and cut is None})
+        grade_labels = sorted({grade for _pid, grade, _cut in by_group.keys() if grade is not None})
 
         # Ungraded GR fetch (existing all-grades comparison), only for players
         # who actually have an ungraded group.
         gr_by_player = await fetch_gr_by_player(session, org_uuid, ungraded_pids)
+        # One fetch per distinct cut-off, covering the players whose book stops there.
+        gr_by_cut: dict = {}
+        for cut in sorted({c for _pid, _g, c in by_group.keys() if c is not None}):
+            cut_pids = sorted({pid for pid, _g, c in by_group.keys() if c == cut})
+            gr_by_cut[cut] = await fetch_gr_by_player(session, org_uuid, cut_pids, through_year=cut)
 
         # One grade-scoped GR fetch per distinct grade label, each covering
         # every player that has a row under that label.
         gr_by_grade: dict = {}
         for grade in grade_labels:
-            grade_pids = [pid for pid, g in by_group.keys() if g == grade]
+            grade_pids = [pid for pid, g, _c in by_group.keys() if g == grade]
             gr_by_grade[grade] = await fetch_gr_by_player_for_grade(
                 session, org_uuid, grade_pids, grade
             )
 
         written = 0
-        for (pid, grade), rows in by_group.items():
+        for (pid, grade, cut), rows in by_group.items():
             items = [
                 {"scope": r.scope, "season_id": r.season_id, "grade_label": r.grade_label,
                  "is_prior_bucket": r.is_prior_bucket, "metrics": imported_to_metrics(r)}
                 for r in rows
             ]
             club, import_seasons = assemble_club_inputs(items)
-            gr_pool = gr_by_grade[grade] if grade is not None else gr_by_player
+            if cut is not None:
+                gr_pool = gr_by_cut[cut]
+            else:
+                gr_pool = gr_by_grade[grade] if grade is not None else gr_by_player
             gr = gr_pool.get(pid, {"season_ids": set(), "totals": None})
             gr_totals = gr["totals"] if gr["totals"] is not None else _blank()
             covered = gr["season_ids"] if grade is not None else covered_by_year(gr["season_ids"], year_by_season)
@@ -677,7 +731,7 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
                 club, gr_totals, import_seasons, covered
             )
 
-            if team_labelled:
+            if team_labelled or cut is not None:
                 # One row per grade the sheet named, so a grade-filtered board
                 # still finds an imported season under the team it was.
                 emitted_rows = season_rows_by_grade(items, [sid for sid, _m in season_deltas])

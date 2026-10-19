@@ -23,10 +23,15 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_SELECTIONS, SELECT_ANY, SELECT_RULES, require_any_cap,
+)  # BetterSelect item permissions
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
+from app.auth.modules import org_has_module
 from app.models.db import Organisation, User, get_db
 from app.routers.auth import get_current_club
-from app.services import grade_labels, player_age, selection_rules as rules_svc
+from app.services.side_size import valid_side_size
+from app.services import grade_labels, player_age, selection_notify, selection_rules as rules_svc
 
 router = APIRouter(prefix="/selection-rules", tags=["selection-rules"])
 
@@ -62,6 +67,26 @@ class SettingsBody(BaseModel):
     # A rule about either still shows: that one the club asked for.
     show_fees: Optional[bool] = None
     show_training: Optional[bool] = None
+    notify_captain_on_confirm: Optional[bool] = None
+    # The BetterComms template each email uses. Absent leaves it alone; null or
+    # an empty string goes back to the standard wording (read through
+    # model_fields_set below).
+    captain_email_template_id: Optional[str] = None
+    player_email_template_id: Optional[str] = None
+    # Half-available colours (#rrggbb). Absent leaves one alone; null or an empty
+    # string puts it back to the platform colour (model_fields_set below).
+    half_colour_w1: Optional[str] = None
+    half_colour_w2: Optional[str] = None
+    # What the club calls week 1 and week 2 of a two-day game ("A" and "B").
+    # Absent leaves one alone; null or blank puts it back to W1 / W2.
+    week_name_w1: Optional[str] = None
+    week_name_w2: Optional[str] = None
+    # How far back a player may have last played to be listed (0 = any time).
+    played_years_selection: Optional[int] = None
+    played_years_availability: Optional[int] = None
+    # The whole list of per-team starting filters, replaced as one (absent
+    # leaves it alone; null or [] removes every rule).
+    team_defaults: Optional[list] = None
 
 
 async def _grade_options(db: AsyncSession, org_id) -> list[dict]:
@@ -108,6 +133,13 @@ def _settings_out(club: Organisation) -> dict:
         "default_team_size": club.default_team_size if club.default_team_size is not None else 11,
         "show_fees": cfg["show_fees"],
         "show_training": cfg["show_training"],
+        "notify_captain_on_confirm": cfg["notify_captain_on_confirm"],
+        "captain_email_template_id": cfg["captain_email_template_id"],
+        "player_email_template_id": cfg["player_email_template_id"],
+        "half_colours": cfg["half_colours"],
+        "week_names": cfg["week_names"],
+        "played_years": cfg["played_years"],
+        "team_defaults": cfg["team_defaults"],
     }
 
 
@@ -115,7 +147,7 @@ def _settings_out(club: Organisation) -> dict:
 async def get_rules(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(*SELECT_ANY)),
 ):
     """Everything the settings screen draws: the club's rules, the settings
     around them, and the options a rule can be scoped to."""
@@ -156,7 +188,7 @@ async def patch_settings(
     body: SettingsBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     cfg = dict(club.selection_rules_config or {})
     if body.age_basis is not None:
@@ -174,15 +206,145 @@ async def patch_settings(
         club.select_show_age_under = player_age.clean_age_limit(body.select_show_age_under)
     if body.dormancy_months is not None:
         club.dormancy_months = max(1, min(600, int(body.dormancy_months)))
-    if body.default_team_size is not None and int(body.default_team_size) in (0, 11, 12, 13):
+    if body.default_team_size is not None and valid_side_size(int(body.default_team_size)):
         club.default_team_size = int(body.default_team_size)
     if body.show_fees is not None:
         cfg["show_fees"] = bool(body.show_fees)
     if body.show_training is not None:
         cfg["show_training"] = bool(body.show_training)
+    if body.notify_captain_on_confirm is not None:
+        cfg["notify_captain_on_confirm"] = bool(body.notify_captain_on_confirm)
+    for field in ("captain_email_template_id", "player_email_template_id"):
+        if field not in body.model_fields_set:
+            continue
+        raw = getattr(body, field)
+        if not (raw or "").strip():
+            cfg.pop(field, None)          # an explicit clear: the standard wording
+            continue
+        tid = rules_svc.clean_template_id(raw)
+        if tid is None:
+            raise HTTPException(status_code=400, detail="That is not a template.")
+        if not org_has_module(club, "comms"):
+            raise HTTPException(status_code=402, detail="Custom email templates need BetterComms.")
+        found = await db.scalar(
+            text("SELECT 1 FROM comms_templates WHERE id = :tid AND organisation_id = :org "
+                 "AND sales_template_key IS NULL"),
+            {"tid": uuid.UUID(tid), "org": club.id},
+        )
+        if not found:
+            raise HTTPException(status_code=404, detail="Template not found.")
+        cfg[field] = tid
+    for key, field in (("w1", "half_colour_w1"), ("w2", "half_colour_w2")):
+        if field not in body.model_fields_set:
+            continue
+        raw = getattr(body, field)
+        halves = dict(cfg.get("half_colours") or {})
+        if not (raw or "").strip():
+            halves.pop(key, None)         # an explicit clear: the platform colour
+        else:
+            colour = rules_svc.clean_colour(raw)
+            if colour is None:
+                raise HTTPException(status_code=400, detail="Pick a colour like #a855f7.")
+            halves[key] = colour
+        if halves:
+            cfg["half_colours"] = halves
+        else:
+            cfg.pop("half_colours", None)
+    for key, field in (("w1", "week_name_w1"), ("w2", "week_name_w2")):
+        if field not in body.model_fields_set:
+            continue
+        names = dict(cfg.get("week_names") or {})
+        name = rules_svc.clean_week_name(getattr(body, field))
+        if name is None:
+            names.pop(key, None)          # an explicit clear: W1 / W2
+        else:
+            names[key] = name
+        if names:
+            cfg["week_names"] = names
+        else:
+            cfg.pop("week_names", None)
+    for key, field in (("selection", "played_years_selection"), ("availability", "played_years_availability")):
+        if field not in body.model_fields_set:
+            continue
+        n = rules_svc.clean_years(getattr(body, field), None)
+        if n is None:
+            raise HTTPException(status_code=400, detail="Pick a number of years from 0 (any time) to 50, or -1 for this season.")
+        py = dict(cfg.get("played_years") or {})
+        py[key] = n
+        cfg["played_years"] = py
+    if "team_defaults" in body.model_fields_set:
+        if body.team_defaults is not None and not isinstance(body.team_defaults, list):
+            raise HTTPException(status_code=400, detail="Team defaults must be a list.")
+        cleaned = rules_svc.clean_team_defaults(body.team_defaults)
+        if cleaned:
+            cfg["team_defaults"] = cleaned
+        else:
+            cfg.pop("team_defaults", None)
     club.selection_rules_config = cfg or None
     await db.commit()
     return _settings_out(club)
+
+
+@router.get("/email-templates")
+async def email_templates(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(require_any_cap(*SELECT_ANY)),
+):
+    """The club's BetterComms templates a selection email can be linked to, and
+    the variables they can use. Templates are written in Admin > Comms >
+    Templates; a club without BetterComms is told so rather than shown none.
+    The Sales Workspace's own templates are never offered."""
+    available = org_has_module(club, "comms")
+    rows = []
+    if available:
+        rows = (await db.execute(
+            text("SELECT id, name, subject FROM comms_templates "
+                 "WHERE organisation_id = :org AND sales_template_key IS NULL ORDER BY name"),
+            {"org": club.id},
+        )).mappings().all()
+    return {
+        "comms_available": available,
+        "templates": [{"id": str(r["id"]), "name": r["name"], "subject": r["subject"]} for r in rows],
+        "variables": selection_notify.SELECTION_VARIABLES,
+    }
+
+
+class TemplatePreviewBody(BaseModel):
+    template_id: str
+    to: str = "captain"
+
+
+@router.post("/email-templates/preview")
+async def preview_email_template(
+    body: TemplatePreviewBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
+):
+    """A template filled in with a made-up match and side, so a selector can see
+    the email before any real player does. Nothing is sent."""
+    if body.to not in selection_notify.TEMPLATE_KEY:
+        raise HTTPException(status_code=400, detail="Preview the captain's or the players' email.")
+    tid = rules_svc.clean_template_id(body.template_id)
+    row = None
+    if tid and org_has_module(club, "comms"):
+        row = (await db.execute(
+            text("SELECT id, name, subject, html FROM comms_templates "
+                 "WHERE id = :tid AND organisation_id = :org AND sales_template_key IS NULL"),
+            {"tid": uuid.UUID(tid), "org": club.id},
+        )).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Template not found.")
+    sheet = selection_notify.sample_sheet()
+    captain, other = sheet["players"][0], sheet["players"][1]
+    subject, html_doc, _text = selection_notify.render_template(
+        club, dict(row), sheet, to=body.to,
+        recipient=captain if body.to == "captain" else other,
+        captain_name=captain["name"],
+        message="Meet at the ground at 11:30 for a 12:30 start." if body.to == "players" else None,
+        default_subject="(your template has no subject, so the standard one is used)")
+    return {"subject": subject, "html": html_doc}
 
 
 def _scope_for(kind: str, raw) -> dict:
@@ -200,7 +362,7 @@ async def create_rule(
     body: RuleBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     kind = body.kind
     if kind not in rules_svc.RULE_KINDS:
@@ -237,7 +399,7 @@ async def update_rule(
     body: RuleBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     row = await _owned_rule(db, rule_id, club.id)
     fields: dict = {"id": row["id"], "org": club.id}
@@ -277,7 +439,7 @@ async def delete_rule(
     rule_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     row = await _owned_rule(db, rule_id, club.id)
     await db.execute(
@@ -293,7 +455,7 @@ async def reorder_rules(
     body: ReorderBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     """Ids that aren't this club's are ignored rather than rejected — the list
     comes from a browser."""
@@ -314,7 +476,7 @@ async def rule_players(
     rule_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(*SELECT_ANY)),
 ):
     """The club's players and where each stands with this one rule."""
     row = await _owned_rule(db, rule_id, club.id)
@@ -344,7 +506,7 @@ async def set_rule_player(
     body: ClearanceBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     """Clear a player of one rule (a permit, an association clearance, the tick
     a free-text rule asks for), or mark them ineligible under it. A null state
@@ -405,7 +567,7 @@ _STARTER_BOWLING = {
 async def seed_starter(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    _: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    _: User = Depends(require_any_cap(SELECT_RULES, MANAGE_SELECTIONS)),
 ):
     """Add the junior bowling limits, if the club hasn't already got some.
 

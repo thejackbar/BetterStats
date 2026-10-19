@@ -1,3 +1,4 @@
+import logging
 from contextvars import ContextVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -32,7 +33,7 @@ from app.services.aggregations import (
     get_career_batting_from_innings, get_career_bowling_from_spells, get_career_fielding_from_stats,
     get_player_batting_innings, get_player_bowling_spells,
     get_dismissal_breakdown, get_batting_by_position, get_batting_by_grade,
-    get_bowling_by_grade, get_player_team_breakdown,
+    get_bowling_by_grade, get_player_team_breakdown, raise_games_to_grid_total,
     get_bowling_dismissal_breakdown, get_bowling_by_batter_position,
     get_season_by_season, get_player_milestones, get_player_partnerships,
     get_player_activity, get_upcoming_milestones_for_org,
@@ -40,9 +41,12 @@ from app.services.aggregations import (
     _club_game_clause,
 )
 from app.services.milestone_rules import (
-    crossed_thresholds, is_displayable, load_scheme, next_threshold, reach_window,
+    crossed_thresholds, is_displayable, next_threshold, reach_window,
 )
+from app.services.grade_milestone_schemes import load_book
 from app.services import iq_teammates
+from app.services import player_form
+from app.services.session_safety import rollback_keeping
 from app.services import milestone_totals
 from app.services import grade_scope, junior_hiding, player_privacy
 from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
@@ -361,6 +365,18 @@ async def get_player_stats(
         batting = await get_career_batting(db, player_id, season_id, scope=scope)
         bowling = await get_career_bowling(db, player_id, season_id, scope=scope)
         fielding = await get_career_fielding(db, player_id, season_id, scope=scope)
+        # The header must not read below the Analysis grid's own total (95 beside
+        # 96 for a player CA undercounted by a game). Raise-only; see
+        # raise_games_to_grid_total. A failure here leaves the figures as they were.
+        if player.organisation_id:
+            try:
+                await raise_games_to_grid_total(
+                    db, player_id, str(player.organisation_id), season_id, scope,
+                    batting, bowling, fielding)
+            except Exception:
+                await rollback_keeping(db, player, org)
+                logging.getLogger(__name__).exception(
+                    "grid match total failed for player %s", player_id)
     batting_innings = await get_player_batting_innings(db, player_id, season_id, grade_id, scope=scope)
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id, scope=scope)
 
@@ -381,7 +397,6 @@ async def get_player_stats(
         except Exception:
             # A note about the figures must never take the figures down.
             await db.rollback()
-            import logging
             logging.getLogger(__name__).exception(
                 "match coverage failed for player %s", player_id)
 
@@ -709,10 +724,10 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
     rows = await get_player_milestones(db, player_id)
     # Filter out pre-existing rows that don't match the club's threshold scheme
     # (10/25 matches, 100/250 runs, etc.) — they stay in the DB, just hidden.
-    scheme = await load_scheme(db, player.organisation_id)
+    book = await load_book(db, player.organisation_id)
     milestones = [
         _str_keys(r) for r in rows
-        if is_displayable(r["milestone_type"], r["milestone_value"], scheme)
+        if is_displayable(r["milestone_type"], r["milestone_value"], book.club)
     ]
 
     # Append computed per-grade match milestones (not stored in DB).
@@ -724,7 +739,8 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
         grade_name = row.get("grade_name")
         if not grade_name:
             continue
-        for threshold in crossed_thresholds("grade_matches", matches_in_grade):
+        for threshold in crossed_thresholds("grade_matches", matches_in_grade,
+                                            book.for_grade(grade_name)):
             milestones.append({
                 "id": None,
                 "milestone_type": "grade_matches",
@@ -773,6 +789,7 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     # hand-entered match — a milestone card reading 197 wickets on a profile
     # whose header says 478. See services/milestone_totals.py.
     from app.services import milestone_scan
+    book = await load_book(db, player.organisation_id)
     upcoming = []
     if player.organisation_id:
         got = await milestone_totals.profile_totals(db, player.organisation_id, [str(player.id)],
@@ -784,8 +801,7 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
         }
         for stat, _cat, col in milestone_scan.STAT_DEFS:
             row[col] = int((t.get("totals") or {}).get(stat) or 0)
-        for m in milestone_scan.upcoming_from_totals(
-                [row], await load_scheme(db, player.organisation_id)):
+        for m in milestone_scan.upcoming_from_totals([row], book.club):
             upcoming.append({k: m[k] for k in (
                 "type", "current", "target", "needed", "junior_split", "counts", "variant",
             ) if k in m})
@@ -799,11 +815,12 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
         grade_name = row.get("grade_name")
         if not grade_name or matches_in_grade <= 0:
             continue
-        target = next_threshold("grade_matches", matches_in_grade)
+        grade_scheme = book.for_grade(grade_name)
+        target = next_threshold("grade_matches", matches_in_grade, grade_scheme)
         if target is None:
             continue
         needed = target - matches_in_grade
-        if needed > reach_window("grade_matches", target):
+        if needed > reach_window("grade_matches", target, grade_scheme):
             continue
         upcoming.append({
             "type": "matches",
@@ -1209,65 +1226,25 @@ async def _snapshot(db: AsyncSession, player: Player) -> dict:
     except Exception:
         snap["availability_next"] = []
 
-    # recent_batting — last 5 scores, most-recent-first (by game date).
-    try:
-        b_res = await db.execute(
-            select(BattingInnings.runs)
-            .join(Game, Game.id == BattingInnings.game_id)
-            .where(BattingInnings.player_id == player.id)
-            .order_by(Game.played_at.desc().nullslast(), BattingInnings.id.desc())
-            .limit(5)
-        )
-        snap["recent_batting"] = [int(r or 0) for (r,) in b_res.all()]
-    except Exception:
-        snap["recent_batting"] = []
-
-    # recent_bowling — last 5 {wickets, runs}, most-recent-first.
-    try:
-        bw_res = await db.execute(
-            select(BowlingSpell.wickets, BowlingSpell.runs)
-            .join(Game, Game.id == BowlingSpell.game_id)
-            .where(BowlingSpell.player_id == player.id)
-            .order_by(Game.played_at.desc().nullslast(), BowlingSpell.id.desc())
-            .limit(5)
-        )
-        snap["recent_bowling"] = [
-            {"wickets": int(w or 0), "runs": int(r or 0)} for (w, r) in bw_res.all()
-        ]
-    except Exception:
-        snap["recent_bowling"] = []
-
-    # season_catches — catches in the club's latest season only (the profile
-    # labels this "this season"; an unfiltered sum would be career catches).
-    try:
-        latest_season = (await db.execute(
-            select(Season.id)
-            .where(Season.organisation_id == player.organisation_id)
-            .order_by(Season.year.desc().nullslast(), Season.name.desc())
-            .limit(1)
-        )).scalar()
-        catches = catches_wk = 0
-        if latest_season:
-            c_res = await db.execute(
-                select(
-                    func.coalesce(func.sum(FieldingStat.catches), 0),
-                    func.coalesce(func.sum(FieldingStat.catches_wk), 0),
-                )
-                .join(Game, Game.id == FieldingStat.game_id)
-                .join(Grade, Grade.id == Game.grade_id)
-                .where(
-                    FieldingStat.player_id == player.id,
-                    Grade.season_id == latest_season,
-                )
-            )
-            row = c_res.first()
-            catches = int((row and row[0]) or 0)
-            catches_wk = int((row and row[1]) or 0)
-        snap["season_catches"] = catches
-        snap["season_catches_wk"] = catches_wk
-    except Exception:
-        snap["season_catches"] = 0
-        snap["season_catches_wk"] = 0
+    # Recent form: last 5 batting innings, last 5 bowling spells, and the club's
+    # current season of fielding. Read from the effective views and the club's
+    # own games, like the public profile (services/player_form.py). `recent_batting`
+    # stays a plain list of runs for older clients; `recent_batting_detail` carries
+    # the not-out flag and the date.
+    form = await player_form.recent_form(db, str(player.id), player)
+    snap["recent_batting_detail"] = form["batting"]
+    snap["recent_batting"] = [b["runs"] for b in form["batting"]]
+    snap["recent_bowling"] = [
+        {"wickets": b["wickets"], "runs": b["runs"], "overs": b["overs"]}
+        for b in form["bowling"]
+    ]
+    fielding = form["fielding"] or {}
+    snap["season_fielding"] = fielding or None
+    snap["season_name"] = fielding.get("season_name")
+    snap["season_catches"] = int(fielding.get("catches") or 0)
+    snap["season_catches_wk"] = int(fielding.get("catches_wk") or 0)
+    snap["season_run_outs"] = int(fielding.get("run_outs") or 0)
+    snap["season_stumpings"] = int(fielding.get("stumpings") or 0)
 
     # last_picked — most recent fixture this player was named in.
     try:

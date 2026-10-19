@@ -7,7 +7,7 @@
 - Merge Duplicates or Manage Grades suggestions (`services/grade_duplicates.py`), or the scorecard reader (`scorecard_ocr.py`, `AdminScorecardUpload.jsx`).
 - Symptoms: see Traps below.
 
-**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/imports-manual-entries-and-data-tidy.md`. Grep hints: `stray innings`, `short_form`, `innings_order_known`, `re-sourced`, `is_team_labelled`, `discriminator`, `name_variant`, `cleanup_seasons`, `import_batch_id`, `staging`, `for-date`, `grade-less`, `exclude_id`, `balls_per_over`, `card_error`.
+**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/imports-manual-entries-and-data-tidy.md`. Grep hints: `stray innings`, `through_year`, `history book`, `short_form`, `innings_order_known`, `re-sourced`, `is_team_labelled`, `discriminator`, `name_variant`, `cleanup_seasons`, `import_batch_id`, `staging`, `for-date`, `grade-less`, `exclude_id`, `balls_per_over`, `card_error`.
 
 **Related guides**: `cricketstatz-import` (pairing, effective views), `stats-figures-records-and-filters`, `cross-club-and-data-safety`, `data-sources-and-sync`.
 
@@ -60,6 +60,9 @@
 32. Jump-back edit replays `extracted_payload` through the upload review UI (photo uploads only); save is `PATCH /games/{id}`. `check_scorecard_duplicate` takes `exclude_id`. Delete and restore use the one audit trail (`/admin/manual-entries#audit`).
 33. A number column holding a non-number must be reported, never parsed bare. `_resolve_games` runs `_bad_number_cells` first, blanks those cells in a copy of the rows (so every later `_parse_int` is safe) and returns `bad_cells` and a warning naming row, player, game, column and value. `/commit` refuses with a 422 while any remain. A new numeric CSV column goes in `_GAME_INT_COLUMNS` or `_GAME_FLOAT_COLUMNS`.
 
+**Historical summaries that stop at a season (migration 328, v9.110.10)**
+34. A sheet that is a career only up to a season (a club history book) carries `import_batches.through_year`. `reconcile_imported_totals` and `routers/imports._resolve` must make the same call: compare it ONLY against `fetch_gr_by_player(through_year=)` (online totals up to and including that season; an unreadable season year counts as inside), always as a whole book (never grade-scoped), and ADD the online record after the cut-off untouched. `season_ids` stays every season so a stray sheet row for a season online holds is dropped. A cut-off is typed as a consecutive pair ("2004/05"); never accept a bare year. The wizard blocks Next and Import while "Only up to a season" is chosen without a usable season: sending nothing would quietly turn a history book into a whole-career import. A new reader of `import_batches` must tolerate NULL (ordinary import); football's schema mirror runs `import_through_ddl` because the shared `ImportBatch` model maps both columns.
+
 **CSFW archives**
 33. There is ONE extractor, `tools/csfw_extract.py` (`docs/csfw-data-extraction.md`). Never copy it for a club: a record layout is a `Layout` (`--layout`); team and match-type names are a `Profile` (`tools/csfw_profiles/<club>.json`, `--profile`, `--team-names`) because no data file holds them; a team number is only meaningful inside its DATABASE (the header's club-name field, never the file name); byes are the profile's `byes`. Start any new club with `--analyse`. Never read another club's type codes or team names into a club with no profile, and never name two databases' teams the same grade.
 
@@ -74,7 +77,7 @@
 ## How to verify a change here
 
 Real Postgres, shipped route bodies, and a control run that REPORTS rather than crashes. A check on an empty fixture or a crashed control proves nothing.
-- `backend/verification/`: `verify_manual_game_check.py` (control reports 142/7), `verify_scorebook_innings.py` (control "None v None"), `verify_csv_innings_import.py`, `verify_manual_side_names.py`, `verify_manual_winner.py`, `verify_manual_games_import.py`, `verify_import_team_labels.py`, `verify_junior_residual_scope.py`, `verify_short_form_match.py`, `verify_grade_duplicates.py`, `verify_season_resolve.py`, `verify_import_bad_cells.py` (control: resolve raises ValueError, 12 of 17 fail). Browser twins: `frontend/verification/`.
+- `backend/verification/`: `verify_manual_game_check.py` (control reports 142/7), `verify_scorebook_innings.py` (control "None v None"), `verify_csv_innings_import.py`, `verify_manual_side_names.py`, `verify_manual_winner.py`, `verify_manual_games_import.py`, `verify_import_team_labels.py`, `verify_junior_residual_scope.py`, `verify_short_form_match.py`, `verify_grade_duplicates.py`, `verify_season_resolve.py`, `verify_import_bad_cells.py` (control: resolve raises ValueError, 12 of 17 fail). `verify_import_through_season.py` (52 checks on the Kalamunda book pages; control reads Overton 777 and Travcich M 1,158, 28 fail), browser twin `verify_import_through_season_browser.mjs`. Browser twins: `frontend/verification/`.
 - Diagnose live data first: `ops/diagnostics/csv_import_unpaired.sql`.
 
 ## Operator commands and scripts

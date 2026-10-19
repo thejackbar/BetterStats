@@ -48,6 +48,20 @@ const NAME_FORMAT_OPTIONS = [
   ['last_first', 'Surname then First name — e.g. "Barendse Jack" or "Barendse, Jack"'],
 ]
 
+// A historical summary can stop at a season (a club history book that ends with
+// 2004/05). Mirrors services/season_resolve.season_start_year: only a
+// consecutive pair counts, because a bare "2005" could mean the season that
+// finished in 2005 or the one that began in it. Returns null for anything else.
+function parseThrough(raw) {
+  const m = /(\d{4})\s*[/\-\u2013]\s*(\d{2}|\d{4})/.exec(String(raw || ''))
+  if (!m) return null
+  const start = Number(m[1])
+  const expected = m[2].length === 2 ? (start + 1) % 100 : start + 1
+  if (Number(m[2]) !== expected) return null
+  const two = n => String(n % 100).padStart(2, '0')
+  return { label: `${start}/${two(start + 1)}`, next: `${start + 1}/${two(start + 2)}` }
+}
+
 const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 const cell = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent'
 const num = n => Number(n || 0).toLocaleString()
@@ -190,6 +204,8 @@ export default function AdminImport() {
   const [granularity, setGranularity] = useState('career')
   const [nameMode, setNameModeRaw] = useState('single')   // single column vs first+surname
   const [nameFormat, setNameFormat] = useState('auto')     // word order, single-column mode only
+  const [throughMode, setThroughMode] = useState('whole')   // whole | to_season (a history book that stops)
+  const [throughText, setThroughText] = useState('')
   const [playerOverrides, setPlayerOverrides] = useState({})
   const [seasonOverrides, setSeasonOverrides] = useState({})
   const [gradeOverrides, setGradeOverrides] = useState({})
@@ -216,6 +232,13 @@ export default function AdminImport() {
     loadHistory()
   }, [loadHistory])
 
+  // "Stops at a season" sends the season the person typed. A half-typed or
+  // non-consecutive season sends nothing AND blocks the import: sending nothing
+  // alone would quietly turn a history book into an ordinary whole-career sheet.
+  const through = throughMode === 'to_season' ? parseThrough(throughText) : null
+  const throughSeason = through ? through.label : ''
+  const throughBlocked = throughMode === 'to_season' && !through
+
   const hasGradeCol = !!mapping.grade_label
   const steps = useMemo(() => {
     const s = ['upload', 'map', 'players']
@@ -233,7 +256,7 @@ export default function AdminImport() {
     const payload = {
       rows: parsed.rows, mapping, granularity, name_format: nameFormat,
       player_overrides: playerOverrides, season_overrides: seasonOverrides,
-      grade_overrides: gradeOverrides,
+      grade_overrides: gradeOverrides, through_season: throughSeason || null,
     }
     const t = setTimeout(() => {
       api.importResolve(payload)
@@ -243,7 +266,7 @@ export default function AdminImport() {
     }, 200)
     return () => { cancelled = true; clearTimeout(t) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed, JSON.stringify(mapping), granularity, nameFormat, JSON.stringify(playerOverrides), JSON.stringify(seasonOverrides), JSON.stringify(gradeOverrides)])
+  }, [parsed, JSON.stringify(mapping), granularity, nameFormat, JSON.stringify(playerOverrides), JSON.stringify(seasonOverrides), JSON.stringify(gradeOverrides), throughSeason])
 
   // No-match names default to "create new player" — so the No-match bucket is
   // pre-filled and you never scroll past 1,000 players to add one.
@@ -370,7 +393,7 @@ export default function AdminImport() {
       const res = await api.importCommit({
         rows: parsed.rows, mapping, granularity, name_format: nameFormat, filename: file?.name,
         player_overrides: playerOverrides, season_overrides: seasonOverrides,
-        grade_overrides: gradeOverrides,
+        grade_overrides: gradeOverrides, through_season: throughSeason || null,
       })
       setCommitted(res)
       loadHistory()
@@ -425,6 +448,7 @@ export default function AdminImport() {
     setStep('upload'); setFile(null); setParsed(null); setResolved(null); setCommitted(null)
     setMapping({}); setPlayerOverrides({}); setSeasonOverrides({}); setGradeOverrides({})
     setNameModeRaw('single'); setNameFormat('auto')
+    setThroughMode('whole'); setThroughText('')
   }
 
   return (
@@ -436,7 +460,8 @@ export default function AdminImport() {
           Pull your online data first, then upload your club's own spreadsheet — career totals or
           season-by-season, any column layout. We smart-match the columns and reconcile against what's already online:
           where the two overlap, the online data wins, and only the part it's missing is added. <span className="text-pb-dim">A
-          player can never be double-counted.</span>
+          player can never be double-counted.</span> A club history book that stops at a season, like a century book that ends
+          with 2004/05, is handled too: pick "Only up to a season" on the Columns step.
         </p>
 
         {/* Stepper */}
@@ -475,7 +500,8 @@ export default function AdminImport() {
               </button>
             </div>
             <p className="font-mono text-[10px] text-pb-faintest mt-3">
-              Headers can be anything — we map them in the next step. <a href="/api/club-admin/imports/template.csv" className="text-pb-accent hover:underline">Download a template</a>.
+              Headers can be anything — we map them in the next step. <a href="/api/club-admin/imports/template.csv" className="text-pb-accent hover:underline">Download a template</a>
+              {' '}or the <a href="/api/club-admin/imports/summary-template.csv" className="text-pb-accent hover:underline">history book template</a> (one row per player, figures to a season).
             </p>
           </div>
         )}
@@ -499,6 +525,37 @@ export default function AdminImport() {
                   </div>
                 </div>
                 <span className="font-mono text-[10px] text-pb-faint">{parsed.row_count} rows · {parsed.headers.length} columns</span>
+              </div>
+
+              {/* How far the figures go: today, or a season where a book stops. */}
+              <div className="mb-4 pb-4 pb-hairline-b" data-testid="through-block">
+                <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">THE FIGURES RUN</div>
+                <div className="flex gap-1 flex-wrap">
+                  {[['whole', 'UP TO TODAY'], ['to_season', 'ONLY UP TO A SEASON']].map(([k, label]) => (
+                    <button key={k} onClick={() => setThroughMode(k)} data-testid={`through-${k}`}
+                      className={`font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded border ${throughMode === k ? 'text-pb-bg border-transparent' : 'text-pb-faint pb-hairline hover:text-pb-text'}`}
+                      style={throughMode === k ? { background: 'var(--pb-accent)' } : undefined}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {throughMode === 'whole' ? (
+                  <p className="text-[11px] text-pb-faint mt-2 leading-relaxed max-w-2xl">
+                    Each player's figures are their whole career as at today. Where they overlap with online data, the online data wins.
+                  </p>
+                ) : (
+                  <div className="mt-3 max-w-2xl">
+                    <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block" htmlFor="through-season">LAST SEASON THE SHEET COVERS</label>
+                    <input id="through-season" data-testid="through-input" value={throughText}
+                      onChange={e => setThroughText(e.target.value)} placeholder="2004/05"
+                      className={`${inp} w-40`} inputMode="text" autoComplete="off" />
+                    <p className={`text-[11px] mt-2 leading-relaxed ${throughBlocked ? 'text-pb-amber' : 'text-pb-faint'}`} data-testid="through-note">
+                      {through
+                        ? <>Covers every season up to and including {through.label}. Each player is compared with the online record up to that season only. Anything online from {through.next} onwards is left alone and added on top.</>
+                        : <>Write the last season as two years, like 2004/05. A single year could mean either end of a season, so it is not accepted.</>}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Legend — each row reads "BetterStats field ← your column". */}
@@ -557,6 +614,9 @@ export default function AdminImport() {
               ))}
             </div>
             <div className="flex items-center gap-3">
+              {mapReady && throughBlocked && (
+                <span className="font-mono text-[10px] text-pb-red/70">Enter the last season the sheet covers, like 2004/05, or switch to "Up to today".</span>
+              )}
               {!mapReady && (
                 <span className="font-mono text-[10px] text-pb-red/70">
                   Map the {[
@@ -565,7 +625,7 @@ export default function AdminImport() {
                   ].filter(Boolean).join(' & ')} column to continue.
                 </span>
               )}
-              <button onClick={() => setStep('players')} disabled={!mapReady}
+              <button onClick={() => setStep('players')} disabled={!mapReady || throughBlocked}
                 className="ml-auto px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
                 NEXT: MATCH PLAYERS →
               </button>
@@ -631,7 +691,7 @@ export default function AdminImport() {
         {step === 'review' && (
           <ReviewStep
             resolved={resolved} resolving={resolving} committing={committing} committed={committed}
-            unresolved={unresolved} onCommit={commit}
+            unresolved={unresolved} onCommit={commit} blocked={throughBlocked}
             onBack={() => setStep(hasGradeCol ? 'grades' : granularity === 'season' ? 'seasons' : 'players')}
             onReset={reset} num={num}
           />
@@ -653,6 +713,11 @@ export default function AdminImport() {
                           </button>
                         )}
                         {h.filename || '(unnamed)'}
+                        {h.through_label && (
+                          <span className="ml-2 font-mono text-[8px] tracking-wide2 text-pb-accent border border-pb-accent/40 rounded px-1 py-0.5" title="The figures in this import stop at the end of this season">
+                            TO {h.through_label}
+                          </span>
+                        )}
                       </td>
                       <td className="py-2 pr-2 font-mono text-[10px] text-pb-faint">{h.granularity}</td>
                       <td className="py-2 pr-2 font-mono text-[10px] text-pb-dim">{h.stats_rows} rows</td>
@@ -1147,7 +1212,7 @@ function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverridesBul
 }
 
 // ── review + commit ──────────────────────────────────────────────────────────
-function ReviewStep({ resolved, resolving, committing, committed, unresolved, onCommit, onBack, onReset, num }) {
+function ReviewStep({ resolved, resolving, committing, committed, unresolved, onCommit, blocked, onBack, onReset, num }) {
   if (committed) {
     return (
       <div className="pb-card p-6">
@@ -1158,6 +1223,7 @@ function ReviewStep({ resolved, resolving, committing, committed, unresolved, on
         <p className="text-pb-faint text-sm mb-4 leading-relaxed max-w-2xl">
           {committed.rows_written} rows written; the reconciler added {committed.deltas_written} adjustment rows for the part
           online data didn't already hold. {committed.rows_skipped ? `${committed.rows_skipped} unmatched rows were skipped.` : ''}
+          {committed.through ? ` These figures run up to ${committed.through.label}. Online data after that season is untouched.` : ''}
         </p>
         <div className="flex gap-3">
           <button onClick={onReset} className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg" style={{ background: 'var(--pb-accent)' }}>IMPORT ANOTHER</button>
@@ -1169,6 +1235,8 @@ function ReviewStep({ resolved, resolving, committing, committed, unresolved, on
   const preview = resolved?.preview || []
   const shownPreview = preview.slice(0, 300)
   const totals = resolved?.totals || {}
+  const cut = resolved?.through || null
+  const cols = cut ? 8 : 7
   return (
     <>
       {(resolved?.warnings || []).map((w, i) => (
@@ -1184,17 +1252,28 @@ function ReviewStep({ resolved, resolving, committing, committed, unresolved, on
           </span>
         </div>
         <p className="text-pb-faint text-[12px] mb-4 leading-relaxed max-w-3xl">
-          <span className="text-pb-dim">Final = online (GR) + the residual we add.</span> Where your sheet and online data
-          overlap, online wins; the residual is only the part it's missing — so the final can never exceed your club's own total.
+          {cut ? (
+            <>
+              <span className="text-pb-dim">Final = online to {cut.label} + what your sheet adds + online after {cut.label}.</span>{' '}
+              Your sheet is compared with the online record up to {cut.label} only. Where they overlap, online wins and your
+              sheet adds just the part online is missing. Anything online after {cut.label} is kept as it is.
+            </>
+          ) : (
+            <>
+              <span className="text-pb-dim">Final = online (GR) + the residual we add.</span> Where your sheet and online data
+              overlap, online wins; the residual is only the part it's missing — so the final can never exceed your club's own total.
+            </>
+          )}
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-[12px] min-w-[640px]">
             <thead>
               <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left">
                 <th className="py-2 pr-2">PLAYER</th>
-                <th className="py-2 pr-2 text-right">YOUR SHEET</th>
-                <th className="py-2 pr-2 text-right">ONLINE (GR)</th>
-                <th className="py-2 pr-2 text-right">+ RESIDUAL</th>
+                <th className="py-2 pr-2 text-right">{cut ? `YOUR SHEET (TO ${cut.label})` : 'YOUR SHEET'}</th>
+                <th className="py-2 pr-2 text-right">{cut ? `ONLINE TO ${cut.label}` : 'ONLINE (GR)'}</th>
+                <th className="py-2 pr-2 text-right">{cut ? '+ ADDED FROM SHEET' : '+ RESIDUAL'}</th>
+                {cut && <th className="py-2 pr-2 text-right" data-testid="after-col">{`+ ONLINE AFTER ${cut.label}`}</th>}
                 <th className="py-2 pr-2 text-right">= FINAL GAMES</th>
                 <th className="py-2 pr-2"></th>
               </tr>
@@ -1209,12 +1288,13 @@ function ReviewStep({ resolved, resolving, committing, committed, unresolved, on
                   <td className="py-2 pr-2 font-mono text-[11px] text-pb-dim text-right">{num(p.club_games)}</td>
                   <td className="py-2 pr-2 font-mono text-[11px] text-pb-dim text-right">{num(p.gr_games)}</td>
                   <td className="py-2 pr-2 font-mono text-[11px] text-pb-accent text-right">+{num(p.residual_games)}</td>
+                  {cut && <td className="py-2 pr-2 font-mono text-[11px] text-pb-dim text-right">+{num(p.online_after_games)}</td>}
                   <td className="py-2 pr-2 font-mono text-[12px] text-pb-text text-right font-semibold">{num(p.final_games)}</td>
                   <td className="py-2 pr-2">{p.gr_exceeds && <span className="font-mono text-[9px] text-pb-amber" title="Online data already shows more than your sheet — we show the higher online figure.">GR HIGHER</span>}</td>
                 </tr>
               ))}
-              {resolving && preview.length === 0 && <tr><td colSpan={6} className="py-8 text-center"><PbSpinner message="Reconciling…" /></td></tr>}
-              {!resolving && preview.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-pb-dim">No matched players yet — go back and resolve the matches.</td></tr>}
+              {resolving && preview.length === 0 && <tr><td colSpan={cols} className="py-8 text-center"><PbSpinner message="Reconciling…" /></td></tr>}
+              {!resolving && preview.length === 0 && <tr><td colSpan={cols} className="py-4 text-center text-pb-dim">No matched players yet — go back and resolve the matches.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1233,7 +1313,7 @@ function ReviewStep({ resolved, resolving, committing, committed, unresolved, on
       <div className="flex items-center gap-3">
         <button onClick={onBack} className="font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-3 py-2 text-pb-faint hover:text-pb-text">← BACK</button>
         {unresolved > 0 && <span className="font-mono text-[10px] text-pb-amber">{unresolved} player(s) still unresolved — they'll be skipped.</span>}
-        <button onClick={onCommit} disabled={committing || preview.length === 0}
+        <button onClick={onCommit} disabled={committing || preview.length === 0 || blocked}
           className="ml-auto px-5 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
           {committing ? 'IMPORTING…' : `IMPORT ${preview.length} PLAYER${preview.length === 1 ? '' : 'S'}`}
         </button>

@@ -218,6 +218,7 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
   const [description, setDescription] = useState('')
   const [body, setBody] = useState('')
   const [audienceCount, setAudienceCount] = useState(null)
+  const [limits, setLimits] = useState(null)   // the club's sending limits (daily cap, today's allowance, next batch)
   // Start unselected — sending to "all subscribed" must be a deliberate choice.
   const [audience, setAudience] = useState({ type: '' })
   const [segments, setSegments] = useState([])
@@ -272,6 +273,7 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
     }).catch(() => {})
     api.commsGetContext().then(c => setIsMarketing(!!c?.current?.is_marketing)).catch(() => {})
     api.commsGetSettings().then(s => setLive(!!s?.provider?.live)).catch(() => {})
+    api.commsGetLimits().then(setLimits).catch(() => {})
     return () => clearInterval(pollRef.current)
   }, [load])
 
@@ -299,6 +301,15 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
   if (!(templateId || body.trim())) sendMissing.push('a message or template')
   if (!audienceSelected) sendMissing.push('an audience')
   const canSend = sendMissing.length === 0 && !!audienceCount
+
+  // A club's daily sending limit can be smaller than the audience. The server
+  // sends today's allowance and holds the rest for the daily batch, so say so
+  // BEFORE Send rather than letting the club believe everyone has it.
+  const goesToday = limits && audienceCount != null ? Math.min(audienceCount, Math.max(0, limits.allowance ?? audienceCount)) : null
+  const heldBack = goesToday != null ? audienceCount - goesToday : 0
+  const nextBatch = limits?.next_batch_at
+    ? new Date(limits.next_batch_at).toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' })
+    : 'the next daily batch'
 
   const startPolling = () => {
     clearInterval(pollRef.current)
@@ -394,7 +405,10 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
     if (!(templateId || finalBody.trim())) { setMsg({ kind: 'error', text: 'Add a message (or pick a template) before sending.' }); return }
     const n = audienceCount ?? 0
     const who = audience.type === 'all' ? 'ALL subscribed contacts' : 'the selected audience'
-    if (!window.confirm(`Send this email to ${n} contact${n === 1 ? '' : 's'} (${who})?`)) return
+    const held = heldBack > 0
+      ? `\n\nYour sending limit lets ${goesToday} go out today. The other ${heldBack} go out in daily batches, the next one on ${nextBatch}.`
+      : ''
+    if (!window.confirm(`Send this email to ${n} contact${n === 1 ? '' : 's'} (${who})?${held}`)) return
     setBusy('send'); setMsg(null)
     try {
       await save(finalBody)
@@ -443,7 +457,8 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
           <RecordTitleRow
             readOnly name={campaign.name || campaign.subject} placeholder="(no subject)"
             blurb={campaign.description || (
-              campaign.status === 'sending' ? 'This email is going out now.'
+              campaign.status === 'sending' && (st.deferred ?? 0) > 0 ? 'Part of this email has gone out. The rest follows in daily batches.'
+                : campaign.status === 'sending' ? 'This email is going out now.'
                 : campaign.status === 'error' ? 'This send hit an error — the detail is below.'
                 : "This email has gone out. It is the club's record of what was sent, so nothing here can be edited."
             )}
@@ -468,7 +483,7 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
           )}
 
           <div className="pb-card p-5 mt-5 max-w-2xl">
-            <div className="grid grid-cols-3 gap-3 text-center">
+            <div className={`grid ${(st.deferred ?? 0) > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'} gap-3 text-center`}>
               <div className="pb-card p-3">
                 <div className="text-xl font-display font-bold text-pb-text">{st.recipients ?? 0}</div>
                 <div className="text-pb-faintest text-xs">recipients</div>
@@ -480,8 +495,17 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
                 {deliveredClubs > 0 && <div className="text-pb-faintest text-[11px] mt-0.5">{fmtClubs(deliveredClubs)}</div>}
               </div>
               <div className="pb-card p-3"><div className="text-xl font-display font-bold text-pb-red">{st.failed ?? 0}</div><div className="text-pb-faintest text-xs">failed</div></div>
+              {(st.deferred ?? 0) > 0 && (
+                <div className="pb-card p-3"><div className="text-xl font-display font-bold text-amber-500">{st.deferred}</div><div className="text-pb-faintest text-xs">waiting</div></div>
+              )}
             </div>
-            {campaign.status === 'sending' && <div className="text-pb-faint text-sm mt-3">Sending in progress…</div>}
+            {(st.deferred ?? 0) > 0 && (
+              <Note toneKey="warn" title={`${st.deferred} still waiting to go out`} className="mt-4">
+                Your daily sending limit holds these back. They go out in the next daily batch ({nextBatch}),
+                and carry on each day until everyone has it. Nothing is lost.
+              </Note>
+            )}
+            {campaign.status === 'sending' && (st.deferred ?? 0) === 0 && <div className="text-pb-faint text-sm mt-3">Sending in progress…</div>}
             {campaign.error && <div className="text-pb-red text-sm mt-3">{campaign.error}</div>}
             {campaign.status !== 'sending' && (
               <RecipientsPanel campaignId={id}
@@ -622,6 +646,16 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
                   ))}
                 </div>
               </div>
+            )}
+
+            {sendMissing.length === 0 && heldBack > 0 && (
+              <Note toneKey="warn" title={`Only ${goesToday} of ${audienceCount} will go out today`} className="mb-4">
+                Your sending limit is {limits.daily_cap} a day ({limits.sent_today} already sent today).
+                The other {heldBack} go out in daily batches, the next one on {nextBatch}, until everyone has it.
+                {limits.tier === 'sandbox'
+                  ? ` BetterAdmin subscribers send at the higher Production limit. If this can't wait, ask ${PLATFORM_NAME}.`
+                  : ''}
+              </Note>
             )}
 
             {/* The same live readout a segment gives, answering the same

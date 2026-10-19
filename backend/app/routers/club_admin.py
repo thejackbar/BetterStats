@@ -13,6 +13,9 @@ import csv
 import re
 from pathlib import Path
 
+from app.auth.capabilities import (
+    MANAGE_AWARDS, MANAGE_MERGES, MANAGE_PLAYERS, RUN_SYNC, require_any_cap, require_cap, require_full_admin,
+)  # route gates added by the access audit
 from app.models.db import (
     User, Organisation, ClubMembership, Player, Season, Grade, ManualPartnershipRecord,
     PlayerSyncRequest, Sponsor, ClubOnboardingRequest, ClubUnpauseRequest, OrgModuleSubscription,
@@ -24,6 +27,7 @@ from sqlalchemy.orm import selectinload, aliased as _orm_aliased
 import asyncio
 import logging as _logging
 from app.routers.auth import get_current_user, get_current_club, require_super_admin, _hash_password
+from app.services import access as access_service
 from app.auth.capabilities import (
     require_cap, effective_capabilities, ALL_CAPABILITIES,
     MANAGE_SETTINGS, MANAGE_MERGES, MANAGE_USERS, MANAGE_SPONSORS, RUN_HARD_REFRESH, RUN_SYNC,
@@ -35,7 +39,11 @@ from app.auth.modules import (
     BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for, STATUS_PRIORITY,
 )
 from app.services import junior_hiding
-from app.services.milestone_rules import RUNS_STEPS, WICKETS_STEPS
+from app.services.side_size import valid_side_size
+from app.services.milestone_rules import (
+    DEFAULT_STEPS as MILESTONE_DEFAULT_STEPS, PRESET_STEPS as MILESTONE_PRESETS,
+    STATS as MILESTONE_STATS, STEP_LIMITS as MILESTONE_LIMITS, step_problem,
+)
 from app.services import sponsor_tiers
 from app.services import section_names
 from app.services import honour_layout
@@ -272,7 +280,7 @@ class PlayerPatch(BaseModel):
     is_opening_batsman: Optional[bool] = None
 
 
-@router.patch("/players/{player_id}")
+@router.patch("/players/{player_id}", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
 async def patch_player(
     player_id: str,
     data: PlayerPatch,
@@ -380,7 +388,7 @@ def _split_written_name(written: str) -> tuple[str, str]:
     return " ".join(parts[:-1]), parts[-1]
 
 
-@router.post("/players")
+@router.post("/players", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
 async def create_player(
     data: PlayerCreate,
     current_user: User = Depends(get_current_user),
@@ -445,7 +453,7 @@ class PlayerSimilarQuery(BaseModel):
     name: str
 
 
-@router.post("/players/similar")
+@router.post("/players/similar", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
 async def similar_players(
     data: PlayerSimilarQuery,
     current_user: User = Depends(get_current_user),
@@ -505,7 +513,7 @@ class SeasonReorderItem(BaseModel):
     display_order: int
 
 
-@router.put("/seasons/reorder")
+@router.put("/seasons/reorder", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def reorder_seasons(
     items: list[SeasonReorderItem],
     current_user: User = Depends(get_current_user),
@@ -770,7 +778,7 @@ class GradeRenamePatch(BaseModel):
     display_name_override: Optional[str] = None
 
 
-@router.patch("/grades/rename")
+@router.patch("/grades/rename", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def rename_grade(
     data: GradeRenamePatch,
     current_user: User = Depends(get_current_user),
@@ -918,6 +926,9 @@ class SettingsPatch(BaseModel):
     # junior-only players and every game in a competition tagged junior. Off by
     # default; club admins still see everything. See services/junior_hiding.py.
     hide_juniors: Optional[bool] = None
+    # Count a club's winter and summer seasons of one year as ONE season
+    # (migration 331). Off by default: Winter 2026 and Summer 2026/27 stay two.
+    amalgamate_seasons: Optional[bool] = None
     # Who may open a committee document the club uploaded (migration 218).
     # True = the uploader, current Office Bearers and the Main Admin only.
     # False = any committee member who can reach the register.
@@ -1075,6 +1086,7 @@ async def get_settings(
         "public_header_logo": bool(club.public_header_logo),
         "show_competition_filters": bool(club.show_competition_filters),
         "hide_juniors": bool(club.hide_juniors),
+        "amalgamate_seasons": bool(club.amalgamate_seasons),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "diary_start_month": club.diary_start_month or 7,
         "socials_style": club.socials_style,
@@ -1116,7 +1128,7 @@ async def patch_settings(
     if data.dormancy_months is not None:
         # Clamp to a sane range: 1 month .. 50 years.
         club.dormancy_months = max(1, min(600, int(data.dormancy_months)))
-    if data.default_team_size is not None and int(data.default_team_size) in (0, 11, 12, 13):
+    if data.default_team_size is not None and valid_side_size(int(data.default_team_size)):
         club.default_team_size = int(data.default_team_size)
     if data.select_show_age is not None:
         club.select_show_age = bool(data.select_show_age)
@@ -1161,6 +1173,8 @@ async def patch_settings(
         # The cached answer is per club and would otherwise serve the old
         # switch for up to its TTL.
         junior_hiding.forget(club.id)
+    if data.amalgamate_seasons is not None:
+        club.amalgamate_seasons = bool(data.amalgamate_seasons)
     if data.committee_docs_office_bearer_only is not None:
         club.committee_docs_office_bearer_only = bool(data.committee_docs_office_bearer_only)
     if data.diary_start_month is not None:
@@ -1434,7 +1448,7 @@ async def _clear_player_photo(db, player: Player, kind: str) -> dict:
     return {"status": "cleared"}
 
 
-@router.post("/players/{player_id}/photo")
+@router.post("/players/{player_id}/photo", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
 async def upload_player_photo(
     player_id: str,
     file: UploadFile = File(...),
@@ -1446,7 +1460,7 @@ async def upload_player_photo(
     return await _store_player_photo(db, player, file, "photo")
 
 
-@router.delete("/players/{player_id}/photo")
+@router.delete("/players/{player_id}/photo", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
 async def delete_player_photo(
     player_id: str,
     current_user: User = Depends(get_current_user),
@@ -1457,7 +1471,7 @@ async def delete_player_photo(
     return await _clear_player_photo(db, player, "photo")
 
 
-@router.post("/players/{player_id}/hero-photo")
+@router.post("/players/{player_id}/hero-photo", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
 async def upload_player_hero_photo(
     player_id: str,
     file: UploadFile = File(...),
@@ -1469,7 +1483,7 @@ async def upload_player_hero_photo(
     return await _store_player_photo(db, player, file, "hero")
 
 
-@router.delete("/players/{player_id}/hero-photo")
+@router.delete("/players/{player_id}/hero-photo", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
 async def delete_player_hero_photo(
     player_id: str,
     current_user: User = Depends(get_current_user),
@@ -1527,7 +1541,7 @@ async def list_partnership_records(
     ]
 
 
-@router.post("/partnership-records", status_code=201)
+@router.post("/partnership-records", status_code=201, dependencies=[Depends(require_cap(MANAGE_AWARDS))])
 async def create_partnership_record(
     data: ManualPartnershipCreate,
     current_user: User = Depends(get_current_user),
@@ -1553,7 +1567,7 @@ async def create_partnership_record(
     return {"id": record.id, "status": "created"}
 
 
-@router.delete("/partnership-records/{record_id}", status_code=204)
+@router.delete("/partnership-records/{record_id}", status_code=204, dependencies=[Depends(require_cap(MANAGE_AWARDS))])
 async def delete_partnership_record(
     record_id: int,
     current_user: User = Depends(get_current_user),
@@ -1586,7 +1600,7 @@ class ManualPartnershipPatch(BaseModel):
     notes: Optional[str] = None
 
 
-@router.patch("/partnership-records/{record_id}")
+@router.patch("/partnership-records/{record_id}", dependencies=[Depends(require_cap(MANAGE_AWARDS))])
 async def patch_partnership_record(
     record_id: int,
     data: ManualPartnershipPatch,
@@ -1701,7 +1715,7 @@ async def download_partnership_template(
     )
 
 
-@router.post("/partnership-records/import")
+@router.post("/partnership-records/import", dependencies=[Depends(require_cap(MANAGE_AWARDS))])
 async def import_partnership_records(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -1905,7 +1919,7 @@ class PartnershipGradeRename(BaseModel):
     new_name: str
 
 
-@router.post("/partnership-records/rename-grade")
+@router.post("/partnership-records/rename-grade", dependencies=[Depends(require_cap(MANAGE_AWARDS))])
 async def rename_partnership_grade(
     data: PartnershipGradeRename,
     current_user: User = Depends(get_current_user),
@@ -3557,7 +3571,7 @@ async def transfer_primary_admin(
 
 # ─── Account / plan status (Phase 19) ──────────────────────────────────────────
 
-@router.get("/account/plan")
+@router.get("/account/plan", dependencies=[Depends(require_full_admin())])
 async def get_account_plan(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -4713,6 +4727,38 @@ async def reset_password(
     return {"status": "password_reset"}
 
 
+@router.post("/super/users/{user_id}/send-password-reset")
+async def super_send_password_reset_link(
+    user_id: str,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Super-admin twin of send_password_reset_link: email any club user a reset
+    link instead of typing a password for them (reset_password above sends no
+    email at all). Names the club the account belongs to."""
+    row = await db.execute(
+        _text(
+            "SELECT u.id, u.email, u.display_name, u.username, cm.club_id "
+            "FROM users u LEFT JOIN club_memberships cm ON cm.user_id = u.id "
+            "WHERE u.id = :uid"
+        ),
+        {"uid": user_id},
+    )
+    target = row.mappings().first()
+    if not target:
+        raise HTTPException(404, "User not found")
+    if not target["email"]:
+        raise HTTPException(400, "This user has no email address on file to send a reset link to")
+    club = await db.get(Organisation, target["club_id"]) if target["club_id"] else None
+    if not club:
+        raise HTTPException(400, "This user is not attached to a club")
+
+    await _issue_and_send_password_reset(
+        db, club=club, actor_id=current_user.id, target=target, action="send_password_reset_link",
+    )
+    return {"status": "sent"}
+
+
 async def _super_admin_count(db: AsyncSession) -> int:
     res = await db.execute(
         select(func.count()).select_from(ClubMembership).where(ClubMembership.role == "super_admin")
@@ -4866,7 +4912,7 @@ async def delete_user(
 # Player Sync Requests
 # ---------------------------------------------------------------------------
 
-@router.get("/sync-requests")
+@router.get("/sync-requests", dependencies=[Depends(require_any_cap(RUN_SYNC, MANAGE_MERGES))])
 async def list_sync_requests(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -4910,7 +4956,7 @@ class SyncRequestAction(BaseModel):
     admin_note: Optional[str] = None
 
 
-@router.post("/sync-requests/{request_id}")
+@router.post("/sync-requests/{request_id}", dependencies=[Depends(require_cap(RUN_SYNC))])
 async def action_sync_request(
     request_id: int,
     body: SyncRequestAction,
@@ -5427,7 +5473,7 @@ async def cleanup_opposition_stats(
     return {"org_id": org_id, "deleted": deleted}
 
 
-@router.get("/sync-drift")
+@router.get("/sync-drift", dependencies=[Depends(require_any_cap(RUN_SYNC, MANAGE_MERGES))])
 async def get_sync_drift(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -5468,7 +5514,7 @@ async def acknowledge_sync_drift(
     return {"dismissed": dismissed}
 
 
-@router.delete("/sync-runs")
+@router.delete("/sync-runs", dependencies=[Depends(require_cap(RUN_SYNC))])
 async def clear_sync_runs(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -5483,7 +5529,7 @@ async def clear_sync_runs(
     return {"deleted": res.rowcount}
 
 
-@router.delete("/sync-requests/resolved")
+@router.delete("/sync-requests/resolved", dependencies=[Depends(require_cap(RUN_SYNC))])
 async def clear_resolved_sync_requests(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -5498,7 +5544,7 @@ async def clear_resolved_sync_requests(
     return {"deleted": res.rowcount}
 
 
-@router.get("/sync-runs")
+@router.get("/sync-runs", dependencies=[Depends(require_any_cap(RUN_SYNC, MANAGE_MERGES))])
 async def list_sync_runs(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -5529,7 +5575,7 @@ async def list_sync_runs(
     ]
 
 
-@router.get("/sync-runs/{run_id}")
+@router.get("/sync-runs/{run_id}", dependencies=[Depends(require_any_cap(RUN_SYNC, MANAGE_MERGES))])
 async def get_sync_run(
     run_id: str,
     current_user: User = Depends(get_current_user),
@@ -6010,10 +6056,26 @@ class ClubUserCreate(BaseModel):
     email: str
     mobile_number: Optional[str] = None
     # Retained for backward-compat with older clients; ignored — every club
-    # user is created as club_admin (club_member is retired). super_admin
-    # invites go through the Super Admin console.
+    # user is created as club_admin and limited afterwards through `access`
+    # (services/access.py). super_admin invites go through the Super Admin console.
     role: str = "club_admin"
     capabilities: list[str] = []
+    # What the person can open: omitted or {"mode": "full"} is a full club admin;
+    # {"mode": "module", "module_key": "select"} locks them to one module;
+    # {"mode": "items", "grants": {"select.availability": "view", ...}} gives them
+    # a choice of menu items. Only the club's Primary Admin (or a Super Admin)
+    # may send a limit.
+    access: Optional["UserAccessBody"] = None
+
+
+class UserAccessBody(BaseModel):
+    # "full", "module" (module_key) or "items" (grants: {item id: "view" | "manage"}).
+    mode: str = "full"
+    module_key: Optional[str] = None
+    grants: Optional[dict[str, str]] = None
+
+
+ClubUserCreate.model_rebuild()
 
 
 class ClubUserUpdate(BaseModel):
@@ -6024,6 +6086,72 @@ class ClubUserUpdate(BaseModel):
     capabilities: Optional[list[str]] = None
     password: Optional[str] = None
     confirm_password: Optional[str] = None
+    # Absent leaves access alone; {"mode": "full"} clears a lock (rule: an absent
+    # key is not a clear, so this is read through model_fields_set).
+    access: Optional[UserAccessBody] = None
+
+
+async def _users_actor(db: AsyncSession, current_user: User, club: Organisation, *, needs_primary: bool = False):
+    """Who is acting on this club's users, refused unless they may.
+
+    A Super Admin always may. A Club Admin may only inside their OWN club: a
+    switched-in admin from a linked club is refused (users and what they can open
+    stay with each club's own admins). ``needs_primary`` is the stricter bar for
+    changing what someone can open."""
+    row = (await db.execute(
+        _text("SELECT role, club_id, is_primary_admin FROM club_memberships WHERE user_id = :u"),
+        {"u": str(current_user.id)},
+    )).mappings().first()
+    if row is None:
+        raise HTTPException(403, "No club membership found")
+    if row["role"] == "super_admin":
+        return row
+    if str(row["club_id"]) != str(club.id):
+        raise HTTPException(
+            403,
+            "Users and what they can open are managed by each club's own admins. "
+            "Switch back to your own club to do this.",
+        )
+    if needs_primary and not row["is_primary_admin"]:
+        raise HTTPException(403, "Only the club's Primary Admin can change what someone can open.")
+    return row
+
+
+def _checked_access(body: Optional["UserAccessBody"]) -> Optional[dict]:
+    """The access a request asks for, validated, or None when it asks for nothing."""
+    if body is None:
+        return None
+    mode = (body.mode or "full").strip().lower()
+    if mode == "full":
+        return {"mode": "full", "module_key": None, "grants": {}}
+    if mode == access_service.MODE_MODULE:
+        if body.module_key not in access_service.MODULE_ACCESS:
+            raise HTTPException(422, "Pick one of the listed modules")
+        return {"mode": mode, "module_key": body.module_key, "grants": {}}
+    if mode == access_service.MODE_ITEMS:
+        try:
+            final, _ = access_service.resolve_grants(body.grants or {})
+        except access_service.AccessError as e:
+            raise HTTPException(e.status, e.message)
+        if not final:
+            raise HTTPException(422, "Pick at least one menu item, or choose Everything")
+        return {"mode": mode, "module_key": None, "grants": dict(body.grants or {})}
+    raise HTTPException(422, "Access must be everything, one module or chosen menu items")
+
+
+async def _apply_access(db: AsyncSession, *, wanted: dict, user_id, club_id, by_user_id) -> dict:
+    """Write a limit (module or items) and return what was stored, or raise the
+    HTTP error for a refusal. Caller commits. {"capabilities": [...], "added": [...]}."""
+    try:
+        if wanted["mode"] == access_service.MODE_ITEMS:
+            return await access_service.set_item_access(
+                db, user_id=user_id, club_id=club_id, grants=wanted["grants"], by_user_id=by_user_id)
+        caps = await access_service.lock_to_module(
+            db, user_id=user_id, club_id=club_id, module_key=wanted["module_key"], by_user_id=by_user_id)
+        return {"capabilities": caps, "added": [], "grants": {}, "view_only": []}
+    except access_service.AccessError as e:
+        await db.rollback()
+        raise HTTPException(e.status, e.message)
 
 
 @router.get("/users")
@@ -6033,11 +6161,13 @@ async def list_club_users(
     db: AsyncSession = Depends(get_db),
 ):
     """List members of this club with their role + capabilities."""
+    await _users_actor(db, current_user, club)
+    locked = await access_service.access_for_club(db, club.id)
     rows = await db.execute(
         _text(
             """
             SELECT u.id, u.username, u.display_name, u.email, u.mobile_number, u.last_login_at,
-                   cm.role, cm.capabilities
+                   cm.role, cm.capabilities, cm.is_primary_admin
             FROM club_memberships cm
             JOIN users u ON u.id = cm.user_id
             WHERE cm.club_id = :org
@@ -6058,6 +6188,8 @@ async def list_club_users(
             "role": r["role"],
             "capabilities": r["capabilities"] or [],
             "effective_capabilities": effective_capabilities(r["role"], r["capabilities"]),
+            "is_primary_admin": bool(r["is_primary_admin"]),
+            "access": access_service.describe(locked.get(str(r["id"]))),
         })
     return out
 
@@ -6066,8 +6198,14 @@ async def list_club_users(
 async def list_capabilities(
     _user: User = Depends(require_cap(MANAGE_USERS)),
 ):
-    """All known capability constants — used by the UI to render checkboxes."""
-    return {"capabilities": list(ALL_CAPABILITIES)}
+    """All known capability constants — used by the UI to render checkboxes —
+    and the modules a Primary Admin can lock someone to."""
+    return {
+        "capabilities": list(ALL_CAPABILITIES),
+        "modules": access_service.module_choices(),
+        # Every module with its menu items, for the choose-items screen.
+        "catalogue": access_service.item_catalogue(),
+    }
 
 
 @router.post("/users")
@@ -6093,8 +6231,12 @@ async def create_club_user(
     if not email or not _INVITE_EMAIL_RE.match(email):
         raise HTTPException(400, "A valid email address is required to invite the new admin")
 
-    # club_member is retired — every invited user is a full club admin
-    # (club_admin implies all capabilities).
+    wanted_access = _checked_access(data.access)
+    locks = bool(wanted_access and wanted_access["mode"] in (access_service.MODE_MODULE, access_service.MODE_ITEMS))
+    await _users_actor(db, current_user, club, needs_primary=locks)
+
+    # Invited as a full club admin (club_admin implies all capabilities). A lock
+    # is applied below once the membership exists, and rewrites role and caps.
     role = "club_admin"
     caps: list[str] = []
 
@@ -6132,12 +6274,19 @@ async def create_club_user(
             "caps": _json.dumps(caps),
         },
     )
+    stored = None
+    if locks:
+        stored = await _apply_access(db, wanted=wanted_access, user_id=new_user_id,
+                                     club_id=club.id, by_user_id=current_user.id)
+        caps = stored["capabilities"]
+        role = access_service.LOCKED_ROLE
 
     from app.services.audit_log import log_activity
     await log_activity(
         db, org_id=club.id, user_id=current_user.id,
         action="create_club_user", target_type="user", target_id=str(new_user_id),
-        details={"username": username, "email": email, "role": role, "capabilities": caps},
+        details={"username": username, "email": email, "role": role, "capabilities": caps,
+                 "access": wanted_access or {"mode": "full", "module_key": None}},
     )
 
     await db.commit()
@@ -6150,7 +6299,10 @@ async def create_club_user(
         club_name=club.name, link=invite_link,
     )
 
-    return {"id": str(new_user_id), "username": username, "role": role, "capabilities": caps, "invited": True}
+    return {"id": str(new_user_id), "username": username, "role": role, "capabilities": caps, "invited": True,
+            "access": access_service.describe(
+                {**wanted_access, "grants": stored["grants"]} if locks and stored else None),
+            "added": (stored or {}).get("added", [])}
 
 
 @router.patch("/users/{user_id}")
@@ -6161,10 +6313,13 @@ async def update_club_user(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
+    wanted_access = _checked_access(data.access) if "access" in data.model_fields_set else None
+    await _users_actor(db, current_user, club, needs_primary=wanted_access is not None)
+
     # Confirm target is a member of this club
     row = await db.execute(
         _text(
-            "SELECT cm.id AS membership_id, cm.role AS current_role, u.id AS user_id "
+            "SELECT cm.id AS membership_id, cm.role AS current_role, cm.is_primary_admin, u.id AS user_id "
             "FROM club_memberships cm JOIN users u ON u.id = cm.user_id "
             "WHERE u.id = :uid AND cm.club_id = :club"
         ),
@@ -6173,6 +6328,12 @@ async def update_club_user(
     target = row.mappings().first()
     if not target:
         raise HTTPException(404, "User not found in this club")
+    # The Primary Admin's own account is theirs: another admin cannot reset the
+    # password, change the email or lock them down. A Super Admin still can.
+    if target["is_primary_admin"] and str(current_user.id) != str(user_id):
+        actor = await _users_actor(db, current_user, club)
+        if actor["role"] != "super_admin":
+            raise HTTPException(403, "Only the Primary Admin can change their own account.")
 
     # Role + capabilities are no longer editable here — club_member is retired,
     # so every club user is a full club admin. Display name, email, mobile
@@ -6200,22 +6361,75 @@ async def update_club_user(
             raise HTTPException(status_code=422, detail={"errors": errors})
         await db.execute(_text("UPDATE users SET password_hash = :h WHERE id = :id"), {"h": _hash_password(data.password), "id": user_id})
         changes["password"] = True
+    if wanted_access is not None:
+        if wanted_access["mode"] in (access_service.MODE_MODULE, access_service.MODE_ITEMS):
+            stored = await _apply_access(db, wanted=wanted_access, user_id=user_id,
+                                         club_id=club.id, by_user_id=current_user.id)
+            changes["access"] = {**wanted_access, "grants": stored.get("grants") or {}}
+            # What was switched on because something chosen needs it, so the screen can say so.
+            changes["added"] = stored.get("added", [])
+        else:
+            await access_service.unlock(db, user_id=user_id, club_id=club.id)
+            changes["access"] = wanted_access
 
     from app.services.audit_log import log_activity
     await log_activity(
         db, org_id=club.id, user_id=current_user.id,
         action="update_club_user", target_type="user", target_id=user_id,
-        details={"changes": list(changes.keys()), **{k: v for k, v in changes.items() if k in ("role", "capabilities")}},
+        details={"changes": list(changes.keys()), **{k: v for k, v in changes.items() if k in ("role", "capabilities", "access")}},
     )
 
     await db.commit()
     return {"status": "ok", **changes}
 
 
+def _reset_email_failure_detail(error: Optional[str]) -> str:
+    """Plain-language reason a reset email did not go, for the admin screen."""
+    e = (error or "").lower()
+    if "no live email provider" in e:
+        return "Email sending is not set up on this server, so nothing was sent."
+    if e.startswith("blocked"):
+        return "This person asked to be removed and is never emailed."
+    return "The email provider refused or could not send the message. Nothing was delivered, so try again shortly."
+
+
+async def _issue_and_send_password_reset(
+    db: AsyncSession, *, club: Organisation, actor_id, target, action: str,
+) -> None:
+    """Mint a reset token for `target` (a users row mapping), email the link and
+    raise a readable error if the email did not go. The email is sent before
+    returning, not in a background task: the screen used to say "sent" whatever
+    happened to the message afterwards. The token is committed first; if the send
+    fails it simply expires unused."""
+    reset_token = _secrets.token_urlsafe(32)
+    reset_expires = _datetime.now(_timezone.utc) + _timedelta(hours=_PASSWORD_RESET_TOKEN_TTL_HOURS)
+    await db.execute(
+        _text("UPDATE users SET password_reset_token = :tok, password_reset_token_expires_at = :exp WHERE id = :id"),
+        {"tok": reset_token, "exp": reset_expires, "id": target["id"]},
+    )
+
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=club.id, user_id=actor_id,
+        action=action, target_type="user", target_id=str(target["id"]),
+    )
+    await db.commit()
+
+    from app.config.settings import settings as _settings
+    from app.services.user_invite import send_password_reset_email
+    reset_link = f"{_settings.public_base_url}/login?reset={reset_token}"
+    result = await send_password_reset_email(
+        email=target["email"],
+        display_name=target["display_name"] or target["username"],
+        club_name=club.name, link=reset_link,
+    )
+    if not result.ok:
+        raise HTTPException(502, _reset_email_failure_detail(result.error))
+
+
 @router.post("/users/{user_id}/send-password-reset")
 async def send_password_reset_link(
     user_id: str,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_cap(MANAGE_USERS)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
@@ -6227,9 +6441,10 @@ async def send_password_reset_link(
     invite-accept endpoints (which 404 once password_hash is set) are left
     untouched, and the reset link is short-lived given it can replace a
     password already in active use."""
+    await _users_actor(db, current_user, club)
     row = await db.execute(
         _text(
-            "SELECT u.id, u.email, u.display_name, u.username "
+            "SELECT u.id, u.email, u.display_name, u.username, cm.is_primary_admin "
             "FROM club_memberships cm JOIN users u ON u.id = cm.user_id "
             "WHERE u.id = :uid AND cm.club_id = :club"
         ),
@@ -6238,30 +6453,15 @@ async def send_password_reset_link(
     target = row.mappings().first()
     if not target:
         raise HTTPException(404, "User not found in this club")
+    if target["is_primary_admin"] and str(current_user.id) != str(user_id):
+        actor = await _users_actor(db, current_user, club)
+        if actor["role"] != "super_admin":
+            raise HTTPException(403, "Only the Primary Admin can change their own account.")
     if not target["email"]:
         raise HTTPException(400, "This user has no email address on file to send a reset link to")
 
-    reset_token = _secrets.token_urlsafe(32)
-    reset_expires = _datetime.now(_timezone.utc) + _timedelta(hours=_PASSWORD_RESET_TOKEN_TTL_HOURS)
-    await db.execute(
-        _text("UPDATE users SET password_reset_token = :tok, password_reset_token_expires_at = :exp WHERE id = :id"),
-        {"tok": reset_token, "exp": reset_expires, "id": user_id},
-    )
-
-    from app.services.audit_log import log_activity
-    await log_activity(
-        db, org_id=club.id, user_id=current_user.id,
-        action="send_password_reset_link", target_type="user", target_id=user_id,
-    )
-    await db.commit()
-
-    from app.config.settings import settings as _settings
-    from app.services.user_invite import send_password_reset_email
-    reset_link = f"{_settings.public_base_url}/login?reset={reset_token}"
-    background_tasks.add_task(
-        send_password_reset_email, email=target["email"],
-        display_name=target["display_name"] or target["username"],
-        club_name=club.name, link=reset_link,
+    await _issue_and_send_password_reset(
+        db, club=club, actor_id=current_user.id, target=target, action="send_password_reset_link",
     )
     return {"status": "sent"}
 
@@ -6275,6 +6475,13 @@ async def remove_club_user(
 ):
     if str(current_user.id) == user_id:
         raise HTTPException(400, "Can't remove yourself")
+    actor = await _users_actor(db, current_user, club)
+    primary = (await db.execute(
+        _text("SELECT is_primary_admin FROM club_memberships WHERE user_id = :uid AND club_id = :club"),
+        {"uid": user_id, "club": str(club.id)},
+    )).scalar()
+    if primary and actor["role"] != "super_admin":
+        raise HTTPException(409, "The Primary Admin can't be removed. Transfer the Primary Admin to someone else first.")
 
     row = await db.execute(
         _text(
@@ -6286,6 +6493,11 @@ async def remove_club_user(
     )
     if not row.first():
         raise HTTPException(404, "User not found in this club")
+    # A removed person keeps no lock row behind.
+    await db.execute(
+        _text("DELETE FROM user_access WHERE user_id = :uid AND club_id = :club"),
+        {"uid": user_id, "club": str(club.id)},
+    )
 
     # club_memberships.uq_membership_one_per_user means the row just deleted
     # above was this user's ONLY membership, ever — nothing in the app ever
@@ -6340,12 +6552,15 @@ async def list_milestones_report(
     """
     import datetime
     from app.services.milestone_rules import (
-        next_threshold, reach_window, crossed_thresholds, is_displayable, load_scheme,
+        next_threshold, reach_window, crossed_thresholds, is_displayable,
     )
-    from app.services import milestone_scan
+    from app.services import grade_milestone_schemes, milestone_scan
 
     org_id = str(club.id)
-    scheme = await load_scheme(db, org_id)
+    # The club's scheme for career milestones; a grade-level one (grade_matches
+    # below) reads that grade's own increments where the club set them.
+    book = await grade_milestone_schemes.load_book(db, org_id)
+    scheme = book.club
     _CAT = {
         "runs": "batting",
         "wickets": "bowling",
@@ -6421,16 +6636,16 @@ async def list_milestones_report(
             WHERE p.organisation_id = :org_id AND p.is_player = TRUE
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender,
                      COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
-            HAVING COUNT(DISTINCT ga.game_id) >= 50
+            HAVING COUNT(DISTINCT ga.game_id) >= :min_step
         """),
-        {"org_id": org_id},
+        {"org_id": org_id, "min_step": book.smallest_step("matches")},
     )
     for r in gm_rows.mappings().all():
         n = int(r["matches"])
         grade_name = r["grade_name"]
         if not grade_name:
             continue
-        for threshold in crossed_thresholds("grade_matches", n):
+        for threshold in crossed_thresholds("grade_matches", n, book.for_grade(grade_name)):
             achieved.append({
                 "player_id": r["player_id"],
                 "player_name": r["player_name"],
@@ -6499,11 +6714,12 @@ async def list_milestones_report(
         grade_name = r["grade_name"]
         if not grade_name:
             continue
-        target = next_threshold("grade_matches", n)
+        grade_scheme = book.for_grade(grade_name)
+        target = next_threshold("grade_matches", n, grade_scheme)
         if target is None:
             continue
         needed = target - n
-        if needed > reach_window("grade_matches", target):
+        if needed > reach_window("grade_matches", target, grade_scheme):
             continue
         upcoming.append({
             "player_id": r["player_id"],
@@ -6522,14 +6738,35 @@ async def list_milestones_report(
     return {
         "upcoming": upcoming,
         "achieved": achieved,
-        "scheme": {"runs_step": scheme.runs_step, "wickets_step": scheme.wickets_step},
-        "scheme_options": {"runs_steps": list(RUNS_STEPS), "wickets_steps": list(WICKETS_STEPS)},
+        "scheme": _scheme_payload(scheme),
+        "scheme_options": {f"{stat}_steps": list(MILESTONE_PRESETS[stat]) for stat in MILESTONE_STATS},
+        "step_limits": {
+            stat: {"min": lo, "max": hi, "multiple": unit}
+            for stat, (lo, hi, unit) in MILESTONE_LIMITS.items()
+        },
+        "grade_schemes": await grade_milestone_schemes.club_grade_choices(
+            db, org_id, this_year=current_year),
     }
+
+
+def _scheme_payload(scheme) -> dict:
+    return {f"{stat}_step": scheme.step_for(stat) for stat in MILESTONE_STATS}
 
 
 class MilestoneSchemeUpdate(BaseModel):
     runs_step: Optional[int] = None
     wickets_step: Optional[int] = None
+    matches_step: Optional[int] = None
+    catches_step: Optional[int] = None
+
+
+class MilestoneGradeSchemeUpdate(BaseModel):
+    """One grade's own increments. A step left out is not touched; null follows the club."""
+    grade: str
+    runs_step: Optional[int] = None
+    wickets_step: Optional[int] = None
+    matches_step: Optional[int] = None
+    catches_step: Optional[int] = None
 
 
 async def _fill_milestone_rungs(org_id) -> None:
@@ -6559,36 +6796,38 @@ async def update_milestone_scheme(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Pick the club's run and wicket milestone increments.
+    """Pick the club's milestone increments: a preset, or a step of its own.
 
     A key that is not sent leaves that increment alone; an explicit null puts it
-    back to the default. A value the screen does not offer is refused, not
-    quietly mapped to the default. Stored rows are never deleted: a rung the new
-    step does not use is hidden by ``is_displayable`` and returns if the club
-    picks that step again. Rungs the new step adds are filled in, undated.
+    back to the default. A value outside the limits in ``milestone_rules`` is
+    refused, not quietly mapped to the default. Stored rows are never deleted:
+    a rung the new step does not use is hidden by ``is_displayable`` and returns
+    if the club picks that step again. Rungs the new step adds are filled in,
+    undated. A grade's own increments (``/milestones/grade-schemes``) are not
+    touched by this.
     """
     from app.services.audit_log import log_activity
-    from app.services.milestone_rules import clean_runs_step, clean_wickets_step
 
-    before = (club.milestone_runs_step, club.milestone_wickets_step)
+    columns = {stat: f"milestone_{stat}_step" for stat in MILESTONE_STATS}
+    before = tuple(getattr(club, col) for col in columns.values())
     fields = data.model_fields_set
-    if "runs_step" in fields:
-        if data.runs_step is not None and data.runs_step not in RUNS_STEPS:
-            raise HTTPException(status_code=422,
-                                detail=f"Runs step must be one of {', '.join(map(str, RUNS_STEPS))}")
-        club.milestone_runs_step = data.runs_step
-    if "wickets_step" in fields:
-        if data.wickets_step is not None and data.wickets_step not in WICKETS_STEPS:
-            raise HTTPException(status_code=422,
-                                detail=f"Wickets step must be one of {', '.join(map(str, WICKETS_STEPS))}")
-        club.milestone_wickets_step = data.wickets_step
+    for stat, col in columns.items():
+        key = f"{stat}_step"
+        if key not in fields:
+            continue
+        value = getattr(data, key)
+        if value is not None:
+            problem = step_problem(stat, value)
+            if problem:
+                raise HTTPException(status_code=422, detail=problem)
+        setattr(club, col, value)
 
-    changed = before != (club.milestone_runs_step, club.milestone_wickets_step)
+    changed = before != tuple(getattr(club, col) for col in columns.values())
     await db.commit()
     await db.refresh(club)
     saved = {
-        "runs_step": clean_runs_step(club.milestone_runs_step),
-        "wickets_step": clean_wickets_step(club.milestone_wickets_step),
+        f"{stat}_step": _clean_step(stat, getattr(club, col))
+        for stat, col in columns.items()
     }
     if changed:
         # After the commit: a failed audit write must not undo the club's choice.
@@ -6599,3 +6838,56 @@ async def update_milestone_scheme(
         )
         background_tasks.add_task(_fill_milestone_rungs, club.id)
     return saved
+
+
+def _clean_step(stat: str, value) -> int:
+    return value if step_problem(stat, value) is None else MILESTONE_DEFAULT_STEPS[stat]
+
+
+@router.put("/milestones/grade-schemes")
+async def update_milestone_grade_scheme(
+    data: MilestoneGradeSchemeUpdate,
+    current_user: User = Depends(require_cap(MANAGE_MILESTONES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Give one grade its own milestone increments.
+
+    Covers the milestones inside that grade (100 games in A Grade, 1,000 runs in
+    A Grade, the Records page with the grade picked, the grade notices). Career
+    milestones keep the club's scheme. A step not sent is left alone, an
+    explicit null follows the club's setting again, and a value outside the
+    limits is refused. Nothing is stored per player, so nothing is rebuilt: the
+    new ladder is read the next time a screen asks.
+    """
+    import datetime
+    from app.services import grade_milestone_schemes
+    from app.services.audit_log import log_activity
+
+    choice = await grade_milestone_schemes.resolve_grade(
+        db, club.id, data.grade, this_year=datetime.date.today().year)
+    if choice is None:
+        raise HTTPException(status_code=422, detail="That grade is not one of this club's grades")
+    steps = {}
+    for stat in MILESTONE_STATS:
+        key = f"{stat}_step"
+        if key not in data.model_fields_set:
+            continue
+        value = getattr(data, key)
+        if value is not None:
+            problem = step_problem(stat, value)
+            if problem:
+                raise HTTPException(status_code=422, detail=problem)
+        steps[stat] = value
+    before = dict(choice["steps"])
+    saved = await grade_milestone_schemes.save_grade_steps(db, club.id, choice, steps)
+    await db.commit()
+    if saved != before:
+        await log_activity(
+            db, org_id=club.id, user_id=current_user.id,
+            action="update_milestone_grade_scheme", target_type="organisation",
+            target_id=str(club.id),
+            details={"grade": choice["name"], "grade_key": choice["key"], "steps": saved},
+            commit=True,
+        )
+    return {"key": choice["key"], "name": choice["name"], "steps": saved}

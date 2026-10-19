@@ -35,6 +35,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_PLAYERS, require_cap,
+)  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_PLAYERS, require_cap
 from app.models.db import Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club, get_current_user
@@ -523,7 +526,7 @@ def _template_examples(squad_names: list | None = None) -> list:
     ]
 
 
-@router.get("/template.csv")
+@router.get("/template.csv", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
 async def template(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -542,7 +545,7 @@ async def template(
     )
 
 
-@router.get("/template.xlsx")
+@router.get("/template.xlsx", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
 async def template_xlsx(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),

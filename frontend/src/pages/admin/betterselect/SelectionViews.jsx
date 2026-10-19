@@ -8,12 +8,16 @@
 // the pointer DnD engine (selectionDnd). Player rows show the real role + style
 // + a quiet form indicator (selectionMeta.roleLine / FormBars) — never the old
 // hardcoded positional hints.
+import { useEffect, useState } from 'react'
+import { sideFit } from '../../../lib/sideSize'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
-import { Icon, Avatar, Dot, Tag, RuleTags } from './ui'
-import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
+import { Icon, Avatar, Dot, Tag, RuleTags, WeekFlag } from './ui'
+import { AVAILABILITY, AVAIL_ORDER, viewStatus, weekFlag } from '../../../lib/availability'
 import { useDrag } from './selectionDnd'
 import { roleLine, formMeta, spark, alsoInLine, dropInLine, inDraftLine } from './selectionMeta'
 import { hasRuleFlag, ruleNotes, isBlocked, xiCompliance } from './selectionRules'
+import { useFitHeight, useBoxHeight, rowDensity, ROW_MIN } from './useFitHeight'
+import { useMediaQuery } from '../../../hooks/useMediaQuery'
 
 const ROLE_CODES = ['BAT', 'ALL', 'BWL', 'WKT']
 const ROLE_LBL = { BAT: 'BAT', ALL: 'ALL', BWL: 'BWL', WKT: 'WK' }
@@ -95,28 +99,105 @@ function AvailMini({ players }) {
 }
 
 /* ── Shared fixture / balance / size chrome ──────────────────────────────── */
-function SizePicker({ value, onChange }) {
-  const opts = [[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']]
+const SIZE_PRESETS = [[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']]
+const MAX_SIDE = 30
+function SizeBar({ value, onChange }) {
+  // Anything off the presets is a custom number (a junior or women's side may
+  // name 7 or 9). Clicking Custom opens a box to type it in.
+  const isCustom = value > 0 && !SIZE_PRESETS.some(([v]) => v === value)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const open = () => { setDraft(isCustom ? String(value) : ''); setEditing(true) }
+  const commit = () => {
+    const n = Math.floor(Number(draft))
+    setEditing(false)
+    if (Number.isFinite(n) && n >= 1 && n <= MAX_SIDE && n !== value) onChange(n)
+  }
+  const on = 'bg-pb-accent/15 text-pb-accent'
+  const off = 'text-pb-faint hover:text-pb-text'
   return (
     <div className="inline-flex p-[3px] gap-0.5 bg-pb-surface2 rounded-lg border border-pb-hairline whitespace-nowrap">
-      {opts.map(([v, l]) => (
-        <button key={v} type="button" onClick={() => onChange(v)}
-          className={`rounded-md font-display font-semibold text-xs px-2.5 py-1 transition ${v === value ? 'bg-pb-accent/15 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
+      {SIZE_PRESETS.map(([v, l]) => (
+        <button key={v} type="button" onClick={() => { setEditing(false); onChange(v) }}
+          className={`rounded-md font-display font-semibold text-xs px-2.5 py-1 transition ${v === value && !editing ? on : off}`}>{l}</button>
       ))}
+      {editing ? (
+        <input autoFocus type="number" inputMode="numeric" min={1} max={MAX_SIDE} value={draft} placeholder="No."
+          aria-label={`Custom side size, 1 to ${MAX_SIDE}`}
+          onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditing(false) }}
+          className="w-14 rounded-md bg-pb-surface border border-pb-accent text-pb-text font-display font-semibold text-xs px-2 py-1 outline-none pb-num" />
+      ) : (
+        <button type="button" onClick={open} title="Enter your own side size"
+          className={`rounded-md font-display font-semibold text-xs px-2.5 py-1 transition ${isCustom ? on : off}`}>{isCustom ? `Custom · ${value}` : 'Custom'}</button>
+      )}
     </div>
   )
 }
-function PickPill({ count, target }) {
-  const off = target > 0 && count !== target
+// The fewest players the side may field: blank means the side must be full.
+// Only offered for a fixture that belongs to one of our teams (the minimum is
+// saved on the team).
+function MinBox({ value, size, onChange }) {
+  const [draft, setDraft] = useState(value ? String(value) : '')
+  useEffect(() => { setDraft(value ? String(value) : '') }, [value])
+  const commit = () => {
+    const t = draft.trim()
+    if (t === '') { if (value) onChange(null); return }
+    const n = Math.floor(Number(t))
+    if (!Number.isFinite(n) || n < 1 || n > 30) { setDraft(value ? String(value) : ''); return }
+    if (n !== value) onChange(n)
+  }
+  return (
+    <label className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-dim whitespace-nowrap"
+      title={`The fewest players this team may field. Leave blank if the side must be full${size > 0 ? ` (${size})` : ''}.`}>
+      Min
+      <input type="number" inputMode="numeric" min={1} max={30} value={draft} placeholder="none"
+        aria-label="Minimum players for this team"
+        onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(value ? String(value) : ''); e.currentTarget.blur() } }}
+        className="w-14 rounded-md bg-pb-surface2 border border-pb-hairline text-pb-text font-display font-semibold text-xs px-2 py-1 outline-none focus:border-pb-accent pb-num" />
+    </label>
+  )
+}
+function SizePicker({ vm }) {
+  return (
+    <div className="inline-flex items-center gap-2 flex-wrap">
+      <SizeBar value={vm.format} onChange={vm.changeFormat} />
+      {vm.canMin && <MinBox value={vm.minFormat || 0} size={vm.format} onChange={vm.changeMin} />}
+    </div>
+  )
+}
+function PickPill({ count, target, min = 0 }) {
+  const off = sideFit(count, target, min).off
   return (
     <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap"
       style={{ background: off ? 'var(--pb-amber)' : 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: off ? '#1b1205' : 'var(--pb-accent)' }}>
-      {count}{target > 0 ? ` / ${target}` : ''} picked
+      {count}{target > 0 ? ` / ${target}` : ''} picked{min > 0 ? ` · min ${min}` : ''}
     </span>
   )
 }
 
-export function FixtureBar({ vm }) {
+export function FixtureBar({ vm, compact = false }) {
+  // On a short window the board's height is what is scarce, so the bar becomes
+  // one row: team switcher, the match, and the side size.
+  if (compact) {
+    return (
+      <div data-fixture-bar="compact" className="rounded-xl px-4 py-2 mb-2 border flex flex-wrap items-center gap-x-4 gap-y-1"
+        style={{ background: 'color-mix(in srgb, var(--pb-accent) 9%, var(--pb-surface))', borderColor: 'color-mix(in srgb, var(--pb-accent) 26%, transparent)' }}>
+        <div className="flex items-center gap-3 min-w-0">{vm.contextLeft}</div>
+        <div className="min-w-0 flex-1 basis-[120px]">
+          <h2 className="font-display font-bold text-[16px] leading-tight truncate" title={vm.title}>{vm.title}</h2>
+          {vm.sub && <div className="text-[12px] text-pb-dim truncate" title={vm.sub}>{vm.sub}</div>}
+        </div>
+        {vm.canEdit && (
+          <div className="flex flex-wrap items-center gap-2">
+            <SizePicker vm={vm} />
+            <PickPill count={vm.count} target={vm.target} min={vm.minFormat || 0} />
+          </div>
+        )}
+      </div>
+    )
+  }
   return (
     <div className="rounded-xl px-4 py-2.5 mb-2.5 border"
       style={{ background: 'color-mix(in srgb, var(--pb-accent) 9%, var(--pb-surface))', borderColor: 'color-mix(in srgb, var(--pb-accent) 26%, transparent)' }}>
@@ -129,8 +210,8 @@ export function FixtureBar({ vm }) {
         </div>
         {vm.canEdit && (
           <div className="flex flex-wrap items-center gap-2.5">
-            <SizePicker value={vm.format} onChange={vm.changeFormat} />
-            <PickPill count={vm.count} target={vm.target} />
+            <SizePicker vm={vm} />
+            <PickPill count={vm.count} target={vm.target} min={vm.minFormat || 0} />
           </div>
         )}
       </div>
@@ -233,10 +314,10 @@ function AvatarAvail({ p, vm, size = 34, dotSize = 10 }) {
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); vm.setAvailEdit(p) }}
             className="absolute -right-[11px] -bottom-[11px] w-8 h-8 inline-flex items-center justify-center rounded-full">
-            <Dot status={p.availability} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} />
+            <Dot status={viewStatus(p)} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} />
           </button>
         )
-        : <span className="absolute -right-px -bottom-px"><Dot status={p.availability} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>}
+        : <span className="absolute -right-px -bottom-px"><Dot status={viewStatus(p)} size={dotSize} style={{ boxShadow: '0 0 0 2px var(--pb-surface)' }} /></span>}
     </span>
   )
 }
@@ -280,9 +361,9 @@ function SlotControls({ vm, id, idx }) {
 }
 
 /* ══ Dual rail ══════════════════════════════════════════════════════════════ */
-function DualCard({ p, kind, idx, vm, drag }) {
+function DualCard({ p, kind, idx, vm, drag, density = 'full' }) {
   const fmt = useAdminNameFormat()
-  const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
+  const meta = AVAILABILITY[viewStatus(p)] || AVAILABILITY.NO_RESPONSE
   const clash = p.clash?.length > 0
   // A call-up (higher grade taking a player from a lower XI) stays pickable;
   // only a same/higher-grade clash blocks. An "unavailable" player is NOT
@@ -295,25 +376,49 @@ function DualCard({ p, kind, idx, vm, drag }) {
   // A player a club rule bars stays pickable — the save is where it bites, and
   // a selector may be about to grant a permit — but the card says so.
   const barred = isBlocked(p)
+  // A slot in a XI that is being fitted to the screen draws less as the rows get
+  // shorter. The pool always draws in full.
+  const dense = kind === 'slot' && density !== 'full'
+  const tight = kind === 'slot' && density === 'tight'
+  const warnLine = clash
+    ? (callUp
+        ? <span className="text-pb-amber">↑ Call-up from {p.clash.join(', ')}</span>
+        : <span className="text-pb-red">⛔ Picked for {p.clash.join(', ')}</span>)
+    : alsoInLine(p)
+      ? <span className="text-pb-amber" title={`Also in ${alsoInLine(p)}`}>Also in {alsoInLine(p)}</span>
+      : inDraftLine(p)
+        ? <span className="text-pb-amber" data-in-draft>{inDraftLine(p)}</span>
+        : null
   return (
-    <div className={`group relative shrink-0 flex items-center gap-2.5 pl-3.5 pr-3 py-1.5 rounded-xl border bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''} ${barred ? 'border-pb-red/45' : 'border-pb-hairline'}`}
+    <div data-density={kind === 'slot' ? density : undefined}
+      className={`group relative flex items-center gap-2.5 pl-3.5 pr-3 ${dense ? 'py-0.5 min-h-0 h-full' : 'py-1.5 shrink-0'} rounded-xl border bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''} ${barred ? 'border-pb-red/45' : 'border-pb-hairline'}`}
       {...(kind === 'pool' && interactive ? drag.bind(dragItem) : {})}
       onClick={kind === 'pool' && interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
-      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
+      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: viewStatus(p) === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       {kind === 'slot' && vm.canEdit && (
         <span {...drag.bind(dragItem)} className="max-sm:hidden cursor-grab text-pb-faintest shrink-0" style={{ touchAction: 'none' }} title="Drag to reorder / off"><Icon name="grip" size={14} /></span>
       )}
-      <AvatarAvail p={p} vm={vm} dotSize={10} />
+      <AvatarAvail p={p} vm={vm} size={tight ? 22 : dense ? 28 : 34} dotSize={tight ? 8 : 10} />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[14px] font-semibold truncate">{fmt(p.display_name)}</span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className={`${tight ? 'text-[13px]' : 'text-[14px]'} font-semibold truncate`}>{fmt(p.display_name)}</span>
           {p.id === vm.capId && <Tag>C</Tag>}{p.id === vm.wkId && <Tag tone="amber">WK</Tag>}
           {p.squads?.[0] && (kind === 'pool') && <Tag tone={p.squad_match ? 'accent' : 'faint'}>{vm.squadShort(p.squads[0])}</Tag>}
-          <AgeTag p={p} />
+          {!tight && <AgeTag p={p} />}
           <FlagTags p={p} />
+          {tight && (
+            <span className="ml-auto text-[11.5px] text-pb-dim truncate min-w-0 pl-1" title={roleLine(p)}>
+              {warnLine ? <>{warnLine}</> : roleLine(p)}
+            </span>
+          )}
         </div>
-        <div className="text-[12px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>
-        {clash
+        {dense ? (!tight && (
+          <div className="text-[11.5px] mt-px truncate leading-tight" title={roleLine(p)}>
+            {warnLine || <span className="text-pb-dim">{roleLine(p)}</span>}
+          </div>
+        )) : <div className="text-[12px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>}
+        {!dense && weekFlag(p.availability_days) && <div className="mt-0.5 truncate" data-week-split><WeekFlag days={p.availability_days} className="text-[11px]" /></div>}
+        {!dense && (clash
           ? (callUp
               ? <div className="text-[11px] text-pb-amber mt-0.5 truncate">↑ Call-up from {p.clash.join(', ')}</div>
               : <div className="text-[11px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>)
@@ -323,15 +428,15 @@ function DualCard({ p, kind, idx, vm, drag }) {
               ? <div className="text-[11px] text-pb-amber mt-0.5 truncate" data-in-draft>{inDraftLine(p)}</div>
             : dropInLine(p)
               ? <div className="text-[11px] text-pb-accent mt-0.5 truncate" data-drop-in>↓ {dropInLine(p)}</div>
-              : p.availability_reason && <div className="text-[11px] text-pb-faint mt-0.5 truncate">{p.availability_reason}</div>}
-        <RuleNotes p={p} />
+              : p.availability_reason && <div className="text-[11px] text-pb-faint mt-0.5 truncate">{p.availability_reason}</div>)}
+        {!dense && <RuleNotes p={p} />}
       </div>
       {kind === 'pool' ? (
         <div className="flex flex-col items-end gap-0.5 shrink-0">
           <FormBars p={p} h={16} />
           <FormWord p={p} />
         </div>
-      ) : <span className="max-sm:hidden"><FormBars p={p} h={16} /></span>}
+      ) : !tight && <span className="max-sm:hidden"><FormBars p={p} h={dense ? 12 : 16} /></span>}
       {kind === 'pool'
         ? (!blocked && <span className="text-pb-faintest shrink-0 group-hover:text-pb-accent"><Icon name="arrow" size={16} /></span>)
         : <SlotControls vm={vm} id={p.id} idx={idx} />}
@@ -339,18 +444,21 @@ function DualCard({ p, kind, idx, vm, drag }) {
   )
 }
 
-function DualSlot({ i, id, vm, drag }) {
+function DualSlot({ i, id, vm, drag, fit = false, density = 'full' }) {
   const p = id ? vm.poolById[id] : null
   const isFocus = vm.focus === i
   const hovered = drag.hover === 'slot:' + i
+  // Fitted to the screen: every row takes an equal share of the list, never
+  // shorter than ROW_MIN (below that the list scrolls) or taller than a card.
+  const rowStyle = fit ? { flex: '1 1 0', minHeight: ROW_MIN, maxHeight: density === 'full' ? 76 : undefined } : undefined
   return (
-    <div className="flex items-stretch gap-2 shrink-0">
-      <span className="font-display font-bold text-[18px] text-pb-faintest w-[22px] flex items-center justify-center shrink-0 pb-num">{i + 1}</span>
+    <div className={`flex items-stretch gap-2 ${fit ? '' : 'shrink-0'}`} style={rowStyle}>
+      <span className={`font-display font-bold ${fit && density !== 'full' ? 'text-[14px]' : 'text-[18px]'} text-pb-faintest w-[22px] flex items-center justify-center shrink-0 pb-num`}>{i + 1}</span>
       <div className="flex-1 min-w-0" data-drop-kind="slot" data-drop-idx={i} onClick={() => !p && vm.canEdit && (vm.isPhone ? vm.openAdd(i) : vm.setFocus(i))}>
         {p
-          ? <DualCard p={p} kind="slot" idx={i} vm={vm} drag={drag} />
+          ? <DualCard p={p} kind="slot" idx={i} vm={vm} drag={drag} density={fit ? density : 'full'} />
           : (
-            <div className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-dashed min-h-[50px] max-lg:min-h-[56px] text-[13px] transition-colors ${hovered ? 'border-pb-accent text-pb-accent bg-pb-accent/10 border-solid' : isFocus ? 'border-pb-accent text-pb-accent bg-pb-accent/[0.06]' : 'border-pb-hairline2 text-pb-faintest'}`}>
+            <div className={`flex items-center gap-2 px-3.5 ${fit ? 'h-full min-h-0' : 'py-2.5 min-h-[50px] max-lg:min-h-[56px]'} rounded-xl border border-dashed text-[13px] transition-colors ${hovered ? 'border-pb-accent text-pb-accent bg-pb-accent/10 border-solid' : isFocus ? 'border-pb-accent text-pb-accent bg-pb-accent/[0.06]' : 'border-pb-hairline2 text-pb-faintest'}`}>
               <Icon name="plus" size={15} /><span>{vm.isPhone ? 'Tap to add a player' : isFocus ? 'Tap a player in the pool' : hovered ? 'Drop here' : 'Open slot'}</span>
             </div>
           )}
@@ -365,16 +473,25 @@ export function DualRailView({ vm }) {
   // so a pick made from the Add sheet and the bar's counts agree with this.
   const mpanel = vm.panel
   const poolHover = drag.hover === 'pool'
+  // Desktop: both panels run from where they start to the bottom of the screen,
+  // and the XI divides that height between its slots, so a full side shows
+  // without scrolling. A phone keeps its own bottom-bar layout.
+  const shortWindow = useMediaQuery('(max-height: 899px)')
+  const [fitRef, fitH] = useFitHeight({ enabled: !vm.isPhone })
+  const [xiListRef, xiListH] = useBoxHeight()
+  const fit = fitH != null
+  const density = fit ? rowDensity(xiListH, vm.slots.length) : 'full'
+  const panelStyle = fit ? { height: fitH } : undefined
 
   return (
     <div>
-      <FixtureBar vm={vm} />
+      <FixtureBar vm={vm} compact={!vm.isPhone && shortWindow} />
       <BalanceStrip vm={vm} />
       <RuleStrip vm={vm} />
 
       <div className="grid items-start gap-3.5 lg:gap-0 lg:grid-cols-[minmax(0,1fr)_56px_minmax(0,1fr)]">
         {/* Pool */}
-        <section className={`pb-card rounded-xl flex flex-col min-h-0 min-w-0 ${mpanel === 'pool' ? '' : 'hidden'} lg:flex`}>
+        <section style={panelStyle} className={`pb-card rounded-xl flex flex-col min-h-0 min-w-0 ${mpanel === 'pool' ? '' : 'hidden'} lg:flex`}>
           <header className="px-4 py-3 border-b pb-hairline flex flex-col gap-2.5">
             <div className="flex items-center justify-between gap-2.5">
               <h3 className="font-display font-bold text-[15px]">Available pool</h3>
@@ -383,7 +500,7 @@ export function DualRailView({ vm }) {
             {vm.filterBar}
           </header>
           <div data-drop-kind="pool"
-            className={`flex flex-col gap-1.5 p-2 overflow-auto pb-scroll max-h-none lg:max-h-[calc(100vh-300px)] rounded-b-xl ${poolHover ? 'bg-pb-red/[0.06] shadow-[inset_0_0_0_2px_color-mix(in_srgb,var(--pb-red)_35%,transparent)]' : ''}`}>
+            className={`flex flex-col gap-1.5 p-2 overflow-auto pb-scroll max-h-none ${fit ? 'flex-1 min-h-0' : 'lg:max-h-[calc(100vh-300px)]'} rounded-b-xl ${poolHover ? 'bg-pb-red/[0.06] shadow-[inset_0_0_0_2px_color-mix(in_srgb,var(--pb-red)_35%,transparent)]' : ''}`}>
             {vm.pool.map((p) => <DualCard key={p.id} p={p} kind="pool" vm={vm} drag={drag} />)}
             {vm.pool.length === 0 && <div className="p-4 text-pb-faint text-sm">No players match.</div>}
             {poolHover && <div className="sticky bottom-1.5 mx-auto mt-1.5 px-3.5 py-1.5 rounded-full text-xs text-pb-red bg-pb-surface border border-dashed border-pb-red/40">Drop here to remove from XI</div>}
@@ -398,8 +515,8 @@ export function DualRailView({ vm }) {
         </div>
 
         {/* XI */}
-        <section className={`pb-card rounded-xl flex flex-col min-h-0 min-w-0 ${mpanel === 'xi' ? '' : 'hidden'} lg:flex`}>
-          <header className="px-4 py-3 border-b pb-hairline flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <section ref={fitRef} style={panelStyle} data-xi-panel data-fit={fit ? 'on' : 'off'} className={`pb-card rounded-xl flex flex-col min-h-0 min-w-0 ${mpanel === 'xi' ? '' : 'hidden'} lg:flex`}>
+          <header className={`px-4 ${fit ? 'py-2' : 'py-3'} border-b pb-hairline flex flex-wrap items-center justify-between gap-x-3 gap-y-2`}>
             <h3 className="font-display font-bold text-[15px]">Selected XI <span className="text-pb-faint font-medium text-[13px]">· batting order</span></h3>
             {vm.canEdit && (
               <div className="flex items-center gap-2">
@@ -417,8 +534,8 @@ export function DualRailView({ vm }) {
               </button>
             </div>
           )}
-          <div className="flex flex-col gap-1.5 p-2 overflow-auto pb-scroll max-h-none lg:max-h-[calc(100vh-300px)]">
-            {vm.slots.map((id, i) => <DualSlot key={i} i={i} id={id} vm={vm} drag={drag} />)}
+          <div ref={xiListRef} data-xi-list className={`flex flex-col ${fit ? 'gap-1 flex-1 min-h-0 p-1.5' : 'gap-1.5 lg:max-h-[calc(100vh-300px)] p-2'} overflow-auto pb-scroll max-h-none`}>
+            {vm.slots.map((id, i) => <DualSlot key={i} i={i} id={id} vm={vm} drag={drag} fit={fit} density={density} />)}
             {vm.format === 0 && <div className="px-4 py-3 rounded-xl border border-dashed border-pb-hairline2 text-center text-[12px] text-pb-faintest">Tap a player to add to the order</div>}
           </div>
         </section>
@@ -468,7 +585,7 @@ function SheetRow({ i, id, vm, drag }) {
 
 function TrayCard({ p, vm, drag }) {
   const fmt = useAdminNameFormat()
-  const meta = AVAILABILITY[p.availability] || AVAILABILITY.NO_RESPONSE
+  const meta = AVAILABILITY[viewStatus(p)] || AVAILABILITY.NO_RESPONSE
   const clash = p.clash?.length > 0
   const callUp = clash && !p.clash_blocks
   // Unavailable players stay pickable (see DualCard) — only a hard clash blocks.
@@ -479,7 +596,7 @@ function TrayCard({ p, vm, drag }) {
     <div className={`group relative flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl border ${barred ? 'border-pb-red/45' : 'border-pb-hairline'} bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''}`}
       {...(interactive ? drag.bind({ kind: 'pool', player: p }) : {})}
       onClick={interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
-      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
+      <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: viewStatus(p) === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       <AvatarAvail p={p} vm={vm} dotSize={10} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
@@ -527,7 +644,7 @@ export function TeamSheetView({ vm }) {
           {vm.sub && <div className="text-[13px] text-pb-dim">{vm.sub}</div>}
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          {vm.canEdit && <SizePicker value={vm.format} onChange={vm.changeFormat} />}
+          {vm.canEdit && <SizePicker vm={vm} />}
           <div className="font-display flex items-baseline gap-1"><b className="text-[38px] leading-none text-pb-accent font-bold pb-num">{vm.count}</b><span className="text-[17px] text-pb-faint">/ {vm.target || '∞'}</span></div>
           <div className="hidden sm:flex gap-3.5 font-display">
             {ROLE_CODES.map((c) => {
