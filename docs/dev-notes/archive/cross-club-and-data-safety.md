@@ -959,3 +959,13 @@ Gisborne: one player held under several Cricket Australia profiles. Redacted jun
 - Both rows in the SAME game is the evidence of two people: refused unless `--allow-shared-games`.
 - After a merge the removed id is a sync redirect. Chains resolve transitively (`sync.merged_away`), so earlier merges into the removed row follow it to the keeper.
 - Proof: `verify_merge_player_pair_script.py` (real Postgres, 16 checks; control with the apply branch disabled fails the merge, merge-log and audit checks).
+
+
+## Gisborne: one player, two profiles, merged into the wrong people (Oct 2026)
+
+A player returned after a gap of years under a new Cricket Australia profile. On 14 Oct club users merged five redacted (`********`) junior profiles into the new one, and that one into an unrelated player whose own career ran 2018 to 2023. Ages and grades gave it away: Under 11 games and Under 17 games in the same season, and 13 games the audit matched to another named player (`audit_player_games`, "NOT ON SHEET").
+- `ops/gisborne-brook-fix.sh` (one-off, ids built in) undoes the seven merges newest first (`undo_player_merge`), refuses to merge unless the new profile then holds only a few games, all from this season and none in common with the old profile, then merges it into the old profile (`merge_player_pair`). `preview`, `undo`, `merge [--apply]`, `verify`.
+- A game synced after a merge is credited to the kept player through the redirect and is not in the merge log, so an undo leaves it there. `verify` lists them. A re-sync does not delete game rows, so it is not tidied by sync.
+- The audit follows only one level of merge: ids merged into a profile that was itself merged show as NOT ON SHEET. Read those against `merge_logs`.
+- Lesson for the merge screen: a redacted name proves nothing about identity. The suggestions flag redacted pairs; a human merge of one is still allowed.
+- Proof: `verification/verify_gisborne_brook_fix_script.py` (real Postgres and the shipped scripts, 20 checks; control with the gate removed fails 6).
