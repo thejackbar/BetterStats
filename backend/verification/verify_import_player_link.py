@@ -47,7 +47,7 @@ async def main():
     from app.models.db import (
         Base, BattingInnings, Game, Grade, ManualBattingInnings, ManualGame, Organisation,
         Player, Season, engine, async_session_maker,
-        BowlingSpell, ManualBowlingSpell,
+        BowlingSpell, ManualBowlingSpell, BowlerWicket,
     )
     from app.services import import_player_link as ipl
     from app.routers.admin import undo_merge, UndoMergeRequest
@@ -120,6 +120,12 @@ async def main():
         synced("Ytwb", "Twinb, Bob"); imported("Xtwb", "Twinb, B")
         synced("Ybad", "Badfig, Bill"); imported("Xbad", "Badfig, B")
         synced("Ybun", "Bowlunp, Bert"); imported("Xbun", "Bowlunp, B")
+        # label clashes: initials that cannot be one man, and initials that could
+        synced("Ycr", "Crou, Angus"); imported("Xag", "Crou, AG"); imported("Xad", "Crou, AD")
+        synced("Ypr", "Pref, Angus"); imported("Xpa", "Pref, AG"); imported("Xpb", "Pref, A")
+        # the wickets as proof: a bowler whose figures differ by a run on the two cards
+        synced("Yb1", "Batter, One"); synced("Yb2", "Batter, Two"); synced("Yo", "Other, Olly")
+        synced("Yel", "Elim, Eric"); imported("Xel", "Elim, E")
         await db.flush()
 
         n = [0]
@@ -218,7 +224,23 @@ async def main():
                                   batting_position=pos, not_out=False, did_not_bat=False))
             db.add(ManualBattingInnings(manual_game_id=mu, player_id=P[xk], innings_number=1,
                                         runs=runs, batting_position=pos, did_not_bat=False))
+        # initials that cannot be one man do not make the label shared; ones that could do
+        await match([("Xag", "Ycr", 36, 2, 36, 2, False)])
+        await match([("Xpa", "Ypr", 44, 3, 44, 3, False)])
+        # the wickets prove it: batters agree (so the pair is confirmed), every bowler's
+        # figures agree except Elim's, whose runs differ by one between the cards
+        m_el = await match([("Yb1", "Yb1", 21, 1, 21, 1, False), ("Yb2", "Yb2", 14, 2, 14, 2, False)])
+        await spells(m_el, [("Xel", "Yel", 3.0, 15, 1), ("Yo", "Yo", 4.0, 20, 2)],
+                     [("Xel", "Yel", 3.0, 16, 1), ("Yo", "Yo", 4.0, 20, 2)])
+        g_el = (await db.get(ManualGame, m_el)).superseded_by_game_id
+        for who, kind in (("Yel", "bowled"), ("Yo", "caught"), ("Yo", "lbw")):
+            db.add(BowlerWicket(game_id=g_el, innings_number=2, bowler_id=P[who],
+                                batter_name="Opp", dismissal_type=kind))
         await db.flush()
+        await db.execute(text("""INSERT INTO manual_edit_logs
+            (organisation_id, action, target_table, target_id, after_json)
+            VALUES (:o, 'import', 'manual_games', 'x', CAST(:j AS JSONB))"""),
+            {"o": org, "j": '{"created_game_ids": ["%s"]}' % m_el})
         await db.execute(text("""INSERT INTO manual_edit_logs
             (organisation_id, action, target_table, target_id, after_json)
             VALUES (:o, 'import', 'manual_games', 'x', CAST(:j AS JSONB))"""),
@@ -238,7 +260,8 @@ async def main():
     # ── the plan, from the database, with nothing written ────────────────────
     dry = await ipl.link_players(org, apply=False)
     want_merge = {"Xsol": "Ysol", "Xand": "Yand", "Xw1": "Yrob", "Xw2": "Yrob",
-                  "Xsing": "Ysing", "Xzap": "Yzap", "Xbow": "Ybow"}
+                  "Xsing": "Ysing", "Xzap": "Yzap", "Xbow": "Ybow",
+                  "Xag": "Ycr", "Xel": "Yel"}
     got_merge = {p["remove"]: p["keep"] for p in dry["pairs"]}
     check("a dry run lists exactly the pairs the evidence proves",
           got_merge, {str(P[k]): str(P[v]) for k, v in want_merge.items()})
@@ -260,6 +283,14 @@ async def main():
     check("a record with a PlayHQ id is not a candidate",
           "Hq, H" not in held and str(P["Xhq"]) not in got_merge)
     check("a pair the club chose to keep apart is not merged", str(P["Xign"]) not in got_merge)
+    check("initials that cannot be one man ('Crou, AD' beside 'Crou, AG') do not block the join",
+          got_merge.get(str(P["Xag"])), str(P["Ycr"]))
+    check("the other record is left, with no evidence of its own", held.get("Crou, AD"), ipl.NO_EVIDENCE)
+    check("initials that could be one man ('Pref, A' beside 'Pref, AG') still make the label shared",
+          held.get("Pref, AG"), ipl.SHARED_NAME)
+    check("a bowler whose figures differ by a run is joined on the wickets: everything else on "
+          "the card agreed and one credited bowler and one import bowler were left",
+          got_merge.get(str(P["Xel"])), str(P["Yel"]))
     check("a player who only ever bowled is joined on his bowling figures",
           got_merge.get(str(P["Xbow"])), str(P["Ybow"]))
     check("two bowlers with identical figures in one match are not evidence for either",

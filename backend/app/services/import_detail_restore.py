@@ -21,6 +21,9 @@ WHAT IT WILL NOT DO. It fills; it never overwrites and never deletes the club's 
   of our bowlers' wickets on the card equals the number PlayHQ credits to him. That is
   the guard against putting a name on the wrong wicket: the new rows can never disagree
   with the club's own bowling figures. The import must have no credits for the match yet.
+  Where the cards differ ONLY by a bowler held under two records (same surname and
+  initial, same count, every other bowler identical) the credits are written against the
+  import's record, the one the figures already name; no merge has to come first.
 
 Each run writes the ids of the rows it inserted to the audit log, and `undo_org` removes
 exactly those and nothing else.
@@ -137,7 +140,7 @@ async def plan_org(db, org_id) -> dict:
     paired = await _all(db, _PAIRED, org=org)
     if not paired:
         return {"paired": 0, "fow": [], "part": [], "bw": [], "skipped": defaultdict(list),
-                "matches": 0, "by_season": {}}
+                "matches": 0, "by_season": {}, "credit_gaps": [], "credits_by_name": 0}
     mids = [p["id"] for p in paired]
     gids = sorted({p["game_id"] for p in paired})
     man_bat = _grouped(await _all(db, _MAN_BAT, ids=mids), "mid")
@@ -153,7 +156,17 @@ async def plan_org(db, org_id) -> dict:
 
     fow_rows, part_rows, bw_rows = [], [], []
     skipped: dict = defaultdict(list)
+    credit_gaps: list = []
+    by_name = 0
     touched, by_season = set(), defaultdict(set)
+    from app.services.import_player_link import label
+
+    names = {r[0]: r[1] for r in (await db.execute(text(
+        "SELECT id::text, COALESCE(NULLIF(display_name_override, ''), name) FROM players "
+        "WHERE organisation_id = CAST(:org AS UUID)"), {"org": org})).all()}
+
+    def label_of(pid):
+        return label(names.get(pid))
 
     for p in paired:
         mid, gid = p["id"], p["game_id"]
@@ -195,21 +208,141 @@ async def plan_org(db, org_id) -> dict:
             for r in credits:
                 per_bowler[str(r["bowler_id"])] += 1
             ours = {k: v for k, v in spells.get(mid, {}).items() if v > 0}
+            as_import: dict = {}
+            usable = True
             if per_bowler != ours:
-                skipped[SKIP_CREDITS].append(mid)
+                gap = {"mid": mid, "synced": dict(per_bowler), "import": ours}
+                credit_gaps.append(gap)
+                # The cards differ only by bowlers held under two records (PlayHQ's "Smith,
+                # Reuben" against the club's "Smith, RG", same count, everything else
+                # identical): the credits belong to the import's record, which the figures
+                # already name. Written against that record, so no merge has to come first,
+                # and a later merge carries them (`merge_carry`).
+                as_import = {y: x for x, y in gap_pairs(gap, label_of)}
+                gap["resolved"] = bool(as_import)
+                if not as_import:
+                    skipped[SKIP_CREDITS].append(mid)
+                    usable = False
+            if not usable:
+                pass
             elif any(r["innings_number"] not in inn_map for r in credits):
                 skipped[SKIP_OPP].append(mid)
             else:
                 for r in credits:
-                    bw_rows.append({**r, "mid": mid, "target": inn_map[r["innings_number"]]})
+                    bid = as_import.get(str(r["bowler_id"]))
+                    bw_rows.append({**r, "mid": mid, "target": inn_map[r["innings_number"]],
+                                    **({"bowler_id": _uuid(bid)} if bid else {})})
+                if as_import:
+                    by_name += 1
                 wrote = True
         if wrote:
             touched.add(mid)
             by_season[p["season_name"]].add(mid)
 
     return {"paired": len(paired), "fow": fow_rows, "part": part_rows, "bw": bw_rows,
-            "skipped": skipped, "matches": len(touched),
-            "by_season": {k: len(v) for k, v in sorted(by_season.items())}}
+            "skipped": skipped, "matches": len(touched), "credit_gaps": credit_gaps,
+            "credits_by_name": by_name, "by_season": {k: len(v) for k, v in sorted(by_season.items())}}
+
+
+GAP_COUNT = "the same bowlers, but a different number of wickets"
+GAP_TWO_RECORDS = "one man under two records (the bowler is not joined yet)"
+GAP_MISSING = "a credited bowler has no wickets on the import's card"
+GAP_EXTRA = "the import credits a bowler PlayHQ does not"
+GAP_OTHER = "bowlers differ in more than one way"
+
+
+def classify_gap(gap: dict, label_of) -> str:
+    """Why one match's wicket credits differ from its bowling figures.
+
+    ``label_of(player id)`` gives (surname, first initial) or None. A credited bowler and
+    an import bowler with the same label and no match of their own are one man held
+    twice, which `link_import_players` has not been able to prove."""
+    syn, imp = gap["synced"], gap["import"]
+    only_syn = [b for b in syn if b not in imp]
+    only_imp = [b for b in imp if b not in syn]
+    if not only_syn and not only_imp:
+        return GAP_COUNT
+    if only_syn and only_imp:
+        left = list(only_imp)
+        for b in only_syn:
+            hit = next((i for i in left if label_of(b) and label_of(b) == label_of(i)), None)
+            if hit is None:
+                return GAP_OTHER
+            left.remove(hit)
+        return GAP_TWO_RECORDS if not left else GAP_OTHER
+    return GAP_MISSING if only_syn else GAP_EXTRA
+
+
+def gap_pairs(gap: dict, label_of) -> list:
+    """The (import record, synced record) pairs a match's wicket credits prove, or [].
+
+    Only when the two cards differ ONLY by bowlers that pair off one-to-one on surname and
+    initial with the same count, so everything else on the card has agreed exactly."""
+    syn, imp = gap["synced"], gap["import"]
+    only_syn = [b for b in syn if b not in imp]
+    only_imp = [b for b in imp if b not in syn]
+    if not only_syn or len(only_syn) != len(only_imp):
+        return []
+    if any(syn[b] != imp[b] for b in syn if b in imp):
+        return []
+    left, pairs = list(only_imp), []
+    for b in only_syn:
+        hit = next((i for i in left if label_of(b) and label_of(b) == label_of(i)
+                    and imp[i] == syn[b]), None)
+        if hit is None:
+            return []
+        left.remove(hit)
+        pairs.append((hit, b))
+    return pairs
+
+
+async def credit_evidence(db, org_id) -> list:
+    """Join evidence for `link_import_players` from the matches whose credits are off by a
+    bowler held under two records: ``[{x_id, y_id, matches}]``."""
+    from collections import Counter
+
+    from app.services.import_player_link import label
+
+    plan = await plan_org(db, org_id)
+    gaps = plan.get("credit_gaps", [])
+    ids = {b for g in gaps for k in ("synced", "import") for b in g[k]}
+    if not ids:
+        return []
+    names = {r[0]: r[1] for r in (await db.execute(text(
+        "SELECT id::text, COALESCE(NULLIF(display_name_override, ''), name) FROM players "
+        "WHERE id = ANY(CAST(:ids AS UUID[]))"), {"ids": sorted(ids)})).all()}
+    tally = Counter()
+    for g in gaps:
+        for x, y in gap_pairs(g, lambda pid: label(names.get(pid))):
+            tally[(x, y)] += 1
+    return [{"x_id": x, "y_id": y, "matches": n} for (x, y), n in tally.items()]
+
+
+async def explain_credits(db, org_id, gaps: list) -> dict:
+    """Group the credits mismatches by cause, with a few named examples of each."""
+    from app.services.import_player_link import label
+
+    ids = {b for g in gaps for k in ("synced", "import") for b in g[k]}
+    names = {}
+    if ids:
+        names = {r[0]: r[1] for r in (await db.execute(text(
+            "SELECT id::text, COALESCE(NULLIF(display_name_override, ''), name) FROM players "
+            "WHERE id = ANY(CAST(:ids AS UUID[]))"), {"ids": sorted(ids)})).all()}
+
+    def label_of(pid):
+        return label(names.get(pid))
+
+    groups: dict = defaultdict(list)
+    for g in gaps:
+        groups[classify_gap(g, label_of)].append(g)
+
+    def show(g):
+        a = ", ".join(sorted(f"{names.get(b, b[:8])} {n}" for b, n in g["synced"].items()))
+        b = ", ".join(sorted(f"{names.get(x, x[:8])} {n}" for x, n in g["import"].items()))
+        return f"PlayHQ credits [{a}]  import card [{b}]  ({g['mid'][:8]})"
+
+    return {k: {"count": len(v), "examples": [show(g) for g in v[:5]]}
+            for k, v in sorted(groups.items(), key=lambda kv: -len(kv[1]))}
 
 
 async def restore_org(db, org_id, *, apply: bool = False,

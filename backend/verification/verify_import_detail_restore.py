@@ -63,9 +63,10 @@ async def main():
             await conn.execute(text(stmt))
 
     org, other, season, grade = u(), u(), u(), u()
-    P = {k: u() for k in ("a", "b", "c", "d", "e", "f", "bw1", "bw2", "fld", "opp")}
-    M = {k: u() for k in ("1", "2", "3", "4", "5", "6", "7")}
-    G = {k: u() for k in ("1", "2", "3", "4", "5", "6", "7")}
+    P = {k: u() for k in ("a", "b", "c", "d", "e", "f", "bw1", "bw2", "fld", "opp",
+                          "synsmith", "impsmith")}
+    M = {k: u() for k in ("1", "2", "3", "4", "5", "6", "7", "8")}
+    G = {k: u() for k in ("1", "2", "3", "4", "5", "6", "7", "8")}
     day = date(2021, 11, 6)
 
     async with async_session_maker() as db:
@@ -76,8 +77,9 @@ async def main():
         db.add(Grade(id=grade, season_id=season, name="1st XI"))
         await db.flush()
         for k, p in P.items():
-            db.add(Player(id=p, organisation_id=other if k == "opp" else org,
-                          name=f"Player, {k.upper()}", grassroots_id=str(p)))
+            nm = {"synsmith": "Smith, Reuben", "impsmith": "Smith, RG"}.get(k, f"Player, {k.upper()}")
+            db.add(Player(id=p, organisation_id=other if k == "opp" else org, name=nm,
+                          grassroots_id=None if k == "impsmith" else str(p)))
         await db.flush()
         for k, g in G.items():
             db.add(Game(id=g, grade_id=grade, played_at=day, home_team="A", away_team="B",
@@ -148,6 +150,12 @@ async def main():
         credits("7", 2, [("bw1", "bowled", None)])
         db.add(ManualBowlerWicket(manual_game_id=M["7"], innings_number=2, bowler_id=P["bw1"],
                                   dismissal_type="bowled"))
+        # 8: one bowler held under two records. PlayHQ credits "Smith, Reuben" 1 and bw1 2; the
+        # import's card names "Smith, RG" 1 and bw1 2. Credits go to the import's own record.
+        cards("8", 1, 1); spells("8", 2, 0)
+        db.add(ManualBowlingSpell(manual_game_id=M["8"], player_id=P["impsmith"], innings_number=2,
+                                  overs=3, runs=15, wickets=1))
+        credits("8", 2, [("synsmith", "bowled", None), ("bw1", "caught", "fld"), ("bw1", "lbw", None)])
         await db.flush()
         await db.execute(text("""INSERT INTO manual_edit_logs
             (organisation_id, action, target_table, target_id, after_json)
@@ -172,18 +180,36 @@ async def main():
 
     dry = await go()
     check("a dry run counts what it would copy",
-          (len(dry["fow"]), len(dry["part"]), len(dry["bw"])), (18, 20, 3))
+          (len(dry["fow"]), len(dry["part"]), len(dry["bw"])), (18, 20, 6))
     check("a dry run writes nothing",
           [await n("manual_fall_of_wickets", k) for k in ("1", "2", "6")], [0, 0, 0])
     check("and lists why a match was skipped",
           ({k: len(v) for k, v in dry["skipped"].items()}),
           {idr.SKIP_PAIR: 1, idr.SKIP_INNINGS: 1, idr.SKIP_CREDITS: 1})
 
+    async with async_session_maker() as db:
+        why = await idr.explain_credits(
+            db, org, [g for g in dry.get("credit_gaps", []) if not g.get("resolved")])
+    check("a credits mismatch is explained: same bowlers, a different number of wickets",
+          {k: v["count"] for k, v in why.items()}, {idr.GAP_COUNT: 1})
+    check("and the example names the bowlers and both counts",
+          why[idr.GAP_COUNT]["examples"][0].split("  (")[0] if why else None,
+          "PlayHQ credits [Player, BW1 2, Player, BW2 1]  import card [Player, BW1 3, Player, BW2 1]")
+    lab = {"s1": ("holmes", "s"), "i1": ("holmes", "s"), "i2": ("jones", "j"), "s2": ("smith", "k")}.get
+    cases = [
+        ({"synced": {"a": 2}, "import": {"a": 3}}, idr.GAP_COUNT),
+        ({"synced": {"s1": 2}, "import": {"i1": 2}}, idr.GAP_TWO_RECORDS),
+        ({"synced": {"s2": 2}, "import": {"i2": 2}}, idr.GAP_OTHER),
+        ({"synced": {"a": 1, "s1": 1}, "import": {"a": 1}}, idr.GAP_MISSING),
+        ({"synced": {"a": 1}, "import": {"a": 1, "i2": 1}}, idr.GAP_EXTRA),
+    ]
+    check("the causes are told apart",
+          [idr.classify_gap(g, lab) for g, _ in cases], [w for _, w in cases])
     small = await go(limit_matches=1)
     check("a limit keeps only the first match that would gain detail",
           (small["matches"], len({r["mid"] for k in ("fow", "part", "bw") for r in small[k]})), (1, 1))
     res = await go(apply=True)
-    check("apply writes the same counts", res["written"], {"fow": 18, "part": 20, "bw": 3})
+    check("apply writes the same counts", res["written"], {"fow": 18, "part": 20, "bw": 6})
     check("fall of wickets and partnerships are put on the import's own innings numbers "
           "(ours 1, theirs 2) though PlayHQ numbered them 2 and 1",
           (await innings("manual_fall_of_wickets", "1"), await innings("manual_partnerships", "1")),
@@ -201,6 +227,15 @@ async def main():
             "SELECT count(*) FROM manual_bowler_wickets WHERE bowler_id = :b"),
             {"b": P["opp"]})).scalar()
     check("the catcher is named", fielded, 1)
+    async with async_session_maker() as db:
+        by_rec = {r[0]: r[1] for r in (await db.execute(text(
+            "SELECT bowler_id::text, count(*) FROM manual_bowler_wickets WHERE manual_game_id = :m "
+            "GROUP BY 1"), {"m": M["8"]})).all()}
+    check("a bowler held under two records gets his credit on the import's own record "
+          "(one man, two names: no merge needed first)",
+          (by_rec.get(str(P["impsmith"])), by_rec.get(str(P["synsmith"])), by_rec.get(str(P["bw1"]))),
+          (1, None, 2))
+    check("and the run says how many matches were written that way", res.get("credits_by_name"), 1)
     check("another club's bowler credit is never copied", other, 0)
     check("when the bowling figures disagree no credits are written, the rest still is",
           (await n("manual_bowler_wickets", "2"), await n("manual_fall_of_wickets", "2")), (0, 4))
@@ -216,10 +251,10 @@ async def main():
     check("a second run finds nothing to copy",
           (len(again["fow"]), len(again["part"]), len(again["bw"])), (0, 0, 0))
 
-    audit_id = res["audit_id"]
+    audit_id = res.get("audit_id") or -1
     async with async_session_maker() as db:
         removed = await idr.undo_org(db, org, audit_id=audit_id)
-    check("undo removes exactly what the run wrote", removed, {"fow": 18, "part": 20, "bw": 3})
+    check("undo removes exactly what the run wrote", removed, {"fow": 18, "part": 20, "bw": 6})
     check("and leaves the import's own row",
           (await n("manual_fall_of_wickets", "4"), await n("manual_bowler_wickets", "7")), (1, 1))
 
