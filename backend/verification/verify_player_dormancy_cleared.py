@@ -131,6 +131,24 @@ async def main():
     check("selection pool: Cal keeps the real last played date",
           (pool.get("Cal Cleared") or {}).get("last_played"), ago(1100).isoformat())
 
+    # The Players list (Admin > Players) carries is_current for its Active filter.
+    from app.routers import club_admin
+    async with Session() as db:
+        club = await db.get(Organisation, org_id)
+        await db.execute(text("UPDATE players SET status = 'inactive' WHERE name = 'Eve New'"))
+        await db.commit()
+        rows = {r["name"]: r for r in await club_admin.list_players(current_user=None, club=club, db=db)}
+    cur = lambda n: (rows.get(n) or {}).get("is_current")  # noqa: E731
+    check("players list: a recent player is current", cur("Ann Current"), True)
+    check("players list: a dormant player is not current", cur("Bob Dormant"), False)
+    check("players list: a player marked back is current", cur("Cal Cleared"), True)
+    check("players list: a lapsed clear is not current", cur("Dee Lapsed"), False)
+    check("players list: a player marked inactive is not current, and not 'dormant'",
+          (cur("Eve New"), (rows.get("Eve New") or {}).get("is_dormant")), (False, False))
+    async with Session() as db:
+        await db.execute(text("UPDATE players SET status = 'active' WHERE name = 'Eve New'"))
+        await db.commit()
+
     # The endpoint.
     setter = getattr(av, "set_dormancy", None)
     Body = getattr(av, "DormancyBody", None)

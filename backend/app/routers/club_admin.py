@@ -208,6 +208,18 @@ async def list_players(
     for pid, lp in lp_res.fetchall():
         last_played[str(pid)] = lp.isoformat() if lp else None
 
+    # Dormant / current, by the one definition every BetterSelect screen uses
+    # (services/dormancy.py, the club's own window, "no longer dormant" marks
+    # honoured). The Players list's Active filter reads these.
+    from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago
+    from app.services import dormancy
+    dormancy_cutoff = months_ago(
+        _date.today(), club.dormancy_months if club.dormancy_months else DEFAULT_DORMANCY_MONTHS)
+
+    def _is_dormant(p: Player) -> bool:
+        lp = last_played.get(str(p.id))
+        return dormancy.is_dormant(_date.fromisoformat(lp) if lp else None, p.dormancy_cleared_on, dormancy_cutoff)
+
     # Every squad each player is in (team_members is authoritative for the
     # multi-squad Squads board). The single squad_team_id below is the derived
     # primary; the board reads squad_team_ids so a player shows in every squad
@@ -256,6 +268,8 @@ async def list_players(
             "squad_team_ids": _squad_team_ids(p),
             "last_played": last_played.get(str(p.id)),
             "dormancy_cleared_on": p.dormancy_cleared_on.isoformat() if p.dormancy_cleared_on else None,
+            "is_dormant": _is_dormant(p) and p.status != "inactive",
+            "is_current": p.status != "inactive" and not _is_dormant(p),
             # Age, not date of birth, and only when the club's own
             # BetterSelect setting says so (migration 269) — a club showing
             # ages for its juniors alone should not be sending its adults'
