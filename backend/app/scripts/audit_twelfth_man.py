@@ -37,7 +37,7 @@ paced, and bounded by --max-games. Ctrl-C stops it.
 Usage, from the server:
   cd /srv/docker && export COMPOSE_PROJECT_NAME=bltbox_docker_app
   docker compose exec -T betterstats-backend python -m app.scripts.audit_twelfth_man <org_id_or_slug_or_all> \\
-      [--max-games 200] [--pace 0.5] [--year 2016] [--list 40] [--csv /tmp/twelfth.csv]
+      [--max-games 200] [--pace 0.5] [--year 2016] [--list 40] [--csv /tmp/twelfth.csv] [--timeout 120]
 """
 import argparse
 import asyncio
@@ -46,11 +46,12 @@ import uuid
 from collections import Counter, defaultdict
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from app.models.db import async_session_maker
 from app.services import grassroots_scores_client as gr
 from app.services.club_grades import club_game_sql
-from app.services.game_status import appearance_counts_as_match
+from app.services.game_status import appearance_counts_as_match, not_played_game_sql
 
 XI = 11  # the side is 11; a name past this slot is a reserve
 
@@ -146,29 +147,60 @@ async def _all_orgs() -> list[tuple[str, str]]:
     return [(r.id, r.name) for r in rows]
 
 
+CHUNK = 100  # players per query: a bound array this size is pushed into the views (rule 11)
+
+
+def say(msg: str = "") -> None:
+    """Progress goes out at once. A stage that takes a while must not look like a hang."""
+    print(msg, flush=True)
+
+
 async def _candidates(session, org: str, year: int | None) -> list[dict]:
-    """Named-only appearances: a team-sheet entry that counts as a match and no row of ours in it."""
-    rows = (await session.execute(text(f"""
-        SELECT ga.game_id::text AS game_id, ga.player_id::text AS player_id,
-               COALESCE(p.grassroots_id, p.id::text) AS raw_guid,
-               COALESCE(p.display_name_override, p.name) AS player_name,
-               g.played_at, se.year, se.name AS season, gr.name AS grade
-        FROM game_appearances ga
-        JOIN v_effective_games g ON g.id = ga.game_id
-        JOIN players p ON p.id = ga.player_id AND p.organisation_id = CAST(:org AS UUID)
-        JOIN grades gr ON gr.id = g.grade_id
-        JOIN seasons se ON se.id = g.season_id
-        WHERE {club_game_sql('g', 'org')}
-          AND {appearance_counts_as_match('ga')}
-          AND (CAST(:year AS INTEGER) IS NULL OR se.year = CAST(:year AS INTEGER))
-          AND NOT EXISTS (SELECT 1 FROM v_effective_batting_innings x
-                          WHERE x.game_id = ga.game_id AND x.player_id = ga.player_id)
-          AND NOT EXISTS (SELECT 1 FROM v_effective_bowling_spells x
-                          WHERE x.game_id = ga.game_id AND x.player_id = ga.player_id)
-          AND NOT EXISTS (SELECT 1 FROM v_effective_fielding_stats x
-                          WHERE x.game_id = ga.game_id AND x.player_id = ga.player_id)
-        ORDER BY g.played_at DESC, ga.game_id"""), {"org": org, "year": year})).mappings().all()
-    return [dict(r) for r in rows]
+    """Named-only appearances: a team-sheet entry that counts as a match and no row of ours in it.
+
+    The `v_effective_*` views are read per chunk of players with `player_id = ANY(:pids)`, never
+    probed per appearance. Probing them once per row (`WHERE x.game_id = ga.game_id AND
+    x.player_id = ga.player_id`) cannot be pushed into the views' joins and took 38s on 40,000
+    appearances against the production views, against 0.4s on the plain ones.
+
+    For a player with no row of their own, `appearance_counts_as_match` reduces to "the game was
+    played", so that is what is tested here, on the raw `games` row.
+    """
+    pids = [r[0] for r in (await session.execute(text(
+        "SELECT id::text FROM players WHERE organisation_id = CAST(:org AS UUID) ORDER BY id"),
+        {"org": org})).all()]
+    out: list[dict] = []
+    for i in range(0, len(pids), CHUNK):
+        chunk = pids[i:i + CHUNK]
+        have = {(r[0], r[1]) for r in (await session.execute(text("""
+            SELECT player_id::text, game_id::text FROM v_effective_batting_innings
+              WHERE player_id = ANY(CAST(:pids AS uuid[]))
+            UNION SELECT player_id::text, game_id::text FROM v_effective_bowling_spells
+              WHERE player_id = ANY(CAST(:pids AS uuid[]))
+            UNION SELECT player_id::text, game_id::text FROM v_effective_fielding_stats
+              WHERE player_id = ANY(CAST(:pids AS uuid[]))"""), {"pids": chunk})).all()}
+        rows = (await session.execute(text(f"""
+            SELECT ga.game_id::text AS game_id, ga.player_id::text AS player_id,
+                   COALESCE(p.grassroots_id, p.id::text) AS raw_guid,
+                   COALESCE(p.display_name_override, p.name) AS player_name,
+                   g.played_at, se.year, se.name AS season, gr.name AS grade
+            FROM game_appearances ga
+            JOIN games gm ON gm.id = ga.game_id
+            JOIN v_effective_games g ON g.id = ga.game_id
+            JOIN players p ON p.id = ga.player_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons se ON se.id = g.season_id
+            WHERE ga.player_id = ANY(CAST(:pids AS uuid[]))
+              AND {club_game_sql('g', 'org')}
+              AND NOT {not_played_game_sql('gm')}
+              AND (CAST(:year AS INTEGER) IS NULL OR se.year = CAST(:year AS INTEGER))"""),
+            {"pids": chunk, "org": org, "year": year})).mappings().all()
+        out += [dict(r) for r in rows if (r["player_id"], r["game_id"]) not in have]
+        if (i // CHUNK) % 5 == 4 or i + CHUNK >= len(pids):
+            say(f"  read {min(i + CHUNK, len(pids))} of {len(pids)} players, "
+                f"{len(out)} named-only appearances so far")
+    out.sort(key=lambda c: (str(c["played_at"]), c["game_id"]), reverse=True)
+    return out
 
 
 async def _merged_guids(session, player_ids: list[str]) -> dict[str, set[str]]:
@@ -194,45 +226,64 @@ async def _held_and_ca(session, org: str, player_ids: list[str]) -> tuple[dict, 
 
     Both sides are keyed by the season's year and name, not its id: a fixture shared with
     another club can hang off that club's season row, which carries the same name and year.
+    Read in chunks of players, each a bound array the views can take a filter from.
     """
-    held = (await session.execute(text(f"""
-        WITH held AS (
-            SELECT bi.player_id, bi.game_id FROM v_effective_batting_innings bi
-              WHERE bi.player_id = ANY(CAST(:pids AS uuid[]))
-            UNION SELECT bs.player_id, bs.game_id FROM v_effective_bowling_spells bs
-              WHERE bs.player_id = ANY(CAST(:pids AS uuid[]))
-            UNION SELECT fs.player_id, fs.game_id FROM v_effective_fielding_stats fs
-              WHERE fs.player_id = ANY(CAST(:pids AS uuid[]))
-            UNION SELECT ga.player_id, ga.game_id FROM game_appearances ga
-              WHERE ga.player_id = ANY(CAST(:pids AS uuid[])) AND {appearance_counts_as_match('ga')}
-        )
-        SELECT h.player_id::text AS pid, se.year, se.name AS season, COUNT(DISTINCT g.id) AS held
-        FROM held h
-        JOIN v_effective_games g ON g.id = h.game_id
-        JOIN seasons se ON se.id = g.season_id
-        WHERE {club_game_sql('g', 'org')}
-        GROUP BY h.player_id, se.year, se.name"""), {"pids": player_ids, "org": org})).all()
-    ca = (await session.execute(text("""
-        SELECT pss.player_id::text AS pid, se.year, se.name AS season, SUM(pss.matches) AS ca
-        FROM player_season_stats pss
-        JOIN seasons se ON se.id = pss.season_id
-        WHERE pss.player_id = ANY(CAST(:pids AS uuid[])) AND pss.source = 'api'
-        GROUP BY pss.player_id, se.year, se.name"""), {"pids": player_ids})).all()
-    return ({(r.pid, r.year, r.season): int(r.held) for r in held},
-            {(r.pid, r.year, r.season): int(r.ca) for r in ca})
+    held: dict = {}
+    ca: dict = {}
+    for i in range(0, len(player_ids), CHUNK):
+        chunk = player_ids[i:i + CHUNK]
+        for r in (await session.execute(text(f"""
+            WITH held AS (
+                SELECT bi.player_id, bi.game_id FROM v_effective_batting_innings bi
+                  WHERE bi.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION SELECT bs.player_id, bs.game_id FROM v_effective_bowling_spells bs
+                  WHERE bs.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION SELECT fs.player_id, fs.game_id FROM v_effective_fielding_stats fs
+                  WHERE fs.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION SELECT ga.player_id, ga.game_id FROM game_appearances ga
+                  WHERE ga.player_id = ANY(CAST(:pids AS uuid[])) AND {appearance_counts_as_match('ga')}
+            )
+            SELECT h.player_id::text AS pid, se.year, se.name AS season, COUNT(DISTINCT g.id) AS held
+            FROM held h
+            JOIN v_effective_games g ON g.id = h.game_id
+            JOIN seasons se ON se.id = g.season_id
+            WHERE {club_game_sql('g', 'org')}
+            GROUP BY h.player_id, se.year, se.name"""), {"pids": chunk, "org": org})).all():
+            held[(r.pid, r.year, r.season)] = int(r.held)
+        for r in (await session.execute(text("""
+            SELECT pss.player_id::text AS pid, se.year, se.name AS season, SUM(pss.matches) AS ca
+            FROM player_season_stats pss
+            JOIN seasons se ON se.id = pss.season_id
+            WHERE pss.player_id = ANY(CAST(:pids AS uuid[])) AND pss.source = 'api'
+            GROUP BY pss.player_id, se.year, se.name"""), {"pids": chunk})).all():
+            ca[(r.pid, r.year, r.season)] = int(r.ca)
+    return held, ca
 
 
 async def audit_club(org: str, label: str, args, budget: list[int]) -> list[dict]:
     """One club. `budget` is a one-item list so the fetch allowance is shared across `all`."""
+    say(f"\n######## {label} ({org})")
+    say("reading each player's named-only appearances from the database (no upstream calls yet)...")
+    timeout_s = int(getattr(args, "timeout", 120))
     async with async_session_maker() as session:
-        cands = await _candidates(session, org, args.year)
-        pids = sorted({c["player_id"] for c in cands})
-        merged = await _merged_guids(session, pids)
-        held, ca = await _held_and_ca(session, org, pids)
+        # Read only by construction, and no single statement may run past --timeout seconds: a
+        # query that is too slow ends here with a message instead of holding the database.
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+        await session.execute(text(f"SET LOCAL statement_timeout = {timeout_s * 1000}"))
+        try:
+            cands = await _candidates(session, org, args.year)
+            pids = sorted({c["player_id"] for c in cands})
+            merged = await _merged_guids(session, pids)
+            say(f"reading CA's season totals for {len(pids)} players...")
+            held, ca = await _held_and_ca(session, org, pids)
+        except DBAPIError as exc:
+            if "statement timeout" in str(exc):
+                raise SystemExit(f"A query ran past {timeout_s}s and was stopped (nothing was written). "
+                                 "Re-run with --year for one season, or raise --timeout.") from exc
+            raise
 
-    print(f"\n######## {label} ({org})")
-    print(f"named-only appearances: {len(cands)} across {len({c['game_id'] for c in cands})} games, "
-          f"{len(pids)} players")
+    say(f"named-only appearances: {len(cands)} across {len({c['game_id'] for c in cands})} games, "
+        f"{len(pids)} players")
 
     cards: dict[str, dict | None] = {}
     skipped = 0
@@ -349,4 +400,5 @@ if __name__ == "__main__":
     ap.add_argument("--year", type=int, default=None, help="only seasons with this year")
     ap.add_argument("--list", type=int, default=40, help="rows to print in each detail list")
     ap.add_argument("--csv", default=None, help="write every judged appearance to this file")
+    ap.add_argument("--timeout", type=int, default=120, help="seconds any one database statement may run")
     asyncio.run(main(ap.parse_args()))
