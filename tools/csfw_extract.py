@@ -654,6 +654,66 @@ def parse_blocks(rec: bytes, lay: Layout = LAYOUT_V1) -> list:
     return blocks
 
 
+def merge_duplicate_blocks(blocks: list) -> tuple:
+    """One block per person per match leg.
+
+    CSFW will hold the same player id in two player-block slots of one leg - a
+    batting entry and a bowling entry, or two batting positions. A scorecard
+    cannot, and the importer's one-row-per-player-per-innings rule rejects the
+    whole match for it, so the entries are folded into one row, first slot's
+    position, figures added up. Adding keeps every innings reconciling to the
+    team total and the wicket count, which dropping either entry would not
+    (in the 26 cases found, the second entry carries runs the team total needs).
+
+    Returns (blocks, merged): `merged` lists what was folded, for the club to
+    check against its scorebook.
+    """
+    by_player, order = {}, []
+    for b in blocks:
+        if b["player_id"] not in by_player:
+            order.append(b["player_id"])
+        by_player.setdefault(b["player_id"], []).append(b)
+    out, merged = [], []
+    for pid in order:
+        group = by_player[pid]
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        first = dict(group[0])
+
+        def total(key):
+            vals = [g[key] for g in group if g[key] is not None]
+            return sum(vals) if vals else None
+
+        batters = [g for g in group if g["batted"]]
+        bowlers = [g for g in group if g["bowled"]]
+        out_ones = [g for g in batters if not g["not_out"]]
+        first["batted"] = bool(batters)
+        first["runs"] = total("runs")
+        first["fours"], first["sixes"] = total("fours"), total("sixes")
+        # out if either entry was out; the first dismissal names the method
+        first["not_out"] = bool(batters) and not out_ones
+        first["dismissal_code"] = (out_ones[0] if out_ones else
+                                   batters[0] if batters else group[0])["dismissal_code"]
+        positions = [g["position"] for g in group if g["position"]]
+        first["position"] = min(positions) if positions else None
+        first["bowled"] = bool(bowlers)
+        if bowlers:
+            first["balls"] = sum(g["balls"] for g in bowlers)
+            first["overs"] = float(balls_to_overs(first["balls"]))
+        for key in ("maidens", "wickets", "conceded", "wides", "no_balls", "catches",
+                    "wk_catches", "stumpings", "byes"):
+            first[key] = total(key)
+        first["votes"] = sum(g["votes"] or 0 for g in group) or group[0]["votes"]
+        first["merged_from"] = len(group)
+        out.append(first)
+        merged.append({"player_id": pid, "entries": len(group),
+                       "positions": [g["position"] for g in group],
+                       "runs": [g["runs"] for g in group],
+                       "overs": [g["overs"] for g in group]})
+    return out, merged
+
+
 def parse_fow(rec: bytes, lay: Layout = LAYOUT_V1) -> list:
     """Pairs of (score, batting position). Positions are 1-indexed."""
     out = []
@@ -732,7 +792,7 @@ def parse_file(path: Path, lay: Layout | None = None) -> dict:
         rec = buf[lay.match_base + idx * lay.match_rec:lay.match_base + (idx + 1) * lay.match_rec]
         us = parse_innings(rec, lay.m_inn_us, lay)
         them = parse_innings(rec, lay.m_inn_them, lay)
-        blocks = parse_blocks(rec, lay)
+        blocks, listed_twice = merge_duplicate_blocks(parse_blocks(rec, lay))
         # EVERY FIXTURE-BACKED RECORD IS A MATCH THE CLUB COUNTS, scorecard or
         # not. An earlier cut skipped a record with no innings and no batting or
         # bowling, reading it as a fixture nobody ever filled in - and that
@@ -747,6 +807,7 @@ def parse_file(path: Path, lay: Layout | None = None) -> dict:
             "ground_index": opt(i16(rec, lay.m_ground_idx)),
             "result_code": rec[lay.m_result],
             "us": us, "them": them, "blocks": blocks, "fow": parse_fow(rec, lay),
+            "listed_twice": listed_twice,
             "has_play": us["played"] or them["played"],
         })
     return {
@@ -2455,6 +2516,30 @@ def write_xlsx(sheets: dict, checks: list, path: Path, notes: list | None = None
     wb.save(path)
 
 
+def listed_twice_rows(seasons: list) -> list:
+    """One row per person CSFW lists twice in one match leg (see
+    `merge_duplicate_blocks`), so the club can check the merge against its book."""
+    out = []
+    for s in seasons:
+        use_season(s)
+        for mid, date, team, opponent, all_legs in group_legs(s):
+            for n, l in enumerate(match_legs(all_legs), 1):
+                for m in l.get("listed_twice", []):
+                    out.append({
+                        "Game key": mid, "Date": date.isoformat() if date else "",
+                        "Season": s["season"], "Team": grade_label(team),
+                        "Opposition": opponent, "Innings": 2 * n - 1,
+                        "Player": s["players"].get(m["player_id"], {}).get("name", ""),
+                        "Entries": m["entries"],
+                        "Batting positions": " and ".join(str(x) for x in m["positions"] if x),
+                        "Runs on each entry": " and ".join(
+                            "-" if x is None else str(x) for x in m["runs"]),
+                        "Overs on each entry": " and ".join(
+                            "-" if x is None else str(x) for x in m["overs"]),
+                    })
+    return out
+
+
 def write_csv(rows: list, path: Path) -> None:
     headers = list(rows[0].keys())
     with path.open("w", newline="", encoding="utf-8-sig") as fh:
@@ -2586,6 +2671,11 @@ def main() -> None:
     unresolved = []
     games = build_game_rows(seasons, club, absent_is_out, unresolved)
     write_csv(games, args.out / "manual_games_scorecards.csv")
+    twice = listed_twice_rows(seasons)
+    if twice:
+        write_csv(twice, args.out / "players_listed_twice.csv")
+        print(f"{len(twice)} players are listed twice in one innings and were merged "
+              f"into one row: see players_listed_twice.csv")
     if unresolved:
         write_format_review(unresolved, args.out / "games_without_format.csv")
         print(f"{len(unresolved)} games have no format: see games_without_format.csv")
