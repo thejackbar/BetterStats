@@ -243,6 +243,18 @@ async def main():
     check("before the join, the pairing script cannot see the unpaired import match",
           (before["candidates"], before["paired"]), (1, 0))
 
+    # a thin sibling label joining the same man does not block the strong one
+    pl = [dict(id="y", name="Ansell, Chris", removable=False, synced=True),
+          dict(id="x1", name="Ansell, C", removable=True, synced=False),
+          dict(id="x2", name="Ansell, CI", removable=True, synced=False)]
+    ev = [dict(x_id="x1", y_id="y", matches=1), dict(x_id="x2", y_id="y", matches=93)]
+    sib = ipl.plan_from(pl, ev, set(), min_evidence=3)
+    check("a sibling label with thin evidence joining the same man does not block the strong one",
+          ([m["remove"] for m in sib["merge"]], [(h["remove"], h["why"]) for h in sib["held"]]),
+          (["x2"], [("x1", ipl.TOO_FEW)]))
+    two = ipl.plan_from(pl, ev, set(), min_evidence=1)
+    check("with no minimum both labels join", sorted(m["remove"] for m in two["merge"]), ["x1", "x2"])
+
     # ── apply ────────────────────────────────────────────────────────────────
     res = await ipl.link_players(org, apply=True)
     check("apply merges every proven pair", (res["merged"], res["failed"]), (len(want_merge), 0))

@@ -154,6 +154,10 @@ def plan_from(players: list[dict], evidence: list[dict], ignored: set,
             continue
         seen[x["id"]][y["id"]] = seen[x["id"]].get(y["id"], 0) + int(e["matches"])
 
+    # `single` is everyone who lines up with exactly one synced player, however
+    # thin the evidence: a sibling label ("Ansell, C", one match) joining the same
+    # man must not block the stronger one ("Ansell, CI", ninety-three). Whether the
+    # evidence is enough to merge on is decided separately, below.
     single: dict[str, tuple[str, int]] = {}
     held: list[dict] = []
     for x_id in sorted(candidates, key=lambda i: by_id[i]["name"].lower()):
@@ -164,10 +168,7 @@ def plan_from(players: list[dict], evidence: list[dict], ignored: set,
             held.append({"remove": x_id, "why": MANY_CANDIDATES, "candidates": sorted(ys)})
         else:
             ((y_id, n),) = ys.items()
-            if n < min_evidence:
-                held.append({"remove": x_id, "why": TOO_FEW, "candidates": [y_id]})
-            else:
-                single[x_id] = (y_id, n)
+            single[x_id] = (y_id, n)
 
     # (2) the label must be this man's alone: nobody else of the club with the
     # same surname and initial, unless they are joining the same synced player
@@ -179,6 +180,9 @@ def plan_from(players: list[dict], evidence: list[dict], ignored: set,
     merge = []
     for x_id, (y_id, n) in single.items():
         x = by_id[x_id]
+        if n < min_evidence:
+            held.append({"remove": x_id, "why": TOO_FEW, "candidates": [y_id]})
+            continue
         clash = [p for p in by_label.get(label(x["name"]), [])
                  if p["id"] not in (x_id, y_id)
                  and single.get(p["id"], (None,))[0] != y_id]
