@@ -25,7 +25,7 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
 import { availRank } from '../../../lib/availability'
-import { Icon, Avatar, Btn, RoleChips, Tag, Empty, QuickAvailModal, playedWithinYears, RuleTags } from './ui'
+import { Icon, Avatar, Btn, RoleChips, Tag, Empty, QuickAvailModal, playedWithinYears, recencyOf, RuleTags } from './ui'
 import { useFilters } from './filters'
 import SelectionHistory from './SelectionHistory'
 import usePersistedState from '../../../lib/usePersistedState'
@@ -486,7 +486,7 @@ export default function AdminSelection() {
     // A name typed into search is someone the selector is looking for, so the
     // "Played ≤ N yrs" window does not hide them. It only trims the browse list.
     // (Players marked inactive stay out either way: see `available`.)
-    if (yearsF && !search.trim()) list = list.filter((p) => playedWithinYears(p.last_played, yearsF, data?.flags?.season_start))
+    if (yearsF && !search.trim()) list = list.filter((p) => playedWithinYears(recencyOf(p), yearsF, data?.flags?.season_start))
     // Registered this season, where the club records it (Accounts screen). Absent
     // is "not told", which is its own answer: the list still to be chased.
     if (values.registered === 'yes') list = list.filter((p) => p.registered === true)

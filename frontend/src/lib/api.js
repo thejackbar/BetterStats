@@ -3290,6 +3290,9 @@ export const api = {
     request(`/availability/matrix${tzQuery()}${juniors ? (tzQuery() ? '&' : '?') + 'juniors=true' : ''}`),
   bsSetAvailability: (data) =>
     request('/availability', { method: 'POST', body: JSON.stringify(data) }),
+  // Mark a dormant player "no longer dormant" (active true), or dormant again (false).
+  bsSetDormancy: (playerId, active) =>
+    request(`/availability/players/${playerId}/dormancy`, { method: 'PUT', body: JSON.stringify({ active }) }),
   bsBulkAvailability: (items) =>
     request('/availability/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
   bsAvailabilityPeriods: (includePast = false) =>

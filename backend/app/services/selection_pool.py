@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import FixtureLineup, Grade, Player, Season, Team
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 from app.auth.modules import org_has_module
-from app.services import player_age, selection_clash, selection_rules, squad_sides
+from app.services import dormancy, player_age, selection_clash, selection_rules, squad_sides
 from app.services.fixture_days import SHARES_A_DAY_SQL, combine_status, fixture_days
 from app.services.side_size import effective_min
 from app.services.grade_labels import grade_is_women, org_grade_category_sets
@@ -795,7 +795,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     for p in players:
         pid = str(p.id)
         lp = last_played.get(pid)
-        dormant = bool(lp) and lp < cutoff
+        dormant = dormancy.is_dormant(lp, p.dormancy_cleared_on, cutoff)
         manual_inactive = p.status == "inactive"
         sq_tid = str(p.squad_team_id) if p.squad_team_id else None
         if sq_tid and sq_tid not in active_teams:
@@ -908,6 +908,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             # know the quick they are about to bowl into the ground is 14.
             "age": player_age.visible_age(p.date_of_birth, club, as_of=age_at),
             "is_dormant": dormant and not manual_inactive,
+            "dormancy_cleared_on": p.dormancy_cleared_on.isoformat() if p.dormancy_cleared_on else None,
             "is_inactive": manual_inactive,
             "is_current": not manual_inactive and not dormant,
             "selected": pid in lineup,

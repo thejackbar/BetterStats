@@ -46,6 +46,8 @@ ACTIONS: dict[str, str] = {
     "called_up_out": "Called up out of XI",
     "restored_to_board": "Restored to the board",
     "availability_set": "Availability set",
+    "dormancy_cleared": "Marked no longer dormant",
+    "dormancy_restored": "Marked dormant again",
     "availability_period_added": "Unavailable period added",
     "availability_period_removed": "Unavailable period removed",
     "added_to_squad": "Added to squad",

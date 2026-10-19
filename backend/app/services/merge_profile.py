@@ -60,7 +60,7 @@ FIELDS: tuple[str, ...] = (
     "gender", "player_role", "is_overseas", "overseas_country",
     "batting_hand", "bowling_action", "bowling_type", "is_opening_batsman",
     "squad_team_id", "email", "phone", "date_of_birth", "shirt_number",
-    "is_financial_override", "trained_override", "skill_positions",
+    "is_financial_override", "trained_override", "skill_positions", "dormancy_cleared_on",
 )
 
 

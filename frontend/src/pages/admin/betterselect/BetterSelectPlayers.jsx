@@ -19,7 +19,7 @@ import { Profile, draftFromProfile, patchFromDraft } from '../../../components/p
 import UnrosteredGuests from '../../../components/player/UnrosteredGuests'
 import {
   Icon, Avatar, AvailDot, RoleChips, Btn, Empty,
-  QuickAvailModal, RecencySelect, playedWithinYears,
+  QuickAvailModal, RecencySelect, playedWithinYears, recencyOf,
   AVAIL_ORDER, AVAILABILITY, RuleTags,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
@@ -132,7 +132,7 @@ function PlayerList({ players, rulesById, statusOf, squadNameOf, selectedIds, se
     if (values.overseas && !p.is_overseas) return false
     if (values.nophoto && p.photo_url) return false
     if (values.newbie && p.last_played) return false
-    if (!playedWithinYears(p.last_played, years)) return false
+    if (!playedWithinYears(recencyOf(p), years)) return false
     return true
   }).sort((a, b) => nameSortKey(nameOf(a)).localeCompare(nameSortKey(nameOf(b)))),
   [players, values, search, years, statusOf, selectedIds])

@@ -4527,6 +4527,12 @@ async def lifespan(app: FastAPI):
         for _stmt in _SELECTION_LOCK_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 348: a dormant player can be marked "no longer dormant". Same
+        # one-copy rule: this and alembic's 348 both run services/dormancy_ddl.STATEMENTS.
+        from app.services.dormancy_ddl import STATEMENTS as _DORMANCY_DDL
+        for _stmt in _DORMANCY_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 335: a net session's own check-in link and the squads it is
         # for. Same one-copy rule: this and alembic's 335 both run
         # services/net_session_link_ddl.STATEMENTS.

@@ -23,7 +23,7 @@ from sqlalchemy import select, func, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import (
-    MANAGE_SELECTIONS, SELECT_ANY, SELECT_AVAILABILITY, require_any_cap,
+    MANAGE_SELECTIONS, SELECT_ANY, SELECT_AVAILABILITY, SELECT_SQUADS, require_any_cap,
 )  # BetterSelect item permissions
 from app.auth.capabilities import (
     MANAGE_SELECTIONS, require_cap,
@@ -34,6 +34,7 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_club, get_current_user
 from app.services import player_dashboard, squad_sides
+from app.services import dormancy
 from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.junior_fixtures import junior_fixture_ids
 from app.services.name_format import name_sort_key
@@ -92,7 +93,8 @@ async def dormant_player_ids(db: AsyncSession, club: Organisation) -> set[uuid.U
         for pid, lp in fb.fetchall():
             if lp and (last.get(pid) is None or lp > last[pid]):
                 last[pid] = lp
-    return {pid for pid, lp in last.items() if lp and lp < cutoff}
+    cleared = await dormancy.cleared_map(db, club.id)
+    return {pid for pid, lp in last.items() if dormancy.is_dormant(lp, cleared.get(pid), cutoff)}
 
 
 async def club_player_roster(db: AsyncSession, club: Organisation) -> list[Player]:
@@ -590,13 +592,61 @@ async def _squad_meta(db: AsyncSession, club_id, sq_sides, names: list[str]) -> 
     return out
 
 
+class DormancyBody(BaseModel):
+    # True: "no longer dormant" (the player is back). False: dormant again.
+    active: bool
+
+
+@router.put("/players/{player_id}/dormancy")
+async def set_dormancy(
+    player_id: str,
+    body: DormancyBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, SELECT_SQUADS, MANAGE_SELECTIONS)),
+):
+    """Mark a long-absent player "no longer dormant", or undo it.
+
+    Sets ``players.dormancy_cleared_on`` to today (None to undo), which counts as
+    a last-active date for the dormancy test and nothing else
+    (services/dormancy.py): the player shows in availability, the squads board,
+    selection and the self-service list in the weeks before their first game, and
+    goes dormant again by itself if they never play. Their last-played date is
+    never touched. Audited, and a person can reverse it.
+    """
+    from app.services import player_audit  # as set_availability does
+    try:
+        pid = uuid.UUID(player_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Player not found")
+    player = await db.get(Player, pid)
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+    before = player.dormancy_cleared_on
+    player.dormancy_cleared_on = date.today() if body.active else None
+    # A swallowed audit error is rolled back inside record(); read what the
+    # reply needs first so nothing is a lazy load afterwards.
+    name = player.display_name
+    cleared_on = player.dormancy_cleared_on
+    await player_audit.record(
+        db, club_id=club.id, area="availability",
+        action="dormancy_cleared" if body.active else "dormancy_restored",
+        summary=f"{name} marked no longer dormant" if body.active else f"{name} marked dormant again",
+        player_id=pid, player_name_=name,
+        detail={"before": before.isoformat() if before else None,
+                "after": cleared_on.isoformat() if cleared_on else None},
+    )
+    await db.commit()
+    return {"player_id": str(pid), "dormancy_cleared_on": cleared_on.isoformat() if cleared_on else None}
+
+
 def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set], cutoff: date,
                   rules=None) -> dict:
     # Derived recency. inactive (manual) takes precedence; otherwise dormant if
     # they've played but not since the cutoff. Never-played players are neither
     # (e.g. a freshly-added manual player with no appearance history yet).
     manual_inactive = p.status == "inactive"
-    dormant = bool(last_played) and last_played < cutoff
+    dormant = dormancy.is_dormant(last_played, p.dormancy_cleared_on, cutoff)
     return {
         "id": str(p.id),
         "display_name": p.display_name,
@@ -605,6 +655,9 @@ def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set],
         "player_role": p.player_role,
         "status": p.status,
         "last_played": last_played.isoformat() if last_played else None,
+        # The day a club said this player is back (services/dormancy.py). The
+        # screens judge "still around" on the later of this and last_played.
+        "dormancy_cleared_on": p.dormancy_cleared_on.isoformat() if p.dormancy_cleared_on else None,
         "squads": sorted(squads) if squads else [],
         "is_inactive": manual_inactive,
         "is_dormant": dormant and not manual_inactive,

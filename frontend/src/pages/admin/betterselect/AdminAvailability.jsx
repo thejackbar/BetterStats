@@ -12,7 +12,7 @@ import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useAllowMaybe, useSelectConfig, useWeekNames } from '../../../lib/useAvailabilityConfig'
 import {
   Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
-  playedWithinYears, RuleTags, Chip, RecencySelect, RECENCY_OPTIONS, RECENCY_OVER,
+  playedWithinYears, RuleTags, Chip, RecencySelect, RECENCY_OPTIONS, RECENCY_OVER, recencyOf, monthsAgoISO,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
 import usePersistedState from '../../../lib/usePersistedState'
@@ -241,7 +241,7 @@ export default function AdminAvailability() {
       if (values.role?.length && !values.role.includes(p.player_role)) return false
       if (values.selected === 'selected' && !selectedIds.has(p.id)) return false
       if (values.selected === 'unselected' && selectedIds.has(p.id)) return false
-      if (!playedWithinYears(p.last_played, years)) return false
+      if (!playedWithinYears(recencyOf(p), years)) return false
       if (!playedWithinYears(p.last_played, lapsedYears)) return false
       if (search.trim() && !nameMatchesSearch(p.display_name, search)) return false
       if (!matchesResponse(p)) return false
@@ -257,6 +257,26 @@ export default function AdminAvailability() {
   const colInCount = useCallback((date) =>
     players.reduce((n, p) => n + ((avail[p.id]?.[date]?.status || 'NO_RESPONSE') === 'AVAILABLE' ? 1 : 0), 0),
   [players, avail])
+
+  // "No longer dormant" (active) or dormant again. The server stamps the day; the
+  // row is patched in place so the screen keeps its scroll and filters.
+  const dormantCutoff = useMemo(() => monthsAgoISO(data?.dormancy_months || 24), [data?.dormancy_months])
+  const setDormancy = async (p, active) => {
+    if (!canEdit) return
+    try {
+      const r = await api.bsSetDormancy(p.id, active)
+      const cleared = r?.dormancy_cleared_on || null
+      setData((d) => ({
+        ...d,
+        players: d.players.map((x) => {
+          if (x.id !== p.id) return x
+          const dormant = !!x.last_played && (cleared && cleared > x.last_played ? cleared : x.last_played) < dormantCutoff
+          return { ...x, dormancy_cleared_on: cleared, is_dormant: dormant && !x.is_inactive, is_current: !x.is_inactive && !dormant }
+        }),
+      }))
+      toast.success(active ? `${p.display_name} is no longer dormant` : `${p.display_name} is dormant again`)
+    } catch (e) { toast.error('Could not change that: ' + e.message) }
+  }
 
   // ---- single-cell write (quick modal; no cell cycling) --------------------
   const setCell = async (pid, date, status) => {
@@ -519,6 +539,25 @@ export default function AdminAvailability() {
                     <span className="text-sm font-medium truncate">{fmt(p.display_name)}</span>
                     <RuleTags player={p} />
                     {p.is_dormant && <span className="font-mono text-[9px] text-amber-300/80 uppercase shrink-0" title={`Dormant${p.last_played ? ' since ' + fmtYear(p.last_played) : ''}`}>dormant</span>}
+                    {canEdit && p.is_dormant && (
+                      <button type="button" onClick={() => setDormancy(p, true)} data-not-dormant
+                        title="No longer dormant: they will be listed in availability, the squads board and selection"
+                        className="shrink-0 rounded border border-pb-hairline2 px-1.5 py-0.5 text-[10px] font-display font-semibold text-pb-accent hover:bg-pb-accent/10 [@media(pointer:coarse)]:px-2.5 [@media(pointer:coarse)]:py-2">
+                        Not dormant
+                      </button>
+                    )}
+                    {!p.is_dormant && !p.is_inactive && p.dormancy_cleared_on && p.last_played && p.last_played < dormantCutoff && (
+                      <>
+                        <span className="font-mono text-[9px] text-pb-accent/80 uppercase shrink-0" title={`Marked no longer dormant on ${p.dormancy_cleared_on}. Last game ${p.last_played}.`}>returning</span>
+                        {canEdit && (
+                          <button type="button" onClick={() => setDormancy(p, false)} data-dormant-again
+                            title="Mark dormant again"
+                            className="shrink-0 text-[10px] text-pb-faint underline underline-offset-2 hover:text-pb-accent [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:py-2">
+                            undo
+                          </button>
+                        )}
+                      </>
+                    )}
                     {p.is_inactive && <span className="font-mono text-[9px] text-pb-red/80 uppercase shrink-0" title="Marked inactive">inactive</span>}
                   </div>
                 </td>

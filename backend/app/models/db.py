@@ -1505,6 +1505,9 @@ class Player(Base):
     # a different question and sit on fee_members, where a non-playing member
     # can hold one too.
     shirt_number = Column(Text, nullable=True)
+    # The day a club marked a dormant player "no longer dormant" (migration 348).
+    # Counts as a last-active date for the dormancy test only; see services/dormancy.py.
+    dormancy_cleared_on = Column(Date, nullable=True)
 
     organisation = relationship("Organisation", back_populates="players")
     batting_innings = relationship("BattingInnings", back_populates="player")

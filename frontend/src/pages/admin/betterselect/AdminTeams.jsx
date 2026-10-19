@@ -39,7 +39,7 @@ import { formatSeason } from '../../../lib/cricketFormat'
 import { AVAILABILITY, AVAIL_ORDER, combineStatus, halfStatus } from '../../../lib/availability'
 import {
   Icon, Avatar, Dot, AvailDot, RoleChips, Btn, Search, Chip, Empty, AvailSummary, QuickAvailModal, WeekFlag,
-  RecencySelect, playedWithinYears, monthsAgoISO,
+  RecencySelect, playedWithinYears, monthsAgoISO, recencyOf,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
 import usePersistedState from '../../../lib/usePersistedState'
@@ -72,7 +72,7 @@ const GENDER_COLS = [{ g: 'male', lbl: 'Men' }, { g: 'female', lbl: 'Women' }, {
 // than a number this screen invents for itself.
 function poolOf(p, cutoff) {
   if (!p.last_played) return 'newcomers'
-  return p.last_played < cutoff ? 'fillins' : 'unassigned'
+  return recencyOf(p) < cutoff ? 'fillins' : 'unassigned'
 }
 
 // The one thing worth saying on a card beyond the name: a newcomer has no
@@ -80,7 +80,7 @@ function poolOf(p, cutoff) {
 // when you're looking for a fill-in.
 function recencyBadge(p, cutoff) {
   if (!p.last_played) return { text: 'new', title: 'No appearances recorded yet' }
-  if (p.last_played < cutoff) return { text: p.last_played.slice(0, 4), title: `Last played ${p.last_played}` }
+  if (recencyOf(p) < cutoff) return { text: p.last_played.slice(0, 4), title: `Last played ${p.last_played}` }
   return null
 }
 
@@ -300,7 +300,7 @@ function BulkAddModal({ fixedTeam, teams, players, dormantCutoff, statusOf, onAs
   // OUT of their squads server-side, so adding them here would only be undone.
   const list = useMemo(() => (players || []).filter((p) =>
     !(targetId && inSquad(p, targetId)) && p.status !== 'inactive'
-    && matchesName(p, q) && playedWithinYears(p.last_played, years),
+    && matchesName(p, q) && playedWithinYears(recencyOf(p), years),
   ), [players, targetId, q, years])
 
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -430,10 +430,12 @@ function AddToSquadMenu({ p, teams, onAddToSquad }) {
 }
 
 /* ── A draggable player card ───────────────────────────────────────────────── */
-function PlayerCard({ p, status, days, dormantCutoff, draggable, onDragStart, onDragEnd, onEditAvail, teams, onAddToSquad, onRemove }) {
+function PlayerCard({ p, status, days, dormantCutoff, draggable, onDragStart, onDragEnd, onEditAvail, teams, onAddToSquad, onRemove, onBringBack }) {
   const fmt = useAdminNameFormat()
   const meta = AVAILABILITY[status] || AVAILABILITY.NO_RESPONSE
   const badge = recencyBadge(p, dormantCutoff)
+  // Offered on a dormant card only (the year badge); a newcomer has no history to be old.
+  const showBack = !!onBringBack && !!badge && !!p.last_played
   return (
     <div draggable={draggable} onDragStart={onDragStart} onDragEnd={onDragEnd}
       className={`group relative flex items-center gap-2 px-2 py-1.5 rounded-lg border border-pb-hairline ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
@@ -459,9 +461,17 @@ function PlayerCard({ p, status, days, dormantCutoff, draggable, onDragStart, on
           </span>
         )}
       </span>
-      {((draggable && onAddToSquad) || onRemove) && (
+      {((draggable && onAddToSquad) || onRemove || showBack) && (
         <span data-card-actions
           className="shrink-0 flex items-center gap-0.5 rounded-md [@media(hover:hover)]:absolute [@media(hover:hover)]:right-1.5 [@media(hover:hover)]:top-1/2 [@media(hover:hover)]:-translate-y-1/2 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100 [@media(hover:hover)]:bg-pb-surface [@media(hover:hover)]:shadow-[0_0_0_1px_var(--pb-hairline)] [@media(hover:hover)]:px-0.5 transition-opacity">
+          {showBack && (
+            <button type="button" onClick={onBringBack} data-bring-back
+              title="No longer dormant: list them in availability and selection again"
+              aria-label={`Mark ${p.display_name || p.name} no longer dormant`}
+              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-display font-semibold text-pb-accent hover:bg-pb-accent/10 transition-colors [@media(pointer:coarse)]:px-2.5 [@media(pointer:coarse)]:py-2">
+              Not dormant
+            </button>
+          )}
           {draggable && onAddToSquad && <AddToSquadMenu p={p} teams={teams} onAddToSquad={onAddToSquad} />}
           {onRemove && (
             <button type="button" onClick={onRemove} data-remove-from-squad
@@ -477,7 +487,7 @@ function PlayerCard({ p, status, days, dormantCutoff, draggable, onDragStart, on
 }
 
 /* ── One squad column (collapsible) ────────────────────────────────────────── */
-function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, canManage, collapsed, onToggleCollapse, isOver, dragHandlers, onAdd, onEdit, onDelete, onEditAvail, teams, onAddToSquad, onRemove, onExport, sortMode = 'avail' }) {
+function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, canManage, collapsed, onToggleCollapse, isOver, dragHandlers, onAdd, onEdit, onDelete, onEditAvail, teams, onAddToSquad, onRemove, onBringBack, onExport, sortMode = 'avail' }) {
   // A long squad can be opened out to its full length instead of scrolling in a box.
   const [tall, setTall] = useState(false)
   const hasKeeper = members.some(isKeeper)
@@ -552,7 +562,8 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
                 onDragStart={() => onCardDragStart(p.id)} onDragEnd={onCardDragEnd}
                 onEditAvail={onEditAvail && next.date ? () => onEditAvail(p, next) : undefined}
                 teams={teams} onAddToSquad={onAddToSquad}
-                onRemove={canManage && !col.unassigned ? () => onRemove(p.id) : undefined} />
+                onRemove={canManage && !col.unassigned ? () => onRemove(p.id) : undefined}
+                onBringBack={canManage && onBringBack ? () => onBringBack(p) : undefined} />
             ))}
             {members.length === 0 && (
               <div className="m-1 px-2.5 py-5 text-center text-pb-faintest text-[11.5px] border border-dashed border-pb-hairline2 rounded-lg">
@@ -1058,6 +1069,16 @@ export default function AdminTeams() {
       .catch(() => {})
   }, [showJuniors])
 
+  // A dormant player the club says is back: they join the Unassigned list (and
+  // availability and selection) in the weeks before their first game.
+  const bringBack = useCallback(async (p) => {
+    try {
+      await api.bsSetDormancy(p.id, true)
+      toast.success(`${p.display_name || p.name} is no longer dormant`)
+      loadPlayers(); loadMatrix()
+    } catch (e) { toast.error(e.message) }
+  }, [toast, loadPlayers, loadMatrix])
+
   useEffect(() => { loadTeams() }, [loadTeams])
   useEffect(() => { loadPlayers() }, [loadPlayers])
   useEffect(() => { loadMatrix() }, [loadMatrix])
@@ -1221,7 +1242,7 @@ export default function AdminTeams() {
       if (!values.showinactive) list = list.filter((p) => p.status !== 'inactive')
       list = list.filter((p) => poolOf(p, dormantCutoff) === col.pool)
       if (col.gender !== null && col.gender !== undefined) list = list.filter((p) => normGender(p.gender) === col.gender)
-      if (col.pool === 'fillins' && fillInCutoff) list = list.filter((p) => p.last_played >= fillInCutoff)
+      if (col.pool === 'fillins' && fillInCutoff) list = list.filter((p) => recencyOf(p) >= fillInCutoff)
     } else {
       // A squad column shows everyone whose membership includes it — a player
       // in several squads appears in each. Full membership always (a dormant
@@ -1435,6 +1456,7 @@ export default function AdminTeams() {
                       teams={teams} onAddToSquad={addToSquad}
                       sortMode={sortMode}
                       onRemove={(id) => editMembership(id, { remove: col.id })}
+                      onBringBack={bringBack}
                       onExport={col.team ? () => setExporting(col.id) : undefined}
                       dragHandlers={{
                         onDragOver: canManage ? (e) => { e.preventDefault(); setOver(col.key) } : undefined,

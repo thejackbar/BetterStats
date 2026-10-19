@@ -255,6 +255,7 @@ async def list_players(
             "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
             "squad_team_ids": _squad_team_ids(p),
             "last_played": last_played.get(str(p.id)),
+            "dormancy_cleared_on": p.dormancy_cleared_on.isoformat() if p.dormancy_cleared_on else None,
             # Age, not date of birth, and only when the club's own
             # BetterSelect setting says so (migration 269) — a club showing
             # ages for its juniors alone should not be sending its adults'
