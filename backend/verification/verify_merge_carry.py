@@ -117,6 +117,8 @@ ALLOWED_DELETES = {
     ("app/routers/manual_entries.py", "overwrite import replacing a manual match it snapshotted"),
     # Undoing an import removes what that import wrote, scoped by its own id.
     ("app/services/cricketstatz_import.py", "an import undoing its own work"),
+    # Undoing a restore removes exactly the rows that run inserted, by their own ids.
+    ("app/services/import_detail_restore.py", "a restore undoing the rows it wrote"),
     # `manual_game_import_staging` holds an uploaded sheet's raw rows for an hour
     # while the admin works through the review — a transient work queue, not a
     # club's committed hand-entered games. Its name only matches the `manual_`
