@@ -43,7 +43,8 @@ describe("BetterCricket template panel", () => {
     await waitFor(() => expect(screen.getByText("{{player 1}}")).toBeTruthy());
     expect(screen.getByText("{{opponent}}")).toBeTruthy();
     expect(screen.getByText("{{batsman 9}}")).toBeTruthy();
-    expect(screen.getByText("Player 1")).toBeTruthy();
+    // "Player 1" is also what the field picker shows, so the badge makes two.
+    expect(screen.getAllByText("Player 1")).toHaveLength(2);
     expect(screen.getByText("Opponent")).toBeTruthy();
     expect(screen.getByText("Not a BetterCricket field")).toBeTruthy();
     expect(screen.getByText(/Post size 1080 × 1080/)).toBeTruthy();
@@ -120,43 +121,61 @@ describe("BetterCricket template panel", () => {
   });
 
   describe("adding blocks", () => {
-    // Every call to openDesign gets the same recording session.
+    // Every call to openDesign gets the same recording session, and the largest
+    // number of sessions open at once is kept.
     const useSession = (o: Parameters<typeof fakeSession>[0] = {}) => {
       const fake = fakeSession(o);
+      const seen = { open: 0, peak: 0 };
       jest.mocked(openDesign).mockImplementation((async (
         _options: unknown,
         callback: (session: unknown) => Promise<void>,
       ) => {
-        await callback(fake.session);
+        seen.open++;
+        seen.peak = Math.max(seen.peak, seen.open);
+        try {
+          await callback(fake.session);
+        } finally {
+          seen.open--;
+        }
       }) as never);
-      return fake;
+      return { ...fake, seen };
     };
     const click = (name: string) =>
       fireEvent.click(screen.getByRole("button", { name }));
 
-    it("adds a heading and 11 player boxes by default, grouped", async () => {
+    it("adds a heading and 11 separate player boxes by default", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);
       click("Add line up");
       await waitFor(() =>
-        expect(
-          screen.getByText(/Line up added to the page as one group/),
-        ).toBeTruthy(),
+        expect(screen.getByText(/12 separate text boxes/)).toBeTruthy(),
       );
       expect(calls.created).toHaveLength(12);
-      expect(calls.grouped).toHaveLength(1);
+      expect(calls.grouped).toHaveLength(0);
       expect(calls.syncs).toBe(1);
     });
 
-    it("re-reads the page afterwards so the list is current", async () => {
-      useSession();
+    it("groups them when the switch is on", async () => {
+      const { calls } = useSession();
+      renderInTestProvider(<App />);
+      fireEvent.click(screen.getByRole("switch"));
+      click("Add line up");
+      await waitFor(() =>
+        expect(screen.getByText(/Line up added as one group/)).toBeTruthy(),
+      );
+      expect(calls.grouped).toHaveLength(1);
+      expect(calls.grouped[0]).toHaveLength(12);
+    });
+
+    it("uses one session to add and re-read the page", async () => {
+      const { seen } = useSession();
       renderInTestProvider(<App />);
       click("Add line up");
       await waitFor(() =>
         expect(screen.getByText(/fields? found/)).toBeTruthy(),
       );
-      // one call to add, one to check
-      expect(jest.mocked(openDesign)).toHaveBeenCalledTimes(2);
+      expect(jest.mocked(openDesign)).toHaveBeenCalledTimes(1);
+      expect(seen.peak).toBe(1);
     });
 
     it("adds as many players as the box says", async () => {
@@ -175,19 +194,55 @@ describe("BetterCricket template panel", () => {
       renderInTestProvider(<App />);
       click("Add match details");
       await waitFor(() =>
-        expect(
-          screen.getByText(/Match details added to the page/),
-        ).toBeTruthy(),
+        expect(screen.getByText(/Match details added/)).toBeTruthy(),
       );
       expect(calls.created).toHaveLength(6);
     });
 
-    it("says so, and keeps the boxes, when Canva will not group them", async () => {
+    it("adds one field at a time, each a little lower than the last", async () => {
+      const { calls } = useSession();
+      renderInTestProvider(<App />);
+      click("Add field");
+      await waitFor(() =>
+        expect(screen.getByText(/Player 1 added/)).toBeTruthy(),
+      );
+      await waitFor(() =>
+        expect(
+          screen
+            .getByRole("button", { name: "Add field" })
+            .hasAttribute("disabled"),
+        ).toBe(false),
+      );
+      click("Add field");
+      await waitFor(() => expect(calls.created).toHaveLength(2));
+      const tops = (calls.created as { top: number }[]).map((c) => c.top);
+      expect(tops[1]).toBeGreaterThan(tops[0] ?? 0);
+      const first = calls.created[0] as {
+        text: { regions: { text: string }[] };
+      };
+      expect(first.text.regions[0]?.text).toBe("{{player 1}}");
+    });
+
+    it("says so, with Canva's reason, when it will not group the boxes", async () => {
       useSession({ groupFails: true });
+      renderInTestProvider(<App />);
+      fireEvent.click(screen.getByRole("switch"));
+      click("Add line up");
+      await waitFor(() =>
+        expect(
+          screen.getByText(/would not group the boxes \(.*cannot group/),
+        ).toBeTruthy(),
+      );
+    });
+
+    it("names the step that failed", async () => {
+      useSession({ syncFails: true });
       renderInTestProvider(<App />);
       click("Add line up");
       await waitFor(() =>
-        expect(screen.getByText(/would not group the boxes/)).toBeTruthy(),
+        expect(
+          screen.getByText(/stopped while saving to the design/),
+        ).toBeTruthy(),
       );
     });
 
@@ -215,7 +270,7 @@ describe("BetterCricket template panel", () => {
     it("does not offer to add where the design cannot be edited", () => {
       jest.mocked(useFeatureSupport).mockReturnValue(() => false);
       renderInTestProvider(<App />);
-      for (const name of ["Add line up", "Add match details"]) {
+      for (const name of ["Add line up", "Add match details", "Add field"]) {
         const b = screen.getByRole("button", { name });
         expect(
           b.hasAttribute("disabled") ||

@@ -1,3 +1,5 @@
+import { bindFromToken, bindLabel } from "./tokens";
+
 // Ready-made blocks the app drops into a design: text boxes already holding the
 // right {{tokens}}, laid out to fit the page. Pure layout only; insert.ts puts
 // them into Canva.
@@ -96,5 +98,49 @@ export function matchDetailsBlock(page: PageSize): BlockSpec {
       color: INK,
       align: "start" as const,
     })),
+  };
+}
+
+/** Every field a single box can hold, in the order the picker lists them. */
+export const FIELD_TOKENS: string[] = [
+  ...Array.from({ length: MAX_LINEUP }, (_, i) => `player ${i + 1}`),
+  "captain",
+  "keeper",
+  "opponent",
+  "team",
+  "headline",
+  "competition",
+  "round",
+  "date",
+  "time",
+  "venue",
+  "season",
+];
+
+/**
+ * One box holding one field, for a club that wants to place each piece itself.
+ * `slot` steps each new box down a little so boxes added in a row do not sit
+ * exactly on top of each other.
+ */
+export function fieldBlock(page: PageSize, token: string, slot = 0): BlockSpec {
+  const fontSize = clamp(
+    Math.round(page.height * 0.04),
+    10,
+    Math.floor(page.height * 0.06),
+  );
+  return {
+    name: bindLabel(bindFromToken(token) ?? token),
+    boxes: [
+      {
+        text: `{{${token}}}`,
+        top: Math.round(page.height * 0.4 + (slot % 8) * fontSize * 1.6),
+        left: Math.round(page.width * 0.08),
+        width: Math.round(page.width * 0.5),
+        fontSize,
+        bold: false,
+        color: INK,
+        align: "start",
+      },
+    ],
   };
 }

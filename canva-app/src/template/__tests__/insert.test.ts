@@ -1,19 +1,35 @@
 import { lineUpBlock } from "../blocks";
-import { insertBlock } from "../insert";
+import { InsertError, insertBlock } from "../insert";
 import { must } from "./fakePage";
 import { fakeSession } from "./fakeSession";
 
 const spec = lineUpBlock({ width: 1080, height: 1080 }, 3);
 
 describe("insertBlock", () => {
-  it("adds every box, groups them, and saves once", async () => {
+  it("adds separate boxes and saves once, by default", async () => {
     const { session, calls } = fakeSession();
     const r = await insertBlock(session, spec);
-    expect(r).toEqual({ added: 4, grouped: true });
+    expect(r).toEqual({ added: 4, grouped: false });
     expect(calls.created).toHaveLength(4);
+    expect(calls.grouped).toHaveLength(0);
+    expect(calls.syncs).toBe(1);
+  });
+
+  it("groups the boxes when asked", async () => {
+    const { session, calls } = fakeSession();
+    const r = await insertBlock(session, spec, { group: true });
+    expect(r).toEqual({ added: 4, grouped: true });
     expect(calls.grouped).toHaveLength(1);
     expect(calls.grouped[0]).toHaveLength(4);
     expect(calls.syncs).toBe(1);
+  });
+
+  it("does not try to group a single box", async () => {
+    const { session, calls } = fakeSession();
+    const one = { name: "one", boxes: spec.boxes.slice(0, 1) };
+    const r = await insertBlock(session, one, { group: true });
+    expect(r).toEqual({ added: 1, grouped: false });
+    expect(calls.grouped).toHaveLength(0);
   });
 
   it("sends the text, size, colour, weight and position Canva needs", async () => {
@@ -66,11 +82,22 @@ describe("insertBlock", () => {
     expect(calls.inserted[0]?.after).toBeUndefined();
   });
 
-  it("keeps the boxes, loose, when Canva refuses to group them", async () => {
+  it("keeps the boxes, loose, and says why when Canva refuses to group them", async () => {
     const { session, calls } = fakeSession({ groupFails: true });
-    const r = await insertBlock(session, spec);
-    expect(r).toEqual({ added: 4, grouped: false });
+    const r = await insertBlock(session, spec, { group: true });
+    expect(r).toMatchObject({ added: 4, grouped: false });
+    expect(r.groupError).toMatch(/cannot group/);
     expect(calls.syncs).toBe(1);
+  });
+
+  it("names the step when saving fails", async () => {
+    const { session } = fakeSession({ syncFails: true });
+    const err = await insertBlock(session, spec).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(InsertError);
+    expect((err as InsertError).step).toBe("saving to the design");
+    expect((err as Error).message).toMatch(
+      /stopped while saving to the design: .*internal_error/,
+    );
   });
 
   it("changes nothing on a locked page", async () => {
@@ -91,7 +118,11 @@ describe("insertBlock", () => {
 
   it("does not save a half-made block when Canva refuses a box", async () => {
     const { session, calls } = fakeSession({ insertFails: true });
-    await expect(insertBlock(session, spec)).rejects.toThrow(/would not add/);
+    const err = await insertBlock(session, spec).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(InsertError);
+    expect((err as Error).message).toMatch(
+      /stopped while adding the boxes: .*would not add/,
+    );
     expect(calls.syncs).toBe(0);
     expect(calls.grouped).toHaveLength(0);
   });

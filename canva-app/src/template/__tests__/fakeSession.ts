@@ -14,6 +14,7 @@ export function fakeSession(
     locked: boolean;
     pageType: string;
     groupFails: boolean;
+    syncFails: boolean;
     insertFails: boolean;
     dimensions: { width: number; height: number } | undefined;
   }> = {},
@@ -45,12 +46,15 @@ export function fakeSession(
       group: async ({ elements }: { elements: unknown[] }) => {
         calls.grouped.push(elements);
         if (o.groupFails) {
-          throw new Error("cannot group");
+          throw new Error("[internal_error]: cannot group");
         }
         return { type: "group" };
       },
     },
     sync: async () => {
+      if (o.syncFails) {
+        throw new Error("[internal_error]: Something went wrong on our end");
+      }
       calls.syncs++;
     },
   };

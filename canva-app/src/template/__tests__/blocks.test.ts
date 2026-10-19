@@ -1,4 +1,11 @@
-import { lineUpBlock, matchDetailsBlock, MAX_LINEUP } from "../blocks";
+import {
+  FIELD_TOKENS,
+  fieldBlock,
+  lineUpBlock,
+  matchDetailsBlock,
+  MAX_LINEUP,
+} from "../blocks";
+import { bindFromToken } from "../tokens";
 import type { PageSize } from "../blocks";
 import { extractFields, isError } from "../extract";
 import { group, must, page, textBox } from "./fakePage";
@@ -140,5 +147,43 @@ describe("matchDetailsBlock", () => {
       ...matchDetailsBlock(size).boxes.map((b) => b.left),
     );
     expect(detailsLeft).toBeGreaterThan(lineUpRight);
+  });
+});
+
+describe("fieldBlock", () => {
+  const size = { width: 1080, height: 1080 };
+
+  it("is one box holding one token, named plainly", () => {
+    const b = fieldBlock(size, "player 3");
+    expect(b.name).toBe("Player 3");
+    expect(b.boxes.map((x) => x.text)).toEqual(["{{player 3}}"]);
+  });
+
+  it("offers only tokens BetterCricket understands, with no repeats", () => {
+    expect(FIELD_TOKENS.every((t) => bindFromToken(t) != null)).toBe(true);
+    expect(new Set(FIELD_TOKENS).size).toBe(FIELD_TOKENS.length);
+    expect(FIELD_TOKENS).toContain("player 15");
+    expect(FIELD_TOKENS).toContain("opponent");
+  });
+
+  it("steps each new box down, so a run of them does not stack", () => {
+    const tops = [0, 1, 2, 3].map(
+      (i) => must(fieldBlock(size, "date", i).boxes[0]).top,
+    );
+    expect(new Set(tops).size).toBe(4);
+    expect(tops).toEqual([...tops].sort((a, b) => a - b));
+  });
+
+  it.each([
+    { width: 1080, height: 1080 },
+    { width: 1080, height: 1350 },
+    { width: 1080, height: 1920 },
+    { width: 800, height: 600 },
+  ])("stays inside a $width x $height page for every slot", (page) => {
+    for (let slot = 0; slot < 20; slot++) {
+      const box = must(fieldBlock(page, "venue", slot).boxes[0]);
+      expect(box.left + box.width).toBeLessThanOrEqual(page.width);
+      expect(box.top + box.fontSize * 1.4).toBeLessThanOrEqual(page.height);
+    }
   });
 });

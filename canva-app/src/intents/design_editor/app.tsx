@@ -6,11 +6,14 @@ import {
   FormField,
   NumberInput,
   Rows,
+  Select,
+  Switch,
   Text,
   Title,
 } from "@canva/app-ui-kit";
 import { findFonts } from "@canva/asset";
 import { openDesign } from "@canva/design";
+import type { DesignEditing } from "@canva/design";
 import { useState } from "react";
 import { useIntl } from "react-intl";
 import * as styles from "styles/components.css";
@@ -18,16 +21,20 @@ import {
   extractFields,
   isError,
   nameFonts,
+  type ExtractError,
   type FontLookup,
 } from "src/template/extract";
 import {
+  FIELD_TOKENS,
+  fieldBlock,
   lineUpBlock,
   matchDetailsBlock,
   MAX_LINEUP,
 } from "src/template/blocks";
 import type { BlockSpec, PageSize } from "src/template/blocks";
-import { insertBlock } from "src/template/insert";
-import { bindLabel } from "src/template/tokens";
+import { insertBlock, type InsertResult } from "src/template/insert";
+import { inCurrentPage } from "src/template/session";
+import { bindFromToken, bindLabel } from "src/template/tokens";
 import type { Extraction, Skipped } from "src/template/types";
 
 const lookupFonts: FontLookup = async (refs) => {
@@ -38,11 +45,17 @@ const lookupFonts: FontLookup = async (refs) => {
 // Shown as the club typed it, so it is data and not a translated message.
 const tokenText = (token: string): string => `{{${token}}}`;
 
+const fieldOptions = FIELD_TOKENS.map((t) => ({
+  value: t,
+  label: bindLabel(bindFromToken(t) ?? t),
+}));
+
 type State =
   | { status: "idle" }
-  | { status: "reading" }
   | { status: "error"; message: string }
   | { status: "done"; result: Extraction };
+
+type Notice = { tone: "positive" | "warn" | "critical"; text: string };
 
 export const App = () => {
   const intl = useIntl();
@@ -50,19 +63,78 @@ export const App = () => {
   const canRead = isSupported(openDesign);
   const [state, setState] = useState<State>({ status: "idle" });
   const [count, setCount] = useState(11);
-  const [adding, setAdding] = useState(false);
-  const [notice, setNotice] = useState<
-    { tone: "positive" | "warn" | "critical"; text: string } | undefined
-  >(undefined);
+  const [groupIt, setGroupIt] = useState(false);
+  const [field, setField] = useState("player 1");
+  const [placed, setPlaced] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<Notice | undefined>(undefined);
 
-  // Adds a ready-made block of text boxes to the open page, then re-reads the page
-  // so the field list shows what was added.
-  const addBlock = async (make: (size: PageSize) => BlockSpec) => {
-    setAdding(true);
+  const readPage = (
+    session: DesignEditing.CurrentPageSession,
+  ): Extraction | ExtractError =>
+    session.page.type === "absolute"
+      ? extractFields(session.page)
+      : {
+          error: intl.formatMessage({
+            defaultMessage:
+              "This kind of page cannot be read by apps. Use a normal design page, such as an Instagram post.",
+            description: "Error when the open page is not a supported type",
+          }),
+        };
+
+  // Names the fonts and shows the result. The page itself was copied out of the
+  // Canva session already, so this can happen after the session has ended.
+  const show = async (read: Extraction | ExtractError | undefined) => {
+    if (!read) {
+      setState({
+        status: "error",
+        message: intl.formatMessage({
+          defaultMessage: "Canva did not give the app the page. Try again.",
+          description: "Error when reading the page returned nothing",
+        }),
+      });
+    } else if (isError(read)) {
+      setState({ status: "error", message: read.error });
+    } else {
+      setState({ status: "done", result: await nameFonts(read, lookupFonts) });
+    }
+  };
+
+  const messageOf = (e: unknown): string =>
+    e instanceof Error && e.message
+      ? e.message
+      : intl.formatMessage({
+          defaultMessage: "Something went wrong talking to Canva.",
+          description: "Generic error when a Canva call failed",
+        });
+
+  const check = async () => {
+    setBusy(true);
     setNotice(undefined);
     try {
-      let result: { added: number; grouped: boolean; name: string } | undefined;
-      await openDesign({ type: "current_page" }, async (session) => {
+      const out: { read?: Extraction | ExtractError } = {};
+      await inCurrentPage(async (session) => {
+        out.read = readPage(session);
+      });
+      await show(out.read);
+    } catch (e) {
+      setState({ status: "error", message: messageOf(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Adds boxes to the open page and re-reads the page in the SAME session, because
+  // Canva allows only one session at a time.
+  const addBlock = async (make: (size: PageSize) => BlockSpec) => {
+    setBusy(true);
+    setNotice(undefined);
+    try {
+      const out: {
+        inserted?: InsertResult & { name: string };
+        read?: Extraction | ExtractError;
+      } = {};
+      await inCurrentPage(async (session) => {
         const page = session.page;
         if (page.type !== "absolute" || !page.dimensions) {
           throw new Error(
@@ -74,102 +146,56 @@ export const App = () => {
           );
         }
         const spec = make(page.dimensions);
-        const r = await insertBlock(session, spec);
-        result = { ...r, name: spec.name };
+        const r = await insertBlock(session, spec, { group: groupIt });
+        out.inserted = { ...r, name: spec.name };
+        out.read = readPage(session);
       });
-      if (result) {
-        const done = result;
-        setNotice(
-          done.grouped
-            ? {
-                tone: "positive",
-                text: intl.formatMessage(
-                  {
-                    defaultMessage:
-                      "{name} added to the page as one group. Move or resize it where you like.",
-                    description: "A block was added and grouped",
-                  },
-                  { name: done.name },
-                ),
-              }
-            : {
-                tone: "warn",
-                text: intl.formatMessage(
-                  {
-                    defaultMessage:
-                      "{name} added, but Canva would not group the boxes. They are loose on the page.",
-                    description: "A block was added but could not be grouped",
-                  },
-                  { name: done.name },
-                ),
+      const done = out.inserted;
+      if (done) {
+        const values = { name: done.name, count: done.added };
+        if (done.grouped) {
+          setNotice({
+            tone: "positive",
+            text: intl.formatMessage(
+              {
+                defaultMessage:
+                  "{name} added as one group. Move or resize it where you like.",
+                description: "A block was added and grouped",
               },
-        );
-        await check();
-      }
-    } catch (e) {
-      setNotice({
-        tone: "critical",
-        text:
-          e instanceof Error && e.message
-            ? e.message
-            : intl.formatMessage({
-                defaultMessage: "Something went wrong adding the block.",
-                description: "Generic error when adding a block failed",
-              }),
-      });
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  const check = async () => {
-    setState({ status: "reading" });
-    try {
-      // The session ends when this callback does, so everything needed is
-      // copied out into plain data before it returns.
-      const out: { value: ReturnType<typeof extractFields> | null } = {
-        value: null,
-      };
-      await openDesign({ type: "current_page" }, async (session) => {
-        if (session.page.type !== "absolute") {
-          out.value = {
-            error: intl.formatMessage({
-              defaultMessage:
-                "This kind of page cannot be read by apps. Use a normal design page, such as an Instagram post.",
-              description: "Error when the open page is not a supported type",
-            }),
-          };
-          return;
+              values,
+            ),
+          });
+        } else if (done.groupError) {
+          setNotice({
+            tone: "warn",
+            text: intl.formatMessage(
+              {
+                defaultMessage:
+                  "{name} added, but Canva would not group the boxes ({reason}). They are loose on the page.",
+                description: "A block was added but could not be grouped",
+              },
+              { ...values, reason: done.groupError },
+            ),
+          });
+        } else {
+          setNotice({
+            tone: "positive",
+            text: intl.formatMessage(
+              {
+                defaultMessage:
+                  "{name} added: {count, plural, one {# text box} other {# separate text boxes}}. Move each one where you like.",
+                description: "A block was added as separate text boxes",
+              },
+              values,
+            ),
+          });
         }
-        out.value = extractFields(session.page);
-      });
-      const read = out.value;
-      if (!read) {
-        setState({
-          status: "error",
-          message: intl.formatMessage({
-            defaultMessage: "Canva did not give the app the page. Try again.",
-            description: "Error when reading the page returned nothing",
-          }),
-        });
-        return;
       }
-      if (isError(read)) {
-        setState({ status: "error", message: read.error });
-        return;
-      }
-      setState({ status: "done", result: await nameFonts(read, lookupFonts) });
+      await show(out.read);
     } catch (e) {
-      setState({
-        status: "error",
-        message:
-          e instanceof Error && e.message
-            ? e.message
-            : intl.formatMessage({
-                defaultMessage: "Something went wrong reading the page.",
-                description: "Generic error when reading the page failed",
-              }),
-      });
+      setNotice({ tone: "critical", text: messageOf(e) });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -201,6 +227,8 @@ export const App = () => {
       ),
     })[s.reason];
 
+  const off = !canRead || busy;
+
   return (
     <div className={styles.scrollContainer}>
       <Rows spacing="2u">
@@ -226,6 +254,7 @@ export const App = () => {
             },
           )}
         </Text>
+
         <Title size="xsmall">
           {intl.formatMessage({
             defaultMessage: "Add to this design",
@@ -263,8 +292,8 @@ export const App = () => {
         <Button
           variant="secondary"
           onClick={() => addBlock((size) => lineUpBlock(size, count))}
-          loading={adding}
-          disabled={!canRead || adding}
+          loading={busy}
+          disabled={off}
           stretch
         >
           {intl.formatMessage({
@@ -275,8 +304,8 @@ export const App = () => {
         <Button
           variant="secondary"
           onClick={() => addBlock((size) => matchDetailsBlock(size))}
-          loading={adding}
-          disabled={!canRead || adding}
+          loading={busy}
+          disabled={off}
           stretch
         >
           {intl.formatMessage({
@@ -284,13 +313,65 @@ export const App = () => {
             description: "Button that adds a match details block to the design",
           })}
         </Button>
+        <Switch
+          value={groupIt}
+          onChange={setGroupIt}
+          disabled={busy}
+          label={intl.formatMessage({
+            defaultMessage: "Group the boxes together",
+            description: "Switch: put an added block's text boxes in one group",
+          })}
+          description={intl.formatMessage({
+            defaultMessage:
+              "Off gives you separate boxes to place one by one. On makes the block move as one.",
+            description: "Explains the group switch",
+          })}
+        />
+
+        <Title size="xsmall">
+          {intl.formatMessage({
+            defaultMessage: "Add one field",
+            description: "Heading of the section that adds a single field",
+          })}
+        </Title>
+        <FormField
+          label={intl.formatMessage({
+            defaultMessage: "Field",
+            description: "Label for the choice of a single field to add",
+          })}
+          control={(props) => (
+            <Select
+              {...props}
+              options={fieldOptions}
+              value={field}
+              onChange={setField}
+              stretch
+            />
+          )}
+        />
+        <Button
+          variant="secondary"
+          onClick={async () => {
+            const slot = placed;
+            setPlaced((n) => n + 1);
+            await addBlock((size) => fieldBlock(size, field, slot));
+          }}
+          loading={busy}
+          disabled={off}
+          stretch
+        >
+          {intl.formatMessage({
+            defaultMessage: "Add field",
+            description: "Button that adds one field's text box to the design",
+          })}
+        </Button>
         {notice && <Alert tone={notice.tone}>{notice.text}</Alert>}
 
         <Button
           variant="primary"
           onClick={check}
-          loading={state.status === "reading"}
-          disabled={!canRead}
+          loading={busy}
+          disabled={off}
           stretch
           tooltipLabel={
             !canRead

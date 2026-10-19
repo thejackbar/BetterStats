@@ -1075,3 +1075,13 @@ What was added. "Add line up" (a player count, 1 to 15, default 11) and "Add mat
 Open question for the real editor. Does resizing a group in Canva rewrite its children's positions and sizes (so the reader sees the new place), or keep them in the group's own scale? Test: add a line up, resize the group, press Check this page, compare. If children keep an unscaled space, the reader needs the group's `width` and `height` against its contents' extent.
 
 Proof. `tsc`, `eslint`, prettier, `jest` (96 tests, including a round trip: lay out a line up, read it back through the reader, same tokens, same positions, heading not a field; deliberate mutation of the count control fails its test), `canva apps build` (1.36 MB, 23 messages). Not proved: anything in the real editor beyond the first reading.
+
+
+### Canva app, stage A3: one session at a time, separate boxes by default, add one field (`canva-app/`, not yet released)
+First real test of "Add line up" in Canva: both blocks landed on the page, but the panel showed `[internal_error]: Something went wrong on our end`, then `[bad_request]: Cannot open design - a session is already open and only one session can be open at a time`. Feedback: wants each element separate for more flexibility.
+
+Causes and fixes. Canva allows ONE design session at a time, and a session that has just ended (or one left behind by an error) can still read as open. The panel opened a second session straight after adding, to re-read the page. Now every session goes through `src/template/session.ts` (`exclusive` queue, `inCurrentPage`, which retries a "session is already open" refusal a few times, only before the callback has started so it never runs twice), and "add then re-read" happens in the SAME session. All buttons are disabled while a session is in flight. The `internal_error` source is not known: `insertBlock` now names the step that failed (`InsertError`: "adding the boxes" or "saving to the design") and passes Canva's own message through, and a grouping refusal reports Canva's reason. Grouping is now OFF by default (a "Group the boxes together" switch turns it on), which also removes `helpers.group` from the default path; whether grouping was the cause is to be learned from the next real run.
+
+New: "Add one field" (a picker of every token BetterCricket understands, `FIELD_TOKENS`, and `fieldBlock`, one box each, stepped down a little per add so a run of them does not stack).
+
+Proof. `tsc`, `eslint`, prettier, `jest` (116 tests; four deliberate mutations each fail tests), `canva apps build`. Not proved: the real editor. To learn next: which step fails in Canva (the message now says), whether grouping works, and the group-resize question from stage A2.
