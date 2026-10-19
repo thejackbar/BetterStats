@@ -34,7 +34,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_VOTES, VIEW_VOTE_RESULTS, require_any_cap, require_cap
@@ -59,6 +59,10 @@ class MedalUpdate(BaseModel):
     # Per-team override, grade NAME -> mode. Sent whole: a name left out reverts
     # to the medal's voter_mode, and {} clears every override.
     grade_voter_modes: Optional[dict[str, str]] = None
+    # Per-team vote counter, grade NAME -> player id, for a team that counts the
+    # captain only. Sent whole: a name left out (or null) goes back to the
+    # captain, {} clears every one. The person need not be in the side.
+    grade_vote_counters: Optional[dict[str, Optional[str]]] = None
     # {"mode": 'off' | 'auto' | 'manual', "manual": {grade name: multiplier}},
     # sent whole. {} turns weighting off.
     grade_weighting: Optional[dict] = None
@@ -128,6 +132,9 @@ def _apply_medal_fields(m: VoteMedal, body: MedalUpdate) -> None:
             if mode not in vote_svc.VOTER_MODES:
                 raise HTTPException(status_code=400, detail="Invalid voter mode")
         m.grade_voter_modes = vote_svc.clean_grade_voter_modes(body.grade_voter_modes)
+    if body.grade_vote_counters is not None:
+        m.grade_vote_counters = vote_svc.clean_grade_vote_counters(
+            {k: v for k, v in body.grade_vote_counters.items() if v})
     if body.grade_weighting is not None:
         gw = body.grade_weighting
         if gw and gw.get("mode") not in vote_svc.WEIGHT_MODES:
@@ -171,12 +178,45 @@ def _apply_medal_fields(m: VoteMedal, body: MedalUpdate) -> None:
             m.link_token = secrets.token_urlsafe(24)
 
 
+async def _check_vote_counters(db: AsyncSession, club: Organisation, body: MedalUpdate) -> None:
+    """A nominated vote counter has to be a real player of this club. They do
+    not have to have played, since the captain's helper is often not in the side,
+    but they sign in on the voting page like any player, so a person who is not a
+    player of this club could never vote."""
+    ids = set()
+    for pid in (body.grade_vote_counters or {}).values():
+        if not pid:
+            continue
+        try:
+            ids.add(uuid.UUID(pid))
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid vote counter")
+    if not ids:
+        return
+    found = {r[0] for r in (await db.execute(
+        text("SELECT id FROM players WHERE organisation_id = :org AND is_player "
+             "AND id = ANY(CAST(:ids AS uuid[]))"),
+        {"org": club.id, "ids": list(ids)},
+    )).fetchall()}
+    if ids - found:
+        raise HTTPException(status_code=400, detail="That person is not a player of this club")
+
+
 async def _medal_payloads(db: AsyncSession, club: Organisation, medals: list[VoteMedal]) -> list[dict]:
     pairs = await vote_svc.medal_grade_pairs(db, club.id, medals)
     active = {g["name"] for g in await vote_svc.club_grade_options(db, club.id)}
     names = {mid: [r["name"] for r in rows] for mid, rows in pairs.items()}
     inactive = {mid: [r for r in rows if r["name"] not in active] for mid, rows in pairs.items()}
-    return [_settings_payload(m, names, inactive) for m in medals]
+    out = [_settings_payload(m, names, inactive) for m in medals]
+    # The nominated counters by name, so a screen can say who without a roster fetch.
+    wanted = {uuid.UUID(pid) for p in out for pid in p["grade_vote_counters"].values()}
+    counter_names = await vote_svc.player_names(db, club.id, {str(i) for i in wanted}) if wanted else {}
+    for p in out:
+        p["vote_counter_names"] = {
+            team: counter_names.get(pid, "Unknown player")
+            for team, pid in p["grade_vote_counters"].items()
+        }
+    return out
 
 
 async def _medals_payload(db: AsyncSession, club: Organisation) -> list[dict]:
@@ -213,6 +253,7 @@ async def create_medal(
     from a copy of the first — a club adding a Colts Medal beside a senior one
     is usually changing the ballot shape, and inheriting settings it then has
     to notice and undo is the worse mistake."""
+    await _check_vote_counters(db, club, body)
     existing = await vote_svc.list_medals(db, club.id)
     medal = VoteMedal(
         organisation_id=club.id,
@@ -237,10 +278,28 @@ async def update_medal(
     medal = await vote_svc.get_medal(db, club.id, medal_id)
     if not medal:
         raise HTTPException(status_code=404, detail="Medal not found")
+    await _check_vote_counters(db, club, body)
     _apply_medal_fields(medal, body)
     await db.commit()
     await db.refresh(medal)
     return await _one_medal_payload(db, club, medal)
+
+
+@router.get("/counter-options")
+async def counter_options(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_any_cap(MANAGE_VOTES, VIEW_VOTE_RESULTS)),
+):
+    """The people a captain-only team can nominate to count its votes: the same
+    active players the voting page's name list offers, since the nominee has to
+    pick their name there. Not limited to who played."""
+    from app.routers.availability import active_self_service_players
+    players = await active_self_service_players(db, club)
+    return {"players": sorted(
+        ({"id": str(p.id), "name": p.display_name} for p in players),
+        key=lambda p: p["name"].lower(),
+    )}
 
 
 @router.get("/medals/{medal_id}/weighting")
@@ -658,6 +717,9 @@ async def fixture_detail(
     )
 
     outstanding = await vote_svc.outstanding_voters(db, club.id, eligible, ballots)
+    fx_cfg = await vote_svc.cfg_for_fixture(db, cfg, fx)
+    counter_names = await vote_svc.player_names(
+        db, club.id, {fx_cfg["vote_counter"]} if fx_cfg.get("vote_counter") else set())
 
     return {
         "fixture": {
@@ -675,7 +737,12 @@ async def fixture_detail(
         # the right voters for the game it is open on.
         "settings": {
             **_settings_payload(s),
-            "voter_mode": (await vote_svc.cfg_for_fixture(db, cfg, fx))["voter_mode"],
+            "voter_mode": fx_cfg["voter_mode"],
+            # The person counting this team's votes in place of the captain, if any.
+            "vote_counter": (
+                {"id": fx_cfg["vote_counter"], "name": counter_names.get(fx_cfg["vote_counter"], "Unknown player")}
+                if fx_cfg.get("vote_counter") else None
+            ),
         },
         "eligibility": {
             "requested": elig["requested"],
@@ -777,6 +844,8 @@ async def admin_enter_ballot(
             detail="No team list for this game yet — save a BetterSelect XI, publish the side on Play.Cricket, or wait for the scorecard to sync",
         )
     eligible_ids = {p["id"] for p in eligible}
+    # The person counting this team's votes is a player ballot even if they did not play.
+    counter_id = (await vote_svc.cfg_for_fixture(db, cfg, fx)).get("vote_counter")
 
     voter_pid: Optional[uuid.UUID] = None
     voter_name: Optional[str] = None
@@ -824,7 +893,7 @@ async def admin_enter_ballot(
             fixture_id=fx.id,
             voter_player_id=voter_pid,
             voter_name=voter_name,
-            voter_kind="player" if (voter_pid and str(voter_pid) in eligible_ids) else "non_player",
+            voter_kind="player" if (voter_pid and (str(voter_pid) in eligible_ids or str(voter_pid) == counter_id)) else "non_player",
             source="admin",
             recorded_by=user.id,
         )

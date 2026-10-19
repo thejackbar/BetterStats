@@ -13,6 +13,7 @@ ending the run.
 """
 from __future__ import annotations
 
+import collections
 import csv
 import datetime
 import importlib.util
@@ -677,6 +678,64 @@ with tempfile.TemporaryDirectory() as td:
         prof4, _, _ = m.apply_answers(m.Profile("t"), plain) if hasattr(m, "apply_answers") else (None, None, [])
         check("the instruction text itself is never taken for an answer",
               prof4.game_formats if prof4 else None, {})
+
+# ---------------------------------------------------------------------------
+# 10. One person listed twice in one innings
+# ---------------------------------------------------------------------------
+# CSFW can hold the same player id in two block slots of one match. The
+# importer refuses a second row for the same player and innings, and drops the
+# whole match for it (Payneham's first load lost 17 matches that way).
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    twice = {
+        0: dict(type=4, result=0, us=(30, 3), them=(20, 10), ground="Home Oval",
+                bat=[(0, 0, 10, 1), (1, 1, 15, 11), (0, 4, 3, 11), (2, 2, 2, 1)]),
+    }
+    (td / "DATA2025.AV").write_bytes(build_av(
+        m.layout_from_dict(dict(V2)), "Dup CC", 2025,
+        [(0, datetime.date(2025, 10, 11), 1, "Fulham")], twice, PLAYERS))
+    seasons = [m.parse_file(td / "DATA2025.AV")]
+    leg = seasons[0]["matches"][0]
+    mine = [b for b in leg["blocks"] if b["player_id"] == 0]
+    check("a person listed twice in a leg is one block, with the figures added",
+          (len(mine), mine[0]["runs"], mine[0]["position"], mine[0]["not_out"]),
+          (1, 13, 1, False))
+    check("what was folded is recorded on the match for the club to check",
+          [(x["player_id"], x["entries"], x["runs"]) for x in leg.get("listed_twice", [])],
+          [(0, 2, [10, 3])])
+    check("the others in the leg are untouched",
+          sorted((b["player_id"], b["runs"]) for b in leg["blocks"]),
+          [(0, 13), (1, 15), (2, 2)])
+    rows = m.build_game_rows(seasons, "Dup CC")
+    merge = getattr(m, "merge_duplicate_blocks", None)
+    per = collections.Counter((r["game_key"], r["innings_number"], r["player_name"])
+                              for r in rows if r["player_name"])
+    check("no player has two rows in one innings (the importer would drop the match)",
+          max(per.values()), 1)
+    check("the folded row carries the added runs",
+          [r["batting_runs"] for r in rows if r["player_name"] == "Smith, Alan"], [13])
+    check("and the review list names the person",
+          [(r["Player"], r["Entries"]) for r in getattr(m, "listed_twice_rows", lambda _: [])(seasons)],
+          [("Smith, Alan", 2)])
+    # a batting entry and a separate bowling entry fold into one with both
+    blocks = [
+        dict(slot=0, player_id=5, position=1, batted=True, runs=20, fours=2, sixes=0,
+             not_out=False, dismissal_code=1, bowled=False, overs=None, balls=0,
+             maidens=None, wickets=None, conceded=None, wides=None, no_balls=None,
+             catches=1, wk_catches=None, stumpings=None, byes=None, votes=None, flags=None),
+        dict(slot=7, player_id=5, position=None, batted=False, runs=None, fours=None,
+             sixes=None, not_out=False, dismissal_code=None, bowled=True, overs=4.3,
+             balls=27, maidens=1, wickets=2, conceded=18, wides=1, no_balls=None,
+             catches=None, wk_catches=None, stumpings=None, byes=None, votes=None, flags=None),
+    ]
+    merged, info = merge(blocks) if merge else (blocks, [])
+    one = merged[0]
+    check("a batting entry and a bowling entry become one row with both",
+          (len(merged), one["runs"], one["overs"], one["wickets"], one["catches"],
+           one["position"], one["batted"], one["bowled"]),
+          (1, 20, 4.3, 2, 1, 1, True, True))
+    check("a leg with nobody listed twice comes back as it went in",
+          merge(blocks[:1]) if merge else None, (blocks[:1], []))
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
