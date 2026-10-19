@@ -9,6 +9,7 @@ Controls (each must FAIL the checks it is named for):
   CONTROL=1   the behaviour before this change: nothing joins an import player.
   MUTATE=1    the evidence ignores runs and batting position, so any same-label
               player in a paired match counts.
+  MUTATE=bowl the unique-figures guard on bowling spells is removed.
 """
 from __future__ import annotations
 
@@ -46,6 +47,7 @@ async def main():
     from app.models.db import (
         Base, BattingInnings, Game, Grade, ManualBattingInnings, ManualGame, Organisation,
         Player, Season, engine, async_session_maker,
+        BowlingSpell, ManualBowlingSpell,
     )
     from app.services import import_player_link as ipl
     from app.routers.admin import undo_merge, UndoMergeRequest
@@ -55,9 +57,12 @@ async def main():
         async def _nothing(org_id, *, apply=False, min_evidence=1, limit=None):
             return {"initial_only": 0, "found": 0, "merged": 0, "failed": 0, "pairs": [], "held": []}
         ipl.link_players = _nothing
-    if os.environ.get("MUTATE"):
+    if os.environ.get("MUTATE") == "bowl":
+        # the unique-figures guard on bowling spells removed
+        ipl._EVIDENCE_SQL = ipl._EVIDENCE_SQL.replace(") = 1", ") >= 1")
+    elif os.environ.get("MUTATE"):
         ipl._EVIDENCE_SQL = ipl._EVIDENCE_SQL.replace(
-            "AND bi.runs = mbi.runs\n          AND bi.batting_position IS NOT DISTINCT FROM mbi.batting_position",
+            "AND bi.runs = mbi.runs\n              AND bi.batting_position IS NOT DISTINCT FROM mbi.batting_position",
             "AND TRUE")
 
     async with engine.begin() as conn:
@@ -109,6 +114,12 @@ async def main():
         synced("Yunp", "Unpaired, Ulf"); imported("Xunp", "Unpaired, U")
         synced("Ydnb", "Dnb, Dee"); imported("Xdnb", "Dnb, D")
         synced("Yzap", "Zappia, Matthew"); imported("Xzap", "Zappia, MA")
+        # bowlers: players a batting line can never prove
+        synced("Ybow", "Bowler, Paul"); imported("Xbow", "Bowler, P")
+        synced("Ytwa", "Twina, Alan"); imported("Xtwa", "Twina, A")
+        synced("Ytwb", "Twinb, Bob"); imported("Xtwb", "Twinb, B")
+        synced("Ybad", "Badfig, Bill"); imported("Xbad", "Badfig, B")
+        synced("Ybun", "Bowlunp, Bert"); imported("Xbun", "Bowlunp, B")
         await db.flush()
 
         n = [0]
@@ -162,13 +173,35 @@ async def main():
         # the club said these two are different people
         await match([("Xign", "Yign", 25, 4, 25, 4, False)])
         # one agreeing match only
-        await match([("Xsing", "Ysing", 61, 1, 61, 1, False)])
+        m_single = await match([("Xsing", "Ysing", 61, 1, 61, 1, False)])
         # the import's match is not paired: no evidence
         await match([("Xunp", "Yunp", 14, 2, 14, 2, False)], paired=False)
         # the import row is a did-not-bat: no evidence
         await match([("Xdnb", "Ydnb", 0, None, 0, None, True)])
         # two initials
         await match([("Xzap", "Yzap", 52, 1, 52, 1, False)])
+
+        async def spells(m, rows, synced_rows=None):
+            g = (await db.get(ManualGame, m)).superseded_by_game_id
+            for xk, yk, ov, ru, wk in rows:
+                db.add(ManualBowlingSpell(manual_game_id=m, player_id=P[xk], innings_number=1,
+                                          overs=ov, runs=ru, wickets=wk))
+            for xk, yk, ov, ru, wk in (synced_rows or rows):
+                db.add(BowlingSpell(game_id=g, player_id=P[yk], innings_number=1,
+                                    overs=ov, runs=ru, wickets=wk))
+            await db.flush()
+
+        # a bowler who never batted: one spell with the same figures on both cards
+        await spells(await match([]), [("Xbow", "Ybow", 5.0, 20, 2)])
+        # two of our bowlers with identical figures: whose is whose is a coin toss
+        await spells(await match([]), [("Xtwa", "Ytwa", 4.0, 20, 1), ("Xtwb", "Ytwb", 4.0, 20, 1)])
+        # the figures differ by a run: not the same spell
+        await spells(await match([]), [("Xbad", "Ybad", 4.0, 20, 1)],
+                     [("Xbad", "Ybad", 4.0, 21, 1)])
+        # a bowling match the import did not pair
+        await spells(await match([], paired=False), [("Xbun", "Ybun", 6.0, 30, 3)])
+        # the SAME match proved by a batting line and a spell counts once
+        await spells(m_single, [("Xsing", "Ysing", 3.0, 12, 0)])
         # THE POINT OF ALL THIS: an import match the override never paired because
         # its players were not the synced players. Four batters on one card, the
         # opposition spelt two ways, the dates four days apart.
@@ -205,7 +238,7 @@ async def main():
     # ── the plan, from the database, with nothing written ────────────────────
     dry = await ipl.link_players(org, apply=False)
     want_merge = {"Xsol": "Ysol", "Xand": "Yand", "Xw1": "Yrob", "Xw2": "Yrob",
-                  "Xsing": "Ysing", "Xzap": "Yzap"}
+                  "Xsing": "Ysing", "Xzap": "Yzap", "Xbow": "Ybow"}
     got_merge = {p["remove"]: p["keep"] for p in dry["pairs"]}
     check("a dry run lists exactly the pairs the evidence proves",
           got_merge, {str(P[k]): str(P[v]) for k, v in want_merge.items()})
@@ -227,6 +260,12 @@ async def main():
     check("a record with a PlayHQ id is not a candidate",
           "Hq, H" not in held and str(P["Xhq"]) not in got_merge)
     check("a pair the club chose to keep apart is not merged", str(P["Xign"]) not in got_merge)
+    check("a player who only ever bowled is joined on his bowling figures",
+          got_merge.get(str(P["Xbow"])), str(P["Ybow"]))
+    check("two bowlers with identical figures in one match are not evidence for either",
+          (held.get("Twina, A"), held.get("Twinb, B")), (ipl.NO_EVIDENCE, ipl.NO_EVIDENCE))
+    check("figures that differ by a run are not the same spell", held.get("Badfig, B"), ipl.NO_EVIDENCE)
+    check("a bowling match the import did not pair is not evidence", held.get("Bowlunp, B"), ipl.NO_EVIDENCE)
 
     one_only = await ipl.link_players(org, apply=False, min_evidence=2)
     check("asking for two agreeing matches holds the single-match player",
