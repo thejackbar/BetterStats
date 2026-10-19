@@ -69,7 +69,7 @@ async def _org_maps(db: AsyncSession, org_id) -> tuple[dict, dict, dict]:
 def _known(guid: str, by_guid: dict, merged: dict):
     """sync's ``_team_pid``: the raw id, then a merge redirect, then the redirect's own."""
     g = _parse_uuid(guid)
-    if g is None:
+    if g is None or participant_names.is_placeholder_id(str(g)):
         return None
     p = by_guid.get(str(g))
     if p is None:
