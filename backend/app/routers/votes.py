@@ -700,6 +700,7 @@ async def fixture_detail(
     pids = {str(p.player_id) for b in ballots for p in b.picks}
     pids |= {str(b.voter_player_id) for b in ballots if b.voter_player_id}
     names = await vote_svc.player_names(db, club.id, pids)
+    photos = await vote_svc.player_photos(db, club.id, pids)
     for p in eligible:
         names.setdefault(p["id"], p["name"])
 
@@ -709,7 +710,7 @@ async def fixture_detail(
     awarded = vote_svc.weighted_points(vote_svc.award_weekly_points(totals, cfg), weight)
     results = sorted(
         (
-            {"player_id": pid, "name": names.get(pid, "Unknown"),
+            {"player_id": pid, "name": names.get(pid, "Unknown"), "photo_url": photos.get(pid),
              "raw": t["raw"], "counts": t["counts"], "points": awarded.get(pid, 0)}
             for pid, t in totals.items()
         ),
@@ -759,11 +760,13 @@ async def fixture_detail(
                 "id": str(b.id),
                 "voter_player_id": str(b.voter_player_id) if b.voter_player_id else None,
                 "voter": names.get(str(b.voter_player_id)) if b.voter_player_id else b.voter_name,
+                "voter_photo_url": photos.get(str(b.voter_player_id)) if b.voter_player_id else None,
                 "voter_kind": b.voter_kind,
                 "source": b.source,
                 "picks": [
                     {"position": p.position, "player_id": str(p.player_id),
-                     "name": names.get(str(p.player_id), "Unknown")}
+                     "name": names.get(str(p.player_id), "Unknown"),
+                     "photo_url": photos.get(str(p.player_id))}
                     for p in sorted(b.picks, key=lambda p: p.position)
                 ],
             }
