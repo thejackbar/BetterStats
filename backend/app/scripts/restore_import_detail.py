@@ -56,8 +56,11 @@ async def run(target, apply, undo, limit_matches, explain=False) -> int:
         res = await idr.restore_org(db, club[0], apply=apply, limit_matches=limit_matches)
     if explain:
         async with async_session_maker() as db:
-            why = await idr.explain_credits(db, club[0], res.get("credit_gaps", []))
-        print(f"{club[1]}: {len(res.get('credit_gaps', []))} match(es) skipped because the wickets "
+            open_gaps = [g for g in res.get("credit_gaps", []) if not g.get("resolved")]
+            why = await idr.explain_credits(db, club[0], open_gaps)
+        print(f"{club[1]}: {res.get('credits_by_name', 0)} match(es) have their credits written "
+              f"against the import's own bowler records (one man under two names).")
+        print(f"{club[1]}: {len(open_gaps)} match(es) skipped because the wickets "
               f"credited to our bowlers differ from the bowling figures. Why:")
         for kind, v in why.items():
             print(f"\n  {v['count']:>5}  {kind}")
@@ -69,7 +72,9 @@ async def run(target, apply, undo, limit_matches, explain=False) -> int:
           f"{res['matches']} would gain detail")
     print(f"      fall of wickets: {len(res['fow'])} row(s)")
     print(f"      partnerships:    {len(res['part'])} row(s)")
-    print(f"      wicket credits (bowler and fielder named): {len(res['bw'])} row(s)")
+    print(f"      wicket credits (bowler and fielder named): {len(res['bw'])} row(s), "
+          f"{res.get('credits_by_name', 0)} match(es) of them written against the import's "
+          f"own bowler records")
     for season, n in res["by_season"].items():
         print(f"      {season}: {n} match(es)")
     for why, rows in res["skipped"].items():

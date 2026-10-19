@@ -1220,3 +1220,7 @@ Two changes to `link_import_players`, both in `services/import_player_link.py`:
 
 Run order after deploying: `link_import_players` dry run, apply with `--min-evidence 2`, then the `restore_import_detail --explain` again; the "one man under two records" group should shrink.
 
+## Wicket credits written against the import's own bowler record (Oct 2026)
+
+After the player joins, 899 Payneham matches were still skipped for mismatched wicket credits, 345 of them "one man under two records" with every other bowler identical ("Smith, Reuben 1" on PlayHQ against "Smith, RG 1" on the card). Those records stay unjoined because the join rules are right to be cautious ("Smith, RG" could be Reuben or Robert across a career, "Singh, H" is Humraj or Harpuneet), but inside one match the pairing is certain: same surname and initial, same count, everything else identical. `restore_import_detail` now writes such a match's credits against the import's record (the one the club's own bowling figures already name), so the bowler's name shows on the dismissal without any merge first and `merge_carry` moves the rows if the records are merged later. `--explain` lists only matches still skipped and says how many were written this way. `verify_import_detail_restore.py` is 23 checks (the control fails 15).
+
