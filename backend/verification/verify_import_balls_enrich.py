@@ -157,7 +157,7 @@ async def main():
                          "AND action = 'enrich_import_balls'", o=org)), [25])
 
     # undo: only a line still holding the figure the run put there
-    audit_id = res["audit_id"]
+    audit_id = res.get("audit_id") or -1
     async with async_session_maker() as db:
         await db.execute(text("UPDATE manual_batting_innings SET balls = 27 WHERE id = :i"),
                          {"i": rows[(mp_, "a")]})

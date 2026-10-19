@@ -137,7 +137,7 @@ async def plan_org(db, org_id) -> dict:
     paired = await _all(db, _PAIRED, org=org)
     if not paired:
         return {"paired": 0, "fow": [], "part": [], "bw": [], "skipped": defaultdict(list),
-                "matches": 0, "by_season": {}}
+                "matches": 0, "by_season": {}, "credit_gaps": []}
     mids = [p["id"] for p in paired]
     gids = sorted({p["game_id"] for p in paired})
     man_bat = _grouped(await _all(db, _MAN_BAT, ids=mids), "mid")
@@ -153,6 +153,7 @@ async def plan_org(db, org_id) -> dict:
 
     fow_rows, part_rows, bw_rows = [], [], []
     skipped: dict = defaultdict(list)
+    credit_gaps: list = []
     touched, by_season = set(), defaultdict(set)
 
     for p in paired:
@@ -197,6 +198,7 @@ async def plan_org(db, org_id) -> dict:
             ours = {k: v for k, v in spells.get(mid, {}).items() if v > 0}
             if per_bowler != ours:
                 skipped[SKIP_CREDITS].append(mid)
+                credit_gaps.append({"mid": mid, "synced": dict(per_bowler), "import": ours})
             elif any(r["innings_number"] not in inn_map for r in credits):
                 skipped[SKIP_OPP].append(mid)
             else:
@@ -208,8 +210,64 @@ async def plan_org(db, org_id) -> dict:
             by_season[p["season_name"]].add(mid)
 
     return {"paired": len(paired), "fow": fow_rows, "part": part_rows, "bw": bw_rows,
-            "skipped": skipped, "matches": len(touched),
+            "skipped": skipped, "matches": len(touched), "credit_gaps": credit_gaps,
             "by_season": {k: len(v) for k, v in sorted(by_season.items())}}
+
+
+GAP_COUNT = "the same bowlers, but a different number of wickets"
+GAP_TWO_RECORDS = "one man under two records (the bowler is not joined yet)"
+GAP_MISSING = "a credited bowler has no wickets on the import's card"
+GAP_EXTRA = "the import credits a bowler PlayHQ does not"
+GAP_OTHER = "bowlers differ in more than one way"
+
+
+def classify_gap(gap: dict, label_of) -> str:
+    """Why one match's wicket credits differ from its bowling figures.
+
+    ``label_of(player id)`` gives (surname, first initial) or None. A credited bowler and
+    an import bowler with the same label and no match of their own are one man held
+    twice, which `link_import_players` has not been able to prove."""
+    syn, imp = gap["synced"], gap["import"]
+    only_syn = [b for b in syn if b not in imp]
+    only_imp = [b for b in imp if b not in syn]
+    if not only_syn and not only_imp:
+        return GAP_COUNT
+    if only_syn and only_imp:
+        left = list(only_imp)
+        for b in only_syn:
+            hit = next((i for i in left if label_of(b) and label_of(b) == label_of(i)), None)
+            if hit is None:
+                return GAP_OTHER
+            left.remove(hit)
+        return GAP_TWO_RECORDS if not left else GAP_OTHER
+    return GAP_MISSING if only_syn else GAP_EXTRA
+
+
+async def explain_credits(db, org_id, gaps: list) -> dict:
+    """Group the credits mismatches by cause, with a few named examples of each."""
+    from app.services.import_player_link import label
+
+    ids = {b for g in gaps for k in ("synced", "import") for b in g[k]}
+    names = {}
+    if ids:
+        names = {r[0]: r[1] for r in (await db.execute(text(
+            "SELECT id::text, COALESCE(NULLIF(display_name_override, ''), name) FROM players "
+            "WHERE id = ANY(CAST(:ids AS UUID[]))"), {"ids": sorted(ids)})).all()}
+
+    def label_of(pid):
+        return label(names.get(pid))
+
+    groups: dict = defaultdict(list)
+    for g in gaps:
+        groups[classify_gap(g, label_of)].append(g)
+
+    def show(g):
+        a = ", ".join(sorted(f"{names.get(b, b[:8])} {n}" for b, n in g["synced"].items()))
+        b = ", ".join(sorted(f"{names.get(x, x[:8])} {n}" for x, n in g["import"].items()))
+        return f"PlayHQ credits [{a}]  import card [{b}]  ({g['mid'][:8]})"
+
+    return {k: {"count": len(v), "examples": [show(g) for g in v[:5]]}
+            for k, v in sorted(groups.items(), key=lambda kv: -len(kv[1]))}
 
 
 async def restore_org(db, org_id, *, apply: bool = False,
