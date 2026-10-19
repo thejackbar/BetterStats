@@ -18,9 +18,26 @@ row to a profile) and the repair script that finds games sync dropped.
 from __future__ import annotations
 
 import re
+import uuid
 from typing import Iterable, Optional
 
 _WORD = re.compile(r"[a-z0-9']+")
+
+
+def is_placeholder_id(guid: Optional[str]) -> bool:
+    """Is this a participant id that does not identify anybody?
+
+    Cricket Australia gives EVERY redacted or anonymous participant the same id,
+    `00000000-0000-0000-0000-000000000001` (and in places `...0002`), whoever they are.
+    It is a label for "somebody we are hiding", never a person, so a name match against it
+    is meaningless and a lookup keyed on it would credit one player with every hidden
+    participant's rows in every game. Found on Leederville's Jonah Cumming: 37 of 49 held
+    games were rows CA carried under this id.
+    """
+    try:
+        return uuid.UUID(str(guid or "")).int < (1 << 16)
+    except ValueError:
+        return False
 
 
 def full_name_key(name: Optional[str]) -> str:
@@ -78,7 +95,7 @@ def resolve_roster_by_name(roster: Iterable[dict], known_guid: dict, unique_name
     claims: dict[object, list] = {}
     for p in roster:
         guid = p.get("participantId") or ""
-        if not guid or guid in known_guid:
+        if not guid or guid in known_guid or is_placeholder_id(guid):
             continue
         name = p.get("playerShortName") or p.get("displayName") or p.get("name")
         if not looks_full(name):

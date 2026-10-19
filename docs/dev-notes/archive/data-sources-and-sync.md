@@ -469,3 +469,14 @@ Not done, on purpose.
 - With the redirects ignored, the aggregate pass creates a row under each new id. That row is a twin of the old record and the usual Merge Players step applies. The ignored redirects stay in `merge_logs`.
 - `participant_relink._org_maps`, `sync_drift`, `admin.py` (~2254) and the fantasy repair modules each build their own redirect map and do not drop dangling ones. They read, they do not insert per-game rows, so none of them loses a game; left alone.
 
+
+## CA's shared placeholder participant id was linked to one player (v9.123.2.3, Oct 2026)
+
+Reported off Leederville CC: Jonah Cumming held 48 games (A to L grades, women's PSWL, three grades on one day) against CA's 12.
+
+- **Evidence.** `audit_player_games` (asks CA, per held game, whether the player's id is on a team sheet): 37 of 49 games NOT on a sheet. `inspect_scorecard_player` traced the rows we hold to the CA rows behind them: all under `00000000-0000-0000-0000-000000000001` (name `********`, sometimes `J Cumming`, once `U Player_1`). CA gives EVERY redacted participant that one id.
+- **Cause.** `sync.sync_organisation` links a team-sheet entry whose id the club never stored to the club player with the same full name (`participant_names.resolve_roster_by_name`) and writes it into `pid_by_guid`, the lookup shared by every game in the run. For the placeholder that mapping is wrong and sticky: every later game's rows under it (either side), and every redacted entry on our sheet, were credited to one player, including their `game_appearances`.
+- **Fix.** `participant_names.is_placeholder_id` (a UUID below 2^16). `resolve_roster_by_name`, `sync._team_pid`, the `pid_by_guid` build and `participant_relink._known` all refuse it. A real fresh id still links by name.
+- **Not done: the repair.** Rows already attached stay. They are found with `audit_player_games` and need a dry-run-by-default repair that detaches a player's rows from the games where their id is not on the sheet (partnerships and fall-of-wicket rows take NULL, bowler_wickets rows go). Genuine rows CA hides under the placeholder cannot be told apart and are lost. Not written yet, owner's call.
+- **How wide.** Sync logs `attached unknown participant 00000000-0000-0000-0000-000000000001 to player <id> by full name` each time it happened: `docker compose logs betterstats-backend | grep "attached unknown participant 00000000"` lists the players, while logs last.
+- **Verified.** `backend/verification/verify_placeholder_participant.py` (7 checks, no database). Control run on the previous `participant_names` attaches the placeholder to Jonah and fails the placeholder checks while the real-id check passes. `verify_dangling_merge_redirect` 22 and `verify_fantasy_late_scorecards` 13 pass; `verify_participant_relink` could not run here (needs an old git revision this clone lacks).
