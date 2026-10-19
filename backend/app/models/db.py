@@ -1793,6 +1793,10 @@ class VoteMedal(Base):
     # Per-team override of ``voter_mode`` (migration 345): grade NAME ->
     # 'players' | 'captain'. A team with no entry follows ``voter_mode``.
     grade_voter_modes = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    # Who counts a captain-only team's votes when the captain hands that job to
+    # someone else (migration 347): grade NAME -> player id (uuid string). The
+    # person need not be in the side. A team with no entry is the captain's.
+    grade_vote_counters = Column(JSONB, nullable=False, default=dict, server_default="{}")
     # How the medal weights its grades (migration 346): {"mode": 'off' | 'auto'
     # | 'manual', "manual": {grade NAME: multiplier}}. Empty = unweighted.
     grade_weighting = Column(JSONB, nullable=False, default=dict, server_default="{}")

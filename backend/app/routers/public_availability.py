@@ -448,6 +448,8 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
         overrides = await vote_svc.overrides_by_fixture(db, medal.id, [f.id for f in todo])
 
         own = await pv.own_local_fixture_ids(db, player, todo)
+        # The person a captain nominated to count a team's votes is not in its side.
+        own |= await vote_svc.counter_fixture_ids(db, cfg, player.id, todo)
 
         for f in todo:
             ov = overrides.get(str(f.id))

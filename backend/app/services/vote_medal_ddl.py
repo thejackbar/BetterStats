@@ -155,6 +155,20 @@ VOTE_GRADE_MODE_DOWNGRADE = [
 ]
 
 
+# A captain-only team can name someone else to submit its votes (migration 347):
+# grade NAME -> player id. Keyed by name like ``grade_voter_modes``. Empty = the
+# captain votes, so nothing changes for a club until it nominates someone. Run
+# by migration 347 and the lifespan mirror.
+VOTE_GRADE_COUNTER_STATEMENTS = [
+    "ALTER TABLE vote_medals ADD COLUMN IF NOT EXISTS grade_vote_counters "
+    "JSONB NOT NULL DEFAULT '{}'::jsonb",
+]
+
+VOTE_GRADE_COUNTER_DOWNGRADE = [
+    "ALTER TABLE vote_medals DROP COLUMN IF EXISTS grade_vote_counters",
+]
+
+
 # How a medal weights its grades against each other (migration 346): a grade
 # that plays 12 games and one that plays 18 should not hand out the same
 # season points per vote. ``{"mode": "off"|"auto"|"manual", "manual":

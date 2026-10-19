@@ -198,12 +198,19 @@ async def _fixtures_player_is_on(
     """``fixtures`` cut down to the games this player is on the votable list of:
     the ballot page's own list (``resolve_eligibility``), so the games offered to
     a verified player are exactly the ones they could open a ballot on. Nobody
-    is shown a game they did not play."""
+    is shown a game they did not play, except the person a captain-only team
+    nominated to count its votes."""
     local = await own_local_fixture_ids(db, player, fixtures)
+    # A team's nominated vote counter is not on its team list, and is still
+    # offered that team's games.
+    counts_for = await vote_svc.counter_fixture_ids(db, cfg, player.id, fixtures)
     overrides = await vote_svc.overrides_by_fixture(db, medal.id, [f.id for f in fixtures])
     live_left = LIVE_EXAMINED
     keep: list[Fixture] = []
     for f in fixtures:
+        if f.id in counts_for:
+            keep.append(f)
+            continue
         ov = overrides.get(str(f.id))
         override_source = ov.eligibility_source if ov else None
         if f.id not in local:
@@ -458,12 +465,22 @@ def _voter_role(cfg: dict, me: Optional[Player], eligible: list[dict]) -> tuple[
 
     Returns (role, reason): role is 'player' (a counted participant ballot),
     'non_player' (allowed as a non-participant), or 'none' (can't vote —
-    reason says why, for the UI)."""
+    reason says why, for the UI).
+
+    ``cfg`` comes through ``cfg_for_fixture``. When it carries a ``vote_counter``
+    (a captain-only team whose captain handed the counting to someone), that
+    person votes whether or not they were in the side, and nobody else on the
+    team does, the captain included: two ballots from one team would count twice."""
     eligible_ids = {p["id"] for p in eligible}
     captain_ids = {p["id"] for p in eligible if p["is_captain"]}
+    counter = cfg.get("vote_counter") if cfg["voter_mode"] == "captain" else None
     if me:
         mid = str(me.id)
+        if counter and mid == counter:
+            return ("player", None)
         if mid in eligible_ids:
+            if counter:
+                return ("none", "counter_only")
             if cfg["voter_mode"] == "captain" and mid not in captain_ids:
                 return ("none", "captain_only")
             return ("player", None)
@@ -541,6 +558,11 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         "me": _me_payload(club, me) if me else None,
         "role": role,
         "reason": reason,
+        # True for the person a captain nominated to submit this team's votes, so the
+        # page can say why a player who was not in the side is being asked.
+        "is_counter": bool(
+            me and cfg["voter_mode"] == "captain" and cfg.get("vote_counter") == str(me.id)
+        ),
         # Someone who cannot vote on this game (did not play it, or the club needs a
         # name first) is not handed its team list.
         "players": [] if role == "none" else [
@@ -587,6 +609,7 @@ async def submit_ballot(token: str, fixture_id: str, body: BallotBody, request: 
     if role == "none":
         detail = {
             "captain_only": "Only the captain submits votes for this club.",
+            "counter_only": "The captain has nominated someone to submit the votes for this team.",
             "did_not_play": "Only players who played in this game can vote.",
             "verify_required": "Find your name and verify with your PIN first.",
         }.get(reason, "You can't vote on this game.")

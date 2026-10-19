@@ -771,6 +771,24 @@ player-dates. Squads for different grades on one day do not overlap at all, and
 a player spends a median 93% of a season in one grade, so the grade split can
 be trusted.
 
+### One person listed twice in one innings
+
+CSFW can hold the same player id in two player-block slots of a single match
+leg: a batting entry and a bowling entry, or two batting positions. A scorecard
+cannot, and the Manual Games importer enforces one row per player per innings
+(`uq_manual_batting_game_inns_player`), so it drops the WHOLE match when a sheet
+carries two. Payneham's first load lost 17 matches this way ("17 row(s) could
+not be read and their matches were left out"); Shoalwater has none.
+
+`merge_duplicate_blocks()` folds them at parse time into one row: figures added,
+first batting position kept, out if either entry was out, bowling and fielding
+added. Adding is deliberate. In the 29 cases the second entry usually carries
+runs the team total needs, so dropping it would break the innings'
+reconciliation; and nothing here can say whether it is one person entered twice
+or two people sharing an id. Every fold is listed in `players_listed_twice.csv`
+for the club to check against its book. The second entry's fall-of-wicket row is
+not carried (the wicket is keyed on the surviving position).
+
 ## 7. Verification
 
 `verify()` checks the decode against the data's own arithmetic, never against
