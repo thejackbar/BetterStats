@@ -65,6 +65,7 @@
 
 **CSFW archives**
 33. There is ONE extractor, `tools/csfw_extract.py` (`docs/csfw-data-extraction.md`). Never copy it for a club: a record layout is a `Layout` (`--layout`); team and match-type names are a `Profile` (`tools/csfw_profiles/<club>.json`, `--profile`, `--team-names`) because no data file holds them; a team number is only meaningful inside its DATABASE (the header's club-name field, never the file name); byes are the profile's `byes`. Start any new club with `--analyse`. Never read another club's type codes or team names into a club with no profile, and never name two databases' teams the same grade. The importer drops a whole match that carries two rows for one player and innings, so the extractor folds a player CSFW lists twice in one leg into one row (`merge_duplicate_blocks`) and lists every fold in `players_listed_twice.csv`; test any new club for it.
+34. A club that holds its history as surname and initials (CSFW) gets a SECOND player for everyone Cricket Australia also knows by full name, because the importer matches names exactly. The scorecard pairing compares player ids, so it then cannot see the same match twice (0 of 612 paired on Payneham). Run `link_import_players` BEFORE `repair_overwrite_pairs`; it joins only on paired-match evidence (surname, first initial, runs, batting position) and leaves a shared or ambiguous label for the merge screen.
 
 ## Traps and failure signatures
 
@@ -85,6 +86,7 @@ Real Postgres, shipped route bodies, and a control run that REPORTS rather than 
 All dry run by default; `--apply` acts.
 - `python -m app.scripts.fix_stray_innings_totals <org|all> [--apply]`: NULLs total/wickets/overs on our innings identical to the opposition's (batters listed, batters plus extras not already equal). Audit entry with before and after, undoable.
 - `python -m app.scripts.settle_manual_winners <org|all> [--apply]`: fix contradicted winners. Run for Hamilton.
+- `python -m app.scripts.link_import_players <org> [--apply] [--limit N] [--min-evidence N] [--report PATH]`: merge initial-only import players into the synced player they provably are (merge log, undoable). Dry run first; try `--limit 20`; run before `repair_overwrite_pairs`.
 - `python -m app.scripts.repair_overwrite_pairs <org|all> [--apply]`: pair matches an overwrite import left unpaired (import-created, re-sourced seasons only). Read the held-back list first; run `all` after v9.90.3.
 - `python -m app.scripts.reconcile_imports <org>`; `python -m app.scripts.reconcile_milestones <org|all> [--apply]`. Shoalwater recovery: undo the CSFW batch, re-import `manual_games_scorecards.csv`, then both repair scripts.
 - `python -m app.scripts.remove_cross_attached_imports <org> <keeper-player-id> <other-player-id> [--apply]`: removes the keeper's `imported_stats` rows that are figure-for-figure copies of the other player's (two same-name players given one sheet line), audits each, rebuilds the import deltas and reads the season-less line back. Never touches hand-typed adjustments (reports them).
