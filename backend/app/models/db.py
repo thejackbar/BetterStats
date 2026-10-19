@@ -1793,6 +1793,9 @@ class VoteMedal(Base):
     # Per-team override of ``voter_mode`` (migration 345): grade NAME ->
     # 'players' | 'captain'. A team with no entry follows ``voter_mode``.
     grade_voter_modes = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    # How the medal weights its grades (migration 346): {"mode": 'off' | 'auto'
+    # | 'manual', "manual": {grade NAME: multiplier}}. Empty = unweighted.
+    grade_weighting = Column(JSONB, nullable=False, default=dict, server_default="{}")
     position = Column(Integer, nullable=False, default=0, server_default="0")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

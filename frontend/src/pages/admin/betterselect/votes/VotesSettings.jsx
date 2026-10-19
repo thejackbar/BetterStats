@@ -31,6 +31,122 @@ function Row({ label, hint, children }) {
   )
 }
 
+const WEIGHT_MODES = [
+  { value: 'off', label: 'Same for every grade' },
+  { value: 'auto', label: 'Auto-weight' },
+  { value: 'manual', label: 'Manual' },
+]
+const fmtWeight = (w) => `×${Number(w).toFixed(2).replace(/\.?0+$/, '')}`
+
+// Grade weighting: grades play different numbers of games, so a vote in a
+// 12 game season is not the same effort as one in an 18 game season. A module
+// level component (not declared inside the settings render) so the manual
+// inputs keep their caret while the parent re-renders.
+function GradeWeighting({ cfg, medalId, canManage, busy, update }) {
+  const toast = useToast()
+  const [info, setInfo] = useState(null)
+  const [draft, setDraft] = useState({})
+  const mode = cfg.grade_weighting?.mode || 'off'
+  // Anything that changes a row (which grades, the ballot, the weighting
+  // itself) re-reads the table from the server.
+  const key = JSON.stringify([cfg.grade_ids, cfg.ballot_values, cfg.grade_weighting])
+
+  useEffect(() => {
+    let live = true
+    api.votesGetWeighting(medalId)
+      .then((d) => { if (live) { setInfo(d); setDraft({}) } })
+      .catch((e) => toast.error(e.message))
+    return () => { live = false }
+  }, [medalId, key, toast])
+
+  if (!info) return <div className="text-[12.5px] text-pb-faint">Loading grades…</div>
+
+  const rows = info.rows || []
+  const anyGames = rows.some((r) => r.games > 0)
+
+  const pickMode = (next) => {
+    if (next === mode) return
+    if (next === 'manual') {
+      // Start from what's in force, so switching doesn't reset every grade to 1.
+      const saved = cfg.grade_weighting?.manual || {}
+      const start = Object.keys(saved).length
+        ? saved
+        : Object.fromEntries(rows.map((r) => [r.name, r.auto_weight ?? 1]))
+      update({ grade_weighting: { mode: 'manual', manual: start } })
+    } else if (next === 'auto') update({ grade_weighting: { mode: 'auto' } })
+    else update({ grade_weighting: {} })
+  }
+
+  const dirty = Object.keys(draft).length > 0
+  const saveManual = () => {
+    const manual = { ...(cfg.grade_weighting?.manual || {}) }
+    for (const [name, raw] of Object.entries(draft)) {
+      const n = parseFloat(raw)
+      if (!(n >= 0.01 && n <= 10)) { toast.error(`${name}: the weight has to be between 0.01 and 10`); return }
+      manual[name] = Math.round(n * 100) / 100
+    }
+    update({ grade_weighting: { mode: 'manual', manual } })
+  }
+
+  return (
+    <>
+      <Segmented sm value={mode} onChange={pickMode}
+        options={WEIGHT_MODES} />
+      <div className="text-[11px] text-pb-faintest mt-1.5">
+        {mode === 'off' && 'Every vote counts the same, whatever the grade. A 3-2-1 is 3-2-1 everywhere.'}
+        {mode === 'auto' && (info.top_grade
+          ? `Measured against ${info.top_grade}, your top grade. A vote in a grade with fewer games counts for more, so 3-2-1 is worth the same per game played.`
+          : 'There are no fixtures for these grades yet, so every grade counts the same until there are.')}
+        {mode === 'manual' && 'Type how much a vote is worth in each grade. 1 is the normal 3-2-1, 1.5 makes it 4.5-3-1.5.'}
+      </div>
+
+      {rows.length > 0 && (
+        <div className="mt-3 text-sm">
+          <div className="grid grid-cols-[minmax(0,1fr)_56px_96px_64px] items-center gap-x-3 pb-1 font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">
+            <div>Grade · {info.season_label}</div><div className="text-right">Games</div>
+            <div className="text-right">Votes ×</div><div className="text-right">Top vote</div>
+          </div>
+          {rows.map((r) => (
+            <div key={r.name} className="grid grid-cols-[minmax(0,1fr)_56px_96px_64px] items-center gap-x-3 py-1.5 border-t pb-hairline">
+              <div className="min-w-0 break-words">
+                {r.name}
+                {mode === 'auto' && r.is_top && (
+                  <span title="Top grade: every other grade is measured against its season length"
+                    className="ml-1.5 align-middle font-mono text-[9.5px] uppercase tracking-wide2 px-1.5 py-0.5 rounded bg-pb-accent/15 text-pb-accent">Top</span>
+                )}
+              </div>
+              <div className="text-right font-mono">{r.games > 0 ? r.games : <span className="text-pb-faintest">none</span>}</div>
+              <div className="text-right">
+                {mode === 'manual' ? (
+                  <input value={draft[r.name] ?? String(r.weight)} disabled={!canManage || busy}
+                    inputMode="decimal" aria-label={`Vote weight for ${r.name}`}
+                    onChange={(e) => setDraft({ ...draft, [r.name]: e.target.value.replace(/[^0-9.]/g, '').slice(0, 5) })}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && dirty) saveManual() }}
+                    className="w-20 text-center bg-pb-surface2 border pb-hairline rounded-lg px-2 py-1 text-sm font-mono focus:outline-none focus:border-pb-accent" />
+                ) : (
+                  <span className={`font-mono ${mode === 'off' ? 'text-pb-faint' : 'font-bold'}`}>{fmtWeight(r.weight)}</span>
+                )}
+                {mode !== 'auto' && r.auto_weight != null && Math.abs(r.auto_weight - r.weight) > 0.004 && (
+                  <div className="text-[10.5px] text-pb-faintest">auto {fmtWeight(r.auto_weight)}</div>
+                )}
+              </div>
+              <div className="text-right font-mono text-pb-faint">{r.top_vote}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {mode === 'manual' && canManage && dirty && (
+        <div className="mt-2.5"><Btn sm variant="primary" onClick={saveManual} disabled={busy}>Save weights</Btn></div>
+      )}
+      {!anyGames && rows.length > 0 && (
+        <div className="text-[11px] text-pb-faintest mt-2">
+          No fixtures found for this season yet. Games are counted from your Fixtures, byes and cancelled rounds left out.
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function VotesSettings({
   canManage, medalId, gradeOptions = [], medalCount = 1, onChanged, onDeleted,
 }) {
@@ -260,6 +376,9 @@ export default function VotesSettings({
             </div>
           </Row>
         )}
+        <Row label="Weight by grade" hint="Grades that play more games give a player more chances to collect votes. Weighting makes a vote in a shorter season count for more, so the grades are fair against each other.">
+          <GradeWeighting cfg={cfg} medalId={medalId} canManage={canManage} busy={busy} update={update} />
+        </Row>
         <Row label="Who can be voted for" hint="Which team list decides who's on the ballot. You can override this on any single game.">
           <select value={cfg.eligibility_source} onChange={(e) => update({ eligibility_source: e.target.value })} disabled={!canManage}
             className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-pb-accent">
