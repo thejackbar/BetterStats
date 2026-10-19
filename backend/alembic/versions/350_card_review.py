@@ -6,15 +6,15 @@ Nothing changes for a match nobody has reviewed: every new column is NULL or FAL
 Defined once in services/card_review_ddl.py, which main.py's lifespan mirror also runs.
 Idempotent.
 
-Revision ID: 349
-Revises: 348
+Revision ID: 350
+Revises: 349
 """
 from alembic import op
 
 from app.services.card_review_ddl import STATEMENTS, DOWNGRADE
 
-revision = "349"
-down_revision = "348"
+revision = "350"
+down_revision = "349"
 branch_labels = None
 depends_on = None
 

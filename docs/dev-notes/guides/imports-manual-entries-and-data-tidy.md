@@ -140,3 +140,9 @@ All dry run by default; `--apply` acts.
 | (sub) v8.80.1 tracked-fields toggles, roster matching | rules extracted | Rule 31 |
 | (sub) v8.80.2 name cross-referencing | rules extracted | Rule 31 |
 | (sub) v8.80.3 card-error versus misread | rules extracted | Rule 31 |
+
+## Card review (Oct 2026)
+
+- A match's displayed card is `review_choice` plus `pair_prefers_import`. Any code that switches which card shows must go through `services/card_review_actions` so the choice is logged, undoable and sets `pairing_locked`.
+- Card review never deletes a card or a row it did not insert. A hybrid undo removes only its recorded ids. New tables recording player activity still belong on `merge_carry.CARRIED`.
+- `review_detail` holds a live Cricket Australia snapshot for the match page; `get_scorecard` reads it only for a manual game with no `extracted_payload`.

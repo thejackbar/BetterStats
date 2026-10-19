@@ -1224,3 +1224,17 @@ Run order after deploying: `link_import_players` dry run, apply with `--min-evid
 
 After the player joins, 899 Payneham matches were still skipped for mismatched wicket credits, 345 of them "one man under two records" with every other bowler identical ("Smith, Reuben 1" on PlayHQ against "Smith, RG 1" on the card). Those records stay unjoined because the join rules are right to be cautious ("Smith, RG" could be Reuben or Robert across a career, "Singh, H" is Humraj or Harpuneet), but inside one match the pairing is certain: same surname and initial, same count, everything else identical. `restore_import_detail` now writes such a match's credits against the import's record (the one the club's own bowling figures already name), so the bowler's name shows on the dismissal without any merge first and `merge_carry` moves the rows if the records are merged later. `--explain` lists only matches still skipped and says how many were written this way. `verify_import_detail_restore.py` is 23 checks (the control fails 15).
 
+
+## Card review: choosing between a match's two stored cards (v9.124.0, migration 350, Oct 2026)
+
+Payneham's Stage 2 import (with override) replaced Cricket Australia cards with the club's own scorecards for 3,328 matches. Card review gives a club the way back, match by match, without deleting either card.
+
+State lives on the manual game: `review_choice` ('ca' | 'club' | 'hybrid'), `review_source` ('hand' | 'bulk'), `review_decided_by/at`, `review_note`, `review_pair_ok`, `review_detail` (JSONB). History and undo are in `card_review_log` (a before-state snapshot plus the ids a hybrid copy inserted). A choice sets `pairing_locked`, so `match_pairing.reconcile_org` cannot flip it on a later sync (checked: a locked CricketStatz-paired match is untouched, the unlocked control flips back). DDL is `services/card_review_ddl.py`, mirrored by migration 350 and the lifespan.
+
+Groups come from `card_review.compare_match`: agree, small, differ, pairing (under 60% shared (player, runs)), nocard. Totals and extras are compared only where both sides store them. The suggestion is Cricket Australia for the agree and small groups, and hybrid for a `differ` match only if Cricket Australia has detail and there are at most three batting differences and no result flip or team total difference; otherwise none.
+
+Hybrid copy (`card_review_hybrid`): balls only fill NULL where player, innings, runs and position match; bowler credits are written where the wicket count equals the club's figure; fall of wickets and partnerships per innings only where the batters' runs agree; the opposition card and dismissal text come from one live `get_scorecard` call stored in `review_detail` (a snapshot, refreshed by the Refresh button; opposition batters are not stored locally). Undo removes exactly the inserted ids, balls only where still unchanged. `games.get_scorecard` reads `review_detail` for a manual game with no `extracted_payload`.
+
+Bulk switch: candidates are group agree, not decided by hand, not already Cricket Australia. Chunked commits, one `audit_logs` row (`card_review_bulk`), batch undo leaves hand-changed matches alone, milestones recomputed with `sync._compute_milestones(reconcile=True)`.
+
+Export: `/club-admin/card-review/export.csv` and `python -m app.scripts.export_card_review <org> [--out PATH] [--all]` (18 columns ending "Your choice", "Notes"). `verify_card_review.py` is 95 checks with MUTATE=balls|hand|undo|lock; `frontend/verification/verify_card_review_browser.mjs` is 48 checks including 390px.
