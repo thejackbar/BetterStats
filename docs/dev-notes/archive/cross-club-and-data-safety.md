@@ -941,3 +941,12 @@ Check: `verify_merge_profile_carry.py` (44 checks, own database) now seeds the r
 
 **Left on purpose.** POSTs that only read (import and email previews, Ask BetterIQ) are refused at View. Only BetterSelect screens draw read only; elsewhere the server refuses a write with a plain message. Sponsors and Milestones have no reads under their capability, and Audit history no writes, so View and Manage are the same there. Templates, per-club roles at a linked club and the junior-data certification gate are the next phases.
 
+
+
+## Undoing a player merge from the server (v9.122.4)
+
+Gisborne (Oct 2026): club users merged several CA-redacted junior rows (names read `********`) into one player on 14 Oct, deliberately and in sequence, and one of those merges needed checking and possibly reversing. The merge screen's Undo needs a signed-in user with merge permission, so `app/scripts/undo_player_merge.py` was added for the server.
+- It calls the shipped `routers/admin.undo_merge` (no copy of the restore logic) and adds a read-only report of what the merge logged, how many games still sit on the kept player, and any newer live merge on the same players.
+- A merge undo restores only the rows logged at merge time. A game that synced after the merge sits on the kept player and is not moved back; the next sync recreates it on the restored row.
+- Undo order is not enforced by `undo_merge` itself. The script skips a log that has a newer live merge on the same players and says so.
+- Proof: `verify_undo_player_merge_script.py` (real Postgres, 18 checks; control with the apply branch disabled fails the 8 restore, undone and audit checks).

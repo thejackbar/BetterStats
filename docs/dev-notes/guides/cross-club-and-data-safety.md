@@ -140,6 +140,7 @@ Suites (`backend/verification/`, real Postgres, shipped route bodies, control ru
 
 - `python -m app.scripts.purge_foreign_members [<org_id>|all] [--apply] [--delete]`: clears member rows pointing at other clubs' players. Dry run by default; archives unless `--delete`. Rows with a payment, role, qualification, committee term, hours, family link or roster shift are reported and left alone. Once clean: `ALTER TABLE fee_members VALIDATE CONSTRAINT fk_fee_members_player_same_org`.
 - `python -m app.scripts.backfill_all_associations [--apply] [--no-api] [--org <id-or-slug>] [--concurrency N]`: groups every club's grades into competitions. Dry run by default.
+- `python -m app.scripts.undo_player_merge <org-id-or-slug> <merge-log-id>... [--apply] [--by name]`: the Admin Undo button with a dry run. Runs the shipped `undo_merge`, so it moves back only what the merge logged; games synced after the merge stay on the kept player. Refuses a log that is already undone, another club's, or one with a newer live merge on the same players. Check: `verification/verify_undo_player_merge_script.py`.
 - `python -m app.scripts.inspect_association_sources`: read-only; do the association id spaces agree, and how many Directory clubs play in one association.
 
 ## Open follow-ups
