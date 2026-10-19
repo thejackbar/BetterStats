@@ -13,7 +13,7 @@ from app.services.summary_only_seasons import (
     summary_only_seasons_clause as _summary_only_seasons_clause,
 )
 from app.services.grade_scope import GradeScope
-from app.services.game_status import appearance_counts_as_match, not_played_game_sql
+from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match, not_played_game_sql
 from app.services import rate_coverage as rc
 from app.services.game_sides import sides_sql
 
@@ -1909,7 +1909,8 @@ async def _grid_clauses(session: AsyncSession, org_id, season_id, scope: Optiona
 
 def _empty_grid_inputs() -> dict:
     return {"season_grade_games": {}, "exact": {}, "season_aggregate": {},
-            "manual_by_season": {}, "mixed_seasons": set(), "without_season": 0}
+            "manual_by_season": {}, "mixed_seasons": set(), "without_season": 0,
+            "reserve": {}}
 
 
 # The relations the grid reads, by default the effective views. A caller that has already
@@ -2139,6 +2140,42 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
         gn = r["grade_name"]
         by_grade[gn] = by_grade.get(gn, 0) + int(r["matches"] or 0)
 
+    # RESERVES: games the player was only a 12th man or substitute in (`game_appearances.is_reserve`,
+    # no row of their own), per season and grade. CA's per-grade claim COUNTS some of them, so
+    # `_attribute_cells` takes them back off it, but only as far as the claim runs past the games
+    # we can show the player played. One bound array of players and one read of the per-innings
+    # views for them: never a per-row probe, which was measured at 38s on 40,000 appearances.
+    reserve_rows = await session.execute(
+        text(f"""
+            WITH rows AS (
+                SELECT bi.player_id, bi.game_id FROM {rels['bi']} bi
+                 WHERE bi.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION SELECT bs.player_id, bs.game_id FROM {rels['bs']} bs
+                 WHERE bs.player_id = ANY(CAST(:pids AS uuid[]))
+                UNION SELECT fs.player_id, fs.game_id FROM {rels['fs']} fs
+                 WHERE fs.player_id = ANY(CAST(:pids AS uuid[]))
+            )
+            SELECT ga.player_id, gr.season_id AS season_id,
+                   {_GRID_GRADE_NAME} AS grade_name,
+                   COUNT(DISTINCT ga.game_id) AS games
+            FROM {rels['ga']} ga
+            LEFT JOIN rows ON rows.player_id = ga.player_id AND rows.game_id = ga.game_id
+            JOIN {rels['games']} g ON g.id = ga.game_id
+            JOIN grades gr ON gr.id = g.grade_id{_GRID_GRADE_NAME_JOINS}
+            WHERE ga.player_id = ANY(CAST(:pids AS uuid[]))
+              AND ga.is_reserve IS TRUE
+              AND rows.game_id IS NULL
+              AND COALESCE(g.status, '') NOT IN ({NOT_PLAYED_SQL_LIST})
+              {club_games_clause}{season_clause_gr}{game_scope_clause}
+            GROUP BY ga.player_id, gr.season_id, {_GRID_GRADE_NAME}
+        """),
+        params,
+    )
+    for r in reserve_rows.mappings():
+        per = out[str(r["player_id"])]["reserve"].setdefault(_canonical_season(r["season_id"]), {})
+        gn = r["grade_name"]
+        per[gn] = per.get(gn, 0) + int(r["games"] or 0)
+
     # The club's own corrections, entered against one season and one grade
     # (Manual Entries -> Adjustments). Additive, so a -1 takes a match off the
     # cell — CA counts a player as having played the moment they are named on
@@ -2201,9 +2238,16 @@ def _attribute_cells(gi: dict) -> tuple:
         if exact:
             # CA's own per-grade count is the source of truth, but never below
             # the number of scorecards we actually hold for that grade.
+            reserve = gi.get("reserve", {}).get(sid, {})
             for gn in set(scorecards) | set(exact):
                 held = scorecards.get(gn, 0)
                 claimed = exact.get(gn, 0)
+                # CA counts a 12th man about as often as it leaves one out. Whatever its claim
+                # runs past the games we can show were played, up to the reserves, is the
+                # reserve: take it off, never below what we hold.
+                r = reserve.get(gn, 0)
+                if r:
+                    claimed -= min(r, max(claimed - held, 0))
                 if max(held, claimed) > 0:
                     row_cells[gn] = max(held, claimed)
                 if claimed > held:

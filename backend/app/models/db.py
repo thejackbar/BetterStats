@@ -2164,6 +2164,10 @@ class GameAppearance(Base):
     team_name = Column(Text, nullable=True)
     is_captain = Column(Boolean, default=False, nullable=False, server_default='false')
     is_wicket_keeper = Column(Boolean, default=False, nullable=False, server_default='false')
+    # A 12th man or substitute fielder who did not play (services/reserve_players.py). NULL = not
+    # judged, read as played. Added in raw SQL by superseded_ddl.STATEMENTS, so it is mapped here.
+    is_reserve = Column(Boolean, nullable=True)
+    sheet_slot = Column(Integer, nullable=True)
 
     game = relationship("Game", back_populates="appearances")
     player = relationship("Player", back_populates="appearances")
