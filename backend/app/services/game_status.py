@@ -140,19 +140,26 @@ def appearance_counts_as_match(ga: str = "ga") -> str:
     copies of a five-line predicate is how one of them ends up subtly different
     and one screen quietly disagrees with the rest.
 
+    A RESERVE (`game_appearances.is_reserve`, services/reserve_players.py: a 12th man or
+    substitute fielder, named on the sheet and nowhere on the card) does not count either, and
+    like the called-off game it keeps the match if the player has a row of their own. NULL
+    (not judged) reads as played. This one predicate is also how fees decide who is charged
+    a match day, so a reserve who did not play is not charged.
+
     `ga` is the alias of the `game_appearances` row being tested; it must expose
-    both `game_id` and `player_id`. The three EXISTS branches are redundant
+    `game_id`, `player_id` and `is_reserve`. The three EXISTS branches are redundant
     inside a UNION that already has batting/bowling/fielding branches of its own
     (a game with a recorded contribution arrives there anyway) and load-bearing
     where this is the only source of the count, as in StatLab's `appear` CTE.
     They are kept in both cases so there is one predicate rather than two.
     """
     return f"""(
-                NOT EXISTS (
+                (NOT EXISTS (
                     SELECT 1 FROM games _co
                     WHERE _co.id = {ga}.game_id
                       AND {not_played_game_sql("_co")}
                 )
+                AND NOT COALESCE({ga}.is_reserve, FALSE))
                 OR EXISTS (
                     SELECT 1 FROM v_effective_batting_innings _cb
                     WHERE _cb.game_id = {ga}.game_id AND _cb.player_id = {ga}.player_id
