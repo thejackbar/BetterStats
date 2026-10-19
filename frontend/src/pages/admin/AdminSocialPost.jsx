@@ -5766,30 +5766,30 @@ export default function AdminSocialPost() {
                       <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5"
                         onDragOver={fxDrag.onDragOver(i)} onDrop={fxDrag.onDrop(i)}
                         style={fxDrag.overIdx === i ? { borderColor: 'var(--pb-accent)' } : undefined}>
-                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px 1fr 58px 20px' }}>
+                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px minmax(0,1fr) 58px 20px' }}>
                           <span draggable onDragStart={fxDrag.onDragStart(i)} onDragEnd={fxDrag.onDragEnd} title="Drag to reorder"
                             className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setFixtures, i, -1)} onDown={() => moveRow(setFixtures, i, 1)} isFirst={i === 0} isLast={i === fixtures.length - 1} />
                           <input value={f.grade} onChange={e => set({ grade: e.target.value })} placeholder={IS_AFL ? 'Grade · SENIORS' : 'Grade · 1ST XI'}
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={f.ha} onChange={e => set({ ha: e.target.value })}
-                            className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
                             <option value="H">Home</option><option value="A">Away</option>
                           </select>
                           <button onClick={() => setFixtures(rows => rows.filter((_, j) => j !== i))}
-                            className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                            title="Remove this row" aria-label="Remove this row" className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
                         </div>
-                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 64px' }}>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'minmax(0,1fr) 64px' }}>
                           <OppRowSearch value={f.opp} onType={v => set({ opp: v })} onPick={org => pickRowOpp('fx', i, org)} />
                           <input value={f.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
                         </div>
                         <OppLogoChip logo={f.oppLogo} loading={f.oppLogoLoading} onClear={() => set({ oppLogo: null })} />
                         <div className="grid grid-cols-2 gap-1.5">
                           <input value={f.time} onChange={e => set({ time: e.target.value })} placeholder="12:30 PM"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <input value={f.venue} onChange={e => set({ venue: e.target.value })} placeholder="Venue"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
                         </div>
                       </div>
                     )
@@ -5851,35 +5851,35 @@ export default function AdminSocialPost() {
                       <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5"
                         onDragOver={rrDrag.onDragOver(i)} onDrop={rrDrag.onDrop(i)}
                         style={rrDrag.overIdx === i ? { borderColor: 'var(--pb-accent)' } : undefined}>
-                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px 1fr 72px 20px' }}>
+                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px minmax(0,1fr) 72px 20px' }}>
                           <span draggable onDragStart={rrDrag.onDragStart(i)} onDragEnd={rrDrag.onDragEnd} title="Drag to reorder"
                             className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setResults, i, -1)} onDown={() => moveRow(setResults, i, 1)} isFirst={i === 0} isLast={i === results.length - 1} />
                           <input value={r.grade} onChange={e => set({ grade: e.target.value })} placeholder={IS_AFL ? 'Grade · SENIORS' : 'Grade · 1ST XI'}
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={r.outcome} onChange={e => set({ outcome: e.target.value })}
-                            className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
                             <option value="W">Won</option><option value="L">Lost</option><option value="T">Tie/NR</option>
                           </select>
                           <button onClick={() => setResults(rows => rows.filter((_, j) => j !== i))}
-                            className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                            title="Remove this row" aria-label="Remove this row" className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
                         </div>
-                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 64px' }}>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'minmax(0,1fr) 64px' }}>
                           <OppRowSearch value={r.opp} onType={v => set({ opp: v })} onPick={org => pickRowOpp('rr', i, org)} />
                           <input value={r.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
                         </div>
                         <OppLogoChip logo={r.oppLogo} loading={r.oppLogoLoading} onClear={() => set({ oppLogo: null })} />
-                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 1fr 1.2fr' }}>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr)' }}>
                           <input value={r.us} onChange={e => set({ us: e.target.value })} placeholder="Us 6/188"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <input value={r.them} onChange={e => set({ them: e.target.value })} placeholder="Them 184"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <input value={r.margin} onChange={e => set({ margin: e.target.value })} placeholder="BY 4 WICKETS"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                         </div>
                         {tmpl.hasLeaders && (
-                          <div className="grid gap-2 pt-1 mt-0.5 border-t pb-hairline" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                          <div className="grid gap-2 pt-1 mt-0.5 border-t pb-hairline" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)' }}>
                             {[['bat', perfKeys(rrPerfSide).bat], ['bowl', perfKeys(rrPerfSide).bowl]].map(([kind, key]) => (
                               <div key={key} className="flex flex-col gap-1">
                                 <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">{rrPerfSide === 'them' ? 'Their' : 'Our'} {kind === 'bat' ? 'top scorers' : 'top wickets'}</span>
@@ -5892,13 +5892,13 @@ export default function AdminSocialPost() {
                                     return { ...x, [key]: arr }
                                   }))
                                   return (
-                                    <div key={slot} className="grid gap-1" style={{ gridTemplateColumns: '1fr 76px' }}>
+                                    <div key={slot} className="grid gap-1" style={{ gridTemplateColumns: 'minmax(0,1fr) 76px' }}>
                                       <input value={entry.name || ''} onChange={e => setSlot({ name: e.target.value.toUpperCase() })}
                                         placeholder={kind === 'bat' ? 'J. BARENDSE' : 'A. ALLISON'}
-                                        className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                                        className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
                                       <input value={entry.line || ''} onChange={e => setSlot({ line: e.target.value })}
                                         placeholder={kind === 'bat' ? '64 (71)' : '4/29 (9.4)'}
-                                        className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                                        className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
                                     </div>
                                   )
                                 })}

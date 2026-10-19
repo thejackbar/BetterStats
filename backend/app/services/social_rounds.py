@@ -540,7 +540,9 @@ async def social_results(db: AsyncSession, org) -> dict:
         if not bucket["round"]:
             bucket["round"] = _round_label(m.get("round"))
         bucket["results"].append(row)
-    dates = sorted(by_date.values(), key=lambda d: d["date"], reverse=True)
+    # A Saturday and a Sunday are one weekend's round, and the editor loads only
+    # the first bucket, so fold them like the fixtures pull does, then newest first.
+    dates = _merge_weekend_days(sorted(by_date.values(), key=lambda d: d["date"]), "results")[::-1]
     await asyncio.gather(*[_finalize_opp_logos(db, d["results"]) for d in dates])
     return {"season": season, "club": _club_dict(org), "dates": dates}
 
