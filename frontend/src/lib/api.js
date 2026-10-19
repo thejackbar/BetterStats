@@ -3364,6 +3364,7 @@ export const api = {
     request(`/votes/medals/${medalId}${confirm ? '?confirm=true' : ''}`, { method: 'DELETE' }),
   votesRegenerateLink: (medalId) =>
     request(`/votes/medals/${medalId}/regenerate`, { method: 'POST' }),
+  votesGetWeighting: (medalId) => request(`/votes/medals/${medalId}/weighting`),
   votesGetSettings: (medalId) => request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`),
   votesSetSettings: (data, medalId) =>
     request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`,

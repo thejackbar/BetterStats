@@ -847,8 +847,10 @@ async def lifespan(app: FastAPI):
         # its own settings and public link. Runs the migration's own statement
         # list so the two can't drift; every one is idempotent, backfill
         # included (each is a no-op once a club already has a medal).
-        from app.services.vote_medal_ddl import VOTE_MEDAL_STATEMENTS, VOTE_GRADE_MODE_STATEMENTS
-        for _stmt in VOTE_MEDAL_STATEMENTS + VOTE_GRADE_MODE_STATEMENTS:
+        from app.services.vote_medal_ddl import (
+            VOTE_MEDAL_STATEMENTS, VOTE_GRADE_MODE_STATEMENTS, VOTE_GRADE_WEIGHT_STATEMENTS,
+        )
+        for _stmt in VOTE_MEDAL_STATEMENTS + VOTE_GRADE_MODE_STATEMENTS + VOTE_GRADE_WEIGHT_STATEMENTS:
             await conn.execute(text(_stmt))
         # Engagement-score parameter history (migration 270). Runs the
         # migration's own statement list so the two can't drift; both are

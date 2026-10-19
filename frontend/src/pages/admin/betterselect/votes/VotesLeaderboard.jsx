@@ -98,6 +98,15 @@ export default function VotesLeaderboard({ medalId }) {
         </div>
       ) : (
         <>
+          {board.weighting && board.weighting.mode !== 'off' && (
+            <div className="text-[12px] text-pb-faint">
+              Points are weighted by grade
+              {board.weighting.mode === 'auto' && board.weighting.top_grade
+                ? ` against ${board.weighting.top_grade}'s season length`
+                : ' by hand'}
+              , so a vote in a shorter season counts for more. The vote counts (3s, 2s, 1s) are the real votes.
+            </div>
+          )}
           <div className="flex flex-col md:flex-row gap-3.5">
             {top3.map((s, i) => (
               <PodiumCard key={s.player_id} standing={s} index={i} ballotValues={values} />
@@ -135,7 +144,7 @@ export default function VotesLeaderboard({ medalId }) {
                     <span className="text-sm font-medium flex-1 min-w-0 truncate">{s.name}</span>
                     <span className="font-mono text-[9.5px] text-pb-faintest shrink-0">{s.grade_short || ''}</span>
                   </div>
-                  <Form points={s.form || []} max={values[0]} />
+                  <Form points={s.form || []} max={Math.max(values[0], ...(s.form || []))} />
                   <div className="text-right text-[17px] font-bold tabular-nums"
                     style={{ color: i === 0 ? 'var(--pb-amber)' : 'var(--pb-text)' }}>{s.points}</div>
                   {s.counts.map((c, j) => (
