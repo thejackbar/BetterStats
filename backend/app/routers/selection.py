@@ -358,51 +358,75 @@ async def previous_xi(
 ):
     """The most recent prior fixture's named XI, for "fill from last week".
 
-    Looks back for the SAME team's last fixture (before this one's date) that has
-    a saved lineup. A fixture with no team of its own falls back to the same
-    grade. It never borrows another team's XI: a women's side with no history of
-    its own used to be filled with the men's last XI, because the lookup fell
-    back to "any of the club's prior fixtures". Returns player ids in batting
-    order plus the captain/keeper, so the selection board can seed empty slots,
-    and the source fixture's team so the board can name where the side came from.
+    "Last week" is the same GRADE's last fixture (before this one's date) that has
+    a saved lineup, matched by grade name so it survives a new season's grade rows.
+    The grade is the one Cricket Australia drew, or the team the club picked on the
+    fixture (`side_key`). Games are not re-assigned when a squad's teams are
+    re-linked, so reading by squad mixed two sides' players together: the grade is
+    what says which side played. Only when the grade has no saved XI of its own does
+    it fall back to the SAME squad's last fixture (the same team of a multi-team
+    squad), then to the same grade for a fixture with no squad. It never borrows
+    another team's XI: a women's side with no history of its own used to be filled
+    with the men's last XI, because the lookup fell back to "any of the club's prior
+    fixtures". Returns player ids in batting order plus the captain/keeper, so the
+    selection board can seed empty slots, and the source fixture's team so the
+    board can name where the side came from.
     """
     fx = await _get_owned_fixture(db, fixture_id, club.id)
     empty = {"source_fixture_id": None, "player_ids": [], "captain_id": None, "wicket_keeper_id": None}
 
+    sides = await squad_sides.load(db, club.id)
+    scopes = []
+
+    # 1. The same grade, by name across seasons. A team the club picked on the
+    # fixture wins over the grade, but only when that squad really has it.
+    key = sides.key_of_grade(fx.grade_id)
+    squad = sides.squads.get(str(fx.team_id)) if fx.team_id else None
+    if fx.side_key and squad is not None and squad.side_for_key(fx.side_key) is not None:
+        key = fx.side_key
+    if key:
+        grade_ids = [uuid.UUID(g) for g in sides.grade_ids_by_key.get(key, set())]
+        by_grade = Fixture.side_key == key
+        if grade_ids:
+            by_grade = or_(Fixture.grade_id.in_(grade_ids), by_grade)
+        scopes.append(by_grade)
+
+    # 2. Nothing saved for that grade yet: the squad's own last side, as before.
     if fx.team_id:
         scope = Fixture.team_id == fx.team_id
         # A squad covering several teams: last week's SIDE, not whichever of its
         # teams played first.
-        same_grades = (await squad_sides.load(db, club.id)).same_team_grade_ids(fx.team_id, fx.grade_id, fx.side_key)
+        same_grades = sides.same_team_grade_ids(fx.team_id, fx.grade_id, fx.side_key)
         if same_grades:
             scope = scope & Fixture.grade_id.in_([uuid.UUID(g) for g in same_grades])
+        scopes.append(scope)
     elif fx.grade_id:
-        scope = Fixture.grade_id == fx.grade_id
-    else:
+        scopes.append(Fixture.grade_id == fx.grade_id)
+
+    if not scopes:
         return empty  # nothing says which side this is, so there is no "last week"
 
-    q = select(Fixture).where(Fixture.organisation_id == club.id, Fixture.id != fx.id, scope)
-    if fx.played_on:
-        q = q.where(Fixture.played_on < fx.played_on)
-    q = q.order_by(Fixture.played_on.desc().nullslast(), Fixture.start_time.desc().nullslast())
-    prior = (await db.execute(q)).scalars().all()
-
-    for f in prior:
-        rows = (await db.execute(
-            select(FixtureLineup).where(FixtureLineup.fixture_id == f.id)
-        )).scalars().all()
-        if not rows:
-            continue
-        rows.sort(key=lambda r: (r.batting_order or 999))
-        return {
-            "source_fixture_id": str(f.id),
-            "source_label": f.opponent_name or f.label,
-            "source_round": f.round,
-            "source_date": f.played_on.isoformat() if f.played_on else None,
-            "player_ids": [str(r.player_id) for r in rows],
-            "captain_id": next((str(r.player_id) for r in rows if r.is_captain), None),
-            "wicket_keeper_id": next((str(r.player_id) for r in rows if r.is_wicket_keeper), None),
-        }
+    for scope in scopes:
+        q = select(Fixture).where(Fixture.organisation_id == club.id, Fixture.id != fx.id, scope)
+        if fx.played_on:
+            q = q.where(Fixture.played_on < fx.played_on)
+        q = q.order_by(Fixture.played_on.desc().nullslast(), Fixture.start_time.desc().nullslast())
+        for f in (await db.execute(q)).scalars().all():
+            rows = (await db.execute(
+                select(FixtureLineup).where(FixtureLineup.fixture_id == f.id)
+            )).scalars().all()
+            if not rows:
+                continue
+            rows.sort(key=lambda r: (r.batting_order or 999))
+            return {
+                "source_fixture_id": str(f.id),
+                "source_label": f.opponent_name or f.label,
+                "source_round": f.round,
+                "source_date": f.played_on.isoformat() if f.played_on else None,
+                "player_ids": [str(r.player_id) for r in rows],
+                "captain_id": next((str(r.player_id) for r in rows if r.is_captain), None),
+                "wicket_keeper_id": next((str(r.player_id) for r in rows if r.is_wicket_keeper), None),
+            }
 
     return empty
 
