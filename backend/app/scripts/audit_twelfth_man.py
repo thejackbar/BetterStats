@@ -26,7 +26,9 @@ The check is CA's own season total (`player_season_stats.matches`, source 'api')
 player and season holding at least one named-only game, held games (what the profile grid
 counts) are set against CA's total:
   EXPLAINED   held minus CA equals the games flagged: the rule accounts for the whole gap.
-  OVER_FLAGS  the rule would take the player below CA's own figure: evidence AGAINST the rule.
+  OVER_FLAGS  the rule would take the player below CA's own figure: CA counted a game the rule
+              flags. Either the rule is wrong or CA counted a substitute (the club can say).
+  CA_ABOVE_HELD  CA counts more than we hold, so the flagged game cannot be tested.
   PARTLY      the rule explains some of the gap and not all of it.
   MISSED      CA is lower than held and nothing was flagged: another cause.
   AGREES      CA already counts every named-only game: supports leaving those alone.
@@ -52,65 +54,7 @@ from app.models.db import async_session_maker
 from app.services import grassroots_scores_client as gr
 from app.services.club_grades import club_game_sql
 from app.services.game_status import appearance_counts_as_match, not_played_game_sql
-
-XI = 11  # the side is 11; a name past this slot is a reserve
-
-TWELFTH_MAN = "TWELFTH_MAN"
-CODES = (TWELFTH_MAN, "ON_CARD_DNB", "SIDE_DID_NOT_BAT", "INSIDE_XI", "HAS_STATS", "NOT_ON_SHEET", "NO_CARD")
-_DNB_TEXT = {"did not bat", "dnb", "absent"}
-
-
-def classify(card: dict | None, guids: set[str]) -> dict:
-    """Judge one named-only appearance from CA's scorecard. Pure: no I/O, no database.
-
-    `guids` is every participant id the player can carry on a card (their own raw GUID plus
-    any merged into them). Returns {code, slot, sheet}: slot is 1-based, sheet is the size of
-    the player's team list.
-    """
-    out = {"code": "NO_CARD", "slot": None, "sheet": None}
-    if not card or not card.get("teams"):
-        return out
-    team = None
-    for t in card["teams"]:
-        for i, p in enumerate(t.get("players") or []):
-            if str(p.get("participantId") or "").lower() in guids:
-                team, slot = t, i + 1
-                pid = str(p["participantId"]).lower()
-                break
-        if team is not None:
-            break
-    if team is None:
-        out["code"] = "NOT_ON_SHEET"
-        return out
-    out.update(slot=slot, sheet=len(team.get("players") or []))
-
-    tid = team.get("id")
-    side_batted = False
-    on_card = None  # the player's own batting row on their side's card
-    has_bowl_or_field = False
-    for inn in card.get("innings") or []:
-        if inn.get("battingTeamId") == tid and inn.get("batting"):
-            side_batted = True
-            for b in inn["batting"]:
-                if str(b.get("participantId") or "").lower() in guids:
-                    on_card = b
-        for row in (inn.get("bowling") or []) + (inn.get("fielding") or []):
-            if str(row.get("participantId") or "").lower() in guids:
-                has_bowl_or_field = True
-
-    if has_bowl_or_field:
-        out["code"] = "HAS_STATS"
-    elif on_card is not None:
-        dnb = str(on_card.get("dismissalType") or "").lower() in _DNB_TEXT
-        out["code"] = "ON_CARD_DNB" if dnb else "HAS_STATS"
-    elif not side_batted:
-        out["code"] = "SIDE_DID_NOT_BAT"
-    elif slot <= XI:
-        out["code"] = "INSIDE_XI"
-    else:
-        out["code"] = TWELFTH_MAN
-    return out
-
+from app.services.reserve_players import CODES, TWELFTH_MAN, XI, classify  # noqa: F401  (re-exported for the suite)
 
 def verdict(held: int, ca: int | None, flagged: int) -> str:
     """How the rule sits against CA's own season total for one player and season."""
@@ -119,6 +63,10 @@ def verdict(held: int, ca: int | None, flagged: int) -> str:
     gap = held - ca
     if flagged == 0:
         return "MISSED" if gap > 0 else "AGREES"
+    if gap < 0:
+        # CA counts more games than we hold, so a game we are missing could be the one CA
+        # counted in place of the flagged one. Nothing can be said either way.
+        return "CA_ABOVE_HELD"
     if gap == flagged:
         return "EXPLAINED"
     return "OVER_FLAGS" if gap < flagged else "PARTLY"
@@ -183,7 +131,8 @@ async def _candidates(session, org: str, year: int | None) -> list[dict]:
             SELECT ga.game_id::text AS game_id, ga.player_id::text AS player_id,
                    COALESCE(p.grassroots_id, p.id::text) AS raw_guid,
                    COALESCE(p.display_name_override, p.name) AS player_name,
-                   g.played_at, se.year, se.name AS season, gr.name AS grade
+                   g.played_at, se.year, se.name AS season, gr.name AS grade,
+                   ga.is_reserve AS stored_reserve
             FROM game_appearances ga
             JOIN games gm ON gm.id = ga.game_id
             JOIN v_effective_games g ON g.id = ga.game_id
@@ -330,7 +279,7 @@ async def audit_club(org: str, label: str, args, budget: list[int]) -> list[dict
         for r in rows:
             r["verdict"] = v
         lines.append((v, rows[0]["player_name"], key[2], h, a, f, Counter(r["code"] for r in rows)))
-    for v in ("EXPLAINED", "OVER_FLAGS", "PARTLY", "MISSED", "AGREES", "NO_CA_TOTAL"):
+    for v in ("EXPLAINED", "OVER_FLAGS", "CA_ABOVE_HELD", "PARTLY", "MISSED", "AGREES", "NO_CA_TOTAL"):
         if verdicts.get(v):
             print(f"  {v:<12} {verdicts[v]}")
 
