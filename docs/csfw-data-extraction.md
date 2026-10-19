@@ -85,7 +85,7 @@ reads the active profile's format table, and a final's format is measured only
 where the profile names BOTH a one-day and a two-day type (Payneham names only
 Limited Over, so its finals stay blank: an ATCA Final is a turf final).
 
-Verification: `tools/verify_csfw_extract.py` (52 checks) builds archives in a
+Verification: `tools/verify_csfw_extract.py` (70 checks) builds archives in a
 layout the extractor was never written against (every table moved and resized,
 every field shifted), with two databases, a bye, an unprofiled club and two
 layouts in one folder, and runs the shipped code over them.
@@ -142,21 +142,72 @@ corroborated by 4, 6, 7, 10 in this file and 8 and 11 in the junior databases.
 - **Dismissal codes 5, 6, 8, 9, 16, 24 and 30** appear 1 to 6 times each and are
   unnamed; they import blank.
 
-**Still needed from Payneham (the CSFW Teams list is installation-wide, so one
-list answers all of it):**
+**Payneham's answers (Oct 2026, a workbook: the sheet plus CSFW's own Teams and
+Match Types tabs).** Applied in `tools/csfw_profiles/payneham.json`:
 
-  1. The full **Teams** list (User Preferences > Teams, every entry with its
-     position), so every database/team pair can be named. The analyser lists 73
-     that are not (e.g. `Payneham S R` 42, 43, 51; `Payneham W` 46, 50;
-     `Payneham S J 12` 39, 40, 45, 55, 56). Named so far: `Payneham` 1 to 5 (proved
-     against CSFW's screen) and `Payneham.` 6 (the club's own "6th XI" report titles).
-  2. The full **Match types** list beyond position 11 (codes 12 to 29 appear).
-  3. Is **Adelaide Turf** two-day? Left blank: the data is multi-innings but that
-     is not the club's word for it.
-  4. What do **result codes 5, 6 and 7** mean?
-  5. Is code 29 **absent out** or **did not bat** in their competition (`--absent`)?
-  6. The 37 `.csv` reports are season totals for old seasons. They are not read yet
-     (Shoalwater's C2 reader is specific to its own file names).
+- **The team number is CSFW's own list ID, the same in every database** (1 = 1st
+  XI ... 9 = 9th XI, 10 = Under 11 ... 56 = U12 White; 46 = 1st IX and 50 = 2nd
+  IX are the women's nine-a-side sides). The first design, per-database names,
+  was wrong about that; the profile now holds one `team_names` list and
+  `databases` only for exceptions. The match-type list is likewise CSFW's, 0 to
+  29. `--answers` reads the workbook directly; its Teams tab wins over the sheet's
+  per-row answers (a different spelling of the same name is reported).
+- **Two names collide across competitions**, and a team's database says which
+  competition it is: `Payneham W` team 1 is the WOMEN'S side but CSFW names it
+  "1st XI", the men's name. Loaded as is, women's games would go into the men's
+  1st XI grade. Profile `databases` renames it `Women's 1st XI` and the five
+  `Payneham G` (girls) teams get " (Girls)". These names are ours, not the
+  club's: confirm them.
+- **Result codes**: 5 = Cancelled (loads with no result), 6 = Tied on first
+  innings and 7 = Winning draw (both load as DRAW; our reading of the club's
+  words, to confirm). `result_labels` and `import_results` hold them.
+- **Code 29 absent batter = did not bat** (`absent` in the profile).
+- **Byes left out; the 37 printed `.csv` reports ignored.**
+- **Formats**: the club said C1 to C9 are all two-day. The data supports that for
+  Adelaide Turf (second innings in 54% of matches) and the ATCA Final (24%), which
+  are applied. It does NOT for the ATCA T20 Final, Ltd Overs Final, Brock Cup (0%)
+  or NE Jnr CA (8%), so those and 14 later types (21 rows) go back to the club
+  on a follow-up sheet (`--questions --open-only`). Until answered ~3,000 games
+  carry no format. Never apply a blanket answer the data contradicts.
+
+**Formats, second round (Oct 2026).** Payneham answered the 21 follow-up rows:
+One Day for everything except East Torrens CA, YMCA CA, SACA Junior U16 and ATCA
+Junior U15 (Two Day), and marked those four plus NE Jnr CA "could be a mix".
+`mixed_format_types` in the profile handles that per game: a scorecard with a
+second innings recorded is proof of a multi-innings game, so it is Two Day
+whatever the type's default. Nothing proves One Day (a two-day game can end on
+first innings), so a mixed type with no second innings keeps the club's answer if
+that was One Day and is left BLANK if it was Two Day. That moved 130 NE Jnr CA
+games to Two Day and left 65 games with no format (old two-day competitions with
+no second innings recorded, and six types too small to ask about). Everything
+except the format column is unchanged, and the three seasons the club
+spot-checked (2016/17, 2019/20, 2022/23) still give 156, 226 and 193.
+
+**Games left with no format are listed for the club.** Every extraction writes
+`games_without_format.csv` when any game has none (one row per game: key, date,
+season, team, opposition, venue, match type, result, score, whether the card
+shows a second innings, and why it is blank), so the club reviews 62 rows instead
+of filtering a 123,000-row file. An abandoned game with no score and no match type
+is left out: it has nothing to be a format of. The club types Two Day or One Day in
+`Your answer`; `--answers` (CSV or workbook) stores each as `game_formats` keyed by
+game key and the next run applies it, and the sheet is not written once every game
+is answered. A game key is year (or file stem) plus the game's order in its season,
+so the answers hold only while the files do not change.
+
+**Final Payneham build (Oct 2026).** The club answered all 62 games (47 Two Day, 15
+One Day; they typed them over the "How to answer" column, so the reader accepts a
+bare Two Day or One Day there and says so). The answers live in the profile's
+`game_formats`. Only the `match_format` column of those 62 games changed: every
+other column on all 122,976 rows is identical to the previous build. 8,852 games
+(Two Day 5,600, One Day 3,249, 3 blank: abandoned, scoreless, untyped games), all
+53 columns known to the importer, the club's spot-checked seasons unchanged
+(2016/17 156, 2019/20 226, 2022/23 193). Two notes from the sheet are not
+applied because nothing in the load file carries them: game `data1954-020`'s
+opposition was changed from "Paradise" to "-", and `dat22004-018` is marked
+"should be Limited Over" (its format One Day agrees).
+
+Result for the whole archive: 8,852 games, 1928/29 to 2025/26, 55 grades, 75
+games for `DATA2025` as CSFW shows. One game (1932) has team 0, no team recorded.
 
 # Part 1: the `.AV` binary format
 
