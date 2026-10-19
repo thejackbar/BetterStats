@@ -27,6 +27,7 @@ const NOT_OPEN = {
 }
 const REASON = {
   captain_only: 'Only the captain submits votes for this club. Ask your skipper to cast them.',
+  counter_only: 'The captain has nominated someone to submit the votes for this team.',
   did_not_play: 'Only players who played in this game can vote at this club.',
   verify_required: 'Find your name to vote on this game.',
 }
@@ -472,9 +473,16 @@ export default function PublicVoting() {
                 <div className="mt-4"><button onClick={backToGames} className="text-pb-accent underline">← Back to games</button></div>
               </div>
             ) : (
+              <>
+              {fixture.is_counter && (
+                <p className="text-xs text-pb-faint mb-3">
+                  You are counting the votes for this team, in place of the captain.
+                </p>
+              )}
               <Ballot fixture={fixture} values={values} votable={votable} picks={picks} setPicks={setPicks}
                 onSubmit={submitBallot} busy={busy} onBack={backToGames}
                 voterLabel={me?.display_name || supporterName} />
+              </>
             )}
           </div>
         )}

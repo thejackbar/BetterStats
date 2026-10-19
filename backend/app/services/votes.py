@@ -305,6 +305,26 @@ def clean_grade_voter_modes(raw) -> dict[str, str]:
     return out
 
 
+def clean_grade_vote_counters(raw) -> dict[str, str]:
+    """A per-team vote counter map (team name to player id), with anything
+    unusable dropped: a blank team name or an id that is not a uuid. A dropped
+    entry leaves the captain voting, the safe direction."""
+    out: dict[str, str] = {}
+    if not isinstance(raw, dict):
+        return out
+    for name, pid in raw.items():
+        if not isinstance(name, str) or not isinstance(pid, str):
+            continue
+        key = name.strip()[:120]
+        try:
+            pid = str(uuid.UUID(pid))
+        except ValueError:
+            continue
+        if key:
+            out[key] = pid
+    return out
+
+
 def voter_mode_for_grade(cfg: dict, grade_name: Optional[str]) -> str:
     """Who votes on a game in this team: the team's own setting, else the medal's."""
     if grade_name:
@@ -315,10 +335,13 @@ def voter_mode_for_grade(cfg: dict, grade_name: Optional[str]) -> str:
 
 
 async def cfg_for_fixture(db: AsyncSession, cfg: dict, fixture: Fixture) -> dict:
-    """``cfg`` with ``voter_mode`` resolved for this fixture's team. A copy, so
-    the medal's own config is untouched. Costs nothing when no team has its own
-    setting, which is every club until one is set."""
-    if not cfg.get("grade_voter_modes"):
+    """``cfg`` with ``voter_mode`` resolved for this fixture's team, and
+    ``vote_counter`` (a player id) set when that team counts the captain only and
+    the captain has handed the counting to someone else. A copy, so the medal's
+    own config is untouched. Costs nothing when no team has its own setting,
+    which is every club until one is set. Read ``cfg.get("vote_counter")``: a
+    config that never went through here has no such key."""
+    if not cfg.get("grade_voter_modes") and not cfg.get("grade_vote_counters"):
         return cfg
     gid = (await effective_grade_ids(db, [fixture])).get(str(fixture.id))
     name = None
@@ -326,7 +349,34 @@ async def cfg_for_fixture(db: AsyncSession, cfg: dict, fixture: Fixture) -> dict
         name = (await db.execute(
             text("SELECT name FROM grades WHERE id = :id"), {"id": gid},
         )).scalar_one_or_none()
-    return {**cfg, "voter_mode": voter_mode_for_grade(cfg, name)}
+    voter_mode = voter_mode_for_grade(cfg, name)
+    counter = (cfg.get("grade_vote_counters") or {}).get(name) if name else None
+    return {**cfg, "voter_mode": voter_mode,
+            "vote_counter": counter if voter_mode == "captain" else None}
+
+
+async def counter_fixture_ids(db: AsyncSession, cfg: dict, player_id, fixtures: list[Fixture]) -> set[uuid.UUID]:
+    """``Fixture.id``s among ``fixtures`` whose team counts the captain only and
+    names this player to submit its votes. They need not be in the side, so the
+    player's own-games lookups never find these. One grade read for the lot, and
+    nothing at all when this player is nobody's nominee."""
+    names = {n for n, pid in (cfg.get("grade_vote_counters") or {}).items() if pid == str(player_id)}
+    if not names or not fixtures:
+        return set()
+    grade_by_fixture = await effective_grade_ids(db, fixtures)
+    gids = list(set(grade_by_fixture.values()))
+    if not gids:
+        return set()
+    rows = (await db.execute(
+        text("SELECT id, name FROM grades WHERE id = ANY(CAST(:ids AS uuid[]))"), {"ids": gids},
+    )).fetchall()
+    name_by_gid = {gid: nm for gid, nm in rows}
+    out: set[uuid.UUID] = set()
+    for f in fixtures:
+        nm = name_by_gid.get(grade_by_fixture.get(str(f.id)))
+        if nm in names and voter_mode_for_grade(cfg, nm) == "captain":
+            out.add(f.id)
+    return out
 
 
 def clean_grade_weighting(raw) -> dict:
@@ -499,6 +549,7 @@ def effective_config(s: Optional[VoteMedal]) -> dict:
         "require_pin": bool(s.require_pin) if s else True,
         "voter_mode": (s.voter_mode if s and s.voter_mode in VOTER_MODES else "players"),
         "grade_voter_modes": clean_grade_voter_modes(getattr(s, "grade_voter_modes", None) if s else None),
+        "grade_vote_counters": clean_grade_vote_counters(getattr(s, "grade_vote_counters", None) if s else None),
         "grade_weighting": clean_grade_weighting(getattr(s, "grade_weighting", None) if s else None),
         "ballot_values": clean_ballot_values(s.ballot_values if s else None),
         "counting_method": (s.counting_method if s and s.counting_method in COUNTING_METHODS else "rank"),
