@@ -656,6 +656,27 @@ with tempfile.TemporaryDirectory() as td:
               got, {"Alpha": "Two Day", "Beta": "One Day", "Gamma": "Two Day", "Delta": "One Day", "Washout": ""})
         check("once every listed game is answered the review sheet is not written",
               (out2 / "games_without_format.csv").exists(), False)
+        # Payneham typed over the instruction column instead of "Your answer"
+        review[0]["Your answer"] = ""
+        review[0]["How to answer"] = "Two Day"
+        wrong = td / "review_wrong_column.csv"
+        with wrong.open("w", newline="", encoding="utf-8-sig") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(review[0].keys()))
+            w.writeheader()
+            w.writerows(review)
+        prof3, _, notes3 = m.apply_answers(m.Profile("t"), wrong) if hasattr(m, "apply_answers") else (None, None, [])
+        check("an answer typed over the instruction column is read, and the club is told",
+              (prof3.game_formats if prof3 else None, [n for n in notes3 if "How to answer" in n] != []),
+              ({"2025-004": "Two Day"}, True))
+        review[0]["How to answer"] = "Type Two Day or One Day"
+        plain = td / "review_unanswered.csv"
+        with plain.open("w", newline="", encoding="utf-8-sig") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(review[0].keys()))
+            w.writeheader()
+            w.writerows(review)
+        prof4, _, _ = m.apply_answers(m.Profile("t"), plain) if hasattr(m, "apply_answers") else (None, None, [])
+        check("the instruction text itself is never taken for an answer",
+              prof4.game_formats if prof4 else None, {})
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

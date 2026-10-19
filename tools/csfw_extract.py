@@ -2253,9 +2253,18 @@ def apply_answers(profile: Profile, path: Path) -> tuple:
             prof.finals_types = prof.finals_types | {code}
     absent, notes, spellings = None, [], {}
     prof.game_formats = dict(profile.game_formats)
+    moved = 0
     for r in rows:
         ans = (r.get("Your answer") or "").strip()
         item, num = (r.get("Item") or "").strip(), (r.get("Number") or "").strip()
+        if not ans and (r.get("Game key") or "").strip():
+            # Payneham typed its answers over the next column, "How to answer".
+            # A value that is nothing BUT Two Day or One Day cannot be the
+            # instruction (which reads "Type Two Day or One Day"), so it is read
+            # as the answer it plainly is, and the club is told it was.
+            alt = (r.get("How to answer") or "").strip()
+            if re.fullmatch(r"(two|one)\s*day", alt, re.I):
+                ans, moved = alt, moved + 1
         if not ans:
             continue
         if (r.get("Game key") or "").strip():
@@ -2291,6 +2300,9 @@ def apply_answers(profile: Profile, path: Path) -> tuple:
                 prof.byes = ()
         else:
             notes.append(f"{r.get('Ref')} {item} {num}: {ans!r} (needs a person, nothing applied)")
+    if moved:
+        notes.append(f"{moved} game format answers were typed in the 'How to answer' column "
+                     "and were read from there")
     # the same name spelt more than one way across the club's rows: the spelling
     # it used most, and the tab's own where that is a tie
     for number, seen in spellings.items():

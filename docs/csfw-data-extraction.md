@@ -85,7 +85,7 @@ reads the active profile's format table, and a final's format is measured only
 where the profile names BOTH a one-day and a two-day type (Payneham names only
 Limited Over, so its finals stay blank: an ATCA Final is a turf final).
 
-Verification: `tools/verify_csfw_extract.py` (68 checks) builds archives in a
+Verification: `tools/verify_csfw_extract.py` (70 checks) builds archives in a
 layout the extractor was never written against (every table moved and resized,
 every field shifted), with two databases, a bye, an unprofiled club and two
 layouts in one folder, and runs the shipped code over them.
@@ -193,6 +193,18 @@ is left out: it has nothing to be a format of. The club types Two Day or One Day
 game key and the next run applies it, and the sheet is not written once every game
 is answered. A game key is year (or file stem) plus the game's order in its season,
 so the answers hold only while the files do not change.
+
+**Final Payneham build (Oct 2026).** The club answered all 62 games (47 Two Day, 15
+One Day; they typed them over the "How to answer" column, so the reader accepts a
+bare Two Day or One Day there and says so). The answers live in the profile's
+`game_formats`. Only the `match_format` column of those 62 games changed: every
+other column on all 122,976 rows is identical to the previous build. 8,852 games
+(Two Day 5,600, One Day 3,249, 3 blank: abandoned, scoreless, untyped games), all
+53 columns known to the importer, the club's spot-checked seasons unchanged
+(2016/17 156, 2019/20 226, 2022/23 193). Two notes from the sheet are not
+applied because nothing in the load file carries them: game `data1954-020`'s
+opposition was changed from "Paradise" to "-", and `dat22004-018` is marked
+"should be Limited Over" (its format One Day agrees).
 
 Result for the whole archive: 8,852 games, 1928/29 to 2025/26, 55 grades, 75
 games for `DATA2025` as CSFW shows. One game (1932) has team 0, no team recorded.
