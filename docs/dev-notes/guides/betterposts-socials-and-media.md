@@ -126,6 +126,7 @@
 
 **Your own Canva design (v9.123.7)**
 60. A club's own design is an image block with `design: true, locked: true`, built by `withDesign()` and always at the back; `BlankCanvas` draws it at the live canvas size. Never keep a `blob:` URL for it, upload to the library first and change nothing on failure. Canva is a one-way door here (exported stills in); Connect and the Apps SDK are unbuilt, see the archive. Check: `verify_own_design_browser.mjs`.
+61. A text block with `bind` prints a live value (`social/boundResolve.js`); `resolveBind` null means "nothing held yet, show the sample", an empty string means "held, but not this slot, print nothing". Never reach `selectedPlayers` from a block: add the value to `blankData`. An imported template (`bettercricket-template` v1, spec in `boundFields.js`) marks every block it makes `fromTemplate: true` so a re-import replaces only those. Check: `probe_bound_fields.mjs`, `verify_template_import_browser.mjs`.
 
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.

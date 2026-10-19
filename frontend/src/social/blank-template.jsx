@@ -12,6 +12,7 @@ import { IS_AFL } from '../lib/sport'
 // ─────────────────────────────────────────────────────────────────────────────
 import { useRef } from 'react'
 import { BrandLockup, GrainSVG, CreditMark } from './cricket-templates'
+import { resolveBind, splitPlayerName, bindLabel } from './boundResolve'
 
 // Colour tokens resolve against the live palette so a palette switch re-tints
 // any block left on a token; a raw hex (custom colour) passes straight through.
@@ -164,6 +165,7 @@ export function itemBBox(it) {
 // the Content panel. Images prefer their stored asset name.
 export function itemLabel(it) {
   if (!it) return ''
+  if (it.type === 'text' && it.bind) return `Field: ${bindLabel(it.bind)}`
   if (it.type === 'text') return `“${(it.text || '').slice(0, 16) || 'Text'}${(it.text || '').length > 16 ? '…' : ''}”`
   if (it.type === 'image') return it.design ? 'Your design' : (it.srcName || (it.src ? 'Image' : 'Image (empty)'))
   if (it.type === 'brand') return 'Club badge'
@@ -248,7 +250,10 @@ export function defaultBlankItems() {
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
-function TextBlock({ item, palette }) {
+function TextBlock({ item, palette, data }) {
+  // A bound field prints the live value; null (nothing held yet) shows its sample.
+  const live = item.bind ? resolveBind(item.bind, data) : null
+  const shown = live === null || live === undefined ? item.text : live
   return (
     <div style={{
       width: item.w,
@@ -262,7 +267,7 @@ function TextBlock({ item, palette }) {
       background: item.bg && item.bg !== 'none' ? resolveBlankColor(item.bg, palette) : 'transparent',
       padding: item.bg && item.bg !== 'none' ? '0.15em 0.4em' : 0,
       boxDecorationBreak: 'clone',
-    }}>{item.text || ' '}</div>
+    }}>{shown || ' '}</div>
   )
 }
 
@@ -311,13 +316,6 @@ const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'ap
 const headshotUrl = (p) => (p?.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null)
 
 // "LAST, First" / "First Last" split, mirroring splitName in AdminSocialPost.
-function splitPlayerName(name) {
-  const n = String(name || '').trim()
-  if (!n) return ['', '']
-  if (n.includes(', ')) { const [l, f] = n.split(', '); return [f || '', l || ''] }
-  const parts = n.split(/\s+/)
-  return [parts.slice(0, -1).join(' '), parts.slice(-1)[0] || '']
-}
 
 function DataBlock({ item, palette, data = {} }) {
   const ink = resolveBlankColor(item.color, palette)
@@ -542,7 +540,7 @@ function SponsorGridBlock({ item, data }) {
 }
 
 function renderContent(item, palette, team, data) {
-  if (item.type === 'text') return <TextBlock item={item} palette={palette} />
+  if (item.type === 'text') return <TextBlock item={item} palette={palette} data={data} />
   if (item.type === 'image') return <ImageBlock item={item} palette={palette} />
   if (item.type === 'element') return <ElementBlock item={item} palette={palette} />
   if (item.type === 'data') return <DataBlock item={item} palette={palette} data={data} />

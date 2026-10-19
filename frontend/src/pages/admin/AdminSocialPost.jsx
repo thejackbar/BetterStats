@@ -50,6 +50,7 @@ import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_AN
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign } from '../../social/blank-template'
+import { parseTemplateFile, itemsFromTemplate, boundSlotCount } from '../../social/boundFields'
 import { sponsorSlotFor } from '../../social/sponsorSlots'
 import { useBlankLayer } from '../../social/useBlankLayer'
 import { useTemplateLayers } from '../../social/useTemplateLayers'
@@ -1305,6 +1306,7 @@ export default function AdminSocialPost() {
   // The club's own design (a Canva export) for the blank canvas.
   const designInputRef = useRef(null)
   const [designBusy, setDesignBusy] = useState(false)
+  const templateFileRef = useRef(null)
   // Club media library (persisted via the social-media API).
   const [mediaAssets, setMediaAssets] = useState([])
   // Below md the editor drops its drag canvas for a guided phone quick-post
@@ -3264,6 +3266,10 @@ export default function AdminSocialPost() {
   const blankData = {
     team, match: matchData, fixtures, results, record: blankRecord,
     scorecard: scorecardMatch, players: allPlayers, playerStats: playerStatsCache,
+    // What bound text fields print (an imported template's player slots, opponent
+    // and so on). null means the editor holds nothing for it yet.
+    lineup: templatePlayers.map((p) => ({ name: [p.first, p.last].filter(Boolean).join(' '), first: p.first, last: p.last, role: p.roleLong || p.role || '', captain: p.captain, keeper: p.keeper })),
+    opponent: opponent.name ? oppData.name : null, headline: headline || null,
     // Sponsor grids resolve their ids against the club's live list, so a saved
     // template always draws current logos.
     sponsors: adminSponsors.filter(sponsorLogoUrl).map((s) => ({ id: s.id, name: s.name, url: sponsorLogoUrl(s) })),
@@ -3712,9 +3718,14 @@ export default function AdminSocialPost() {
   })()
 
   // ─── Controls ────────────────────────────────────────────────────────────────
-  const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab)
-  const showOpponent  = !['scorecard', 'fixtures', 'results', 'totw', 'milestones', 'events', 'blank'].includes(activeTab)
-  const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
+  // An imported template (bound text fields) is a Blank canvas that still needs
+  // the lineup, the opponent and the match details those fields print.
+  const boundSlots = isBlankTab ? boundSlotCount(canvas.items) : 0
+  const hasBound = isBlankTab && canvas.items.some((it) => it.bind)
+  const playerCap = tmpl.maxPlayers > 0 ? tmpl.maxPlayers : boundSlots
+  const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab) || hasBound
+  const showOpponent  = !['scorecard', 'fixtures', 'results', 'totw', 'milestones', 'events', 'blank'].includes(activeTab) || hasBound
+  const showPlayers   = (activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0) || boundSlots > 0
   const showHeroImage = HERO_SLOT_TEMPLATES.includes(templateId)
   const HERO_SLOT_LAYOUT_NAMES = HERO_SLOT_TEMPLATES
     .map((id) => TEMPLATES.find((t) => t.id === id)?.name)
@@ -4005,6 +4016,49 @@ export default function AdminSocialPost() {
         : { text: 'Your design is the bottom layer, locked. Add Club data, text or sponsors on top, then Save as template.', tool: 'content' }, 12000)
     } catch (e) {
       flashNote({ warn: true, text: `Your design did not upload (${e?.message || 'no answer from the server'}). Images over 5 MB are refused: export from Canva as JPG, or at a smaller size, and try again.`, tool: 'content' }, 14000)
+    } finally {
+      setDesignBusy(false)
+    }
+  }
+  // A template file from the BetterCricket Canva app: the design with the field
+  // words taken out, plus where each field sits and how it is styled. It becomes
+  // the locked design and one bound text block per field, ready for the players.
+  // Nothing changes if the file or its picture cannot be used.
+  const importTemplateFile = async (file) => {
+    if (!file) return
+    setDesignBusy(true)
+    try {
+      const parsed = parseTemplateFile(await file.text())
+      if (parsed.error) { flashNote({ warn: true, text: parsed.error, tool: 'content' }, 14000); return }
+      const warnings = [...parsed.warnings]
+      let designUrl = null
+      if (parsed.background) {
+        if (!/^data:image\/(png|jpeg|webp);base64,/.test(parsed.background)) {
+          flashNote({ warn: true, text: 'The picture inside that template is not a PNG, JPG or WebP, so nothing was imported.', tool: 'content' }, 14000)
+          return
+        }
+        const blob = await (await fetch(parsed.background)).blob()
+        const saved = await api.uploadSocialMedia(new File([blob], `${parsed.name}.${blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png'}`, { type: blob.type }))
+        setMediaAssets((a) => [saved, ...a])
+        designUrl = saved.url
+      }
+      // The post takes the template's shape when it is one BetterPosts makes.
+      const shape = POST_SIZES.find((z) => z.w === parsed.canvas.w && z.h === parsed.canvas.h)
+      if (shape) setPostSize(shape.key)
+      else warnings.push(`The template is ${parsed.canvas.w}×${parsed.canvas.h}, which is not a BetterPosts size, so it stays on ${W}×${H} and the design is cropped to fit.`)
+      record('Import template')
+      const target = shape || { w: W, h: H }
+      canvas.setItems(itemsFromTemplate(parsed, { designUrl, designName: file.name, width: target.w, height: target.h, keep: canvas.items }))
+      canvas.setSelIds([])
+      const slots = parsed.fields.reduce((n, f) => { const m = (f.bind || '').match(/^lineup\.(\d+)\./); return m ? Math.max(n, Number(m[1])) : n }, 0)
+      const bound = parsed.fields.filter((f) => f.bind).length
+      flashNote({
+        warn: warnings.length > 0,
+        text: `Imported “${parsed.name}”: ${bound} field${bound === 1 ? '' : 's'}${slots ? `, ${slots} player slot${slots === 1 ? '' : 's'}` : ''}. Add the players, opponent and match details in the panels on the left.${warnings.length ? ` ${warnings.join(' ')}` : ''}`,
+        tool: 'content',
+      }, 16000)
+    } catch (e) {
+      flashNote({ warn: true, text: `That template did not import (${e?.message || 'it could not be read'}). Nothing was changed.`, tool: 'content' }, 14000)
     } finally {
       setDesignBusy(false)
     }
@@ -5014,6 +5068,18 @@ export default function AdminSocialPost() {
                       </button>
                     )}
                   </div>
+                  <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mt-1">Or import a template with its fields</div>
+                  <p className="text-[11px] text-pb-dim leading-relaxed">
+                    From the BetterCricket Canva app: a file that brings the design and a text field for every {'{{'}player 1{'}}'}, {'{{'}opponent{'}}'} or {'{{'}date{'}}'} you typed in Canva. The slots then fill from the players you add here.
+                  </p>
+                  <div>
+                    <button onClick={() => templateFileRef.current?.click()} disabled={designBusy} data-testid="template-file-import"
+                      className="px-3 py-1.5 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors disabled:opacity-50">
+                      Import a template file
+                    </button>
+                  </div>
+                  <input ref={templateFileRef} type="file" accept=".json,application/json" className="sr-only" data-testid="template-file-input"
+                    onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; importTemplateFile(f) }} />
                   <input ref={designInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" data-testid="own-design-input"
                     onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadDesign(f) }} />
                 </div>
@@ -5104,7 +5170,7 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
-                    Players <span className="ml-1 text-pb-faintest">{selectedPlayers.length}/{tmpl.maxPlayers}</span>
+                    Players <span className="ml-1 text-pb-faintest">{selectedPlayers.length}/{playerCap}</span>
                   </h2>
                   <div className="flex items-center gap-1.5">
                     {selectedPlayers.length > 1 && (alphaFrom
@@ -5157,13 +5223,13 @@ export default function AdminSocialPost() {
                     </p>
                   </div>
                 )}
-                {!IS_AFL && selectedPlayers.length < tmpl.maxPlayers && (
+                {!IS_AFL && selectedPlayers.length < playerCap && (
                   manualPlayerOpen
                     ? <ManualPlayerForm roster={allPlayers} onAdd={onManualPlayer} onClose={() => setManualPlayerOpen(false)} />
                     : <button onClick={() => setManualPlayerOpen(true)} data-testid="add-manual-player"
                         className="mb-3 font-mono text-[10px] tracking-wide2 px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text">+ ADD A PLAYER BY HAND</button>
                 )}
-                {selectedPlayers.length < tmpl.maxPlayers && (
+                {selectedPlayers.length < playerCap && (
                   <>
                     <input value={playerSearch} onChange={e => setPlayerSearch(e.target.value)} placeholder="Search players..."
                       className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text placeholder:text-pb-faintest mb-2" />
