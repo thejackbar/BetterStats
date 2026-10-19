@@ -17,7 +17,7 @@ from app.models.db import (
     PlayerSeasonStats, PlayerSeasonGradeStats, Milestone,
     SyncRun, async_session_maker
 )
-from app.services import auto_sync, dismissal, merge_redirects, participant_names, playhq_client
+from app.services import auto_sync, dismissal, merge_redirects, participant_names, playhq_client, reserve_players
 from app.services.boundary_counts import clean as _bounds
 from app.services.game_status import NOT_PLAYED_STATUSES, not_played_game_sql
 from app.services.grade_labels import suggest_categories, suggest_category
@@ -2603,6 +2603,11 @@ async def sync_grassroots_game_level_data(
                 # get a hit, fielders with no chances). Matches play.cricket's
                 # match-count which is based on selection, not stat lines.
                 if our_team:
+                    # A 12th man or substitute fielder is on this list and nowhere else on the card
+                    # (services/reserve_players.py). Judged only once CA calls the game COMPLETED:
+                    # a card read mid-game has no batting yet, which would read as "the side never
+                    # batted" and stamp a judgement that is never revisited. NULL means not judged.
+                    _reserve = reserve_players.sync_flags(scorecard, our_team)
                     seen_appear_pids: set[uuid.UUID] = set()
                     for roster_p in (our_team.get("players") or []):
                         rpid = _team_pid(_parse_uuid(roster_p.get("participantId") or ""))
@@ -2614,10 +2619,13 @@ async def sync_grassroots_game_level_data(
                         roles = roster_p.get("roles") or []
                         is_captain = any((r or "").lower() == "captain" for r in roles)
                         is_wk = any("wicket" in (r or "").lower() for r in roles)
+                        _flag = _reserve.get(str(roster_p.get("participantId") or "").lower())
                         session.add(GameAppearance(
                             game_id=match_uuid, player_id=rpid,
                             team_name=our_team_name,
                             is_captain=is_captain, is_wicket_keeper=is_wk,
+                            is_reserve=_flag["is_reserve"] if _flag else None,
+                            sheet_slot=_flag["slot"] if _flag else None,
                         ))
                         appear_count += 1
 
