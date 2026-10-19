@@ -1025,3 +1025,15 @@ Fix. `social_results` now merges ascending with `_merge_weekend_days(..., "resul
 Not done. A cluster is anchored on its first day, so a Saturday result and a Sunday result land under "SAT" in the dropdown, the same as Fixtures. The Include chips are unchanged: a vets team can also be turned off with the Masters chip when its grade is marked that way on the Grades screen.
 
 Proof. `_merge_weekend_days` run on a Sat/Sun/previous-week set: control (old ordering) returns Sunday alone first (1 result), new returns Sat+Sun as one bucket of 3 then the previous week. Chromium at 320px on the row markup: old grid puts the ✕ at x=358 in a card ending at 292 (clipped, horizontal scroll); new puts it at 283 with no overflow. `vite build` passes. The full Postgres harness (`verify_social_totw.py`) was not run: no database in this session.
+
+
+### Your own Canva design on the Blank canvas (v9.123.7)
+Asked for: clubs bringing their own Canva templates into BetterPosts (two examples were shared as Canva embeds, a violet cricket scorecard video and a blue fixtures Instagram post; neither page was readable from the sandbox, Canva answers 403, so nothing here is modelled on their look).
+
+Route chosen: upload an exported PNG or JPG, not a Canva account link. Canva Connect needs an OAuth integration registered by BetterSports, and its Autofill and Brand Template APIs need a Canva Enterprise member (developers without one can ask for access in the Developer Portal). The Canva Apps SDK Design Editing API (`openDesign`) runs inside the Canva editor, so it pushes data INTO a Canva design and cannot bring one into BetterPosts. Neither was built.
+
+What shipped. `withDesign()` in `social/blank-template.jsx` puts an image block at the back of the Blank canvas with `design: true, locked: true`, replacing any earlier design and keeping every other block. `BlankCanvas` draws a locked design at the live canvas size (x 0, y 0, canvas width and height), so it follows the size picker; it takes no pointer events. `SelectionInspector` gets Lock/Unlock for it; Layers is the way to select a locked block. `uploadDesign` in `AdminSocialPost.jsx` uploads to the club library (`POST /admin/social/media`, 5 MB cap) and never keeps a blob: URL; it reads the picture's size and warns when its shape differs from the post's by more than 2%. The hooks (`designInputRef`, `designBusy`) sit with the other state above the start-screen early return (React #310 otherwise).
+
+Proof. `frontend/verification/verify_own_design_browser.mjs` (production build, API stubbed): 27 checks pass. The same script on the previous commit passes 9 and fails 18, all on the new behaviour (the 9 are absence checks paired with a positive one). `verify_post_designer_browser.mjs` reports 122 pass and the same 8 fail on both builds. Header of the script lists what a build cannot tell you.
+
+Not done. No saved-template picker entry for "Canva" designs as such (they are Blank canvas templates). 16:9 designs (the video example is 1920 by 1080) are cropped to the post size; the Blank canvas has no landscape size. Videos cannot be imported (stills only).

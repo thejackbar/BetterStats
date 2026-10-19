@@ -33,7 +33,7 @@ export const seen = async (loc) => { try { return (await loc.count()) > 0 && awa
 export const press = async (loc) => { try { if (await loc.count()) { await loc.first().click(); return true } } catch { /* reported by the check */ } return false }
 export const tab = (page, name) => press(page.getByRole('button', { name, exact: true }))
 
-const TYPE = { T13: 'lineup', C5: 'announcement', RS8: 'result' }
+const TYPE = { T13: 'lineup', C5: 'announcement', RS8: 'result', BL1: 'blank' }
 
 // The EXPORTED post: the off-screen node, not the scaled preview.
 export const ROOT = () => {

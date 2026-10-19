@@ -162,6 +162,15 @@ export default function SelectionInspector({
             <Btn onClick={() => patch({ fit: single.fit === 'cover' ? 'contain' : 'cover' })}>
               {single.fit === 'cover' ? 'Fill' : 'Fit'}
             </Btn>
+            {/* Your uploaded design stays put so dragging a block over it moves
+                the block. Unlock to move or resize the picture itself. */}
+            {single.design && (
+              <Btn
+                title={single.locked ? 'Locked to the whole post. Click to move or resize it.' : 'Click to lock it back to the whole post.'}
+                onClick={() => patch({ locked: !single.locked })}>
+                {single.locked ? 'Unlock' : 'Lock'}
+              </Btn>
+            )}
           </>
         )}
 
