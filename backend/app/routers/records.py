@@ -108,6 +108,38 @@ SLOW_RECORDS_LOG_TOP = 8
 _ASSIGN_RE = re.compile(r"^\s*(\w+)\s*=\s*await\s+q\(")
 
 
+# A grade's display name is the club's own override for that grade NAME, falling back to
+# a merge alias's canonical name, then to the grade's own. It depends only on the grade,
+# so a board that ranks thousands of partnerships works it out once per DISTINCT grade
+# from the CTE `base` (which must expose `grade_id` and `grade_raw`), never once per row.
+# As two LATERAL subqueries on the partnership rows themselves, the override lookup
+# (it cannot use an index on a name) scanned every grade on the platform for every row
+# whenever the planner declined to cache it: Payneham, 53,000 rows x 31,000 grades,
+# 47s per board. `MATERIALIZED` keeps the planner from folding it back into the rows.
+_GRADE_NAMES_CTE = """
+    names AS MATERIALIZED (
+        SELECT x.grade_id,
+               COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, x.grade_raw)) AS grade_name
+        FROM (SELECT DISTINCT grade_id, grade_raw FROM base) x
+        LEFT JOIN LATERAL (
+            SELECT canonical_name FROM grade_merge_logs gml
+            WHERE gml.org_id = CAST(:org_id AS UUID)
+              AND gml.alias_name = x.grade_raw
+              AND gml.undone_at IS NULL
+            LIMIT 1
+        ) am ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT gr2.display_name_override FROM grades gr2
+            JOIN seasons s2 ON s2.id = gr2.season_id
+            WHERE s2.organisation_id = CAST(:org_id AS UUID)
+              AND gr2.name = COALESCE(am.canonical_name, x.grade_raw)
+              AND gr2.display_name_override IS NOT NULL
+            LIMIT 1
+        ) gdn ON TRUE
+    )
+"""
+
+
 def _query_label(depth: int = 2) -> str:
     """The name of the variable the awaited query is being assigned to.
 
@@ -1062,43 +1094,36 @@ async def get_records(
     """)
 
     partnerships_by_wicket_rows = await q(f"""
+        WITH base AS MATERIALIZED (
+            SELECT
+                p1.id::text AS batter1_id,
+                COALESCE(p1.display_name_override, p1.name) AS batter1_name,
+                p2.id::text AS batter2_id,
+                COALESCE(p2.display_name_override, p2.name) AS batter2_name,
+                pt.runs, pt.wicket_number,
+                g.played_at::text AS played_at,
+                gr.id AS grade_id, gr.name AS grade_raw,
+                s.name AS season_name,
+                EXTRACT(YEAR FROM g.played_at)::int AS season_year
+            FROM v_effective_partnerships pt
+            JOIN v_effective_games g ON g.id = pt.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN players p1 ON p1.id = pt.batter1_id
+            LEFT JOIN players p2 ON p2.id = pt.batter2_id
+            WHERE pt.is_club_innings IS NOT FALSE
+              AND p1.organisation_id = :org_id AND p2.organisation_id = :org_id
+              {partnership_season_clause} {game_grade_clause} {finals_clause}
+              AND pt.runs IS NOT NULL AND pt.runs > 0 AND pt.wicket_number BETWEEN 1 AND 10
+        ), {_GRADE_NAMES_CTE}
         SELECT
-            p1.id::text AS batter1_id,
-            COALESCE(p1.display_name_override, p1.name) AS batter1_name,
-            p2.id::text AS batter2_id,
-            COALESCE(p2.display_name_override, p2.name) AS batter2_name,
-            pt.runs, pt.wicket_number,
-            g.played_at::text,
-            COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
-            s.name AS season_name,
-            EXTRACT(YEAR FROM g.played_at)::int AS season_year,
+            b.batter1_id, b.batter1_name, b.batter2_id, b.batter2_name,
+            b.runs, b.wicket_number, b.played_at,
+            n.grade_name, b.season_name, b.season_year,
             false AS is_manual,
-            ROW_NUMBER() OVER (PARTITION BY pt.wicket_number ORDER BY pt.runs DESC) AS rn
-        FROM v_effective_partnerships pt
-        JOIN v_effective_games g ON g.id = pt.game_id
-        JOIN grades gr ON gr.id = g.grade_id
-        JOIN seasons s ON s.id = gr.season_id
-        LEFT JOIN LATERAL (
-            SELECT canonical_name FROM grade_merge_logs gml
-            WHERE gml.org_id = CAST(:org_id AS UUID)
-              AND gml.alias_name = gr.name
-              AND gml.undone_at IS NULL
-            LIMIT 1
-        ) am ON TRUE
-        LEFT JOIN LATERAL (
-            SELECT gr2.display_name_override FROM grades gr2
-            JOIN seasons s2 ON s2.id = gr2.season_id
-            WHERE s2.organisation_id = CAST(:org_id AS UUID)
-              AND gr2.name = COALESCE(am.canonical_name, gr.name)
-              AND gr2.display_name_override IS NOT NULL
-            LIMIT 1
-        ) gdn ON TRUE
-        LEFT JOIN players p1 ON p1.id = pt.batter1_id
-        LEFT JOIN players p2 ON p2.id = pt.batter2_id
-        WHERE pt.is_club_innings IS NOT FALSE
-          AND p1.organisation_id = :org_id AND p2.organisation_id = :org_id
-          {partnership_season_clause} {game_grade_clause} {finals_clause}
-          AND pt.runs IS NOT NULL AND pt.runs > 0 AND pt.wicket_number BETWEEN 1 AND 10
+            ROW_NUMBER() OVER (PARTITION BY b.wicket_number ORDER BY b.runs DESC) AS rn
+        FROM base b
+        JOIN names n ON n.grade_id = b.grade_id
     """)
     by_wicket: dict[int, list] = {}
     for row in partnerships_by_wicket_rows:
@@ -1110,9 +1135,9 @@ async def get_records(
             by_wicket[wk].append(d)
 
     partnerships_by_grade_rows = await q(f"""
-        WITH ranked AS (
+        WITH base AS MATERIALIZED (
             SELECT
-                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                gr.id AS grade_id, gr.name AS grade_raw,
                 s.name AS season_name,
                 pt.wicket_number,
                 p1.id::text AS batter1_id,
@@ -1120,37 +1145,31 @@ async def get_records(
                 p2.id::text AS batter2_id,
                 COALESCE(p2.display_name_override, p2.name) AS batter2_name,
                 pt.runs,
-                g.played_at::text,
-                EXTRACT(YEAR FROM g.played_at)::int AS season_year,
-                ROW_NUMBER() OVER (
-                    PARTITION BY COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)), pt.wicket_number
-                    ORDER BY pt.runs DESC
-                ) AS rn
+                g.played_at::text AS played_at,
+                EXTRACT(YEAR FROM g.played_at)::int AS season_year
             FROM v_effective_partnerships pt
             JOIN v_effective_games g ON g.id = pt.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
-            LEFT JOIN LATERAL (
-                SELECT canonical_name FROM grade_merge_logs gml
-                WHERE gml.org_id = CAST(:org_id AS UUID)
-                  AND gml.alias_name = gr.name
-                  AND gml.undone_at IS NULL
-                LIMIT 1
-            ) am ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT gr2.display_name_override FROM grades gr2
-                JOIN seasons s2 ON s2.id = gr2.season_id
-                WHERE s2.organisation_id = CAST(:org_id AS UUID)
-                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
-                  AND gr2.display_name_override IS NOT NULL
-                LIMIT 1
-            ) gdn ON TRUE
             LEFT JOIN players p1 ON p1.id = pt.batter1_id
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
             WHERE pt.is_club_innings IS NOT FALSE
               AND p1.organisation_id = :org_id AND p2.organisation_id = :org_id
               {partnership_season_clause} {game_grade_clause} {finals_clause}
               AND pt.runs IS NOT NULL AND pt.runs > 0 AND pt.wicket_number BETWEEN 1 AND 10
+        ), {_GRADE_NAMES_CTE}, ranked AS (
+            SELECT
+                n.grade_name,
+                b.season_name,
+                b.wicket_number,
+                b.batter1_id, b.batter1_name, b.batter2_id, b.batter2_name,
+                b.runs, b.played_at, b.season_year,
+                ROW_NUMBER() OVER (
+                    PARTITION BY n.grade_name, b.wicket_number
+                    ORDER BY b.runs DESC
+                ) AS rn
+            FROM base b
+            JOIN names n ON n.grade_id = b.grade_id
         )
         SELECT * FROM ranked WHERE rn = 1
         ORDER BY grade_name, wicket_number
