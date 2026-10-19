@@ -87,6 +87,57 @@ async def run(match_id: str, player_id: str) -> None:
             if not any((p.get('participantId') or '').lower() in interesting for p in players):
                 print("  nobody on this sheet matches his id or a word of his name")
 
+        # The rows BetterStats holds for this player in this game, traced back to the CA row each came
+        # from (same innings, same batting position and runs, or same overs and wickets). This is what
+        # shows a game attached to the wrong person: the CA participant behind the row has a different
+        # id AND a different name from the player.
+        print("\nrows BetterStats holds for him in this game, and the CA row each matches")
+        mine_bat = (await s.execute(text(
+            "SELECT innings_number, batting_position, runs, COALESCE(did_not_bat, FALSE) AS dnb "
+            "FROM batting_innings WHERE game_id = CAST(:g AS UUID) AND player_id = CAST(:p AS UUID) ORDER BY 1, 2"),
+            {"g": match_id, "p": player_id})).mappings().all()
+        mine_bowl = (await s.execute(text(
+            "SELECT innings_number, overs, runs, wickets FROM bowling_spells "
+            "WHERE game_id = CAST(:g AS UUID) AND player_id = CAST(:p AS UUID) ORDER BY 1"),
+            {"g": match_id, "p": player_id})).mappings().all()
+        if not mine_bat and not mine_bowl:
+            print("  none (named in the side, or fielding only)")
+        matched: set = set()
+        for n, inn in enumerate(sc.get("innings") or [], start=1):
+            num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+            for mb in mine_bat:
+                if mb["innings_number"] != num or mb["dnb"]:
+                    continue
+                for row in inn.get("batting") or []:
+                    if row.get("batOrder") == mb["batting_position"] and (row.get("runsScored") or 0) == (mb["runs"] or 0):
+                        pid = (row.get("participantId") or "").lower()
+                        interesting.setdefault(pid, _name_of(row))
+                        mark = "  <-- THE PLAYER'S OWN ID" if pid == guid else "  <-- A DIFFERENT PERSON"
+                        matched.add(("bat", mb["innings_number"], mb["batting_position"]))
+                        print(f"  batted at {mb['batting_position']} for {mb['runs']} in innings {num}: CA says "
+                              f"{_name_of(row)!r} id={pid}{mark}")
+            for mw in mine_bowl:
+                if mw["innings_number"] != num:
+                    continue
+                for row in inn.get("bowling") or []:
+                    if float(row.get("oversBowled") or 0) == float(mw["overs"] or 0) and \
+                            (row.get("wicketsTaken") or 0) == (mw["wickets"] or 0) and \
+                            (row.get("runsConceded") or 0) == (mw["runs"] or 0):
+                        pid = (row.get("participantId") or "").lower()
+                        interesting.setdefault(pid, _name_of(row))
+                        mark = "  <-- THE PLAYER'S OWN ID" if pid == guid else "  <-- A DIFFERENT PERSON"
+                        matched.add(("bowl", mw["innings_number"], str(mw["overs"])))
+                        print(f"  bowled {mw['overs']} for {mw['runs']}/{mw['wickets']} in innings {num}: CA says "
+                              f"{_name_of(row)!r} id={pid}{mark}")
+        for mb in mine_bat:
+            if not mb["dnb"] and ("bat", mb["innings_number"], mb["batting_position"]) not in matched:
+                print(f"  batted at {mb['batting_position']} for {mb['runs']} in innings {mb['innings_number']}: "
+                      f"NO CA row has that position and score (the card may have been corrected since)")
+        for mw in mine_bowl:
+            if ("bowl", mw["innings_number"], str(mw["overs"])) not in matched:
+                print(f"  bowled {mw['overs']} for {mw['runs']}/{mw['wickets']} in innings {mw['innings_number']}: "
+                      f"NO CA row has those figures (the card may have been corrected since)")
+
         print("\nrows under those ids, by innings")
         found = False
         for n, inn in enumerate(sc.get("innings") or [], start=1):
