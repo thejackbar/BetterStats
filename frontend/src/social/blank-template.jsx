@@ -12,6 +12,7 @@ import { IS_AFL } from '../lib/sport'
 // ─────────────────────────────────────────────────────────────────────────────
 import { useRef } from 'react'
 import { BrandLockup, GrainSVG, CreditMark } from './cricket-templates'
+import { resolveBind, splitPlayerName, bindLabel } from './boundResolve'
 
 // Colour tokens resolve against the live palette so a palette switch re-tints
 // any block left on a token; a raw hex (custom colour) passes straight through.
@@ -31,6 +32,8 @@ let _seq = 0
 const nextId = () => `bi${Date.now().toString(36)}${(_seq++).toString(36)}`
 
 export const BLANK_FONTS = [
+  // The club's own brand font (Brand settings), so a post follows a font change.
+  { key: 'club', name: 'Club font', family: "var(--social-display-font, 'Anton', sans-serif)" },
   { key: 'anton', name: 'Anton', family: "'Anton', sans-serif" },
   { key: 'barlow', name: 'Barlow Condensed', family: "'Barlow Condensed', sans-serif" },
   { key: 'bebas', name: 'Bebas Neue', family: "'Bebas Neue', sans-serif" },
@@ -101,6 +104,10 @@ export function newBlankItem(type, opts = {}) {
     return {
       id, type: 'image', x: opts.x ?? 340, y: opts.y ?? 340, w: opts.w ?? 400, h: opts.h ?? 400,
       src: opts.src ?? null, srcName: opts.srcName, radius: 0, fit: opts.fit || 'contain', rotation: 0,
+      // A club's own design (a Canva export): full-bleed, behind everything and
+      // locked so a drag meant for a block on top cannot shove it aside. Absent
+      // on every ordinary image, so saved posts are unchanged.
+      ...(opts.design ? { design: true, locked: true } : null),
     }
   }
   if (type === 'brand') {
@@ -160,8 +167,9 @@ export function itemBBox(it) {
 // the Content panel. Images prefer their stored asset name.
 export function itemLabel(it) {
   if (!it) return ''
+  if (it.type === 'text' && it.bind) return `Field: ${bindLabel(it.bind)}`
   if (it.type === 'text') return `“${(it.text || '').slice(0, 16) || 'Text'}${(it.text || '').length > 16 ? '…' : ''}”`
-  if (it.type === 'image') return it.srcName || (it.src ? 'Image' : 'Image (empty)')
+  if (it.type === 'image') return it.design ? 'Your design' : (it.srcName || (it.src ? 'Image' : 'Image (empty)'))
   if (it.type === 'brand') return 'Club badge'
   if (it.type === 'sponsors') return 'Sponsors'
   if (it.type === 'element') return { line: 'Line', divider: 'Divider', rect: 'Box', ellipse: 'Circle', triangle: 'Triangle', star: 'Star', arrow: 'Arrow', chevron: 'Chevron', diamond: 'Diamond', hexagon: 'Hexagon' }[it.shape] || 'Element'
@@ -231,17 +239,29 @@ export function starterItems(key) {
   return s ? s.build() : []
 }
 
+// The club's own design as the bottom layer: the image block at the back of the
+// stack, sized to the canvas. Any earlier design is replaced, everything else is
+// kept, so swapping the picture never costs the blocks placed on top of it.
+export function withDesign(items, src, srcName, width, height) {
+  const design = newBlankItem('image', { design: true, src, srcName, x: 0, y: 0, w: width, h: height, fit: 'cover' })
+  return [design, ...(items || []).filter((it) => !it.design)]
+}
+
 export function defaultBlankItems() {
   return starterItems('players')
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
-function TextBlock({ item, palette }) {
+function TextBlock({ item, palette, data }) {
+  // A bound field prints the live value; null (nothing held yet) shows its sample.
+  const live = item.bind ? resolveBind(item.bind, data) : null
+  const shown = live === null || live === undefined ? item.text : live
   return (
     <div style={{
       width: item.w,
       fontFamily: item.fontFamily, fontSize: item.fontSize,
-      fontWeight: item.bold ? 800 : 400,
+      // The club's display font names its own weight (a one-weight face must not be bolded).
+      fontWeight: item.bold ? (String(item.fontFamily || '').includes('--social-display-font') ? 'var(--social-display-font-weight, 800)' : 800) : 400,
       color: resolveBlankColor(item.color, palette),
       textAlign: item.align, lineHeight: item.lineHeight ?? 1,
       letterSpacing: item.letterSpacing || 0,
@@ -250,7 +270,7 @@ function TextBlock({ item, palette }) {
       background: item.bg && item.bg !== 'none' ? resolveBlankColor(item.bg, palette) : 'transparent',
       padding: item.bg && item.bg !== 'none' ? '0.15em 0.4em' : 0,
       boxDecorationBreak: 'clone',
-    }}>{item.text || ' '}</div>
+    }}>{shown || ' '}</div>
   )
 }
 
@@ -299,13 +319,6 @@ const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'ap
 const headshotUrl = (p) => (p?.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null)
 
 // "LAST, First" / "First Last" split, mirroring splitName in AdminSocialPost.
-function splitPlayerName(name) {
-  const n = String(name || '').trim()
-  if (!n) return ['', '']
-  if (n.includes(', ')) { const [l, f] = n.split(', '); return [f || '', l || ''] }
-  const parts = n.split(/\s+/)
-  return [parts.slice(0, -1).join(' '), parts.slice(-1)[0] || '']
-}
 
 function DataBlock({ item, palette, data = {} }) {
   const ink = resolveBlankColor(item.color, palette)
@@ -530,7 +543,7 @@ function SponsorGridBlock({ item, data }) {
 }
 
 function renderContent(item, palette, team, data) {
-  if (item.type === 'text') return <TextBlock item={item} palette={palette} />
+  if (item.type === 'text') return <TextBlock item={item} palette={palette} data={data} />
   if (item.type === 'image') return <ImageBlock item={item} palette={palette} />
   if (item.type === 'element') return <ElementBlock item={item} palette={palette} />
   if (item.type === 'data') return <DataBlock item={item} palette={palette} data={data} />
@@ -573,6 +586,7 @@ function BlankBlock({ item, palette, team, data, interactive, selected, single, 
         // Re-armed explicitly so a block stays grabbable inside a pass-through
         // layer, whose root deliberately takes no pointer events at all.
         ...(interactive ? { pointerEvents: 'auto' } : null),
+        ...(item.locked ? { pointerEvents: 'none' } : null),
       }}>
       {renderContent(item, palette, team, data)}
       {interactive && single && (
@@ -777,15 +791,20 @@ export function BlankCanvas({
           <CreditMark ink={palette.ink || '#fff'} h={44} />
         </div>
       )}
-      {items.map((it) => (
+      {items.map((raw) => {
+        // The saved size is the canvas it was uploaded to. Drawn at the live
+        // canvas, so a design follows the Square / 4:5 / Story picker.
+        const it = raw.design && raw.locked ? { ...raw, x: 0, y: 0, w: width, h: height, rotation: 0 } : raw
+        return (
         <BlankBlock
-          key={it.id} item={it} palette={palette} team={team} data={data} interactive={interactive}
+          key={it.id} item={it} palette={palette} team={team} data={data} interactive={interactive && !it.locked}
           selected={selSet.has(it.id)} single={selectedIds.length === 1 && selSet.has(it.id)}
           outline={outline} handle={handle} accent={accent}
           onPointerDown={beginMove} onResize={beginResize} onRotate={beginRotate}
           onDuplicate={onDuplicate} onRemove={onRemove}
         />
-      ))}
+        )
+      })}
       {interactive && multi && gbb && (
         <div style={{ position: 'absolute', left: gbb.x, top: gbb.y, width: gbb.w, height: gbb.h, outline: `${outline}px dashed ${accent}`, pointerEvents: 'none' }}>
           <div onPointerDown={(e) => beginResizeGroup(e, gbb)} title="Drag to resize group"
