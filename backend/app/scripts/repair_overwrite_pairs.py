@@ -21,6 +21,9 @@ is visible, rather than paired to the wrong fixture, which is not.
 
     python -m app.scripts.repair_overwrite_pairs                 # every club, dry run
     python -m app.scripts.repair_overwrite_pairs <org|all> --apply
+        [--skip ID[,ID...]]  leave these imported matches unpaired (the id, or its
+                             first 8 characters, as the dry run prints it); for a
+                             pair a person has looked at and does not believe
 """
 from __future__ import annotations
 
@@ -82,7 +85,11 @@ _PAIR_SQL = """
 """
 
 
-async def repair_org(db, org_id, *, apply: bool) -> dict:
+def _skipped(mg_id: str, skip) -> bool:
+    return any(mg_id == s or (len(s) >= 6 and mg_id.startswith(s)) for s in skip)
+
+
+async def repair_org(db, org_id, *, apply: bool, skip=()) -> dict:
     org = str(org_id)
     club_tokens = mp.team_tokens((await db.execute(
         text(mp._CLUB_NAME_SQL), {"org": org})).scalar() or "")
@@ -106,7 +113,7 @@ async def repair_org(db, org_id, *, apply: bool) -> dict:
                                   from_day=from_day, to_day=to_day,
                                   exclude_twinned=True)
     syn_by_id = {m.id: m for m in synced}
-    pairs, held = [], []
+    pairs, held, skipped = [], [], []
     for mg_id, (game_id, _prefer) in mp.assign(imported, synced).items():
         imp, syn, r = next(m for m in imported if m.id == mg_id), syn_by_id[game_id], by_id[mg_id]
         pair = {
@@ -127,17 +134,28 @@ async def repair_org(db, org_id, *, apply: bool) -> dict:
         if pair["shared_scores"] == 0:
             held.append(pair)
             continue
+        if _skipped(mg_id, skip):
+            skipped.append(pair)
+            continue
         pairs.append(pair)
         if apply:
             await db.execute(text(_PAIR_SQL),
                              {"game": game_id, "mg": mg_id, "org": org})
     if apply:
         await db.commit()
-    return {"candidates": len(rows), "paired": len(pairs), "pairs": pairs, "held": held}
+    return {"candidates": len(rows), "paired": len(pairs), "pairs": pairs, "held": held,
+            "skipped": skipped}
 
 
 async def main() -> None:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    skip: list[str] = []
+    if "--skip" in sys.argv:
+        i = sys.argv.index("--skip")
+        if i + 1 >= len(sys.argv):
+            raise SystemExit("--skip needs one or more ids, comma separated")
+        skip = [x.strip() for x in sys.argv[i + 1].split(",") if x.strip()]
+    args = [a for i, a in enumerate(sys.argv[1:], 1)
+            if not a.startswith("--") and not (i > 1 and sys.argv[i - 1] == "--skip")]
     apply = "--apply" in sys.argv
     which = args[0] if args else "all"
 
@@ -156,7 +174,7 @@ async def main() -> None:
     for org_id, name in orgs:
         try:
             async with async_session_maker() as db:
-                res = await repair_org(db, org_id, apply=apply)
+                res = await repair_org(db, org_id, apply=apply, skip=skip)
         except Exception as exc:  # one club is never the whole run
             print(f"  {name}: FAILED — {type(exc).__name__}: {exc}")
             continue
@@ -165,7 +183,12 @@ async def main() -> None:
         for p in sorted(res["pairs"], key=lambda x: (x["season"], str(x["import_date"]))):
             print(f"      {p['season']}: import {p['import_date']} v {p['import_opp'] or '?'}"
                   f"  <->  synced {p['synced_date']} v {p['synced_opp'] or '?'}"
-                  f"  ({p['shared_scores']} shared scores)")
+                  f"  ({p['shared_scores']} shared scores)  [{str(p['manual_game_id'])[:8]}]")
+        if res.get("skipped"):
+            print(f"    skipped by --skip, left unpaired:")
+            for p in sorted(res["skipped"], key=lambda x: (x["season"], str(x["import_date"]))):
+                print(f"      {p['season']}: import {p['import_date']} v {p['import_opp'] or '?'}"
+                      f"  [{str(p['manual_game_id'])[:8]}]")
         if res.get("held"):
             print(f"    held back, no shared score — NOT paired, check by hand:")
             for p in sorted(res["held"], key=lambda x: (x["season"], str(x["import_date"]))):

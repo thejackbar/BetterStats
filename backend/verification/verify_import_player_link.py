@@ -282,6 +282,18 @@ async def main():
     check("after the join, the same script pairs it on its scorecard",
           (after["candidates"], after["paired"], after["pairs"][0]["shared_scores"] if after["pairs"] else None),
           (1, 1, 4))
+    # the pairing script can be told to leave a pair a person does not believe
+    async def repair_skip(skip):
+        async with async_session_maker() as db:
+            return await rop.repair_org(db, org, apply=False, skip=skip)
+
+    unpaired_id = after["pairs"][0]["manual_game_id"] if after["pairs"] else None
+    sk = await repair_skip([str(unpaired_id)[:8]])
+    check("--skip by the id the dry run prints leaves that pair unpaired and says so",
+          (sk["paired"], len(sk["skipped"])), (0, 1))
+    check("a skip shorter than six characters matches nothing",
+          (await repair_skip([str(unpaired_id)[:3]]))["paired"], 1)
+
     again = await ipl.link_players(org, apply=True)
     check("a second run finds nothing to merge", (again["found"], again["merged"]), (0, 0))
 
