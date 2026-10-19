@@ -18,6 +18,7 @@
 
 1. A manual game, its innings and a hand-typed correction are the club's own work. A function may ADD to and MOVE them. It may remove or replace only what it wrote itself, never what a person wrote. There is no upstream to re-pull them from.
 2. A merge MOVES a record, never deletes one. `_merge_players_core` once reached no `manual_*` table, each `ON DELETE CASCADE` on `players.id`, so it destroyed the removed player's manual and imported career. `services/merge_carry.CARRIED` is the list (shared with the undo via `merge_logs.carried_row_ids`); a table recording what a player DID belongs on it.
+   A pair of same-name records with a game each on the same date, in different games, is probably two people: `services/merge_safety.same_day_clash_dates`. `merge-players` answers 409 `same_day_clash` unless `confirm_same_day_clash` is sent, and Bulk Approve skips flagged pairs. The fantasy merge, `hand_added_merge` and the org merge call the core directly and are not gated.
 3. An import replaces only what it wrote (`cricketstatz_import.import_match`, matched on `cricketstatz_match_id`). `hand_edited_games` reads `manual_edit_logs` (the import writes none): an un-undone row means a person edited it, so the import skips the match and says so.
 4. A Full Rebuild deletes from `games`, never `manual_games`.
 5. Season and grade deletes refuse while a manual game or adjustment points at them (`_season_in_use`, `_grade_in_use`, `routers/manual_entries.py`). Both FKs cascade, so these are the only guard.

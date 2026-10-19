@@ -37,6 +37,7 @@ from app.services.player_aliases import seed_alias_on_rename
 from app.services import junior_hiding
 from app.services import merge_carry
 from app.services import merge_profile
+from app.services import merge_safety
 from app.services import grade_duplicates
 from app.services.import_reconcile import reconcile_imported_totals
 from app.auth.modules import require_module
@@ -287,10 +288,15 @@ async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), 
                     continue
                 emitted.add(pair_key)
                 a, b = await enrich(p1), await enrich(p2)
+                # Both records have a game on the same date, in different games: two people who
+                # share a name, not one person twice (services/merge_safety). Never Bulk Approve.
+                clash = await merge_safety.same_day_clash_dates(db, p1.id, p2.id)
                 candidate_pairs.append({
                     "kind": "exact",
                     "normalised_name": key,
                     "redacted": _is_redacted_name(p1.name) or _is_redacted_name(p2.name),
+                    "same_day_clash": len(clash),
+                    "same_day_clash_message": merge_safety.clash_message(clash) if clash else None,
                     "player_a": a,
                     "player_b": b,
                 })
@@ -381,6 +387,8 @@ class MergeRequest(BaseModel):
     keep_player_id: str
     remove_player_id: str
     org_id: str
+    # Set by the screen after the admin has read the same-day warning (services/merge_safety).
+    confirm_same_day_clash: bool = False
 
 
 async def _merge_players_core(
@@ -745,6 +753,11 @@ async def _merge_players_core(
 
 @router.post("/merge-players")
 async def merge_players(req: MergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_cap(MANAGE_MERGES))):
+    if not req.confirm_same_day_clash:
+        dates = await merge_safety.same_day_clash_dates(db, req.keep_player_id, req.remove_player_id)
+        if dates:
+            raise HTTPException(status_code=409, detail={
+                "code": "same_day_clash", "dates": len(dates), "message": merge_safety.clash_message(dates)})
     return await _merge_players_core(
         db, uuid.UUID(req.keep_player_id), uuid.UUID(req.remove_player_id), uuid.UUID(req.org_id), current_user,
     )

@@ -969,3 +969,13 @@ A player returned after a gap of years under a new Cricket Australia profile. On
 - The audit follows only one level of merge: ids merged into a profile that was itself merged show as NOT ON SHEET. Read those against `merge_logs`.
 - Lesson for the merge screen: a redacted name proves nothing about identity. The suggestions flag redacted pairs; a human merge of one is still allowed.
 - Proof: `verification/verify_gisborne_brook_fix_script.py` (real Postgres and the shipped scripts, 20 checks; control with the gate removed fails 6).
+
+## v9.123.3.1: Merge Duplicates stops same-name namesakes being bulk merged
+
+- Why: Mulgrave's two Luke Bennetts (a junior and an adult) matched the "exact name" tier and went through Bulk Approve. The pair looks identical on name alone, so the screen could not tell them from a real duplicate.
+- Rule: one person is not in two different games on one date. `services/merge_safety.same_day_clash_dates(db, a, b)` returns the dates on which record A and record B each have a game, in different games. A non-empty list means the pair is probably two people.
+- `GET /admin/merge-candidates` adds `same_day_clash` (count) and `same_day_clash_message` to each exact pair. The screen shows a "Probably two people" chip and leaves the pair out of Bulk Approve.
+- `POST /admin/merge-players` refuses with 409 `{code: "same_day_clash", dates, message}` unless the body carries `confirm_same_day_clash: true`. `MergeTools.mergeConfirming` asks, then retries with the flag. Bulk Approve never sends it, so a flagged pair that slipped into a bulk batch fails closed.
+- `merge_player_pair.py` prints the clash count and refuses without `--allow-shared-games`.
+- Not gated: the fantasy merge route (`routers/fantasy.py`), `hand_added_merge` and the org merge call the merge core directly.
+- Proof: `backend/verification/verify_merge_same_day_safeguard.py` (real Postgres, 11 checks; control against the previous `admin.py` fails 8). `frontend/verification/verify_merge_same_day_browser.mjs` (Chromium, API stubbed, 16 checks; control against the previous build fails 10).

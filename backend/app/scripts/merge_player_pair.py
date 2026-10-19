@@ -15,8 +15,9 @@ Dry run by default: it reports both players and changes nothing.
     python -m app.scripts.merge_player_pair <org-id-or-slug> <keep-player-id> <remove-player-id> [--apply] [--by "name"] [--allow-shared-games]
 
 The two players must be in the club. If both rows appear in the SAME game they are
-almost certainly two people (nobody is in one XI twice) and it refuses unless you
-pass --allow-shared-games.
+almost certainly two people (nobody is in one XI twice). If they each have a game on the same
+date, in different games, they are very likely two people who share a name (services/merge_safety).
+Either way it refuses unless you pass --allow-shared-games.
 
 From the server:
 
@@ -35,6 +36,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 
 from app.models.db import async_session_maker
+from app.services import merge_safety
 
 
 async def _club(db, target: str):
@@ -98,6 +100,7 @@ async def run(target: str, keep: str, remove: str, apply: bool, by: str, allow_s
         k = await describe(db, club_id, keep_id)
         r = await describe(db, club_id, remove_id)
         shared = await shared_games(db, keep_id, remove_id) if k and r else 0
+        clash = await merge_safety.same_day_clash_dates(db, keep_id, remove_id) if k and r else []
     print(f"{club_name}: {'APPLY' if apply else 'dry run'}")
     for role, who, pid in (("KEEP  ", k, keep_id), ("REMOVE", r, remove_id)):
         if who is None:
@@ -107,8 +110,13 @@ async def run(target: str, keep: str, remove: str, apply: bool, by: str, allow_s
     _print("KEEP  ", k)
     _print("REMOVE", r)
     print(f"  games both appear in: {shared}")
+    print(f"  dates both have a game, in different games: {len(clash)}")
     if shared and not allow_shared:
         print("  REFUSED: both rows are in the same game, so they are probably two different people. "
+              "Pass --allow-shared-games only if you have checked.")
+        return 1
+    if clash and not allow_shared:
+        print(f"  REFUSED: {merge_safety.clash_message(clash)} "
               "Pass --allow-shared-games only if you have checked.")
         return 1
     if k["status"] == "inactive":
