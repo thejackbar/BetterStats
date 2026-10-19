@@ -1,8 +1,7 @@
 """Detach one player's rows from synced games their id is not on. Dry run unless --apply.
 
 For a record that holds games CA does not credit to them: rows linked by a shared hidden-participant
-id (Leederville's Jonah Cumming, 36 games) or by a namesake's full name (Mulgrave's Luke Bennett, 16
-games). `audit_player_games` shows the same list read only; this uses the same rule
+id (Leederville's Jonah Cumming, 37 games). `audit_player_games` shows the same list read only; this uses the same rule
 (`services/game_attribution.classify`), so what is reported is what is repaired.
 
 For every synced game the player holds, CA's scorecard is read. A game is WRONG when it names people

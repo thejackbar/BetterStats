@@ -261,16 +261,13 @@ async def main() -> None:
 
     check("the ordinary game is stored", await stored(G_PLAIN))
     check("the game naming a player with a dangling redirect is stored", await stored(G_BAD))
-    # Since v9.123.2.4 a team-sheet entry is linked by full name only to a record with NO id of its
-    # own (participant_names.attachable_by_full_name); every old record here holds one, so the
-    # player is left for the Merge Players screen. The game must still be stored, whole.
-    check("that player's innings is NOT put on his old record by name (it holds an id), and the game is stored",
-          await runs_of(G_BAD, OLD_KOBI) == [], str(await runs_of(G_BAD, OLD_KOBI)))
+    check("that player's innings is on his old record, matched by full name",
+          await runs_of(G_BAD, OLD_KOBI) == [41], str(await runs_of(G_BAD, OLD_KOBI)))
     check("and the rest of the side is there too", await runs_of(G_BAD, MATE) == [12])
-    check("a player recorded as merged into himself: the game is stored, his innings not put on the old record by name",
-          await stored(G_SELF) and await runs_of(G_SELF, OLD_SAM) == [], str(await runs_of(G_SELF, OLD_SAM)))
-    check("two ids merged into each other (a loop): the game is stored, the innings not put on the old record by name",
-          await stored(G_LOOP) and await runs_of(G_LOOP, OLD_LOU) == [], str(await runs_of(G_LOOP, OLD_LOU)))
+    check("a player recorded as merged into himself: the game is stored, his innings on the old record",
+          await stored(G_SELF) and await runs_of(G_SELF, OLD_SAM) == [18], str(await runs_of(G_SELF, OLD_SAM)))
+    check("two ids merged into each other (a loop): the game is stored, the innings on the old record",
+          await stored(G_LOOP) and await runs_of(G_LOOP, OLD_LOU) == [33], str(await runs_of(G_LOOP, OLD_LOU)))
     check("a redirect to a player who exists still redirects",
           await stored(G_LIVE) and await runs_of(G_LIVE, OLD_RICK) == [27], str(await runs_of(G_LIVE, OLD_RICK)))
     check("a game the database refuses is not stored", not await stored(G_BROKEN))

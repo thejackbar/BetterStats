@@ -1,8 +1,8 @@
 """Verification: the rule that says whether a synced game is a player's, from CA's scorecard. No database.
 
 Shared by the audit and the repair script, so a mistake here would repair the wrong games. Covers the
-cases found on Leederville (Jonah Cumming: hidden-participant rows) and Mulgrave (Luke Bennett: a
-namesake's rows), and the ones that must NOT be called wrong: a merged second registration, a
+case found on Leederville (Jonah Cumming: hidden-participant rows), a stranger's id on a card, and the
+ones that must NOT be called wrong: a merged second registration, a
 per-club merged id, a card with nobody on it.
 
 Run:  python verification/verify_game_attribution.py
@@ -55,7 +55,7 @@ check("a per-club merged record (uuid5 of the raw id) is MERGE",
       ga.classify(card([SECOND_REG]), [ME], [removed_uuid5], ORG) == "MERGE")
 
 print("\n-- games that are NOT theirs --")
-check("Luke Bennett: a namesake's id on the card, not his", ga.classify(card([OTHER], bat_ids=[OTHER]), [ME], []) == "OFF")
+check("a stranger's id on the card, not his", ga.classify(card([OTHER], bat_ids=[OTHER]), [ME], []) == "OFF")
 check("Jonah Cumming: only the hidden placeholder id and strangers", ga.classify(card([OTHER], bat_ids=[PLACEHOLDER]), [ME], []) == "OFF")
 check("the placeholder id never counts as the player even if a record held it",
       ga.classify(card([PLACEHOLDER], bat_ids=[PLACEHOLDER, OTHER]), [PLACEHOLDER], []) == "OFF")

@@ -1,7 +1,7 @@
 """Verification: the repair that detaches a player's rows from games CA's card does not carry them in. Real Postgres.
 
-Reported: Leederville's Jonah Cumming held 36 games that are other people's (CA's hidden-participant
-id), Mulgrave's Luke Bennett held 16 that are a namesake's. `scripts/repair_misattributed_games`
+Reported: Leederville's Jonah Cumming held 37 games that are other people's (CA's hidden-participant
+id). `scripts/repair_misattributed_games`
 removes them, from CA's own scorecard.
 
 Runs the SHIPPED script functions over the `v_effective_*` views pulled from the migrations, with
@@ -169,7 +169,7 @@ async def seed() -> None:
 
         CARDS[str(G_ON)] = card([JON, OTHER1], bat=[JON, OTHER1])
         CARDS[str(G_MERGE)] = card([SECOND, OTHER1], bat=[SECOND, OTHER1])
-        CARDS[str(G_OFF1)] = card([OTHER1, OTHER2], bat=[OTHER1, OTHER2])               # a namesake's game
+        CARDS[str(G_OFF1)] = card([OTHER1, OTHER2], bat=[OTHER1, OTHER2])               # another team's game, Jonah is not on the card
         CARDS[str(G_OFF2)] = card([OTHER1], bat=[PLACEHOLDER, OTHER1], field=[PLACEHOLDER])   # hidden-participant rows
         CARDS[str(G_EMPTY)] = card()                                                      # nobody named: unjudgeable
 
@@ -242,7 +242,7 @@ async def main() -> int:
     ok = await run(apply=True, expect=2, by="Jack")
     check("apply with the right count succeeds", ok is None, str(ok))
     off1, off2 = await jon_rows(G_OFF1), await jon_rows(G_OFF2)
-    check("the namesake game's rows for Jonah are gone from every table", not any(off1.values()), str(off1))
+    check("the other team's game rows for Jonah are gone from every table", not any(off1.values()), str(off1))
     check("the hidden-participant game's rows for Jonah are gone", not any(off2.values()), str(off2))
     for label, g in (("the game CA carries him in", G_ON), ("the merged second registration's game", G_MERGE),
                      ("the game whose card names nobody", G_EMPTY)):

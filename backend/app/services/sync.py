@@ -1953,22 +1953,20 @@ async def sync_grassroots_game_level_data(
         # (id = uuid5(org, guid)) it maps the scorecard's raw participantId to
         # the uuid5 id so game-level rows attach to the right record.
         player_res = await session.execute(
-            select(Player.id, Player.grassroots_id, Player.name, Player.display_name_override, Player.is_player,
-                   Player.playhq_id)
+            select(Player.id, Player.grassroots_id, Player.name, Player.display_name_override, Player.is_player)
             .where(Player.organisation_id == org_uuid)
         )
         _name_pairs: list[tuple] = []
-        for _pid, _gid, _pname, _pover, _is_player, _phq in player_res:
+        for _pid, _gid, _pname, _pover, _is_player in player_res:
             known_player_ids.add(_pid)
             g = _parse_uuid(_gid) if _gid else None
             if g is not None and not participant_names.is_placeholder_id(str(g)):
                 pid_by_guid[g] = _pid
             if _is_player is not False:
-                _name_pairs.append((_pid, _pover or _pname, bool(_gid or _phq)))
-        # Full names held by exactly one player AND that player has no CA id of their own,
-        # for a team sheet whose participant id is one we never stored (see
-        # services/participant_names.py: a namesake must never inherit a record that has an id).
-        org_unique_names = participant_names.attachable_by_full_name(_name_pairs)
+                _name_pairs.append((_pid, _pover or _pname))
+        # Full names held by exactly one player, for a team sheet whose participant
+        # id is one we never stored (see services/participant_names.py).
+        org_unique_names = participant_names.unique_by_full_name(_name_pairs)
         logger.info(f"GR-sync: {len(known_player_ids)} existing players in org")
 
         # Build merged-away → kept redirect map so scorecards referencing a

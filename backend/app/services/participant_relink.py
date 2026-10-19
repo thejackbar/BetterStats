@@ -43,16 +43,16 @@ async def _org_maps(db: AsyncSession, org_id) -> tuple[dict, dict, dict]:
     """(guid -> player id, merged-away redirect, unique full names) for a club, built the
     way sync builds them so the two cannot disagree about who is "known"."""
     players = (await db.execute(text("""
-        SELECT id, grassroots_id, name, display_name_override, is_player, playhq_id
+        SELECT id, grassroots_id, name, display_name_override, is_player
         FROM players WHERE organisation_id = CAST(:o AS UUID)"""), {"o": str(org_id)})).all()
     by_guid: dict[str, uuid.UUID] = {}
     pairs = []
-    for pid, gid, name, over, is_player, phq in players:
+    for pid, gid, name, over, is_player in players:
         g = _parse_uuid(gid) if gid else None
         if g is not None:
             by_guid[str(g)] = pid
         if is_player is not False:
-            pairs.append((pid, over or name, bool(gid or phq)))
+            pairs.append((pid, over or name))
     raw = {r[0]: r[1] for r in (await db.execute(text("""
         SELECT removed_player_id, keep_player_id FROM merge_logs
         WHERE org_id = CAST(:o AS UUID) AND undone_at IS NULL"""), {"o": str(org_id)})).all()}
@@ -63,7 +63,7 @@ async def _org_maps(db: AsyncSession, org_id) -> tuple[dict, dict, dict]:
             seen.add(target)
             target = raw[target]
         merged[removed] = target
-    return by_guid, merged, participant_names.attachable_by_full_name(pairs)
+    return by_guid, merged, participant_names.unique_by_full_name(pairs)
 
 
 def _known(guid: str, by_guid: dict, merged: dict):
