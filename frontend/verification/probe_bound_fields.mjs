@@ -1,5 +1,6 @@
 // Pure checks for bound text fields: which words are a field, and what a field
 // prints. Plain Node, no browser:  node frontend/verification/probe_bound_fields.mjs
+import { readFileSync } from 'node:fs'
 import { bindFromToken, bindLabel, resolveBind, boundSlotCount, splitPlayerName } from '../src/social/boundResolve.js'
 let pass = 0, fail = 0
 const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); ok ? pass++ : fail++; console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${ok ? '' : `  got ${JSON.stringify(got)} want ${JSON.stringify(want)}`}`) }
@@ -23,6 +24,12 @@ eq('an unknown word is not guessed', bindFromToken('batsman 1'), null)
 eq('empty is not a field', bindFromToken(''), null)
 eq('player alone is not a field', bindFromToken('player'), null)
 eq('player 1 banana is not a field', bindFromToken('player 1 banana'), null)
+
+// The Canva app keeps its own copy of the token rules (canva-app/src/template/tokens.ts)
+// and tests it against this same table, so the two cannot drift apart.
+const shared = JSON.parse(readFileSync(new URL('../../canva-app/src/template/token-cases.json', import.meta.url), 'utf8'))
+eq('the shared token table is not empty', shared.length > 10, true)
+for (const c of shared) eq(`shared with Canva app: ${JSON.stringify(c.token)}`, bindFromToken(c.token), c.binding)
 
 // Labels
 eq('label for a slot', bindLabel('lineup.3.last'), 'Player 3 (last name)')
