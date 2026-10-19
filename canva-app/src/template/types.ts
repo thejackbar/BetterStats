@@ -112,6 +112,7 @@ export type FixedText = Omit<Field, "token" | "binding"> & { text: string };
 export type Canvas = { w: number; h: number };
 
 import type { Surface } from "./describe";
+import type { Panel } from "./panels";
 import type { ColorRole, FontRole } from "./roles";
 
 export type Extraction = {
@@ -123,6 +124,8 @@ export type Extraction = {
   fields: Field[];
   /** Fixed words such as a heading. */
   texts: FixedText[];
+  /** Surfaces behind text, which BetterCricket redraws in the club's colours. */
+  panels: Panel[];
   /** Rects, shapes and other non-text elements, for the "what is on this page" list. */
   surfaces: Surface[];
   skipped: Skipped[];

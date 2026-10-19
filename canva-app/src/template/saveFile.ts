@@ -1,34 +1,10 @@
 import type { TemplateFile } from "./buildFile";
 
-/** A safe file name for a template: letters, numbers, dashes. */
-export function fileNameFor(name: string): string {
-  const base = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return `${base || "template"}.bettercricket.json`;
-}
-
-/** Offers the template as a download. Returns false if the browser refused. */
-export function downloadTemplate(file: TemplateFile): boolean {
-  try {
-    const blob = new Blob([JSON.stringify(file)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileNameFor(file.name);
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Copies the template's text to the clipboard. Returns false if that is not allowed. */
+/**
+ * Copies the template's text to the clipboard. Returns false if that is not
+ * allowed. (A file download is not offered: Canva's panel does not let a page
+ * inside it save files, so the text is what crosses to BetterCricket.)
+ */
 export async function copyTemplate(file: TemplateFile): Promise<boolean> {
   const text = JSON.stringify(file);
   try {

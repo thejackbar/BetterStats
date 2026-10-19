@@ -18,7 +18,7 @@ import type {
   TextElementLike,
 } from "src/template/types";
 import { fetchPicture } from "src/template/picture";
-import { copyTemplate, downloadTemplate } from "src/template/saveFile";
+import { copyTemplate } from "src/template/saveFile";
 import { renderInTestProvider } from "src/utils/test_render";
 
 jest.mock("@canva/app-hooks");
@@ -106,7 +106,7 @@ describe("BetterCricket template panel", () => {
           paths: [{ d: "M0 0", colour: "#7B3B3B" }],
         }),
         rect({ top: 10, left: 10, width: 200, height: 200, media: "image" }),
-        textBox("{{player 1}}"),
+        textBox("{{player 1}}", { top: 200, left: 90, width: 300, height: 50 }),
       ]),
     );
     renderInTestProvider(<App />);
@@ -116,15 +116,49 @@ describe("BetterCricket template panel", () => {
     );
     expect(
       screen.getByText(
-        /Rectangle 1080 × 1080 at 0, 0: solid #ffffff, covers the whole page/,
+        /Rectangle 1080 × 1080 at 0, 0: solid #ffffff \(the background\)$/,
       ),
     ).toBeTruthy();
     expect(
-      screen.getByText(/Shape 400 × 900 at 70, 120: solid #7b3b3b$/),
+      screen.getByText(
+        /Shape 400 × 900 at 70, 120: solid #7b3b3b \(a panel behind your text\)$/,
+      ),
     ).toBeTruthy();
     expect(
-      screen.getByText(/Rectangle 200 × 200 at 10, 10: a picture$/),
+      screen.getByText(
+        /Rectangle 200 × 200 at 10, 10: a picture \(left out\)$/,
+      ),
     ).toBeTruthy();
+  });
+
+  it("says when a shape is turned", async () => {
+    showPage(
+      page([
+        rect({
+          left: -376,
+          top: 582,
+          width: 1346,
+          height: 451,
+          rotation: 90,
+          media: "image",
+        }),
+        textBox("{{player 1}}", {
+          top: 300,
+          left: 164,
+          width: 700,
+          height: 50,
+        }),
+      ]),
+    );
+    renderInTestProvider(<App />);
+    check();
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          /Rectangle 1346 × 451 at -376, 582: a picture, turned 90° \(a panel behind your text\)$/,
+        ),
+      ).toBeTruthy(),
+    );
   });
 
   it("shows no list when there is only text", async () => {
@@ -392,7 +426,6 @@ describe("BetterCricket template panel", () => {
         dataUrl: "data:image/png;base64,AAAA",
         bytes: 2 * 1024 * 1024,
       });
-      jest.mocked(downloadTemplate).mockReturnValue(true);
       jest.mocked(copyTemplate).mockResolvedValue(true);
     });
 
@@ -431,9 +464,10 @@ describe("BetterCricket template panel", () => {
         expect(screen.getByText(/Template ready/)).toBeTruthy(),
       );
       fireEvent.click(
-        screen.getByRole("button", { name: "Download template file" }),
+        screen.getByRole("button", { name: "Copy template text" }),
       );
-      expect(downloadTemplate).toHaveBeenCalledWith(
+      await waitFor(() => expect(copyTemplate).toHaveBeenCalled());
+      expect(copyTemplate).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "Saturday XI",
           format: "bettercricket-template",
@@ -441,7 +475,7 @@ describe("BetterCricket template panel", () => {
       );
     });
 
-    it("downloads and copies the file, and says where it goes in BetterCricket", async () => {
+    it("copies the template text, and says where to paste it in BetterCricket", async () => {
       livePage(els());
       renderInTestProvider(<App />);
       fireEvent.click(exportButton());
@@ -449,17 +483,16 @@ describe("BetterCricket template panel", () => {
         expect(screen.getByText(/Template ready/)).toBeTruthy(),
       );
       fireEvent.click(
-        screen.getByRole("button", { name: "Download template file" }),
-      );
-      expect(
-        screen.getByText(/Template file saved\. In BetterCricket/),
-      ).toBeTruthy();
-      fireEvent.click(
         screen.getByRole("button", { name: "Copy template text" }),
       );
       await waitFor(() =>
-        expect(screen.getByText(/Template text copied/)).toBeTruthy(),
+        expect(
+          screen.getByText(
+            /Template text copied\. In BetterCricket, open BetterPosts/,
+          ),
+        ).toBeTruthy(),
       );
+      expect(screen.getByText(/Or paste the template text/)).toBeTruthy();
       // The default file is the layout alone: no picture, and roles for the look.
       expect(copyTemplate).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -503,6 +536,47 @@ describe("BetterCricket template panel", () => {
       expect(fetchPicture).not.toHaveBeenCalled();
     });
 
+    it("carries a panel behind the text, and says so", async () => {
+      livePage([
+        rect({ left: 60, top: 100, width: 450, height: 900, media: "image" }),
+        textBox("LINE UP", { top: 150, left: 100, width: 300, height: 50 }),
+        textBox("{{player 1}}", {
+          top: 250,
+          left: 100,
+          width: 300,
+          height: 50,
+        }),
+      ]);
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            /Template ready: 1 field, 1 fixed word, and 1 panel\./,
+          ),
+        ).toBeTruthy(),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Copy template text" }),
+      );
+      await waitFor(() => expect(copyTemplate).toHaveBeenCalled());
+      expect(copyTemplate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          panels: [{ x: 60, y: 100, w: 450, h: 900, source: "picture" }],
+        }),
+      );
+    });
+
+    it("offers no download, because Canva's panel cannot save files", async () => {
+      livePage(els());
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/Template ready/)).toBeTruthy(),
+      );
+      expect(screen.queryByRole("button", { name: /Download/ })).toBeNull();
+    });
+
     it("lists a box that was left out of the file", async () => {
       livePage([textBox("{{player 1}}"), textBox("vs {{opponent}}")]);
       renderInTestProvider(<App />);
@@ -513,8 +587,7 @@ describe("BetterCricket template panel", () => {
       expect(screen.getByText(/has other words with the token/)).toBeTruthy();
     });
 
-    it("says so when the browser refuses the download or the copy", async () => {
-      jest.mocked(downloadTemplate).mockReturnValue(false);
+    it("says so when the browser refuses the copy", async () => {
       jest.mocked(copyTemplate).mockResolvedValue(false);
       livePage(els());
       renderInTestProvider(<App />);
@@ -522,12 +595,6 @@ describe("BetterCricket template panel", () => {
       await waitFor(() =>
         expect(screen.getByText(/Template ready/)).toBeTruthy(),
       );
-      fireEvent.click(
-        screen.getByRole("button", { name: "Download template file" }),
-      );
-      expect(
-        screen.getByText(/would not save the file from here/),
-      ).toBeTruthy();
       fireEvent.click(
         screen.getByRole("button", { name: "Copy template text" }),
       );
@@ -603,12 +670,12 @@ describe("BetterCricket template panel", () => {
       expect(back(list)).toEqual([0, 0, 0.25]);
       fireEvent.click(screen.getByRole("button", { name: "Open the picture" }));
       expect(requestOpenExternalUrl).toHaveBeenCalledWith({ url });
-      fireEvent.click(
-        screen.getByRole("button", { name: "Download fields only" }),
-      );
-      expect(downloadTemplate).toHaveBeenCalledWith(
+      fireEvent.click(screen.getByRole("button", { name: "Copy fields only" }));
+      await waitFor(() => expect(copyTemplate).toHaveBeenCalled());
+      expect(copyTemplate).toHaveBeenCalledWith(
         expect.not.objectContaining({ background: expect.anything() }),
       );
+      expect(screen.queryByRole("button", { name: /Download/ })).toBeNull();
     });
 
     it("offers a manual restore when the words cannot be put back, and it works", async () => {

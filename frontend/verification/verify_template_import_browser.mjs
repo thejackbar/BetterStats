@@ -268,6 +268,73 @@ const asRgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `rgb(${(n 
   await page.close()
 }
 
+// 6e. Panels: a surface behind the text becomes a faint accent rectangle behind it.
+const TEMPLATE3 = {
+  ...TEMPLATE2,
+  name: 'Panels',
+  panels: [
+    { x: 70, y: 130, w: 450, h: 950, source: 'picture' },
+    { x: 560, y: 560, w: 300, h: 200, source: 'solid', color: '#112233' },
+  ],
+}
+const panelAt = (page, w, h) => page.evaluate(([rootSrc, w, h]) => {
+  const root = (new Function(`return (${rootSrc})()`))()
+  if (!root) return null
+  const d = [...root.querySelectorAll('div')].find((x) => x.style.width === `${w}px` && x.style.height === `${h}px` && x.children.length === 0)
+  if (!d) return null
+  const cs = getComputedStyle(d)
+  const head = [...root.querySelectorAll('div')].find((x) => x.children.length === 0 && x.innerText.trim() === 'LINE UP')
+  const wrap = d.parentElement
+  return {
+    x: parseFloat(wrap.style.left), y: parseFloat(wrap.style.top), bg: cs.backgroundColor, opacity: parseFloat(cs.opacity),
+    behindText: !!head && !!(d.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING),
+  }
+}, [ROOT.toString(), w, h])
+{
+  const { page, puts } = await open()
+  await importFile(page, TEMPLATE3)
+  const a = await panelAt(page, 450, 950)
+  const b = await panelAt(page, 300, 200)
+  ck('a panel is drawn where the design had it', a && a.x === 70 && a.y === 130, JSON.stringify(a))
+  ck('a panel is faint (22%), so the text on it still reads', a && Math.abs(a.opacity - 0.22) < 0.001, JSON.stringify(a && a.opacity))
+  ck('a panel is drawn behind the heading', a && a.behindText === true, JSON.stringify(a))
+  ck('both panels use the club accent, not the designer\'s #112233', a && b && a.bg === b.bg && b.bg !== asRgb('#112233') && /rgb/.test(a.bg), JSON.stringify([a && a.bg, b && b.bg]))
+  const t = await say(page)
+  ck('the note counts the panels and says how to recolour them', /2 panels/.test(t) && /colour swatches/.test(t), '')
+  await tab(page, 'Design'); await page.waitForTimeout(400)
+  await page.getByPlaceholder('Template name...').fill('Panels')
+  await press(page.getByRole('button', { name: /^Save current$/ })); await page.waitForTimeout(1200)
+  const saved = puts.length ? JSON.stringify(puts[puts.length - 1]) : ''
+  ck('a saved panel is an ordinary rectangle block on the accent token', /"shape":"rect"[^}]*"color":"accent"|"color":"accent"[^}]*"shape":"rect"/.test(saved) && /"opacity":0\.22/.test(saved), saved.slice(0, 160))
+  await page.close()
+}
+{
+  const { page } = await open()
+  await page.getByTestId('club-style-input').uncheck({ timeout: 2000 }).catch(() => {})
+  await importFile(page, TEMPLATE3)
+  const a = await panelAt(page, 450, 950)
+  const b = await panelAt(page, 300, 200)
+  ck('keeping the Canva look: a solid panel uses the designer\'s colour, in full', b && b.bg === asRgb('#112233') && b.opacity === 1, JSON.stringify(b))
+  ck('keeping the Canva look: a picture panel (colour unknown) still uses the club accent', a && a.bg !== asRgb('#112233') && Math.abs(a.opacity - 0.22) < 0.001, JSON.stringify(a))
+  await page.close()
+}
+{
+  const { page } = await open()
+  await importFile(page, TEMPLATE3)
+  const before = await flat(page)
+  await importFile(page, TEMPLATE3)
+  ck('importing again does not stack the panels', !!(await panelAt(page, 450, 950)) && (await page.evaluate((rootSrc) => { const root = (new Function(`return (${rootSrc})()`))(); return [...root.querySelectorAll('div')].filter((x) => x.style.width === '450px' && x.style.height === '950px' && x.children.length === 0).length }, ROOT.toString())) === 1)
+  await page.close()
+}
+{
+  const { page } = await open()
+  await importFile(page, { ...TEMPLATE3, panels: [{ x: 0, y: 0, w: 5, h: 5 }, 'rubbish', null, { x: 10, y: 10, w: 300, h: 300, source: 'banana' }] })
+  const a = await panelAt(page, 300, 300)
+  const tiny = await panelAt(page, 5, 5)
+  ck('a panel that is too small, or not an object, is ignored; an unknown source still draws', !!a && !tiny, JSON.stringify([a, tiny]))
+  await page.close()
+}
+
 // 7. Bad files change nothing and say why.
 for (const [label, file, expect] of [
   ['not JSON', 'this is not json', /not JSON/],

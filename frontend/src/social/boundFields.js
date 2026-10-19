@@ -15,14 +15,17 @@
 //         "fontRole": "display",     // optional: display | body
 //         "align": "left", "uppercase": true, "lineHeight": 1, "letterSpacing": 0 }
 //     ],
-//     "texts": [ { "text": "LINE UP", ...same look keys as a field... } ]   // fixed words, optional
+//     "texts": [ { "text": "LINE UP", ...same look keys as a field... } ],  // fixed words, optional
+//     "panels": [ { "x": 70, "y": 130, "w": 450, "h": 950, "source": "picture", "color": "#7b3b3b" } ]
+//                // surfaces behind the text; "color" only when the design's was a solid colour
 //   }
 //
 // STRUCTURE FIRST. By default an import uses the roles, not the designer's own
 // values: a colour role becomes a palette token (so the club's palette tints it and
 // a palette switch re-tints it) and a font role becomes the club's display font or
 // Inter. The designer's colour and font name are kept in the file for a club that
-// chooses "keep my Canva look".
+// chooses "keep my Canva look". A panel is drawn as a rectangle behind the text, tinted
+// with the club's accent (a flat copy of a picture's colour cannot be known).
 //
 // Tokens (case and spacing do not matter; an unknown one is kept as plain text
 // and reported, never guessed):
@@ -32,6 +35,8 @@
 import { newBlankItem, withDesign, BLANK_FONTS, BLANK_STARTERS } from './blank-template'
 import { bindFromToken, bindLabel } from './boundResolve'
 
+// How much of the club's accent a panel carries: enough to show, not enough to fight the text.
+export const PANEL_TINT = 0.22
 const COLOR_ROLES = ['ink', 'accent', 'primary', 'secondary', 'white', 'black']
 const FONT_ROLES = ['display', 'body']
 const fontByKey = (key) => BLANK_FONTS.find((x) => x.key === key)
@@ -93,11 +98,22 @@ export function parseTemplateFile(raw) {
     if (!t || typeof t !== 'object' || typeof t.text !== 'string' || !t.text.trim()) continue
     texts.push({ text: t.text.slice(0, 500), ...look(t) })
   }
+  const panels = []
+  for (const p of (Array.isArray(doc.panels) ? doc.panels : []).slice(0, 10)) {
+    if (!p || typeof p !== 'object') continue
+    const pw = Math.round(num(p.w, 0)), ph = Math.round(num(p.h, 0))
+    if (pw < 20 || ph < 20) continue
+    panels.push({
+      x: Math.round(num(p.x, 0)), y: Math.round(num(p.y, 0)), w: pw, h: ph,
+      hex: HEX.test(p.color || '') ? p.color.toLowerCase() : null,
+      source: ['solid', 'picture', 'shape'].includes(p.source) ? p.source : 'picture',
+    })
+  }
   const w = num(doc.canvas && doc.canvas.w, 1080), h = num(doc.canvas && doc.canvas.h, 1080)
   return {
     name: String(doc.name || 'Imported template').slice(0, 80),
     canvas: { w, h }, background: typeof doc.background === 'string' ? doc.background : null,
-    fields, texts, warnings,
+    fields, texts, panels, warnings,
   }
 }
 
@@ -127,6 +143,18 @@ export function itemsFromTemplate(parsed, { designUrl, designName, width, height
     text, x: f.x, y: f.y, w: f.w, fontFamily: fontOf(f), fontSize: f.fontSize, bold: f.bold,
     color: colorOf(f), align: f.align, lineHeight: f.lineHeight, letterSpacing: f.letterSpacing, uppercase: f.uppercase,
   })
+  // A panel is a plain rectangle in the club's accent, kept faint so the text on it
+  // reads in light or dark mode alike. Keeping the Canva look uses the designer's
+  // colour, but only where the panel was a solid colour (a picture's colour is not known).
+  const panelItems = parsed.panels.map((p) => {
+    const own = !clubStyle && p.hex
+    return {
+      ...newBlankItem('element', { shape: 'rect' }),
+      x: p.x, y: p.y, w: p.w, h: p.h,
+      color: own ? p.hex : 'accent', opacity: own ? 1 : PANEL_TINT, fill: true, radius: 0,
+      fromTemplate: true,
+    }
+  })
   const fixed = parsed.texts.map((t) => ({ ...make(t.text, t), fromTemplate: true }))
   const fields = parsed.fields.map((f) => ({
     ...make(f.bind ? bindLabel(f.bind).toUpperCase() : f.token, f),
@@ -144,5 +172,5 @@ export function itemsFromTemplate(parsed, { designUrl, designName, width, height
   const untouched = BLANK_STARTERS.some((st) => { const b = st.build(); return b.length === own.length && b.every((x, i) => sig(x) === sig(own[i])) })
   const others = keep.filter((it) => !it.fromTemplate && !it.design && !(untouched && own.includes(it)))
   const base = designUrl ? withDesign(others, designUrl, designName, width, height) : [...keep.filter((it) => it.design), ...others]
-  return [...base, ...fixed, ...fields]
+  return [...base, ...panelItems, ...fixed, ...fields]
 }

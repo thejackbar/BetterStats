@@ -1,3 +1,4 @@
+import type { Panel } from "./panels";
 import type { ColorRole, FontRole } from "./roles";
 import type { Extraction, Field, FixedText } from "./types";
 
@@ -27,6 +28,14 @@ export type TemplateFile = {
   background?: string;
   fields: (Look & { token: string })[];
   texts?: (Look & { text: string })[];
+  panels?: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    color?: string;
+    source: Panel["source"];
+  }[];
 };
 
 const lookOf = (f: Field | FixedText): Look => ({
@@ -63,6 +72,18 @@ export function buildTemplateFile(
     canvas: extraction.canvas,
     ...(opts.background ? { background: opts.background } : null),
     fields: extraction.fields.map((f) => ({ token: f.token, ...lookOf(f) })),
+    ...(extraction.panels.length
+      ? {
+          panels: extraction.panels.map((p) => ({
+            x: p.x,
+            y: p.y,
+            w: p.w,
+            h: p.h,
+            ...(p.color ? { color: p.color } : null),
+            source: p.source,
+          })),
+        }
+      : null),
     ...(extraction.texts.length
       ? { texts: extraction.texts.map((t) => ({ text: t.text, ...lookOf(t) })) }
       : null),

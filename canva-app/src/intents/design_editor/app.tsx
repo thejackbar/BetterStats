@@ -45,7 +45,7 @@ import {
 import type { TemplateFile } from "src/template/buildFile";
 import type { Hidden } from "src/template/hide";
 import { fetchPicture } from "src/template/picture";
-import { copyTemplate, downloadTemplate } from "src/template/saveFile";
+import { copyTemplate } from "src/template/saveFile";
 import { insertBlock, type InsertResult } from "src/template/insert";
 import { inCurrentPage } from "src/template/session";
 import { bindFromToken, bindLabel } from "src/template/tokens";
@@ -78,6 +78,7 @@ type ExportView =
       file: TemplateFile;
       fieldCount: number;
       textCount: number;
+      panelCount: number;
       bytes: number | null;
       skipped: Skipped[];
     }
@@ -86,6 +87,7 @@ type ExportView =
       file: TemplateFile;
       fieldCount: number;
       textCount: number;
+      panelCount: number;
       reason: string;
       url: string | null;
       skipped: Skipped[];
@@ -267,6 +269,7 @@ export const App = () => {
           file: out.file,
           fieldCount: out.fieldCount,
           textCount: out.textCount,
+          panelCount: out.panelCount,
           bytes: out.pictureBytes,
           skipped: out.skipped,
         });
@@ -276,6 +279,7 @@ export const App = () => {
           file: out.file,
           fieldCount: out.fieldCount,
           textCount: out.textCount,
+          panelCount: out.panelCount,
           reason: out.reason,
           url: out.pictureUrl,
           skipped: out.skipped,
@@ -318,47 +322,27 @@ export const App = () => {
     }
   };
 
-  const saveTemplate = (file: TemplateFile, how: "download" | "copy") => {
-    const sent = how === "download" ? downloadTemplate(file) : null;
-    const done = (ok: boolean) =>
-      setNotice(
-        ok
-          ? {
-              tone: "positive",
-              text:
-                how === "download"
-                  ? intl.formatMessage({
-                      defaultMessage:
-                        "Template file saved. In BetterCricket, open BetterPosts, Blank canvas, and choose Import a template file.",
-                      description: "After the template file was downloaded",
-                    })
-                  : intl.formatMessage({
-                      defaultMessage:
-                        "Template text copied. In BetterCricket, paste it into the Import box on the Blank canvas.",
-                      description: "After the template text was copied",
-                    }),
-            }
-          : {
-              tone: "warn",
-              text:
-                how === "download"
-                  ? intl.formatMessage({
-                      defaultMessage:
-                        "Your browser would not save the file from here. Use Copy template text instead.",
-                      description: "The download was refused",
-                    })
-                  : intl.formatMessage({
-                      defaultMessage:
-                        "Your browser would not allow copying from here.",
-                      description: "The copy was refused",
-                    }),
-            },
-      );
-    if (sent != null) {
-      done(sent);
-    } else {
-      void copyTemplate(file).then(done);
-    }
+  const copyOut = async (file: TemplateFile) => {
+    const ok = await copyTemplate(file);
+    setNotice(
+      ok
+        ? {
+            tone: "positive",
+            text: intl.formatMessage({
+              defaultMessage:
+                "Template text copied. In BetterCricket, open BetterPosts, then the Blank canvas, then Content, and paste it under “Or paste the template text”.",
+              description: "After the template text was copied",
+            }),
+          }
+        : {
+            tone: "warn",
+            text: intl.formatMessage({
+              defaultMessage:
+                "Your browser would not allow copying from here. Try again, or try a different browser.",
+              description: "The copy was refused",
+            }),
+          },
+    );
   };
 
   const skippedText = (s: Skipped): string =>
@@ -416,12 +400,24 @@ export const App = () => {
       },
       { kind, fill, w: sf.w, h: sf.h, x: sf.x, y: sf.y },
     );
-    return sf.fullPage
-      ? `${line}${intl.formatMessage({
-          defaultMessage: ", covers the whole page",
-          description: "Added to a line when the element covers the whole page",
-        })}`
-      : line;
+    const use = intl.formatMessage(
+      {
+        defaultMessage:
+          "{use, select, panel {a panel behind your text} background {the background} other {left out}}",
+        description: "What the export does with a non-text element",
+      },
+      { use: sf.use },
+    );
+    const turned = sf.rotation
+      ? intl.formatMessage(
+          {
+            defaultMessage: ", turned {degrees}°",
+            description: "Added to a line when the element is rotated",
+          },
+          { degrees: sf.rotation },
+        )
+      : "";
+    return `${line}${turned} (${use})`;
   };
 
   const off = !canRead || busy;
@@ -757,25 +753,42 @@ export const App = () => {
               {exp.bytes == null
                 ? intl.formatMessage(
                     {
-                      defaultMessage: "Template ready: {fields} and {texts}.",
+                      defaultMessage: "Template ready: {parts}.",
                       description: "The export finished, with no picture",
                     },
                     {
-                      fields: intl.formatMessage(
-                        {
-                          defaultMessage:
-                            "{count, plural, one {# field} other {# fields}}",
-                          description: "A number of fields",
-                        },
-                        { count: exp.fieldCount },
-                      ),
-                      texts: intl.formatMessage(
-                        {
-                          defaultMessage:
-                            "{count, plural, one {# fixed word} other {# fixed words}}",
-                          description: "A number of fixed words",
-                        },
-                        { count: exp.textCount },
+                      parts: intl.formatList(
+                        [
+                          intl.formatMessage(
+                            {
+                              defaultMessage:
+                                "{count, plural, one {# field} other {# fields}}",
+                              description: "A number of fields",
+                            },
+                            { count: exp.fieldCount },
+                          ),
+                          intl.formatMessage(
+                            {
+                              defaultMessage:
+                                "{count, plural, one {# fixed word} other {# fixed words}}",
+                              description: "A number of fixed words",
+                            },
+                            { count: exp.textCount },
+                          ),
+                          ...(exp.panelCount
+                            ? [
+                                intl.formatMessage(
+                                  {
+                                    defaultMessage:
+                                      "{count, plural, one {# panel} other {# panels}}",
+                                    description: "A number of panels",
+                                  },
+                                  { count: exp.panelCount },
+                                ),
+                              ]
+                            : []),
+                        ],
+                        { type: "conjunction" },
                       ),
                     },
                   )
@@ -806,21 +819,7 @@ export const App = () => {
                 })}
               </Alert>
             )}
-            <Button
-              variant="secondary"
-              onClick={() => saveTemplate(exp.file, "download")}
-              stretch
-            >
-              {intl.formatMessage({
-                defaultMessage: "Download template file",
-                description: "Button that downloads the template file",
-              })}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => saveTemplate(exp.file, "copy")}
-              stretch
-            >
+            <Button variant="primary" onClick={() => copyOut(exp.file)} stretch>
               {intl.formatMessage({
                 defaultMessage: "Copy template text",
                 description: "Button that copies the template text",
@@ -859,18 +858,7 @@ export const App = () => {
             )}
             <Button
               variant="secondary"
-              onClick={() => saveTemplate(exp.file, "download")}
-              stretch
-            >
-              {intl.formatMessage({
-                defaultMessage: "Download fields only",
-                description:
-                  "Button that downloads a template without its picture",
-              })}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => saveTemplate(exp.file, "copy")}
+              onClick={() => copyOut(exp.file)}
               stretch
             >
               {intl.formatMessage({

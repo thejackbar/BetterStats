@@ -4060,7 +4060,7 @@ export default function AdminSocialPost() {
       const bound = parsed.fields.filter((f) => f.bind).length
       flashNote({
         warn: warnings.length > 0,
-        text: `Imported “${parsed.name}”: ${bound} field${bound === 1 ? '' : 's'}${slots ? `, ${slots} player slot${slots === 1 ? '' : 's'}` : ''}${parsed.texts.length ? `, ${parsed.texts.length} fixed word${parsed.texts.length === 1 ? '' : 's'}` : ''}. ${clubStyle ? 'Colours and fonts come from your club, so changing your palette or font restyles it. ' : ''}Add the players, opponent and match details in the panels on the left.${warnings.length ? ` ${warnings.join(' ')}` : ''}`,
+        text: `Imported “${parsed.name}”: ${bound} field${bound === 1 ? '' : 's'}${slots ? `, ${slots} player slot${slots === 1 ? '' : 's'}` : ''}${parsed.texts.length ? `, ${parsed.texts.length} fixed word${parsed.texts.length === 1 ? '' : 's'}` : ''}${parsed.panels.length ? `, ${parsed.panels.length} panel${parsed.panels.length === 1 ? '' : 's'} (recolour with the block's colour swatches)` : ''}. ${clubStyle ? 'Colours and fonts come from your club, so changing your palette or font restyles it. ' : ''}Add the players, opponent and match details in the panels on the left.${warnings.length ? ` ${warnings.join(' ')}` : ''}`,
         tool: 'content',
       }, 16000)
     } catch (e) {

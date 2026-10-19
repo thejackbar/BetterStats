@@ -25,6 +25,7 @@ export type ExportOutcome =
       file: TemplateFile;
       fieldCount: number;
       textCount: number;
+      panelCount: number;
       /** Size of the picture in the file, or null when the file has none. */
       pictureBytes: number | null;
       /** Boxes that were left out of the file, and why. */
@@ -36,6 +37,7 @@ export type ExportOutcome =
       file: TemplateFile;
       fieldCount: number;
       textCount: number;
+      panelCount: number;
       pictureUrl: string | null;
       reason: string;
       skipped: Skipped[];
@@ -171,11 +173,13 @@ export async function exportTemplate(
   const url = response.exportBlobs[0]?.url ?? null;
   const fieldCount = named.fields.length;
   const textCount = named.texts.length;
+  const panelCount = named.panels.length;
   const withoutPicture = (reason: string): ExportOutcome => ({
     status: "no_picture",
     file: buildTemplateFile(named, { name: opts.name }),
     fieldCount,
     textCount,
+    panelCount,
     pictureUrl: url,
     reason,
     skipped: named.skipped,
@@ -193,6 +197,7 @@ export async function exportTemplate(
       }),
       fieldCount,
       textCount,
+      panelCount,
       pictureBytes: picture.bytes,
       skipped: named.skipped,
     };
@@ -237,6 +242,7 @@ async function exportStructure(
     file: buildTemplateFile(named, { name }),
     fieldCount: named.fields.length,
     textCount: named.texts.length,
+    panelCount: named.panels.length,
     pictureBytes: null,
     skipped: named.skipped,
   };

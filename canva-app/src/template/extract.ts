@@ -1,4 +1,5 @@
 import { describeSurfaces } from "./describe";
+import { findPanels } from "./panels";
 import { colorRole, fontRole } from "./roles";
 import { bindFromToken, wantsUppercase } from "./tokens";
 import { textBoxes, type TextBox } from "./walk";
@@ -128,13 +129,30 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
       `This page is ${Math.round(page.dimensions.width)} x ${Math.round(page.dimensions.height)}, which is not a BetterCricket post shape (square, 4:5 or story). It will be cropped to fit.`,
     );
   }
+  // Anything behind text becomes a panel; the rest is the background or left out.
+  const anchors = textBoxes(page.elements.toArray())
+    .filter((b) => b.text.trim())
+    .map((b) => ({
+      x: b.offset.x + b.el.left,
+      y: b.offset.y + b.el.top,
+      w: b.el.width,
+      h: b.el.height,
+      align: ALIGN[readLook(b.el).textAlign ?? "start"],
+    }));
+  const found = findPanels(
+    describeSurfaces(page),
+    anchors,
+    page.dimensions,
+    scale,
+  );
   return {
     canvas,
     postSize,
     scale,
     fields,
     texts,
-    surfaces: describeSurfaces(page),
+    panels: found.panels,
+    surfaces: found.surfaces,
     skipped,
     warnings,
   };
