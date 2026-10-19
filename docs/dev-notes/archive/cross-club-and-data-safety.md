@@ -950,3 +950,40 @@ Gisborne (Oct 2026): club users merged several CA-redacted junior rows (names re
 - A merge undo restores only the rows logged at merge time. A game that synced after the merge sits on the kept player and is not moved back; the next sync recreates it on the restored row.
 - Undo order is not enforced by `undo_merge` itself. The script skips a log that has a newer live merge on the same players and says so.
 - Proof: `verify_undo_player_merge_script.py` (real Postgres, 18 checks; control with the apply branch disabled fails the 8 restore, undone and audit checks).
+
+
+## Merging one named pair from the server (Oct 2026)
+
+Gisborne: one player held under several Cricket Australia profiles. Redacted junior rows read `********`, so Admin Manual Merge cannot find them by name, and its keep-or-remove default is a guess (playhq id, then seasons). `app/scripts/merge_player_pair.py` takes the club and the two ids and says which stays.
+- It runs the shipped `_merge_players_core`; it adds only the report (games, span, live merges already into each, squad and availability rows, games both rows are in) and the refusals.
+- Both rows in the SAME game is the evidence of two people: refused unless `--allow-shared-games`.
+- After a merge the removed id is a sync redirect. Chains resolve transitively (`sync.merged_away`), so earlier merges into the removed row follow it to the keeper.
+- Proof: `verify_merge_player_pair_script.py` (real Postgres, 16 checks; control with the apply branch disabled fails the merge, merge-log and audit checks).
+
+
+## Gisborne: one player, two profiles, merged into the wrong people (Oct 2026)
+
+A player returned after a gap of years under a new Cricket Australia profile. On 14 Oct club users merged five redacted (`********`) junior profiles into the new one, and that one into an unrelated player whose own career ran 2018 to 2023. Ages and grades gave it away: Under 11 games and Under 17 games in the same season, and 13 games the audit matched to another named player (`audit_player_games`, "NOT ON SHEET").
+- `ops/gisborne-brook-fix.sh` (one-off, ids built in) undoes the seven merges newest first (`undo_player_merge`), refuses to merge unless the new profile then holds only a few games, all from this season and none in common with the old profile, then merges it into the old profile (`merge_player_pair`). `preview`, `undo`, `merge [--apply]`, `verify`.
+- A game synced after a merge is credited to the kept player through the redirect and is not in the merge log, so an undo leaves it there. `verify` lists them. A re-sync does not delete game rows, so it is not tidied by sync.
+- The audit follows only one level of merge: ids merged into a profile that was itself merged show as NOT ON SHEET. Read those against `merge_logs`.
+- Lesson for the merge screen: a redacted name proves nothing about identity. The suggestions flag redacted pairs; a human merge of one is still allowed.
+- Proof: `verification/verify_gisborne_brook_fix_script.py` (real Postgres and the shipped scripts, 20 checks; control with the gate removed fails 6).
+
+## v9.123.3.1: Merge Duplicates stops same-name namesakes being bulk merged
+
+- Why: Mulgrave's two Luke Bennetts (a junior and an adult) matched the "exact name" tier and went through Bulk Approve. The pair looks identical on name alone, so the screen could not tell them from a real duplicate.
+- Rule: one person is not in two different games on one date. `services/merge_safety.same_day_clash_dates(db, a, b)` returns the dates on which record A and record B each have a game, in different games. A non-empty list means the pair is probably two people.
+- `GET /admin/merge-candidates` adds `same_day_clash` (count) and `same_day_clash_message` to each exact pair. The screen shows a "Probably two people" chip and leaves the pair out of Bulk Approve.
+- `POST /admin/merge-players` refuses with 409 `{code: "same_day_clash", dates, message}` unless the body carries `confirm_same_day_clash: true`. `MergeTools.mergeConfirming` asks, then retries with the flag. Bulk Approve never sends it, so a flagged pair that slipped into a bulk batch fails closed.
+- `merge_player_pair.py` prints the clash count and refuses without `--allow-shared-games`.
+- Not gated: the fantasy merge route (`routers/fantasy.py`), `hand_added_merge` and the org merge call the merge core directly.
+- Proof: `backend/verification/verify_merge_same_day_safeguard.py` (real Postgres, 11 checks; control against the previous `admin.py` fails 8). `frontend/verification/verify_merge_same_day_browser.mjs` (Chromium, API stubbed, 16 checks; control against the previous build fails 10).
+
+
+## Moving a game's rows to the right player (Oct 2026)
+
+After the Gisborne merges were undone, a game that synced after the merge (17 Oct) was still credited to the player the id used to be merged into. `repair_misattributed_games` deletes such rows and sync does not recreate them, so it would have lost the innings. `app/scripts/move_game_rows.py` moves them instead.
+- Named games only; ten places (appearances, batting, bowling, fielding, fall of wicket, bowler wickets as bowler and fielder, partnerships both sides, milestones). Refuses a game where the receiver already holds a row. The ids moved go in one `audit_logs` entry; `--restore AUDIT_ID` puts them back, once.
+- Season and grade stats are not touched: sync deletes and rewrites a season's `player_season_stats` and grade stats (`sync.py`), so the next sync of the season corrects them. Check the season afterwards.
+- Proof: `verification/verify_move_game_rows_script.py` (real Postgres, 17 checks; control with the move disabled fails the moved and restored checks).

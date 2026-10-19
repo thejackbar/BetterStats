@@ -12,7 +12,7 @@ import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useAllowMaybe, useSelectConfig, useWeekNames } from '../../../lib/useAvailabilityConfig'
 import {
   Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
-  playedWithinYears, RuleTags, Chip,
+  playedWithinYears, RuleTags, Chip, RecencySelect, RECENCY_OPTIONS, RECENCY_OVER, recencyOf, monthsAgoISO,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
 import usePersistedState from '../../../lib/usePersistedState'
@@ -83,6 +83,9 @@ export default function AdminAvailability() {
   // Junior grades (per Manage Grades) are left out until asked for.
   // Whether junior grades show is a Settings choice now, not a switch on this screen.
   const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
+  // "Hasn't played since": a RECENCY_OVER + N value (last played more than N years
+  // ago), 0 for off. Sits beside the club's own "played within" window, never replaces it.
+  const [lapsed, setLapsed] = usePersistedState('avail.lapsed', 0, (v) => Number.isInteger(v) && (v === 0 || v > RECENCY_OVER))
   const [selectedIds, setSelectedIds] = useState(() => new Set()) // picked in any XI this round
 
   // Selected week (column) — drives the Pick XI handoff and single-week bulk.
@@ -141,7 +144,32 @@ export default function AdminAvailability() {
     if (a < 0 || b < 0) return allDates
     return allDates.slice(Math.min(a, b), Math.max(a, b) + 1)
   }, [allDates, rangeApplied])
-  const squadOptions = useMemo(() => data?.all_squads || [], [data])
+  // The Squad facet lists only squads worth picking: a squad someone in the shown
+  // roster belongs to, not switched off, and (unless Show juniors is on) not junior.
+  // The server says which names are off or junior; a name it knows nothing about stays.
+  const squadOptions = useMemo(() => {
+    const meta = data?.squad_meta || {}
+    const inRoster = new Set()
+    for (const p of data?.players || []) {
+      if (roster === 'current' && !p.is_current) continue
+      for (const s of p.squads || []) inRoster.add(s)
+    }
+    return (data?.all_squads || []).filter((s) => (
+      inRoster.has(s) && meta[s]?.active !== false && (showJuniors || !meta[s]?.junior)
+    ))
+  }, [data, roster, showJuniors])
+
+  // "Last played more than N years ago" choices that can still return someone:
+  // narrower than the club's played-within window, and (on Current squad) inside
+  // the dormancy window that roster is already limited to.
+  const lapsedOptions = useMemo(() => {
+    const maxYears = Math.min(
+      years < 0 ? 0 : (years || Infinity),
+      roster === 'current' ? (data?.dormancy_months || 24) / 12 : Infinity,
+    )
+    return RECENCY_OPTIONS.filter((o) => o.value > RECENCY_OVER && o.value - RECENCY_OVER < maxYears)
+  }, [years, roster, data])
+  const lapsedYears = lapsedOptions.some((o) => o.value === lapsed) ? lapsed : 0
 
   const facets = useMemo(() => [
     { key: 'squad', label: 'Squad', type: 'multi', options: squadOptions.map((s) => ({ value: s, label: s })) },
@@ -213,12 +241,13 @@ export default function AdminAvailability() {
       if (values.role?.length && !values.role.includes(p.player_role)) return false
       if (values.selected === 'selected' && !selectedIds.has(p.id)) return false
       if (values.selected === 'unselected' && selectedIds.has(p.id)) return false
-      if (!playedWithinYears(p.last_played, years)) return false
+      if (!playedWithinYears(recencyOf(p), years)) return false
+      if (!playedWithinYears(p.last_played, lapsedYears)) return false
       if (search.trim() && !nameMatchesSearch(p.display_name, search)) return false
       if (!matchesResponse(p)) return false
       return true
     })
-  }, [data, roster, values, years, search, selectedIds, matchesResponse])
+  }, [data, roster, values, years, lapsedYears, search, selectedIds, matchesResponse])
 
   // Per-date player list as objects carrying a flat `availability` status, so we
   // can hand the matched-player set straight to <AvailSummary statusOf=…>.
@@ -228,6 +257,26 @@ export default function AdminAvailability() {
   const colInCount = useCallback((date) =>
     players.reduce((n, p) => n + ((avail[p.id]?.[date]?.status || 'NO_RESPONSE') === 'AVAILABLE' ? 1 : 0), 0),
   [players, avail])
+
+  // "No longer dormant" (active) or dormant again. The server stamps the day; the
+  // row is patched in place so the screen keeps its scroll and filters.
+  const dormantCutoff = useMemo(() => monthsAgoISO(data?.dormancy_months || 24), [data?.dormancy_months])
+  const setDormancy = async (p, active) => {
+    if (!canEdit) return
+    try {
+      const r = await api.bsSetDormancy(p.id, active)
+      const cleared = r?.dormancy_cleared_on || null
+      setData((d) => ({
+        ...d,
+        players: d.players.map((x) => {
+          if (x.id !== p.id) return x
+          const dormant = !!x.last_played && (cleared && cleared > x.last_played ? cleared : x.last_played) < dormantCutoff
+          return { ...x, dormancy_cleared_on: cleared, is_dormant: dormant && !x.is_inactive, is_current: !x.is_inactive && !dormant }
+        }),
+      }))
+      toast.success(active ? `${p.display_name} is no longer dormant` : `${p.display_name} is dormant again`)
+    } catch (e) { toast.error('Could not change that: ' + e.message) }
+  }
 
   // ---- single-cell write (quick modal; no cell cycling) --------------------
   const setCell = async (pid, date, status) => {
@@ -326,6 +375,11 @@ export default function AdminAvailability() {
             { value: 'current', label: 'Current squad' },
             { value: 'all', label: 'All' },
           ]} />
+          {lapsedOptions.length > 0 && (
+            <RecencySelect value={lapsedYears} onChange={setLapsed}
+              title={roster === 'current' ? "Only players who haven't played since. Switch to All to look further back." : "Only players who haven't played since"}
+              options={[{ value: 0, label: "Hasn't played: any time" }, ...lapsedOptions.map((o) => ({ ...o, group: undefined }))]} />
+          )}
           <button onClick={() => setRangeOn((v) => !v)}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${rangeOn ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}>
             <Icon name="fixtures" size={14} /> Date range {rangeOn ? '▲' : '▼'}
@@ -485,6 +539,25 @@ export default function AdminAvailability() {
                     <span className="text-sm font-medium truncate">{fmt(p.display_name)}</span>
                     <RuleTags player={p} />
                     {p.is_dormant && <span className="font-mono text-[9px] text-amber-300/80 uppercase shrink-0" title={`Dormant${p.last_played ? ' since ' + fmtYear(p.last_played) : ''}`}>dormant</span>}
+                    {canEdit && p.is_dormant && (
+                      <button type="button" onClick={() => setDormancy(p, true)} data-not-dormant
+                        title="No longer dormant: they will be listed in availability, the squads board and selection"
+                        className="shrink-0 rounded border border-pb-hairline2 px-1.5 py-0.5 text-[10px] font-display font-semibold text-pb-accent hover:bg-pb-accent/10 [@media(pointer:coarse)]:px-2.5 [@media(pointer:coarse)]:py-2">
+                        Not dormant
+                      </button>
+                    )}
+                    {!p.is_dormant && !p.is_inactive && p.dormancy_cleared_on && p.last_played && p.last_played < dormantCutoff && (
+                      <>
+                        <span className="font-mono text-[9px] text-pb-accent/80 uppercase shrink-0" title={`Marked no longer dormant on ${p.dormancy_cleared_on}. Last game ${p.last_played}.`}>returning</span>
+                        {canEdit && (
+                          <button type="button" onClick={() => setDormancy(p, false)} data-dormant-again
+                            title="Mark dormant again"
+                            className="shrink-0 text-[10px] text-pb-faint underline underline-offset-2 hover:text-pb-accent [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:py-2">
+                            undo
+                          </button>
+                        )}
+                      </>
+                    )}
                     {p.is_inactive && <span className="font-mono text-[9px] text-pb-red/80 uppercase shrink-0" title="Marked inactive">inactive</span>}
                   </div>
                 </td>

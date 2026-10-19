@@ -1960,7 +1960,7 @@ async def sync_grassroots_game_level_data(
         for _pid, _gid, _pname, _pover, _is_player in player_res:
             known_player_ids.add(_pid)
             g = _parse_uuid(_gid) if _gid else None
-            if g is not None:
+            if g is not None and not participant_names.is_placeholder_id(str(g)):
                 pid_by_guid[g] = _pid
             if _is_player is not False:
                 _name_pairs.append((_pid, _pover or _pname))
@@ -2009,6 +2009,10 @@ async def sync_grassroots_game_level_data(
         GUID lands on the right record.
         """
         if guid is None:
+            return None
+        # CA's shared "hidden participant" id belongs to nobody in particular (see
+        # participant_names.is_placeholder_id): never map it to one of our players.
+        if participant_names.is_placeholder_id(str(guid)):
             return None
         p = pid_by_guid.get(guid)
         if p is None:

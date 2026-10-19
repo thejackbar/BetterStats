@@ -501,10 +501,15 @@ export const api = {
   getMergeCandidates: (orgId) => request(`/admin/merge-candidates?org_id=${orgId}`),
   getMergeHistory: (orgId) => request(`/admin/merge-history?org_id=${orgId}`),
   getPlayerMergeInfo: (playerId, orgId) => request(`/admin/player-info?player_id=${playerId}&org_id=${orgId}`),
-  mergePlayers: (keepPlayerId, removePlayerId, orgId) =>
+  // confirmSameDayClash: the admin has read the warning that both records have a game on the
+  // same date (usually two people who share a name) and still wants to merge them.
+  mergePlayers: (keepPlayerId, removePlayerId, orgId, confirmSameDayClash = false) =>
     request('/admin/merge-players', {
       method: 'POST',
-      body: JSON.stringify({ keep_player_id: keepPlayerId, remove_player_id: removePlayerId, org_id: orgId }),
+      body: JSON.stringify({
+        keep_player_id: keepPlayerId, remove_player_id: removePlayerId, org_id: orgId,
+        confirm_same_day_clash: confirmSameDayClash,
+      }),
     }),
   ignorePair: (playerAId, playerBId, orgId) =>
     request('/admin/ignore-pair', {
@@ -3285,6 +3290,9 @@ export const api = {
     request(`/availability/matrix${tzQuery()}${juniors ? (tzQuery() ? '&' : '?') + 'juniors=true' : ''}`),
   bsSetAvailability: (data) =>
     request('/availability', { method: 'POST', body: JSON.stringify(data) }),
+  // Mark a dormant player "no longer dormant" (active true), or dormant again (false).
+  bsSetDormancy: (playerId, active) =>
+    request(`/availability/players/${playerId}/dormancy`, { method: 'PUT', body: JSON.stringify({ active }) }),
   bsBulkAvailability: (items) =>
     request('/availability/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
   bsAvailabilityPeriods: (includePast = false) =>
@@ -3372,6 +3380,7 @@ export const api = {
     request(`/votes/medals/${medalId}${confirm ? '?confirm=true' : ''}`, { method: 'DELETE' }),
   votesRegenerateLink: (medalId) =>
     request(`/votes/medals/${medalId}/regenerate`, { method: 'POST' }),
+  votesCounterOptions: () => request('/votes/counter-options'),
   votesGetWeighting: (medalId) => request(`/votes/medals/${medalId}/weighting`),
   votesGetSettings: (medalId) => request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`),
   votesSetSettings: (data, medalId) =>

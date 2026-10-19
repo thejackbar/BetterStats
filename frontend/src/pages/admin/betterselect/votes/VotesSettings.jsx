@@ -1,6 +1,6 @@
 // Settings tab — ONE medal's setup. The public-link block lives in
 // ShareVotePanel (one sharing surface); everything else (name, grades,
-// voter_mode (plus grade_voter_modes, one override per team), allow_non_participants, allow_self_vote, ballot_values,
+// voter_mode (plus grade_voter_modes and grade_vote_counters, one override per team), allow_non_participants, allow_self_vote, ballot_values,
 // counting_method, tie_policy, eligibility_source, auto_close_days) patches
 // the medal.
 import { useCallback, useEffect, useState } from 'react'
@@ -155,12 +155,20 @@ export default function VotesSettings({
   const [busy, setBusy] = useState(false)
   const [ballotDraft, setBallotDraft] = useState(null)
   const [nameDraft, setNameDraft] = useState(null)
+  // Who a captain-only team can hand its vote counting to. Loaded once; the
+  // nominee does not have to be in the side.
+  const [people, setPeople] = useState([])
 
   const load = useCallback(() => {
     setCfg(null)
     api.votesGetSettings(medalId).then(setCfg).catch((e) => toast.error(e.message))
   }, [toast, medalId])
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let live = true
+    api.votesCounterOptions().then((d) => { if (live) setPeople(d.players || []) }).catch(() => {})
+    return () => { live = false }
+  }, [])
 
   const update = async (patch) => {
     if (!canManage) return
@@ -222,11 +230,20 @@ export default function VotesSettings({
     update({ grade_voter_modes: next })
   }
 
+  const setTeamCounter = (name, playerId) => {
+    const next = { ...(cfg.grade_vote_counters || {}) }
+    if (playerId) next[name] = playerId
+    else delete next[name]
+    update({ grade_vote_counters: next })
+  }
+
   if (!cfg) return <PbSpinner message="Loading settings…" />
 
   const chosenGrades = new Set(cfg.grade_names || [])
   const inactiveGrades = cfg.inactive_grades || []
   const teamModes = cfg.grade_voter_modes || {}
+  const teamCounters = cfg.grade_vote_counters || {}
+  const counterNames = cfg.vote_counter_names || {}
   // The teams this medal counts: the ticked ones, or every active team when
   // none is ticked.
   const scopeTeams = gradeOptions.filter((g) => chosenGrades.size === 0 || chosenGrades.has(g.name))
@@ -310,20 +327,40 @@ export default function VotesSettings({
             options={[{ value: 'players', label: 'All players' }, { value: 'captain', label: 'Captain only' }]} />
         </Row>
         {scopeTeams.length > 0 && (
-          <Row label="Who votes, by team" hint="Some teams count every player's vote, others only the captain's. Pick per team, or leave a team on the default above.">
+          <Row label="Who votes, by team" hint="Some teams count every player's vote, others only the captain's. Pick per team, or leave a team on the default above. Where only the captain votes, the captain can hand the counting to someone else, who doesn't have to be in the side.">
             <div className="flex flex-col gap-1.5">
-              {scopeTeams.map((g) => (
-                <div key={g.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                  <span className="text-sm min-w-0 break-words">{g.name}</span>
-                  <select value={teamModes[g.name] || 'default'} onChange={(e) => setTeamMode(g.name, e.target.value)}
-                    disabled={!canManage || busy}
-                    className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-pb-accent">
-                    <option value="default">Default ({MODE_LABEL[cfg.voter_mode]})</option>
-                    <option value="players">{MODE_LABEL.players}</option>
-                    <option value="captain">{MODE_LABEL.captain}</option>
-                  </select>
-                </div>
-              ))}
+              {scopeTeams.map((g) => {
+                const counterId = teamCounters[g.name] || ''
+                const knownCounter = counterId && people.some((x) => x.id === counterId)
+                return (
+                  <div key={g.id} className="flex flex-col gap-1">
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                      <span className="text-sm min-w-0 break-words">{g.name}</span>
+                      <select value={teamModes[g.name] || 'default'} onChange={(e) => setTeamMode(g.name, e.target.value)}
+                        disabled={!canManage || busy}
+                        className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-pb-accent">
+                        <option value="default">Default ({MODE_LABEL[cfg.voter_mode]})</option>
+                        <option value="players">{MODE_LABEL.players}</option>
+                        <option value="captain">{MODE_LABEL.captain}</option>
+                      </select>
+                    </div>
+                    {(teamModes[g.name] || cfg.voter_mode) === 'captain' && (
+                      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 pl-3">
+                        <span className="text-[12.5px] text-pb-faint min-w-0 break-words">Votes counted by</span>
+                        <select value={counterId} onChange={(e) => setTeamCounter(g.name, e.target.value)}
+                          disabled={!canManage || busy} aria-label={`Who counts the votes for ${g.name}`}
+                          className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm max-w-full focus:outline-none focus:border-pb-accent">
+                          <option value="">The captain</option>
+                          {counterId && !knownCounter && (
+                            <option value={counterId}>{counterNames[g.name] || 'Nominated player'}</option>
+                          )}
+                          {people.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </Row>
         )}

@@ -28,7 +28,7 @@ import { useWeekNames } from '../../../lib/useAvailabilityConfig'
 import { PbSpinner } from '../../../lib/presskit'
 import { availRank, AVAILABILITY, halfStatus, viewStatus, weekFlag } from '../../../lib/availability'
 import { useSelectConfig } from '../../../lib/useAvailabilityConfig'
-import { Icon, Avatar, Btn, Tag, RuleTags, WeekFlag, playedWithinYears } from './ui'
+import { Icon, Avatar, Btn, Tag, RuleTags, WeekFlag, playedWithinYears, recencyOf } from './ui'
 import { DnD, useDrag } from './selectionDnd'
 import { nameMatches, roleLine, spark, formMeta, normGender, unavailableWeeksText, gameDatesLabel, fixtureTabs } from './selectionMeta'
 import { xiCompliance, isBlocked } from './selectionRules'
@@ -679,7 +679,7 @@ export default function AdminSelectionDraftTable() {
     if (hideOut) list = list.filter((p) => p.availability !== 'UNAVAILABLE')
     // A name typed into search is someone being looked for, so the recency window
     // only trims the browse list.
-    if (years && !q.trim()) list = list.filter((p) => playedWithinYears(p.last_played, years))
+    if (years && !q.trim()) list = list.filter((p) => playedWithinYears(recencyOf(p), years))
     return list.slice().sort((a, b) =>
       availRank(a.availability) - availRank(b.availability)
       || (b.score ?? 0) - (a.score ?? 0)

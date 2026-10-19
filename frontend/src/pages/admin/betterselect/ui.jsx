@@ -429,6 +429,17 @@ export function playedWithinYears(lastPlayed, years, seasonStart) {
   const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
   return new Date(lastPlayed + 'T00:00:00') >= cutoff
 }
+// The date a player counts as last active when judging whether they are still
+// around: the later of their last game and the day a club marked them "no longer
+// dormant" (the server sends both, services/dormancy.py). Only for those who have
+// played: a name with no game has no history to be old. The real `last_played`
+// stays what a card, a badge and the "Hasn't played" filter say.
+export function recencyOf(p) {
+  const last = p?.last_played
+  if (!last) return null
+  const back = p.dormancy_cleared_on
+  return back && back > last ? back : last
+}
 // A date N months back as a plain YYYY-MM-DD string, so it compares directly
 // against a `last_played` off the API with no timezone in the way. Clamped to
 // the target month's length, matching the backend's months_ago() — otherwise
