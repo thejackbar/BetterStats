@@ -63,8 +63,9 @@ async def diagnose(org_ref: str, who: str, show_all: bool) -> None:
             SELECT id::text AS id, COALESCE(display_name_override, name) AS name
             FROM players
             WHERE organisation_id = CAST(:org AS UUID)
-              AND COALESCE(display_name_override, name) ILIKE :who
-            ORDER BY 2"""), {"org": org, "who": f"%{who}%"})).mappings().all()
+              AND (SELECT bool_and(COALESCE(display_name_override, name) ILIKE '%' || w || '%')
+                   FROM unnest(CAST(:words AS text[])) AS w)
+            ORDER BY 2"""), {"org": org, "words": who.replace(",", " ").split()})).mappings().all()
         if not players:
             raise SystemExit(f"No player matching {who!r} in that club")
         print(f"{len(players)} player(s) match {who!r}:")
@@ -178,7 +179,7 @@ async def diagnose(org_ref: str, who: str, show_all: bool) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("org", help="club id or slug")
-    ap.add_argument("player", help="part of the player's name")
+    ap.add_argument("player", help="the player's name, or part of it, in any order (names are stored surname first)")
     ap.add_argument("--all", action="store_true", help="list every game the player was named in")
     a = ap.parse_args()
     asyncio.run(diagnose(a.org, a.player, a.all))

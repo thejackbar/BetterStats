@@ -43,7 +43,11 @@ async def _resolve_org(org_ref: str) -> str:
 
 async def diagnose(org_ref: str, who: str) -> None:
     org = await _resolve_org(org_ref)
-    like = f"%{who}%"
+    words = who.replace(",", " ").split()
+
+    def has_words(col: str) -> str:
+        """Every word of the name appears in `col`, in any order (names are stored surname first)."""
+        return f"(SELECT bool_and({col} ILIKE '%' || w || '%') FROM unnest(CAST(:words AS text[])) AS w)"
     async with async_session_maker() as s:
         print(f"== players in the club named like {who!r}")
         for r in (await s.execute(text("""
@@ -51,18 +55,20 @@ async def diagnose(org_ref: str, who: str) -> None:
                    is_player, import_batch_id IS NOT NULL AS imported,
                    (SELECT COUNT(*) FROM game_appearances ga WHERE ga.player_id = p.id) AS games
             FROM players p
-            WHERE organisation_id = CAST(:org AS UUID) AND COALESCE(display_name_override, name) ILIKE :like
-            ORDER BY 2"""), {"org": org, "like": like})).mappings():
+            WHERE organisation_id = CAST(:org AS UUID)
+              AND (SELECT bool_and(COALESCE(display_name_override, name) ILIKE '%' || w || '%')
+                   FROM unnest(CAST(:words AS text[])) AS w)
+            ORDER BY 2"""), {"org": org, "words": words})).mappings():
             print(f"  {r['name']:<28} {r['id']}  ca_id={r['grassroots_id']}  playhq={r['playhq_id']}"
                   f"  is_player={r['is_player']} imported={r['imported']} games={r['games']}")
 
         print(f"\n== merge_logs naming them, ANY org (this club is {org})")
-        rows = (await s.execute(text("""
+        rows = (await s.execute(text(f"""
             SELECT id, merged_at::text AS at, org_id::text AS org_id, keep_player_name, keep_player_id::text AS keep_id,
                    removed_player_name, removed_player_id::text AS removed_id, undone_at::text AS undone
             FROM merge_logs
-            WHERE keep_player_name ILIKE :like OR removed_player_name ILIKE :like
-            ORDER BY merged_at DESC LIMIT 40"""), {"like": like})).mappings().all()
+            WHERE {has_words('keep_player_name')} OR {has_words('removed_player_name')}
+            ORDER BY merged_at DESC LIMIT 40"""), {"words": words})).mappings().all()
         if not rows:
             print("  none: no merge was ever logged for this name, in any club")
         for r in rows:
@@ -76,11 +82,11 @@ async def diagnose(org_ref: str, who: str) -> None:
             print(f"       keep={r['keep_id']} removed={r['removed_id']}")
 
         print("\n== audit log entries naming them (merges, automatic or by hand)")
-        rows = (await s.execute(text("""
+        rows = (await s.execute(text(f"""
             SELECT created_at::text AS at, action, user_id::text AS user_id, details::text AS details
             FROM audit_logs
-            WHERE org_id = CAST(:org AS UUID) AND action ILIKE '%merge%' AND details::text ILIKE :like
-            ORDER BY created_at DESC LIMIT 20"""), {"org": org, "like": like})).mappings().all()
+            WHERE org_id = CAST(:org AS UUID) AND action ILIKE '%merge%' AND {has_words('details::text')}
+            ORDER BY created_at DESC LIMIT 20"""), {"org": org, "words": words})).mappings().all()
         if not rows:
             print("  none")
         for r in rows:
@@ -88,12 +94,12 @@ async def diagnose(org_ref: str, who: str) -> None:
             print(f"  {r['at']}  {r['action']}  by {who_did}\n       {r['details'][:300]}")
 
         print("\n== name aliases (a merge leaves the removed spelling as an alias of the kept player)")
-        for r in (await s.execute(text("""
+        for r in (await s.execute(text(f"""
             SELECT a.alias_name, a.source, a.created_at::text AS at,
                    COALESCE(p.display_name_override, p.name) AS player, p.id::text AS player_id
             FROM player_name_aliases a JOIN players p ON p.id = a.player_id
-            WHERE a.organisation_id = CAST(:org AS UUID) AND a.alias_name ILIKE :like
-            ORDER BY a.created_at DESC"""), {"org": org, "like": like})).mappings():
+            WHERE a.organisation_id = CAST(:org AS UUID) AND {has_words('a.alias_name')}
+            ORDER BY a.created_at DESC"""), {"org": org, "words": words})).mappings():
             print(f"  {r['alias_name']!r} -> {r['player']} ({r['player_id']}) source={r['source']} {r['at']}")
 
 
