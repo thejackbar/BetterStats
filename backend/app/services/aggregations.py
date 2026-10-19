@@ -13,7 +13,7 @@ from app.services.summary_only_seasons import (
     summary_only_seasons_clause as _summary_only_seasons_clause,
 )
 from app.services.grade_scope import GradeScope
-from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match, not_played_game_sql
+from app.services.game_status import appearance_counts_as_match, called_off_sql, not_played_game_sql
 from app.services import rate_coverage as rc
 from app.services.game_sides import sides_sql
 
@@ -2169,7 +2169,7 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
             JOIN grades gr ON gr.id = g.grade_id{_GRID_GRADE_NAME_JOINS}
             WHERE ga.player_id = ANY(CAST(:pids AS uuid[]))
               AND rows.game_id IS NULL
-              AND (ga.is_reserve IS TRUE OR COALESCE(g.status, '') IN ({NOT_PLAYED_SQL_LIST}))
+              AND (ga.is_reserve IS TRUE OR {called_off_sql('g')})
               {club_games_clause}{season_clause_gr}{game_scope_clause}
             GROUP BY ga.player_id, gr.season_id, {_GRID_GRADE_NAME}
         """),

@@ -32,6 +32,42 @@ def is_not_played(status: str | None) -> bool:
     return (status or "").strip().upper() in NOT_PLAYED_STATUSES
 
 
+def card_called_off(card: dict | None) -> bool | None:
+    """Did CA call this fixture off while still marking it COMPLETED? (`games.ca_called_off`)
+
+    Leederville CC, 14 Nov 2020: six games with `status` COMPLETED and `resultText` "Match drawn"
+    whose two teams both carry `matchSummary.teams[].resultType` ABANDONED. CA does not count a
+    named-only player in them, and nothing else on the row says so: `status` reads COMPLETED,
+    `result` is NULL (sync maps ABANDONED to no result) and the opposition scored 19 to 22 overs,
+    so `looks_unplayed_sql` does not fire either. A genuine draw carries DREW (Applecross 8a5f61d3),
+    which CA does count.
+
+    True when every team on the summary carries ABANDONED, False when the card has been read and
+    does not, None when it cannot be judged (no card, no summary, or CA has not called the game
+    COMPLETED: a card read mid-game says nothing yet, and NULL is what the backfill re-reads).
+    A fixture whose `status` is already ABANDONED is called off by `NOT_PLAYED_STATUSES`, so it
+    is left None here rather than stamped twice.
+    """
+    if not card or (card.get("status") or "").strip().upper() != "COMPLETED":
+        return None
+    teams = (card.get("matchSummary") or {}).get("teams") or []
+    if not teams:
+        return None
+    return all((t.get("resultType") or "").strip().upper() == "ABANDONED" for t in teams)
+
+
+def called_off_sql(g: str) -> str:
+    """SQL predicate, never NULL: CA called this fixture off, by `status` or by `ca_called_off`.
+
+    `g` is the alias of a `games` row OR of `v_effective_games` / a copy of it: all expose `id` and
+    `status`. `ca_called_off` is read from the `games` table by id rather than from `g`, so the view's
+    column list stays as it was and a copy made before the column existed still works.
+    This is the CA-says-so half of `not_played_game_sql`, without the empty-scorecard inference.
+    """
+    return (f"(COALESCE({g}.status, '') IN ({NOT_PLAYED_SQL_LIST}) OR EXISTS ("
+            f"SELECT 1 FROM games _cog WHERE _cog.id = {g}.id AND _cog.ca_called_off IS TRUE))")
+
+
 def _scored_innings_sql(g: str) -> str:
     """SQL count of innings in `g.innings_totals` where anything was scored.
 
@@ -114,11 +150,13 @@ def looks_unplayed_sql(g: str) -> str:
 def not_played_game_sql(g: str) -> str:
     """SQL predicate, never NULL: this game was not played.
 
-    CA says so (`NOT_PLAYED_STATUSES`) or the scorecard is empty (`looks_unplayed_sql`).
+    CA says so (`NOT_PLAYED_STATUSES`, or a COMPLETED game whose teams both read ABANDONED:
+    `card_called_off`) or the scorecard is empty (`looks_unplayed_sql`).
     `g` is the alias of a `games` row. COALESCE so `NOT` over it can never turn a
     NULL status into a row that silently drops out of a WHERE.
     """
     return (f"COALESCE(({g}.status IN ({NOT_PLAYED_SQL_LIST}) "
+            f"OR {g}.ca_called_off IS TRUE "
             f"OR {looks_unplayed_sql(g)}), FALSE)")
 
 
