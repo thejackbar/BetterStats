@@ -142,6 +142,7 @@ Suites (`backend/verification/`, real Postgres, shipped route bodies, control ru
 - `python -m app.scripts.backfill_all_associations [--apply] [--no-api] [--org <id-or-slug>] [--concurrency N]`: groups every club's grades into competitions. Dry run by default.
 - `python -m app.scripts.undo_player_merge <org-id-or-slug> <merge-log-id>... [--apply] [--by name]`: the Admin Undo button with a dry run. Runs the shipped `undo_merge`, so it moves back only what the merge logged; games synced after the merge stay on the kept player. Refuses a log that is already undone, another club's, or one with a newer live merge on the same players. Check: `verification/verify_undo_player_merge_script.py`.
 - `python -m app.scripts.diagnose_player_merge <org-id-or-slug> "<name>"` (read only): for a player gone from the club with nothing on Merge History. Shows the club's players of that name, merge_logs naming them under ANY org (the screen only reads the club's own `org_id`), audit entries (`auto_merge_hand_added` is the post-sync merge nobody clicked) and name aliases.
+- `python -m app.scripts.audit_player_games <org|auto> <player-id>` (read only) and `repair_misattributed_games` (dry run by default, `--apply --expect N --by`, undo with `--restore AUDIT_ID`): for a record holding games CA does not credit to them. See data-sources-and-sync.
 - `python -m app.scripts.inspect_association_sources`: read-only; do the association id spaces agree, and how many Directory clubs play in one association.
 
 ## Open follow-ups

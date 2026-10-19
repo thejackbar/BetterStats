@@ -81,6 +81,27 @@ def unique_by_full_name(players: Iterable[tuple]) -> dict[str, object]:
     return {k: v[0] for k, v in seen.items() if len(set(v)) == 1}
 
 
+def attachable_by_full_name(players: Iterable[tuple]) -> dict[str, object]:
+    """``{full_name_key: player_id}`` for the players a team-sheet entry may be linked to by name.
+
+    ``players`` is ``(id, name, has_id)`` triples, ``has_id`` true when the record already
+    holds a Cricket Australia or PlayHQ participant id.
+
+    A name is only offered when exactly ONE player holds it (so a shared name is never
+    guessed), AND that player holds no id of their own. A record that already has an id is a
+    person CA already knows; a different id turning up under the same name is as likely to be
+    a different person (a junior with the same name, a namesake at another club's fixture) as
+    a new registration, and a wrong link puts someone else's games on their record. Linking
+    stays for a hand-added record, which has no id to be wrong about. A person who really did
+    re-register under a new id is merged on the Merge Players screen, which also redirects
+    their id for good.
+    """
+    triples = [(pid, name, has_id) for pid, name, has_id in players]
+    unique = unique_by_full_name([(pid, name) for pid, name, _ in triples])
+    without_id = {pid for pid, _, has_id in triples if not has_id}
+    return {k: pid for k, pid in unique.items() if pid in without_id}
+
+
 def resolve_roster_by_name(roster: Iterable[dict], known_guid: dict, unique_names: dict) -> dict[str, object]:
     """For one team sheet, ``{participant_guid: player_id}`` for every rostered
     player whose id is unknown (``known_guid`` has neither the id nor a redirect

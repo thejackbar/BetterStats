@@ -6,13 +6,13 @@ the games got there. For each game the player has a row or a team-sheet entry in
 CA for the scorecard and checks the sheets for the player's participant id, and for any id
 that was merged into them (`merge_logs`, not undone):
 
-  ON SHEET     the player's own id is on a team sheet: the game is theirs.
+  ON SHEET     the player's own id is on the card (a team sheet entry or a row): the game is theirs.
   VIA MERGE    an id merged into them is on the sheet: theirs through a merge.
   NOT ON SHEET neither is. Their rows came from somewhere else; for each batting or bowling
                row we hold, the CA row it matches (same innings, position and score, or same
                figures) is printed with the name and id CA gives it, so a redacted
                participant (`********`, id 00000000-...-0001) or another person is visible.
-  NO CARD      CA returned nothing for the game.
+  NO CARD      CA returned nothing for the game, or the card names nobody. Nothing can be judged.
 
 One paced request per game (the client caches). Writes nothing.
 
@@ -29,7 +29,7 @@ import uuid
 from sqlalchemy import text
 
 from app.models.db import async_session_maker
-from app.services import grassroots_scores_client as gr
+from app.services import game_attribution, grassroots_scores_client as gr
 from app.services.club_grades import club_game_sql
 
 
@@ -68,9 +68,10 @@ async def audit(org_ref: str, player_id: str, limit: int) -> None:
         if not me:
             raise SystemExit("No such player id")
         own = {(me["grassroots_id"] or player_id).lower()}
-        merged_in = {str(r[0]).lower() for r in (await s.execute(text(
-            "SELECT removed_player_id FROM merge_logs WHERE keep_player_id = CAST(:p AS UUID) AND undone_at IS NULL"),
-            {"p": player_id})).all()}
+        redirects = {str(r[0]): str(r[1]) for r in (await s.execute(text(
+            "SELECT removed_player_id, keep_player_id FROM merge_logs "
+            "WHERE org_id = CAST(:o AS UUID) AND undone_at IS NULL"), {"o": org})).all()}
+        merged_in = game_attribution.merged_into(redirects, player_id)
         print(f"{me['name']}  ids that count as theirs: {sorted(own)}"
               + (f"  plus {len(merged_in)} merged in" if merged_in else ""))
 
@@ -95,11 +96,15 @@ async def audit(org_ref: str, player_id: str, limit: int) -> None:
                 tally["NONE"] += 1
                 print(f"  {g['d']}  {str(g['grade']):<18} NO CARD  {g['id']}")
                 continue
-            sheet = {(p.get("participantId") or "").lower() for t in sc.get("teams") or [] for p in (t.get("players") or [])}
-            if sheet & own:
+            verdict = game_attribution.classify(sc, own, merged_in, uuid.UUID(org))
+            if verdict == "EMPTY":
+                tally["NONE"] += 1
+                print(f"  {g['d']}  {str(g['grade']):<18} NOBODY NAMED ON THE CARD  {g['id']}")
+                continue
+            if verdict == "ON":
                 tally["ON"] += 1
                 continue
-            if sheet & merged_in:
+            if verdict == "MERGE":
                 tally["MERGE"] += 1
                 print(f"  {g['d']}  {str(g['grade']):<18} VIA MERGE  {g['id']}")
                 continue
