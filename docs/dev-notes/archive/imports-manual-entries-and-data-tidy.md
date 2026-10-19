@@ -1207,3 +1207,16 @@ After deploying, run `link_import_players` again (dry run first), then re-run th
 
 On Payneham, adding bowling figures as join evidence lifted the joinable players only from about 80 to 103 (2,325 stay unjoined, mostly players PlayHQ never held), so the "players who only bowled" explanation covers a small part of the 931 matches whose wicket credits disagree with the bowling figures. `restore_import_detail --explain` groups those matches by cause (the same bowlers with different counts, one man under two records, a credited bowler missing from the import's card, an extra bowler on the import's card, other) and prints named examples, so the cause is read off the data instead of guessed. Also fixed: the balls and detail suites' control runs crashed on a missing audit id and so were not controls; they read it with `.get` now.
 
+## What the 927 mismatched wicket credits were, and two more ways to join a player (Oct 2026)
+
+`restore_import_detail --explain` on Payneham grouped the 927 matches whose wicket credits differ from the bowling figures: 383 one man held under two records (PlayHQ "Smith, Reuben 1" against the import's "Smith, RG 1" with every other bowler identical), 340 differing in more than one way (mostly an extra or missing bowler on one card), 146 where the import credits a bowler PlayHQ does not, 47 the same bowlers with a different count, 11 a credited bowler with no wickets on the import's card. So player merging does explain the largest group, but the players were held back by the label rule, not by missing evidence.
+
+Two changes to `link_import_players`, both in `services/import_player_link.py`:
+
+* **Initials that cannot be one man no longer make a label shared.** "Crouch, AG" beside "Crouch, AD" are different people; "Crouch, A" beside "Crouch, AG" could be one, so that still blocks. A different SYNCED player with the same surname and initial still blocks as before.
+* **The wickets count as proof.** `import_detail_restore.credit_evidence` finds paired matches where every bowler's credits agree exactly except one credited bowler and one import bowler with the same surname, initial and count, and feeds them in as evidence (the larger of this tally and the SQL tally for the pair, never the sum, since one match can supply both).
+
+`verify_import_player_link.py` is 51 checks; the previous services fail 7 and the control 30. The remaining mismatches (a bowler missing from one card, wickets counted differently) are not player problems and are left skipped.
+
+Run order after deploying: `link_import_players` dry run, apply with `--min-evidence 2`, then the `restore_import_detail --explain` again; the "one man under two records" group should shrink.
+

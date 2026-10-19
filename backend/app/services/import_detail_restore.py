@@ -243,6 +243,51 @@ def classify_gap(gap: dict, label_of) -> str:
     return GAP_MISSING if only_syn else GAP_EXTRA
 
 
+def gap_pairs(gap: dict, label_of) -> list:
+    """The (import record, synced record) pairs a match's wicket credits prove, or [].
+
+    Only when the two cards differ ONLY by bowlers that pair off one-to-one on surname and
+    initial with the same count, so everything else on the card has agreed exactly."""
+    syn, imp = gap["synced"], gap["import"]
+    only_syn = [b for b in syn if b not in imp]
+    only_imp = [b for b in imp if b not in syn]
+    if not only_syn or len(only_syn) != len(only_imp):
+        return []
+    if any(syn[b] != imp[b] for b in syn if b in imp):
+        return []
+    left, pairs = list(only_imp), []
+    for b in only_syn:
+        hit = next((i for i in left if label_of(b) and label_of(b) == label_of(i)
+                    and imp[i] == syn[b]), None)
+        if hit is None:
+            return []
+        left.remove(hit)
+        pairs.append((hit, b))
+    return pairs
+
+
+async def credit_evidence(db, org_id) -> list:
+    """Join evidence for `link_import_players` from the matches whose credits are off by a
+    bowler held under two records: ``[{x_id, y_id, matches}]``."""
+    from collections import Counter
+
+    from app.services.import_player_link import label
+
+    plan = await plan_org(db, org_id)
+    gaps = plan.get("credit_gaps", [])
+    ids = {b for g in gaps for k in ("synced", "import") for b in g[k]}
+    if not ids:
+        return []
+    names = {r[0]: r[1] for r in (await db.execute(text(
+        "SELECT id::text, COALESCE(NULLIF(display_name_override, ''), name) FROM players "
+        "WHERE id = ANY(CAST(:ids AS UUID[]))"), {"ids": sorted(ids)})).all()}
+    tally = Counter()
+    for g in gaps:
+        for x, y in gap_pairs(g, lambda pid: label(names.get(pid))):
+            tally[(x, y)] += 1
+    return [{"x_id": x, "y_id": y, "matches": n} for (x, y), n in tally.items()]
+
+
 async def explain_credits(db, org_id, gaps: list) -> dict:
     """Group the credits mismatches by cause, with a few named examples of each."""
     from app.services.import_player_link import label
