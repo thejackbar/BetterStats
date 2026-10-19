@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../../../lib/api'
+import VoteFace from './VoteFace'
 
 // Presentation mode: the count on a projector, revealed one round at a time,
 // exactly how a club reads a Brownlow-style vote on awards night.
@@ -92,7 +93,8 @@ export default function AwardsNight({ board, onExit }) {
         <div className="w-[430px] shrink-0 flex flex-col justify-center gap-6">
           <div>
             <div className="font-mono text-[11px] tracking-wide4" style={{ color: 'var(--pb-amber)' }}>LEADING THE COUNT</div>
-            <div className="text-[64px] font-extrabold leading-none tracking-tighter mt-2.5">{leader?.name}</div>
+            <div className="mt-4"><VoteFace player={leader} size={112} accent="var(--pb-amber)" /></div>
+            <div className="text-[64px] font-extrabold leading-none tracking-tighter mt-4">{leader?.name}</div>
             <div className="flex items-baseline gap-3.5 mt-4">
               <div className="text-[84px] font-extrabold leading-none tabular-nums" style={{ color: 'var(--pb-amber)' }}>
                 {leader?.points}
@@ -134,6 +136,8 @@ export default function AwardsNight({ board, onExit }) {
                 }}>
                 <div className="font-mono text-[15px] font-bold w-[26px]"
                   style={{ color: i === 0 ? 'var(--pb-amber)' : 'var(--pb-faintest)' }}>{i + 1}</div>
+                <VoteFace player={s} size={i === 0 ? 48 : i < 3 ? 42 : 36}
+                  accent={i === 0 ? 'var(--pb-amber)' : undefined} />
                 <div className="flex-1 min-w-0 font-semibold truncate"
                   style={{ fontSize: i === 0 ? 22 : i < 3 ? 19 : 17 }}>{s.name}</div>
                 {s.round_gain > 0 && (

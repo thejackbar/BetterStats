@@ -11,6 +11,7 @@ import BallotProgress from './BallotProgress'
 import VoteStateBadge from './VoteStateBadge'
 import ShareVotePanel from './ShareVotePanel'
 import OutstandingVoters from './OutstandingVoters'
+import VoteFace from './VoteFace'
 import { fmtDate } from './votesTokens'
 
 const SOURCES = [
@@ -248,7 +249,11 @@ export default function FixtureDetail({ fixtureId, medalId, onBack }) {
                 <tbody>
                   {detail.results.map((r) => (
                     <tr key={r.player_id} className="border-t pb-hairline">
-                      <td className="py-2 pr-3 font-medium">{r.name}</td>
+                      <td className="py-2 pr-3 font-medium">
+                        <span className="flex items-center gap-2.5 min-w-0">
+                          <VoteFace player={r} size={28} /><span className="truncate">{r.name}</span>
+                        </span>
+                      </td>
                       <td className="py-2 pr-3 text-right font-mono font-bold" style={{ color: r.points > 0 ? 'var(--pb-accent)' : undefined }}>{r.points || '—'}</td>
                       <td className="py-2 pr-3 text-right font-mono">{r.raw}</td>
                       {r.counts.map((n, i) => <td key={i} className="py-2 pr-3 text-right font-mono text-pb-faint">{n || '·'}</td>)}
@@ -271,7 +276,9 @@ export default function FixtureDetail({ fixtureId, medalId, onBack }) {
               <div className="divide-y divide-pb-hairline">
                 {detail.ballots.map((b) => (
                   <div key={b.id} className="py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span className="font-medium text-sm min-w-[140px]">{b.voter || 'Unknown'}</span>
+                    <span className="flex items-center gap-2 font-medium text-sm min-w-[160px]">
+                      <VoteFace player={{ name: b.voter, photo_url: b.voter_photo_url }} size={24} />{b.voter || 'Unknown'}
+                    </span>
                     {b.voter_kind === 'non_player' && (
                       <span className="font-mono text-[9px] px-1.5 py-0.5 rounded-full bg-pb-amber/15 text-pb-amber">NON-PLAYER</span>
                     )}
@@ -280,7 +287,11 @@ export default function FixtureDetail({ fixtureId, medalId, onBack }) {
                     )}
                     <span className="text-[13px] text-pb-dim flex-1">
                       {b.picks.map((p, i) => (
-                        <span key={p.position}>{i > 0 && ' · '}<b className="font-mono">{values[p.position - 1] ?? '?'}</b> {p.name}</span>
+                        <span key={p.position} className="inline-flex items-center gap-1.5 align-middle">
+                          {i > 0 && <span className="mx-1">·</span>}
+                          <b className="font-mono">{values[p.position - 1] ?? '?'}</b>
+                          <VoteFace player={p} size={20} />{p.name}
+                        </span>
                       ))}
                     </span>
                     <button onClick={() => removeBallot(b)} className="text-pb-faintest hover:text-pb-red" title="Delete ballot">

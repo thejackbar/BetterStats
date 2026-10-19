@@ -1167,6 +1167,23 @@ async def player_names(db: AsyncSession, org_id, player_ids: set[str]) -> dict[s
     return {str(pid): name for pid, name in res.fetchall()}
 
 
+async def player_photos(db: AsyncSession, org_id, player_ids: set[str]) -> dict[str, str]:
+    """player id -> photo URL, for the players that have one. Admin screens only:
+    the public ballot applies its own is_public / privacy_hidden_at test (see
+    public_votes) before it puts a face on an unauthenticated page."""
+    if not player_ids:
+        return {}
+    res = await db.execute(
+        text(
+            "SELECT id, photo_url FROM players "
+            "WHERE organisation_id = :org AND id = ANY(:ids) "
+            "AND photo_url IS NOT NULL AND photo_url <> ''"
+        ),
+        {"org": org_id, "ids": [uuid.UUID(p) for p in player_ids]},
+    )
+    return {str(pid): url for pid, url in res.fetchall()}
+
+
 async def build_leaderboard(
     db: AsyncSession,
     org_id,
@@ -1337,6 +1354,7 @@ async def build_leaderboard(
             movement[pid] = (prev_ranks[pid] - r) if pid in prev_ranks else 0
 
     names = await player_names(db, org_id, all_pids)
+    photos = await player_photos(db, org_id, all_pids)
     grade_short_names = {gid: _grade_short(name) for gid, name in grade_names.items()}
     standings = []
     for pid, c in cumulative.items():
@@ -1349,6 +1367,7 @@ async def build_leaderboard(
         standings.append({
             "player_id": pid,
             "name": names.get(pid, "Unknown"),
+            "photo_url": photos.get(pid),
             "points": c["points"],
             "raw": c["raw"],
             "counts": c["counts"],
@@ -1375,7 +1394,10 @@ async def build_leaderboard(
         for fx in lr["fixtures"]:
             for r in fx["results"]:
                 if r["points"] > 0:
-                    lr_results.append({"player_id": r["player_id"], "name": names.get(r["player_id"], "Unknown"), "points": r["points"]})
+                    lr_results.append({
+                        "player_id": r["player_id"], "name": names.get(r["player_id"], "Unknown"),
+                        "photo_url": photos.get(r["player_id"]), "points": r["points"],
+                    })
         lr_results.sort(key=lambda r: -r["points"])
         last_round = {"label": lr["label"], "fixture": opponents, "results": lr_results}
 
