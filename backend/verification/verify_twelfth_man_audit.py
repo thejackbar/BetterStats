@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from verify_board_games_match_profile import build_schema
 from app.routers.players import get_player_stats
 from app.scripts import audit_twelfth_man as audit
+from app.services import superseded_ddl
 from app.services import grassroots_scores_client as gr
 
 DB = os.environ["DATABASE_URL"]
@@ -230,10 +231,22 @@ def by(rows, player, game):
     return next((r for r in rows if r["player_id"] == str(player) and r["game_id"] == str(G[game])), None)
 
 
+async def apply_production_views() -> None:
+    """The lifespan re-applies `superseded_ddl` on every boot, so production reads THESE views, not
+    the migrations'. The audit first read them per row and took 38s on 40,000 appearances here
+    against 0.4s on the migration versions: a suite on the wrong views cannot see that."""
+    async with engine.begin() as conn:
+        for stmt in superseded_ddl.STATEMENTS:
+            await conn.execute(text(stmt))
+        ok = await superseded_ddl.verify(conn)
+    check("the production source-aware views are the ones under test", all(ok.values()), str(ok))
+
+
 async def main() -> None:
     await build_schema()
+    await apply_production_views()
     await seed()
-    args = Namespace(year=None, pace=0.0, list=40, csv=None, max_games=500)
+    args = Namespace(year=None, pace=0.0, list=40, csv=None, max_games=500, timeout=120)
 
     print("\n-- CONTROL: THE SEED REPRODUCES THE REPORTED BEHAVIOUR --")
     jack_profile = await profile_games(JACK)
@@ -298,7 +311,7 @@ async def main() -> None:
     check("the shared rained-off game (two players) was asked for once", FETCHES.count(str(G["rain"])) == 1)
 
     FETCHES.clear()
-    capped = await audit.audit_club(str(ORG), "Audit Club", Namespace(year=None, pace=0.0, list=5, csv=None, max_games=3),
+    capped = await audit.audit_club(str(ORG), "Audit Club", Namespace(year=None, pace=0.0, list=5, csv=None, max_games=3, timeout=120),
                                     [3])
     check("a --max-games allowance of 3 stops at 3 requests", len(FETCHES) == 3, str(len(FETCHES)))
     check("and games beyond it are left unjudged, not guessed",
