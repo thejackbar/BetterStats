@@ -1203,3 +1203,7 @@ The first `restore_import_detail` dry run on Payneham skipped 931 matches becaus
 
 After deploying, run `link_import_players` again (dry run first), then re-run the `restore_import_detail` dry run: the skipped-credits count should fall.
 
+## Bowling evidence found little; `restore_import_detail --explain` (Oct 2026)
+
+On Payneham, adding bowling figures as join evidence lifted the joinable players only from about 80 to 103 (2,325 stay unjoined, mostly players PlayHQ never held), so the "players who only bowled" explanation covers a small part of the 931 matches whose wicket credits disagree with the bowling figures. `restore_import_detail --explain` groups those matches by cause (the same bowlers with different counts, one man under two records, a credited bowler missing from the import's card, an extra bowler on the import's card, other) and prints named examples, so the cause is read off the data instead of guessed. Also fixed: the balls and detail suites' control runs crashed on a missing audit id and so were not controls; they read it with `.get` now.
+

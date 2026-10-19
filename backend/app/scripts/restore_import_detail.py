@@ -13,6 +13,8 @@ Dry run by default. Run it after `link_import_players`, `repair_overwrite_pairs`
     python -m app.scripts.restore_import_detail <org-id-or-slug>             # dry run
     python -m app.scripts.restore_import_detail <org-id-or-slug> --apply
         [--limit-matches N]  write only the first N matches (try 30 first)
+    python -m app.scripts.restore_import_detail <org-id-or-slug> --explain
+        why the wicket credits of each skipped match differ from the bowling figures
     python -m app.scripts.restore_import_detail <org-id-or-slug> --undo AUDIT_ID
 
 `--apply` prints the audit id. `--undo` removes exactly the rows that run inserted.
@@ -37,7 +39,7 @@ def _opt(name, default=None, cast=str):
     return cast(sys.argv[i + 1])
 
 
-async def run(target, apply, undo, limit_matches) -> int:
+async def run(target, apply, undo, limit_matches, explain=False) -> int:
     async with async_session_maker() as db:
         club = (await db.execute(text(
             "SELECT id, name FROM organisations WHERE id::text = :o OR slug = :o"),
@@ -52,6 +54,16 @@ async def run(target, apply, undo, limit_matches) -> int:
                   f"partnership row(s), {r['bw']} wicket credit(s) (audit entry {undo}).")
             return 0
         res = await idr.restore_org(db, club[0], apply=apply, limit_matches=limit_matches)
+    if explain:
+        async with async_session_maker() as db:
+            why = await idr.explain_credits(db, club[0], res.get("credit_gaps", []))
+        print(f"{club[1]}: {len(res.get('credit_gaps', []))} match(es) skipped because the wickets "
+              f"credited to our bowlers differ from the bowling figures. Why:")
+        for kind, v in why.items():
+            print(f"\n  {v['count']:>5}  {kind}")
+            for ex in v["examples"]:
+                print(f"           {ex}")
+        return 0
     print("APPLYING" if apply else "DRY RUN: nothing written (pass --apply to write)")
     print(f"  {club[1]}: {res['paired']} import match(es) paired to a synced game; "
           f"{res['matches']} would gain detail")
@@ -77,7 +89,7 @@ def main() -> int:
         print(__doc__)
         return 2
     return asyncio.run(run(args[0], "--apply" in sys.argv, _opt("--undo", None, int),
-                           _opt("--limit-matches", None, int)))
+                           _opt("--limit-matches", None, int), "--explain" in sys.argv))
 
 
 if __name__ == "__main__":

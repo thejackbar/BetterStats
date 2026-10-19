@@ -179,6 +179,23 @@ async def main():
           ({k: len(v) for k, v in dry["skipped"].items()}),
           {idr.SKIP_PAIR: 1, idr.SKIP_INNINGS: 1, idr.SKIP_CREDITS: 1})
 
+    async with async_session_maker() as db:
+        why = await idr.explain_credits(db, org, dry.get("credit_gaps", []))
+    check("a credits mismatch is explained: same bowlers, a different number of wickets",
+          {k: v["count"] for k, v in why.items()}, {idr.GAP_COUNT: 1})
+    check("and the example names the bowlers and both counts",
+          why[idr.GAP_COUNT]["examples"][0].split("  (")[0] if why else None,
+          "PlayHQ credits [Player, BW1 2, Player, BW2 1]  import card [Player, BW1 3, Player, BW2 1]")
+    lab = {"s1": ("holmes", "s"), "i1": ("holmes", "s"), "i2": ("jones", "j"), "s2": ("smith", "k")}.get
+    cases = [
+        ({"synced": {"a": 2}, "import": {"a": 3}}, idr.GAP_COUNT),
+        ({"synced": {"s1": 2}, "import": {"i1": 2}}, idr.GAP_TWO_RECORDS),
+        ({"synced": {"s2": 2}, "import": {"i2": 2}}, idr.GAP_OTHER),
+        ({"synced": {"a": 1, "s1": 1}, "import": {"a": 1}}, idr.GAP_MISSING),
+        ({"synced": {"a": 1}, "import": {"a": 1, "i2": 1}}, idr.GAP_EXTRA),
+    ]
+    check("the causes are told apart",
+          [idr.classify_gap(g, lab) for g, _ in cases], [w for _, w in cases])
     small = await go(limit_matches=1)
     check("a limit keeps only the first match that would gain detail",
           (small["matches"], len({r["mid"] for k in ("fow", "part", "bw") for r in small[k]})), (1, 1))
@@ -216,7 +233,7 @@ async def main():
     check("a second run finds nothing to copy",
           (len(again["fow"]), len(again["part"]), len(again["bw"])), (0, 0, 0))
 
-    audit_id = res["audit_id"]
+    audit_id = res.get("audit_id") or -1
     async with async_session_maker() as db:
         removed = await idr.undo_org(db, org, audit_id=audit_id)
     check("undo removes exactly what the run wrote", removed, {"fow": 18, "part": 20, "bw": 3})
