@@ -1428,6 +1428,25 @@ async def get_scorecard(
     if is_manual and getattr(game, "extracted_payload", None):
         opp_batting, opp_bowling = _manual_opp_from_payload(game.extracted_payload, innings_totals)
 
+    # A club card a person chose to show WITH Cricket Australia's detail (card review,
+    # services/card_review_hybrid): the opposition's cards and the bowler/fielder text on our
+    # dismissals, copied once from the synced card and kept on `review_detail`. Never read for a
+    # photo upload (that carries its own `extracted_payload`) and written by nothing else.
+    # The club's own `manual_innings` totals are merged AFTER this, so they win.
+    if is_manual and getattr(game, "review_detail", None) and not getattr(game, "extracted_payload", None):
+        _rd = game.review_detail
+        opp_batting = [dict(r) for r in _rd.get("opp_batting") or []]
+        opp_bowling = [dict(r) for r in _rd.get("opp_bowling") or []]
+        for _n, _t in (_rd.get("innings_totals") or {}).items():
+            _meta = innings_totals.setdefault(int(_n), {"runs": 0, "wickets": 0, "extras": 0})
+            _meta.update({k: v for k, v in _t.items() if v is not None})
+        _text_by = {(d.get("innings_number"), str(d.get("player_id"))): d.get("text")
+                    for d in _rd.get("our_dismissals") or []}
+        for _row in batting_flat:
+            _txt = _text_by.get((_row.get("innings_number"), str(_row.get("player_id"))))
+            if _txt:
+                _row["dismissal_type"] = _txt
+
     # A hand-entered game records its innings side / extras / opposition totals
     # in manual_innings instead (a photo upload has none, so these never clash).
     if is_manual and manual_innings_rows:
