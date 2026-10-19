@@ -979,3 +979,11 @@ A player returned after a gap of years under a new Cricket Australia profile. On
 - `merge_player_pair.py` prints the clash count and refuses without `--allow-shared-games`.
 - Not gated: the fantasy merge route (`routers/fantasy.py`), `hand_added_merge` and the org merge call the merge core directly.
 - Proof: `backend/verification/verify_merge_same_day_safeguard.py` (real Postgres, 11 checks; control against the previous `admin.py` fails 8). `frontend/verification/verify_merge_same_day_browser.mjs` (Chromium, API stubbed, 16 checks; control against the previous build fails 10).
+
+
+## Moving a game's rows to the right player (Oct 2026)
+
+After the Gisborne merges were undone, a game that synced after the merge (17 Oct) was still credited to the player the id used to be merged into. `repair_misattributed_games` deletes such rows and sync does not recreate them, so it would have lost the innings. `app/scripts/move_game_rows.py` moves them instead.
+- Named games only; ten places (appearances, batting, bowling, fielding, fall of wicket, bowler wickets as bowler and fielder, partnerships both sides, milestones). Refuses a game where the receiver already holds a row. The ids moved go in one `audit_logs` entry; `--restore AUDIT_ID` puts them back, once.
+- Season and grade stats are not touched: sync deletes and rewrites a season's `player_season_stats` and grade stats (`sync.py`), so the next sync of the season corrects them. Check the season afterwards.
+- Proof: `verification/verify_move_game_rows_script.py` (real Postgres, 17 checks; control with the move disabled fails the moved and restored checks).
