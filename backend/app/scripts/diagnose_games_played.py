@@ -21,9 +21,10 @@ counts the club's games by status, so a status the code does not know about show
 
 Read-only: writes nothing, calls nothing upstream.
 
-Usage from the backend container:
-  docker exec -e PYTHONPATH=/app betterstats-backend \\
-    python -m app.scripts.diagnose_games_played <org_id_or_slug> "<player name>" [--all]
+Usage, from the server:
+  cd /srv/docker && export COMPOSE_PROJECT_NAME=bltbox_docker_app
+  docker compose exec -T betterstats-backend python -m app.scripts.diagnose_games_played <org_id_or_slug> "<player name>" [--all]
+
 
 `--all` lists every game the player was named in; the default keeps only the ones that
 could have been a washout (a called-off status, no status, NO RESULT, or an empty card).

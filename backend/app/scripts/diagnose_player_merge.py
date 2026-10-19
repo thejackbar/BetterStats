@@ -15,9 +15,9 @@ prints the evidence for each:
      record (see the players section: two rows, or one row and a name alias).
   4. The merge was undone (`undone_at`), which the screen shows greyed or hides.
 
-Usage from the backend container:
-  docker exec -e PYTHONPATH=/app betterstats-backend \\
-    python -m app.scripts.diagnose_player_merge <org_id_or_slug> "<name>"
+Usage, from the server:
+  cd /srv/docker && export COMPOSE_PROJECT_NAME=bltbox_docker_app
+  docker compose exec -T betterstats-backend python -m app.scripts.diagnose_player_merge <org_id_or_slug> "<name>"
 """
 import argparse
 import asyncio
