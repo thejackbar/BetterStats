@@ -54,8 +54,22 @@ def _scored_innings_sql(g: str) -> str:
                 )"""
 
 
+# Statuses `looks_unplayed_sql` may read as "no cricket was played", given an empty
+# scorecard. NULL (a row from before the column) is handled beside these.
+#
+# UPCOMING is here because sync stores a `games` row, and a `game_appearances` row
+# for every named player, for a fixture that has not been played: CA hands back the
+# selected side as soon as a club publishes it, and the match loop has no status
+# gate. Without this, naming next round's XI mid-week added a match to every player
+# in it (Leederville, Oct 2026: two extra games for most of the club, nobody having
+# touched anything). LIVE is deliberately NOT here: a game in progress is not ours
+# to call.
+INFERABLE_STATUSES = ("COMPLETED", "UPCOMING")
+INFERABLE_STATUS_SQL = ", ".join(f"'{s}'" for s in INFERABLE_STATUSES)
+
+
 def looks_unplayed_sql(g: str) -> str:
-    """SQL predicate: a game CA calls COMPLETED that has nothing in its scorecard.
+    """SQL predicate: a game CA calls COMPLETED or UPCOMING that has nothing in its scorecard.
 
     CA's `status` is the first word on whether a fixture went ahead, but it is
     not the last. A completed fixture can carry a result with no cricket behind
@@ -78,6 +92,10 @@ def looks_unplayed_sql(g: str) -> str:
     `innings_totals`. A hand-typed game is never a `games` row, so it is never
     inferred away: it has no upstream to re-pull from.
 
+    An UPCOMING fixture has no scorecard by definition, so it reads as unplayed until
+    one arrives; a game whose status is stale (still UPCOMING after it was played) has
+    rows and an innings behind it and counts as soon as they are stored.
+
     This only ever decides whether a NAMED player with no real line of their own
     counts the match. A player who batted, bowled or fielded in the game keeps
     it, exactly as for an abandoned one (see `appearance_counts_as_match`).
@@ -86,7 +104,7 @@ def looks_unplayed_sql(g: str) -> str:
                 f"AND NOT COALESCE(_rb.did_not_bat, FALSE))")
     bowl = f"EXISTS (SELECT 1 FROM bowling_spells _rw WHERE _rw.game_id = {g}.id)"
     return f"""(
-                ({g}.status IS NULL OR {g}.status = 'COMPLETED')
+                ({g}.status IS NULL OR {g}.status IN ({INFERABLE_STATUS_SQL}))
                 AND {_scored_innings_sql(g)} = 0
                 AND NOT {real_bat}
                 AND NOT {bowl}

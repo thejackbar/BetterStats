@@ -6,7 +6,7 @@
 - Adding a filter or query on `v_effective_player_season_stats` or `game_appearances`.
 - Symptoms: a filter raising a total; matches disagreeing between header and grid; strike rate too high; junior season in senior career; Records 15s.
 
-**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/stats-figures-records-and-filters.md`. Grep hints: `Grade filter on the public player profile`, `milestone_totals`, `RETIRED NOT OUT`, `A rate is only as good`, `Season × grade`, `A washout is not`, `StatLab: one player`, `Grade Type / Match Type`, `several values at once`, `A grade is several things`, `IMPORT RESIDUAL`, `Junior stats split`, `Awards`, `Stats by competition`, `two match counts`, `Which lens a panel`, `Hide a club's juniors`.
+**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/stats-figures-records-and-filters.md`. Grep hints: `Grade filter on the public player profile`, `milestone_totals`, `RETIRED NOT OUT`, `A rate is only as good`, `Season × grade`, `A washout is not`, `A named side for a fixture not yet played`, `StatLab: one player`, `Grade Type / Match Type`, `several values at once`, `A grade is several things`, `IMPORT RESIDUAL`, `Junior stats split`, `Awards`, `Stats by competition`, `two match counts`, `Which lens a panel`, `Hide a club's juniors`.
 
 **Related guides**: sync and import guides (writers of `not_out`, `balls`, `match_format`, `status`, residual rows); CricketStatz/import pairing guide (paired twins, per-innings views).
 
@@ -28,6 +28,7 @@
 11. `services/dismissal.py` is the one rule, whole-phrase, never `LIKE 'retired%'`. CA ids: 0 DNB, 1 Not Out, 8 Retired Hurt, 13 Retired, 14 Retired Not Out, 15 Absent. 14 (Law 25.4.2) and 8 are not dismissals; 13 (25.4.3) is.
 12. Fix the writer (`sync.py`, live scorecard merge), not readers. Every average is `innings - not_outs` (by-opposition, by-venue, by-position, by-grade too). A retirement leaves the dismissal donut; retired-out stays.
 13. `games.status` (266) is CA's word verbatim (`result` NULL cannot tell washout from unplayed). `services/game_status.py` is the one vocabulary (`NOT_PLAYED_STATUSES`; NO RESULT excluded). A named player with no bat/bowl/field row in a not-played fixture is subtracted.
+13a. A fixture CA lists as UPCOMING is stored with its named side, so it counts as not played until a scorecard arrives (`game_status.INFERABLE_STATUSES`); LIVE counts. Known gaps, unfixed: did-not-bat rows count as "recorded something", NO RESULT with an empty card counts, a NULL status leaves a washout in CA's count (archive: `A named side for a fixture not yet played`). `app.scripts.diagnose_games_played` shows which one a club has.
 14. That correction lives in `v_effective_player_season_stats` AND every reader counting `game_appearances`, via `appearance_counts_as_match(alias)` (StatLab `appear`, by-grade, by-season-grade, by-venue, Formats). Ask which source a new screen reads. Recent-games lists keep washouts.
 
 **Grade scope (`services/grade_scope.py`; 228, 229, 259, 283)**
