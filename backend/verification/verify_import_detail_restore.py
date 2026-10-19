@@ -49,7 +49,7 @@ async def main():
     from verify_merge_carry import EXTRA_DDL
 
     if os.environ.get("CONTROL"):
-        async def _nothing(db, org_id, *, apply=False):
+        async def _nothing(db, org_id, *, apply=False, limit_matches=None):
             return {"paired": 0, "fow": [], "part": [], "bw": [], "skipped": {}, "matches": 0,
                     "by_season": {}, "written": {"fow": 0, "part": 0, "bw": 0}}
         idr.restore_org = _nothing
@@ -179,6 +179,9 @@ async def main():
           ({k: len(v) for k, v in dry["skipped"].items()}),
           {idr.SKIP_PAIR: 1, idr.SKIP_INNINGS: 1, idr.SKIP_CREDITS: 1})
 
+    small = await go(limit_matches=1)
+    check("a limit keeps only the first match that would gain detail",
+          (small["matches"], len({r["mid"] for k in ("fow", "part", "bw") for r in small[k]})), (1, 1))
     res = await go(apply=True)
     check("apply writes the same counts", res["written"], {"fow": 18, "part": 20, "bw": 3})
     check("fall of wickets and partnerships are put on the import's own innings numbers "

@@ -12,6 +12,7 @@ Dry run by default. Run it after `link_import_players`, `repair_overwrite_pairs`
 
     python -m app.scripts.restore_import_detail <org-id-or-slug>             # dry run
     python -m app.scripts.restore_import_detail <org-id-or-slug> --apply
+        [--limit-matches N]  write only the first N matches (try 30 first)
     python -m app.scripts.restore_import_detail <org-id-or-slug> --undo AUDIT_ID
 
 `--apply` prints the audit id. `--undo` removes exactly the rows that run inserted.
@@ -36,7 +37,7 @@ def _opt(name, default=None, cast=str):
     return cast(sys.argv[i + 1])
 
 
-async def run(target, apply, undo) -> int:
+async def run(target, apply, undo, limit_matches) -> int:
     async with async_session_maker() as db:
         club = (await db.execute(text(
             "SELECT id, name FROM organisations WHERE id::text = :o OR slug = :o"),
@@ -50,7 +51,7 @@ async def run(target, apply, undo) -> int:
             print(f"{club[1]}: removed {r['fow']} fall-of-wicket row(s), {r['part']} "
                   f"partnership row(s), {r['bw']} wicket credit(s) (audit entry {undo}).")
             return 0
-        res = await idr.restore_org(db, club[0], apply=apply)
+        res = await idr.restore_org(db, club[0], apply=apply, limit_matches=limit_matches)
     print("APPLYING" if apply else "DRY RUN: nothing written (pass --apply to write)")
     print(f"  {club[1]}: {res['paired']} import match(es) paired to a synced game; "
           f"{res['matches']} would gain detail")
@@ -70,11 +71,13 @@ async def run(target, apply, undo) -> int:
 
 def main() -> int:
     args = [a for i, a in enumerate(sys.argv[1:], 1)
-            if not a.startswith("--") and not (i > 1 and sys.argv[i - 1] == "--undo")]
+            if not a.startswith("--")
+            and not (i > 1 and sys.argv[i - 1] in ("--undo", "--limit-matches"))]
     if len(args) != 1:
         print(__doc__)
         return 2
-    return asyncio.run(run(args[0], "--apply" in sys.argv, _opt("--undo", None, int)))
+    return asyncio.run(run(args[0], "--apply" in sys.argv, _opt("--undo", None, int),
+                           _opt("--limit-matches", None, int)))
 
 
 if __name__ == "__main__":
