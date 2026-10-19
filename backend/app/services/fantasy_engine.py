@@ -625,11 +625,13 @@ async def _round_player_scores(session: AsyncSession, fs, rnd) -> dict[str, dict
             {"wickets": w["wickets"] or 0, "maidens": w["maidens"]}
         )
     for f in fielding.mappings():
+        # One row per innings the player fielded in (a two-day game gives two), so
+        # these add up; assigning kept only the last innings.
         c = _cell(str(f["player_id"]), f["game_id"])
-        c["catches_wk"] = f["catches_wk"]
-        c["stumpings"] = f["stumpings"]
-        c["catches_nonwk"] = max((f["catches"] or 0) - (f["catches_wk"] or 0), 0)
-        c["run_outs"] = f["run_outs"]
+        c["catches_wk"] += f["catches_wk"] or 0
+        c["stumpings"] += f["stumpings"] or 0
+        c["catches_nonwk"] += max((f["catches"] or 0) - (f["catches_wk"] or 0), 0)
+        c["run_outs"] += f["run_outs"] or 0
     for a in appearances.mappings():
         _cell(str(a["player_id"]), a["game_id"])  # ensures the appearance point
 
