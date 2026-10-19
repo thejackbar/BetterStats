@@ -52,6 +52,25 @@ async def run(match_id: str, player_id: str) -> None:
             raise SystemExit("Cricket Australia returned no scorecard for that match")
         print(f"match status={sc.get('status')!r}  grade={(sc.get('grade') or {}).get('name')!r}")
 
+        # Everything CA says ABOUT the match that is not a roster or a scorecard line: a flag
+        # for a friendly, a practice game, an exhibition or a grade that keeps no player stats
+        # would be here, and is the answer to "why does CA not count this game".
+        print("\nwhat CA says about the match itself")
+        for k, v in sc.items():
+            if k in ("teams", "innings", "matchSchedule"):
+                continue
+            if isinstance(v, dict):
+                flat = {a: b for a, b in v.items() if not isinstance(b, (dict, list))}
+                print(f"  {k}: {flat}")
+                for a, b in v.items():
+                    if isinstance(b, dict):
+                        print(f"  {k}.{a}: { {x: y for x, y in b.items() if not isinstance(y, (dict, list))} }")
+            elif isinstance(v, list):
+                print(f"  {k}: list of {len(v)}")
+            else:
+                print(f"  {k}: {v!r}")
+        print(f"  matchSchedule: {[ {a: b for a, b in (e or {}).items() if not isinstance(b, (dict, list))} for e in (sc.get('matchSchedule') or [])]}")
+
         interesting: dict[str, str] = {}
         for team in sc.get("teams") or []:
             players = team.get("players") or []
