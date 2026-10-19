@@ -4,6 +4,9 @@
 //   npx vite build && npx vite preview --port 5198 &
 //   node frontend/verification/verify_totw_browser.mjs [baseUrl]
 //
+// Also drives the period pick (Tuesday to Sunday), the Juniors / Seniors switch and
+// the set make-up (four batters, a keeper, three all-rounders, three bowlers).
+//
 // What a build cannot tell you: that the pull asks for the right thing (no `q`
 // for the latest round, the pasted link as `q` otherwise), that the team is 11
 // by default and moves between 6 and 14 with the stepper, that every one of the
@@ -35,6 +38,8 @@ const NAMES = ['Star, Sam', 'Ton, Eli', 'Bowler, Bo', 'Guest, Gus', 'Keeper, Fay
 const PLAYERS = NAMES.slice(0, 10).map((n, i) => ({
   id: `p${i + 1}`, name: n, display_name: n, status: 'active', photo_url: `/api/images/players/p${i + 1}/photo`,
 }))
+// The seat each performance fills (WK / BAT / AR / BOWL). The first six are the junior game's players.
+const KINDS = ['AR', 'BAT', 'BOWL', 'WK', 'BAT', 'BOWL', 'AR', 'BAT', 'WK', 'BOWL', 'AR', 'BAT', 'BOWL', 'BAT', 'WK', 'BAT']
 const POOL = NAMES.map((n, i) => {
   const [last, first] = n.split(', ')
   const base = 130 - i * 7
@@ -44,9 +49,19 @@ const POOL = NAMES.map((n, i) => {
     bowling: i % 3 !== 2 ? { o: '8.0', m: 1, r: 30, w: 2, econ: 3.75 } : null,
     fielding: i % 4 === 0 ? { catches: 2, catches_wk: 0, stumpings: 0, run_outs: 0 } : null,
     grade: i % 2 ? '2ND GRADE' : '1ST GRADE', opp: 'RIVALS CC', oppMono: 'RIV', outcome: 'W',
+    kind: KINDS[i], categories: i < 6 ? ['junior'] : ['senior'],
   }
 })
-const TOTW = { kind: 'round', season: '2025/26', club: {}, round: 'Round 5', date: '2026-09-26', label: 'SAT 26 SEP', matches: 3, players: POOL }
+const TOTW = { kind: 'round', season: '2025/26', club: {}, round: 'Round 5', date: '2026-09-26', label: 'SAT 26 SEP', matches: 3, scope: 'all', scopeMatches: { junior: 2, senior: 3 }, players: POOL }
+// What the server answers for a query: the same round, narrowed to the junior game's players or to the rest by `scope`,
+// and labelled with the period when one is sent.
+const totwFor = (search) => {
+  const q = new URLSearchParams(search)
+  const scope = q.get('scope') || 'all'
+  const players = scope === 'junior' ? POOL.slice(0, 6) : scope === 'senior' ? POOL.slice(6) : POOL
+  const label = q.get('date_from') ? 'TUE 13 TO SUN 18 OCT' : TOTW.label
+  return { ...TOTW, scope, label, players, matches: scope === 'all' ? 5 : scope === 'junior' ? 2 : 3 }
+}
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mP8z8BQz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC', 'base64')
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
@@ -61,7 +76,7 @@ async function openEditor(query, viewport = { width: 1600, height: 1000 }, mobil
   const json = (body) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   await page.route('**/api/**', async (route) => {
     const url = route.request().url()
-    if (/\/admin\/social\/totw/.test(url)) { totwCalls.push(new URL(url).search); return route.fulfill(json(TOTW)) }
+    if (/\/admin\/social\/totw/.test(url)) { totwCalls.push(new URL(url).search); return route.fulfill(json(totwFor(new URL(url).search))) }
     if (/\/images\/players\/[^/]+\/photo/.test(url)) return route.fulfill({ status: 200, contentType: 'image/png', body: PNG })
     if (/\/auth\/me/.test(url)) return route.fulfill(json({
       id: 'u1', username: 'admin', role: 'club_admin', club_slug: 'applecross',
@@ -256,6 +271,146 @@ const pickSize = async (page, label) => { await press(page.getByRole('button', {
   const { ctx, page } = await openEditor('?type=totw', { width: 390, height: 800 }, true)
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   ck('no horizontal overflow at 390px', overflow <= 1, String(overflow))
+  await ctx.close()
+}
+
+// ── 5. A period, Juniors / Seniors, and a set make-up ─────────────────────
+{
+  const { ctx, page, errors, totwCalls } = await openEditor('?type=totw')
+  const kicker = async () => (await page.evaluate(() => {
+    const holder = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px' && d.style.position === 'absolute')
+    return holder?.querySelector('[data-layer="Masthead"]')?.innerText || ''
+  }))
+  const postNames = async () => ((await readPost(page))?.cards || []).map((c) => c.text)
+  const pull = async (label) => { await press(page.getByRole('button', { name: label })); await page.waitForTimeout(350) }
+
+  // The period.
+  ck('the data step offers a period', await seen(page.getByTestId('totw-range')))
+  const go = page.getByRole('button', { name: 'Pull this period' })
+  ck('a period cannot be pulled until both days are picked', await go.isDisabled().catch(() => false) === true)
+  await page.getByLabel('From').first().fill('2026-10-13', { timeout: 3000 }).catch(() => {})
+  ck('  ... one day is not enough', await go.isDisabled().catch(() => false) === true)
+  await page.getByLabel('To').first().fill('2026-10-18', { timeout: 3000 }).catch(() => {})
+  ck('  ... both days enable it', await go.isDisabled().catch(() => true) === false)
+  await go.click({ timeout: 3000 }).catch(() => {})
+  await page.waitForTimeout(350)
+  ck('the period is sent as date_from and date_to, and nothing else', totwCalls.at(-1) === '?date_from=2026-10-13&date_to=2026-10-18', JSON.stringify(totwCalls))
+  ck('the team is 11 off that period', (await count(page)) === 11, String(await count(page)))
+  await press(page.getByRole('button', { name: /Continue to editor/ }))
+  await page.waitForTimeout(250)
+  ck('the post is dated with the period', /TUE 13 TO SUN 18 OCT/.test(await kicker()), await kicker())
+  ck('  ... and says nothing about Juniors or Seniors on the whole club', /TUE 13 TO SUN 18 OCT/.test(await kicker()) && !/JUNIOR|SENIOR/.test(await kicker()), await kicker())
+
+  // The period is remembered in this browser.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByLabel('From').first().waitFor({ timeout: 15000 }).catch(() => {})
+  const remembered = [await page.getByLabel('From').first().inputValue().catch(() => ''), await page.getByLabel('To').first().inputValue().catch(() => '')]
+  ck('the last period is back after a reload', remembered.join(' ') === '2026-10-13 2026-10-18', remembered.join(' '))
+  const callsBefore = totwCalls.length
+  await pull('Pull this period')
+
+  // Juniors and Seniors re-pull the SAME round with a scope.
+  await press(page.getByTestId('totw-scope').getByRole('button', { name: /^Juniors/ }))
+  await page.waitForTimeout(400)
+  ck('Juniors re-pulls the same period with scope=junior', totwCalls.at(-1) === '?date_from=2026-10-13&date_to=2026-10-18&scope=junior', JSON.stringify(totwCalls.slice(callsBefore)))
+  ck('  ... and the pool is the junior players (6)', (await textOf(page.getByTestId('totw-size'))).includes('6 ranked'), await textOf(page.getByTestId('totw-size')))
+  ck('  ... the picker shows how many matches each side holds', /Juniors \(2\)/.test(await textOf(page.getByTestId('totw-scope'))) && /Seniors \(3\)/.test(await textOf(page.getByTestId('totw-scope'))), await textOf(page.getByTestId('totw-scope')))
+  ck('  ... the team is the six juniors', (await count(page)) === 6, String(await count(page)))
+  await press(page.getByRole('button', { name: /Continue to editor/ }))
+  await page.waitForTimeout(250)
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/junior-post.png` }).catch(() => {})
+  ck('the junior post says JUNIOR in its masthead', /JUNIOR/.test(await kicker()) && !/SENIOR/.test(await kicker()), await kicker())
+  const juniorNames = (await postNames()).join(' ')
+  ck('  ... and holds only junior players', /STAR/i.test(juniorNames) && !/ALPHA|BRAVO|CHARLIE/i.test(juniorNames), juniorNames.slice(0, 120))
+
+  // Back in the data step the Seniors button.
+  await press(page.getByRole('button', { name: 'Data', exact: true }))
+  await press(page.getByTestId('totw-scope').getByRole('button', { name: /^Seniors/ }))
+  await page.waitForTimeout(400)
+  ck('Seniors re-pulls with scope=senior', totwCalls.at(-1) === '?date_from=2026-10-13&date_to=2026-10-18&scope=senior', JSON.stringify(totwCalls.slice(-2)))
+  ck('  ... the pool is the ten senior players', (await textOf(page.getByTestId('totw-size'))).includes('10 ranked'), await textOf(page.getByTestId('totw-size')))
+  await press(page.getByTestId('totw-scope').getByRole('button', { name: /^All teams/ }))
+  await page.waitForTimeout(400)
+  ck('All teams drops the scope again', totwCalls.at(-1) === '?date_from=2026-10-13&date_to=2026-10-18', JSON.stringify(totwCalls.slice(-2)))
+
+  // The make-up.
+  ck('best performers is the default and shows the size stepper', await seen(page.getByRole('button', { name: 'Set the make-up' })) && await seen(page.getByTestId('totw-size')) && !(await seen(page.getByTestId('totw-makeup'))))
+  await press(page.getByRole('button', { name: 'Set the make-up' }))
+  await page.waitForTimeout(150)
+  ck('a set make-up starts on the fantasy mix', (await Promise.all(['BAT', 'WK', 'AR', 'BOWL'].map((k) => textOf(page.getByTestId(`totw-seat-${k}-count`))))).join(',') === '4,1,3,3')
+  ck('  ... the size stepper gives way to the total', !(await seen(page.getByTestId('totw-size'))) && /Team of 11/.test(await textOf(page.getByTestId('totw-makeup-total'))))
+  ck('  ... and nothing is short on a full round', await seen(page.getByTestId('totw-makeup')) && !(await seen(page.getByTestId('totw-makeup-warn'))))
+  ck('  ... each seat says how many played', /3 played/.test(await textOf(page.getByTestId('totw-seat-WK'))), await textOf(page.getByTestId('totw-seat-WK')))
+  await press(page.getByRole('button', { name: /Continue to editor/ }))
+  await page.waitForTimeout(250)
+  const made = await postNames()
+  const joined = made.join(' | ')
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/makeup-post.png` }).catch(() => {})
+  ck('the post holds 11 players', made.length === 11, String(made.length))
+  ck('the keeper is the BEST keeper (Guest), not the second (Bravo)', /GUEST/i.test(joined) && !/BRAVO/i.test(joined), joined.slice(0, 160))
+  ck('the best of each seat made it: the third all-rounder (Delta) and the fourth batter (Echo)', /DELTA/i.test(joined) && /ECHO/i.test(joined))
+  ck('and the lesser ones did not: the fourth bowler, the fifth batter and the third keeper', /CHARLIE/i.test(joined) && !/FOXTROT|GOLF|HOTEL|INDIA/i.test(joined))
+  ck('the team is still best first', /STAR/i.test(made[0] || ''), made[0])
+  ck('the masthead is the whole club again', made.length === 11 && /ROUND 5/.test(await kicker()) && !/JUNIOR|SENIOR/.test(await kicker()), await kicker())
+
+  // Changing a seat rebuilds the team.
+  await press(page.getByRole('button', { name: 'Data', exact: true }))
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/makeup-panel.png` }).catch(() => {})
+  await press(page.getByRole('button', { name: 'More wicketkeeper' }))
+  await page.waitForTimeout(250)
+  ck('asking for a second keeper brings in the second best (Bravo)', (await postNames()).length === 12 && /BRAVO/i.test((await postNames()).join(' ')))
+  ck('  ... and the total follows', /Team of 12/.test(await textOf(page.getByTestId('totw-makeup-total'))))
+  for (let i = 0; i < 4; i++) await press(page.getByRole('button', { name: 'More batters' }))
+  await page.waitForTimeout(150)
+  ck('the team stops at 14', /Team of 14/.test(await textOf(page.getByTestId('totw-makeup-total'))))
+  ck('  ... and no seat can grow past it', (await Promise.all(['wicketkeeper', 'batters', 'all-rounders', 'bowlers', 'best of the rest'].map((k) => page.getByRole('button', { name: `More ${k}` }).first().isDisabled().catch(() => false)))).every(Boolean))
+  for (const k of ['batters', 'batters', 'batters', 'batters', 'batters', 'batters', 'batters', 'batters']) await press(page.getByRole('button', { name: `Fewer ${k}` }))
+  for (let i = 0; i < 4; i++) await press(page.getByRole('button', { name: 'Fewer wicketkeeper' }))
+  for (let i = 0; i < 4; i++) await press(page.getByRole('button', { name: 'Fewer all-rounders' }))
+  await page.waitForTimeout(150)
+  ck('a team under six warns and still builds', /Team of [0-5]\b/.test(await textOf(page.getByTestId('totw-makeup-total'))) && await seen(page.getByText(/at least 6 players/)))
+  await press(page.getByRole('button', { name: /Fantasy mix/ }))
+  await page.waitForTimeout(200)
+  ck('the fantasy mix button restores 4 / 1 / 3 / 3', (await Promise.all(['BAT', 'WK', 'AR', 'BOWL'].map((k) => textOf(page.getByTestId(`totw-seat-${k}-count`))))).join(',') === '4,1,3,3')
+
+  // A pool that cannot fill the make-up says so and still builds a team.
+  await press(page.getByTestId('totw-scope').getByRole('button', { name: /^Juniors/ }))
+  await page.waitForTimeout(400)
+  const warn = await textOf(page.getByTestId('totw-makeup-warn'))
+  ck('six juniors cannot make 4 / 1 / 3 / 3, and it says what is short', /Short by .*all-rounders.*batters.*bowler/.test(warn), warn)
+  ck('  ... and how many players there are', /Only 6 players/.test(warn), warn)
+  await press(page.getByRole('button', { name: /Continue to editor/ }))
+  await page.waitForTimeout(250)
+  ck('  ... the team is all six', (await postNames()).length === 6, String((await postNames()).length))
+
+  // Back to best performers.
+  await press(page.getByRole('button', { name: 'Data', exact: true }))
+  const wasMakeup = await seen(page.getByTestId('totw-makeup'))
+  await press(page.getByRole('button', { name: 'Best performers' }))
+  await page.waitForTimeout(200)
+  ck('best performers brings the size stepper back', wasMakeup && await seen(page.getByTestId('totw-size')) && !(await seen(page.getByTestId('totw-makeup'))))
+  ck('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+  await ctx.close()
+}
+
+// ── 6. The controls at 390px ────────────────────────────────────────────────
+{
+  // A phone opens the quick post, which only has Round and Date for this post type (the same as
+  // Fixtures and Results); pulling a round is the full editor's job, so open that.
+  const { ctx, page } = await openEditor('?type=totw', { width: 390, height: 900 }, true)
+  await press(page.getByRole('button', { name: 'Full editor' }))
+  await page.getByRole('button', { name: 'Pull latest round' }).first().waitFor({ timeout: 15000 }).catch(() => {})
+  await page.getByLabel('From').first().fill('2026-10-13', { timeout: 3000 }).catch(() => {})
+  await page.getByLabel('To').first().fill('2026-10-18', { timeout: 3000 }).catch(() => {})
+  await press(page.getByRole('button', { name: 'Pull this period' }))
+  await page.waitForTimeout(400)
+  await press(page.getByRole('button', { name: 'Set the make-up' }))
+  await page.waitForTimeout(200)
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  ck('the date range, scope and make-up fit at 390px', overflow <= 1 && await seen(page.getByTestId('totw-makeup')), String(overflow))
+  const sized = await page.evaluate(() => [...document.querySelectorAll('[data-testid="totw-makeup"] button, [data-testid="totw-range"] button, [data-testid="totw-scope"] button')].map((b) => b.getBoundingClientRect().height))
+  ck('  ... with every control tappable', sized.length >= 15 && sized.every((h) => h >= 28), `${sized.length} controls, smallest ${Math.min(...sized)}`)
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/controls-390.png`, fullPage: true }).catch(() => {})
   await ctx.close()
 }
 
