@@ -34,6 +34,7 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_club, get_current_user
 from app.services import player_dashboard, squad_sides
+from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.junior_fixtures import junior_fixture_ids
 from app.services.name_format import name_sort_key
 from app.services.squad_next_game import fixture_has_started, squad_next_games
@@ -542,6 +543,9 @@ async def availability_matrix(
     from app.services.selection_pool import club_rule_context
     rules = await club_rule_context(db, club, players)
 
+    all_squads = sorted({s for names in squads_map.values() for s in names})
+    squad_meta = await _squad_meta(db, club.id, sq_sides, all_squads)
+
     return {
         "dates": [
             {"date": d, "fixtures": by_date[d]}
@@ -552,13 +556,38 @@ async def availability_matrix(
             for p in players
         ],
         "availability": avail_map,
-        "all_squads": sorted({s for names in squads_map.values() for s in names}),
+        "all_squads": all_squads,
+        # Per squad name: is it switched off, is it a junior side. Lets the
+        # Squad filter offer only the squads worth picking.
+        "squad_meta": squad_meta,
         "dormancy_months": months,
         "squad_next": squad_next,
         # Empty for a club that has written no rules, which is what keeps the
         # roster and the matrix looking exactly as they did.
         "rules": {"active": rules.active, "applied": rules.rules},
     }
+
+
+async def _squad_meta(db: AsyncSession, club_id, sq_sides, names: list[str]) -> dict[str, dict]:
+    """``{squad name: {active, junior}}`` for the names the Squad filter lists.
+
+    A name is either one of the club's squads (a team) or a team name read off
+    appearance history. A switched-off team is not active. Junior is Manage
+    Grades' answer (as for fixtures, services/junior_fixtures.py): a squad's own
+    grades first, else its name. It fails open: a name that does not read as
+    junior is not junior.
+    """
+    categories = await org_grade_category_sets(db, club_id)
+    by_name = {sq.name.strip(): sq for sq in sq_sides.squads.values()}
+    out: dict[str, dict] = {}
+    for name in names:
+        sq = by_name.get(name)
+        probes = (sq_sides.grade_names(sq.id) if sq else []) or [name]
+        out[name] = {
+            "active": sq.is_active if sq else True,
+            "junior": any("junior" in categories_for_name(categories, g) for g in probes),
+        }
+    return out
 
 
 def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set], cutoff: date,
