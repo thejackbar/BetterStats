@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
 from app.models.db import async_session_maker
-from app.services import iq_lineup, iq_opponent, iq_players, iq_team, iq_trends
+from app.services import iq_lineup, iq_opponent, iq_players, iq_review, iq_team, iq_trends
 from app.services import iq as iq_service
 from app.services.aggregations import get_player_by_opposition
 from app.services.bowling_style import bowling_class, bowling_label
@@ -129,6 +129,31 @@ _SYSTEM = (
     "- If a fixture's opponent has no linked history (has_history false), say the "
     "club can be linked via 'Match club' on the BetterIQ Opposition page to unlock "
     "the head-to-head.\n"
+    "Completed games, player votes and who played well:\n"
+    "- For a game that has ALREADY been played ('give the 3-2-1 for the 3rd XI game', "
+    "'who played well on the 17th', 'player of the match'), find it with recent_games "
+    "(pass team, opponent or a date), or when the user pastes a match link or id "
+    "(betterat.cricket/games/<id>) pass it straight to match_performances. Never say "
+    "you can't see completed games or open the link: the id inside it is all the tool "
+    "needs. team matches the side as the club names it ('3rd XI') and the grade it "
+    "played in ('5th Grade'); they often differ, so use the game's own 'team'.\n"
+    "- To give a 3-2-1 (or any votes), call match_performances, then judge on what "
+    "the scorecard shows: the context of the game (how it was won or lost, batting "
+    "first or chasing, a collapse, the best stand), runs against the team total and "
+    "the batting slot, scoring rate where balls are recorded, not outs that saw a "
+    "chase home, economy and maidens, and the VALUE of each wicket. Wicket value is "
+    "not a head count: each wicket carries the dismissed batter's slot and score. "
+    "Top-order wickets and set batters (30+) are worth the most, a number 9, 10 or 11 "
+    "is worth a lot less, so 3 for 20 that includes both openers can beat 4 for 20 "
+    "made of tail-enders. Likewise a quick 30 at the top that set up a chase can "
+    "outrank a late 35 against a beaten attack. Catches, run outs and stumpings "
+    "count as support, not as the lead reason.\n"
+    "- Give the three names in order (3, 2, 1) with a one-line reason each, and say "
+    "who just missed out if it was close. Treat a figure that is thin (a handful of "
+    "balls, a 1 over spell) as a small sample. Say plainly that it is judged from the "
+    "scorecard only (no ball-by-ball), that only our players are scored, and use the "
+    "scores the tool gives; if the tool says they are approximate, say so. Never "
+    "invent a player or a figure.\n"
     "Clarifying questions:\n"
     "- You have an ask_user tool that puts a question to the user as buttons. Use it "
     "ONLY when the answer would materially change with the choice and you can't "
@@ -289,6 +314,29 @@ TOOLS = [
             "type": "object",
             "properties": {"fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"}},
             "required": ["fixture_id"],
+        },
+    },
+    {
+        "name": "recent_games",
+        "description": "Games the club has ALREADY PLAYED, newest first: date, opponent, result, venue, the grade it was played in ('5th Grade') and the team it was picked as ('3rd XI'), plus a game_id. Use it to find a played game before match_performances, e.g. 'the most recent 3rd XI game' (team='3rd XI', limit 1) or 'the 17 October game' (from_date and to_date). Filter by team (matches the XI or the grade), opponent (part of the club name) and from_date/to_date (YYYY-MM-DD).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "team": {"type": "string", "description": "Team or grade, e.g. '3rd XI' or '5th Grade'."},
+                "opponent": {"type": "string", "description": "Part of the opposition club name."},
+                "from_date": {"type": "string", "description": "Earliest game date, YYYY-MM-DD."},
+                "to_date": {"type": "string", "description": "Latest game date, YYYY-MM-DD."},
+                "limit": {"type": "integer", "description": "How many to return (default 5, max 20)."},
+            },
+        },
+    },
+    {
+        "name": "match_performances",
+        "description": "ONE completed game, in full, for judging who played well and for 3-2-1 votes: the result and true team scores, how it was won or lost, the best stand and any collapse; EVERY batter of ours with position, band (top order, middle order, tail), runs, balls, strike rate, not out, and share of the team total; EVERY bowler with overs, maidens, runs, wickets, economy and each wicket taken labelled with the dismissed batter's position, their score and a value (high, medium, low: a top-order or set batter is high, a tail-ender is low); and fielding (catches, run outs, stumpings). Pass the game_id from recent_games, or the whole match link or id the user pasted (betterat.cricket/games/<id>). Our players only.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"game_id": {"type": "string", "description": "a game id, or a pasted match link containing one"}},
+            "required": ["game_id"],
         },
     },
     {
@@ -973,6 +1021,36 @@ async def _tool_opponent_lineup(session, org_id, *, fixture_id=None):
     }
 
 
+_RECENT_DEFAULT_LIMIT = 5
+_RECENT_MAX_LIMIT = 20
+_GAME_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
+async def _tool_recent_games(session, org_id, team=None, opponent=None, from_date=None, to_date=None, limit=None):
+    try:
+        limit = min(max(int(limit or _RECENT_DEFAULT_LIMIT), 1), _RECENT_MAX_LIMIT)
+    except (TypeError, ValueError):
+        limit = _RECENT_DEFAULT_LIMIT
+    games = await iq_review.list_recent_games(
+        session, org_id, limit=limit, team=team, opponent=opponent,
+        from_date=_iso_date(from_date), to_date=_iso_date(to_date),
+    )
+    if not games:
+        return {"count": 0, "note": "No played game matches that filter. Try another spelling, a wider date range, or no filter."}
+    return {"count": len(games), "games": games, "scope": _scope_echo(basis="completed games, newest first")}
+
+
+async def _tool_match_performances(session, org_id, *, game_id=None):
+    m = _GAME_ID.search(str(game_id or ""))
+    if not m:
+        return {"error": "Pass a game id from recent_games, or the match link the user pasted."}
+    d = await iq_review.game_performances(session, org_id, m.group(0).lower())
+    if d is None:
+        return {"error": "No such game for this club. Use a game_id from recent_games."}
+    d["scope"] = _scope_echo(basis="this one game, our players only")
+    return d
+
+
 _DISPATCH = {
     "find_players": _tool_find_players,
     "player_detail": _tool_player_detail,
@@ -987,6 +1065,8 @@ _DISPATCH = {
     "opponent_danger_players": _tool_opponent_danger_players,
     "opponent_lineup": _tool_opponent_lineup,
     "our_selected_xi": _tool_our_selected_xi,
+    "recent_games": _tool_recent_games,
+    "match_performances": _tool_match_performances,
 }
 
 

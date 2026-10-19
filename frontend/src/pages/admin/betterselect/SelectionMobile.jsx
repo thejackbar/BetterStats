@@ -16,9 +16,9 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
-import { AVAILABILITY, availRank, viewStatus } from '../../../lib/availability'
-import { Icon, Avatar, Dot, Tag } from './ui'
-import { roleLine, nameMatches, alsoInLine, dropInLine, inDraftLine, weekSplitLine } from './selectionMeta'
+import { AVAILABILITY, availRank, viewStatus, weekFlag } from '../../../lib/availability'
+import { Icon, Avatar, Dot, Tag, WeekFlag } from './ui'
+import { roleLine, nameMatches, alsoInLine, dropInLine, inDraftLine } from './selectionMeta'
 import { FlagTags, RuleNotes, AgeTag } from './SelectionViews'
 
 // The part of the screen that is actually visible. With the keyboard up, a phone
@@ -103,7 +103,7 @@ function AddRow({ p, onAdd }) {
           <span style={{ color: viewStatus(p) === 'NO_RESPONSE' ? undefined : meta.cssVar }}>{meta.label}</span>
           {' · '}{roleLine(p)}
         </span>
-        {weekSplitLine(p) && <span className="block text-[11px] font-semibold text-pb-red truncate" data-week-split>{weekSplitLine(p)}</span>}
+        {weekFlag(p.availability_days) && <span className="block truncate" data-week-split><WeekFlag days={p.availability_days} className="text-[11px]" /></span>}
         {blocked
           ? <span className="block text-[11px] text-pb-red truncate">⛔ Picked for {p.clash.join(', ')}</span>
           : callUp

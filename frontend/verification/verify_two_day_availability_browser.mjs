@@ -93,12 +93,12 @@ try {
     check('control: week 3\'s date is not', !bodyText.includes(await heading(SAT3)))
     const txt1 = await textOf(page, `[data-date-card="${SAT1}"]`)
     const txt2 = await textOf(page, `[data-date-card="${SAT2}"]`)
-    check('week 1 card says "Week 1 of 2"', /week 1 of 2/i.test(txt1), txt1)
-    check('week 2 card says "Week 2 of 2"', /week 2 of 2/i.test(txt2), txt2)
+    check('week 1 card says "W1 · 2-day game"', /w1 · 2-day game/i.test(txt1), txt1)
+    check('week 2 card says "W2 · 2-day game"', /w2 · 2-day game/i.test(txt2), txt2)
     check('each game row names both Saturdays', (await page.locator('[data-two-day-note]').count()) === 2)
     check('one both-weeks card for the game', (await page.locator('[data-both-weeks]').count()) === 1)
     const sum0 = await textOf(page, '[data-both-summary]')
-    check('mixed answers are spelled out', /week 1: available/i.test(sum0) && /week 2: unavailable/i.test(sum0), sum0)
+    check('mixed answers are spelled out', /w1: available/i.test(sum0) && /w2: unavailable/i.test(sum0), sum0)
 
     if (SHOT && label === 'phone') await page.screenshot({ path: `${SHOT}/two-day-phone.png`, fullPage: true })
     if (SHOT && label === 'desktop') await page.screenshot({ path: `${SHOT}/two-day-desktop.png`, fullPage: true })
@@ -116,9 +116,9 @@ try {
     // One week alone.
     writes.length = 0
     await tryClick(page, `[data-date-card="${SAT2}"] button:has-text("Unavailable")`)
-    await tryWait(page, () => /week 2: unavailable/i.test(document.querySelector('[data-both-summary]')?.textContent || ''))
+    await tryWait(page, () => /w2: unavailable/i.test(document.querySelector('[data-both-summary]')?.textContent || ''))
     check('changing week 2 alone writes only week 2', writes.length === 1 && writes[0].date === SAT2 && writes[0].status === 'UNAVAILABLE', JSON.stringify(writes))
-    check('...and week 1 keeps its answer', /week 1: available/i.test(await textOf(page, '[data-both-summary]')))
+    check('...and week 1 keeps its answer', /w1: available/i.test(await textOf(page, '[data-both-summary]')))
 
     // A failed write rolls back only its own date.
     writes.length = 0
@@ -126,8 +126,8 @@ try {
     await tryClick(page, '[data-both="MAYBE"]')
     await page.waitForTimeout(600)
     const sumFail = await textOf(page, '[data-both-summary]')
-    check('week 2 rolled back when its write failed', /week 2: unavailable/i.test(sumFail), sumFail)
-    check('week 1 kept the new answer', /week 1: maybe/i.test(sumFail), sumFail)
+    check('week 2 rolled back when its write failed', /w2: unavailable/i.test(sumFail), sumFail)
+    check('week 1 kept the new answer', /w1: maybe/i.test(sumFail), sumFail)
     check('the player is told it did not save', (await page.locator('body').innerText()).toLowerCase().includes('could not save'))
     failDate = null
 
@@ -135,7 +135,7 @@ try {
     await tryClick(page, '[data-tab="mine"]')
     await page.waitForSelector('[data-my-page]')
     const mine = await textOf(page, '[data-my-page]')
-    check('My page labels the two weeks', /week 1 of 2/i.test(mine) && /week 2 of 2/i.test(mine), mine.slice(0, 200))
+    check('My page labels the two weeks', /w1 · 2-day game/i.test(mine) && /w2 · 2-day game/i.test(mine), mine.slice(0, 200))
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.screen.width)
     check(`no horizontal overflow at ${vp.width}px`, overflow <= 0, String(overflow))
@@ -151,7 +151,7 @@ try {
   await stub(page, holder)
   await page.goto(`${BASE}/avail/tok-two-day`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('[data-fixture]')
-  check('week 2 is still answerable and tagged', /week 2 of 2/i.test(await textOf(page, `[data-date-card="${SAT2}"]`)))
+  check('week 2 is still answerable and tagged', /w2 · 2-day game/i.test(await textOf(page, `[data-date-card="${SAT2}"]`)))
   check('no both-weeks card when only one week is left', (await page.locator('[data-both-weeks]').count()) === 0)
   await ctx.close()
 } finally {
