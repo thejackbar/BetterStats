@@ -30,6 +30,10 @@ of these has to hold. Anything else is reported and left for the merge screen:
   one name is a question for a person, and the report says so;
 * the pair is not one the club chose to keep apart (``merge_pair_ignores``).
 
+A third proof counts alongside batting lines and bowling figures: the wickets. In a paired
+match where every other bowler's credits agree exactly, the one credited bowler and the one
+import bowler left over, with the same surname, initial and count, are one man.
+
 Nothing here reads another club's players. The merge is the club's own
 (`routers/admin._merge_players_core`): it moves records and never deletes them,
 every table in `merge_carry.CARRIED` follows the person, and it is in the merge
@@ -84,6 +88,16 @@ def same_label(a: Optional[str], b: Optional[str]) -> bool:
     """Same surname and the same first initial."""
     la = label(a)
     return la is not None and la == label(b)
+
+
+def distinct_people(a: Optional[str], b: Optional[str]) -> bool:
+    """Two initial-only records whose full initials cannot be one man: "Crouch, AG" and
+    "Crouch, AD". "Crouch, A" and "Crouch, AG" could be, so they are not distinct."""
+    ma, mb = _INITIALS.match(a or ""), _INITIALS.match(b or "")
+    if not ma or not mb:
+        return False
+    ia, ib = ma.group(2).upper(), mb.group(2).upper()
+    return not (ia.startswith(ib) or ib.startswith(ia))
 
 
 _PLAYERS_SQL = """
@@ -216,9 +230,12 @@ def plan_from(players: list[dict], evidence: list[dict], ignored: set,
         if n < min_evidence:
             held.append({"remove": x_id, "why": TOO_FEW, "candidates": [y_id]})
             continue
+        # Another import record whose initials cannot be this man's ("Crouch, AD" beside
+        # "Crouch, AG") is a different person and no reason to doubt the label.
         clash = [p for p in by_label.get(label(x["name"]), [])
                  if p["id"] not in (x_id, y_id)
-                 and single.get(p["id"], (None,))[0] != y_id]
+                 and single.get(p["id"], (None,))[0] != y_id
+                 and not (p["removable"] and distinct_people(p["name"], x["name"]))]
         if clash:
             held.append({"remove": x_id, "why": SHARED_NAME,
                          "candidates": [y_id] + sorted(p["id"] for p in clash)})
@@ -235,6 +252,20 @@ async def find_pairs(db: AsyncSession, org_id, *, min_evidence: int = 1) -> dict
     org = str(org_id)
     players = [dict(r) for r in (await db.execute(text(_PLAYERS_SQL), {"org": org})).mappings().all()]
     evidence = [dict(r) for r in (await db.execute(text(_EVIDENCE_SQL), {"org": org})).mappings().all()]
+    # A third kind of proof, from the wickets: in a paired match where every other bowler's
+    # credits agree exactly with the club's figures, the one credited bowler and the one
+    # import bowler left over (same surname and initial, same count) are one man. Counted
+    # as the larger of the two tallies, never the sum, because one match can supply both.
+    from app.services import import_detail_restore
+
+    by_pair = {(e["x_id"], e["y_id"]): e for e in evidence}
+    for e in await import_detail_restore.credit_evidence(db, org_id):
+        have = by_pair.get((e["x_id"], e["y_id"]))
+        if have is None:
+            evidence.append(e)
+            by_pair[(e["x_id"], e["y_id"])] = e
+        elif int(e["matches"]) > int(have["matches"]):
+            have["matches"] = e["matches"]
     ignored = {frozenset((a, b)) for a, b in (await db.execute(text(_IGNORES_SQL), {"org": org})).all()}
     plan = plan_from(players, evidence, ignored, min_evidence=min_evidence)
     by_id = {p["id"]: p for p in players}
