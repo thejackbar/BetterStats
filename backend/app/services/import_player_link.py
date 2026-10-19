@@ -20,9 +20,10 @@ of these has to hold. Anything else is reported and left for the merge screen:
   PlayHQ id, no login, not claimed, and a name that is surname and bare initials;
 * the record to keep is synced (has a Cricket Australia id) and is not itself a
   candidate to remove;
-* across the club's paired matches, the removed record's innings line up with
-  exactly ONE synced player: same surname, first initial, runs and batting
-  position (``min_evidence`` matches or more);
+* across the club's paired matches, the removed record's performances line up with
+  exactly ONE synced player: same surname and first initial, and either the same runs
+  and batting position or the same bowling figures (overs, runs, wickets) where those
+  figures are unique on both cards (``min_evidence`` matches or more);
 * no other player of the club shares that surname and first initial, unless that
   other player is a record this same pass is joining to the same synced player
   (the "Westley, R" and "Westley, RHJ" of one man). Two synced records with the
@@ -96,26 +97,58 @@ _PLAYERS_SQL = """
 """
 
 # One row per (imported player, synced player) with the number of paired
-# matches in which their innings agree. A paired match is a manual game that
+# matches in which their performances agree. A paired match is a manual game that
 # supersedes its synced twin. Both players are scoped to this club: a shared
-# fixture carries the other club's batters on the synced side too.
+# fixture carries the other club's players on the synced side too.
+#
+# Two kinds of performance count, and a match counts once however many agree:
+#
+# * a batting line: same runs and same batting position (a position is held by one
+#   batter, so this needs no further guard);
+# * a bowling spell: same overs, runs conceded and wickets. Two bowlers can share a
+#   figure (4-0-20-1 twice in a match), so a spell only counts when its figures are
+#   unique among our bowlers on BOTH cards. This is what joins a player who only ever
+#   bowled in the paired matches, whom a batting line can never prove.
 _EVIDENCE_SQL = """
-    SELECT mbi.player_id::text AS x_id, bi.player_id::text AS y_id,
-           COUNT(DISTINCT mg.id) AS matches
-      FROM manual_games mg
-      JOIN manual_batting_innings mbi
-           ON mbi.manual_game_id = mg.id AND NOT COALESCE(mbi.did_not_bat, FALSE)
-      JOIN batting_innings bi
-           ON bi.game_id = mg.superseded_by_game_id
-          AND NOT COALESCE(bi.did_not_bat, FALSE)
-          AND bi.runs = mbi.runs
-          AND bi.batting_position IS NOT DISTINCT FROM mbi.batting_position
-      JOIN players px ON px.id = mbi.player_id AND px.organisation_id = CAST(:org AS UUID)
-      JOIN players py ON py.id = bi.player_id AND py.organisation_id = CAST(:org AS UUID)
-     WHERE mg.organisation_id = CAST(:org AS UUID)
-       AND mg.superseded_by_game_id IS NOT NULL
-       AND mbi.player_id <> bi.player_id
-     GROUP BY mbi.player_id, bi.player_id
+    WITH hits AS (
+        SELECT mg.id AS mg_id, mbi.player_id AS x_id, bi.player_id AS y_id
+          FROM manual_games mg
+          JOIN manual_batting_innings mbi
+               ON mbi.manual_game_id = mg.id AND NOT COALESCE(mbi.did_not_bat, FALSE)
+          JOIN batting_innings bi
+               ON bi.game_id = mg.superseded_by_game_id
+              AND NOT COALESCE(bi.did_not_bat, FALSE)
+              AND bi.runs = mbi.runs
+              AND bi.batting_position IS NOT DISTINCT FROM mbi.batting_position
+          JOIN players px ON px.id = mbi.player_id AND px.organisation_id = CAST(:org AS UUID)
+          JOIN players py ON py.id = bi.player_id AND py.organisation_id = CAST(:org AS UUID)
+         WHERE mg.organisation_id = CAST(:org AS UUID)
+           AND mg.superseded_by_game_id IS NOT NULL
+           AND mbi.player_id <> bi.player_id
+        UNION ALL
+        SELECT mg.id, msp.player_id, bs.player_id
+          FROM manual_games mg
+          JOIN manual_bowling_spells msp ON msp.manual_game_id = mg.id
+          JOIN bowling_spells bs
+               ON bs.game_id = mg.superseded_by_game_id
+              AND bs.overs = msp.overs AND bs.runs = msp.runs AND bs.wickets = msp.wickets
+          JOIN players px ON px.id = msp.player_id AND px.organisation_id = CAST(:org AS UUID)
+          JOIN players py ON py.id = bs.player_id AND py.organisation_id = CAST(:org AS UUID)
+         WHERE mg.organisation_id = CAST(:org AS UUID)
+           AND mg.superseded_by_game_id IS NOT NULL
+           AND msp.player_id <> bs.player_id
+           AND msp.overs IS NOT NULL AND msp.overs > 0
+           AND (SELECT COUNT(*) FROM manual_bowling_spells m2
+                 WHERE m2.manual_game_id = mg.id AND m2.overs = msp.overs
+                   AND m2.runs = msp.runs AND m2.wickets = msp.wickets) = 1
+           AND (SELECT COUNT(*) FROM bowling_spells b2
+                  JOIN players p2 ON p2.id = b2.player_id
+                       AND p2.organisation_id = CAST(:org AS UUID)
+                 WHERE b2.game_id = bs.game_id AND b2.overs = bs.overs
+                   AND b2.runs = bs.runs AND b2.wickets = bs.wickets) = 1
+    )
+    SELECT x_id::text AS x_id, y_id::text AS y_id, COUNT(DISTINCT mg_id) AS matches
+      FROM hits GROUP BY x_id, y_id
 """
 
 _IGNORES_SQL = """

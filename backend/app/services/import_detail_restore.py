@@ -212,8 +212,20 @@ async def plan_org(db, org_id) -> dict:
             "by_season": {k: len(v) for k, v in sorted(by_season.items())}}
 
 
-async def restore_org(db, org_id, *, apply: bool = False) -> dict:
+async def restore_org(db, org_id, *, apply: bool = False,
+                      limit_matches: Optional[int] = None) -> dict:
+    """The plan for one club and, with ``apply``, write it in one transaction.
+
+    ``limit_matches`` keeps only the first N matches that would gain detail, in a fixed
+    order, so a first run can be small enough to check by eye before the rest."""
     plan = await plan_org(db, org_id)
+    if limit_matches:
+        order = sorted({r["mid"] for k in ("fow", "part", "bw") for r in plan[k]})
+        keep = set(order[:limit_matches])
+        for k in ("fow", "part", "bw"):
+            plan[k] = [r for r in plan[k] if r["mid"] in keep]
+        plan["matches"] = len(keep)
+        plan["by_season"] = {}
     res = {**plan, "written": {"fow": 0, "part": 0, "bw": 0}}
     if not apply or not (plan["fow"] or plan["part"] or plan["bw"]):
         return res
