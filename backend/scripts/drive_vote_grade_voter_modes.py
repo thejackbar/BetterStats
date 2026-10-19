@@ -53,6 +53,9 @@ def route_api(route, request):
         return send({"id": "u1", "username": "admin", "role": "club_admin", "club_slug": "applecross",
                      "organisation_id": "org1", "capabilities": [], "entitlements": {
                          "modules": ["select"], "status": "active", "overrides": ["select"]}})
+    if "/weighting" in path:
+        return send({"year": 2026, "season_label": "2026/27", "mode": "off", "top_grade": None,
+                     "ballot_values": [3, 2, 1], "rows": []})
     if path.startswith("/votes/medals"):
         return send({"medals": [STATE], "grades": GRADES})
     if path.startswith("/votes/settings"):

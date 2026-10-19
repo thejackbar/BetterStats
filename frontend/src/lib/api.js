@@ -235,7 +235,15 @@ export const api = {
   getSocialFixtures: (q) => request(`/admin/social/fixtures${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   getSocialResults: (q) => request(`/admin/social/results${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   getSocialPotm: (matchId) => request(`/admin/social/potm/${matchId}`),
-  getSocialTotw: (q) => request(`/admin/social/totw${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  getSocialTotw: (q, { dateFrom = '', dateTo = '', scope = 'all' } = {}) => {
+    const p = new URLSearchParams()
+    if (q) p.set('q', q)
+    if (dateFrom) p.set('date_from', dateFrom)
+    if (dateTo) p.set('date_to', dateTo)
+    if (scope && scope !== 'all') p.set('scope', scope)
+    const qs = p.toString()
+    return request(`/admin/social/totw${qs ? `?${qs}` : ''}`)
+  },
   // Which of these players have no earlier game on the club's record (debuts).
   // `before` is the match day as an ISO date; absent means today.
   getSocialDebuts: (ids, before) => request(`/admin/social/debuts?player_ids=${encodeURIComponent((ids || []).join(','))}${before ? `&before=${encodeURIComponent(String(before).slice(0, 10))}` : ''}`),
@@ -3364,6 +3372,7 @@ export const api = {
     request(`/votes/medals/${medalId}${confirm ? '?confirm=true' : ''}`, { method: 'DELETE' }),
   votesRegenerateLink: (medalId) =>
     request(`/votes/medals/${medalId}/regenerate`, { method: 'POST' }),
+  votesGetWeighting: (medalId) => request(`/votes/medals/${medalId}/weighting`),
   votesGetSettings: (medalId) => request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`),
   votesSetSettings: (data, medalId) =>
     request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`,

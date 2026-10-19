@@ -943,7 +943,7 @@ Check: `verify_merge_profile_carry.py` (44 checks, own database) now seeds the r
 
 
 
-## Undoing a player merge from the server (v9.122.4)
+## Undoing a player merge from the server (v9.123.1)
 
 Gisborne (Oct 2026): club users merged several CA-redacted junior rows (names read `********`) into one player on 14 Oct, deliberately and in sequence, and one of those merges needed checking and possibly reversing. The merge screen's Undo needs a signed-in user with merge permission, so `app/scripts/undo_player_merge.py` was added for the server.
 - It calls the shipped `routers/admin.undo_merge` (no copy of the restore logic) and adds a read-only report of what the merge logged, how many games still sit on the kept player, and any newer live merge on the same players.

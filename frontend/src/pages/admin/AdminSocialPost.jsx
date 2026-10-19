@@ -44,6 +44,7 @@ import {
 } from '../../social/milestoneItems'
 import MilestonePicker from '../../components/admin/socialpost/MilestonePicker'
 import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
+import { MAKEUP_KINDS, MAKEUP_LABELS, FANTASY_MAKEUP, makeupSize, poolKinds, pickMakeup, shortfallText } from '../../social/totwMakeup'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
@@ -895,19 +896,67 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
   )
 }
 
-// Team of the week — pull the round (latest, or the one a pasted match link
-// names) and set how many of its best performers go on the post.
-function TotwImportBox({ status, notice, data, onPull, onFetchLink }) {
+// Team of the week — pull the round (the club's latest, the days it was played
+// on, or the one a pasted match link names) and set how many of its best
+// performers go on the post.
+const TOTW_SCOPE_OPTS = [['all', 'All teams'], ['junior', 'Juniors'], ['senior', 'Seniors']]
+const TOTW_RANGE_KEY = 'bs_social_totw_range'
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+function lastSevenDays() {
+  const to = new Date(), from = new Date()
+  from.setDate(from.getDate() - 6)
+  return { from: isoDay(from), to: isoDay(to) }
+}
+// The period a club last pulled, so a round that always runs Tuesday to Sunday
+// is not typed in again each week. Per browser, and only a convenience.
+function readTotwRange() {
+  try {
+    const r = JSON.parse(localStorage.getItem(TOTW_RANGE_KEY) || 'null')
+    if (r && typeof r.from === 'string' && typeof r.to === 'string') return { from: r.from, to: r.to }
+  } catch { /* storage blocked or not JSON: start empty */ }
+  return { from: '', to: '' }
+}
+function writeTotwRange(r) {
+  try { localStorage.setItem(TOTW_RANGE_KEY, JSON.stringify(r)) } catch { /* private window */ }
+}
+
+function TotwImportBox({ status, notice, data, onPull, onFetchLink, range, onRange, onPullRange }) {
   const [link, setLink] = useState('')
   const fetchLink = () => { const q = link.trim(); if (q) onFetchLink(q) }
+  const dateCls = 'w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono'
+  const btnCls = 'px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50'
   return (
     <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
       <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from a round</p>
       <button onClick={onPull} disabled={status === 'loading'}
-        className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
+        className={btnCls}
         style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
         {status === 'loading' ? 'Loading…' : 'Pull latest round'}
       </button>
+      {onPullRange && range && (
+        <div data-testid="totw-range">
+          <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mt-3 mb-1.5">…or pick the days the round was played</p>
+          <div className="flex flex-wrap gap-2">
+            <label className="flex-1 min-w-[9rem] flex flex-col gap-1">
+              <span className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2">From</span>
+              <input type="date" value={range.from} max={range.to || undefined}
+                onChange={e => onRange({ ...range, from: e.target.value })} className={dateCls} />
+            </label>
+            <label className="flex-1 min-w-[9rem] flex flex-col gap-1">
+              <span className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2">To</span>
+              <input type="date" value={range.to} min={range.from || undefined}
+                onChange={e => onRange({ ...range, to: e.target.value })} className={dateCls} />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            <button onClick={onPullRange} disabled={status === 'loading' || !range.from || !range.to}
+              className={btnCls} style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>Pull this period</button>
+            <button type="button" onClick={() => onRange(lastSevenDays())}
+              className="px-3 py-1.5 rounded border pb-hairline text-xs font-mono tracking-wide2 text-pb-text">Last 7 days</button>
+          </div>
+          <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">Every completed match your club played in this period counts, whatever day it was on.</p>
+        </div>
+      )}
       <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mt-3 mb-1.5">…or paste any match link from that round</p>
       <div className="flex gap-2">
         <input value={link} onChange={e => setLink(e.target.value)}
@@ -915,7 +964,7 @@ function TotwImportBox({ status, notice, data, onPull, onFetchLink }) {
           placeholder="Match link from play.cricket.com.au"
           className="flex-1 min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
         <button onClick={fetchLink} disabled={status === 'loading'}
-          className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
+          className={btnCls}
           style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>Fetch</button>
       </div>
       {notice?.kind === 'playhq' && (
@@ -926,7 +975,7 @@ function TotwImportBox({ status, notice, data, onPull, onFetchLink }) {
       )}
       {status === 'ok' && data && (
         <p className="font-mono text-[9px] mt-1.5 text-green-400">
-          ✓ {data.players.length} performers from {data.matches} {data.matches === 1 ? 'match' : 'matches'} · {[data.round, data.label].filter(Boolean).join(' · ')}
+          ✓ {data.players.length} performers from {data.matches} {data.matches === 1 ? 'match' : 'matches'} · {[data.scope && data.scope !== 'all' ? (data.scope === 'junior' ? 'Juniors' : 'Seniors') : '', data.round, data.label].filter(Boolean).join(' · ')}
         </p>
       )}
       {status && status !== 'loading' && status !== 'ok' && (
@@ -934,6 +983,35 @@ function TotwImportBox({ status, notice, data, onPull, onFetchLink }) {
       )}
       <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">
         Points are the same as the player of the match: 1 a run, 20 a wicket, 2 a maiden, 8 an outfield catch, stumping or run out, 4 a keeper catch. A player who played in two grades counts once, on their better day.
+      </p>
+    </div>
+  )
+}
+
+// Which of the club's teams the team of the week is drawn from. Changing it
+// pulls the same round again, since a player's better day is decided among the
+// matches in scope.
+function TotwScopePicker({ scope, onChange, data, busy }) {
+  const counts = data?.scopeMatches
+  return (
+    <div className="mb-4" data-testid="totw-scope">
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-1.5">Teams</p>
+      <div className="flex flex-wrap gap-1.5">
+        {TOTW_SCOPE_OPTS.map(([k, label]) => {
+          const on = scope === k
+          return (
+            <button key={k} type="button" onClick={() => onChange(k)} aria-pressed={on} disabled={busy}
+              className="px-3 min-h-8 rounded border font-mono text-[10px] tracking-wide2 transition-colors disabled:opacity-60"
+              style={on
+                ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+                : { background: 'transparent', color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' }}>
+              {label}{counts && k !== 'all' ? ` (${counts[k]})` : ''}
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">
+        Juniors are the grades marked Juniors on the Grades screen (under-age teams and girls' age groups). Seniors are every other grade, men's and women's. Fix a grade there if it lands on the wrong side.
       </p>
     </div>
   )
@@ -956,6 +1034,78 @@ function TotwSizeStepper({ count, poolSize, onChange }) {
         <p className="font-mono text-[9px] mt-1.5 text-amber-400">A team of the week is at least {TOTW_MIN} players.{poolSize != null && poolSize < TOTW_MIN ? ` Only ${poolSize} played that round.` : ''}</p>
       )}
     </div>
+  )
+}
+
+// Best performers (a size) or a set make-up (so many of each seat). In the
+// make-up the size is the sum of the seats, so there is no separate stepper.
+function TotwTeamShape({ mode, onMode, makeup, onMakeup, data, count, onSize }) {
+  const pool = data?.players || null
+  const have = pool ? poolKinds(pool) : null
+  const total = makeupSize(makeup)
+  const result = pool && mode === 'makeup' ? pickMakeup(pool, makeup) : null
+  const warn = result ? shortfallText(result.short, result.picks.length, result.wanted) : ''
+  const btn = 'w-8 h-8 rounded border pb-hairline font-mono text-base text-pb-text disabled:opacity-30'
+  const tab = (on) => (on
+    ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+    : { background: 'transparent', color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' })
+  const seats = [...MAKEUP_KINDS, 'ANY']
+  return (
+    <div data-testid="totw-shape">
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {[['best', 'Best performers'], ['makeup', 'Set the make-up']].map(([k, label]) => (
+          <button key={k} type="button" aria-pressed={mode === k} onClick={() => onMode(k)}
+            className="px-3 min-h-8 rounded border font-mono text-[10px] tracking-wide2 transition-colors" style={tab(mode === k)}>{label}</button>
+        ))}
+      </div>
+      {mode === 'best' ? (
+        <TotwSizeStepper count={count} poolSize={pool ? pool.length : null} onChange={onSize} />
+      ) : (
+        <div data-testid="totw-makeup">
+          <div className="flex flex-col gap-1.5">
+            {seats.map(k => {
+              const n = Number(makeup[k]) || 0
+              return (
+                <div key={k} className="flex items-center gap-2" data-testid={`totw-seat-${k}`}>
+                  <span className="text-xs text-pb-text w-32 shrink-0">{MAKEUP_LABELS[k]}</span>
+                  <button className={btn} disabled={n <= 0} onClick={() => onMakeup({ ...makeup, [k]: n - 1 })} aria-label={`Fewer ${MAKEUP_LABELS[k].toLowerCase()}`}>−</button>
+                  <span className="font-mono text-sm text-pb-text w-6 text-center" data-testid={`totw-seat-${k}-count`}>{n}</span>
+                  <button className={btn} disabled={total >= TOTW_MAX} onClick={() => onMakeup({ ...makeup, [k]: n + 1 })} aria-label={`More ${MAKEUP_LABELS[k].toLowerCase()}`}>+</button>
+                  {have && k !== 'ANY' && <span className="font-mono text-[9px] text-pb-faintest">{have[k]} played</span>}
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
+            <span className="font-mono text-[10px] text-pb-faint" data-testid="totw-makeup-total">Team of {total} · {TOTW_MIN} to {TOTW_MAX}</span>
+            <button type="button" onClick={() => onMakeup({ ...FANTASY_MAKEUP })}
+              className="px-3 min-h-8 rounded border pb-hairline font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">Fantasy mix 4 · 1 · 3 · 3</button>
+          </div>
+          {total < TOTW_MIN && (
+            <p className="font-mono text-[9px] mt-1.5 text-amber-400">A team of the week is at least {TOTW_MIN} players.</p>
+          )}
+          {warn && <p className="font-mono text-[9px] mt-1.5 text-amber-400 leading-relaxed" data-testid="totw-makeup-warn">{warn}</p>}
+          <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">
+            Each place goes to the best performer of that kind. A keeper is whoever the scorecard lists as one (or took a keeper catch or stumping), an all-rounder scored 20 or more and took a wicket, and the rest are batters or bowlers by what earned them more points. Best of the rest takes the next best performer of any kind.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// The whole Team of the Week pull panel: which teams, which round, what shape.
+// One component so the full editor and the phone quick-post cannot drift apart.
+function TotwControls({ t }) {
+  return (
+    <>
+      <TotwScopePicker scope={t.plan.scope} onChange={t.onScope} data={t.import.data} busy={t.import.status === 'loading'} />
+      <TotwImportBox status={t.import.status} notice={t.import.notice} data={t.import.data}
+        onPull={t.onPull} onFetchLink={t.onFetchLink}
+        range={t.plan.range} onRange={t.onRange} onPullRange={t.onPullRange} />
+      <TotwTeamShape mode={t.plan.mode} onMode={t.onMode} makeup={t.plan.makeup} onMakeup={t.onMakeup}
+        data={t.import.data} count={t.count} onSize={t.onSize} />
+    </>
   )
 }
 
@@ -1443,6 +1593,9 @@ export default function AdminSocialPost() {
   // exactly as they do on a lineup.
   const [totwImport, setTotwImport] = useState({ status: null, data: null, notice: null })
   const [totwOpts, setTotwOpts] = useState({ showPoints: false })
+  // How the pool is pulled and shaped: which teams (all, juniors, seniors), the
+  // period for a round that is not a weekend, and best performers or a set make-up.
+  const [totwPlan, setTotwPlan] = useState(() => ({ scope: 'all', range: readTotwRange(), mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
   // Milestones: the club's recorded list, which are ticked (in post order), the
   // window and search that narrow the picker, and what the post says about them.
   const [msImport, setMsImport] = useState({ status: null, report: null })
@@ -2290,24 +2443,39 @@ export default function AdminSocialPost() {
     }
   }, [playerForPid])
 
-  const applyTotw = useCallback((data, size) => {
+  // The team off the pool: the top `size`, or (with a make-up) the best of each
+  // seat. `cursor` is how far down the ranking the team reaches, so the stepper
+  // carries on from there.
+  const applyTotw = useCallback((data, size, makeup) => {
     const pool = data?.players || []
-    const n = Math.max(TOTW_MIN, Math.min(TOTW_MAX, size))
-    totwCursor.current = Math.min(n, pool.length) - 1
-    setSelectedPlayers(pool.slice(0, n).map(totwSelection))
+    let chosen
+    if (makeup) {
+      chosen = pickMakeup(pool, makeup).picks
+      totwCursor.current = chosen.reduce((c, pl) => Math.max(c, pool.indexOf(pl)), -1)
+    } else {
+      const n = Math.max(TOTW_MIN, Math.min(TOTW_MAX, size))
+      chosen = pool.slice(0, n)
+      totwCursor.current = Math.min(n, pool.length) - 1
+    }
+    setSelectedPlayers(chosen.map(pl => totwSelection(pl, pool.indexOf(pl))))
     setMatch(m => ({ ...m, round: data.round || m.round, date: data.label || m.date, season: data.season || m.season }))
   }, [totwSelection])
 
-  // A pasted link names the round; none means the club's latest match-day.
-  // A playhq.com link cannot (different id namespace) and comes back kind
-  // 'playhq' for the amber correction, same as the roundups.
-  const loadTotw = useCallback(async (q) => {
+  // A period names the round by the days it was played; a pasted link names it
+  // by one of its matches; none means the club's latest match-day. A playhq.com
+  // link cannot (different id namespace) and comes back kind 'playhq' for the
+  // amber correction, same as the roundups. `source` is remembered so changing
+  // the teams re-pulls the same round.
+  const loadTotw = useCallback(async (q, over = {}) => {
+    const scope = over.scope ?? totwPlan.scope
+    const dateFrom = over.dateFrom || ''
+    const dateTo = over.dateTo || ''
     setTotwImport(s => ({ ...s, status: 'loading', notice: null }))
     try {
-      const data = await api.getSocialTotw(q || '')
+      const data = await api.getSocialTotw(q || '', { dateFrom, dateTo, scope })
       if (data.kind === 'round' && data.players?.length) {
-        setTotwImport({ status: 'ok', data, notice: null })
-        applyTotw(data, TOTW_DEFAULT)
+        setTotwImport({ status: 'ok', data, notice: null, source: { q: q || '', dateFrom, dateTo } })
+        applyTotw(data, TOTW_DEFAULT, totwPlan.mode === 'makeup' ? totwPlan.makeup : null)
         return
       }
       if (data.kind === 'playhq') {
@@ -2318,7 +2486,29 @@ export default function AdminSocialPost() {
     } catch (e) {
       setTotwImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
     }
-  }, [applyTotw])
+  }, [applyTotw, totwPlan])
+
+  const pullTotwRange = () => {
+    const { from, to } = totwPlan.range
+    if (!from || !to) { setTotwImport(s => ({ ...s, status: 'Pick a start date and an end date.' })); return }
+    writeTotwRange(totwPlan.range)
+    loadTotw('', { dateFrom: from, dateTo: to })
+  }
+  const changeTotwScope = (scope) => {
+    if (scope === totwPlan.scope) return
+    setTotwPlan(pl => ({ ...pl, scope }))
+    const src = totwImport.source
+    if (src && totwImport.data) loadTotw(src.q, { dateFrom: src.dateFrom, dateTo: src.dateTo, scope })
+  }
+  const changeTotwMode = (mode) => {
+    if (mode === totwPlan.mode) return
+    setTotwPlan(pl => ({ ...pl, mode }))
+    if (totwImport.data) applyTotw(totwImport.data, selectedPlayers.length || TOTW_DEFAULT, mode === 'makeup' ? totwPlan.makeup : null)
+  }
+  const changeTotwMakeup = (makeup) => {
+    setTotwPlan(pl => ({ ...pl, makeup }))
+    if (totwImport.data && totwPlan.mode === 'makeup') applyTotw(totwImport.data, TOTW_DEFAULT, makeup)
+  }
 
   // The club's recorded milestones (the same report as Admin > Milestones). The
   // first load ticks the newest in the window so a post exists straight away; a
@@ -2374,6 +2564,14 @@ export default function AdminSocialPost() {
     }
     totwCursor.current = cursor
     setSelectedPlayers([...prev, ...add])
+  }
+
+  // Everything the Team of the Week panel needs, in one prop for TotwControls.
+  const totwControls = {
+    plan: totwPlan, import: totwImport, count: selectedPlayers.length,
+    onScope: changeTotwScope, onMode: changeTotwMode, onMakeup: changeTotwMakeup, onSize: changeTotwSize,
+    onRange: (range) => setTotwPlan(pl => ({ ...pl, range })),
+    onPull: () => loadTotw(''), onFetchLink: (q) => loadTotw(q), onPullRange: pullTotwRange,
   }
 
   // ── Play.cricket fixtures / results round import ────────────────────────────
@@ -3131,7 +3329,11 @@ export default function AdminSocialPost() {
   if (tmpl.kind === 'totw') {
     // The competition stays as typed: a team of the week spans grades, so the
     // 'COMPETITION' placeholder the other posts fall back to would print on it.
-    extraProps.totw = { round: matchData.round, date: matchData.date, comp: match.competition, showPoints: totwOpts.showPoints }
+    extraProps.totw = {
+      round: matchData.round, date: matchData.date, comp: match.competition, showPoints: totwOpts.showPoints,
+      // JUNIOR or SENIOR above the round on a scoped team, nothing on the club's whole week.
+      heading: { junior: 'JUNIOR', senior: 'SENIOR' }[totwImport.data?.scope] || undefined,
+    }
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'milestones') {
@@ -3244,6 +3446,7 @@ export default function AdminSocialPost() {
     setPotmImport({ status: null, data: null, playerIdx: 0, include: { bat: true, bowl: true, field: true } })
     setTotwImport({ status: null, data: null, notice: null })
     setTotwOpts({ showPoints: false })
+    setTotwPlan(pl => ({ scope: 'all', range: pl.range, mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
     totwCursor.current = -1
     setMsImport({ status: null, report: null })
     setMsPicks([])
@@ -4244,9 +4447,7 @@ export default function AdminSocialPost() {
 
                 {activeTab === 'totw' && (
                   <div className="pb-card p-4">
-                    <TotwImportBox status={totwImport.status} notice={totwImport.notice} data={totwImport.data}
-                      onPull={() => loadTotw('')} onFetchLink={loadTotw} />
-                    <TotwSizeStepper count={selectedPlayers.length} poolSize={totwImport.data?.players?.length ?? null} onChange={changeTotwSize} />
+                    <TotwControls t={totwControls} />
                   </div>
                 )}
 
@@ -5187,11 +5388,7 @@ export default function AdminSocialPost() {
             {activeTab === 'totw' && (
               <section className="pb-card p-4" data-testid="totw-section">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Team of the Week</h2>
-                <TotwImportBox status={totwImport.status} notice={totwImport.notice} data={totwImport.data}
-                  onPull={() => loadTotw('')} onFetchLink={loadTotw} />
-                <Field label="Team size">
-                  <TotwSizeStepper count={selectedPlayers.length} poolSize={totwImport.data?.players?.length ?? null} onChange={changeTotwSize} />
-                </Field>
+                <TotwControls t={totwControls} />
                 <label className="flex items-center gap-2 mt-3 text-xs font-mono text-pb-text cursor-pointer">
                   <input type="checkbox" checked={totwOpts.showPoints} onChange={(e) => setTotwOpts(o => ({ ...o, showPoints: e.target.checked }))} />
                   Show points on the post

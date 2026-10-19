@@ -220,6 +220,12 @@ export default function FixtureDetail({ fixtureId, medalId, onBack }) {
 
           <div className="pb-card px-4 py-4">
             <div className="font-display font-bold text-[15px] mb-2.5">This week's count</div>
+            {detail.fixture.weight != null && detail.fixture.weight !== 1 && (
+              <div className="text-[12px] text-pb-faint mb-2.5">
+                This grade's votes are weighted ×{detail.fixture.weight}, so the season points below are the
+                normal points times {detail.fixture.weight}. Raw votes are the real count.
+              </div>
+            )}
             {detail.results.length === 0 ? (
               <div className="text-pb-faint text-sm">No votes yet.</div>
             ) : (

@@ -1639,7 +1639,7 @@ Reported (Oct 2026, Squads board): the quick-update window for a two-day fixture
 - Proof: `verify_squad_next_game.py` (pure + matrix route with a two-day game; the control on the previous service fails the end_on checks), `verify_week_names.py` (16 checks on settings, config and public landing; control fails 14), `frontend/verification/verify_squads_two_day_browser.mjs` (38 checks, Chromium, API stubbed: the four answers write the exact requests, flags match dot colours, A/B names, legacy payload, 390px; control on the previous build fails the two-day header, half dot and quick-answer checks). `verify_two_day_availability_browser.mjs`, `verify_two_day_selection_browser.mjs`, `verify_two_day_whiteboard_browser.mjs` and `verify_select_settings_browser.mjs` were updated to the new wording.
 
 
-## Fill from last week follows the grade (v9.122.4)
+## Fill from last week follows the grade (v9.123.1)
 
 Reported by Gisborne (Oct 2026): the 3rd and 4th XI grades (07J, 09J) were linked to the wrong squads. After the links were corrected, "fill from last week" on both returned a mixed bag of players.
 - Cause: `previous_xi` scoped last week by the fixture's squad (`team_id`). Re-linking a squad's teams moves only upcoming games (`assign_fixtures`), so last week's 07J and 09J games both still sat on one squad and the later one won for both.

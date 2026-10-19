@@ -9,7 +9,7 @@ client stubbed to a small, hand-built round:
                                                Cy (2 catches), Dee (a duck), and an OPPOSITION batter on 200
                        2nd Grade v Others      Eli (100 not out), Sam again (30), Fay (a keeper: 3 catches
                                                + a stumping), Gus (unresolved to a club player)
-  Round 4 (a week on)  1st Grade v Earlier     Hal (150), who must NOT be in round 5's team
+  Round 4 (8 days on)  1st Grade v Earlier     Hal (150), who must NOT be in round 5's team
 
 Points are 1 a run, 20 a wicket, 2 a maiden, 8 an outfield catch / stumping / run
 out, 4 a keeper catch.
@@ -62,16 +62,18 @@ def check(label, got, want=True):
 
 ORG = uuid.uuid4()
 OPP_ORG = uuid.uuid4()
-GRADE_A, GRADE_B = str(uuid.uuid4()), str(uuid.uuid4())
+GRADE_A, GRADE_B, GRADE_J = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
 TODAY = date.today()
 SAT = TODAY - timedelta(days=2)
-PREV = SAT - timedelta(days=7)
+PREV = SAT - timedelta(days=8)   # more than a weekend window clear of the Tuesday junior game
+TUE = SAT - timedelta(days=4)   # the round's first day: a junior game, 4 days before the Saturday
 
 # Participant guids on the scorecards. Gus has no club player row.
-P = {n: str(uuid.uuid4()) for n in ("sam", "bo", "cy", "dee", "eli", "fay", "gus", "hal", "opp")}
-NAME = {"sam": "Sam Star", "bo": "Bo Bowler", "cy": "Cy Catcher", "dee": "Dee Duck", "eli": "Eli Ton",
+P = {n: str(uuid.uuid4()) for n in ("sam", "bo", "cy", "dee", "eli", "fay", "gus", "hal", "opp", "jax", "kit", "lou")}
+NAME = {"jax": "Jax Junior", "kit": "Kit Keeper", "lou": "Lou Allround",
+        "sam": "Sam Star", "bo": "Bo Bowler", "cy": "Cy Catcher", "dee": "Dee Duck", "eli": "Eli Ton",
         "fay": "Fay Keeper", "gus": "Gus Guest", "hal": "Hal Earlier", "opp": "Otto Opposition"}
-M1, M3, M0 = (str(uuid.uuid4()) for _ in range(3))
+M1, M3, M0, MJ = (str(uuid.uuid4()) for _ in range(4))
 OUR_TEAM, THEIR_TEAM = "aaaaaaaa-0000-0000-0000-000000000001", "bbbbbbbb-0000-0000-0000-000000000002"
 
 
@@ -90,9 +92,11 @@ def field(who, catches=0, wk=0, st=0, ro=0):
             "wicketKeeperCatches": wk, "stumpings": st, "runOuts": ro}
 
 
-def scorecard(grade_name, our_bat, our_field_bowl_vs_them, opp_bat, day):
+def scorecard(grade_name, our_bat, our_field_bowl_vs_them, opp_bat, day, roles=None):
     """Our innings carry our batting; THEIR innings carry our bowling + fielding."""
-    roster = [{"participantId": P[k], "displayName": NAME[k], "playerShortName": NAME[k]} for k in P if k != "opp"]
+    roles = roles or {}
+    roster = [{"participantId": P[k], "displayName": NAME[k], "playerShortName": NAME[k], "roles": roles.get(k, [])}
+              for k in P if k != "opp"]
     return {
         "grade": {"name": grade_name},
         "matchSummary": {
@@ -122,9 +126,16 @@ CARDS = {
                     ([], [field("fay", catches=3, wk=3, st=1)]),
                     [], SAT),
     M0: scorecard("1st Grade", [bat("hal", 150, 120)], ([], []), [], PREV),
+    # The round's first day: a junior game. Jax is an all-rounder (45 + 2 wkts), Kit is listed as the keeper
+    # but takes no catch, Lou bowls (3 wkts).
+    MJ: scorecard("Under 15s", [bat("jax", 45, 40), bat("kit", 10, 20)],
+                  ([bowl("jax", "6.0", 0, 20, 2), bowl("lou", "8.0", 1, 18, 3)], []),
+                  [], TUE, roles={"kit": ["Wicket Keeper"]}),
 }
 # Gus scores on the 2nd grade card only.
 CARDS[M3]["innings"][0]["batting"].append(bat("gus", 40, 30))
+# Jax played up in the 2nd grade on the Saturday and made 12.
+CARDS[M3]["innings"][0]["batting"].append(bat("jax", 12, 15))
 
 
 def raw_match(mid, day, rnd, grade_guid, status=3):
@@ -138,6 +149,7 @@ def raw_match(mid, day, rnd, grade_guid, status=3):
 GRADE_MATCHES = {
     GRADE_A: [raw_match(M1, SAT, "Round 5", GRADE_A), raw_match(M0, PREV, "Round 4", GRADE_A)],
     GRADE_B: [raw_match(M3, SAT, "Round 5", GRADE_B)],
+    GRADE_J: [raw_match(MJ, TUE, "Round 5", GRADE_J)],
 }
 
 
@@ -162,6 +174,22 @@ gr.get_match_scorecard = _scorecard
 gr.get_match_detail = _detail
 
 
+async def tw(*args):
+    """social_totw, answering `unsupported` instead of raising on a build that predates the arguments,
+    so a control run reports the new checks as FAIL rather than crashing before it writes its digest."""
+    try:
+        return await social_rounds.social_totw(*args)
+    except TypeError as exc:
+        return {"kind": f"unsupported: {exc}"}
+
+
+async def tw_route(fn, *args):
+    try:
+        return await fn(*args)
+    except TypeError as exc:
+        return {"kind": f"unsupported: {exc}"}
+
+
 async def main():
     async with engine.begin() as conn:
         await conn.execute(text("DROP SCHEMA public CASCADE"))
@@ -169,8 +197,19 @@ async def main():
         await conn.run_sync(Base.metadata.create_all)
         # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
         await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
+        # Lifespan table the category lookup reads (main.py), copied column for column.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL,
+                undone_at TIMESTAMPTZ
+            )
+        """))
 
-    season, ga, gb = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    season, ga, gb, gj = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     async with Session() as db:
         db.add_all([
             Organisation(id=ORG, name="Applecross Cricket Club", short_name="Applecross", slug="applecross",
@@ -181,9 +220,10 @@ async def main():
         db.add_all([
             Grade(id=ga, season_id=season, name="1st Grade", grassroots_id=GRADE_A),
             Grade(id=gb, season_id=season, name="2nd Grade", grassroots_id=GRADE_B),
+            Grade(id=gj, season_id=season, name="Under 15s", grassroots_id=GRADE_J),
         ])
         await db.flush()
-        for k in ("sam", "bo", "cy", "dee", "eli", "fay", "hal"):
+        for k in ("sam", "bo", "cy", "dee", "eli", "fay", "hal", "jax", "kit", "lou"):
             db.add(Player(id=uuid.uuid4(), organisation_id=ORG, name=NAME[k].split()[1] + ", " + NAME[k].split()[0],
                           grassroots_id=P[k]))
         await db.commit()
@@ -223,7 +263,7 @@ async def main():
             check("round and date read off the newest match-day", (out.get("round"), out.get("date")), ("Round 5", SAT.isoformat()))
             check("ranked best first, by the POTM points",
                   [(p["last"], p["points"]) for p in pl],
-                  [("Star", 129), ("Ton", 100), ("Bowler", 84), ("Guest", 40), ("Keeper", 20), ("Catcher", 16), ("Duck", 0)])
+                  [("Star", 129), ("Ton", 100), ("Bowler", 84), ("Guest", 40), ("Keeper", 20), ("Catcher", 16), ("Junior", 12), ("Duck", 0)])
             check("a keeper's catches score 4 and a stumping 8: 3x4 + 8 = 20, not 3x8",
                   by_last.get("Keeper", E).get("points"), 20)
             check("Sam played two grades and appears once", [p["last"] for p in pl].count("Star"), 1)
@@ -249,6 +289,67 @@ async def main():
             gr.get_grade_matches = saved
             check("a club with no completed matches gets a message, not an error", empty.get("kind"), "no_results")
 
+    print("\n── Team of the week: a period, not a weekend ──")
+    async with Session() as db:
+        org = await db.get(Organisation, ORG)
+        wk = await tw(db, org, "", TUE.isoformat(), SAT.isoformat())
+        names = {p["last"]: p for p in wk.get("players", [])}
+        check("the period answers as a round", wk.get("kind"), "round")
+        check("it pooled the Tuesday junior game as well as the Saturday ones", wk.get("matches"), 3)
+        check("  ... so the junior all-rounder is in", "Junior" in names)
+        check("the label names the days, with no dash", wk.get("label"), getattr(social_rounds, "_range_label", lambda a, b: None)(TUE.isoformat(), SAT.isoformat()))
+        check("  ... in the club's date style", " TO " in (wk.get("label") or "") and "-" not in (wk.get("label") or ""))
+        check("the round is the one the matches share", wk.get("round"), "Round 5")
+        short = await tw(db, org, "", SAT.isoformat(), SAT.isoformat())
+        check("a one-day period leaves the Tuesday game out", short.get("matches"), 2)
+        check("  ... and its junior is not on the team", all(p["last"] != "Lou" for p in short.get("players", [])))
+        none = await tw(db, org, "", (TUE - timedelta(days=60)).isoformat(), (TUE - timedelta(days=55)).isoformat())
+        check("a quiet period says so", (none.get("kind"), none.get("message")), ("no_results", "No completed matches found in that period."))
+        check("an end before the start is refused", (await tw(db, org, "", SAT.isoformat(), TUE.isoformat())).get("kind"), "invalid")
+        check("a half-filled period is refused", (await tw(db, org, "", TUE.isoformat(), "")).get("kind"), "invalid")
+        check("a period past a month is refused", (await tw(db, org, "", "2026-01-01", "2026-06-01")).get("kind"), "invalid")
+        check("the period wins over a pasted link", (await tw(db, org, M0, TUE.isoformat(), SAT.isoformat())).get("matches"), 3)
+
+        print("\n── Team of the week: Juniors and Seniors ──")
+        jr = await tw(db, org, "", TUE.isoformat(), SAT.isoformat(), "junior")
+        sr = await tw(db, org, "", TUE.isoformat(), SAT.isoformat(), "senior")
+        jn = {p["last"]: p for p in jr.get("players", [])}
+        sn = {p["last"]: p for p in sr.get("players", [])}
+        check("the junior team holds only the junior game's players", sorted(jn), ["Junior", "Keeper", "Allround"] if False else sorted(["Junior", "Keeper", "Allround"]))
+        check("  ... one match", (jr.get("scope"), jr.get("matches")), ("junior", 1))
+        check("the senior team holds none of them but the junior who played up",
+              sorted(sn), sorted(["Star", "Ton", "Bowler", "Guest", "Keeper", "Catcher", "Junior", "Duck"]))
+        check("  ... and the junior is there on his SENIOR game (12), not pooled away by his better 85",
+              (sn.get("Junior", {}).get("points"), sn.get("Junior", {}).get("grade")), (12, "2ND GRADE"))
+        check("  ... while on the junior team he is on his junior game (45 + 2 wickets = 85)",
+              (jn.get("Junior", {}).get("points"), jn.get("Junior", {}).get("grade")), (85, "UNDER 15S"))
+        check("with every team he is on the better of the two, 85",
+              {p["last"]: p["points"] for p in wk.get("players", [])}.get("Junior"), 85)
+        check("the response counts matches by scope before filtering", jr.get("scopeMatches"), {"junior": 1, "senior": 2})
+        check("each performer carries the categories of the grade they played",
+              (jn.get("Junior", {}).get("categories"), sn.get("Star", {}).get("categories")), (["junior"], ["senior"]))
+        check("an unknown scope is read as all teams", (await tw(db, org, "", TUE.isoformat(), SAT.isoformat(), "bogus")).get("scope"), "all")
+        nojr = await tw(db, org, "", SAT.isoformat(), SAT.isoformat(), "junior")
+        check("a scope with no matches says which one",
+              (nojr.get("kind"), nojr.get("message")), ("no_results", "No completed junior matches found for that round yet."))
+        check("  ... and still counts what was played", nojr.get("scopeMatches"), {"junior": 0, "senior": 2})
+        latest_jr = await tw(db, org, "", "", "", "junior")
+        check("the latest-round pull takes a scope too (Tuesday is outside that weekend)", latest_jr.get("kind"), "no_results")
+
+        print("\n── Team of the week: the seat each performance fills ──")
+        kinds = {p["last"]: p.get("kind") for p in wk.get("players", [])}
+        check("a keeper with catches fills the keeper seat", kinds.get("Keeper") == "WK", True)
+        check("  ... (Fay, 3 catches and a stumping, on the 2nd grade card)", next((p for p in sn.values() if p["guid"] == P["fay"]), {}).get("kind"), "WK")
+        check("a player the scorecard LISTS as keeper is one with no catch at all (Kit)",
+              next((p for p in jr.get("players", []) if p["guid"] == P["kit"]), {}).get("kind"), "WK")
+        check("a score of 20+ and a wicket is an all-rounder (Jax, 45 and 2)", jn.get("Junior", {}).get("kind"), "AR")
+        check("wickets and no bat is a bowler (Lou)", jn.get("Allround", {}).get("kind"), "BOWL")
+        check("a big score and no wicket is a batter (Eli)", sn.get("Ton", {}).get("kind"), "BAT")
+        check("Sam, 87 and 2 wickets, is an all-rounder", sn.get("Star", {}).get("kind"), "AR")
+        check("Bo, four wickets and no bat, is a bowler", sn.get("Bowler", {}).get("kind"), "BOWL")
+        check("a fielder with only catches reads as a batter, not a gap", sn.get("Catcher", {}).get("kind"), "BAT")
+        check("Gus, 40 runs and no wicket, is a batter", sn.get("Guest", {}).get("kind"), "BAT")
+
     print("\n── The route body ──")
     from app.routers import admin as admin_router
     get_social_totw = getattr(admin_router, "get_social_totw", None)
@@ -256,8 +357,11 @@ async def main():
     if get_social_totw is not None:
         async with Session() as db:
             org = await db.get(Organisation, ORG)
-            body = await get_social_totw("", db, org)
-            check("the route answers with the ranked pool of 7", (body.get("kind"), len(body.get("players", []))), ("round", 7))
+            body = await tw_route(get_social_totw, "", db, org)
+            check("the route answers with the ranked pool of 8", (body.get("kind"), len(body.get("players", []))), ("round", 8))
+            ranged = await tw_route(get_social_totw, "", db, org, TUE.isoformat(), SAT.isoformat(), "junior")
+            check("the route passes the period and the scope through",
+                  (ranged.get("kind"), ranged.get("scope"), len(ranged.get("players", []))), ("round", "junior", 3))
 
     Path(os.environ.get("TOTW_DIGEST", "/tmp/totw_digest.json")).write_text(json.dumps(digest, indent=1, sort_keys=True, default=str))
     print(f"\n{PASS} passed, {FAIL} failed")

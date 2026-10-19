@@ -2145,17 +2145,22 @@ async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), clu
 
 
 @router.get("/social/totw", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
-async def get_social_totw(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+async def get_social_totw(
+    q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
+    date_from: str = "", date_to: str = "", scope: str = "all",
+):
     """Team-of-the-week pool for the BetterSocials post: every completed club
     match in one round, each performance scored with the same points as the
     player of the match, pooled across grades and ranked best first.
 
-    ``q`` (optional) is a pasted match link/ID naming the round; with none it is
-    the club's latest match-day and the games within a weekend of it. The post
-    takes the top 6 to 14 off the front of the list."""
+    ``date_from`` and ``date_to`` (ISO days) name the round as a period, for a
+    club whose round runs Tuesday to Sunday. Otherwise ``q`` (optional) is a
+    pasted match link/ID naming the round, and with none it is the club's latest
+    match-day and the games within a weekend of it. ``scope`` is ``all``,
+    ``junior`` or ``senior``. The post takes its team off the front of the list."""
     from app.services.social_rounds import social_totw
     try:
-        return await social_totw(db, club, q)
+        return await social_totw(db, club, q, date_from, date_to, scope)
     except HTTPException:
         raise
     except Exception as exc:

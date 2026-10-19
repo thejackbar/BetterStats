@@ -1119,8 +1119,26 @@ async def _rank_our_side(db: AsyncSession, org, raw: dict) -> dict:
 # 14, starting at 11) off the front of the pool, so the pool carries a few more
 # than the biggest team and the operator can swap a name without a second pull.
 
-_TOTW_POOL = 30
+_TOTW_POOL = 150
 _NO_ROUND_MESSAGE = "No completed matches found for that round yet."
+
+# A date range is one club "round" that does not line up with a weekend (a
+# Tuesday under-17s game through to the Sunday women's final). Bounded so the
+# scorecard fan-out stays small: a month at most, and no more than this many
+# matches (the semaphore in the client paces the fetches).
+_TOTW_MAX_RANGE_DAYS = 31
+_TOTW_RANGE_MAX_MATCHES = 80
+
+# Which grades a team of the week draws from. Junior is any grade the club
+# classes as junior (a "Girls Under 15" is junior AND women's, so it counts
+# here). Senior is everything else: men's, women's, masters and mixed.
+TOTW_SCOPES = ("all", "junior", "senior")
+
+# A player is an all-rounder for the week when they made both a real score and
+# took a wicket in the same performance. Anything less is a batter or a bowler
+# by whichever side earned them more points.
+_TOTW_AR_MIN_RUNS = 20
+_TOTW_AR_MIN_WICKETS = 1
 
 
 def _totw_sort_key(p: dict) -> tuple:
@@ -1151,6 +1169,7 @@ def _pool_round(scored: list[tuple[dict, dict]]) -> list[dict]:
                 "opp": match.get("opponent") or "",
                 "oppMono": match.get("oppMono") or "",
                 "outcome": match.get("outcome") or "",
+                "categories": list(match.get("categories") or []),
             }
             held = best.get(key)
             if held is None or _totw_sort_key(entry) < _totw_sort_key(held):
@@ -1158,17 +1177,156 @@ def _pool_round(scored: list[tuple[dict, dict]]) -> list[dict]:
     return sorted(best.values(), key=_totw_sort_key)
 
 
-async def social_totw(db: AsyncSession, org, q: str = "") -> dict:
-    """The round's best performers across every grade the club played.
+def _scope_matches(scope: str, categories) -> bool:
+    """Is a grade with these categories part of this team-of-the-week scope?"""
+    junior = "junior" in (categories or ())
+    if scope == "junior":
+        return junior
+    if scope == "senior":
+        return not junior
+    return True
 
-    ``q`` (optional) is a pasted match link/ID naming the round, exactly as the
-    Results roundup takes it. With none, the round is the club's most recent
-    match-day and the games within a weekend of it.
 
-    Returns ``{kind: 'round', season, club, round, date, label, matches,
-    players: [...]}`` with ``players`` ranked best first, or a
-    ``{kind, message}`` for a link that cannot name a round."""
-    if q.strip():
+def _our_keeper_guids(org, raw: dict) -> set[str]:
+    """Scorecard participants our side lists as the wicketkeeper."""
+    our_team = next((t for t in (raw.get("teams") or []) if team_is_club(org, t)), None)
+    out: set[str] = set()
+    for rp in (our_team or {}).get("players") or []:
+        roles = [str(r).lower() for r in (rp.get("roles") or [])]
+        if any("keeper" in r or "wicket" in r for r in roles):
+            pid = (rp.get("participantId") or "").lower()
+            if pid:
+                out.add(pid)
+    return out
+
+
+def _totw_kind(p: dict, keeper: bool) -> str:
+    """Which seat a performance fills in a picked make-up: ``WK``, ``AR``,
+    ``BAT`` or ``BOWL``.
+
+    The keeper is whoever the scorecard lists as one, or whoever took a keeper
+    catch or a stumping. Otherwise it is read off what they did that day, not a
+    roster label: a score of 20 or more and a wicket is an all-rounder, and the
+    rest are a bowler when their bowling earned more points than their runs.
+    A player who only fielded reads as a batter."""
+    if keeper:
+        return "WK"
+    bat, bowl = p.get("batting"), p.get("bowling")
+    runs = (bat or {}).get("r") or 0
+    wkts = (bowl or {}).get("w") or 0
+    if runs >= _TOTW_AR_MIN_RUNS and wkts >= _TOTW_AR_MIN_WICKETS:
+        return "AR"
+    bowl_pts = _POTM_WICKET * wkts + _POTM_MAIDEN * ((bowl or {}).get("m") or 0)
+    if bowl and (not bat or bowl_pts > runs):
+        return "BOWL"
+    return "BAT"
+
+
+def _range_label(start: str, end: str) -> str:
+    """'TUE 13 OCT TO SUN 18 OCT', or 'TUE 13 TO SUN 18 OCT' in one month."""
+    try:
+        a, b = date.fromisoformat(start), date.fromisoformat(end)
+    except (ValueError, TypeError):
+        return f"{start} TO {end}".upper()
+    if a == b:
+        return _label(start)
+    left = f"{a.strftime('%a').upper()} {a.day}"
+    if (a.year, a.month) != (b.year, b.month):
+        left += f" {a.strftime('%b').upper()}"
+    return f"{left} TO {_label(end)}"
+
+
+async def _totw_range_matches(db: AsyncSession, org, date_from: str, date_to: str) -> dict | None:
+    """The club's completed matches played from ``date_from`` to ``date_to``
+    (inclusive), across the current season's grades, newest first. ``None`` when
+    the club has no current-season grades."""
+    rows = await current_grade_rows_with_live(db, org.id)
+    if not rows:
+        return None
+    grade_name_by_guid = {guid: gname for guid, _, gname, _ in rows}
+    season = next((sname for *_, sname in rows if sname), None)
+    discovered = await asyncio.gather(
+        *[gr.get_grade_results(guid, since=date_from) for guid, *_ in rows],
+        return_exceptions=True,
+    )
+    seen: set = set()
+    kept: list[dict] = []
+    for lst in discovered:
+        if not isinstance(lst, list):
+            continue
+        for m in lst:
+            mid = m.get("id")
+            if not mid or mid in seen or (m.get("played_at") or "") > date_to:
+                continue
+            if not fixture_involves_club(org, m):
+                continue
+            seen.add(mid)
+            kept.append(m)
+    kept.sort(key=lambda x: x.get("played_at") or "", reverse=True)
+    return {"grade_name_by_guid": grade_name_by_guid, "season": season, "kept": kept[:_TOTW_RANGE_MAX_MATCHES]}
+
+
+def _parse_range(date_from: str, date_to: str) -> tuple[str, str] | dict:
+    """``(from, to)`` as ISO days, or an ``{kind, message}`` to hand back."""
+    try:
+        a, b = date.fromisoformat(date_from.strip()), date.fromisoformat(date_to.strip())
+    except (ValueError, TypeError, AttributeError):
+        return {"kind": "invalid", "message": "Pick a start date and an end date."}
+    if b < a:
+        return {"kind": "invalid", "message": "The end date is before the start date."}
+    if (b - a).days > _TOTW_MAX_RANGE_DAYS:
+        return {"kind": "invalid", "message": f"Pick a period of {_TOTW_MAX_RANGE_DAYS} days or fewer."}
+    return a.isoformat(), b.isoformat()
+
+
+async def social_totw(
+    db: AsyncSession, org, q: str = "",
+    date_from: str = "", date_to: str = "", scope: str = "all",
+) -> dict:
+    """The round's best performers across the grades the club played.
+
+    The round is, in order of priority:
+
+    - ``date_from`` / ``date_to`` (ISO days): every completed match played in
+      that period, whatever the club's round calendar says;
+    - ``q``, a pasted match link/ID naming the round, exactly as the Results
+      roundup takes it;
+    - with neither, the club's most recent match-day and the games within a
+      weekend of it.
+
+    ``scope`` is ``all``, ``junior`` or ``senior``. It is applied to the
+    matches BEFORE the pool is built, so a junior who also played up appears
+    on the junior team for their junior game rather than being pooled away by
+    a better senior one.
+
+    Returns ``{kind: 'round', season, club, round, date, label, matches, scope,
+    scopeMatches, players: [...]}`` with ``players`` ranked best first, each
+    carrying the ``kind`` seat it fills (WK, BAT, AR, BOWL); or a
+    ``{kind, message}`` for a link or period that cannot name a round."""
+    scope = (scope or "all").strip().lower()
+    if scope not in TOTW_SCOPES:
+        scope = "all"
+    cats_of = await _category_lookup(db, org.id)
+    date_range = None
+    if (date_from or "").strip() or (date_to or "").strip():
+        parsed = _parse_range(date_from, date_to)
+        if isinstance(parsed, dict):
+            return parsed
+        date_range = parsed
+
+    if date_range:
+        recent = await _totw_range_matches(db, org, *date_range)
+        kept = (recent or {}).get("kept") or []
+        if not kept:
+            return {"kind": "no_results", "message": "No completed matches found in that period."}
+        grade_name_by_guid = recent["grade_name_by_guid"]
+        season = recent["season"]
+        day = date_range[1]
+        rounds = [_round_label(m.get("round")) for m in kept if m.get("round")]
+        round_label = max(set(rounds), key=rounds.count) if rounds else ""
+        label = _range_label(*date_range)
+        pairs = [(m.get("id"), grade_name_by_guid.get(m.get("grade_id")) or "") for m in kept]
+    elif q.strip():
         err, ctx = await _reference_round(db, org, q)
         if err is not None:
             return err
@@ -1180,6 +1338,7 @@ async def social_totw(db: AsyncSession, org, q: str = "") -> dict:
         season = ctx["season"]
         day = ctx["anchor_day"]
         round_label = _round_label(ctx["anchor_round"])
+        label = _label(day)
         pairs = [(m.get("id"), grade_name_by_guid.get(guid) or "") for guid, m in completed]
     else:
         recent = await _recent_club_matches(db, org)
@@ -1206,6 +1365,7 @@ async def social_totw(db: AsyncSession, org, q: str = "") -> dict:
             if near or d == day:
                 round_matches.append(m)
         round_label = _round_label(round_matches[0].get("round") if round_matches else "")
+        label = _label(day)
         pairs = [(m.get("id"), grade_name_by_guid.get(m.get("grade_id")) or "") for m in round_matches]
 
     pairs = [(mid, g) for mid, g in pairs if mid]
@@ -1214,6 +1374,9 @@ async def social_totw(db: AsyncSession, org, q: str = "") -> dict:
 
     cards = await asyncio.gather(*[gr.get_match_scorecard(mid) for mid, _ in pairs], return_exceptions=True)
     scored: list[tuple[dict, dict]] = []
+    # How many matches each scope holds, counted before the scope is applied, so
+    # an empty junior team can say whether any junior match was played at all.
+    scope_matches = {"junior": 0, "senior": 0}
     for (mid, grade_name), sc in zip(pairs, cards):
         if not isinstance(sc, dict):
             continue
@@ -1226,9 +1389,26 @@ async def social_totw(db: AsyncSession, org, q: str = "") -> dict:
         match = ranked["match"]
         if grade_name:
             match["grade"] = grade_name.upper()
+        cats = cats_of(grade_name or match["grade"])
+        match["categories"] = cats
+        scope_matches["junior" if "junior" in cats else "senior"] += 1
+        if not _scope_matches(scope, cats):
+            continue
+        keepers = _our_keeper_guids(org, sc)
+        for p in ranked["players"]:
+            fld = p.get("fielding") or {}
+            keeper = p["guid"] in keepers or bool(fld.get("catches_wk") or fld.get("stumpings"))
+            p["keeper"] = keeper
+            p["kind"] = _totw_kind(p, keeper)
         scored.append((match, ranked["players"]))
     pool = _pool_round(scored)
     if not pool:
+        if scope != "all" and scope_matches[scope] == 0:
+            return {
+                "kind": "no_results",
+                "message": f"No completed {scope} matches found for that round yet.",
+                "scopeMatches": scope_matches,
+            }
         return {"kind": "no_results", "message": _NO_ROUND_MESSAGE}
     return {
         "kind": "round",
@@ -1236,7 +1416,9 @@ async def social_totw(db: AsyncSession, org, q: str = "") -> dict:
         "club": _club_dict(org),
         "round": round_label,
         "date": day,
-        "label": _label(day),
+        "label": label,
         "matches": len(scored),
+        "scope": scope,
+        "scopeMatches": scope_matches,
         "players": pool[:_TOTW_POOL],
     }
