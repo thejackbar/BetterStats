@@ -950,3 +950,12 @@ Gisborne (Oct 2026): club users merged several CA-redacted junior rows (names re
 - A merge undo restores only the rows logged at merge time. A game that synced after the merge sits on the kept player and is not moved back; the next sync recreates it on the restored row.
 - Undo order is not enforced by `undo_merge` itself. The script skips a log that has a newer live merge on the same players and says so.
 - Proof: `verify_undo_player_merge_script.py` (real Postgres, 18 checks; control with the apply branch disabled fails the 8 restore, undone and audit checks).
+
+
+## Merging one named pair from the server (Oct 2026)
+
+Gisborne: one player held under several Cricket Australia profiles. Redacted junior rows read `********`, so Admin Manual Merge cannot find them by name, and its keep-or-remove default is a guess (playhq id, then seasons). `app/scripts/merge_player_pair.py` takes the club and the two ids and says which stays.
+- It runs the shipped `_merge_players_core`; it adds only the report (games, span, live merges already into each, squad and availability rows, games both rows are in) and the refusals.
+- Both rows in the SAME game is the evidence of two people: refused unless `--allow-shared-games`.
+- After a merge the removed id is a sync redirect. Chains resolve transitively (`sync.merged_away`), so earlier merges into the removed row follow it to the keeper.
+- Proof: `verify_merge_player_pair_script.py` (real Postgres, 16 checks; control with the apply branch disabled fails the merge, merge-log and audit checks).
