@@ -11,9 +11,18 @@
 //     "fields": [
 //       { "token": "player 1", "x": 80, "y": 300, "w": 600,
 //         "fontFamily": "Anton", "fontSize": 54, "bold": true, "color": "#ffffff",
+//         "colorRole": "ink",        // optional: ink | accent | primary | secondary | white | black
+//         "fontRole": "display",     // optional: display | body
 //         "align": "left", "uppercase": true, "lineHeight": 1, "letterSpacing": 0 }
-//     ]
+//     ],
+//     "texts": [ { "text": "LINE UP", ...same look keys as a field... } ]   // fixed words, optional
 //   }
+//
+// STRUCTURE FIRST. By default an import uses the roles, not the designer's own
+// values: a colour role becomes a palette token (so the club's palette tints it and
+// a palette switch re-tints it) and a font role becomes the club's display font or
+// Inter. The designer's colour and font name are kept in the file for a club that
+// chooses "keep my Canva look".
 //
 // Tokens (case and spacing do not matter; an unknown one is kept as plain text
 // and reported, never guessed):
@@ -22,6 +31,10 @@
 //   competition | round | venue | date | time | season
 import { newBlankItem, withDesign, BLANK_FONTS, BLANK_STARTERS } from './blank-template'
 import { bindFromToken, bindLabel } from './boundResolve'
+
+const COLOR_ROLES = ['ink', 'accent', 'primary', 'secondary', 'white', 'black']
+const FONT_ROLES = ['display', 'body']
+const fontByKey = (key) => BLANK_FONTS.find((x) => x.key === key)
 export { bindFromToken, bindLabel, resolveBind, boundSlotCount, isBoundPlayerSlot, LINEUP_SLOTS } from './boundResolve'
 
 export const FORMAT = 'bettercricket-template'
@@ -51,41 +64,72 @@ export function parseTemplateFile(raw) {
   const fieldsIn = Array.isArray(doc.fields) ? doc.fields : []
   if (!fieldsIn.length) return { error: 'The template has no fields. In Canva, type {{player 1}}, {{opponent}} and so on into text boxes first.' }
   const warnings = []
+  const look = (f) => {
+    const font = matchFont(f.fontFamily)
+    return {
+      x: Math.round(num(f.x, 0)), y: Math.round(num(f.y, 0)), w: Math.max(40, Math.round(num(f.w, 400))),
+      // The designer's own values, used only when a club keeps the Canva look.
+      hex: HEX.test(f.color || '') ? f.color.toLowerCase() : null,
+      fontName: f.fontFamily ? String(f.fontFamily) : null,
+      font,
+      // What the colour and font are for, which a club's own branding fills in.
+      colorRole: COLOR_ROLES.includes(f.colorRole) ? f.colorRole : null,
+      fontRole: FONT_ROLES.includes(f.fontRole) ? f.fontRole : null,
+      fontSize: Math.max(8, Math.round(num(f.fontSize, 40))),
+      bold: f.bold !== false && !!f.bold,
+      align: ['left', 'center', 'right'].includes(f.align) ? f.align : 'left',
+      uppercase: !!f.uppercase, lineHeight: num(f.lineHeight, 1), letterSpacing: num(f.letterSpacing, 0),
+    }
+  }
   const fields = []
   for (const f of fieldsIn.slice(0, 80)) {
     if (!f || typeof f !== 'object') continue
     const bind = bindFromToken(f.token)
-    const font = matchFont(f.fontFamily)
-    if (f.fontFamily && !font) warnings.push(`The font “${f.fontFamily}” is not in BetterPosts, so “${f.token}” uses Inter.`)
-    fields.push({
-      token: String(f.token || ''), bind,
-      x: Math.round(num(f.x, 0)), y: Math.round(num(f.y, 0)), w: Math.max(40, Math.round(num(f.w, 400))),
-      fontFamily: (font || BLANK_FONTS.find((x) => x.key === 'inter')).family,
-      fontSize: Math.max(8, Math.round(num(f.fontSize, 40))),
-      bold: f.bold !== false && !!f.bold,
-      color: HEX.test(f.color || '') ? f.color.toLowerCase() : 'ink',
-      align: ['left', 'center', 'right'].includes(f.align) ? f.align : 'left',
-      uppercase: !!f.uppercase, lineHeight: num(f.lineHeight, 1), letterSpacing: num(f.letterSpacing, 0),
-    })
+    fields.push({ token: String(f.token || ''), bind, ...look(f) })
     if (!bind) warnings.push(`“{{${f.token}}}” is not a field BetterCricket knows, so it stays as the text it is.`)
+  }
+  const texts = []
+  for (const t of (Array.isArray(doc.texts) ? doc.texts : []).slice(0, 40)) {
+    if (!t || typeof t !== 'object' || typeof t.text !== 'string' || !t.text.trim()) continue
+    texts.push({ text: t.text.slice(0, 500), ...look(t) })
   }
   const w = num(doc.canvas && doc.canvas.w, 1080), h = num(doc.canvas && doc.canvas.h, 1080)
   return {
     name: String(doc.name || 'Imported template').slice(0, 80),
     canvas: { w, h }, background: typeof doc.background === 'string' ? doc.background : null,
-    fields, warnings,
+    fields, texts, warnings,
   }
 }
 
-// The blocks for a parsed template: the design at the back, a text block per
-// field above it. `bind` is absent on a field that is not one (plain text).
-export function itemsFromTemplate(parsed, { designUrl, designName, width, height, keep = [] }) {
+// A font BetterPosts does not have is only a problem where the designer's font name
+// is the one used: when the club keeps the Canva look, or a file carries no font role
+// (an older one). Where the club's own font fills in, the name is never used.
+export function templateWarnings(parsed, { clubStyle = true } = {}) {
+  const out = [...parsed.warnings]
+  for (const f of [...parsed.fields, ...parsed.texts]) {
+    const nameIsUsed = !clubStyle || !f.fontRole
+    if (nameIsUsed && f.fontName && !f.font) out.push(`The font “${f.fontName}” is not in BetterPosts, so “${f.token || f.text}” uses Inter.`)
+  }
+  return out
+}
+
+// The blocks for a parsed template: the design at the back, the fixed words, then a
+// text block per field. `clubStyle` (default) fills the look from the club's own
+// palette and fonts through roles; off keeps the designer's colours and fonts.
+// `bind` is absent on a field that is not one (plain text).
+export function itemsFromTemplate(parsed, { designUrl, designName, width, height, keep = [], clubStyle = true }) {
+  const colorOf = (f) => (clubStyle && f.colorRole ? f.colorRole : (f.hex || 'ink'))
+  const fontOf = (f) => {
+    if (clubStyle && f.fontRole) return (fontByKey(f.fontRole === 'display' ? 'club' : 'inter') || fontByKey('inter')).family
+    return (f.font || fontByKey('inter')).family
+  }
+  const make = (text, f) => newBlankItem('text', {
+    text, x: f.x, y: f.y, w: f.w, fontFamily: fontOf(f), fontSize: f.fontSize, bold: f.bold,
+    color: colorOf(f), align: f.align, lineHeight: f.lineHeight, letterSpacing: f.letterSpacing, uppercase: f.uppercase,
+  })
+  const fixed = parsed.texts.map((t) => ({ ...make(t.text, t), fromTemplate: true }))
   const fields = parsed.fields.map((f) => ({
-    ...newBlankItem('text', {
-      text: f.bind ? bindLabel(f.bind).toUpperCase() : f.token,
-      x: f.x, y: f.y, w: f.w, fontFamily: f.fontFamily, fontSize: f.fontSize, bold: f.bold,
-      color: f.color, align: f.align, lineHeight: f.lineHeight, letterSpacing: f.letterSpacing, uppercase: f.uppercase,
-    }),
+    ...make(f.bind ? bindLabel(f.bind).toUpperCase() : f.token, f),
     // Every block an import makes is marked, including a word that is not a field,
     // so importing again replaces exactly these and leaves the club's own blocks.
     fromTemplate: true,
@@ -100,5 +144,5 @@ export function itemsFromTemplate(parsed, { designUrl, designName, width, height
   const untouched = BLANK_STARTERS.some((st) => { const b = st.build(); return b.length === own.length && b.every((x, i) => sig(x) === sig(own[i])) })
   const others = keep.filter((it) => !it.fromTemplate && !it.design && !(untouched && own.includes(it)))
   const base = designUrl ? withDesign(others, designUrl, designName, width, height) : [...keep.filter((it) => it.design), ...others]
-  return [...base, ...fields]
+  return [...base, ...fixed, ...fields]
 }

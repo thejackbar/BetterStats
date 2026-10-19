@@ -49,6 +49,7 @@ import { copyTemplate, downloadTemplate } from "src/template/saveFile";
 import { insertBlock, type InsertResult } from "src/template/insert";
 import { inCurrentPage } from "src/template/session";
 import { bindFromToken, bindLabel } from "src/template/tokens";
+import type { Surface } from "src/template/describe";
 import type { Extraction, Skipped } from "src/template/types";
 
 const lookupFonts: FontLookup = async (refs) => {
@@ -72,13 +73,22 @@ type ExportView =
   | { status: "aborted" }
   | { status: "blocked"; message: string; skipped: Skipped[] }
   | { status: "error"; message: string }
-  | { status: "done"; file: TemplateFile; fieldCount: number; bytes: number }
+  | {
+      status: "done";
+      file: TemplateFile;
+      fieldCount: number;
+      textCount: number;
+      bytes: number | null;
+      skipped: Skipped[];
+    }
   | {
       status: "no_picture";
       file: TemplateFile;
       fieldCount: number;
+      textCount: number;
       reason: string;
       url: string | null;
+      skipped: Skipped[];
     };
 
 const fieldOptions = FIELD_TOKENS.map((t) => ({
@@ -105,6 +115,7 @@ export const App = () => {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | undefined>(undefined);
   const [templateName, setTemplateName] = useState("Line up");
+  const [withPicture, setWithPicture] = useState(false);
   const [exp, setExp] = useState<ExportView>({ status: "idle" });
   const [stuck, setStuck] = useState<Hidden[] | null>(null);
 
@@ -244,7 +255,10 @@ export const App = () => {
     setStuck(null);
     setExp({ status: "working" });
     try {
-      const out = await exportTemplate(exportDeps, { name: templateName });
+      const out = await exportTemplate(exportDeps, {
+        name: templateName,
+        withPicture,
+      });
       if (out.status === "aborted") {
         setExp({ status: "aborted" });
       } else if (out.status === "done") {
@@ -252,15 +266,19 @@ export const App = () => {
           status: "done",
           file: out.file,
           fieldCount: out.fieldCount,
+          textCount: out.textCount,
           bytes: out.pictureBytes,
+          skipped: out.skipped,
         });
       } else {
         setExp({
           status: "no_picture",
           file: out.file,
           fieldCount: out.fieldCount,
+          textCount: out.textCount,
           reason: out.reason,
           url: out.pictureUrl,
+          skipped: out.skipped,
         });
       }
     } catch (e) {
@@ -370,6 +388,41 @@ export const App = () => {
         { text: s.text },
       ),
     })[s.reason];
+
+  const surfaceText = (sf: Surface): string => {
+    const kind = intl.formatMessage(
+      {
+        defaultMessage:
+          "{kind, select, rect {Rectangle} shape {Shape} other {Other element}}",
+        description: "Kind of a non-text element on the page",
+      },
+      { kind: sf.kind },
+    );
+    const fill = intl.formatMessage(
+      {
+        defaultMessage:
+          "{fill, select, solid {solid {color}} image {a picture} video {a video} mixed {several fills} other {no fill}}",
+        description: "What fills a non-text element on the page",
+      },
+      {
+        fill: sf.fill.kind,
+        color: sf.fill.kind === "solid" ? sf.fill.color : "",
+      },
+    );
+    const line = intl.formatMessage(
+      {
+        defaultMessage: "{kind} {w} × {h} at {x}, {y}: {fill}",
+        description: "One line describing a non-text element on the page",
+      },
+      { kind, fill, w: sf.w, h: sf.h, x: sf.x, y: sf.y },
+    );
+    return sf.fullPage
+      ? `${line}${intl.formatMessage({
+          defaultMessage: ", covers the whole page",
+          description: "Added to a line when the element covers the whole page",
+        })}`
+      : line;
+  };
 
   const off = !canRead || busy;
 
@@ -583,6 +636,22 @@ export const App = () => {
                   )}
                 </Alert>
               )}
+            {state.result.surfaces.length > 0 && (
+              <Rows spacing="0.5u">
+                <Text size="small" tone="tertiary">
+                  {intl.formatMessage({
+                    defaultMessage: "Other things on this page",
+                    description:
+                      "Heading above the list of shapes and pictures on the page",
+                  })}
+                </Text>
+                {state.result.surfaces.slice(0, 20).map((sf, i) => (
+                  <Text key={`${sf.kind}-${i}`} size="small">
+                    {surfaceText(sf)}
+                  </Text>
+                ))}
+              </Rows>
+            )}
             {state.result.skipped.map((s, i) => (
               <Alert key={`${s.text}-${i}`} tone="warn">
                 {skippedText(s)}
@@ -603,16 +672,26 @@ export const App = () => {
           })}
         </Title>
         <Text size="small">
-          {intl.formatMessage(
-            {
-              defaultMessage:
-                "Makes a template file with your design as the picture and a field for each {example}. Those words are hidden for a moment while the picture is made, then put back.",
-              description:
-                "Explains the export. The value is an example field, not translated.",
-            },
-            { example: "{{player 1}}" },
-          )}
+          {intl.formatMessage({
+            defaultMessage:
+              "Makes a template file with the layout: where each field and fixed word sits, how big it is, and which colour and font it uses. BetterCricket fills in the club's own colours, fonts and background.",
+            description: "Explains the export",
+          })}
         </Text>
+        <Switch
+          value={withPicture}
+          onChange={setWithPicture}
+          disabled={busy}
+          label={intl.formatMessage({
+            defaultMessage: "Also include my Canva picture",
+            description: "Switch: put the design as a picture in the template",
+          })}
+          description={intl.formatMessage({
+            defaultMessage:
+              "Keeps your Canva background and artwork as a flat picture, instead of the club's own. Your field words are hidden for a moment while it is made, then put back.",
+            description: "Explains the picture switch",
+          })}
+        />
         <FormField
           label={intl.formatMessage({
             defaultMessage: "Template name",
@@ -675,19 +754,49 @@ export const App = () => {
         {exp.status === "done" && (
           <Rows spacing="1u">
             <Alert tone="positive">
-              {intl.formatMessage(
-                {
-                  defaultMessage:
-                    "Template ready: {count, plural, one {# field} other {# fields}} and the picture ({size} MB).",
-                  description: "The export finished",
-                },
-                {
-                  count: exp.fieldCount,
-                  size: (exp.bytes / 1024 / 1024).toFixed(1),
-                },
-              )}
+              {exp.bytes == null
+                ? intl.formatMessage(
+                    {
+                      defaultMessage: "Template ready: {fields} and {texts}.",
+                      description: "The export finished, with no picture",
+                    },
+                    {
+                      fields: intl.formatMessage(
+                        {
+                          defaultMessage:
+                            "{count, plural, one {# field} other {# fields}}",
+                          description: "A number of fields",
+                        },
+                        { count: exp.fieldCount },
+                      ),
+                      texts: intl.formatMessage(
+                        {
+                          defaultMessage:
+                            "{count, plural, one {# fixed word} other {# fixed words}}",
+                          description: "A number of fixed words",
+                        },
+                        { count: exp.textCount },
+                      ),
+                    },
+                  )
+                : intl.formatMessage(
+                    {
+                      defaultMessage:
+                        "Template ready: {fields, plural, one {# field} other {# fields}} and the picture ({size} MB).",
+                      description: "The export finished, with a picture",
+                    },
+                    {
+                      fields: exp.fieldCount,
+                      size: (exp.bytes / 1024 / 1024).toFixed(1),
+                    },
+                  )}
             </Alert>
-            {exp.bytes > PICTURE_LIMIT_BYTES && (
+            {exp.skipped.map((sk, i) => (
+              <Alert key={`${sk.text}-${i}`} tone="warn">
+                {skippedText(sk)}
+              </Alert>
+            ))}
+            {exp.bytes != null && exp.bytes > PICTURE_LIMIT_BYTES && (
               <Alert tone="warn">
                 {intl.formatMessage({
                   defaultMessage:

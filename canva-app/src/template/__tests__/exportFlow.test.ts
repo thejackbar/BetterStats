@@ -94,7 +94,10 @@ describe("exportTemplate", () => {
   it("hides the words, exports, puts the words back, and builds the file", async () => {
     const els = boxes();
     const h = harness(els, { fonts: [] });
-    const out = await exportTemplate(h.deps, { name: "LineUp" });
+    const out = await exportTemplate(h.deps, {
+      name: "LineUp",
+      withPicture: true,
+    });
     const done = asDone(out);
     // Order of events: hide and save, export, restore and save, fetch the picture.
     expect(h.log).toEqual([
@@ -108,6 +111,7 @@ describe("exportTemplate", () => {
     // Afterwards everything is exactly as it was.
     expect(transparencies(els)).toEqual([0, 0, 0.25]);
     expect(done.fieldCount).toBe(2);
+    expect(done.textCount).toBe(1);
     expect(done.pictureBytes).toBe(1234);
     expect(done.file.background).toBe("data:image/png;base64,AAAA");
     expect(done.file.name).toBe("LineUp");
@@ -120,7 +124,7 @@ describe("exportTemplate", () => {
   it("puts the words back when the export is cancelled", async () => {
     const els = boxes();
     const h = harness(els, { exportResult: { status: "aborted" } });
-    const out = await exportTemplate(h.deps, { name: "x" });
+    const out = await exportTemplate(h.deps, { name: "x", withPicture: true });
     expect(out).toEqual({ status: "aborted" });
     expect(transparencies(els)).toEqual([0, 0, 0.25]);
     expect(h.log).toEqual(["sync1", "export", "sync2"]);
@@ -131,9 +135,9 @@ describe("exportTemplate", () => {
     const h = harness(els, {
       exportResult: new Error("[internal_error]: boom"),
     });
-    await expect(exportTemplate(h.deps, { name: "x" })).rejects.toThrow(
-      /could not export the picture: .*boom/,
-    );
+    await expect(
+      exportTemplate(h.deps, { name: "x", withPicture: true }),
+    ).rejects.toThrow(/could not export the picture: .*boom/);
     expect(transparencies(els)).toEqual([0, 0, 0.25]);
     expect(h.log).toEqual(["sync1", "export", "sync2"]);
   });
@@ -143,7 +147,7 @@ describe("exportTemplate", () => {
     const h = harness(els, {
       fetch: new Error("blocked by the app's security policy"),
     });
-    const out = await exportTemplate(h.deps, { name: "x" });
+    const out = await exportTemplate(h.deps, { name: "x", withPicture: true });
     expect(transparencies(els)).toEqual([0, 0, 0.25]);
     const np = asNoPicture(out);
     expect(np.reason).toMatch(/security policy/);
@@ -156,14 +160,14 @@ describe("exportTemplate", () => {
     const h = harness(boxes(), {
       exportResult: { status: "completed", exportBlobs: [] },
     });
-    const out = await exportTemplate(h.deps, { name: "x" });
+    const out = await exportTemplate(h.deps, { name: "x", withPicture: true });
     expect(asNoPicture(out).pictureUrl).toBeNull();
   });
 
   it("names the fonts it found in the file", async () => {
     const els = [textBox("{{player 1}}", { format: { fontRef: "f1" } })];
     const h = harness(els, { fonts: [{ ref: "f1", name: "Anton" }] });
-    const out = await exportTemplate(h.deps, { name: "x" });
+    const out = await exportTemplate(h.deps, { name: "x", withPicture: true });
     expect(out.status === "done" && out.file.fields[0]?.fontFamily).toBe(
       "Anton",
     );
@@ -172,7 +176,7 @@ describe("exportTemplate", () => {
   it("tells the caller what was hidden before the export starts", async () => {
     const h = harness(boxes());
     const seen: Hidden[][] = [];
-    await exportTemplate(h.deps, { name: "x" }, (hidden) => {
+    await exportTemplate(h.deps, { name: "x", withPicture: true }, (hidden) => {
       seen.push(hidden);
       expect(h.log).not.toContain("export");
     });
@@ -183,9 +187,10 @@ describe("exportTemplate", () => {
   describe("refuses, and changes nothing, when the picture would be wrong", () => {
     const refused = async (els: ElementLike[]) => {
       const h = harness(els);
-      const err = await exportTemplate(h.deps, { name: "x" }).catch(
-        (e: unknown) => e,
-      );
+      const err = await exportTemplate(h.deps, {
+        name: "x",
+        withPicture: true,
+      }).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(ExportBlocked);
       expect(h.log).toEqual([]);
       return err as ExportBlocked;
@@ -227,9 +232,9 @@ describe("exportTemplate", () => {
   it("puts the words back if saving the hide fails, and reports the failure", async () => {
     const els = boxes();
     const h = harness(els, { syncFailsAt: [1] });
-    await expect(exportTemplate(h.deps, { name: "x" })).rejects.toThrow(
-      /sync failed/,
-    );
+    await expect(
+      exportTemplate(h.deps, { name: "x", withPicture: true }),
+    ).rejects.toThrow(/sync failed/);
     expect(transparencies(els)).toEqual([0, 0, 0.25]);
     expect(h.log).not.toContain("export");
   });
@@ -237,9 +242,10 @@ describe("exportTemplate", () => {
   it("says the words are still hidden, and what to press, when it cannot put them back", async () => {
     const els = boxes();
     const h = harness(els, { syncFailsAt: [2] });
-    const err = await exportTemplate(h.deps, { name: "x" }).catch(
-      (e: unknown) => e,
-    );
+    const err = await exportTemplate(h.deps, {
+      name: "x",
+      withPicture: true,
+    }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(RestoreFailed);
     expect((err as RestoreFailed).message).toMatch(/Restore placeholders/);
     expect((err as RestoreFailed).hidden).toHaveLength(2);
@@ -248,9 +254,10 @@ describe("exportTemplate", () => {
   it("lets a retry restore them later", async () => {
     const els = boxes();
     const h = harness(els, { syncFailsAt: [2] });
-    const err = (await exportTemplate(h.deps, { name: "x" }).catch(
-      (e: unknown) => e,
-    )) as RestoreFailed;
+    const err = (await exportTemplate(h.deps, {
+      name: "x",
+      withPicture: true,
+    }).catch((e: unknown) => e)) as RestoreFailed;
     // Canva refused the first restore, so the in-memory boxes are back but the
     // design was not saved. A manual restore goes through now.
     await restoreHidden(h.deps.inPage, err.hidden);
@@ -269,5 +276,66 @@ describe("restoreHidden", () => {
 describe("limits", () => {
   it("knows BetterCricket's picture limit", () => {
     expect(PICTURE_LIMIT_BYTES).toBe(5 * 1024 * 1024);
+  });
+});
+
+describe("structure-only export (the default)", () => {
+  it("builds the file from the page and touches nothing", async () => {
+    const els = boxes();
+    const h = harness(els, { fonts: [] });
+    const out = asDone(await exportTemplate(h.deps, { name: "LineUp" }));
+    expect(out.pictureBytes).toBeNull();
+    expect(out.fieldCount).toBe(2);
+    expect(out.textCount).toBe(1);
+    expect(out.file.background).toBeUndefined();
+    expect(out.file.fields.map((f) => f.token)).toEqual([
+      "player 1",
+      "opponent",
+    ]);
+    expect(out.file.texts?.map((t) => t.text)).toEqual(["LINE UP"]);
+    // No hide, no export dialog, no picture fetch, no save.
+    expect(h.log).toEqual([]);
+    expect(transparencies(els)).toEqual([0, 0, 0.25]);
+  });
+
+  it("carries the roles, not only the designer's values", async () => {
+    const els = [
+      textBox("{{player 1}}", { format: { color: "#ffffff", fontSize: 44 } }),
+      textBox("{{date}}", {
+        format: { color: "#e63946", fontWeight: "bold", fontSize: 30 },
+      }),
+    ];
+    const out = asDone(await exportTemplate(harness(els).deps, { name: "x" }));
+    expect(out.file.fields.map((f) => [f.colorRole, f.fontRole])).toEqual([
+      ["ink", "body"],
+      ["accent", "display"],
+    ]);
+    expect(out.file.fields[0]?.color).toBe("#ffffff");
+  });
+
+  it("lists a box it left out, without refusing", async () => {
+    const els = [
+      textBox("{{player 1}}"),
+      textBox("vs {{opponent}}"),
+      textBox("{{date}}", { locked: true }),
+    ];
+    const out = asDone(await exportTemplate(harness(els).deps, { name: "x" }));
+    expect(out.fieldCount).toBe(1);
+    expect(out.skipped.map((s) => s.reason)).toEqual(["mixed", "locked"]);
+  });
+
+  it("explains a page with no fields", async () => {
+    const err = await exportTemplate(harness([textBox("LINE UP")]).deps, {
+      name: "x",
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ExportBlocked);
+    expect((err as Error).message).toMatch(/no fields/);
+  });
+
+  it("names the fonts it can", async () => {
+    const els = [textBox("{{player 1}}", { format: { fontRef: "f1" } })];
+    const h = harness(els, { fonts: [{ ref: "f1", name: "Anton" }] });
+    const out = asDone(await exportTemplate(h.deps, { name: "x" }));
+    expect(out.file.fields[0]?.fontFamily).toBe("Anton");
   });
 });

@@ -32,6 +32,8 @@ let _seq = 0
 const nextId = () => `bi${Date.now().toString(36)}${(_seq++).toString(36)}`
 
 export const BLANK_FONTS = [
+  // The club's own brand font (Brand settings), so a post follows a font change.
+  { key: 'club', name: 'Club font', family: "var(--social-display-font, 'Anton', sans-serif)" },
   { key: 'anton', name: 'Anton', family: "'Anton', sans-serif" },
   { key: 'barlow', name: 'Barlow Condensed', family: "'Barlow Condensed', sans-serif" },
   { key: 'bebas', name: 'Bebas Neue', family: "'Bebas Neue', sans-serif" },
@@ -258,7 +260,8 @@ function TextBlock({ item, palette, data }) {
     <div style={{
       width: item.w,
       fontFamily: item.fontFamily, fontSize: item.fontSize,
-      fontWeight: item.bold ? 800 : 400,
+      // The club's display font names its own weight (a one-weight face must not be bolded).
+      fontWeight: item.bold ? (String(item.fontFamily || '').includes('--social-display-font') ? 'var(--social-display-font-weight, 800)' : 800) : 400,
       color: resolveBlankColor(item.color, palette),
       textAlign: item.align, lineHeight: item.lineHeight ?? 1,
       letterSpacing: item.letterSpacing || 0,

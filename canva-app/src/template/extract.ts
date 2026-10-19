@@ -1,9 +1,12 @@
+import { describeSurfaces } from "./describe";
+import { colorRole, fontRole } from "./roles";
 import { bindFromToken, wantsUppercase } from "./tokens";
-import { tokenBoxes } from "./walk";
+import { textBoxes, type TextBox } from "./walk";
 import type {
   Canvas,
   Extraction,
   Field,
+  FixedText,
   FormatLike,
   PageLike,
   Skipped,
@@ -39,6 +42,30 @@ function readLook(el: TextElementLike): FormatLike {
   return regions.find((r) => r.formatting)?.formatting ?? {};
 }
 
+const MAX_FIXED = 40;
+
+/** What a box looks like, in BetterPosts' 1080 wide space, with its roles. */
+function boxLook(box: TextBox, scale: number) {
+  const { el } = box;
+  const look = readLook(el);
+  const fontSize = Math.max(8, Math.round((look.fontSize ?? 16) * scale));
+  const bold = BOLD.includes(look.fontWeight ?? "normal");
+  const color = look.color ?? null;
+  return {
+    x: Math.round((box.offset.x + el.left) * scale),
+    y: Math.round((box.offset.y + el.top) * scale),
+    w: Math.max(40, Math.round(el.width * scale)),
+    fontRef: look.fontRef ?? null,
+    fontFamily: null,
+    fontSize,
+    bold,
+    color,
+    colorRole: colorRole(color),
+    fontRole: fontRole(bold, fontSize),
+    align: ALIGN[look.textAlign ?? "start"],
+  };
+}
+
 export type ExtractError = { error: string };
 
 /**
@@ -62,29 +89,30 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
   const skipped: Skipped[] = [];
   const warnings: string[] = [];
 
-  for (const box of tokenBoxes(page.elements.toArray())) {
+  const texts: FixedText[] = [];
+  for (const box of textBoxes(page.elements.toArray())) {
     const { el, token } = box;
     const clean = box.text.replace(/\s+/g, " ").trim();
-    if (token == null) {
+    if (!box.hasToken) {
+      // Plain words stay as written, unless they sit in a rotated group.
+      if (clean && !box.rotated && texts.length < MAX_FIXED) {
+        texts.push({
+          text: box.text.trim(),
+          ...boxLook(box, scale),
+          uppercase: wantsUppercase(clean),
+        });
+      }
+    } else if (token == null) {
       skipped.push({ reason: "mixed", text: clean });
     } else if (box.rotated) {
       skipped.push({ reason: "rotated_group", text: clean });
     } else if (box.locked) {
       skipped.push({ reason: "locked", text: clean });
     } else {
-      const look = readLook(el);
       fields.push({
         token,
         binding: bindFromToken(token),
-        x: Math.round((box.offset.x + el.left) * scale),
-        y: Math.round((box.offset.y + el.top) * scale),
-        w: Math.max(40, Math.round(el.width * scale)),
-        fontRef: look.fontRef ?? null,
-        fontFamily: null,
-        fontSize: Math.max(8, Math.round((look.fontSize ?? 16) * scale)),
-        bold: BOLD.includes(look.fontWeight ?? "normal"),
-        color: look.color ?? null,
-        align: ALIGN[look.textAlign ?? "start"],
+        ...boxLook(box, scale),
         uppercase: wantsUppercase(token),
       });
       if (Math.abs(el.rotation) > 1) {
@@ -100,7 +128,16 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
       `This page is ${Math.round(page.dimensions.width)} x ${Math.round(page.dimensions.height)}, which is not a BetterCricket post shape (square, 4:5 or story). It will be cropped to fit.`,
     );
   }
-  return { canvas, postSize, scale, fields, skipped, warnings };
+  return {
+    canvas,
+    postSize,
+    scale,
+    fields,
+    texts,
+    surfaces: describeSurfaces(page),
+    skipped,
+    warnings,
+  };
 }
 
 export const isError = (r: Extraction | ExtractError): r is ExtractError =>
@@ -110,14 +147,20 @@ export type FontLookup = (
   refs: string[],
 ) => Promise<readonly { ref: string; name: string }[]>;
 
-/** Names the fonts. A font that cannot be named is reported, never guessed. */
+/**
+ * Names the fonts, for a club that wants to keep the designer's fonts. By default
+ * BetterCricket uses the club's own, so a font Canva will not name is left empty
+ * and BetterCricket falls back to its own, without making a fuss.
+ */
 export async function nameFonts(
   extraction: Extraction,
   lookup: FontLookup,
 ): Promise<Extraction> {
   const refs = [
     ...new Set(
-      extraction.fields.flatMap((f) => (f.fontRef ? [f.fontRef] : [])),
+      [...extraction.fields, ...extraction.texts].flatMap((f) =>
+        f.fontRef ? [f.fontRef] : [],
+      ),
     ),
   ];
   let found: readonly { ref: string; name: string }[] = [];
@@ -129,15 +172,13 @@ export async function nameFonts(
     }
   }
   const byRef = new Map(found.map((f) => [f.ref, f.name]));
-  const warnings = [...extraction.warnings];
-  const fields = extraction.fields.map((f) => {
-    const fontFamily = f.fontRef ? (byRef.get(f.fontRef) ?? null) : null;
-    if (f.fontRef && !fontFamily) {
-      warnings.push(
-        `Canva would not name the font on {{${f.token}}}, so BetterCricket will use Inter for it.`,
-      );
-    }
-    return { ...f, fontFamily };
+  const named = <T extends { fontRef: string | null }>(f: T): T => ({
+    ...f,
+    fontFamily: f.fontRef ? (byRef.get(f.fontRef) ?? null) : null,
   });
-  return { ...extraction, fields, warnings };
+  return {
+    ...extraction,
+    fields: extraction.fields.map(named),
+    texts: extraction.texts.map(named),
+  };
 }

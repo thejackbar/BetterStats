@@ -50,7 +50,7 @@ import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_AN
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign } from '../../social/blank-template'
-import { parseTemplateFile, itemsFromTemplate, boundSlotCount } from '../../social/boundFields'
+import { parseTemplateFile, itemsFromTemplate, templateWarnings, boundSlotCount } from '../../social/boundFields'
 import { sponsorSlotFor } from '../../social/sponsorSlots'
 import { useBlankLayer } from '../../social/useBlankLayer'
 import { useTemplateLayers } from '../../social/useTemplateLayers'
@@ -1307,6 +1307,7 @@ export default function AdminSocialPost() {
   const designInputRef = useRef(null)
   const [designBusy, setDesignBusy] = useState(false)
   const templateFileRef = useRef(null)
+  const [clubStyle, setClubStyle] = useState(true)
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
   // Club media library (persisted via the social-media API).
@@ -4035,7 +4036,7 @@ export default function AdminSocialPost() {
     try {
       const parsed = parseTemplateFile(text)
       if (parsed.error) { flashNote({ warn: true, text: parsed.error, tool: 'content' }, 14000); return }
-      const warnings = [...parsed.warnings]
+      const warnings = templateWarnings(parsed, { clubStyle })
       let designUrl = null
       if (parsed.background) {
         if (!/^data:image\/(png|jpeg|webp);base64,/.test(parsed.background)) {
@@ -4053,13 +4054,13 @@ export default function AdminSocialPost() {
       else warnings.push(`The template is ${parsed.canvas.w}×${parsed.canvas.h}, which is not a BetterPosts size, so it stays on ${W}×${H} and the design is cropped to fit.`)
       record('Import template')
       const target = shape || { w: W, h: H }
-      canvas.setItems(itemsFromTemplate(parsed, { designUrl, designName: label, width: target.w, height: target.h, keep: canvas.items }))
+      canvas.setItems(itemsFromTemplate(parsed, { designUrl, designName: label, width: target.w, height: target.h, keep: canvas.items, clubStyle }))
       canvas.setSelIds([])
       const slots = parsed.fields.reduce((n, f) => { const m = (f.bind || '').match(/^lineup\.(\d+)\./); return m ? Math.max(n, Number(m[1])) : n }, 0)
       const bound = parsed.fields.filter((f) => f.bind).length
       flashNote({
         warn: warnings.length > 0,
-        text: `Imported “${parsed.name}”: ${bound} field${bound === 1 ? '' : 's'}${slots ? `, ${slots} player slot${slots === 1 ? '' : 's'}` : ''}. Add the players, opponent and match details in the panels on the left.${warnings.length ? ` ${warnings.join(' ')}` : ''}`,
+        text: `Imported “${parsed.name}”: ${bound} field${bound === 1 ? '' : 's'}${slots ? `, ${slots} player slot${slots === 1 ? '' : 's'}` : ''}${parsed.texts.length ? `, ${parsed.texts.length} fixed word${parsed.texts.length === 1 ? '' : 's'}` : ''}. ${clubStyle ? 'Colours and fonts come from your club, so changing your palette or font restyles it. ' : ''}Add the players, opponent and match details in the panels on the left.${warnings.length ? ` ${warnings.join(' ')}` : ''}`,
         tool: 'content',
       }, 16000)
     } catch (e) {
@@ -5084,6 +5085,10 @@ export default function AdminSocialPost() {
                   <p className="text-[11px] text-pb-dim leading-relaxed">
                     From the BetterCricket Canva app: a file that brings the design and a text field for every {'{{'}player 1{'}}'}, {'{{'}opponent{'}}'} or {'{{'}date{'}}'} you typed in Canva. The slots then fill from the players you add here.
                   </p>
+                  <label className="flex items-start gap-2 text-[11px] text-pb-dim leading-relaxed cursor-pointer" data-testid="club-style">
+                    <input type="checkbox" checked={clubStyle} onChange={(e) => setClubStyle(e.target.checked)} className="mt-0.5" data-testid="club-style-input" />
+                    <span>Use my club's colours and fonts <span className="text-pb-faintest">(recommended). Untick to keep the colours and fonts from Canva.</span></span>
+                  </label>
                   <div>
                     <button onClick={() => templateFileRef.current?.click()} disabled={designBusy} data-testid="template-file-import"
                       className="px-3 py-1.5 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors disabled:opacity-50">

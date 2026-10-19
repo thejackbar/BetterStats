@@ -206,6 +206,68 @@ const ys = [300, 362, 424, 486, 548, 610, 672, 734, 796, 858, 920, 120, 1200]
   await page.close()
 }
 
+// 6d. Structure first: roles and fixed words take the club's colours and fonts.
+const TEMPLATE2 = {
+  format: 'bettercricket-template', version: 1, name: 'Maroon',
+  canvas: { w: 1080, h: 1080 },
+  texts: [
+    { text: 'LINE UP', x: 165, y: 240, w: 400, fontSize: 60, bold: true, color: '#ffffff', colorRole: 'ink', fontRole: 'display', fontFamily: 'Oswald', align: 'left', uppercase: true },
+  ],
+  fields: [
+    { token: 'player 1', x: 165, y: 330, w: 500, fontSize: 44, bold: false, color: '#ffe14d', colorRole: 'ink', fontRole: 'body', fontFamily: 'Oswald', align: 'left' },
+    { token: 'player 2', x: 165, y: 390, w: 500, fontSize: 44, bold: false, color: '#ffe14d', colorRole: 'ink', fontRole: 'body', fontFamily: 'Comic Sans MS', align: 'left' },
+    { token: 'opponent', x: 560, y: 120, w: 450, fontSize: 70, bold: true, color: '#e63946', colorRole: 'accent', fontRole: 'display', fontFamily: 'Oswald', align: 'left' },
+  ],
+}
+const asRgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})` }
+{
+  const { page, puts } = await open()
+  ck('the club-style box is ticked by default', await page.getByTestId('club-style-input').isChecked({ timeout: 2000 }).catch(() => false))
+  await importFile(page, TEMPLATE2)
+  const g = await rows(page, [240, 330, 390, 120])
+  const [head, p1, p2, opp] = g || []
+  ck('the fixed word LINE UP comes across in place', head && head.text === 'LINE UP' && head.x === 165, JSON.stringify(head))
+  ck('the player slots come across in place', p1 && p1.text === 'PLAYER 1' && p2 && p2.text === 'PLAYER 2', JSON.stringify([p1, p2]))
+  ck('an ink field uses the club ink, not the designer\'s yellow', p1 && p1.color !== asRgb('#ffe14d'), JSON.stringify(p1 && p1.color))
+  ck('the fixed word uses the same club ink', head && p1 && head.color === p1.color, JSON.stringify([head && head.color, p1 && p1.color]))
+  ck('an accent field uses the club accent, not the designer\'s red', opp && opp.color !== asRgb('#e63946') && opp.color !== p1.color, JSON.stringify(opp && opp.color))
+  ck('a display-role field uses the club\'s display font (this club\'s is Barlow Condensed), not the designer\'s Oswald', opp && /Barlow Condensed/.test(opp.family) && !/Oswald/.test(opp.family), JSON.stringify(opp && opp.family))
+  ck('a body-role field uses Inter, not the designer\'s Oswald or Comic Sans', p1 && /Inter/.test(p1.family) && p2 && /Inter/.test(p2.family) && !/Oswald|Comic/.test(p1.family + p2.family), JSON.stringify([p1 && p1.family, p2 && p2.family]))
+  const t = await say(page)
+  ck('the note counts the fixed word', /1 fixed word/.test(t))
+  ck('the note says the colours and fonts come from the club', /come from your club/.test(t))
+  ck('no font warning when the club\'s own fonts are used', !/not in BetterPosts/.test(t))
+  await tab(page, 'Design'); await page.waitForTimeout(400)
+  await page.getByPlaceholder('Template name...').fill('Maroon')
+  await press(page.getByRole('button', { name: /^Save current$/ })); await page.waitForTimeout(1200)
+  const saved = puts.length ? JSON.stringify(puts[puts.length - 1]) : ''
+  ck('the saved template holds palette tokens, so a palette switch re-tints it', /"color":"ink"/.test(saved) && /"color":"accent"/.test(saved) && !/#ffe14d|#e63946/.test(saved), saved.slice(0, 200))
+  ck('the saved template holds the club font by name, so a font change follows', /--social-display-font/.test(saved), saved.slice(0, 200))
+  await page.close()
+}
+{
+  const { page } = await open()
+  await page.getByTestId('club-style-input').uncheck({ timeout: 2000 }).catch(() => {})
+  await importFile(page, TEMPLATE2)
+  const g = await rows(page, [240, 330, 390, 120])
+  const [head, p1, p2, opp] = g || []
+  ck('keeping the Canva look: the designer\'s colours', p1 && p1.color === asRgb('#ffe14d') && opp && opp.color === asRgb('#e63946') && head && head.color === asRgb('#ffffff'), JSON.stringify([p1 && p1.color, opp && opp.color, head && head.color]))
+  ck('keeping the Canva look: the designer\'s fonts', p1 && /Oswald/.test(p1.family) && opp && /Oswald/.test(opp.family), JSON.stringify([p1 && p1.family, opp && opp.family]))
+  ck('keeping the Canva look: an unknown font falls back to Inter', p2 && /Inter/.test(p2.family), JSON.stringify(p2 && p2.family))
+  const t = await say(page)
+  ck('keeping the Canva look: the unknown font is reported', /Comic Sans MS/.test(t) && /not in BetterPosts/.test(t))
+  ck('keeping the Canva look: the note does not claim club colours', !/come from your club/.test(t))
+  await page.close()
+}
+{
+  // A template from before roles existed behaves as it did: the designer's values.
+  const { page } = await open()
+  await importFile(page, TEMPLATE)
+  const g = await rows(page, [300])
+  ck('a file with no roles still uses its own colour', g && g[0] && g[0].color === asRgb('#ffe14d'), JSON.stringify(g && g[0]))
+  await page.close()
+}
+
 // 7. Bad files change nothing and say why.
 for (const [label, file, expect] of [
   ['not JSON', 'this is not json', /not JSON/],

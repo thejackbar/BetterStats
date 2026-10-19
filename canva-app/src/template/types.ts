@@ -34,11 +34,47 @@ export type GroupElementLike = {
   readonly contents: { toArray(): readonly ElementLike[] };
 };
 
-export type OtherElementLike = {
-  readonly type: "rect" | "shape" | "embed" | "unsupported";
+export type FillRefLike =
+  | { readonly type: "solid"; readonly color: string }
+  | { readonly type: "image" | "video" | "unsupported" };
+
+export type FillLike = {
+  readonly colorContainer: { readonly ref: FillRefLike | undefined };
+  readonly mediaContainer: { readonly ref: FillRefLike | undefined };
 };
 
-export type ElementLike = TextElementLike | GroupElementLike | OtherElementLike;
+type BoxLike = {
+  readonly width: number;
+  readonly height: number;
+  readonly locked: boolean;
+  top: number;
+  left: number;
+  rotation: number;
+  transparency: number;
+};
+
+export type RectElementLike = BoxLike & {
+  readonly type: "rect";
+  readonly fill: FillLike;
+};
+
+export type ShapeElementLike = BoxLike & {
+  readonly type: "shape";
+  readonly paths: {
+    toArray(): readonly { readonly d: string; readonly fill: FillLike }[];
+  };
+};
+
+export type OtherElementLike = BoxLike & {
+  readonly type: "embed" | "unsupported";
+};
+
+export type ElementLike =
+  | TextElementLike
+  | GroupElementLike
+  | RectElementLike
+  | ShapeElementLike
+  | OtherElementLike;
 
 export type PageLike = {
   readonly type: "absolute";
@@ -62,11 +98,21 @@ export type Field = {
   fontSize: number;
   bold: boolean;
   color: string | null;
+  /** What the colour is for, so BetterCricket can use the club's own. */
+  colorRole: ColorRole;
+  /** Which of the club's fonts it should use. */
+  fontRole: FontRole;
   align: "left" | "center" | "right";
   uppercase: boolean;
 };
 
+/** Plain words that stay as written, such as a heading. Same look as a field. */
+export type FixedText = Omit<Field, "token" | "binding"> & { text: string };
+
 export type Canvas = { w: number; h: number };
+
+import type { Surface } from "./describe";
+import type { ColorRole, FontRole } from "./roles";
 
 export type Extraction = {
   canvas: Canvas;
@@ -75,6 +121,10 @@ export type Extraction = {
   /** Whether the page's shape is one BetterPosts makes (square, 4:5, story). */
   postSize: boolean;
   fields: Field[];
+  /** Fixed words such as a heading. */
+  texts: FixedText[];
+  /** Rects, shapes and other non-text elements, for the "what is on this page" list. */
+  surfaces: Surface[];
   skipped: Skipped[];
   warnings: string[];
 };

@@ -4,7 +4,13 @@ import { openDesign, requestExport } from "@canva/design";
 import { requestOpenExternalUrl } from "@canva/platform";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { App } from "src/intents/design_editor/app";
-import { group, page, textBox } from "src/template/__tests__/fakePage";
+import {
+  group,
+  page,
+  rect,
+  shape,
+  textBox,
+} from "src/template/__tests__/fakePage";
 import { fakeSession } from "src/template/__tests__/fakeSession";
 import type {
   ElementLike,
@@ -88,6 +94,47 @@ describe("BetterCricket template panel", () => {
     expect(screen.getByText(/0 fields found|No fields found/)).toBeTruthy();
   });
 
+  it("lists the shapes and pictures on the page, as Canva sees them", async () => {
+    showPage(
+      page([
+        rect({ width: 1080, height: 1080, colour: "#ffffff" }),
+        shape({
+          top: 120,
+          left: 70,
+          width: 400,
+          height: 900,
+          paths: [{ d: "M0 0", colour: "#7B3B3B" }],
+        }),
+        rect({ top: 10, left: 10, width: 200, height: 200, media: "image" }),
+        textBox("{{player 1}}"),
+      ]),
+    );
+    renderInTestProvider(<App />);
+    check();
+    await waitFor(() =>
+      expect(screen.getByText("Other things on this page")).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(
+        /Rectangle 1080 × 1080 at 0, 0: solid #ffffff, covers the whole page/,
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Shape 400 × 900 at 70, 120: solid #7b3b3b$/),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Rectangle 200 × 200 at 10, 10: a picture$/),
+    ).toBeTruthy();
+  });
+
+  it("shows no list when there is only text", async () => {
+    showPage(page([textBox("{{player 1}}")]));
+    renderInTestProvider(<App />);
+    check();
+    await waitFor(() => expect(screen.getByText(/1 field found/)).toBeTruthy());
+    expect(screen.queryByText("Other things on this page")).toBeNull();
+  });
+
   it("explains a page with no fields", async () => {
     showPage(page([textBox("LINEUP")]));
     renderInTestProvider(<App />);
@@ -116,7 +163,11 @@ describe("BetterCricket template panel", () => {
     showPage(page([textBox("{{date}}")]));
     check();
     await waitFor(() => expect(screen.getByText("Date")).toBeTruthy());
-    expect(screen.queryByText("Session expired")).toBeNull();
+    // Canva's screen-reader announcer keeps the last message, so look only at the panel.
+    const inPanel = screen
+      .queryAllByText("Session expired")
+      .filter((e) => !e.hasAttribute("data-announcer-region"));
+    expect(inPanel).toHaveLength(0);
   });
 
   it("disables the button where the design cannot be read", () => {
@@ -167,7 +218,9 @@ describe("BetterCricket template panel", () => {
     it("groups them when the switch is on", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);
-      fireEvent.click(screen.getByRole("switch"));
+      fireEvent.click(
+        screen.getByRole("switch", { name: /Group the boxes together/ }),
+      );
       click("Add line up");
       await waitFor(() =>
         expect(screen.getByText(/Line up added as one group/)).toBeTruthy(),
@@ -235,7 +288,9 @@ describe("BetterCricket template panel", () => {
     it("says so, with Canva's reason, when it will not group the boxes", async () => {
       useSession({ groupFails: true });
       renderInTestProvider(<App />);
-      fireEvent.click(screen.getByRole("switch"));
+      fireEvent.click(
+        screen.getByRole("switch", { name: /Group the boxes together/ }),
+      );
       click("Add line up");
       await waitFor(() =>
         expect(
@@ -320,6 +375,10 @@ describe("BetterCricket template panel", () => {
     ];
     const back = (list: ElementLike[]) =>
       list.map((e) => (e as TextElementLike).transparency);
+    const pictureOn = () =>
+      fireEvent.click(
+        screen.getByRole("switch", { name: /Also include my Canva picture/ }),
+      );
     const exportButton = () =>
       screen.getByRole("button", { name: "Export for BetterCricket" });
     const url = "https://export.example/design.png";
@@ -346,6 +405,7 @@ describe("BetterCricket template panel", () => {
         return { status: "completed", exportBlobs: [{ url }] };
       }) as never);
       renderInTestProvider(<App />);
+      pictureOn();
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(
@@ -400,9 +460,57 @@ describe("BetterCricket template panel", () => {
       await waitFor(() =>
         expect(screen.getByText(/Template text copied/)).toBeTruthy(),
       );
+      // The default file is the layout alone: no picture, and roles for the look.
+      expect(copyTemplate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fields: expect.arrayContaining([
+            expect.objectContaining({ token: "player 1", colorRole: "ink" }),
+          ]),
+        }),
+      );
+      expect(copyTemplate).toHaveBeenCalledWith(
+        expect.not.objectContaining({ background: expect.anything() }),
+      );
+    });
+
+    it("includes the picture only when asked", async () => {
+      livePage(els());
+      renderInTestProvider(<App />);
+      pictureOn();
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/and the picture/)).toBeTruthy(),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Copy template text" }),
+      );
+      await waitFor(() => expect(copyTemplate).toHaveBeenCalled());
       expect(copyTemplate).toHaveBeenCalledWith(
         expect.objectContaining({ background: "data:image/png;base64,AAAA" }),
       );
+    });
+
+    it("does not use Canva's export at all by default", async () => {
+      livePage(els());
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(
+          screen.getByText(/Template ready: 2 fields and 1 fixed word/),
+        ).toBeTruthy(),
+      );
+      expect(requestExport).not.toHaveBeenCalled();
+      expect(fetchPicture).not.toHaveBeenCalled();
+    });
+
+    it("lists a box that was left out of the file", async () => {
+      livePage([textBox("{{player 1}}"), textBox("vs {{opponent}}")]);
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/Template ready/)).toBeTruthy(),
+      );
+      expect(screen.getByText(/has other words with the token/)).toBeTruthy();
     });
 
     it("says so when the browser refuses the download or the copy", async () => {
@@ -435,6 +543,7 @@ describe("BetterCricket template panel", () => {
       });
       livePage(els());
       renderInTestProvider(<App />);
+      pictureOn();
       fireEvent.click(exportButton());
       await waitFor(() => expect(screen.getByText(/up to 5 MB/)).toBeTruthy());
     });
@@ -444,6 +553,7 @@ describe("BetterCricket template panel", () => {
       livePage(list);
       jest.mocked(requestExport).mockResolvedValue({ status: "aborted" });
       renderInTestProvider(<App />);
+      pictureOn();
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(screen.getByText(/Export cancelled/)).toBeTruthy(),
@@ -456,6 +566,7 @@ describe("BetterCricket template panel", () => {
       const list = [textBox("{{player 1}}"), textBox("vs {{opponent}}")];
       livePage(list);
       renderInTestProvider(<App />);
+      pictureOn();
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(
@@ -483,6 +594,7 @@ describe("BetterCricket template panel", () => {
       const list = els();
       livePage(list);
       renderInTestProvider(<App />);
+      pictureOn();
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(screen.getByText(/picture could not be fetched/)).toBeTruthy(),
@@ -504,6 +616,7 @@ describe("BetterCricket template panel", () => {
       // the second save (the automatic restore) fails; the manual one is the third
       livePage(list, [2]);
       renderInTestProvider(<App />);
+      pictureOn();
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(

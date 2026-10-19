@@ -1,7 +1,7 @@
 import { buildTemplateFile } from "../buildFile";
 import { extractFields, fitToPost, isError, nameFonts } from "../extract";
 import type { Extraction } from "../types";
-import { group, page, textBox } from "./fakePage";
+import { group, page, rect, shape, textBox } from "./fakePage";
 
 const ok = (r: ReturnType<typeof extractFields>): Extraction => {
   if (isError(r)) {
@@ -59,6 +59,8 @@ describe("extractFields", () => {
         fontSize: 44,
         bold: true,
         color: "#ffe14d",
+        colorRole: "accent",
+        fontRole: "display",
         align: "center",
         uppercase: false,
       },
@@ -68,11 +70,7 @@ describe("extractFields", () => {
   });
 
   it("ignores text with no token, and shapes", () => {
-    const r = ok(
-      extractFields(
-        page([textBox("LINEUP"), { type: "rect" }, { type: "shape" }]),
-      ),
-    );
+    const r = ok(extractFields(page([textBox("LINEUP"), rect(), shape()])));
     expect(r.fields).toEqual([]);
     expect(r.skipped).toEqual([]);
   });
@@ -283,6 +281,95 @@ describe("extractFields", () => {
   });
 });
 
+describe("fixed words and roles", () => {
+  it("carries plain text as fixed words, with its look and place", () => {
+    const r = ok(
+      extractFields(
+        page([
+          textBox("LINE UP", {
+            top: 240,
+            left: 165,
+            width: 400,
+            format: { fontSize: 40, fontWeight: "bold", color: "#ffffff" },
+          }),
+          textBox("{{player 1}}"),
+        ]),
+      ),
+    );
+    expect(r.texts).toEqual([
+      {
+        text: "LINE UP",
+        x: 165,
+        y: 240,
+        w: 400,
+        fontRef: null,
+        fontFamily: null,
+        fontSize: 40,
+        bold: true,
+        color: "#ffffff",
+        colorRole: "ink",
+        fontRole: "display",
+        align: "left",
+        uppercase: true,
+      },
+    ]);
+    expect(r.fields).toHaveLength(1);
+  });
+
+  it("does not carry empty text, or a token among other words as fixed text", () => {
+    const r = ok(
+      extractFields(page([textBox("   "), textBox("vs {{opponent}}")])),
+    );
+    expect(r.texts).toEqual([]);
+    expect(r.skipped.map((x) => x.reason)).toEqual(["mixed"]);
+  });
+
+  it("carries fixed words from inside a group, in place", () => {
+    const r = ok(
+      extractFields(
+        page([
+          group([textBox("SATURDAY", { top: 5, left: 7 })], {
+            top: 100,
+            left: 200,
+          }),
+        ]),
+      ),
+    );
+    expect(r.texts[0]).toMatchObject({ text: "SATURDAY", x: 207, y: 105 });
+  });
+
+  it("leaves out fixed words in a rotated group", () => {
+    const r = ok(
+      extractFields(page([group([textBox("SATURDAY")], { rotation: 30 })])),
+    );
+    expect(r.texts).toEqual([]);
+  });
+
+  it("scales fixed words with the page", () => {
+    const r = ok(
+      extractFields(
+        page(
+          [
+            textBox("HELLO", {
+              top: 400,
+              left: 160,
+              width: 800,
+              format: { fontSize: 100 },
+            }),
+          ],
+          { width: 2160, height: 2160 },
+        ),
+      ),
+    );
+    expect(r.texts[0]).toMatchObject({ x: 80, y: 200, w: 400, fontSize: 50 });
+  });
+
+  it("keeps at most 40 fixed words", () => {
+    const many = Array.from({ length: 60 }, (_, i) => textBox(`word ${i}`));
+    expect(ok(extractFields(page(many))).texts).toHaveLength(40);
+  });
+});
+
 describe("nameFonts", () => {
   const base = (): Extraction =>
     ok(
@@ -313,12 +400,12 @@ describe("nameFonts", () => {
     expect(r.warnings).toEqual([]);
   });
 
-  it("reports a font Canva would not name", async () => {
+  it("leaves a font Canva would not name empty, without a fuss", async () => {
     const r = await nameFonts(base(), async () => [
       { ref: "a", name: "Anton" },
     ]);
     expect(r.fields[2]?.fontFamily).toBeNull();
-    expect(r.warnings.join(" ")).toMatch(/{{date}}/);
+    expect(r.warnings).toEqual([]);
   });
 
   it("carries on when the lookup fails", async () => {
@@ -326,7 +413,26 @@ describe("nameFonts", () => {
       throw new Error("offline");
     });
     expect(r.fields.every((f) => f.fontFamily == null)).toBe(true);
-    expect(r.warnings).toHaveLength(3);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("names the fonts on fixed words too, in the same lookup", async () => {
+    const e = ok(
+      extractFields(
+        page([
+          textBox("{{player 1}}", { format: { fontRef: "a" } }),
+          textBox("LINE UP", { format: { fontRef: "b" } }),
+        ]),
+      ),
+    );
+    const lookup = jest.fn(async () => [
+      { ref: "a", name: "Anton" },
+      { ref: "b", name: "Oswald" },
+    ]);
+    const r = await nameFonts(e, lookup);
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(lookup).toHaveBeenCalledWith(["a", "b"]);
+    expect(r.texts[0]?.fontFamily).toBe("Oswald");
   });
 
   it("does not look anything up when no box has a font", async () => {
@@ -374,6 +480,8 @@ describe("buildTemplateFile", () => {
           fontSize: 44,
           bold: false,
           color: "#ffe14d",
+          colorRole: "accent",
+          fontRole: "body",
           align: "left",
           uppercase: true,
           lineHeight: 1,
