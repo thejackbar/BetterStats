@@ -1187,3 +1187,9 @@ After Payneham's Stage 2 override, 501 of 877 matches whose batting scores diffe
 
 Run order on a club in this state: `link_import_players`, `repair_overwrite_pairs`, `repair_crossed_pairs`, then the comparison SQL. After `repair_overwrite_pairs --apply` on Payneham, probable doubles fell from 171 clear cases to about 9, and paired matches rose from 3,168 to 3,328.
 
+## Payneham Stage 2 after the repairs, and getting balls faced back (Oct 2026)
+
+Comparison of the 3,328 replaced Payneham matches against the synced matches they replaced, after `link_import_players` (932 joins), `repair_overwrite_pairs` (160 pairs) and `repair_crossed_pairs` (468 moves): 2,112 agree (63%, from 54%), 988 differ (from 1,245), 228 have no PlayHQ card of ours. Of the 988: 533 are benign (254 bowling runs or wickets only, 212 date only at 7 or 1 days, 65 result only where PlayHQ is blank), 233 are still pairing errors (88 crosswise, 145 with under half the scores in common, mostly the 118 pairs the closed-swap rule holds back), and 222 are real disagreements on batting scores (177 share 80% or more, usually one extra 0 or one score out by one).
+
+What the override cost, measured on the synced rows it hid: balls faced on 3,100 matches (13,919 of 32,125 batting lines, 43%, nearly all since 2019), who took each wicket on 1,967, fall of wickets on 599, partnerships on 249, opposition cards on 45 or 46. Stage 2 was not undone or re-run: re-running would only repeat the pairing problem, and the synced rows are still there. `services/import_balls_enrich.py` and `app.scripts.enrich_import_balls` read balls faced back onto the import's lines. `verify_import_balls_enrich.py` is 18 checks on a real Postgres; the control (nothing copied) fails 5. Dismissal credits, fall of wickets and partnerships have no manual table to hold them, so they stay on the hidden synced rows.
+
