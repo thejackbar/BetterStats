@@ -18,7 +18,9 @@ One paced request per game (the client caches). Writes nothing.
 
 Usage, from the server:
   cd /srv/docker && export COMPOSE_PROJECT_NAME=bltbox_docker_app
-  docker compose exec -T betterstats-backend python -m app.scripts.audit_player_games <org_id_or_slug> <player-id> [--limit 80]
+  docker compose exec -T betterstats-backend python -m app.scripts.audit_player_games <org_id_or_slug_or_auto> <player-id> [--limit 80]
+
+Pass `auto` as the club to use the player's own club.
 """
 import argparse
 import asyncio
@@ -49,7 +51,16 @@ def _name_of(p: dict) -> str:
 
 
 async def audit(org_ref: str, player_id: str, limit: int) -> None:
-    org = await _resolve_org(org_ref)
+    if org_ref in ("auto", "-"):
+        # The player's own club, so any club's player can be audited without knowing its slug.
+        async with async_session_maker() as s0:
+            found = (await s0.execute(text(
+                "SELECT organisation_id::text FROM players WHERE id = CAST(:p AS UUID)"), {"p": player_id})).scalar()
+        if not found:
+            raise SystemExit("No such player id")
+        org = found
+    else:
+        org = await _resolve_org(org_ref)
     async with async_session_maker() as s:
         me = (await s.execute(text(
             "SELECT COALESCE(display_name_override, name) AS name, grassroots_id FROM players WHERE id = CAST(:p AS UUID)"),
@@ -113,7 +124,7 @@ async def audit(org_ref: str, player_id: str, limit: int) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("org", help="club id or slug")
+    ap.add_argument("org", help="club id or slug, or 'auto' for the player's own club")
     ap.add_argument("player", help="BetterStats player id")
     ap.add_argument("--limit", type=int, default=80, help="most games to check (newest first)")
     a = ap.parse_args()
