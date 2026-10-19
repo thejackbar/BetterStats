@@ -153,14 +153,91 @@ describe("extractFields", () => {
     expect(r.skipped).toEqual([{ reason: "locked", text: "{{date}}" }]);
   });
 
-  it("leaves out and reports a token inside a group", () => {
+  it("reads a box inside a group, with the group's position added back in", () => {
     const r = ok(
       extractFields(
-        page([group(textBox("{{player 1}}"), group(textBox("{{player 2}}")))]),
+        page([
+          group([textBox("{{player 1}}", { top: 20, left: 10, width: 300 })], {
+            top: 200,
+            left: 100,
+          }),
+        ]),
       ),
     );
+    expect(r.fields[0]).toMatchObject({ x: 110, y: 220, w: 300 });
+    expect(r.skipped).toEqual([]);
+  });
+
+  it("adds up nested groups", () => {
+    const r = ok(
+      extractFields(
+        page([
+          group(
+            [
+              group([textBox("{{player 1}}", { top: 5, left: 7 })], {
+                top: 50,
+                left: 30,
+              }),
+            ],
+            { top: 200, left: 100 },
+          ),
+        ]),
+      ),
+    );
+    expect(r.fields[0]).toMatchObject({ x: 137, y: 255 });
+  });
+
+  it("scales a grouped box with the page", () => {
+    const r = ok(
+      extractFields(
+        page(
+          [
+            group([textBox("{{date}}", { top: 100, left: 20 })], {
+              top: 400,
+              left: 160,
+            }),
+          ],
+          { width: 2160, height: 2160 },
+        ),
+      ),
+    );
+    expect(r.fields[0]).toMatchObject({ x: 90, y: 250 });
+  });
+
+  it("leaves out and reports a box in a rotated group", () => {
+    const r = ok(
+      extractFields(page([group([textBox("{{player 1}}")], { rotation: 30 })])),
+    );
     expect(r.fields).toEqual([]);
-    expect(r.skipped.map((s) => s.reason)).toEqual(["in_group", "in_group"]);
+    expect(r.skipped).toEqual([
+      { reason: "rotated_group", text: "{{player 1}}" },
+    ]);
+  });
+
+  it("leaves out and reports a box in a locked group", () => {
+    const r = ok(
+      extractFields(page([group([textBox("{{player 1}}")], { locked: true })])),
+    );
+    expect(r.fields).toEqual([]);
+    expect(r.skipped.map((x) => x.reason)).toEqual(["locked"]);
+  });
+
+  it("still reads a plain box beside a group", () => {
+    const r = ok(
+      extractFields(
+        page([
+          textBox("{{date}}", { top: 1, left: 2 }),
+          group([textBox("{{player 1}}", { top: 3, left: 4 })], {
+            top: 10,
+            left: 10,
+          }),
+        ]),
+      ),
+    );
+    expect(r.fields.map((f) => [f.token, f.x, f.y])).toEqual([
+      ["date", 2, 1],
+      ["player 1", 14, 13],
+    ]);
   });
 
   it("warns about a rotated box but still reads it", () => {

@@ -27,6 +27,10 @@ export type TextElementLike = {
 
 export type GroupElementLike = {
   readonly type: "group";
+  readonly locked: boolean;
+  top: number;
+  left: number;
+  rotation: number;
   readonly contents: { toArray(): readonly ElementLike[] };
 };
 
@@ -42,7 +46,7 @@ export type PageLike = {
   readonly elements: { toArray(): readonly ElementLike[] };
 };
 
-export type SkipReason = "locked" | "mixed" | "in_group";
+export type SkipReason = "locked" | "mixed" | "rotated_group";
 
 export type Skipped = { reason: SkipReason; text: string };
 

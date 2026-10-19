@@ -44,9 +44,10 @@ const isText = (el: ElementLike): el is TextElementLike => el.type === "text";
 export type ExtractError = { error: string };
 
 /**
- * Reads one page for text boxes that hold exactly one {{token}}. Only the top
- * level of the page is read: a box inside a group has a position relative to the
- * group, so it is reported and left out rather than placed wrongly.
+ * Reads one page for text boxes that hold exactly one {{token}}. A box inside a
+ * group is read too, with its group's position added back in. A box in a rotated
+ * group is reported and left out, because its place cannot be worked out from
+ * the group's corner alone.
  */
 export function extractFields(page: PageLike): Extraction | ExtractError {
   if (!page.dimensions) {
@@ -63,10 +64,22 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
   const skipped: Skipped[] = [];
   const warnings: string[] = [];
 
-  const scan = (elements: readonly ElementLike[], inGroup: boolean) => {
+  // A box inside a group is positioned relative to the group, so a group's own
+  // position is added back in. `offset` is the sum of every group around the box.
+  const scan = (
+    elements: readonly ElementLike[],
+    offset: { x: number; y: number },
+    locked: boolean,
+    rotated: boolean,
+  ) => {
     for (const el of elements) {
       if (el.type === "group") {
-        scan(el.contents.toArray(), true);
+        scan(
+          el.contents.toArray(),
+          { x: offset.x + el.left, y: offset.y + el.top },
+          locked || el.locked,
+          rotated || Math.abs(el.rotation) > 1,
+        );
         continue;
       }
       if (!isText(el)) {
@@ -78,19 +91,19 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
       }
       const clean = text.replace(/\s+/g, " ").trim();
       const token = wholeToken(text);
-      if (inGroup) {
-        skipped.push({ reason: "in_group", text: clean });
-      } else if (token == null) {
+      if (token == null) {
         skipped.push({ reason: "mixed", text: clean });
-      } else if (el.locked) {
+      } else if (rotated) {
+        skipped.push({ reason: "rotated_group", text: clean });
+      } else if (locked || el.locked) {
         skipped.push({ reason: "locked", text: clean });
       } else {
         const look = readLook(el);
         fields.push({
           token,
           binding: bindFromToken(token),
-          x: Math.round(el.left * scale),
-          y: Math.round(el.top * scale),
+          x: Math.round((offset.x + el.left) * scale),
+          y: Math.round((offset.y + el.top) * scale),
           w: Math.max(40, Math.round(el.width * scale)),
           fontRef: look.fontRef ?? null,
           fontFamily: null,
@@ -108,7 +121,7 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
       }
     }
   };
-  scan(page.elements.toArray(), false);
+  scan(page.elements.toArray(), { x: 0, y: 0 }, false, false);
 
   if (!postSize) {
     warnings.push(

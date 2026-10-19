@@ -1,5 +1,14 @@
 import { useFeatureSupport } from "@canva/app-hooks";
-import { Alert, Badge, Button, Rows, Text, Title } from "@canva/app-ui-kit";
+import {
+  Alert,
+  Badge,
+  Button,
+  FormField,
+  NumberInput,
+  Rows,
+  Text,
+  Title,
+} from "@canva/app-ui-kit";
 import { findFonts } from "@canva/asset";
 import { openDesign } from "@canva/design";
 import { useState } from "react";
@@ -11,6 +20,13 @@ import {
   nameFonts,
   type FontLookup,
 } from "src/template/extract";
+import {
+  lineUpBlock,
+  matchDetailsBlock,
+  MAX_LINEUP,
+} from "src/template/blocks";
+import type { BlockSpec, PageSize } from "src/template/blocks";
+import { insertBlock } from "src/template/insert";
 import { bindLabel } from "src/template/tokens";
 import type { Extraction, Skipped } from "src/template/types";
 
@@ -33,6 +49,78 @@ export const App = () => {
   const isSupported = useFeatureSupport();
   const canRead = isSupported(openDesign);
   const [state, setState] = useState<State>({ status: "idle" });
+  const [count, setCount] = useState(11);
+  const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState<
+    { tone: "positive" | "warn" | "critical"; text: string } | undefined
+  >(undefined);
+
+  // Adds a ready-made block of text boxes to the open page, then re-reads the page
+  // so the field list shows what was added.
+  const addBlock = async (make: (size: PageSize) => BlockSpec) => {
+    setAdding(true);
+    setNotice(undefined);
+    try {
+      let result: { added: number; grouped: boolean; name: string } | undefined;
+      await openDesign({ type: "current_page" }, async (session) => {
+        const page = session.page;
+        if (page.type !== "absolute" || !page.dimensions) {
+          throw new Error(
+            intl.formatMessage({
+              defaultMessage:
+                "This page has no fixed size, so a block cannot be laid out on it. Use a normal design page.",
+              description: "Error when adding a block to a page without a size",
+            }),
+          );
+        }
+        const spec = make(page.dimensions);
+        const r = await insertBlock(session, spec);
+        result = { ...r, name: spec.name };
+      });
+      if (result) {
+        const done = result;
+        setNotice(
+          done.grouped
+            ? {
+                tone: "positive",
+                text: intl.formatMessage(
+                  {
+                    defaultMessage:
+                      "{name} added to the page as one group. Move or resize it where you like.",
+                    description: "A block was added and grouped",
+                  },
+                  { name: done.name },
+                ),
+              }
+            : {
+                tone: "warn",
+                text: intl.formatMessage(
+                  {
+                    defaultMessage:
+                      "{name} added, but Canva would not group the boxes. They are loose on the page.",
+                    description: "A block was added but could not be grouped",
+                  },
+                  { name: done.name },
+                ),
+              },
+        );
+        await check();
+      }
+    } catch (e) {
+      setNotice({
+        tone: "critical",
+        text:
+          e instanceof Error && e.message
+            ? e.message
+            : intl.formatMessage({
+                defaultMessage: "Something went wrong adding the block.",
+                description: "Generic error when adding a block failed",
+              }),
+      });
+    } finally {
+      setAdding(false);
+    }
+  };
 
   const check = async () => {
     setState({ status: "reading" });
@@ -103,11 +191,11 @@ export const App = () => {
         },
         { text: s.text },
       ),
-      in_group: intl.formatMessage(
+      rotated_group: intl.formatMessage(
         {
           defaultMessage:
-            "“{text}” is inside a group. Move it out of the group.",
-          description: "A token text box is inside a group",
+            "“{text}” is in a rotated group. Rotate the group back to level.",
+          description: "A token text box is inside a rotated group",
         },
         { text: s.text },
       ),
@@ -126,7 +214,7 @@ export const App = () => {
           {intl.formatMessage(
             {
               defaultMessage:
-                "Type a field into its own text box, like {player}, {opponent} or {date}. BetterCricket fills it in with live club details. Use {caps} in capitals for capital letters.",
+                "Add a block below, or type a field into its own text box, like {player}, {opponent} or {date}. BetterCricket fills it in with live club details. Use {caps} in capitals for capital letters.",
               description:
                 "How to mark a field. The values are example fields and are not translated.",
             },
@@ -138,6 +226,66 @@ export const App = () => {
             },
           )}
         </Text>
+        <Title size="xsmall">
+          {intl.formatMessage({
+            defaultMessage: "Add to this design",
+            description: "Heading of the section that adds ready-made blocks",
+          })}
+        </Title>
+        <FormField
+          label={intl.formatMessage({
+            defaultMessage: "Players in the line up",
+            description: "Label for the number of player places to add",
+          })}
+          control={(props) => (
+            <NumberInput
+              {...props}
+              value={count}
+              min={1}
+              max={MAX_LINEUP}
+              hasSpinButtons
+              decrementAriaLabel={intl.formatMessage({
+                defaultMessage: "One fewer player",
+                description: "Accessible label for the minus button",
+              })}
+              incrementAriaLabel={intl.formatMessage({
+                defaultMessage: "One more player",
+                description: "Accessible label for the plus button",
+              })}
+              onChange={(value) => {
+                if (value !== undefined) {
+                  setCount(value);
+                }
+              }}
+            />
+          )}
+        />
+        <Button
+          variant="secondary"
+          onClick={() => addBlock((size) => lineUpBlock(size, count))}
+          loading={adding}
+          disabled={!canRead || adding}
+          stretch
+        >
+          {intl.formatMessage({
+            defaultMessage: "Add line up",
+            description: "Button that adds a line up block to the design",
+          })}
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => addBlock((size) => matchDetailsBlock(size))}
+          loading={adding}
+          disabled={!canRead || adding}
+          stretch
+        >
+          {intl.formatMessage({
+            defaultMessage: "Add match details",
+            description: "Button that adds a match details block to the design",
+          })}
+        </Button>
+        {notice && <Alert tone={notice.tone}>{notice.text}</Alert>}
+
         <Button
           variant="primary"
           onClick={check}

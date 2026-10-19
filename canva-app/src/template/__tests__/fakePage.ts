@@ -35,8 +35,20 @@ export function textBox(
   };
 }
 
-export const group = (...contents: ElementLike[]): GroupElementLike => ({
+export const group = (
+  contents: ElementLike[],
+  o: Partial<{
+    top: number;
+    left: number;
+    rotation: number;
+    locked: boolean;
+  }> = {},
+): GroupElementLike => ({
   type: "group",
+  locked: o.locked ?? false,
+  top: o.top ?? 0,
+  left: o.left ?? 0,
+  rotation: o.rotation ?? 0,
   contents: { toArray: () => contents },
 });
 
@@ -51,3 +63,11 @@ export const page = (
   dimensions,
   elements: { toArray: () => elements },
 });
+
+/** Narrows a value a test knows is there, failing loudly when it is not. */
+export function must<T>(value: T | undefined | null): T {
+  if (value == null) {
+    throw new Error("Expected a value in the test, found none.");
+  }
+  return value;
+}
