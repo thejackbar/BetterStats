@@ -1,8 +1,8 @@
 export default {
   version: 'v9.123.0',
   date: '2026-10-25',
-  // Above v9.122.4's sortKey. Check origin/main at merge time.
-  sortKey: '2026-10-25T06:00:00Z',
+  // Above v9.122.5's sortKey. Check origin/main at merge time.
+  sortKey: '2026-10-25T07:00:00Z',
   title: 'Team of the Week: pick the days, Juniors or Seniors, and the make-up of the team',
   items: [
     'Team of the Week can now be built from a period instead of a weekend. Pick a start day and an end day (say Tuesday to Sunday) and every completed match your club played in that period is scored. The last period you used is remembered in your browser, and there is a Last 7 days button.',
