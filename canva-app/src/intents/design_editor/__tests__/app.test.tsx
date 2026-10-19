@@ -1,14 +1,23 @@
 import { useFeatureSupport } from "@canva/app-hooks";
 import { findFonts } from "@canva/asset";
-import { openDesign } from "@canva/design";
+import { openDesign, requestExport } from "@canva/design";
+import { requestOpenExternalUrl } from "@canva/platform";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { App } from "src/intents/design_editor/app";
 import { group, page, textBox } from "src/template/__tests__/fakePage";
 import { fakeSession } from "src/template/__tests__/fakeSession";
-import type { PageLike } from "src/template/types";
+import type {
+  ElementLike,
+  PageLike,
+  TextElementLike,
+} from "src/template/types";
+import { fetchPicture } from "src/template/picture";
+import { copyTemplate, downloadTemplate } from "src/template/saveFile";
 import { renderInTestProvider } from "src/utils/test_render";
 
 jest.mock("@canva/app-hooks");
+jest.mock("src/template/picture");
+jest.mock("src/template/saveFile");
 
 // Makes the mocked openDesign hand its callback a session holding this page.
 const showPage = (p: PageLike | { type: "unsupported" }) => {
@@ -277,6 +286,250 @@ describe("BetterCricket template panel", () => {
             b.getAttribute("aria-disabled") === "true",
         ).toBe(true);
       }
+    });
+  });
+
+  describe("exporting", () => {
+    // A live page, so what one session changes the next one sees.
+    const livePage = (elements: ElementLike[], syncFailsAt: number[] = []) => {
+      const p = page(elements);
+      let syncs = 0;
+      const calls = { syncs: 0 };
+      jest.mocked(openDesign).mockImplementation((async (
+        _o: unknown,
+        cb: (session: unknown) => Promise<void>,
+      ) => {
+        await cb({
+          page: p,
+          helpers: {},
+          sync: async () => {
+            syncs++;
+            calls.syncs = syncs;
+            if (syncFailsAt.includes(syncs)) {
+              throw new Error("[internal_error]: sync failed");
+            }
+          },
+        });
+      }) as never);
+      return calls;
+    };
+    const els = () => [
+      textBox("LINE UP"),
+      textBox("{{player 1}}", { top: 300, left: 90, transparency: 0 }),
+      textBox("{{opponent}}", { top: 100, left: 90, transparency: 0.25 }),
+    ];
+    const back = (list: ElementLike[]) =>
+      list.map((e) => (e as TextElementLike).transparency);
+    const exportButton = () =>
+      screen.getByRole("button", { name: "Export for BetterCricket" });
+    const url = "https://export.example/design.png";
+
+    beforeEach(() => {
+      jest.mocked(requestExport).mockResolvedValue({
+        status: "completed",
+        exportBlobs: [{ url }],
+      });
+      jest.mocked(fetchPicture).mockResolvedValue({
+        dataUrl: "data:image/png;base64,AAAA",
+        bytes: 2 * 1024 * 1024,
+      });
+      jest.mocked(downloadTemplate).mockReturnValue(true);
+      jest.mocked(copyTemplate).mockResolvedValue(true);
+    });
+
+    it("exports, hides the words while Canva makes the picture, and puts them back", async () => {
+      const list = els();
+      livePage(list);
+      let hiddenAtExport: number[] = [];
+      jest.mocked(requestExport).mockImplementation((async () => {
+        hiddenAtExport = back(list);
+        return { status: "completed", exportBlobs: [{ url }] };
+      }) as never);
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            /Template ready: 2 fields and the picture \(2.0 MB\)/,
+          ),
+        ).toBeTruthy(),
+      );
+      expect(hiddenAtExport).toEqual([0, 1, 1]);
+      expect(back(list)).toEqual([0, 0, 0.25]);
+      expect(requestExport).toHaveBeenCalledWith({
+        acceptedFileTypes: ["png", "jpg"],
+      });
+    });
+
+    it("uses the name typed in the box", async () => {
+      livePage(els());
+      renderInTestProvider(<App />);
+      const input = screen.getByLabelText(/Template name/);
+      fireEvent.change(input, { target: { value: "Saturday XI" } });
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/Template ready/)).toBeTruthy(),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Download template file" }),
+      );
+      expect(downloadTemplate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Saturday XI",
+          format: "bettercricket-template",
+        }),
+      );
+    });
+
+    it("downloads and copies the file, and says where it goes in BetterCricket", async () => {
+      livePage(els());
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/Template ready/)).toBeTruthy(),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Download template file" }),
+      );
+      expect(
+        screen.getByText(/Template file saved\. In BetterCricket/),
+      ).toBeTruthy();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Copy template text" }),
+      );
+      await waitFor(() =>
+        expect(screen.getByText(/Template text copied/)).toBeTruthy(),
+      );
+      expect(copyTemplate).toHaveBeenCalledWith(
+        expect.objectContaining({ background: "data:image/png;base64,AAAA" }),
+      );
+    });
+
+    it("says so when the browser refuses the download or the copy", async () => {
+      jest.mocked(downloadTemplate).mockReturnValue(false);
+      jest.mocked(copyTemplate).mockResolvedValue(false);
+      livePage(els());
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/Template ready/)).toBeTruthy(),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Download template file" }),
+      );
+      expect(
+        screen.getByText(/would not save the file from here/),
+      ).toBeTruthy();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Copy template text" }),
+      );
+      await waitFor(() =>
+        expect(screen.getByText(/would not allow copying/)).toBeTruthy(),
+      );
+    });
+
+    it("warns when the picture is over BetterCricket's limit", async () => {
+      jest.mocked(fetchPicture).mockResolvedValue({
+        dataUrl: "data:image/png;base64,AAAA",
+        bytes: 6 * 1024 * 1024,
+      });
+      livePage(els());
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() => expect(screen.getByText(/up to 5 MB/)).toBeTruthy());
+    });
+
+    it("leaves the design as it was when the export is cancelled", async () => {
+      const list = els();
+      livePage(list);
+      jest.mocked(requestExport).mockResolvedValue({ status: "aborted" });
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/Export cancelled/)).toBeTruthy(),
+      );
+      expect(back(list)).toEqual([0, 0, 0.25]);
+      expect(fetchPicture).not.toHaveBeenCalled();
+    });
+
+    it("refuses, and touches nothing, while a box would show its words", async () => {
+      const list = [textBox("{{player 1}}"), textBox("vs {{opponent}}")];
+      livePage(list);
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(
+          screen.getByText(/would show their {{words}} in the picture/),
+        ).toBeTruthy(),
+      );
+      expect(screen.getByText(/has other words with the token/)).toBeTruthy();
+      expect(requestExport).not.toHaveBeenCalled();
+      expect(back(list)).toEqual([0, 0]);
+    });
+
+    it("explains a page with no fields", async () => {
+      livePage([textBox("LINE UP")]);
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/nothing to export yet/)).toBeTruthy(),
+      );
+    });
+
+    it("still gives the fields when the picture cannot be fetched", async () => {
+      jest
+        .mocked(fetchPicture)
+        .mockRejectedValue(new Error("blocked by the security policy"));
+      const list = els();
+      livePage(list);
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/picture could not be fetched/)).toBeTruthy(),
+      );
+      expect(screen.getByText(/blocked by the security policy/)).toBeTruthy();
+      expect(back(list)).toEqual([0, 0, 0.25]);
+      fireEvent.click(screen.getByRole("button", { name: "Open the picture" }));
+      expect(requestOpenExternalUrl).toHaveBeenCalledWith({ url });
+      fireEvent.click(
+        screen.getByRole("button", { name: "Download fields only" }),
+      );
+      expect(downloadTemplate).toHaveBeenCalledWith(
+        expect.not.objectContaining({ background: expect.anything() }),
+      );
+    });
+
+    it("offers a manual restore when the words cannot be put back, and it works", async () => {
+      const list = els();
+      // the second save (the automatic restore) fails; the manual one is the third
+      livePage(list, [2]);
+      renderInTestProvider(<App />);
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(
+          screen.getByText(/still hidden\. Press “Restore placeholders”/),
+        ).toBeTruthy(),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Restore placeholders" }),
+      );
+      await waitFor(() =>
+        expect(screen.getByText(/Your text boxes are back/)).toBeTruthy(),
+      );
+      expect(
+        screen.queryByRole("button", { name: "Restore placeholders" }),
+      ).toBeNull();
+      expect(back(list)).toEqual([0, 0, 0.25]);
+    });
+
+    it("does not offer to export where the design cannot be edited", () => {
+      jest.mocked(useFeatureSupport).mockReturnValue(() => false);
+      renderInTestProvider(<App />);
+      const b = exportButton();
+      expect(
+        b.hasAttribute("disabled") ||
+          b.getAttribute("aria-disabled") === "true",
+      ).toBe(true);
     });
   });
 });

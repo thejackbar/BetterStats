@@ -1307,6 +1307,8 @@ export default function AdminSocialPost() {
   const designInputRef = useRef(null)
   const [designBusy, setDesignBusy] = useState(false)
   const templateFileRef = useRef(null)
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [pasteText, setPasteText] = useState('')
   // Club media library (persisted via the social-media API).
   const [mediaAssets, setMediaAssets] = useState([])
   // Below md the editor drops its drag canvas for a guided phone quick-post
@@ -4024,11 +4026,14 @@ export default function AdminSocialPost() {
   // words taken out, plus where each field sits and how it is styled. It becomes
   // the locked design and one bound text block per field, ready for the players.
   // Nothing changes if the file or its picture cannot be used.
-  const importTemplateFile = async (file) => {
-    if (!file) return
+  const importTemplateText = async (text, label) => {
+    if (!text || !String(text).trim()) {
+      flashNote({ warn: true, text: 'There is no template text to import. Copy it from the BetterCricket Canva app first.', tool: 'content' }, 10000)
+      return
+    }
     setDesignBusy(true)
     try {
-      const parsed = parseTemplateFile(await file.text())
+      const parsed = parseTemplateFile(text)
       if (parsed.error) { flashNote({ warn: true, text: parsed.error, tool: 'content' }, 14000); return }
       const warnings = [...parsed.warnings]
       let designUrl = null
@@ -4048,7 +4053,7 @@ export default function AdminSocialPost() {
       else warnings.push(`The template is ${parsed.canvas.w}×${parsed.canvas.h}, which is not a BetterPosts size, so it stays on ${W}×${H} and the design is cropped to fit.`)
       record('Import template')
       const target = shape || { w: W, h: H }
-      canvas.setItems(itemsFromTemplate(parsed, { designUrl, designName: file.name, width: target.w, height: target.h, keep: canvas.items }))
+      canvas.setItems(itemsFromTemplate(parsed, { designUrl, designName: label, width: target.w, height: target.h, keep: canvas.items }))
       canvas.setSelIds([])
       const slots = parsed.fields.reduce((n, f) => { const m = (f.bind || '').match(/^lineup\.(\d+)\./); return m ? Math.max(n, Number(m[1])) : n }, 0)
       const bound = parsed.fields.filter((f) => f.bind).length
@@ -4062,6 +4067,13 @@ export default function AdminSocialPost() {
     } finally {
       setDesignBusy(false)
     }
+  }
+  const importTemplateFile = async (file) => {
+    if (!file) return
+    let text = ''
+    try { text = await file.text() } catch { /* reported by importTemplateText as no text */ }
+    await importTemplateText(text, file.name)
+    return
   }
   // Crop / remove the background on the image ALREADY in a block. The hero
   // photo and sponsor logos have had this since they were built; an image block
@@ -5080,6 +5092,26 @@ export default function AdminSocialPost() {
                   </div>
                   <input ref={templateFileRef} type="file" accept=".json,application/json" className="sr-only" data-testid="template-file-input"
                     onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; importTemplateFile(f) }} />
+                  <div>
+                    <button onClick={() => setPasteOpen((o) => !o)} data-testid="template-paste-toggle"
+                      className="text-[11px] font-mono text-pb-dim hover:text-pb-text underline underline-offset-2">
+                      {pasteOpen ? 'Hide paste box' : 'Or paste the template text'}
+                    </button>
+                  </div>
+                  {pasteOpen && (
+                    <div className="flex flex-col gap-1.5">
+                      <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} data-testid="template-paste"
+                        rows={4} placeholder="Paste what the Canva app copied here"
+                        className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-[11px] font-mono text-pb-text placeholder:text-pb-faintest" />
+                      <div>
+                        <button onClick={async () => { await importTemplateText(pasteText, 'Pasted template'); setPasteText('') }} disabled={designBusy || !pasteText.trim()}
+                          data-testid="template-paste-import"
+                          className="px-3 py-1.5 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors disabled:opacity-50">
+                          Import pasted text
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <input ref={designInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" data-testid="own-design-input"
                     onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadDesign(f) }} />
                 </div>

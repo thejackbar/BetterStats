@@ -174,6 +174,38 @@ const ys = [300, 362, 424, 486, 548, 610, 672, 734, 796, 858, 920, 120, 1200]
   await page.close()
 }
 
+// 6c. The same template pasted as text (what the Canva app's Copy button gives).
+{
+  const { page, uploads } = await open()
+  ck('the paste box is closed until asked for', !(await seen(page.getByTestId('template-paste'))))
+  await press(page.getByTestId('template-paste-toggle')); await page.waitForTimeout(200)
+  ck('the paste box opens', await seen(page.getByTestId('template-paste')))
+  const btn = page.getByTestId('template-paste-import')
+  ck('Import pasted text is off while the box is empty', await btn.isDisabled())
+  await page.getByTestId('template-paste').fill(JSON.stringify(TEMPLATE))
+  ck('Import pasted text turns on once there is text', !(await btn.isDisabled()))
+  await btn.click(); await page.waitForTimeout(1800)
+  const r = await flat(page)
+  ck('pasting imports the template: 1080x1350 post', r && r.w === 1080 && r.h === 1350, JSON.stringify(r && [r.w, r.h]))
+  ck('pasting uploads the design picture once', uploads.length === 1, String(uploads.length))
+  const g = await rows(page, [300, 920])
+  ck('pasting puts the player slots on the post', g && g[0] && g[0].text === 'PLAYER 1' && g[1] && g[1].text === 'PLAYER 11', JSON.stringify(g))
+  ck('the paste box is emptied after a good import', (await page.getByTestId('template-paste').inputValue()) === '')
+  ck('the note says what was imported', /Imported “LineUp”/.test(await say(page)))
+  await page.close()
+}
+{
+  const { page, uploads } = await open()
+  await press(page.getByTestId('template-paste-toggle')); await page.waitForTimeout(200)
+  const before = await flat(page)
+  await page.getByTestId('template-paste').fill('definitely not a template')
+  await page.getByTestId('template-paste-import').click(); await page.waitForTimeout(800)
+  const after = await flat(page)
+  ck('pasting rubbish says it is not JSON', /not JSON/.test(await say(page)))
+  ck('pasting rubbish uploads nothing and changes nothing', uploads.length === 0 && before && after && before.count === after.count, JSON.stringify([uploads.length, before && before.count, after && after.count]))
+  await page.close()
+}
+
 // 7. Bad files change nothing and say why.
 for (const [label, file, expect] of [
   ['not JSON', 'this is not json', /not JSON/],

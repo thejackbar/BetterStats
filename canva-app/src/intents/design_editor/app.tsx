@@ -9,10 +9,12 @@ import {
   Select,
   Switch,
   Text,
+  TextInput,
   Title,
 } from "@canva/app-ui-kit";
 import { findFonts } from "@canva/asset";
-import { openDesign } from "@canva/design";
+import { requestOpenExternalUrl } from "@canva/platform";
+import { openDesign, requestExport } from "@canva/design";
 import type { DesignEditing } from "@canva/design";
 import { useState } from "react";
 import { useIntl } from "react-intl";
@@ -32,6 +34,18 @@ import {
   MAX_LINEUP,
 } from "src/template/blocks";
 import type { BlockSpec, PageSize } from "src/template/blocks";
+import {
+  ExportBlocked,
+  PICTURE_LIMIT_BYTES,
+  RestoreFailed,
+  exportTemplate,
+  restoreHidden,
+  type ExportDeps,
+} from "src/template/exportFlow";
+import type { TemplateFile } from "src/template/buildFile";
+import type { Hidden } from "src/template/hide";
+import { fetchPicture } from "src/template/picture";
+import { copyTemplate, downloadTemplate } from "src/template/saveFile";
 import { insertBlock, type InsertResult } from "src/template/insert";
 import { inCurrentPage } from "src/template/session";
 import { bindFromToken, bindLabel } from "src/template/tokens";
@@ -44,6 +58,28 @@ const lookupFonts: FontLookup = async (refs) => {
 
 // Shown as the club typed it, so it is data and not a translated message.
 const tokenText = (token: string): string => `{{${token}}}`;
+
+const exportDeps: ExportDeps = {
+  inPage: inCurrentPage,
+  requestExport,
+  fetchPicture,
+  lookupFonts,
+};
+
+type ExportView =
+  | { status: "idle" }
+  | { status: "working" }
+  | { status: "aborted" }
+  | { status: "blocked"; message: string; skipped: Skipped[] }
+  | { status: "error"; message: string }
+  | { status: "done"; file: TemplateFile; fieldCount: number; bytes: number }
+  | {
+      status: "no_picture";
+      file: TemplateFile;
+      fieldCount: number;
+      reason: string;
+      url: string | null;
+    };
 
 const fieldOptions = FIELD_TOKENS.map((t) => ({
   value: t,
@@ -68,6 +104,9 @@ export const App = () => {
   const [placed, setPlaced] = useState(0);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | undefined>(undefined);
+  const [templateName, setTemplateName] = useState("Line up");
+  const [exp, setExp] = useState<ExportView>({ status: "idle" });
+  const [stuck, setStuck] = useState<Hidden[] | null>(null);
 
   const readPage = (
     session: DesignEditing.CurrentPageSession,
@@ -196,6 +235,111 @@ export const App = () => {
       setNotice({ tone: "critical", text: messageOf(e) });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const runExport = async () => {
+    setBusy(true);
+    setNotice(undefined);
+    setStuck(null);
+    setExp({ status: "working" });
+    try {
+      const out = await exportTemplate(exportDeps, { name: templateName });
+      if (out.status === "aborted") {
+        setExp({ status: "aborted" });
+      } else if (out.status === "done") {
+        setExp({
+          status: "done",
+          file: out.file,
+          fieldCount: out.fieldCount,
+          bytes: out.pictureBytes,
+        });
+      } else {
+        setExp({
+          status: "no_picture",
+          file: out.file,
+          fieldCount: out.fieldCount,
+          reason: out.reason,
+          url: out.pictureUrl,
+        });
+      }
+    } catch (e) {
+      if (e instanceof RestoreFailed) {
+        setStuck(e.hidden);
+        setExp({ status: "error", message: e.message });
+      } else if (e instanceof ExportBlocked) {
+        setExp({ status: "blocked", message: e.message, skipped: e.skipped });
+      } else {
+        setExp({ status: "error", message: messageOf(e) });
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restoreNow = async () => {
+    if (!stuck) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await restoreHidden(inCurrentPage, stuck);
+      setStuck(null);
+      setExp({ status: "idle" });
+      setNotice({
+        tone: "positive",
+        text: intl.formatMessage({
+          defaultMessage: "Your text boxes are back.",
+          description: "The hidden placeholder boxes were restored",
+        }),
+      });
+    } catch (e) {
+      setNotice({ tone: "critical", text: messageOf(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveTemplate = (file: TemplateFile, how: "download" | "copy") => {
+    const sent = how === "download" ? downloadTemplate(file) : null;
+    const done = (ok: boolean) =>
+      setNotice(
+        ok
+          ? {
+              tone: "positive",
+              text:
+                how === "download"
+                  ? intl.formatMessage({
+                      defaultMessage:
+                        "Template file saved. In BetterCricket, open BetterPosts, Blank canvas, and choose Import a template file.",
+                      description: "After the template file was downloaded",
+                    })
+                  : intl.formatMessage({
+                      defaultMessage:
+                        "Template text copied. In BetterCricket, paste it into the Import box on the Blank canvas.",
+                      description: "After the template text was copied",
+                    }),
+            }
+          : {
+              tone: "warn",
+              text:
+                how === "download"
+                  ? intl.formatMessage({
+                      defaultMessage:
+                        "Your browser would not save the file from here. Use Copy template text instead.",
+                      description: "The download was refused",
+                    })
+                  : intl.formatMessage({
+                      defaultMessage:
+                        "Your browser would not allow copying from here.",
+                      description: "The copy was refused",
+                    }),
+            },
+      );
+    if (sent != null) {
+      done(sent);
+    } else {
+      void copyTemplate(file).then(done);
     }
   };
 
@@ -449,6 +593,183 @@ export const App = () => {
                 {w}
               </Alert>
             ))}
+          </Rows>
+        )}
+
+        <Title size="xsmall">
+          {intl.formatMessage({
+            defaultMessage: "Export for BetterCricket",
+            description: "Heading of the export section",
+          })}
+        </Title>
+        <Text size="small">
+          {intl.formatMessage(
+            {
+              defaultMessage:
+                "Makes a template file with your design as the picture and a field for each {example}. Those words are hidden for a moment while the picture is made, then put back.",
+              description:
+                "Explains the export. The value is an example field, not translated.",
+            },
+            { example: "{{player 1}}" },
+          )}
+        </Text>
+        <FormField
+          label={intl.formatMessage({
+            defaultMessage: "Template name",
+            description: "Label for the name of the exported template",
+          })}
+          control={(props) => (
+            <TextInput
+              {...props}
+              value={templateName}
+              onChange={setTemplateName}
+              disabled={busy}
+            />
+          )}
+        />
+        <Button
+          variant="primary"
+          onClick={runExport}
+          loading={exp.status === "working"}
+          disabled={off}
+          stretch
+        >
+          {intl.formatMessage({
+            defaultMessage: "Export for BetterCricket",
+            description: "Button that exports the template",
+          })}
+        </Button>
+        {stuck && (
+          <Button
+            variant="secondary"
+            onClick={restoreNow}
+            disabled={busy}
+            stretch
+          >
+            {intl.formatMessage({
+              defaultMessage: "Restore placeholders",
+              description: "Button that puts hidden text boxes back",
+            })}
+          </Button>
+        )}
+        {exp.status === "aborted" && (
+          <Alert tone="info">
+            {intl.formatMessage({
+              defaultMessage:
+                "Export cancelled. Your text boxes are back as they were.",
+              description: "The export dialog was closed",
+            })}
+          </Alert>
+        )}
+        {exp.status === "error" && <Alert tone="critical">{exp.message}</Alert>}
+        {exp.status === "blocked" && (
+          <Rows spacing="1u">
+            <Alert tone="warn">{exp.message}</Alert>
+            {exp.skipped.map((sk, i) => (
+              <Alert key={`${sk.text}-${i}`} tone="warn">
+                {skippedText(sk)}
+              </Alert>
+            ))}
+          </Rows>
+        )}
+        {exp.status === "done" && (
+          <Rows spacing="1u">
+            <Alert tone="positive">
+              {intl.formatMessage(
+                {
+                  defaultMessage:
+                    "Template ready: {count, plural, one {# field} other {# fields}} and the picture ({size} MB).",
+                  description: "The export finished",
+                },
+                {
+                  count: exp.fieldCount,
+                  size: (exp.bytes / 1024 / 1024).toFixed(1),
+                },
+              )}
+            </Alert>
+            {exp.bytes > PICTURE_LIMIT_BYTES && (
+              <Alert tone="warn">
+                {intl.formatMessage({
+                  defaultMessage:
+                    "BetterCricket takes pictures up to 5 MB, so it may refuse this one. Export again and choose JPG.",
+                  description:
+                    "The exported picture is over BetterCricket's limit",
+                })}
+              </Alert>
+            )}
+            <Button
+              variant="secondary"
+              onClick={() => saveTemplate(exp.file, "download")}
+              stretch
+            >
+              {intl.formatMessage({
+                defaultMessage: "Download template file",
+                description: "Button that downloads the template file",
+              })}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => saveTemplate(exp.file, "copy")}
+              stretch
+            >
+              {intl.formatMessage({
+                defaultMessage: "Copy template text",
+                description: "Button that copies the template text",
+              })}
+            </Button>
+          </Rows>
+        )}
+        {exp.status === "no_picture" && (
+          <Rows spacing="1u">
+            <Alert tone="warn">
+              {intl.formatMessage(
+                {
+                  defaultMessage:
+                    "The {count, plural, one {# field is} other {# fields are}} ready, but the picture could not be fetched ({reason}). You can still use the fields and upload the picture in BetterCricket under Your own design.",
+                  description:
+                    "The export worked but the picture could not be fetched",
+                },
+                { count: exp.fieldCount, reason: exp.reason },
+              )}
+            </Alert>
+            {exp.url && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (exp.url) {
+                    void requestOpenExternalUrl({ url: exp.url });
+                  }
+                }}
+                stretch
+              >
+                {intl.formatMessage({
+                  defaultMessage: "Open the picture",
+                  description: "Button that opens the exported picture",
+                })}
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              onClick={() => saveTemplate(exp.file, "download")}
+              stretch
+            >
+              {intl.formatMessage({
+                defaultMessage: "Download fields only",
+                description:
+                  "Button that downloads a template without its picture",
+              })}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => saveTemplate(exp.file, "copy")}
+              stretch
+            >
+              {intl.formatMessage({
+                defaultMessage: "Copy fields only",
+                description:
+                  "Button that copies a template without its picture",
+              })}
+            </Button>
           </Rows>
         )}
       </Rows>

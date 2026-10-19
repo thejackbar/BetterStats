@@ -1,7 +1,7 @@
-import { bindFromToken, hasToken, wantsUppercase, wholeToken } from "./tokens";
+import { bindFromToken, wantsUppercase } from "./tokens";
+import { tokenBoxes } from "./walk";
 import type {
   Canvas,
-  ElementLike,
   Extraction,
   Field,
   FormatLike,
@@ -39,8 +39,6 @@ function readLook(el: TextElementLike): FormatLike {
   return regions.find((r) => r.formatting)?.formatting ?? {};
 }
 
-const isText = (el: ElementLike): el is TextElementLike => el.type === "text";
-
 export type ExtractError = { error: string };
 
 /**
@@ -64,64 +62,38 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
   const skipped: Skipped[] = [];
   const warnings: string[] = [];
 
-  // A box inside a group is positioned relative to the group, so a group's own
-  // position is added back in. `offset` is the sum of every group around the box.
-  const scan = (
-    elements: readonly ElementLike[],
-    offset: { x: number; y: number },
-    locked: boolean,
-    rotated: boolean,
-  ) => {
-    for (const el of elements) {
-      if (el.type === "group") {
-        scan(
-          el.contents.toArray(),
-          { x: offset.x + el.left, y: offset.y + el.top },
-          locked || el.locked,
-          rotated || Math.abs(el.rotation) > 1,
+  for (const box of tokenBoxes(page.elements.toArray())) {
+    const { el, token } = box;
+    const clean = box.text.replace(/\s+/g, " ").trim();
+    if (token == null) {
+      skipped.push({ reason: "mixed", text: clean });
+    } else if (box.rotated) {
+      skipped.push({ reason: "rotated_group", text: clean });
+    } else if (box.locked) {
+      skipped.push({ reason: "locked", text: clean });
+    } else {
+      const look = readLook(el);
+      fields.push({
+        token,
+        binding: bindFromToken(token),
+        x: Math.round((box.offset.x + el.left) * scale),
+        y: Math.round((box.offset.y + el.top) * scale),
+        w: Math.max(40, Math.round(el.width * scale)),
+        fontRef: look.fontRef ?? null,
+        fontFamily: null,
+        fontSize: Math.max(8, Math.round((look.fontSize ?? 16) * scale)),
+        bold: BOLD.includes(look.fontWeight ?? "normal"),
+        color: look.color ?? null,
+        align: ALIGN[look.textAlign ?? "start"],
+        uppercase: wantsUppercase(token),
+      });
+      if (Math.abs(el.rotation) > 1) {
+        warnings.push(
+          `{{${token}}} is rotated in Canva. BetterCricket places it unrotated.`,
         );
-        continue;
-      }
-      if (!isText(el)) {
-        continue;
-      }
-      const text = el.text.readPlaintext();
-      if (!hasToken(text)) {
-        continue;
-      }
-      const clean = text.replace(/\s+/g, " ").trim();
-      const token = wholeToken(text);
-      if (token == null) {
-        skipped.push({ reason: "mixed", text: clean });
-      } else if (rotated) {
-        skipped.push({ reason: "rotated_group", text: clean });
-      } else if (locked || el.locked) {
-        skipped.push({ reason: "locked", text: clean });
-      } else {
-        const look = readLook(el);
-        fields.push({
-          token,
-          binding: bindFromToken(token),
-          x: Math.round((offset.x + el.left) * scale),
-          y: Math.round((offset.y + el.top) * scale),
-          w: Math.max(40, Math.round(el.width * scale)),
-          fontRef: look.fontRef ?? null,
-          fontFamily: null,
-          fontSize: Math.max(8, Math.round((look.fontSize ?? 16) * scale)),
-          bold: BOLD.includes(look.fontWeight ?? "normal"),
-          color: look.color ?? null,
-          align: ALIGN[look.textAlign ?? "start"],
-          uppercase: wantsUppercase(token),
-        });
-        if (Math.abs(el.rotation) > 1) {
-          warnings.push(
-            `{{${token}}} is rotated in Canva. BetterCricket places it unrotated.`,
-          );
-        }
       }
     }
-  };
-  scan(page.elements.toArray(), { x: 0, y: 0 }, false, false);
+  }
 
   if (!postSize) {
     warnings.push(
