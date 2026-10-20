@@ -981,3 +981,7 @@ The requirement: the ad flow lets a visitor name and confirm their club on /tria
 
 **Verification.** `verify_club_teaser_link.py` (26; the control with ties resolved by guessing fails the shared-UTM, shared-CA-id and report-agreement checks).
 
+## Renderer build fix (v9.128.2.1, Oct 2026)
+
+The first server build after the pictures release failed at `pip install`: `playwright==1.64.0` needs `greenlet>=3.1.1`, the app pins `greenlet==3.0.3` (SQLAlchemy async). It was missed because Playwright had been installed into an existing working venv, where pip had quietly upgraded greenlet. Fixed by pinning `playwright==1.47.0`, the newest that accepts greenlet 3.0.3, rather than moving greenlet under the whole database layer. Rebuilding in a clean venv from `requirements.txt` then showed the second problem: 1.47 asks Chrome for `--headless=old`, which the current Chrome builds have removed ("Old Headless mode has been removed from the Chrome binary"), so the renderer could not start at all. `ChromiumRenderer` now adds `--headless=new`. Verified in a clean Python 3.11 venv with the exact pins (greenlet 3.0.3, playwright 1.47.0): the images suite (63), the ad pack suite (43), the linkage suite (26) and a full real render of two clubs in all three formats.
+

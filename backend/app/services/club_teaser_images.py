@@ -235,7 +235,11 @@ class ChromiumRenderer:
     async def __aenter__(self):
         from playwright.async_api import async_playwright
         self._pw = await async_playwright().start()
-        kwargs = {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
+        # --headless=new: the pinned Playwright asks Chrome for its OLD headless
+        # mode, which current Chrome (the distro package in the backend image)
+        # has removed, and it then refuses to start. A later --headless switch
+        # wins, so this works with Playwright versions old and new.
+        kwargs = {"args": ["--no-sandbox", "--disable-dev-shm-usage", "--headless=new"]}
         if self._exe:
             kwargs["executable_path"] = self._exe
         self._browser = await self._pw.chromium.launch(**kwargs)
