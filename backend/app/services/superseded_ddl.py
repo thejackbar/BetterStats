@@ -109,6 +109,12 @@ STATEMENTS: tuple[str, ...] = (
     # v_effective_games and v_effective_player_season_stats, both of which read
     # `games.status`, and it runs BEFORE the 266 mirror further down the boot.
     "ALTER TABLE games ADD COLUMN IF NOT EXISTS status TEXT",
+    # Migration 350's column (services/game_status.card_called_off): CA left the fixture
+    # COMPLETED but both teams' resultType read ABANDONED. Guarded here for the same reason as
+    # `status`: the views below read it.
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS ca_called_off BOOLEAN",
+    "CREATE INDEX IF NOT EXISTS ix_games_ca_called_off "
+    "ON games (ca_called_off) WHERE ca_called_off IS TRUE",
     "CREATE INDEX IF NOT EXISTS ix_games_status_not_played "
     "ON games (status) WHERE status IN ('ABANDONED', 'CANCELLED')",
     # Tiny by construction — only the seasons a club has re-sourced — so the
@@ -219,7 +225,10 @@ STATEMENTS: tuple[str, ...] = (
         -- one about as often as it leaves one out, so this cannot subtract blindly: a total CA
         -- already kept the game out of must not lose it twice.
         --
-        --   R = the player's reserve games that season with no row of their own
+        --   R = the player's reserve games that season with no row of their own, plus the named-only
+        --       games CA called off but left COMPLETED (`games.ca_called_off`; CA leaves a named-only
+        --       player out of those, so `CA - N` is 0 for them and nothing is taken off a total that
+        --       was already right, and a total that did count one loses it once)
         --   N = the games we hold for them that DO count, in that calendar year
         --   CA counted `LEAST(R, GREATEST(CA - N, 0))` of the reserve games, because anything
         --   CA counts beyond the games we can show the player played is the reserve (or a
@@ -255,7 +264,8 @@ STATEMENTS: tuple[str, ...] = (
                     JOIN grades xgr ON xgr.id = xg.grade_id
                     JOIN seasons xs ON xs.id = xgr.season_id
                     WHERE xs.year = rs.year
-                      AND (x.has_row OR COALESCE(xg.status, '') NOT IN ('ABANDONED', 'CANCELLED'))
+                      AND (x.has_row OR (COALESCE(xg.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+                                          AND xg.ca_called_off IS NOT TRUE))
                     GROUP BY x.game_id
                ) z) AS held_games
         FROM (
@@ -264,7 +274,7 @@ STATEMENTS: tuple[str, ...] = (
             JOIN games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
             WHERE ga.player_id = pss.player_id
-              AND ga.is_reserve IS TRUE
+              AND (ga.is_reserve IS TRUE OR g.ca_called_off IS TRUE)
               AND gr.season_id = pss.season_id
               AND COALESCE(g.status, '') NOT IN ('ABANDONED', 'CANCELLED')
               AND NOT EXISTS (
@@ -688,7 +698,7 @@ STATEMENTS: tuple[str, ...] = (
         -- season rows cannot count a game twice — CA season guid first.
         WITH auth_games AS MATERIALIZED (
             SELECT g.id AS game_id, s.id AS season_id, g.grade_id,
-                   s.organisation_id, g.status
+                   s.organisation_id, g.status, g.ca_called_off
             FROM seasons s
             JOIN grades gr ON gr.season_id = s.id
             JOIN games g ON g.grade_id = gr.id
@@ -697,11 +707,11 @@ STATEMENTS: tuple[str, ...] = (
                                WHERE pm.superseded_by_game_id = g.id
                                  AND pm.pair_prefers_import)
             UNION
-            SELECT game_id, season_id, grade_id, organisation_id, status
+            SELECT game_id, season_id, grade_id, organisation_id, status, ca_called_off
             FROM (
                 SELECT DISTINCT ON (g.id)
                        g.id AS game_id, s.id AS season_id, g.grade_id,
-                       s.organisation_id, g.status
+                       s.organisation_id, g.status, g.ca_called_off
                 FROM seasons s
                 JOIN games g ON (g.home_org_id = s.organisation_id
                                  OR g.away_org_id = s.organisation_id)
@@ -742,6 +752,7 @@ STATEMENTS: tuple[str, ...] = (
             SELECT ag.game_id, ag.season_id, ag.grade_id, ag.organisation_id, ga.player_id
             FROM auth_games ag JOIN game_appearances ga ON ga.game_id = ag.game_id
             WHERE COALESCE(ag.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+              AND ag.ca_called_off IS NOT TRUE
               AND ga.is_reserve IS NOT TRUE
         ),
         -- OUR OWN PLAYERS ONLY. A shared fixture carries both clubs' rows on
