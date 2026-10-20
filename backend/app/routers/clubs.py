@@ -3,6 +3,7 @@ password-protected "Draft" page gate (see app/services/club_lock.py)."""
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -88,6 +89,49 @@ async def get_club_by_slug(slug: str, request: Request, db: AsyncSession = Depen
         "website_enabled": bool(org.website_enabled),
         "public_header_logo": bool(org.public_header_logo),
     }
+
+
+@router.get("/{slug}/manifest")
+async def get_club_manifest(slug: str, db: AsyncSession = Depends(get_db)):
+    """Web app manifest for a club's public pages, so "Add to Home Screen"
+    (iOS reads the manifest's start_url) opens the club and not the site root.
+    The static /site.webmanifest has start_url "/" and stays the default for
+    every non-club page. Manifest fetches carry no cookies, so a PIN-locked or
+    blocked club gets the start_url only, with the BetterCricket name and icons,
+    and nothing from the club's own record. Not under a .webmanifest path: nginx
+    serves that extension from disk before it ever reaches /api."""
+    org = await _org_by_slug(db, slug)
+    if not org:
+        raise HTTPException(status_code=404, detail="Club not found")
+    start = f"/{org.slug}"
+    manifest = {
+        "id": start,
+        "name": "BetterCricket",
+        "short_name": "BetterCricket",
+        "lang": "en-AU",
+        "start_url": start,
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#0b1220",
+        "theme_color": "#0b1220",
+        "icons": [
+            {"src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any"},
+            {"src": "/favicon.png", "type": "image/png", "sizes": "256x256", "purpose": "any"},
+            {"src": "/apple-touch-icon.png", "type": "image/png", "sizes": "180x180", "purpose": "maskable"},
+        ],
+    }
+    if not org.password_protected and not _public_blocked(org):
+        manifest["name"] = org.name or manifest["name"]
+        manifest["short_name"] = (org.short_name or org.name or manifest["short_name"])[:12]
+        if org.primary_color:
+            manifest["theme_color"] = org.primary_color
+        if org.logo_url:
+            manifest["icons"] = [{"src": org.logo_url, "sizes": "any", "purpose": "any"}]
+    return JSONResponse(
+        manifest,
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 class UnlockBody(BaseModel):

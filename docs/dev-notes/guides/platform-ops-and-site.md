@@ -54,6 +54,7 @@
 29. CA field names: `bowlingEconomyRate`, `fieldingTotalCatches`; no `bowlingOvers` (derive from `bowlingBalls`).
 30. PlayHQ's public game summary API gives no cricket scorecards without a partner JWT.
 31. `stats["player_seasons"]` in sync counts player-season records, not unique players.
+32. Home-screen install follows the web app manifest, not the page URL (iOS 16.4+). The static `/site.webmanifest` has `start_url` "/"; club pages swap the manifest link (`lib/favicon.setManifest`, driven by `FaviconManager`) to `GET /api/clubs/{slug}/manifest`, which sets `start_url` to `/{slug}`. Keep it off a `.webmanifest` path: nginx serves that extension from disk before `/api`.
 
 ## Traps and failure signatures
 
