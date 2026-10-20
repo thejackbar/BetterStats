@@ -38,6 +38,9 @@ export function refusal(e: unknown): string {
   if (/missing_scope|scope/i.test(detail)) {
     return "Canva says the app is missing the permission to read your pictures (canva:asset:private:read). Add it under Scopes in the Developer Portal, then reload the app.";
   }
+  if (/not_allowed|restricted/i.test(detail)) {
+    return "This is a Canva library photo, and Canva does not let apps copy those. Use a picture you uploaded yourself, or add the background in BetterPosts under Design, Your own design.";
+  }
   return `Canva would not give the app this picture (${detail || "no reason given"}). It may be a Canva library photo the app is not allowed to read. Upload your own copy into the design, or add the background in BetterPosts.`;
 }
 

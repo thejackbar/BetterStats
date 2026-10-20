@@ -11,6 +11,18 @@ describe("refusal", () => {
     expect(msg).toMatch(/Scopes in the Developer Portal/);
   });
 
+  it("explains a restricted library photo in plain words, with what to do", () => {
+    const msg = refusal(
+      new Error(
+        "[not_allowed]: Encountered an error while trying to get a temporary URL: Access to the requested image is restricted.",
+      ),
+    );
+    expect(msg).toMatch(/Canva library photo/);
+    expect(msg).toMatch(/uploaded yourself/);
+    expect(msg).toMatch(/Your own design/);
+    expect(msg).not.toMatch(/not_allowed/);
+  });
+
   it("gives Canva's own words for anything else", () => {
     const msg = refusal(new Error("[not_found]: asset is not available"));
     expect(msg).toMatch(/not_found/);
