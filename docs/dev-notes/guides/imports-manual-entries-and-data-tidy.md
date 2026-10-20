@@ -147,3 +147,4 @@ All dry run by default; `--apply` acts.
 - Card review never deletes a card or a row it did not insert. A hybrid undo removes only its recorded ids. New tables recording player activity still belong on `merge_carry.CARRIED`.
 - `review_detail` holds a live Cricket Australia snapshot for the match page; `get_scorecard` reads it only for a manual game with no `extracted_payload`.
 - "Scores agree" never means "Cricket Australia holds more". A bulk switch only takes matches where `club_richer` is empty; any new kind of detail the club card can hold must be added to `club_richer_of`.
+- The Card review overview is an ordered walk-through (pairing, agree, small, differ). A new group or state belongs in `overview()`'s `todo` and in `STEPS` in `AdminCardReview.jsx`, in the order the work should be done.

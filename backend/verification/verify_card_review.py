@@ -558,11 +558,11 @@ async def main():
         ov = await route.card_review_overview(club=club, db=s)
         check("the overview counts every paired match once", (ov["total"], sum(ov["groups"].values())),
               (n_paired, n_paired))
-        lst = await route.card_review_matches(group="differ", season=None, decided=None, source_file=None,
+        lst = await route.card_review_matches(group="differ", season=None, decided=None, source_file=None, sort=None, richer=None,
                                               recent_seasons=None, limit=2, offset=0, club=club, db=s)
         check("a list answers one group, with the total and a page of it",
               ({r["group"] for r in lst["rows"]}, lst["total"] >= 3, len(lst["rows"])), ({"differ"}, True, 2))
-        page2 = await route.card_review_matches(group="differ", season=None, decided=None, source_file=None,
+        page2 = await route.card_review_matches(group="differ", season=None, decided=None, source_file=None, sort=None, richer=None,
                                                 recent_seasons=None, limit=2, offset=2, club=club, db=s)
         check("the next page continues where the first stopped",
               {r["match_id"] for r in lst["rows"]} & {r["match_id"] for r in page2["rows"]}, set())
@@ -570,13 +570,13 @@ async def main():
         check("each line carries its headline, its count and its full difference list",
               (bool(row["headline"]), row["item_count"], len(row["items"])), (True, len(row["items"]), len(row["items"])))
         try:
-            await route.card_review_matches(group="nonsense", season=None, decided=None, source_file=None,
+            await route.card_review_matches(group="nonsense", season=None, decided=None, source_file=None, sort=None, richer=None,
                                             recent_seasons=None, limit=5, offset=0, club=club, db=s)
             code = None
         except HTTPException as e:
             code = e.status_code
         check("an unknown group is refused", code, 422)
-        yes = await route.card_review_matches(group=None, season=None, decided="yes", source_file=None,
+        yes = await route.card_review_matches(group=None, season=None, decided="yes", source_file=None, sort=None, richer=None,
                                               recent_seasons=None, limit=50, offset=0, club=club, db=s)
         check("the list can show only matches chosen by hand", all(r["decided_by_hand"] for r in yes["rows"]), True)
 
@@ -713,7 +713,7 @@ async def main():
           (await q("SELECT review_choice FROM manual_games WHERE id = :m", m=ids["rich_detail"][0]))[0][0], None)
     async with async_session_maker() as s:
         route._CACHE.clear()
-        listed = await route.card_review_matches(group="agree", richer="yes", decided=None, season=None,
+        listed = await route.card_review_matches(group="agree", richer="yes", sort=None, decided=None, season=None,
                                                  source_file=None, recent_seasons=None, limit=50, offset=0,
                                                  club=club, db=s)
         route._CACHE.clear()
@@ -727,6 +727,42 @@ async def main():
     check("the spreadsheet lists them, saying what the club card holds",
           sorted(r[hdr.index("Club scorecard holds more")] for r in flagged), ["balls faced 6", "balls faced 6"])
     check("and still leaves out a plain agreeing match", rs["match_id"] in {r[0] for r in parsed2[1:]}, False)
+
+    # --- the order of the review ---------------------------------------------------------------
+    print("\n-- the overview says what is left in each step, and lists can put the worst first --")
+    rows3 = await review()
+    ov3 = cr.overview(list(rows3.values()))
+    vals = list(rows3.values())
+    undecided = lambda grp: sum(1 for r in vals if r["group"] == grp and not r["decided_by_hand"])
+    left_bulk = sum(1 for r in vals if r["group"] == "agree" and not r["decided_by_hand"]
+                    and r["current"] != "ca" and not r["club_richer"])
+    check("a step's count of what is left is the matches nobody has decided",
+          (ov3["todo"]["small"], ov3["todo"]["differ"]), (undecided("small"), undecided("differ")))
+    check("the pairing step counts every match still in 'pairing looks wrong'",
+          ov3["todo"]["pairing"], ov3["groups"]["pairing"])
+    check("the agree step counts what the switch can take plus what it holds back",
+          (ov3["bulk_left"], ov3["todo"]["agree"]), (left_bulk, left_bulk + ov3["agree_club_richer"]))
+    async with async_session_maker() as s:
+        await act.set_choice(s, ORG, ids["differ"][0], "ca", USER2)
+    ov4 = cr.overview(list((await review()).values()))
+    check("deciding a match takes it off its step", ov4["todo"]["differ"], ov3["todo"]["differ"] - 1)
+    async with async_session_maker() as s:
+        route._CACHE.clear()
+        worst = await route.card_review_matches(group="differ", sort="worst", decided=None, season=None, source_file=None,
+                                                 richer=None, recent_seasons=None, limit=50, offset=0, club=club, db=s)
+        pw = await route.card_review_matches(group="pairing", sort="worst", decided=None, season=None, source_file=None,
+                                              richer=None, recent_seasons=None, limit=50, offset=0, club=club, db=s)
+        try:
+            await route.card_review_matches(group="differ", sort="sideways", decided=None, season=None, source_file=None,
+                                             richer=None, recent_seasons=None, limit=50, offset=0, club=club, db=s)
+            code = None
+        except HTTPException as e:
+            code = e.status_code
+    sizes = [r["size"] for r in worst["rows"]]
+    check("'worst first' puts the biggest difference on top", sizes, sorted(sizes, reverse=True))
+    shared = [rows3[r["match_id"]]["shared"] for r in pw["rows"]]
+    check("and, for pairings, the match with the fewest batters in common", shared, sorted(shared))
+    check("an unknown sort is refused", code, 422)
 
     print(f"\n{PASS} passed, {FAIL} failed")
     await engine.dispose()

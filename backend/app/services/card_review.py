@@ -505,8 +505,16 @@ def overview(rows: list) -> dict:
     seasons = sorted(by_season.values(), key=lambda s: (season_sort_key(s["season"]), s["season"]))
     current = {c: sum(1 for r in rows if r["current"] == c) for c in CHOICES}
     richer = sum(1 for r in rows if r["group"] == "agree" and r["club_richer"] and not r["decided_by_hand"])
+    # What is still to do in each step of the review, in the order the review should go: a
+    # pairing first (a wrong link makes the comparison meaningless, and fixing it moves matches
+    # into the other groups), then the matches the bulk switch can take, then the rest.
+    bulk_left = sum(1 for r in rows if r["group"] == "agree" and not r["decided_by_hand"]
+                    and r["current"] != "ca" and not r["club_richer"])
+    todo = {"pairing": groups["pairing"], "agree": bulk_left + richer,
+            "small": sum(1 for r in rows if r["group"] == "small" and not r["decided_by_hand"]),
+            "differ": sum(1 for r in rows if r["group"] == "differ" and not r["decided_by_hand"])}
     return {"total": len(rows), "groups": groups, "seasons": seasons, "current": current,
-            "agree_club_richer": richer,
+            "agree_club_richer": richer, "bulk_left": bulk_left, "todo": todo,
             "decided_by_hand": sum(1 for r in rows if r["decided_by_hand"])}
 
 

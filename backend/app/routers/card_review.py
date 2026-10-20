@@ -112,6 +112,7 @@ async def card_review_matches(
     source_file: Optional[str] = Query(None),
     richer: Optional[str] = Query(None, description="'yes' only where the club card holds more than Cricket Australia's, 'no' only where it does not"),
     recent_seasons: Optional[int] = Query(None, ge=1, description="only the newest N seasons"),
+    sort: Optional[str] = Query(None, description="'newest' (the default) or 'worst': the match that most needs a look first"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     club: Organisation = Depends(get_current_club),
@@ -138,7 +139,13 @@ async def card_review_matches(
         newest = sorted({r["season"] for r in await _rows(db, club.id)},
                         key=lambda s: (cr.season_sort_key(s), s or ""))[:recent_seasons]
         rows = [r for r in rows if r["season"] in newest]
+    if sort not in (None, "newest", "worst"):
+        raise HTTPException(status_code=422, detail="Unknown sort.")
     rows.sort(key=lambda r: (str(r["date"] or ""), r["match_id"]), reverse=True)
+    if sort == "worst":
+        # a stable sort on top of newest-first: the least shared batters first for a pairing,
+        # the biggest difference first for everything else
+        rows.sort(key=(lambda r: r["shared"]) if group == "pairing" else (lambda r: -r["size"]))
     sources = sorted({(r["source"].get("filename") or r["source"]["label"]) for r in await _rows(db, club.id)})
     return {"total": len(rows), "offset": offset, "limit": limit, "sources": sources,
             "rows": [_line(r) for r in rows[offset:offset + limit]]}
