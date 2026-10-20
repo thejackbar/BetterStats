@@ -18,6 +18,7 @@
 // guarantee that makes this safe to put under all 48: a post nobody has
 // reordered goes through the same code path it always did.
 import { createContext, useContext, useEffect, useMemo, Children, cloneElement, isValidElement } from 'react'
+import { usePostLook, veilStyle } from './postLook'
 
 const PostLayerContext = createContext(null)
 
@@ -196,8 +197,11 @@ export function applyOrder(naturalIds, order) {
 // THE ROOT
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function LayerRoot({ style, children, ...rest }) {
+export function LayerRoot({ style: ownStyle, children, ...rest }) {
   const ctx = useContext(PostLayerContext)
+  // The club's own veil over the background (postLook.js); the layout's fill
+  // as it draws it when none is set.
+  const style = veilStyle(ownStyle, usePostLook().veil)
 
   // Children.toArray drops null/false, so a conditional element that is not
   // rendered is simply not a layer — which is the right answer, and the reason

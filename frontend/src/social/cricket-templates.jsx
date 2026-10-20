@@ -9,6 +9,7 @@
 import { useRef, useState, useLayoutEffect } from 'react'
 import { aspectOf, pick, share, grow } from './postAspect'
 import { LayerRoot } from './postLayers'
+import { usePostLook } from './postLook'
 import brandBlack from '../assets/bettercricket-black.svg'
 import brandWhite from '../assets/bettercricket-white.svg'
 import { IS_AFL, PLATFORM_NAME } from '../lib/sport'
@@ -149,6 +150,7 @@ export function AutoFitText({ text, children, max, min = 8, lines = 1, pad = 0, 
 // child that silently drops the prop would keep painting in markup order while
 // the panel said otherwise.
 export function GrainSVG({ opacity = 0.35, id = 'grain', style = {} }) {
+  if (usePostLook().texture === false) return null
   return (
     <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', mixBlendMode: 'overlay', opacity, ...style }}>
       <filter id={id}>
@@ -161,6 +163,7 @@ export function GrainSVG({ opacity = 0.35, id = 'grain', style = {} }) {
 }
 
 export function Halftone({ color = '#fff', size = 14, opacity = 0.12, angle = 0, style = {} }) {
+  if (usePostLook().texture === false) return null
   return (
     <div style={{
       position: 'absolute', inset: 0, pointerEvents: 'none', opacity,
@@ -174,6 +177,7 @@ export function Halftone({ color = '#fff', size = 14, opacity = 0.12, angle = 0,
 }
 
 export function Stripes({ color = '#fff', angle = -45, gap = 14, opacity = 0.06, style = {} }) {
+  if (usePostLook().texture === false) return null
   return (
     <div style={{
       position: 'absolute', inset: 0, pointerEvents: 'none', opacity,
