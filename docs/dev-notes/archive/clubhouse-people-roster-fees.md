@@ -1319,7 +1319,7 @@ The server already returned `membership_outstanding` and `match_fee_outstanding`
 
 Checked with `frontend/verification/verify_accounts_owing_split_browser.mjs` (real screen, API stubbed, 21 checks, 390px overflow and the downloaded file contents). Control run against the previous build: the three-button check and the phone split check fail, the rest of the old behaviour passes.
 
-## v9.125.7: match fees are charged the day after the match day
+## v9.126.1: match fees are charged the day after the match day
 
 Clubs moved the date of a game after players had already been billed for it. `recompute_fee_match_days` ran after every sync and charged a game as soon as it had a date and an appearance, so a game rescheduled by the league had already put a match day on the member, and a payment against it froze the row (`auto_derived` rows with `paid_payment_id` are not re-synced).
 
