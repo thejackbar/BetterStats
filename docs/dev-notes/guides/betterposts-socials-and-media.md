@@ -139,6 +139,8 @@
 **Layout on the background, colour roles and per-element parts (v9.126.0, `social/postLook.js`, `social/layoutParts.js`)**
 74. A layout's fill and texture over the background belong to the club: `PostLookContext` (`veil`, `texture`) is read by `LayerRoot` and by `Halftone`/`Stripes`/`GrainSVG`. A new texture primitive must read `usePostLook().texture`; a new layout's root must be a `LayerRoot` so the veil reaches it. Inner elements still use the default `primary` + `99` palette, so never read the veil from the palette.
 75. Tint and texture are `null` (automatic) until touched: 60% and the pattern on a built-in texture, none of either on `custom-image`. Do not store the automatic value.
+77. Every editor layout (60) registers its parts with `registerParts` under the layout. A new layout needs: an entry in `PARTS_FAMILY`, a fixture in `verification/layout_parts/`, `baseline` before and `check` after `probe_layout_parts.mjs` with zero FAIL, and a pass in `verify_parts_all_browser.mjs`. Use `STANDARD_KEYS` only where the meaning is exact; a family-wide key must mean the same element on every layout that has it.
+78. Pure-texture elements a layout draws itself are gated on `usePostLook().texture`; content, photos, scrims and panels never are.
 76. A layout colour a club may want to set goes in `LAYOUT_PARTS` and is read with `pc`/`pt` against the layout's own fallback; absent means unchanged. A saved template field that is absent is a pre-v9.126.0 template (rule 52). New parts that mean something per layout (not shared) need their own key.
 
 ## Traps and failure signatures

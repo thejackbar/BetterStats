@@ -147,7 +147,7 @@ export function RoundCover({
         </div>
         <div style={{ width: '100%', marginTop: 14 }}>
           <AutoFitText text={fixture} max={g.lineMax} min={14} lines={1} measureDeps={[width, height]}
-            style={{ color: pc(parts, 'nameColor', ink), lineHeight: 1.25, letterSpacing: 1, textAlign: 'center' }} />
+            style={{ color: pc(parts, 't13TeamColor', ink), lineHeight: 1.25, letterSpacing: 1, textAlign: 'center' }} />
         </div>
         {when && (
           <div style={{ width: '100%', marginTop: 4, opacity: 0.85 }}>
@@ -178,7 +178,7 @@ registerParts({
     colorPart('t13VColor', 'The "V" between the clubs', 'Round and fixture', (p) => p.ink || '#ffffff'),
     colorPart('t13LineColor', 'Line above the round', 'Round and fixture', (p) => p.ink || '#ffffff'),
     colorPart('roundColor', 'Round', 'Round and fixture', (p) => p.accent || '#ffc233'),
-    colorPart('nameColor', 'Team names', 'Round and fixture', (p) => p.ink || '#ffffff'),
+    colorPart('t13TeamColor', 'Team names', 'Round and fixture', (p) => p.ink || '#ffffff'),
     colorPart('t13DateColor', 'Date and time', 'Round and fixture', (p) => p.ink || '#ffffff'),
   ],
 })

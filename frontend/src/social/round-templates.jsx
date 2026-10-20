@@ -1092,7 +1092,7 @@ export function ResultStar({ palette: pal, width = 1080, height = 1080, result: 
           <Slab bg={starBg} fg={pc(parts, 'rs4StarColor', partPicked(parts, 'rs4StarBg') ? inkOn(starBg) : pal.primary)} size={17} style={{ padding: '6px 12px' }}>{pt(parts, 'rs4StarWord', '★ STAR OF THE DAY')}</Slab>
           <div style={{ fontFamily: DISPLAY, fontSize: 44, letterSpacing: 1, opacity: 0.7, lineHeight: 1, marginTop: 18, color: pc(parts, 'firstColor', undefined) }}>{(p.first || '').toUpperCase()}</div>
           <div style={{ fontFamily: DISPLAY, fontSize: b(116), letterSpacing: -1, lineHeight: 0.86, whiteSpace: 'nowrap', color: pc(parts, 'nameColor', undefined) }}>{p.last}</div>
-          <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, color: pc(parts, 'subColor', pal.accent), marginTop: 8 }}>{p.role}</div>
+          <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, color: pc(parts, 'rs4RoleColor', pal.accent), marginTop: 8 }}>{p.role}</div>
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 576 }, { bottom: barB + 148 }), display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -1125,7 +1125,7 @@ registerParts({
     colorPart('rs4StarColor', 'Tag text', 'Player', (p) => p.primary),
     colorPart('firstColor', 'First name', 'Player', (p) => p.ink),
     colorPart('nameColor', 'Surname', 'Player', (p) => p.ink),
-    colorPart('subColor', 'Role', 'Player', (p) => p.accent),
+    colorPart('rs4RoleColor', 'Role', 'Player', (p) => p.accent),
     colorPart('rs4BatBg', 'Batting box', 'Batting and bowling boxes', (p) => p.accent),
     colorPart('rs4BatColor', 'Batting box text', 'Batting and bowling boxes', (p) => p.primary),
     colorPart('rs4BowlBg', 'Bowling box', 'Batting and bowling boxes', null, { autoLabel: 'Soft tint' }),
@@ -1262,7 +1262,7 @@ export function ResultTicket({ palette: pal, width = 1080, height = 1080, result
             <div style={{ minWidth: 0 }}>
               <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 3, color: pc(parts, 'rs6TicketColor', pal.accent) }}>{pt(parts, 'rs6TicketWord', 'MATCH TICKET · RESULT')}</div>
               <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 1, lineHeight: 0.95, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'clubColor', undefined) }}>{r.us.name}</div>
-              <div style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 1, opacity: 0.7, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'subColor', undefined) }}>{r.grade || r.comp}</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 1, opacity: 0.7, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'rs6GradeColor', undefined) }}>{r.grade || r.comp}</div>
             </div>
           </div>
           <div style={{ textAlign: 'right', fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: pc(parts, 'roundColor', pal.ink), opacity: 0.72, lineHeight: 1.7, flexShrink: 0, marginLeft: 16 }}>{r.round}<br />{r.date}<br />{r.venue}</div>
@@ -1303,7 +1303,7 @@ registerParts({
     textPart('rs6TicketWord', 'Ticket label words', 'Ticket top', () => 'MATCH TICKET · RESULT'),
     colorPart('rs6TicketColor', 'Ticket label', 'Ticket top', (p) => p.accent),
     colorPart('clubColor', 'Club name', 'Ticket top', (p) => p.ink),
-    colorPart('subColor', 'Grade', 'Ticket top', (p) => p.ink),
+    colorPart('rs6GradeColor', 'Grade', 'Ticket top', (p) => p.ink),
     colorPart('roundColor', 'Round, date and ground', 'Ticket top', (p) => p.ink),
     colorPart('markColor', 'Club badge letters', RS_TEAMS, (p) => p.ink),
     colorPart('winColor', 'Winning team badge ring', RS_TEAMS, (p) => p.accent),

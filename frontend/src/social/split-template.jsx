@@ -236,7 +236,7 @@ export function SplitPoster({
         <AutoFitText text={(team.name || '').toUpperCase()} max={36} min={16} lines={1}
           style={{ fontFamily: NAME_FONT, fontWeight: 800, letterSpacing: 0.2, lineHeight: 1.12, color: pc(parts, 'clubColor', accent) }} />
         <AutoFitText text={`${pt(parts, 't11Vs', 'VS')} ${(opponent.name || '').toUpperCase()}`.trim()} max={36} min={16} lines={1}
-          style={{ fontFamily: NAME_FONT, fontWeight: 800, letterSpacing: 0.2, lineHeight: 1.12, color: pc(parts, 'subColor', '#ffffff') }} />
+          style={{ fontFamily: NAME_FONT, fontWeight: 800, letterSpacing: 0.2, lineHeight: 1.12, color: pc(parts, 'oppColor', '#ffffff') }} />
       </div>
       <div data-layer="Venue and time" style={{
         position: 'absolute', left: 326, bottom: footBottom + 42, width: 200,
@@ -284,7 +284,7 @@ registerParts({
     C('t11HeroMark', 'Photo player highlight', T11_XI, (p) => p.accent),
     T('t11Vs', 'Versus word', T11_FIX, () => 'VS'),
     C('clubColor', 'Club name', T11_FIX, (p) => p.accent),
-    C('subColor', 'Opposition', T11_FIX, () => '#ffffff'),
+    C('oppColor', 'Opposition', T11_FIX, () => '#ffffff'),
     C('t11VenueColor', 'Venue and time', T11_FIX, () => '#ffffff'),
   ],
 })

@@ -339,7 +339,7 @@ export function LineupCard({
           measureDeps={[fontSig]} style={{ letterSpacing: 0.5, lineHeight: 1.15, color: pc(parts, 'clubColor', undefined) }} />
         <div style={{ fontSize: Math.round(small * 0.85), lineHeight: 1.5, letterSpacing: 1, color: pc(parts, 't12VsColor', undefined) }}>{pt(parts, 't12Vs', 'VS')}</div>
         <AutoFitText text={(opponent.name || '').toUpperCase()} max={fixture} min={18} lines={1}
-          measureDeps={[fontSig]} style={{ letterSpacing: 0.5, lineHeight: 1.15, color: pc(parts, 'subColor', undefined) }} />
+          measureDeps={[fontSig]} style={{ letterSpacing: 0.5, lineHeight: 1.15, color: pc(parts, 'oppColor', undefined) }} />
         <div style={{ marginTop: 34 }}>
           <AutoFitText text={(match.date || '').toUpperCase()} max={small} min={14} lines={1}
             measureDeps={[fontSig]} style={{ letterSpacing: 0.4, lineHeight: 1.3, color: pc(parts, 't12DateColor', undefined) }} />
@@ -381,7 +381,7 @@ registerParts({
     C('clubColor', 'Club name', T12_DET, () => '#ffffff'),
     T('t12Vs', 'Versus word', T12_DET, () => 'VS'),
     C('t12VsColor', 'Versus word colour', T12_DET, () => '#ffffff'),
-    C('subColor', 'Opposition', T12_DET, () => '#ffffff'),
+    C('oppColor', 'Opposition', T12_DET, () => '#ffffff'),
     C('t12DateColor', 'Date and time', T12_DET, () => '#ffffff'),
     C('t12VenueColor', 'Venue', T12_DET, () => '#ffffff'),
     C('footerBg', 'Sponsor bar', T12_BAR, () => '#ffffff', { autoLabel: 'Backing' }),

@@ -1581,7 +1581,7 @@ export function T7_CaptainSpotlight({ width = 1080, height = 1080, team, opponen
         <div style={{ marginTop: 22, paddingTop: 16, borderTop: `2px solid ${pc(parts, 't7RuleColor', palette.accent)}` }}>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 32, letterSpacing: 1, color: pc(parts, 't7HeroFirstColor', palette.ink), opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: lastSize, letterSpacing: -1, color: pc(parts, 't7HeroNameColor', palette.ink), lineHeight: 0.9, marginTop: 2 }}>{player?.last || ''}</div>
-          {detail && <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.2, color: pc(parts, 'subColor', palette.ink), opacity: 0.7, marginTop: 10, lineHeight: 1.4 }}>{detail}</div>}
+          {detail && <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.2, color: pc(parts, 't7DetailColor', palette.ink), opacity: 0.7, marginTop: 10, lineHeight: 1.4 }}>{detail}</div>}
         </div>
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: bandH, background: bandBg, borderTop: `3px solid ${pc(parts, 'footerRule', palette.accent)}`, padding: A === 'square' ? '18px 40px' : '18px 40px 26px', zIndex: 3, display: 'flex', flexDirection: 'column' }}>
@@ -1625,7 +1625,7 @@ registerParts({
     colorPart('t7RuleColor', 'Line above the name', T7_FIG, (p) => p.accent),
     colorPart('t7HeroFirstColor', 'Player first name', T7_FIG, (p) => p.ink),
     colorPart('t7HeroNameColor', 'Player surname', T7_FIG, (p) => p.ink),
-    colorPart('subColor', 'Player detail line', T7_FIG, (p) => p.ink),
+    colorPart('t7DetailColor', 'Player detail line', T7_FIG, (p) => p.ink),
     colorPart('footerBg', 'Roster band', T7_ROSTER, (p) => p.primary),
     colorPart('footerRule', 'Line over the band', T7_ROSTER, (p) => p.accent),
     textPart('t7Joined', 'Band heading words', T7_ROSTER, () => '// JOINED BY THE XI'),
@@ -1882,7 +1882,7 @@ export function T9_Flyer({ width = 1080, height = 1080, team, opponent, match, p
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={90} shape="shield" />
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 74, letterSpacing: 1, color: pc(parts, 'clubColor', palette.ink), lineHeight: 1 }}>{team.name}</div>
           <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 3, color: pc(parts, 't9VsColor', palette.accent), padding: '0 8px' }}>{pt(parts, 't9Vs', 'vs')}</div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: 1, color: pc(parts, 'subColor', palette.ink), lineHeight: 1, opacity: 0.85 }}>{opponent.name}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: 1, color: pc(parts, 'oppColor', palette.ink), lineHeight: 1, opacity: 0.85 }}>{opponent.name}</div>
           <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={48} shape="shield" />
         </div>
       </div>
@@ -1951,7 +1951,7 @@ registerParts({
     colorPart('clubColor', 'Club name', T9_TOP, (p) => p.ink),
     textPart('t9Vs', 'Word between the clubs', T9_TOP, () => 'vs'),
     colorPart('t9VsColor', 'Word between the clubs colour', T9_TOP, (p) => p.accent),
-    colorPart('subColor', 'Opposition name', T9_TOP, (p) => p.ink),
+    colorPart('oppColor', 'Opposition name', T9_TOP, (p) => p.ink),
     colorPart('t9BannerColor', 'Headline line', T9_TOP, (p) => p.accent),
     colorPart('t9BannerRule', 'Lines beside the headline', T9_TOP, (p) => p.accent),
     colorPart('t9Tier1Color', 'Top billing names', T9_BILL, (p) => p.ink),
@@ -2643,7 +2643,7 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
           <div style={{ minWidth: 0 }}>
             <div style={{ display: 'inline-block', padding: '7px 15px', background: tagBg, color: tagInk, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3 }}>{pt(parts, 'c4ChipText', 'RESULT')}</div>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: pc(parts, 'roundColor', palette.ink), opacity: 0.7, marginTop: 9 }}>{metaLine}</div>
-            {match.venue && <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: pc(parts, 'subColor', palette.ink), opacity: 0.7, marginTop: 4 }}>{match.venue.toUpperCase()}</div>}
+            {match.venue && <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: pc(parts, 'c4VenueColor', palette.ink), opacity: 0.7, marginTop: 4 }}>{match.venue.toUpperCase()}</div>}
           </div>
           <BrandLockup team={team} palette={palette} size={92} align="right" nameSize={26} nameColor={pc(parts, 'clubColor', undefined)} style={{ maxWidth: 460 }} />
         </div>
@@ -2716,7 +2716,7 @@ registerParts({
     colorPart('badgeBg', 'Tags (Result and Winner)', 'Header', (p) => p.accent),
     colorPart('badgeColor', 'Tag text', 'Header', (p) => p.primary),
     colorPart('roundColor', 'Competition, round and date', 'Header', (p) => p.ink),
-    colorPart('subColor', 'Venue', 'Header', (p) => p.ink),
+    colorPart('c4VenueColor', 'Venue', 'Header', (p) => p.ink),
     colorPart('clubColor', 'Club name', 'Header', (p) => p.ink),
     colorPart('headerRule', 'Line under the header', 'Header', (p) => p.accent),
     colorPart('winColor', 'Winning side outline', 'Scores', (p) => p.accent),
