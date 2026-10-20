@@ -1182,3 +1182,7 @@ Proof. Canva app: `tsc`, `eslint`, prettier, `jest` 284. Front end: `probe_bound
 
 
 Follow-up to v9.124.6. A screenshot showed "CLUB LOGO" and "OPPONENT LOGO" as small text blocks on the post. A reproduction on the current build (club logo from `team.logo`, the settings logo the watermark uses; opponent from `opponent.logo`, what the fixture templates use) showed the real crests, so those were plain words typed in Canva without the `{{ }}`, which stay as fixed text. `extractFields` now warns about a fixed word that would be an area token (logo, crest, badge, photo, sponsors) and says to type it in braces or use the Add buttons. Canva app only (`jest` 286), so no site version change.
+
+**v9.124.8: click the empty canvas to deselect**
+
+A selected block kept its outline, handles and toolbar with no way to clear them on a built-in layout. `BlankCanvas` only deselected when the press landed on its own root, and on a layout every blocks layer is `passThrough`, so that root never receives a click. The deselect now lives on the canvas box in `AdminSocialPost.renderCanvas` (`onPointerDown`, `layer.deselect()`). It relies on blocks, resize and rotate handles, the quick toolbar and the group handle all calling `stopPropagation`, so only a press on empty canvas or on the layout's own elements reaches it.

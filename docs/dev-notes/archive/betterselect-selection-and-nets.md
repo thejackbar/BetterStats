@@ -1670,7 +1670,7 @@ Asked for (Oct 2026) on the Core Players list (`pages/admin/AdminPlayers.jsx`, a
 - A toggle beside the All/Local/Overseas/Hidden scope, not a fifth scope, so it combines with them. Device preference `players.activeOnly`. Text search ignores it, like the BetterSelect recency window (rule 59), so a former player is always findable by name.
 - Proof: `verify_player_dormancy_cleared.py` (now 26 checks, 5 on `list_players`; control on the previous `club_admin.py` fails those 5), `frontend/verification/verify_players_active_filter_browser.mjs` (Chromium, 13 checks incl. 390px).
 
-## Pool order: an answer beats form (v9.124.8)
+## Pool order: an answer beats form (v9.124.9)
 Asked for (Oct 2026): on Selection > Pool, put the players who have answered above those who have not put in availability.
 - Within each rank bucket the sort used form score first and availability second, so a silent player with a higher score sat above an Available or Maybe one. The order is now bucket, availability (Available, Maybe, no response, Unavailable), form score, name. Server: `selection_pool.pool_sort_key`; browser: `cmp` in `AdminSelection.jsx`. The Whiteboard pool already sorted availability first.
 - Proof: `verify_selection_open_pool.py` (now 30 checks, section B2 drives `pool_sort_key`; control on the previous order fails the same-bucket check).
