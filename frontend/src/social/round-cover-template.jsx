@@ -21,6 +21,8 @@ import { mixHex } from './split-template'
 import { aspectOf, pick } from './postAspect'
 import { LayerRoot } from './postLayers'
 import { cornerLine, glowDisc, badgeStyle, glowColor } from './card-kit'
+import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
+import { usePostLook } from './postLook'
 
 const FONT = "var(--social-display-font, 'Anton', 'Hanken Grotesk', sans-serif)"
 const WEIGHT = 'var(--social-display-font-weight, 700)'

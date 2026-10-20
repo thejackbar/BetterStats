@@ -24,6 +24,8 @@ import { AutoFitText, CreditMark, RoleChip, DebutTag, LINEUP_MAX } from './crick
 import { mixHex } from './split-template'
 import { aspectOf, pick } from './postAspect'
 import { LayerRoot } from './postLayers'
+import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
+import { usePostLook } from './postLook'
 
 // The club's chosen display face and its weight (Style, Font in the editor), the
 // same variables every other layout reads, so the card follows the brand.

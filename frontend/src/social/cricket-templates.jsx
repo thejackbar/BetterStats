@@ -9,10 +9,11 @@
 import { useRef, useState, useLayoutEffect } from 'react'
 import { aspectOf, pick, share, grow } from './postAspect'
 import { LayerRoot } from './postLayers'
-import { usePostLook } from './postLook'
 import brandBlack from '../assets/bettercricket-black.svg'
 import brandWhite from '../assets/bettercricket-white.svg'
 import { IS_AFL, PLATFORM_NAME } from '../lib/sport'
+import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
+import { usePostLook } from './postLook'
 
 // The BetterCricket credit mark used in every template's footer — the real
 // brand logo (black on a light footer, white on a dark one), no wordmark text.

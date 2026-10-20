@@ -22,6 +22,8 @@ import { AutoFitText, CreditMark, heroFocusStyle } from './cricket-templates'
 import { mixHex } from './split-template'
 import { aspectOf, pick } from './postAspect'
 import { LayerRoot } from './postLayers'
+import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
+import { usePostLook } from './postLook'
 
 // The club's chosen display face and weight (Style, Font in the editor).
 const FONT = "var(--social-display-font, 'Hanken Grotesk', 'Inter', sans-serif)"

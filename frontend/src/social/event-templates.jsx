@@ -36,6 +36,8 @@ import icoBolt from '../assets/thiings/lightning-bolt.png'
 import icoCalendar from '../assets/thiings/calendar.png'
 import icoNecktie from '../assets/thiings/necktie.png'
 import icoRibbon from '../assets/thiings/ribbon.png'
+import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
+import { usePostLook } from './postLook'
 
 // Append an 8-bit alpha to a 6-digit hex (palette colours are always #rrggbb).
 const a = (hex, alpha) => {
