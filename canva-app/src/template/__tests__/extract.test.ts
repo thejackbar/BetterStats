@@ -57,6 +57,7 @@ describe("extractFields", () => {
         fontRef: "font-anton",
         fontFamily: null,
         fontSize: 44,
+        h: null,
         bold: true,
         color: "#ffe14d",
         colorRole: "accent",
@@ -503,5 +504,126 @@ describe("buildTemplateFile", () => {
     expect("background" in f).toBe(false);
     expect("fontFamily" in (f.fields[0] ?? {})).toBe(false);
     expect("color" in (f.fields[0] ?? {})).toBe(false);
+  });
+});
+
+describe("photo and sponsors areas", () => {
+  const word = (token: string, o: Parameters<typeof textBox>[1] = {}) =>
+    textBox(token, { align: undefined, ...o } as never);
+
+  it("takes the rectangle a photo field sits on as its area, and not as a panel", () => {
+    const r = ok(
+      extractFields(
+        page([
+          rect({
+            left: 600,
+            top: 100,
+            width: 200,
+            height: 260,
+            colour: "#9aa0a6",
+          }),
+          textBox("{{player 1 photo}}", {
+            left: 600,
+            top: 220,
+            width: 200,
+            height: 30,
+            format: { textAlign: "center" },
+          }),
+        ]),
+      ),
+    );
+    const f = r.fields[0];
+    expect(f?.binding).toBe("lineup.1.photo");
+    expect([f?.x, f?.y, f?.w, f?.h]).toEqual([600, 100, 200, 260]);
+    expect(r.panels).toEqual([]);
+    expect(r.surfaces.map((s) => s.use)).toEqual(["area"]);
+  });
+
+  it("scales the area with the page", () => {
+    const r = ok(
+      extractFields(
+        page(
+          [
+            rect({
+              left: 300,
+              top: 50,
+              width: 100,
+              height: 130,
+              colour: "#9aa0a6",
+            }),
+            textBox("{{player 2 photo}}", {
+              left: 300,
+              top: 100,
+              width: 100,
+              height: 20,
+              format: { textAlign: "center" },
+            }),
+          ],
+          { width: 540, height: 540 },
+        ),
+      ),
+    );
+    const f = r.fields[0];
+    expect([f?.x, f?.y, f?.w, f?.h]).toEqual([600, 100, 200, 260]);
+  });
+
+  it("uses the smallest rectangle when two stack up", () => {
+    const r = ok(
+      extractFields(
+        page([
+          rect({ left: 0, top: 0, width: 900, height: 900, colour: "#eeeeee" }),
+          rect({
+            left: 600,
+            top: 100,
+            width: 200,
+            height: 200,
+            colour: "#9aa0a6",
+          }),
+          textBox("{{sponsors}}", {
+            left: 600,
+            top: 180,
+            width: 200,
+            height: 30,
+            format: { textAlign: "center" },
+          }),
+        ]),
+      ),
+    );
+    expect(r.fields[0]?.w).toBe(200);
+    // The bigger rectangle is still free to be a panel.
+    expect(r.surfaces.map((s) => s.use)).toEqual(["panel", "area"]);
+  });
+
+  it("falls back to the text box width when nothing is under it", () => {
+    const photo = ok(
+      extractFields(
+        page([word("{{player 3 photo}}", { left: 100, top: 100, width: 240 })]),
+      ),
+    );
+    expect(photo.fields[0]?.h).toBe(240);
+    const strip = ok(
+      extractFields(
+        page([word("{{sponsors}}", { left: 100, top: 900, width: 800 })]),
+      ),
+    );
+    expect(strip.fields[0]?.h).toBe(160);
+  });
+
+  it("leaves ordinary text alone: no height", () => {
+    const r = ok(extractFields(page([textBox("{{player 1}}")])));
+    expect(r.fields[0]?.h).toBeNull();
+  });
+
+  it("does not take the whole-page background as an area", () => {
+    const r = ok(
+      extractFields(
+        page([
+          rect({ width: 1080, height: 1080, colour: "#112233" }),
+          textBox("{{sponsors}}", { left: 100, top: 900, width: 800 }),
+        ]),
+      ),
+    );
+    expect(r.fields[0]?.h).toBe(160);
+    expect(r.surfaces.map((s) => s.use)).toEqual(["background"]);
   });
 });

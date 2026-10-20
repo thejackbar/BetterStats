@@ -169,7 +169,7 @@ export function itemLabel(it) {
   if (!it) return ''
   if (it.type === 'text' && it.bind) return `Field: ${bindLabel(it.bind)}`
   if (it.type === 'text') return `“${(it.text || '').slice(0, 16) || 'Text'}${(it.text || '').length > 16 ? '…' : ''}”`
-  if (it.type === 'image') return it.design ? 'Your design' : (it.srcName || (it.src ? 'Image' : 'Image (empty)'))
+  if (it.type === 'image') return it.design ? 'Your design' : it.bind ? `Field: ${bindLabel(it.bind)}` : (it.srcName || (it.src ? 'Image' : 'Image (empty)'))
   if (it.type === 'brand') return 'Club badge'
   if (it.type === 'sponsors') return 'Sponsors'
   if (it.type === 'element') return { line: 'Line', divider: 'Divider', rect: 'Box', ellipse: 'Circle', triangle: 'Triangle', star: 'Star', arrow: 'Arrow', chevron: 'Chevron', diamond: 'Diamond', hexagon: 'Hexagon' }[it.shape] || 'Element'
@@ -274,7 +274,22 @@ function TextBlock({ item, palette, data }) {
   )
 }
 
-function ImageBlock({ item, palette }) {
+function ImageBlock({ item, palette, data }) {
+  // A bound picture (a player's photo) shows the live one; nothing held yet shows a
+  // labelled placeholder, and a place with no player or no photo prints nothing.
+  if (item.bind) {
+    const live = resolveBind(item.bind, data)
+    if (live) return <img src={live} alt="" draggable={false} style={{ width: item.w, height: item.h, objectFit: item.fit || 'cover', borderRadius: item.radius || 0, display: 'block', pointerEvents: 'none' }} />
+    if (live === '') return <div style={{ width: item.w, height: item.h }} />
+    return (
+      <div style={{
+        width: item.w, height: item.h, borderRadius: item.radius || 0,
+        border: `3px dashed ${resolveBlankColor('ink', palette)}55`, boxSizing: 'border-box',
+        display: 'grid', placeItems: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 22, letterSpacing: 2,
+        color: `${resolveBlankColor('ink', palette)}99`, textAlign: 'center', padding: 16,
+      }}>{bindLabel(item.bind).toUpperCase()}</div>
+    )
+  }
   if (item.src) {
     return <img src={item.src} alt="" draggable={false} style={{ width: item.w, height: item.h, objectFit: item.fit || 'contain', borderRadius: item.radius || 0, display: 'block', pointerEvents: 'none' }} />
   }
@@ -544,7 +559,7 @@ function SponsorGridBlock({ item, data }) {
 
 function renderContent(item, palette, team, data) {
   if (item.type === 'text') return <TextBlock item={item} palette={palette} data={data} />
-  if (item.type === 'image') return <ImageBlock item={item} palette={palette} />
+  if (item.type === 'image') return <ImageBlock item={item} palette={palette} data={data} />
   if (item.type === 'element') return <ElementBlock item={item} palette={palette} />
   if (item.type === 'data') return <DataBlock item={item} palette={palette} data={data} />
   if (item.type === 'sponsors') return <SponsorGridBlock item={item} data={data} />

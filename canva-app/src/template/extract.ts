@@ -1,7 +1,7 @@
-import { describeSurfaces } from "./describe";
-import { findPanels } from "./panels";
+import { describeSurfaces, type Surface } from "./describe";
+import { findPanels, wordsPoint } from "./panels";
 import { colorRole, fontRole } from "./roles";
-import { bindFromToken, wantsUppercase } from "./tokens";
+import { bindFromToken, isAreaBinding, wantsUppercase } from "./tokens";
 import { textBoxes, type TextBox } from "./walk";
 import type {
   Canvas,
@@ -67,6 +67,64 @@ function boxLook(box: TextBox, scale: number) {
   };
 }
 
+/**
+ * A photo or sponsors field marks an AREA. The area is the smallest rectangle or
+ * shape the field's word sits on, which is then not drawn as a panel; with nothing
+ * under it, the text box's width and a shape that suits (a square photo, a wide strip).
+ */
+function takeArea(
+  f: Field,
+  box: TextBox,
+  surfaces: Surface[],
+  scale: number,
+): void {
+  const { el } = box;
+  const p = wordsPoint({
+    x: box.offset.x + el.left,
+    y: box.offset.y + el.top,
+    w: el.width,
+    h: el.height,
+    align: ALIGN[readLook(el).textAlign ?? "start"],
+  });
+  let best = -1;
+  surfaces.forEach((sf, i) => {
+    const v = sf.visual;
+    const inside =
+      p.x >= v.x && p.x <= v.x + v.w && p.y >= v.y && p.y <= v.y + v.h;
+    const usable =
+      !sf.fullPage &&
+      !sf.inRotatedGroup &&
+      sf.kind !== "other" &&
+      sf.fill.kind !== "video";
+    const current = surfaces[best];
+    if (
+      inside &&
+      usable &&
+      (!current || v.w * v.h < current.visual.w * current.visual.h)
+    ) {
+      best = i;
+    }
+  });
+  const under = surfaces[best];
+  if (under) {
+    const x0 = Math.round(under.visual.x * scale);
+    const y0 = Math.round(under.visual.y * scale);
+    f.x = x0;
+    f.y = y0;
+    f.w = Math.max(
+      40,
+      Math.round((under.visual.x + under.visual.w) * scale) - x0,
+    );
+    f.h = Math.max(
+      40,
+      Math.round((under.visual.y + under.visual.h) * scale) - y0,
+    );
+    surfaces[best] = { ...under, use: "area" };
+  } else {
+    f.h = Math.round(f.binding === "sponsors" ? f.w * 0.2 : f.w);
+  }
+}
+
 export type ExtractError = { error: string };
 
 /**
@@ -87,6 +145,7 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
     page.dimensions.height,
   );
   const fields: Field[] = [];
+  const fieldBoxes: TextBox[] = [];
   const skipped: Skipped[] = [];
   const warnings: string[] = [];
 
@@ -112,8 +171,10 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
         token,
         binding: bindFromToken(token),
         ...boxLook(box, scale),
+        h: null,
         uppercase: wantsUppercase(token),
       });
+      fieldBoxes.push(box);
       if (Math.abs(el.rotation) > 1) {
         warnings.push(
           `{{${token}}} is rotated in Canva. BetterCricket places it unrotated.`,
@@ -137,12 +198,14 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
       h: b.el.height,
       align: ALIGN[readLook(b.el).textAlign ?? "start"],
     }));
-  const found = findPanels(
-    describeSurfaces(page),
-    anchors,
-    page.dimensions,
-    scale,
-  );
+  const surfaces = describeSurfaces(page);
+  fields.forEach((f, i) => {
+    const box = fieldBoxes[i];
+    if (box && isAreaBinding(f.binding)) {
+      takeArea(f, box, surfaces, scale);
+    }
+  });
+  const found = findPanels(surfaces, anchors, page.dimensions, scale);
   // A picture that covers the whole page is the design's own background.
   const cover = found.surfaces.find(
     (sf) => sf.use === "background" && sf.fill.kind === "image",

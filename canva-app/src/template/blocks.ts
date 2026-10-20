@@ -15,7 +15,17 @@ export type BoxSpec = {
   align: "start" | "center" | "end";
 };
 
-export type BlockSpec = { name: string; boxes: BoxSpec[] };
+/** A plain rectangle that marks an area (a photo, the sponsors). Drawn under the text. */
+export type RectSpec = {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  color: string;
+  transparency: number;
+};
+
+export type BlockSpec = { name: string; boxes: BoxSpec[]; rects?: RectSpec[] };
 
 export type PageSize = { width: number; height: number };
 
@@ -98,6 +108,93 @@ export function matchDetailsBlock(page: PageSize): BlockSpec {
       color: INK,
       align: "start" as const,
     })),
+  };
+}
+
+const AREA = "#9aa0a6";
+
+/** A rectangle marking an area, with its field word sitting centred inside it. */
+function areaBlock(
+  name: string,
+  token: string,
+  rect: { top: number; left: number; width: number; height: number },
+  fontSize: number,
+): BlockSpec {
+  return {
+    name,
+    rects: [{ ...rect, color: AREA, transparency: 0.55 }],
+    boxes: [
+      {
+        text: `{{${token}}}`,
+        top: Math.round(rect.top + (rect.height - fontSize * 1.3) / 2),
+        left: rect.left,
+        width: rect.width,
+        fontSize,
+        bold: false,
+        color: INK,
+        align: "center",
+      },
+    ],
+  };
+}
+
+/**
+ * A strip for the club's sponsors. The grey rectangle is only a marker: its size and
+ * place are the sponsors area in BetterCricket, which fills it with the post's logos.
+ */
+export function sponsorsBlock(page: PageSize): BlockSpec {
+  const fontSize = clamp(Math.round(page.height * 0.022), 10, 40);
+  return areaBlock(
+    "Sponsors box",
+    "sponsors",
+    {
+      top: Math.round(page.height * 0.86),
+      left: Math.round(page.width * 0.08),
+      width: Math.round(page.width * 0.84),
+      height: Math.round(page.height * 0.1),
+    },
+    fontSize,
+  );
+}
+
+/** What a player can carry besides a name, as the picker lists it. */
+export const PLAYER_EXTRAS = [
+  "photo",
+  "captain",
+  "vice captain",
+  "keeper",
+  "debut",
+] as const;
+
+/**
+ * The photo area for one player, or a small box that prints their captain,
+ * vice-captain, keeper or debut mark (BetterCricket prints it only for the players who are).
+ */
+export function playerExtraBlock(
+  page: PageSize,
+  place: number,
+  extra: string,
+  slot = 0,
+): BlockSpec {
+  const token = `player ${place} ${extra}`;
+  const name = bindLabel(bindFromToken(token) ?? token);
+  if (extra === "photo") {
+    const side = Math.round(page.width * 0.16);
+    return areaBlock(
+      name,
+      token,
+      {
+        top: Math.round(page.height * 0.1 + (slot % 4) * side * 0.15),
+        left: Math.round(page.width * 0.62 + (slot % 4) * side * 0.15),
+        width: side,
+        height: side,
+      },
+      clamp(Math.round(page.height * 0.02), 10, 40),
+    );
+  }
+  return {
+    ...fieldBlock(page, token, slot),
+    name,
   };
 }
 

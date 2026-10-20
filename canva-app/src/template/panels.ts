@@ -48,7 +48,7 @@ const intersection = (a: Rect, b: Rect): Rect | null => {
 };
 
 /** Where the words of a text box are, for deciding what they sit on. */
-const wordsPoint = (a: Anchor) => ({
+export const wordsPoint = (a: Anchor) => ({
   x:
     a.align === "left"
       ? a.x + Math.min(INSET, a.w / 2)
@@ -81,6 +81,10 @@ export function findPanels(
   const candidates: { index: number; rect: Rect }[] = [];
 
   const marked: Surface[] = surfaces.map((sf, index) => {
+    // Already taken as a photo or sponsors area: not a panel.
+    if (sf.use === "area") {
+      return sf;
+    }
     if (sf.fullPage) {
       return { ...sf, use: "background" as const };
     }

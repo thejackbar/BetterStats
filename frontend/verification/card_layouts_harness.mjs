@@ -56,7 +56,9 @@ export async function shotNode(page, file) {
   })
 }
 
-export async function makeEditor(browser, BASE, { layout, size = 'portrait', nSponsors = 1, viewport = { width: 1700, height: 2300 }, mobile = false } = {}) {
+export async function makeEditor(browser, BASE, { layout, size = 'portrait', nSponsors = 1, viewport = { width: 1700, height: 2300 }, mobile = false, photos = [], debutIds = [] } = {}) {
+  // Players with a headshot, and players on their first game for the club (both none by default).
+  const roster = PLAYERS.map((p) => ({ ...p, photo_url: photos.includes(p.id) ? 'x' : null }))
   const ctx = await browser.newContext({ viewport })
   const page = await ctx.newPage()
   const errors = []
@@ -81,6 +83,7 @@ export async function makeEditor(browser, BASE, { layout, size = 'portrait', nSp
     const url = route.request().url()
     const img = (body) => route.fulfill({ status: 200, contentType: 'image/svg+xml', body })
     if (/\/images\/organisations\/[^/]+\/logo/.test(url)) return img(CREST('#0e6e51', 'S'))
+    if (/\/images\/players\/[^/]+\/photo/.test(url)) return img(CREST('#7b3b3b', 'P'))
     if (/\/images\/sponsors\/s(\d+)\/logo/.test(url)) return img(SPONSOR(Number(url.match(/s(\d+)\/logo/)[1]) - 1))
     if (/\/auth\/me/.test(url)) return route.fulfill(json({
       id: 'u1', username: 'admin', role: 'club_admin', club_slug: 'scarborough',
@@ -91,14 +94,14 @@ export async function makeEditor(browser, BASE, { layout, size = 'portrait', nSp
     if (/\/admin\/social\/potm\//.test(url)) return route.fulfill(json({ match: {}, players: [] }))
     if (/\/admin\/social\/templates/.test(url)) return route.fulfill(json([]))
     if (/\/admin\/social\/media/.test(url)) return route.fulfill(json([]))
-    if (/\/admin\/social\/debuts/.test(url)) return route.fulfill(json({ debuts: [], known: [], before: '2026-10-03' }))
+    if (/\/admin\/social\/debuts/.test(url)) return route.fulfill(json({ debuts: debutIds, known: debutIds.length ? PLAYERS.map((p) => p.id) : [], before: '2026-10-03' }))
     if (/\/club-admin\/settings/.test(url)) return route.fulfill(json(settings))
-    if (/\/club-admin\/players/.test(url)) return route.fulfill(json(PLAYERS))
+    if (/\/club-admin\/players/.test(url)) return route.fulfill(json(roster))
     if (/sponsors\/post-default/.test(url)) return route.fulfill(json({ sponsor_ids: sponsors.map((x) => x.id), source: 'club' }))
     if (/sponsors/.test(url)) return route.fulfill(json(sponsors))
-    if (/selection\/overview/.test(url)) return route.fulfill(json({ fixtures: [{ id: 'fx1', opponent_name: 'South Perth', grade: '1st Grade', round: 'Round 1', played_on: '2026-10-03' }] }))
+    if (/selection\/overview/.test(url)) return route.fulfill(json({ fixtures: [{ id: 'fx1', opponent_name: 'South Perth', grade_name: '1st Grade', round: 'Round 1', played_on: '2026-10-03' }] }))
     if (/\/selection\/fx1$/.test(url)) return route.fulfill(json({
-      fixture: { id: 'fx1', opponent_name: 'South Perth', grade: '1st Grade', round: 'Round 1', played_on: '2026-10-03', venue: 'Richardson Park', start_time: '10:30', home_away: 'HOME', home_team: 'Scarborough', away_team: 'South Perth' },
+      fixture: { id: 'fx1', opponent_name: 'South Perth', grade_name: '1st Grade', round: 'Round 1', played_on: '2026-10-03', venue: 'Richardson Park', start_time: '10:30', home_away: 'HOME', home_team: 'Scarborough', away_team: 'South Perth' },
       lineup: PLAYERS.slice(0, 11).map((p, i) => ({ player_id: p.id, batting_order: i + 1, is_captain: p.id === 'p1', is_wicket_keeper: p.id === 'p5' })),
       pool: [],
     }))

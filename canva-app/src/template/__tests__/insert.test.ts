@@ -1,4 +1,4 @@
-import { lineUpBlock } from "../blocks";
+import { lineUpBlock, sponsorsBlock } from "../blocks";
 import { InsertError, insertBlock } from "../insert";
 import { must } from "./fakePage";
 import { fakeSession } from "./fakeSession";
@@ -125,5 +125,24 @@ describe("insertBlock", () => {
     );
     expect(calls.syncs).toBe(0);
     expect(calls.grouped).toHaveLength(0);
+  });
+});
+
+describe("insertBlock with a marker rectangle", () => {
+  it("adds the rectangle first so the words sit on top, and counts only the text boxes", async () => {
+    const { session, calls } = fakeSession();
+    const r = await insertBlock(
+      session,
+      sponsorsBlock({ width: 1080, height: 1080 }),
+    );
+    expect(r).toEqual({ added: 1, grouped: false });
+    expect(calls.created).toHaveLength(2);
+    expect(calls.created[0]).toHaveProperty("rect");
+    const rect = (calls.created[0] as { rect: Record<string, unknown> }).rect;
+    expect(rect.fill).toEqual({
+      colorContainer: { type: "solid", color: "#9aa0a6" },
+    });
+    expect(calls.created[1]).toHaveProperty("text");
+    expect(calls.syncs).toBe(1);
   });
 });
