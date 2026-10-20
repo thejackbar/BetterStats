@@ -206,5 +206,349 @@
   {
     "token": "logo 2",
     "binding": null
+  },
+  {
+    "token": "fixture 1",
+    "binding": "fixture.1.opponent"
+  },
+  {
+    "token": "fixture 2 venue",
+    "binding": "fixture.2.venue"
+  },
+  {
+    "token": "Fixture 3 Time",
+    "binding": "fixture.3.time"
+  },
+  {
+    "token": "fixture 4 grade",
+    "binding": "fixture.4.grade"
+  },
+  {
+    "token": "fixture 5 team",
+    "binding": "fixture.5.grade"
+  },
+  {
+    "token": "fixture 6 short",
+    "binding": "fixture.6.short"
+  },
+  {
+    "token": "fixture 7 home away",
+    "binding": "fixture.7.homeaway"
+  },
+  {
+    "token": "fixture 8 opp",
+    "binding": "fixture.8.opponent"
+  },
+  {
+    "token": "fixture 9",
+    "binding": null
+  },
+  {
+    "token": "fixture 1 banana",
+    "binding": null
+  },
+  {
+    "token": "fixture",
+    "binding": null
+  },
+  {
+    "token": "result 1",
+    "binding": "result.1.opponent"
+  },
+  {
+    "token": "result 2 us",
+    "binding": "result.2.us"
+  },
+  {
+    "token": "result 2 them",
+    "binding": "result.2.them"
+  },
+  {
+    "token": "result 3 outcome",
+    "binding": "result.3.outcome"
+  },
+  {
+    "token": "result 3 margin",
+    "binding": "result.3.margin"
+  },
+  {
+    "token": "result 4 our score",
+    "binding": "result.4.us"
+  },
+  {
+    "token": "result 4 their score",
+    "binding": "result.4.them"
+  },
+  {
+    "token": "result 9 us",
+    "binding": null
+  },
+  {
+    "token": "our score",
+    "binding": "final.us"
+  },
+  {
+    "token": "opponent score",
+    "binding": "final.them"
+  },
+  {
+    "token": "their score",
+    "binding": "final.them"
+  },
+  {
+    "token": "our overs",
+    "binding": "final.usOvers"
+  },
+  {
+    "token": "opponent overs",
+    "binding": "final.themOvers"
+  },
+  {
+    "token": "result",
+    "binding": "final.result"
+  },
+  {
+    "token": "final result",
+    "binding": "final.result"
+  },
+  {
+    "token": "margin",
+    "binding": "final.margin"
+  },
+  {
+    "token": "winner",
+    "binding": "final.winner"
+  },
+  {
+    "token": "grade",
+    "binding": "final.grade"
+  },
+  {
+    "token": "potm name",
+    "binding": "potm.name"
+  },
+  {
+    "token": "potm first",
+    "binding": "potm.first"
+  },
+  {
+    "token": "potm last",
+    "binding": "potm.last"
+  },
+  {
+    "token": "potm role",
+    "binding": "potm.role"
+  },
+  {
+    "token": "potm bat",
+    "binding": "potm.bat"
+  },
+  {
+    "token": "potm bowl",
+    "binding": "potm.bowl"
+  },
+  {
+    "token": "potm line",
+    "binding": "potm.line"
+  },
+  {
+    "token": "potm summary",
+    "binding": "potm.summary"
+  },
+  {
+    "token": "potm photo",
+    "binding": "potm.photo"
+  },
+  {
+    "token": "stat 1 label",
+    "binding": "stat.1.label"
+  },
+  {
+    "token": "stat 2",
+    "binding": "stat.2.value"
+  },
+  {
+    "token": "stat 6 value",
+    "binding": "stat.6.value"
+  },
+  {
+    "token": "stat 7",
+    "binding": null
+  },
+  {
+    "token": "our batter 1",
+    "binding": "perf.us.bat.1.name"
+  },
+  {
+    "token": "our batter 2 line",
+    "binding": "perf.us.bat.2.line"
+  },
+  {
+    "token": "opponent batter 3 name",
+    "binding": "perf.them.bat.3.name"
+  },
+  {
+    "token": "our bowler 1 line",
+    "binding": "perf.us.bowl.1.line"
+  },
+  {
+    "token": "their bowler 2",
+    "binding": "perf.them.bowl.2.name"
+  },
+  {
+    "token": "our batter 4",
+    "binding": null
+  },
+  {
+    "token": "toss",
+    "binding": "toss.text"
+  },
+  {
+    "token": "toss winner",
+    "binding": "toss.winner"
+  },
+  {
+    "token": "toss decision",
+    "binding": "toss.decision"
+  },
+  {
+    "token": "announcement headline",
+    "binding": "announce.headline"
+  },
+  {
+    "token": "announcement subheadline",
+    "binding": "announce.subheadline"
+  },
+  {
+    "token": "announcement kind",
+    "binding": "announce.kind"
+  },
+  {
+    "token": "announcement name",
+    "binding": "announce.name"
+  },
+  {
+    "token": "announcement first",
+    "binding": "announce.first"
+  },
+  {
+    "token": "announcement last",
+    "binding": "announce.last"
+  },
+  {
+    "token": "announcement photo",
+    "binding": "announce.photo"
+  },
+  {
+    "token": "milestone 1",
+    "binding": "milestone.1.name"
+  },
+  {
+    "token": "milestone 2 value",
+    "binding": "milestone.2.value"
+  },
+  {
+    "token": "milestone 2 unit",
+    "binding": "milestone.2.unit"
+  },
+  {
+    "token": "milestone 3 photo",
+    "binding": "milestone.3.photo"
+  },
+  {
+    "token": "milestone 4 date",
+    "binding": "milestone.4.date"
+  },
+  {
+    "token": "milestone title",
+    "binding": "ms.title"
+  },
+  {
+    "token": "milestone 9",
+    "binding": null
+  },
+  {
+    "token": "totw 1",
+    "binding": "totw.1.name"
+  },
+  {
+    "token": "totw 2 line",
+    "binding": "totw.2.line"
+  },
+  {
+    "token": "totw 3 photo",
+    "binding": "totw.3.photo"
+  },
+  {
+    "token": "totw 4 points",
+    "binding": "totw.4.points"
+  },
+  {
+    "token": "totw 15",
+    "binding": "totw.15.name"
+  },
+  {
+    "token": "totw 16",
+    "binding": null
+  },
+  {
+    "token": "totw heading",
+    "binding": "tw.heading"
+  },
+  {
+    "token": "event title",
+    "binding": "event.title"
+  },
+  {
+    "token": "event kicker",
+    "binding": "event.kicker"
+  },
+  {
+    "token": "event subtitle",
+    "binding": "event.subtitle"
+  },
+  {
+    "token": "event date",
+    "binding": "event.date"
+  },
+  {
+    "token": "event time",
+    "binding": "event.time"
+  },
+  {
+    "token": "event venue",
+    "binding": "event.venue"
+  },
+  {
+    "token": "event price",
+    "binding": "event.price"
+  },
+  {
+    "token": "event cta",
+    "binding": "event.cta"
+  },
+  {
+    "token": "event sponsor",
+    "binding": "event.sponsor"
+  },
+  {
+    "token": "event photo",
+    "binding": "event.photo"
+  },
+  {
+    "token": "event item 1",
+    "binding": "item.1.title"
+  },
+  {
+    "token": "event item 2 date",
+    "binding": "item.2.date"
+  },
+  {
+    "token": "event item 3 venue",
+    "binding": "item.3.venue"
+  },
+  {
+    "token": "event item 9",
+    "binding": null
   }
 ]

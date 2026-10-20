@@ -45,6 +45,8 @@ import {
   type ExportOutcome,
 } from "src/template/exportFlow";
 import type { PostType, TemplateFile } from "src/template/buildFile";
+import { TYPE_BLOCKS, typeFieldTokens } from "src/template/typeBlocks";
+import type { BlockId } from "src/template/typeBlocks";
 import { fetchImage } from "src/template/picture";
 import { copyTemplate } from "src/template/saveFile";
 import { insertBlock, type InsertResult } from "src/template/insert";
@@ -74,10 +76,34 @@ type ExportView =
   | { status: "error"; message: string }
   | ({ status: "done" } & ExportOutcome);
 
-const fieldOptions = FIELD_TOKENS.map((t) => ({
-  value: t,
-  label: bindLabel(bindFromToken(t) ?? t),
-}));
+const toOptions = (tokens: string[]) =>
+  tokens.map((t) => ({
+    value: t,
+    label: bindLabel(bindFromToken(t) ?? t),
+  }));
+
+const fieldOptions = toOptions(FIELD_TOKENS);
+
+// The fields a kind of post can hold beyond the match details every post has.
+const GENERAL_FIELDS = FIELD_TOKENS.filter((t) => !t.startsWith("player "));
+const fieldOptionsFor = (type: PostType | undefined) =>
+  type && type !== "lineup" && type !== "general"
+    ? toOptions([...typeFieldTokens(type), ...GENERAL_FIELDS])
+    : fieldOptions;
+
+const POST_TYPES: PostType[] = [
+  "lineup",
+  "fixtures",
+  "results",
+  "result",
+  "motm",
+  "totw",
+  "milestones",
+  "announcement",
+  "toss",
+  "events",
+  "general",
+];
 
 type State =
   | { status: "idle" }
@@ -102,6 +128,8 @@ export const App = () => {
   const [templateName, setTemplateName] = useState("Line up");
   const [postType, setPostType] = useState<PostType | undefined>(undefined);
   const [exp, setExp] = useState<ExportView>({ status: "idle" });
+  // How many rows each repeating block asks for, by block.
+  const [rows, setRows] = useState<Partial<Record<BlockId, number>>>({});
 
   const readPage = (
     session: DesignEditing.CurrentPageSession,
@@ -287,7 +315,7 @@ export const App = () => {
             tone: "positive",
             text: intl.formatMessage({
               defaultMessage:
-                "Template text copied. In BetterCricket, open BetterPosts, then paste it into “Import pasted text”. A line up goes into the Lineup design, anything else into the Blank canvas.",
+                "Template text copied. In BetterCricket, open BetterPosts, then paste it into “Import pasted text”. It goes into the design for its kind of post, and an other post goes into the Blank canvas.",
               description: "After the template text was copied",
             }),
           }
@@ -370,6 +398,10 @@ export const App = () => {
   };
 
   const off = !canRead || busy;
+  const fieldChoices = fieldOptionsFor(postType);
+  const fieldValue = fieldChoices.some((o) => o.value === field)
+    ? field
+    : (fieldChoices[0]?.value ?? field);
 
   return (
     <div className={styles.scrollContainer}>
@@ -417,29 +449,23 @@ export const App = () => {
           })}
           description={intl.formatMessage({
             defaultMessage:
-              "A line up goes into the Lineup design in BetterPosts, so the players you pick fill it in. Anything else goes onto the Blank canvas.",
+              "Each kind of post goes into its own design in BetterPosts, so the data you pull there fills it in. Other post goes onto the Blank canvas.",
             description: "Explains why the kind of post is asked for",
           })}
           control={(props) => (
             <Select
               {...props}
-              options={[
-                {
-                  value: "lineup",
-                  label: intl.formatMessage({
-                    defaultMessage: "Line up",
-                    description: "A kind of post: the team line up",
-                  }),
-                },
-                {
-                  value: "general",
-                  label: intl.formatMessage({
-                    defaultMessage: "Other post",
-                    description:
-                      "A kind of post: anything that is not a line up",
-                  }),
-                },
-              ]}
+              options={POST_TYPES.map((t) => ({
+                value: t,
+                label: intl.formatMessage(
+                  {
+                    defaultMessage:
+                      "{type, select, lineup {Line up} fixtures {Fixtures} results {Results} result {Final score} motm {Player of the match} totw {Team of the week} milestones {Milestones} announcement {Announcement} toss {Toss} events {Event} other {Other post}}",
+                    description: "A kind of post the template can be made for",
+                  },
+                  { type: t },
+                ),
+              }))}
               value={postType}
               placeholder={intl.formatMessage({
                 defaultMessage: "Choose one",
@@ -457,7 +483,16 @@ export const App = () => {
             description: "Heading of the section that adds ready-made blocks",
           })}
         </Title>
-        {postType !== "general" && (
+        {postType === undefined && (
+          <Text size="small" tone="tertiary">
+            {intl.formatMessage({
+              defaultMessage:
+                "Choose the kind of post above to see the blocks that go with it.",
+              description: "Shown until a kind of post is chosen",
+            })}
+          </Text>
+        )}
+        {postType === "lineup" && (
           <Rows spacing="1u">
             <FormField
               label={intl.formatMessage({
@@ -501,6 +536,64 @@ export const App = () => {
             </Button>
           </Rows>
         )}
+        {(TYPE_BLOCKS[postType ?? "general"] ?? []).map((block) => {
+          const n = rows[block.id] ?? block.count?.start ?? 1;
+          return (
+            <Rows spacing="1u" key={block.id}>
+              {block.count && (
+                <FormField
+                  label={intl.formatMessage(
+                    {
+                      defaultMessage:
+                        "{id, select, performers {Performers on each side} other {Rows}}",
+                      description: "Label for how many rows a block has",
+                    },
+                    { id: block.id },
+                  )}
+                  control={(props) => (
+                    <NumberInput
+                      {...props}
+                      value={n}
+                      min={block.count?.min}
+                      max={block.count?.max}
+                      hasSpinButtons
+                      decrementAriaLabel={intl.formatMessage({
+                        defaultMessage: "One fewer row",
+                        description: "Accessible label for the minus button",
+                      })}
+                      incrementAriaLabel={intl.formatMessage({
+                        defaultMessage: "One more row",
+                        description: "Accessible label for the plus button",
+                      })}
+                      onChange={(value) => {
+                        if (value !== undefined) {
+                          setRows((r) => ({ ...r, [block.id]: value }));
+                        }
+                      }}
+                    />
+                  )}
+                />
+              )}
+              <Button
+                variant="secondary"
+                onClick={() => addBlock((size) => block.build(size, n))}
+                loading={busy}
+                disabled={off}
+                stretch
+              >
+                {intl.formatMessage(
+                  {
+                    defaultMessage:
+                      "{id, select, fixturesList {Add fixtures list} resultsList {Add results list} finalScore {Add final score} performers {Add top performers} potm {Add player of the match} stats {Add stats} team {Add team} milestoneList {Add milestones} announce {Add announcement} toss {Add toss} eventDetails {Add event details} other {Add dated list}}",
+                    description:
+                      "Button that adds a ready-made block for the chosen kind of post",
+                  },
+                  { id: block.id },
+                )}
+              </Button>
+            </Rows>
+          );
+        })}
         <Button
           variant="secondary"
           onClick={() => addBlock((size) => matchDetailsBlock(size))}
@@ -542,8 +635,8 @@ export const App = () => {
           control={(props) => (
             <Select
               {...props}
-              options={fieldOptions}
-              value={field}
+              options={fieldChoices}
+              value={fieldValue}
               onChange={setField}
               stretch
             />
@@ -554,7 +647,7 @@ export const App = () => {
           onClick={async () => {
             const slot = placed;
             setPlaced((n) => n + 1);
-            await addBlock((size) => fieldBlock(size, field, slot));
+            await addBlock((size) => fieldBlock(size, fieldValue, slot));
           }}
           loading={busy}
           disabled={off}
@@ -565,91 +658,98 @@ export const App = () => {
             description: "Button that adds one field's text box to the design",
           })}
         </Button>
-        <Title size="xsmall">
-          {intl.formatMessage({
-            defaultMessage: "Add a player's photo or mark",
-            description:
-              "Heading of the section that adds a photo area or a captain, keeper or debut mark",
-          })}
-        </Title>
-        <Text size="small">
-          {intl.formatMessage({
-            defaultMessage:
-              "Captain, vice-captain, keeper and debut marks, C, VC, WK and DEBUT, are added after the names automatically, so you do not need boxes for them. Add a mark box only to place one yourself. A photo area is filled with that player's picture.",
-            description: "Explains photos and marks",
-          })}
-        </Text>
-        <FormField
-          label={intl.formatMessage({
-            defaultMessage: "Player place",
-            description: "Label for which player place a photo or mark is for",
-          })}
-          control={(props) => (
-            <NumberInput
-              {...props}
-              value={place}
-              min={1}
-              max={MAX_LINEUP}
-              hasSpinButtons
-              decrementAriaLabel={intl.formatMessage({
-                defaultMessage: "One place earlier",
-                description: "Accessible label for the minus button",
+        {postType === "lineup" && (
+          <Rows spacing="1u">
+            <Title size="xsmall">
+              {intl.formatMessage({
+                defaultMessage: "Add a player's photo or mark",
+                description:
+                  "Heading of the section that adds a photo area or a captain, keeper or debut mark",
               })}
-              incrementAriaLabel={intl.formatMessage({
-                defaultMessage: "One place later",
-                description: "Accessible label for the plus button",
+            </Title>
+            <Text size="small">
+              {intl.formatMessage({
+                defaultMessage:
+                  "Captain, vice-captain, keeper and debut marks, C, VC, WK and DEBUT, are added after the names automatically, so you do not need boxes for them. Add a mark box only to place one yourself. A photo area is filled with that player's picture.",
+                description: "Explains photos and marks",
               })}
-              onChange={(value) => {
-                if (value !== undefined) {
-                  setPlace(value);
-                }
+            </Text>
+            <FormField
+              label={intl.formatMessage({
+                defaultMessage: "Player place",
+                description:
+                  "Label for which player place a photo or mark is for",
+              })}
+              control={(props) => (
+                <NumberInput
+                  {...props}
+                  value={place}
+                  min={1}
+                  max={MAX_LINEUP}
+                  hasSpinButtons
+                  decrementAriaLabel={intl.formatMessage({
+                    defaultMessage: "One place earlier",
+                    description: "Accessible label for the minus button",
+                  })}
+                  incrementAriaLabel={intl.formatMessage({
+                    defaultMessage: "One place later",
+                    description: "Accessible label for the plus button",
+                  })}
+                  onChange={(value) => {
+                    if (value !== undefined) {
+                      setPlace(value);
+                    }
+                  }}
+                />
+              )}
+            />
+            <FormField
+              label={intl.formatMessage({
+                defaultMessage: "What to add",
+                description: "Label for choosing a photo or a mark",
+              })}
+              control={(props) => (
+                <Select
+                  {...props}
+                  options={PLAYER_EXTRAS.map((e) => ({
+                    value: e,
+                    label: intl.formatMessage(
+                      {
+                        defaultMessage:
+                          "{kind, select, photo {Photo area} captain {Captain mark} keeper {Keeper mark} debut {Debut mark} other {Vice-captain mark}}",
+                        description:
+                          "A photo area or a mark a player can carry",
+                      },
+                      { kind: e === "vice captain" ? "vice" : e },
+                    ),
+                  }))}
+                  value={extra}
+                  onChange={setExtra}
+                  stretch
+                />
+              )}
+            />
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                const slot = placed;
+                setPlaced((n) => n + 1);
+                await addBlock((size) =>
+                  playerExtraBlock(size, place, extra, slot),
+                );
               }}
-            />
-          )}
-        />
-        <FormField
-          label={intl.formatMessage({
-            defaultMessage: "What to add",
-            description: "Label for choosing a photo or a mark",
-          })}
-          control={(props) => (
-            <Select
-              {...props}
-              options={PLAYER_EXTRAS.map((e) => ({
-                value: e,
-                label: intl.formatMessage(
-                  {
-                    defaultMessage:
-                      "{kind, select, photo {Photo area} captain {Captain mark} keeper {Keeper mark} debut {Debut mark} other {Vice-captain mark}}",
-                    description: "A photo area or a mark a player can carry",
-                  },
-                  { kind: e === "vice captain" ? "vice" : e },
-                ),
-              }))}
-              value={extra}
-              onChange={setExtra}
+              loading={busy}
+              disabled={off}
               stretch
-            />
-          )}
-        />
-        <Button
-          variant="secondary"
-          onClick={async () => {
-            const slot = placed;
-            setPlaced((n) => n + 1);
-            await addBlock((size) =>
-              playerExtraBlock(size, place, extra, slot),
-            );
-          }}
-          loading={busy}
-          disabled={off}
-          stretch
-        >
-          {intl.formatMessage({
-            defaultMessage: "Add to player",
-            description: "Button that adds a photo area or a mark for a player",
-          })}
-        </Button>
+            >
+              {intl.formatMessage({
+                defaultMessage: "Add to player",
+                description:
+                  "Button that adds a photo area or a mark for a player",
+              })}
+            </Button>
+          </Rows>
+        )}
         <Button
           variant="secondary"
           onClick={() => addBlock((size) => logoBlock(size, "club"))}

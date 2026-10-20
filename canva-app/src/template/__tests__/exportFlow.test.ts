@@ -143,6 +143,35 @@ describe("exportTemplate", () => {
       expect(out.file.postType).toBe("general");
     });
 
+    it("holds every other kind of post to its own words too", async () => {
+      const els = [textBox("{{opponent}}"), textBox("{{date}}")];
+      const err = await exportTemplate(harness(els).deps, {
+        name: "x",
+        postType: "fixtures",
+      }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ExportBlocked);
+      expect((err as Error).message).toMatch(
+        /fixtures post needs at least one of its own fields, such as \{\{fixture 1 opponent\}\}/,
+      );
+    });
+
+    it("accepts a final score that has one of its words, and writes the type", async () => {
+      const out = await exportTemplate(
+        harness([textBox("{{our score}}"), textBox("{{opponent}}")]).deps,
+        { name: "x", postType: "result" },
+      );
+      expect(out.file.postType).toBe("result");
+      expect(out.fieldCount).toBe(2);
+    });
+
+    it("does not accept a word from another kind of post", async () => {
+      const err = await exportTemplate(harness([textBox("{{toss}}")]).deps, {
+        name: "x",
+        postType: "fixtures",
+      }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ExportBlocked);
+    });
+
     it("counts a player's first name or role as a player place", async () => {
       const els = [textBox("{{player 1 first}}")];
       const out = await exportTemplate(harness(els).deps, lineup);

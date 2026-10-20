@@ -10,6 +10,8 @@ export function splitPlayerName(name) {
   return [parts.slice(0, -1).join(' '), parts.slice(-1)[0] || '']
 }
 
+import { postBindFromToken, postBindLabel, isPostAreaBind, resolvePostBind } from './postFields.js'
+
 export const LINEUP_SLOTS = 15
 
 const MATCH_KEYS = ['competition', 'round', 'venue', 'date', 'time', 'season']
@@ -36,7 +38,8 @@ export function bindFromToken(token) {
   if (t === 'opponent') return 'opponent'
   if (t === 'team' || t === 'club') return 'team'
   if (MATCH_KEYS.includes(t)) return `match.${t}`
-  return null
+  // The other post types' words (fixture 2 venue, our score, potm photo, ...).
+  return postBindFromToken(t)
 }
 
 const WORD = { name: '', first: ' (first name)', last: ' (last name)', role: ' (role)', photo: ' (photo)', captain: ' (captain mark)', vice: ' (vice-captain mark)', keeper: ' (keeper mark)', debut: ' (debut mark)' }
@@ -48,11 +51,13 @@ export function bindLabel(bind) {
   const p = bind.match(/^lineup\.(\d+)\.(\w+)$/)
   if (p) return `Player ${p[1]}${WORD[p[2]] || ''}`
   if (bind.startsWith('match.')) return bind.slice(6).replace(/^./, (c) => c.toUpperCase())
+  const other = postBindLabel(bind)
+  if (other) return other
   return bind.replace(/^./, (c) => c.toUpperCase())
 }
 
 // An area block (a photo, the sponsors) takes its size from the template rather than from text.
-export const isAreaBind = (bind) => bind === 'sponsors' || bind === 'photo' || /^logo\.(team|opponent)$/.test(bind || '') || /^lineup\.\d+\.photo$/.test(bind || '')
+export const isAreaBind = (bind) => bind === 'sponsors' || bind === 'photo' || /^logo\.(team|opponent)$/.test(bind || '') || /^lineup\.\d+\.photo$/.test(bind || '') || isPostAreaBind(bind)
 export const isBoundPlayerSlot = (bind) => /^lineup\./.test(bind || '')
 export const boundSlotCount = (items) => (items || []).reduce((n, it) => {
   const m = (it.bind || '').match(/^lineup\.(\d+)\./)
@@ -107,6 +112,7 @@ export function resolveBind(bind, data = {}) {
   if (bind === 'team') return (data.team && (data.team.fullName || data.team.name)) || null
   if (bind === 'headline') return data.headline || null
   if (bind.startsWith('match.')) return (data.match || {})[bind.slice(6)] ?? null
-  return null
+  // The other post types: fixtures, results, the final score, player of the match, and so on.
+  return resolvePostBind(bind, data)
 }
 

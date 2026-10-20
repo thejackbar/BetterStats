@@ -33,6 +33,16 @@ const showPage = (p: PageLike | { type: "unsupported" }) => {
 const check = () =>
   fireEvent.click(screen.getByRole("button", { name: "Check this page" }));
 
+// The kind-of-post picker is the first select in the panel.
+const choose = (label: string) => {
+  const picker = screen.getAllByRole("combobox")[0];
+  if (!picker) {
+    throw new Error("The post type picker is missing.");
+  }
+  fireEvent.click(picker);
+  fireEvent.click(screen.getByRole("option", { name: label }));
+};
+
 describe("BetterCricket template panel", () => {
   beforeEach(() => {
     jest.resetAllMocks();
@@ -233,6 +243,7 @@ describe("BetterCricket template panel", () => {
     it("adds a heading and 11 separate player boxes by default", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);
+      choose("Line up");
       click("Add line up");
       await waitFor(() =>
         expect(screen.getByText(/12 separate text boxes/)).toBeTruthy(),
@@ -245,6 +256,7 @@ describe("BetterCricket template panel", () => {
     it("groups them when the switch is on", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(
         screen.getByRole("switch", { name: /Group the boxes together/ }),
       );
@@ -259,6 +271,7 @@ describe("BetterCricket template panel", () => {
     it("uses one session to add and re-read the page", async () => {
       const { seen } = useSession();
       renderInTestProvider(<App />);
+      choose("Line up");
       click("Add line up");
       await waitFor(() =>
         expect(screen.getByText(/fields? found/)).toBeTruthy(),
@@ -270,6 +283,7 @@ describe("BetterCricket template panel", () => {
     it("adds as many players as the box says", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);
+      choose("Line up");
       const input = screen.getByLabelText(/Players in the line up/);
       fireEvent.change(input, { target: { value: "5" } });
       fireEvent.blur(input);
@@ -278,9 +292,18 @@ describe("BetterCricket template panel", () => {
       expect(calls.created).toHaveLength(6);
     });
 
+    it("adds the fixtures list: a heading and a row of four boxes for each fixture", async () => {
+      const { calls } = useSession();
+      renderInTestProvider(<App />);
+      choose("Fixtures");
+      click("Add fixtures list");
+      await waitFor(() => expect(calls.created).toHaveLength(1 + 6 * 4));
+    });
+
     it("adds the match details", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);
+      choose("Line up");
       click("Add match details");
       await waitFor(() =>
         expect(screen.getByText(/Match details added/)).toBeTruthy(),
@@ -291,6 +314,7 @@ describe("BetterCricket template panel", () => {
     it("adds one field at a time, each a little lower than the last", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);
+      choose("Line up");
       click("Add field");
       await waitFor(() =>
         expect(screen.getByText(/Player 1 added/)).toBeTruthy(),
@@ -315,6 +339,7 @@ describe("BetterCricket template panel", () => {
     it("says so, with Canva's reason, when it will not group the boxes", async () => {
       useSession({ groupFails: true });
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(
         screen.getByRole("switch", { name: /Group the boxes together/ }),
       );
@@ -329,6 +354,7 @@ describe("BetterCricket template panel", () => {
     it("names the step that failed", async () => {
       useSession({ syncFails: true });
       renderInTestProvider(<App />);
+      choose("Line up");
       click("Add line up");
       await waitFor(() =>
         expect(
@@ -340,6 +366,7 @@ describe("BetterCricket template panel", () => {
     it("explains a locked page and adds nothing", async () => {
       const { calls } = useSession({ locked: true });
       renderInTestProvider(<App />);
+      choose("Line up");
       click("Add line up");
       await waitFor(() =>
         expect(screen.getByText(/page is locked/)).toBeTruthy(),
@@ -351,6 +378,7 @@ describe("BetterCricket template panel", () => {
     it("explains a page with no size and adds nothing", async () => {
       const { calls } = useSession({ dimensions: undefined });
       renderInTestProvider(<App />);
+      choose("Line up");
       click("Add line up");
       await waitFor(() =>
         expect(screen.getByText(/has no fixed size/)).toBeTruthy(),
@@ -361,6 +389,7 @@ describe("BetterCricket template panel", () => {
     it("does not offer to add where the design cannot be edited", () => {
       jest.mocked(useFeatureSupport).mockReturnValue(() => false);
       renderInTestProvider(<App />);
+      choose("Line up");
       for (const name of ["Add line up", "Add match details", "Add field"]) {
         const b = screen.getByRole("button", { name });
         expect(
@@ -385,6 +414,7 @@ describe("BetterCricket template panel", () => {
     it("adds a square 1080 x 1080 page", async () => {
       jest.mocked(addPage).mockResolvedValue({} as never);
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(
         screen.getByRole("button", { name: "Start on a square page" }),
       );
@@ -403,6 +433,7 @@ describe("BetterCricket template panel", () => {
     it("says why when Canva refuses the page", async () => {
       jest.mocked(addPage).mockRejectedValue(new Error("nope from canva"));
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(
         screen.getByRole("button", { name: "Start on a square page" }),
       );
@@ -414,6 +445,7 @@ describe("BetterCricket template panel", () => {
     it("offers the square page when the page is not a post shape", async () => {
       showPage(page([textBox("{{player 1}}")], { width: 800, height: 600 }));
       renderInTestProvider(<App />);
+      choose("Line up");
       check();
       await waitFor(() =>
         expect(
@@ -425,6 +457,7 @@ describe("BetterCricket template panel", () => {
     it("does not offer it on a square page", async () => {
       showPage(page([textBox("{{player 1}}")]));
       renderInTestProvider(<App />);
+      choose("Line up");
       check();
       await waitFor(() =>
         expect(screen.getByText(/1 field found/)).toBeTruthy(),
@@ -437,6 +470,7 @@ describe("BetterCricket template panel", () => {
     it("adds a sponsors box: a grey rectangle and the {{sponsors}} word", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(screen.getByRole("button", { name: "Add sponsors box" }));
       await waitFor(() => expect(calls.created).toHaveLength(2));
       expect(calls.created[0]).toHaveProperty("rect");
@@ -446,6 +480,7 @@ describe("BetterCricket template panel", () => {
     it("adds the featured photo area, which BetterPosts fills from its photo settings", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(
         screen.getByRole("button", { name: "Add featured photo" }),
       );
@@ -456,6 +491,7 @@ describe("BetterCricket template panel", () => {
     it("adds a club logo and an opponent logo area", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(screen.getByRole("button", { name: "Add club logo" }));
       await waitFor(() => expect(calls.created).toHaveLength(2));
       expect(JSON.stringify(calls.created[1])).toContain("{{club logo}}");
@@ -480,6 +516,7 @@ describe("BetterCricket template panel", () => {
         ]),
       );
       renderInTestProvider(<App />);
+      choose("Line up");
       check();
       await waitFor(() =>
         expect(
@@ -492,6 +529,7 @@ describe("BetterCricket template panel", () => {
 
     it("says the marks are automatic", () => {
       renderInTestProvider(<App />);
+      choose("Line up");
       expect(
         screen.getByText(/added after the names automatically/),
       ).toBeTruthy();
@@ -500,6 +538,7 @@ describe("BetterCricket template panel", () => {
     it("adds a photo area for a chosen player place", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.change(screen.getByLabelText(/Player place/), {
         target: { value: "3" },
       });
@@ -537,15 +576,6 @@ describe("BetterCricket template panel", () => {
       screen.getByRole("button", { name: "Export for BetterCricket" });
     const isDisabled = (b: HTMLElement) =>
       b.hasAttribute("disabled") || b.getAttribute("aria-disabled") === "true";
-    // The kind-of-post picker is the first select in the panel.
-    const choose = (label: "Line up" | "Other post") => {
-      const picker = screen.getAllByRole("combobox")[0];
-      if (!picker) {
-        throw new Error("The post type picker is missing.");
-      }
-      fireEvent.click(picker);
-      fireEvent.click(screen.getByRole("option", { name: label }));
-    };
     const copied = async () => {
       fireEvent.click(
         screen.getByRole("button", { name: "Copy template text" }),
@@ -610,12 +640,84 @@ describe("BetterCricket template panel", () => {
 
     it("offers the line up block only for a line up", async () => {
       renderInTestProvider(<App />);
+      expect(screen.queryByRole("button", { name: "Add line up" })).toBeNull();
+      expect(screen.getByText(/Choose the kind of post above/)).toBeTruthy();
+      choose("Line up");
       expect(screen.getByRole("button", { name: "Add line up" })).toBeTruthy();
       choose("Other post");
       expect(screen.queryByRole("button", { name: "Add line up" })).toBeNull();
       expect(
         screen.getByRole("button", { name: "Add match details" }),
       ).toBeTruthy();
+    });
+
+    it.each([
+      ["Fixtures", ["Add fixtures list"], "fixtures"],
+      ["Results", ["Add results list"], "results"],
+      [
+        "Final score",
+        ["Add final score", "Add top performers", "Add player of the match"],
+        "result",
+      ],
+      ["Player of the match", ["Add player of the match", "Add stats"], "motm"],
+      ["Team of the week", ["Add team"], "totw"],
+      ["Milestones", ["Add milestones"], "milestones"],
+      ["Announcement", ["Add announcement"], "announcement"],
+      ["Toss", ["Add toss"], "toss"],
+      ["Event", ["Add event details", "Add dated list"], "events"],
+    ])("%s offers its own blocks and no line up", (label, buttons) => {
+      renderInTestProvider(<App />);
+      choose(label);
+      for (const name of buttons) {
+        expect(screen.getByRole("button", { name })).toBeTruthy();
+      }
+      expect(screen.queryByRole("button", { name: "Add line up" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Add to player" }),
+      ).toBeNull();
+      // The match details, logos and sponsors stay available on every kind of post.
+      expect(
+        screen.getByRole("button", { name: "Add match details" }),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Add sponsors box" }),
+      ).toBeTruthy();
+    });
+
+    it.each([
+      ["Fixtures", "fixture 1 opponent", "fixtures"],
+      ["Final score", "our score", "result"],
+      ["Toss", "toss", "toss"],
+      ["Event", "event title", "events"],
+    ])(
+      "%s: exports a page with one of its words as that kind of post",
+      async (label, word, type) => {
+        livePage([textBox(`{{${word}}}`)]);
+        renderInTestProvider(<App />);
+        choose(label);
+        fireEvent.click(exportButton());
+        await waitFor(() =>
+          expect(screen.getByText(/Template ready/)).toBeTruthy(),
+        );
+        expect(await copied()).toEqual(
+          expect.objectContaining({ postType: type }),
+        );
+      },
+    );
+
+    it("refuses a page marked as fixtures that holds none of its words", async () => {
+      livePage([textBox("{{opponent}}"), textBox("{{date}}")]);
+      renderInTestProvider(<App />);
+      choose("Fixtures");
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            /fixtures post needs at least one of its own fields/,
+          ),
+        ).toBeTruthy(),
+      );
+      expect(copyTemplate).not.toHaveBeenCalled();
     });
 
     it("uses the name typed in the box", async () => {

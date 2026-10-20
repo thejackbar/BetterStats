@@ -51,7 +51,8 @@ import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPalet
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign } from '../../social/blank-template'
 import { parseTemplateFile, itemsFromTemplate, templateWarnings, boundSlotCount } from '../../social/boundFields'
-import { CustomLayout, CUSTOM_LAYOUT_ID } from '../../social/custom-layout'
+import { CustomLayout, CUSTOM_LAYOUT_ID, CUSTOM_LAYOUTS, CUSTOM_LAYOUT_IDS, CUSTOM_PANEL_ALIAS, isCustomLayout } from '../../social/custom-layout'
+import { fixtureRows, resultRows, finalBundle, motmBundle, announceBundle, tossBundle, totwBundle, milestoneBundle, eventBundle } from '../../social/postBundle'
 import CanvaImportBox from '../../components/admin/socialpost/CanvaImportBox'
 import { sponsorSlotFor } from '../../social/sponsorSlots'
 import { useBlankLayer } from '../../social/useBlankLayer'
@@ -135,16 +136,21 @@ const ALL_TEMPLATES = [
   // Club-event / announcement posters — own "Events" tab, surface + photo flags
   // come from the event registry.
   ...EVENT_TEMPLATES.map((t) => ({ id: t.id, name: t.name, component: t.component, desc: t.desc, maxPlayers: 0, kind: 'event', surface: t.surface, photo: t.photo, list: !!t.list })),
-  // A layout imported from the BetterCricket Canva app. It sits on the Lineup tab so the Data tab,
-  // Players, Opponent and Match Info all link up; the template's own blocks are the overlay on it.
-  { id: CUSTOM_LAYOUT_ID, name: 'Your template', component: CustomLayout, desc: 'Imported from the Canva app', maxPlayers: LINEUP_MAX },
+  // A layout imported from the BetterCricket Canva app, one per post type. It sits on its type's own tab so
+  // the Data tab, Players, Opponent, Match Info and the type's Content panel all link up; the template's own
+  // blocks are the overlay on it.
+  ...Object.entries(CUSTOM_LAYOUTS).map(([type, id]) => ({
+    id, name: 'Your template', component: CustomLayout, desc: 'Imported from the Canva app',
+    maxPlayers: { lineup: LINEUP_MAX, totw: TOTW_MAX, motm: 1, announcement: 1 }[type] || 0,
+    ...(type === 'result' ? { kind: 'singleresult' } : null),
+  })),
   // Freeform WYSIWYG canvas — add/move/resize your own text & images.
   { id: 'BL1', name: 'Blank Canvas', component: BlankCanvas, desc: 'Freeform — add your own text & images', maxPlayers: 0, kind: 'blank' },
 ]
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set([CUSTOM_LAYOUT_ID, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'MS1', 'MS2'])
+const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'MS1', 'MS2'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -155,7 +161,7 @@ const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080, T13: 
 const HERO_FOCUS_TEMPLATES = Object.keys(HERO_CROP_ASPECT)
 // The layouts drawn around a hero photo. Derived from the same id list the Hero
 // Image panel is gated on, so the two can't drift apart.
-const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', CUSTOM_LAYOUT_ID]
+const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', CUSTOM_LAYOUTS.lineup, CUSTOM_LAYOUTS.result, CUSTOM_LAYOUTS.motm, CUSTOM_LAYOUTS.announcement]
 // The lineups that can mark which listed player is the one in the photo, and
 // the ones whose Hero Player picker names that player. T7 and the announcement
 // layouts have a single player, so there is no list to mark.
@@ -168,7 +174,8 @@ const DEBUT_TEMPLATE_NAMES = { T1: 'Hero List', T3: 'Side Numbered', T10: 'Team 
 
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
-  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup', T13: 'lineup', [CUSTOM_LAYOUT_ID]: 'lineup',
+  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup', T13: 'lineup',
+  ...Object.fromEntries(Object.entries(CUSTOM_LAYOUTS).map(([type, id]) => [id, type])),
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
   C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result', RS7: 'result', RS8: 'result',
@@ -214,6 +221,19 @@ const TAB_ICON = {
 }
 // Post types that pull from external data (BetterSelect / a match link / a round
 // import). These open on the "Get your data" step so the source is collected first.
+// What to do next, per post type, once a template has landed on its own layout.
+const IMPORT_NEXT_STEP = {
+  lineup: 'Now pull the XI in Data (BetterSelect or Play-Cricket), or add players in Content.',
+  fixtures: 'Now pull the round in Data, or edit the fixtures in Content.',
+  results: 'Now pull the round in Data, or edit the results in Content.',
+  result: 'Now paste the match link in Data, or type the scores in Content.',
+  motm: 'Now choose the player and their stats in Data or Content.',
+  totw: 'Now pull the round in Data, then adjust the team in Content.',
+  milestones: 'Now tick the milestones to feature in Data.',
+  announcement: 'Now choose the player and the words in Content.',
+  toss: 'Now choose who won the toss and what they chose in Content.',
+  events: 'Now fill in the event in Content.',
+}
 const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw', 'milestones']
 const SOURCE_HELP = {
   lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
@@ -374,7 +394,7 @@ function readEventDraft() {
 // the round-ups, results and toss posts are not named by a side. Every layout
 // prints the Competition except Round Cover and Giant Type (a round number and a
 // figure are their headlines). A field the open layout ignores says so on screen.
-const HEADLINE_TEMPLATES = ['T1', 'T2', 'T3', 'T5', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', CUSTOM_LAYOUT_ID]
+const HEADLINE_TEMPLATES = ['T1', 'T2', 'T3', 'T5', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', ...CUSTOM_LAYOUT_IDS]
 const NO_COMPETITION_TEMPLATES = ['T13', 'C5']
 const ROLE_OPTIONS = IS_AFL ? ['', 'FB', 'HB', 'C', 'W', 'MID', 'RUCK', 'HF', 'FF', 'UTIL'] : ['BAT', 'BOWL', 'AR', 'WK']
 const ROLE_LONG = IS_AFL
@@ -1352,7 +1372,9 @@ export default function AdminSocialPost() {
     if (one && TEMPLATES.some((t) => t.id === one)) return one
     const t = p.get('type')
     if (t && TAB_FIRST[t]) return TAB_FIRST[t]
-    return localStorage.getItem('bs_social_template') || LINEUP_DEFAULT
+    // An imported layout is its blocks, which are not kept across a reload: open its tab on a built-in layout instead.
+    const last = localStorage.getItem('bs_social_template') || LINEUP_DEFAULT
+    return isCustomLayout(last) ? (TAB_FIRST[TAB_MAP[last]] || LINEUP_DEFAULT) : last
   })
   const [paletteKey, setPaletteKey] = useState(() =>
     localStorage.getItem('bs_social_palette') || 'club'
@@ -1704,7 +1726,7 @@ export default function AdminSocialPost() {
   // template so it can be tweaked and saved as a custom template.
   const [customEdit, setCustomEdit] = useState(false)
   // The imported-template layout is its blocks, so the freeform layer is always on for it.
-  const customOn = customEdit || templateId === CUSTOM_LAYOUT_ID
+  const customOn = customEdit || isCustomLayout(templateId)
   // Career stats for players referenced by "player" data blocks, fetched on
   // demand and cached by id (keeps saved templates live — config only).
   const [playerStatsCache, setPlayerStatsCache] = useState({})
@@ -2972,7 +2994,7 @@ export default function AdminSocialPost() {
     }
   }, [sourceFixtures, pcFixtures])
   // The imported-template layout is offered only once there is one (it is its blocks, so an empty one is a blank post).
-  const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab && (t.id !== CUSTOM_LAYOUT_ID || templateId === CUSTOM_LAYOUT_ID))
+  const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab && (!isCustomLayout(t.id) || templateId === t.id))
   const displayFont = (fontKey === 'club_font' && clubFont)
     ? clubFont
     : (DISPLAY_FONTS.find(f => f.key === fontKey) || DISPLAY_FONTS[0])
@@ -3015,6 +3037,8 @@ export default function AdminSocialPost() {
 
   const nameFormat = settings?.player_name_format || 'last_first'
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
+  // The Content panel the open layout shares with its type's built-in layouts (an imported toss uses the toss panel).
+  const panelId = CUSTOM_PANEL_ALIAS[templateId] || templateId
   const isScorecard = !!(tmpl.isScorecard)
   const TemplateComponent = tmpl.component
   // Scorecard split into 2 square Instagram posts (batted-first team, then
@@ -3266,6 +3290,54 @@ export default function AdminSocialPost() {
     season: match.season || '2025–26',
   }
 
+  // The milestone cards the post prints, in post order. Built once: the built-in layouts and a template's
+  // {{milestone N ...}} words both read them.
+  const milestoneCards = activeTab !== 'milestones' ? [] : (() => {
+    const byKey = new Map(msRows.map(r => [r.key, r]))
+    const profiles = new Map(allPlayers.map(pl => [String(pl.id), pl]))
+    return msPicks.map(k => byKey.get(k)).filter(Boolean).map(r => {
+      const pl = profiles.get(String(r.player_id)) || {}
+      const tp = playerToTemplatePlayer({ id: r.player_id, display_name: r.player_name, photo_url: pl.photo_url, hero_photo_url: pl.hero_photo_url }, {}, nameFormat, swapNames)
+      return {
+        key: r.key, _id: r.player_id, first: tp.first, last: tp.last, headshot: tp.headshot,
+        value: milestoneValueText(r), unit: milestoneUnit(r),
+        dateLabel: msOpts.showDates ? formatMilestoneDate(r.achieved_at) : '',
+      }
+    })
+  })()
+
+  // What a template's post-type words ({{fixture 2 venue}}, {{our score}}, {{potm photo}}) read: the editor's
+  // own state for the open tab, shaped by social/postBundle.js. Only the open tab's is built.
+  const tossNames = { teamName: team.name, oppName: oppData.name }
+  const postBundle = (() => {
+    switch (activeTab) {
+      case 'fixtures': return { fixtures: fixtureRows(fixtures) }
+      case 'results': return { results: resultRows(results) }
+      case 'result': {
+        const b = finalBundle(result, tossNames)
+        const profile = playerForPid(result.motmPlayerId)
+        const photo = heroImage.blobUrl || (profile?.photo_url ? `${BASE_URL}/images/players/${profile.id}/photo` : '')
+        if (b.potm) b.potm.photo = photo
+        return b
+      }
+      case 'motm': {
+        const sp = selectedPlayers[motm.playerIdx]
+        const player = sp ? playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames) : undefined
+        return motmBundle(motm, player, (heroMode === 'hero' && heroImage.blobUrl) || player?.headshot || '')
+      }
+      case 'totw': return totwBundle(templatePlayers, { junior: 'JUNIOR', senior: 'SENIOR' }[totwImport.data?.scope] || '')
+      case 'milestones': return milestoneBundle(milestoneCards, msOpts.title)
+      case 'announcement': {
+        const sp = selectedPlayers[announcement.playerIdx]
+        const player = sp ? playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames) : undefined
+        return announceBundle(announcement, player, (heroMode === 'hero' && heroImage.blobUrl) || player?.headshot || '')
+      }
+      case 'toss': return tossBundle(toss, tossNames)
+      case 'events': return eventBundle(event, prepareEventList(eventList), eventBg || '')
+      default: return undefined
+    }
+  })()
+
   // Live data bundle for the Blank Canvas "data blocks" (fixtures / results /
   // record / scorecard / player). Built from the state the designer already
   // holds, so blocks show current info with no extra fetch (bar player stats).
@@ -3282,6 +3354,7 @@ export default function AdminSocialPost() {
     // and so on). null means the editor holds nothing for it yet.
     lineup: templatePlayers.map((p) => ({ name: [p.first, p.last].filter(Boolean).join(' '), first: p.first, last: p.last, role: p.roleLong || p.role || '', captain: p.captain, keeper: p.keeper, viceCaptain: p.viceCaptain, debut: p.debut, photo: p.headshot })),
     opponent: opponent.name ? oppData.name : null, headline: headline || null,
+    post: postBundle,
     // The photo a template's featured-photo area shows: the Hero Image panel's upload, else the chosen
     // (or captain's) headshot. '' once players are held but none has a photo; null before any.
     featuredPhoto: templatePlayers.length ? (heroImage.blobUrl || featuredOf(templatePlayers, heroPlayerId)?.headshot || '') : (heroImage.blobUrl || null),
@@ -3292,6 +3365,7 @@ export default function AdminSocialPost() {
     // template always draws current logos.
     sponsors: adminSponsors.filter(sponsorLogoUrl).map((s) => ({ id: s.id, name: s.name, url: sponsorLogoUrl(s) })),
   }
+
 
   // Fetch career stats for any player referenced by a player data block.
   useEffect(() => {
@@ -3364,17 +3438,7 @@ export default function AdminSocialPost() {
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'milestones') {
-    const byKey = new Map(msRows.map(r => [r.key, r]))
-    const profiles = new Map(allPlayers.map(pl => [String(pl.id), pl]))
-    extraProps.milestones = msPicks.map(k => byKey.get(k)).filter(Boolean).map(r => {
-      const pl = profiles.get(String(r.player_id)) || {}
-      const tp = playerToTemplatePlayer({ id: r.player_id, display_name: r.player_name, photo_url: pl.photo_url, hero_photo_url: pl.hero_photo_url }, {}, nameFormat, swapNames)
-      return {
-        key: r.key, _id: r.player_id, first: tp.first, last: tp.last, headshot: tp.headshot,
-        value: milestoneValueText(r), unit: milestoneUnit(r),
-        dateLabel: msOpts.showDates ? formatMilestoneDate(r.achieved_at) : '',
-      }
-    })
+    extraProps.milestones = milestoneCards
     // Typed as it is: no 'ROUND 1' placeholder on a post that is not about a round.
     extraProps.milestoneMeta = { title: msOpts.title, round: match.round, date: match.date, comp: match.competition }
     extraProps.sponsors = scorecardMatch.meta.sponsors
@@ -3557,7 +3621,7 @@ export default function AdminSocialPost() {
     if (!existing) {
       if (sponsorDismissed.current[sponsorKey]) return
       // "Your template" has no sponsor band unless the template drew a sponsors box.
-      if (templateId === CUSTOM_LAYOUT_ID) return
+      if (isCustomLayout(templateId)) return
       const fresh = newBlankItem('sponsors', { ...geo, sponsorIds: sponsorDefault.ids, auto: true })
       // Functional, so two runs of this effect before React re-renders cannot
       // put two grids on the post.
@@ -3742,7 +3806,7 @@ export default function AdminSocialPost() {
   // ─── Controls ────────────────────────────────────────────────────────────────
   // An imported template (bound text fields) is a Blank canvas that still needs
   // the lineup, the opponent and the match details those fields print.
-  const boundItems = isBlankTab ? canvas.items : templateId === CUSTOM_LAYOUT_ID ? overlay.items : []
+  const boundItems = isBlankTab ? canvas.items : isCustomLayout(templateId) ? overlay.items : []
   const boundSlots = boundSlotCount(boundItems)
   const hasBound = boundItems.some((it) => it.bind)
   // A template with eleven places holds eleven players; a built-in lineup holds its own ceiling.
@@ -4094,20 +4158,22 @@ export default function AdminSocialPost() {
       if (shape) setPostSize(shape.key)
       else warnings.push(`The template is ${parsed.canvas.w}×${parsed.canvas.h}, which is not a BetterPosts size, so it stays on ${W}×${H} and the design is cropped to fit.`)
       const target = shape || { w: W, h: H }
-      const toLineup = parsed.postType === 'lineup' && !IS_AFL
+      // Every cricket post type has a layout of its own; a general template (or any, in the football build) is a Blank canvas.
+      const customId = IS_AFL ? null : CUSTOM_LAYOUTS[parsed.postType] || null
+      const toCustom = !!customId
       const build = (keep) => itemsFromTemplate(parsed, { designUrl, designName: `${parsed.name} background`, width: target.w, height: target.h, keep, clubStyle })
-      if (toLineup) {
+      if (toCustom) {
         overlayHistory.commit('Import template')
         // Importing again into the same layout updates it; coming from another layout starts clean
         // (the post's own sponsor grid is kept either way).
         // A template starts with the post's own extras off (crest watermark, texture, background word):
         // the Canva design is the look, and the club turns anything back on under Design.
-        if (templateId !== CUSTOM_LAYOUT_ID) { setBgLogoOn(false); setBgStyle('none'); setBgBigText('') }
-        overlay.setItems(build(templateId === CUSTOM_LAYOUT_ID ? overlay.items : overlay.items.filter((it) => it.type === 'sponsors')))
+        if (templateId !== customId) { setBgLogoOn(false); setBgStyle('none'); setBgBigText('') }
+        overlay.setItems(build(templateId === customId ? overlay.items : overlay.items.filter((it) => it.type === 'sponsors')))
         overlay.setSelIds([])
-        setTemplateId(CUSTOM_LAYOUT_ID)
+        setTemplateId(customId)
         setCustomEdit(false)
-        setTool('source')
+        setTool(DATA_TABS.includes(parsed.postType) ? 'source' : 'content')
       } else {
         canvasHistory.commit('Import template')
         canvas.setItems(build(templateId === 'BL1' ? canvas.items : []))
@@ -4125,8 +4191,8 @@ export default function AdminSocialPost() {
       ]
       flashNote({
         warn: warnings.length > 0,
-        text: `Imported “${parsed.name}” as ${toLineup ? 'a Lineup layout called “Your template”' : 'a Blank canvas post'}: ${parts.join(', ')}. ${clubStyle ? 'Colours and fonts come from your club, so changing your palette or font restyles it. ' : ''}${toLineup ? 'Now pull the XI in Data (BetterSelect or Play-Cricket), or add players in Content.' : 'Add the players, opponent and match details in the panels on the left.'}${warnings.length ? ` ${warnings.join(' ')}` : ''}`,
-        tool: toLineup ? 'source' : 'content',
+        text: `Imported “${parsed.name}” as ${toCustom ? `a ${TABS.find((t) => t.key === parsed.postType)?.label || 'post'} layout called “Your template”` : 'a Blank canvas post'}: ${parts.join(', ')}. ${clubStyle ? 'Colours and fonts come from your club, so changing your palette or font restyles it. ' : ''}${toCustom ? (IMPORT_NEXT_STEP[parsed.postType] || '') : 'Add the players, opponent and match details in the panels on the left.'}${warnings.length ? ` ${warnings.join(' ')}` : ''}`,
+        tool: toCustom && DATA_TABS.includes(parsed.postType) ? 'source' : 'content',
       }, 18000)
       return true
     } catch (e) {
@@ -5077,10 +5143,10 @@ export default function AdminSocialPost() {
                       </button>
                     )}
                   </div>
-                  {activeTab === 'lineup' && !IS_AFL && (
+                  {!IS_AFL && activeTab !== 'scorecard' && activeTab !== 'blank' && (
                     <div className="pt-2 border-t pb-hairline" data-testid="design-canva-import">
                       <CanvaImportBox clubStyle={clubStyle} onClubStyle={setClubStyle} onImport={importTemplateText} busy={designBusy}
-                        hint="Choose Line up in the Canva app, and the template becomes a Lineup layout here, with the Data tab, players and match details linked up." />
+                        hint={`Choose ${TABS.find((t) => t.key === activeTab)?.label || 'the post type'} in the Canva app, and the template becomes a layout on this tab, with the Data tab, players and match details linked up.`} />
                     </div>
                   )}
                   {templateId === CUSTOM_LAYOUT_ID && (
@@ -5092,7 +5158,7 @@ export default function AdminSocialPost() {
                       </span>
                     </label>
                   )}
-                  {!isBlankTab && templateId !== CUSTOM_LAYOUT_ID && (
+                  {!isBlankTab && !isCustomLayout(templateId) && (
                     <div className="flex flex-col gap-1 self-start">
                       <button
                         onClick={customEdit ? stopCustomEdit : beginCustomEdit}
@@ -5163,7 +5229,7 @@ export default function AdminSocialPost() {
                     )}
                   </div>
                   <div className="mt-2 pt-3 border-t pb-hairline">
-                    <CanvaImportBox clubStyle={clubStyle} onClubStyle={setClubStyle} onImport={importTemplateText} busy={designBusy} hint="A line up goes to the Lineup post type; anything else stays on this canvas." />
+                    <CanvaImportBox clubStyle={clubStyle} onClubStyle={setClubStyle} onImport={importTemplateText} busy={designBusy} hint="A template made for a post type goes to that post type, with its data linked up; anything else stays on this canvas." />
                   </div>
                   <input ref={designInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" data-testid="own-design-input"
                     onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadDesign(f) }} />
@@ -5474,7 +5540,7 @@ export default function AdminSocialPost() {
                     </div>
                   </div>
                 )}
-                {['C1', 'C3', 'C5'].includes(templateId) && (
+                {['C1', 'C3', 'C5'].includes(panelId) && (
                   <div className="flex gap-2 mb-3">
                     <button
                       onClick={() => setHeroMode('player')}
@@ -5488,7 +5554,7 @@ export default function AdminSocialPost() {
                     >Hero Image</button>
                   </div>
                 )}
-                {(!['C1', 'C3', 'C5'].includes(templateId) || heroMode === 'hero') && (
+                {(!['C1', 'C3', 'C5'].includes(panelId) || heroMode === 'hero') && (
                   <div className="flex flex-col gap-3">
                     <label className="flex items-center gap-3 cursor-pointer group">
                       <span className="px-3 py-2 rounded border pb-hairline text-xs font-mono text-pb-faint group-hover:bg-pb-surface2 transition-colors">Choose File</span>
@@ -5551,7 +5617,7 @@ export default function AdminSocialPost() {
             )}
 
             {/* C1 Announcement */}
-            {(templateId === 'C1' || templateId === 'C5') && (
+            {(panelId === 'C1' || panelId === 'C5') && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Announcement</h2>
                 <div className="grid grid-cols-1 gap-3">
@@ -5571,7 +5637,7 @@ export default function AdminSocialPost() {
             )}
 
             {/* C2 Toss */}
-            {templateId === 'C2' && (
+            {panelId === 'C2' && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Toss Result</h2>
                 <div className="grid grid-cols-2 gap-3">
@@ -5640,7 +5706,7 @@ export default function AdminSocialPost() {
             )}
 
             {/* C3 Player Spotlight */}
-            {templateId === 'C3' && (
+            {panelId === 'C3' && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Player Spotlight</h2>
 

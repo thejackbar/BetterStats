@@ -6,7 +6,8 @@
 // A template file is JSON:
 //   {
 //     "format": "bettercricket-template", "version": 1, "name": "LineUp",
-//     "postType": "lineup",                        // lineup | general (default). Decides where it imports.
+//     "postType": "lineup",                        // lineup | fixtures | results | result | motm | totw | milestones |
+//                                                  // announcement | toss | events | general (default). Decides where it imports.
 //     "canvas": { "w": 1080, "h": 1350 },          // one of the Post size shapes
 //     "background": "data:image/png;base64,...",   // the design with the field text taken out; optional
 //     "fields": [
@@ -45,6 +46,7 @@
 //   competition | round | venue | date | time | season
 import { newBlankItem, withDesign, BLANK_FONTS, BLANK_STARTERS } from './blank-template'
 import { bindFromToken, bindLabel, isAreaBind } from './boundResolve'
+import { POST_TYPES, hasTypeField, TYPE_NAMES } from './postFields.js'
 
 // How much of the club's accent a panel carries: enough to show, not enough to fight the text.
 export const PANEL_TINT = 0.22
@@ -138,9 +140,11 @@ export function parseTemplateFile(raw) {
     })
   }
   const w = num(doc.canvas && doc.canvas.w, 1080), h = num(doc.canvas && doc.canvas.h, 1080)
-  const postType = doc.postType === 'lineup' ? 'lineup' : 'general'
-  if (postType === 'lineup' && !fields.some((f) => /^lineup\./.test(f.bind || ''))) {
-    warnings.push('This is marked as a line up but has no player places, so nothing will fill from the players you add. In Canva, type {{player 1}}, {{player 2}} and so on.')
+  const postType = POST_TYPES.includes(doc.postType) ? doc.postType : 'general'
+  if (!hasTypeField(postType, fields.map((f) => f.bind))) {
+    warnings.push(postType === 'lineup'
+      ? 'This is marked as a line up but has no player places, so nothing will fill from the players you add. In Canva, type {{player 1}}, {{player 2}} and so on.'
+      : `This is marked as ${/^[aeiou]/.test(TYPE_NAMES[postType]) ? 'an' : 'a'} ${TYPE_NAMES[postType]} post but has none of its fields, so nothing will fill in from the post. Use the Add buttons in the Canva app, or type words such as {{our score}}.`)
   }
   return {
     postType,

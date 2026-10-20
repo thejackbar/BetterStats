@@ -5,6 +5,7 @@ import {
   type TemplateFile,
 } from "./buildFile";
 import { extractFields, isError, nameFonts, type FontLookup } from "./extract";
+import { TYPE_EXAMPLE, TYPE_NAMES, hasTypeField } from "./postFields";
 import type { SessionCallback } from "./session";
 import type { Extraction, Skipped } from "./types";
 
@@ -93,11 +94,15 @@ export async function exportTemplate(
     );
   }
   if (
-    opts.postType === "lineup" &&
-    !read.fields.some((f) => f.binding?.startsWith("lineup."))
+    !hasTypeField(
+      opts.postType,
+      read.fields.map((f) => f.binding),
+    )
   ) {
     throw new ExportBlocked(
-      "A line up needs at least one player place. Add one with “Add line up”, or type {{player 1}} into a text box.",
+      opts.postType === "lineup"
+        ? "A line up needs at least one player place. Add one with “Add line up”, or type {{player 1}} into a text box."
+        : `A ${TYPE_NAMES[opts.postType]} post needs at least one of its own fields, such as {{${TYPE_EXAMPLE[opts.postType]}}}. Add one with the buttons for this kind of post, or type it into a text box.`,
       read.skipped,
     );
   }

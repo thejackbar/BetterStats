@@ -28,5 +28,18 @@ export function CustomLayout({ width = 1080, height = 1080, palette }) {
 }
 CustomLayout.displayName = 'CustomLayout'
 
-/** The id the editor gives the imported-template layout. */
+/** The id the editor gives the imported-template layout on the Lineup tab. */
 export const CUSTOM_LAYOUT_ID = 'LC1'
+
+/**
+ * One imported-template layout per post type, all drawn by the same component. The post type is the
+ * tab the layout sits on, so the Data tab, the players and the type's own Content panel all stay linked.
+ */
+export const CUSTOM_LAYOUTS = {
+  lineup: 'LC1', fixtures: 'LC2', result: 'LC3', results: 'LC4', motm: 'LC5',
+  totw: 'LC6', milestones: 'LC7', announcement: 'LC8', toss: 'LC9', events: 'LC10',
+}
+export const CUSTOM_LAYOUT_IDS = Object.values(CUSTOM_LAYOUTS)
+export const isCustomLayout = (id) => CUSTOM_LAYOUT_IDS.includes(id)
+/** The Content panel a custom layout shares with the built-in layouts of its type (the toss, the spotlight, the announcement). */
+export const CUSTOM_PANEL_ALIAS = { LC5: 'C3', LC8: 'C1', LC9: 'C2' }

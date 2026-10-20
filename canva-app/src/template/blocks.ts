@@ -30,9 +30,9 @@ export type BlockSpec = { name: string; boxes: BoxSpec[]; rects?: RectSpec[] };
 export type PageSize = { width: number; height: number };
 
 export const MAX_LINEUP = 15;
-const INK = "#222222";
+export const INK = "#222222";
 
-const clamp = (n: number, lo: number, hi: number) =>
+export const clamp = (n: number, lo: number, hi: number) =>
   Math.min(hi, Math.max(lo, n));
 
 /**
@@ -111,10 +111,10 @@ export function matchDetailsBlock(page: PageSize): BlockSpec {
   };
 }
 
-const AREA = "#9aa0a6";
+export const AREA = "#9aa0a6";
 
 /** A rectangle marking an area, with its field word sitting centred inside it. */
-function areaBlock(
+export function areaBlock(
   name: string,
   token: string,
   rect: { top: number; left: number; width: number; height: number },
