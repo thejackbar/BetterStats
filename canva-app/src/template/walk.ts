@@ -89,3 +89,14 @@ export function surfaceBoxes(elements: readonly ElementLike[]): SurfaceBox[] {
   scan(elements, { x: 0, y: 0 }, false);
   return out;
 }
+
+/** How many groups there are at any depth. */
+export function countGroups(elements: readonly ElementLike[]): number {
+  let n = 0;
+  for (const el of elements) {
+    if (el.type === "group") {
+      n += 1 + countGroups(el.contents.toArray());
+    }
+  }
+  return n;
+}

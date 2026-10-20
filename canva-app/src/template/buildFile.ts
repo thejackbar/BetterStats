@@ -34,6 +34,8 @@ export type TemplateFile = {
   background?: string;
   fields: (Look & { token: string })[];
   texts?: (Look & { text: string })[];
+  /** Pictures nothing is written on, each with its own box (before it was turned). */
+  pictures?: { image: string; box: NonNullable<Panel["box"]> }[];
   panels?: {
     x: number;
     y: number;
@@ -69,6 +71,18 @@ export type Pictures = {
   /** Data URLs by Canva image id. */
   byRef: ReadonlyMap<string, string>;
 };
+
+/** The free-standing pictures that could be fetched, with their data and box. */
+function pictureList(extraction: Extraction, pictures?: Pictures) {
+  const out: { image: string; box: NonNullable<Panel["box"]> }[] = [];
+  for (const p of extraction.pictures) {
+    const image = pictures?.byRef.get(p.imageRef);
+    if (image) {
+      out.push({ image, box: p.box });
+    }
+  }
+  return out;
+}
 
 /**
  * The file BetterCricket imports (spec: frontend/src/social/boundFields.js).
@@ -108,6 +122,9 @@ export function buildTemplateFile(
             };
           }),
         }
+      : null),
+    ...(pictureList(extraction, opts.pictures).length
+      ? { pictures: pictureList(extraction, opts.pictures) }
       : null),
     ...(extraction.texts.length
       ? { texts: extraction.texts.map((t) => ({ text: t.text, ...lookOf(t) })) }

@@ -540,6 +540,48 @@ const photoSrcs = (page) => page.evaluate((rootSrc) => { const root = (new Funct
   await page.close()
 }
 
+// 6i. Free-standing pictures and logo areas.
+const LINEUP4 = {
+  ...LINEUP, name: 'Pics',
+  pictures: [{ image: `data:image/png;base64,${BG.toString('base64')}`, box: { x: 700, y: 150, w: 300, h: 700, rotation: 0 } }, { image: 'not a picture', box: { x: 0, y: 0, w: 100, h: 100, rotation: 0 } }, { image: 'data:image/png;base64,AAAA', box: { x: 0, y: 0, w: 5, h: 5, rotation: 0 } }],
+  fields: [...LINEUP.fields, { token: 'club logo', x: 60, y: 40, w: 120, h: 120 }, { token: 'opponent logo', x: 880, y: 40, w: 120, h: 120 }],
+}
+const imgsAt = (page) => page.evaluate((rootSrc) => { const root = (new Function(`return (${rootSrc})()`))(); if (!root) return null; const rr = root.getBoundingClientRect(); return [...root.querySelectorAll('img')].map((i) => ({ src: i.getAttribute('src') || '', x: Math.round(i.getBoundingClientRect().left - rr.left), y: Math.round(i.getBoundingClientRect().top - rr.top), w: Math.round(i.getBoundingClientRect().width), h: Math.round(i.getBoundingClientRect().height) })) }, ROOT.toString())
+{
+  const e = await open()
+  const { page, uploads } = e
+  await importFile(page, LINEUP4)
+  const t0 = await say(page)
+  const im = await imgsAt(page)
+  const pic = im && im.find((i) => i.x === 700 && i.y === 150)
+  ck('a free-standing picture is kept as a picture at its own box', !!pic && pic.w === 300 && pic.h === 700, JSON.stringify(im))
+  ck('only the usable picture was uploaded (bad ones were skipped)', uploads.length === 1, String(uploads.length))
+  ck('the note counts the picture', /1 picture\b/.test(t0), t0.slice(0, 200))
+  const club = im && im.find((i) => /organisations\/.+\/logo/.test(i.src) && i.x === 60 && i.y === 40)
+  ck('the club logo shows the club crest in its own box', !!club && club.w === 120 && club.h === 120, JSON.stringify(im && im.filter((i) => /logo/.test(i.src))))
+  const opp = await page.evaluate((rootSrc) => { const root = (new Function(`return (${rootSrc})()`))(); return root.innerText.replace(/\s+/g, ' ') }, ROOT.toString())
+  ck('before an opponent is chosen the opponent logo shows a labelled placeholder', /OPPONENT LOGO/.test(opp), opp.slice(0, 200))
+  await e.run.loadXI(); await page.waitForTimeout(900)
+  const opp2 = await page.evaluate((rootSrc) => { const root = (new Function(`return (${rootSrc})()`))(); return root.innerText.replace(/\s+/g, ' ') }, ROOT.toString())
+  ck('an opponent with no logo prints nothing there', !/OPPONENT LOGO/.test(opp2), opp2.slice(0, 200))
+  await page.close()
+}
+{
+  // Select a logo area and switch it to the other crest.
+  const e = await open()
+  const { page } = e
+  await importFile(page, LINEUP4)
+  // The editor keeps an off-screen copy for export; click the visible crest, the one inside the canvas area.
+  const crests = page.locator('img[src*="/images/organisations/"]')
+  let clubImg = null
+  for (let i = 0; i < await crests.count(); i++) { const bb = await crests.nth(i).boundingBox(); if (bb && bb.x > 380 && bb.y > 100 && bb.width > 40) { clubImg = crests.nth(i); break } }
+  ck('the club logo is on the canvas to click', !!clubImg)
+  if (clubImg) await clubImg.click({ force: true, timeout: 5000 }).catch(() => {}); await page.waitForTimeout(500)
+  const sel = page.getByTestId('photo-source')
+  ck('a logo area offers the club and opponent logo', await seen(sel) && (await sel.locator('option').allInnerTexts()).join('|') === 'Club logo|Opponent logo')
+  await page.close()
+}
+
 // 7. Bad files change nothing and say why.
 for (const [label, file, expect] of [
   ['not JSON', 'this is not json', /not JSON/],

@@ -28,6 +28,9 @@ export function bindFromToken(token) {
   if (t === 'captain' || t === 'keeper' || t === 'headline' || t === 'sponsors') return t
   // The featured photo: whoever the Hero Image panel names (or the captain), or the photo uploaded there.
   if (t === 'photo' || t === 'player photo' || t === 'featured photo' || t === 'hero' || t === 'hero photo') return 'photo'
+  // Crests: the club's own, and the opposition's when the fixture names one.
+  if (['logo', 'club logo', 'team logo', 'our logo', 'crest', 'club crest', 'badge'].includes(t)) return 'logo.team'
+  if (['opponent logo', 'opposition logo', 'opponent crest', 'opposition crest', 'opponent badge'].includes(t)) return 'logo.opponent'
   if (t === 'wicketkeeper' || t === 'wicket keeper') return 'keeper'
   if (t === 'vice captain' || t === 'vicecaptain' || t === 'vice') return 'vice'
   if (t === 'opponent') return 'opponent'
@@ -40,6 +43,8 @@ const WORD = { name: '', first: ' (first name)', last: ' (last name)', role: ' (
 export function bindLabel(bind) {
   if (!bind) return ''
   if (bind === 'photo') return 'Featured photo'
+  if (bind === 'logo.team') return 'Club logo'
+  if (bind === 'logo.opponent') return 'Opponent logo'
   const p = bind.match(/^lineup\.(\d+)\.(\w+)$/)
   if (p) return `Player ${p[1]}${WORD[p[2]] || ''}`
   if (bind.startsWith('match.')) return bind.slice(6).replace(/^./, (c) => c.toUpperCase())
@@ -47,7 +52,7 @@ export function bindLabel(bind) {
 }
 
 // An area block (a photo, the sponsors) takes its size from the template rather than from text.
-export const isAreaBind = (bind) => bind === 'sponsors' || bind === 'photo' || /^lineup\.\d+\.photo$/.test(bind || '')
+export const isAreaBind = (bind) => bind === 'sponsors' || bind === 'photo' || /^logo\.(team|opponent)$/.test(bind || '') || /^lineup\.\d+\.photo$/.test(bind || '')
 export const isBoundPlayerSlot = (bind) => /^lineup\./.test(bind || '')
 export const boundSlotCount = (items) => (items || []).reduce((n, it) => {
   const m = (it.bind || '').match(/^lineup\.(\d+)\./)
@@ -95,6 +100,9 @@ export function resolveBind(bind, data = {}) {
   }
   // The featured photo comes from the Hero Image panel: null before any player is held, '' when there is none.
   if (bind === 'photo') return data.featuredPhoto === undefined ? null : data.featuredPhoto
+  // Crests: null before the editor holds anything, '' when it holds the club or fixture but no logo.
+  if (bind === 'logo.team') return data.teamLogo === undefined ? null : (data.teamLogo || '')
+  if (bind === 'logo.opponent') return data.opponentLogo === undefined || data.opponentLogo === null ? (data.opponent ? '' : null) : data.opponentLogo
   if (bind === 'opponent') return data.opponent || null
   if (bind === 'team') return (data.team && (data.team.fullName || data.team.name)) || null
   if (bind === 'headline') return data.headline || null

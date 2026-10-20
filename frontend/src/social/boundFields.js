@@ -22,6 +22,7 @@
 //                // A picture panel can carry its own picture: "image" (a data URL) and "box"
 //                // ({x,y,w,h,rotation}, the picture's own rectangle before it was turned).
 //     "background": "data:image/png;base64,..."   // the design's own background picture, optional
+//     "pictures": [ { "image": "data:...", "box": {x,y,w,h,rotation} } ]   // pictures nothing is written on, e.g. a cut-out player
 //   }
 //
 // STRUCTURE FIRST. By default an import uses the roles, not the designer's own
@@ -35,6 +36,7 @@
 // and reported, never guessed):
 //   player N | player N first | player N last | player N role   N = 1 to LINEUP_MAX
 //   player N photo        a picture area bound to that player's photo (h is the area's height)
+//   club logo | opponent logo   the crests (areas); aliases logo, crest, badge, opposition logo
 //   photo                 the featured photo (the Hero Image panel's player or upload)
 //   player N captain | vice | keeper | debut   print C, VC, WK or DEBUT when the player is one
 //                          (without any of these, names carry (C), (WK) and DEBUT by themselves)
@@ -126,6 +128,15 @@ export function parseTemplateFile(raw) {
       imageUrl: null,
     })
   }
+  // Pictures on the design that no words sit on (a cut-out player, a logo): each with its own box and turn.
+  const pictures = []
+  for (const p of (Array.isArray(doc.pictures) ? doc.pictures : []).slice(0, 8)) {
+    if (!p || typeof p !== 'object' || typeof p.image !== 'string' || !p.box || Number(p.box.w) < 20 || Number(p.box.h) < 20) continue
+    pictures.push({
+      image: p.image, imageUrl: null,
+      box: { x: Math.round(num(p.box.x, 0)), y: Math.round(num(p.box.y, 0)), w: Math.round(num(p.box.w, 0)), h: Math.round(num(p.box.h, 0)), rotation: Math.round(num(p.box.rotation, 0)) },
+    })
+  }
   const w = num(doc.canvas && doc.canvas.w, 1080), h = num(doc.canvas && doc.canvas.h, 1080)
   const postType = doc.postType === 'lineup' ? 'lineup' : 'general'
   if (postType === 'lineup' && !fields.some((f) => /^lineup\./.test(f.bind || ''))) {
@@ -135,7 +146,7 @@ export function parseTemplateFile(raw) {
     postType,
     name: String(doc.name || 'Imported template').slice(0, 80),
     canvas: { w, h }, background: typeof doc.background === 'string' ? doc.background : null,
-    fields, texts, panels, warnings,
+    fields, texts, panels, pictures, warnings,
   }
 }
 
@@ -191,6 +202,11 @@ export function itemsFromTemplate(parsed, { designUrl, designName, width, height
       fromTemplate: true,
     }
   })
+  // Free-standing pictures stay pictures, drawn under the words, at their own place and turn.
+  const pictureItems = (parsed.pictures || []).filter((p) => p.imageUrl).map((p) => ({
+    ...newBlankItem('image', { src: p.imageUrl, srcName: `${parsed.name} picture`, x: p.box.x, y: p.box.y, w: p.box.w, h: p.box.h, fit: 'cover' }),
+    rotation: p.box.rotation, fromTemplate: true,
+  }))
   const fixed = parsed.texts.map((t) => ({ ...make(t.text, t), fromTemplate: true }))
   // Marks come after names on their own, unless the template placed marks itself.
   const placedMarks = parsed.fields.some((f) => /^lineup\.\d+\.(captain|vice|keeper|debut)$/.test(f.bind || ''))
@@ -204,7 +220,8 @@ export function itemsFromTemplate(parsed, { designUrl, designName, width, height
       }
     }
     if (isAreaBind(f.bind)) {
-      return { ...newBlankItem('image', { x: f.x, y: f.y, w: f.w, h: f.h || f.w, fit: 'cover' }), bind: f.bind, fromTemplate: true }
+      // A photo fills its box; a crest keeps its shape.
+      return { ...newBlankItem('image', { x: f.x, y: f.y, w: f.w, h: f.h || f.w, fit: /^logo\./.test(f.bind) ? 'contain' : 'cover' }), bind: f.bind, fromTemplate: true }
     }
     return {
       ...make(f.bind ? bindLabel(f.bind).toUpperCase() : f.token, f),
@@ -227,5 +244,5 @@ export function itemsFromTemplate(parsed, { designUrl, designName, width, height
   const hasSponsorBox = parsed.fields.some((f) => f.bind === 'sponsors')
   const others = keep.filter((it) => !it.fromTemplate && !it.design && !(untouched && own.includes(it)) && !(it.type === 'sponsors' && (it.auto || hasSponsorBox)))
   const base = designUrl ? withDesign(others, designUrl, designName, width, height) : [...keep.filter((it) => it.design), ...others]
-  return [...base, ...panelItems, ...fixed, ...fields]
+  return [...base, ...panelItems, ...pictureItems, ...fixed, ...fields]
 }

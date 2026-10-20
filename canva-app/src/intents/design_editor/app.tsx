@@ -28,6 +28,7 @@ import {
 import {
   FIELD_TOKENS,
   featuredPhotoBlock,
+  logoBlock,
   fieldBlock,
   lineUpBlock,
   matchDetailsBlock,
@@ -351,7 +352,7 @@ export const App = () => {
     const use = intl.formatMessage(
       {
         defaultMessage:
-          "{use, select, panel {a panel behind your text} background {the background} area {the photo or sponsors area} other {left out}}",
+          "{use, select, panel {a panel behind your text} background {the background} area {the photo, logo or sponsors area} picture {a picture kept as it is} other {left out}}",
         description: "What the export does with a non-text element",
       },
       { use: sf.use },
@@ -651,6 +652,32 @@ export const App = () => {
         </Button>
         <Button
           variant="secondary"
+          onClick={() => addBlock((size) => logoBlock(size, "club"))}
+          loading={busy}
+          disabled={off}
+          stretch
+        >
+          {intl.formatMessage({
+            defaultMessage: "Add club logo",
+            description:
+              "Button that adds an area BetterPosts fills with the club logo",
+          })}
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => addBlock((size) => logoBlock(size, "opponent"))}
+          loading={busy}
+          disabled={off}
+          stretch
+        >
+          {intl.formatMessage({
+            defaultMessage: "Add opponent logo",
+            description:
+              "Button that adds an area BetterPosts fills with the opposition's logo",
+          })}
+        </Button>
+        <Button
+          variant="secondary"
           onClick={() => addBlock((size) => featuredPhotoBlock(size))}
           loading={busy}
           disabled={off}
@@ -721,6 +748,62 @@ export const App = () => {
                   w: state.result.canvas.w,
                   h: state.result.canvas.h,
                   count: state.result.fields.length,
+                },
+              )}
+            </Text>
+            <Text size="small" tone="tertiary">
+              {intl.formatMessage(
+                {
+                  defaultMessage: "Canva lists on this page: {parts}.",
+                  description:
+                    "Counts of what Canva reports on the page, for finding what the app cannot see",
+                },
+                {
+                  parts: intl.formatList(
+                    [
+                      intl.formatMessage(
+                        {
+                          defaultMessage:
+                            "{count, plural, one {# text box} other {# text boxes}}",
+                          description: "A number of text boxes",
+                        },
+                        { count: state.result.counts.text },
+                      ),
+                      intl.formatMessage(
+                        {
+                          defaultMessage:
+                            "{count, plural, one {# rectangle} other {# rectangles}}",
+                          description: "A number of rectangles",
+                        },
+                        { count: state.result.counts.rects },
+                      ),
+                      intl.formatMessage(
+                        {
+                          defaultMessage:
+                            "{count, plural, one {# shape} other {# shapes}}",
+                          description: "A number of shapes",
+                        },
+                        { count: state.result.counts.shapes },
+                      ),
+                      intl.formatMessage(
+                        {
+                          defaultMessage:
+                            "{count, plural, one {# group} other {# groups}}",
+                          description: "A number of groups",
+                        },
+                        { count: state.result.counts.groups },
+                      ),
+                      intl.formatMessage(
+                        {
+                          defaultMessage:
+                            "{count, plural, one {# other element} other {# other elements}}",
+                          description: "A number of other elements",
+                        },
+                        { count: state.result.counts.other },
+                      ),
+                    ],
+                    { type: "conjunction" },
+                  ),
                 },
               )}
             </Text>

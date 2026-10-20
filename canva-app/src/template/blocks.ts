@@ -177,6 +177,29 @@ export function featuredPhotoBlock(page: PageSize): BlockSpec {
   );
 }
 
+/**
+ * A square area for a crest: the club's own, or the opposition's. BetterCricket
+ * fills it from the club's logo and from the fixture, so it is never retyped.
+ */
+export function logoBlock(
+  page: PageSize,
+  which: "club" | "opponent",
+): BlockSpec {
+  const side = Math.round(page.width * 0.14);
+  const club = which === "club";
+  return areaBlock(
+    club ? "Club logo" : "Opponent logo",
+    club ? "club logo" : "opponent logo",
+    {
+      top: Math.round(page.height * 0.06),
+      left: club ? Math.round(page.width * 0.06) : Math.round(page.width * 0.8),
+      width: side,
+      height: side,
+    },
+    clamp(Math.round(page.height * 0.018), 10, 40),
+  );
+}
+
 /** What a player can carry besides a name, as the picker lists it. */
 export const PLAYER_EXTRAS = [
   "photo",

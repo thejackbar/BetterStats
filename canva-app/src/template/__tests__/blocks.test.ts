@@ -2,6 +2,7 @@ import {
   FIELD_TOKENS,
   featuredPhotoBlock,
   fieldBlock,
+  logoBlock,
   lineUpBlock,
   matchDetailsBlock,
   MAX_LINEUP,
@@ -240,6 +241,22 @@ describe("featuredPhotoBlock", () => {
       expect(bindFromToken("{{photo}}")).toBe("photo");
       expect(r.left + r.width).toBeLessThanOrEqual(size.width);
       expect(r.top + r.height).toBeLessThanOrEqual(size.height);
+    }
+  });
+});
+
+describe("logoBlock", () => {
+  it("is a square area with the logo word in it that BetterCricket knows", () => {
+    for (const size of SIZES) {
+      for (const which of ["club", "opponent"] as const) {
+        const b = logoBlock(size, which);
+        const r = must(b.rects?.[0]);
+        expect(r.width).toBe(r.height);
+        expect(r.left + r.width).toBeLessThanOrEqual(size.width);
+        expect(bindFromToken(must(b.boxes[0]).text)).toBe(
+          which === "club" ? "logo.team" : "logo.opponent",
+        );
+      }
     }
   });
 });

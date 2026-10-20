@@ -3286,6 +3286,8 @@ export default function AdminSocialPost() {
     // (or captain's) headshot. '' once players are held but none has a photo; null before any.
     featuredPhoto: templatePlayers.length ? (heroImage.blobUrl || featuredOf(templatePlayers, heroPlayerId)?.headshot || '') : (heroImage.blobUrl || null),
     marksOn: templateMarks,
+    // Crests a template's logo areas show: the club's own, and the opposition's when the fixture gave one.
+    teamLogo: team.logo || '', opponentLogo: opponent.logo || null,
     // Sponsor grids resolve their ids against the club's live list, so a saved
     // template always draws current logos.
     sponsors: adminSponsors.filter(sponsorLogoUrl).map((s) => ({ id: s.id, name: s.name, url: sponsorLogoUrl(s) })),
@@ -4083,6 +4085,10 @@ export default function AdminSocialPost() {
         p.imageUrl = await keepTemplatePicture(p.image, `${parsed.name} panel ${i + 1}`)
         if (!p.imageUrl) warnings.push(`The picture for panel ${i + 1} could not be saved, so it is drawn as a plain panel in your accent colour.`)
       }
+      for (const [i, p] of parsed.pictures.entries()) {
+        p.imageUrl = await keepTemplatePicture(p.image, `${parsed.name} picture ${i + 1}`)
+        if (!p.imageUrl) warnings.push(`The picture ${i + 1} on the design could not be saved (it may be over 5 MB), so it is left out.`)
+      }
       // The post takes the template's shape when it is one BetterPosts makes.
       const shape = POST_SIZES.find((z) => z.w === parsed.canvas.w && z.h === parsed.canvas.h)
       if (shape) setPostSize(shape.key)
@@ -4114,6 +4120,7 @@ export default function AdminSocialPost() {
         `${bound} field${bound === 1 ? '' : 's'}`,
         ...(slots ? [`${slots} player place${slots === 1 ? '' : 's'}`] : []),
         ...(parsed.texts.length ? [`${parsed.texts.length} fixed word${parsed.texts.length === 1 ? '' : 's'}`] : []),
+        ...(parsed.pictures.some((p) => p.imageUrl) ? [`${parsed.pictures.filter((p) => p.imageUrl).length} picture${parsed.pictures.filter((p) => p.imageUrl).length === 1 ? '' : 's'}`] : []),
         ...(parsed.panels.length ? [`${parsed.panels.length} panel${parsed.panels.length === 1 ? '' : 's'}${parsed.panels.some((p) => !p.imageUrl) ? ' (recolour a plain panel with its colour swatches)' : ''}`] : []),
       ]
       flashNote({

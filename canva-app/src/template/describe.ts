@@ -29,7 +29,7 @@ export type Surface = {
   /** Any rotation at all, for the list in the panel. */
   rotated: boolean;
   /** What the export does with it. Set once the page has been read as a whole. */
-  use: "panel" | "background" | "area" | "left_out";
+  use: "panel" | "background" | "area" | "picture" | "left_out";
 };
 
 const FULL = 0.95;

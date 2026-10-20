@@ -150,6 +150,40 @@ describe("exportTemplate", () => {
     });
   });
 
+  describe("free-standing pictures", () => {
+    const batter = () =>
+      rect({
+        left: 700,
+        top: 150,
+        width: 300,
+        height: 700,
+        media: "image",
+        imageRef: "batter",
+      });
+
+    it("carries the picture and its box in the file", async () => {
+      const h = harness([batter(), textBox("{{player 1}}")]);
+      const out = await exportTemplate(h.deps, lineup);
+      expect(h.log).toEqual(["image batter panel"]);
+      expect(out.file.pictures).toEqual([
+        {
+          image: "data:image/png;base64,batter",
+          box: { x: 700, y: 150, w: 300, h: 700, rotation: 0 },
+        },
+      ]);
+      expect(out.loosePictures).toBe(1);
+    });
+
+    it("says which picture was left out", async () => {
+      const h = harness([batter(), textBox("{{player 1}}")], {
+        images: { batter: new Error("restricted") },
+      });
+      const out = await exportTemplate(h.deps, lineup);
+      expect(out.pictureProblems).toEqual(["Picture 1: restricted"]);
+      expect(out.file.pictures).toBeUndefined();
+    });
+  });
+
   describe("photo and sponsors areas", () => {
     it("writes the area's box into the file and does not draw the marker as a panel", async () => {
       const els = [
