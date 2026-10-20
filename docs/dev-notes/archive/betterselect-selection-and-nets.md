@@ -1674,3 +1674,8 @@ Asked for (Oct 2026) on the Core Players list (`pages/admin/AdminPlayers.jsx`, a
 Asked for (Oct 2026): on Selection > Pool, put the players who have answered above those who have not put in availability.
 - Within each rank bucket the sort used form score first and availability second, so a silent player with a higher score sat above an Available or Maybe one. The order is now bucket, availability (Available, Maybe, no response, Unavailable), form score, name. Server: `selection_pool.pool_sort_key`; browser: `cmp` in `AdminSelection.jsx`. The Whiteboard pool already sorted availability first.
 - Proof: `verify_selection_open_pool.py` (now 30 checks, section B2 drives `pool_sort_key`; control on the previous order fails the same-bucket check).
+
+## Overview follows squad order, not kick-off (v9.127.1)
+Asked for (Oct 2026): the Selection list should follow the Fixtures order and the squads order. A club with 12:00 OD sides and a 12:30 1st XI saw the OD sides first.
+- `selection_overview` sorted by date, start time, then team rank, so kick-off beat the squad's place. It now sorts date, team rank (ranked first), name with numbers read as numbers, start time, id. The Fixtures page already ranked before start time. The screen keeps the server's order and only groups by day.
+- Proof: `verify_squad_sides.py` section C (48 checks on real Postgres) now expects the 1pm 1st XI above the 9am 2nd XI; control on the previous `selection.py` fails that one check.

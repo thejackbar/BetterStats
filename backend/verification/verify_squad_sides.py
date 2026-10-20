@@ -185,8 +185,8 @@ async def main():
     ovk = {f["round"] if "round" in f else f.get("label"): f for f in (ov or {}).get("fixtures", [])}
     check("the selection overview calls it the 2nd XI too", (ovk.get("g2-w1") or {}).get("team_name"), "2nd XI")
     first_day = [f.get("team_name") for f in (ov or {}).get("fixtures", []) if f.get("played_on") == d1.isoformat()]
-    check("...and, on the same day, lists them by kick-off first (9am 2nd XI, then 1pm 1st XI)",
-          [n for n in first_day if n in ("1st XI", "2nd XI")], ["2nd XI", "1st XI"])
+    check("...and, on the same day, lists them in squad order, not kick-off order (1pm 1st XI, then 9am 2nd XI)",
+          [n for n in first_day if n in ("1st XI", "2nd XI")], ["1st XI", "2nd XI"])
 
     print("\n# D. Squad tiers read every XI number a squad covers")
     players = {}

@@ -165,19 +165,19 @@ async def selection_overview(
     team_sizes = {str(t.id): side_size(club, t) for t in teams}
     team_mins = {str(t.id): effective_min(t.min_team_size, team_sizes[str(t.id)]) for t in teams}
 
-    # Teams that play at the same time on the same day (most clubs start every
-    # side at once) would otherwise come back in whatever order Postgres likes.
-    # Break the tie the way every squad list does: ranked teams first by
-    # hierarchy (1st XI, 2nd XI, ...), then unranked ones by name, numbers read
-    # as numbers (OD3s before OD10s). Date and start time still lead.
+    # Within a matchday the teams follow the squad order, the same as the
+    # Fixtures page: ranked teams first by hierarchy (1st XI, 2nd XI, ...), then
+    # unranked ones by name, numbers read as numbers (OD3s before OD10s). The date
+    # leads and the start time only breaks a tie, so a 12:30 first XI is not pushed
+    # below the 12:00 sides.
     def _team_order(f: Fixture):
         seq = sq_sides.rank(f.team_id, f.grade_id, f.side_key) or (team_seqs.get(str(f.team_id)) if f.team_id else None)
         name = sq_sides.name(f.team_id, f.grade_id, f.side_key) or (team_names.get(str(f.team_id)) if f.team_id else None) or f.label or f.opponent_name or ""
         return (
             f.played_on is None, f.played_on or date.min,
-            f.start_time is None, f.start_time or "",
             not (seq or 0) > 0, seq or 0,
             [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", name.lower())],
+            f.start_time is None, f.start_time or "",
             str(f.id),
         )
 
