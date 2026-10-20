@@ -290,7 +290,7 @@ async def find_doubles(db, org_id) -> dict:
     wrong = []
     for m in manuals:
         mm = meta[m.id]
-        if not mm["linked"] or not m.has_card or mm["review_pair_ok"] or mm["review_source"] == "hand":
+        if not mm["linked"] or not m.has_card or mm["review_pair_ok"]:
             continue
         if cr.confirms_pair(set(m.signature), set(cur_cards.get(mm["linked_to"], ()))):
             continue

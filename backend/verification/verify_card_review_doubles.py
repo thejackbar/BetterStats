@@ -213,7 +213,7 @@ async def main():
 
     def bat(n):
         """Four batters with scores no other match in the fixture shares."""
-        return [(names[(n + i) % len(names)], 40 + n * 11 + i * 3) for i in range(4)]
+        return [(names[(n + i) % (len(names) - 1)], 40 + n * 11 + i * 3) for i in range(4)]  # never Quill, the single-card player
 
     four = [("Ritchie", 30), ("Hind", 0), ("Moore", 12), ("Lane", 7)]
     other_four = bat(1)
@@ -262,12 +262,21 @@ async def main():
     g_wB = await synced("g_wB", date(2008, 3, 1), "Safety Bay", fmt="Two Day", bat=bat(10), grade=GRADE_B)
     await manual("m_wB", date(2008, 3, 1), "Safety Bay", fmt="One Day", bat=bat(10), grade=GRADE_B, link=g_wA)
     await manual("m_wA", date(2008, 3, 1), "Safety Bay", fmt="One Day", bat=bat(11), grade=GRADE_A)
-    # 6e. A wrong-looking link a person decided is left alone.
+    # 6f. Shoalwater's 11/12/04: the card was CHOSEN by hand (the site shows Cricket Australia) while it
+    # sat on a game with none of its batters. Choosing a card does not confirm the pairing was right.
+    g_cw = await synced("g_cw", date(2008, 5, 3), "Warnbro", bat=bat(14), grade=GRADE_A)
+    g_ct = await synced("g_ct", date(2008, 5, 3), "Warnbro", bat=bat(13), grade=GRADE_B)
+    await manual("m_chosen", date(2008, 5, 3), "Warnbro", bat=bat(13), grade=GRADE_B, link=g_cw)
+    async with async_session_maker() as s:
+        await s.execute(text("UPDATE manual_games SET pair_prefers_import = FALSE, review_choice = 'ca', "
+                             "review_source = 'hand' WHERE id = :m"), {"m": ids["m_chosen"]})
+        await s.commit()
+    # 6e. A link a person CONFIRMED as the same match is left alone, however wrong it looks.
     g_hw = await synced("g_hw", date(2008, 4, 5), "Hillman", grade=GRADE_A)
     await synced("g_ht", date(2008, 4, 5), "Hillman", bat=bat(12), grade=GRADE_B)
     await manual("m_hand", date(2008, 4, 5), "Hillman", bat=bat(12), grade=GRADE_B, link=g_hw)
     async with async_session_maker() as s:
-        await s.execute(text("UPDATE manual_games SET review_source = 'hand' WHERE id = :m"), {"m": ids["m_hand"]})
+        await s.execute(text("UPDATE manual_games SET review_pair_ok = TRUE, review_source = 'hand' WHERE id = :m"), {"m": ids["m_hand"]})
         await s.commit()
     # 7. Already linked: neither half is a candidate for anything.
     g_linked = await synced("g_linked", date(2006, 3, 4), "Warnbro", bat=bat(4))
@@ -312,7 +321,10 @@ async def main():
     check("the two copies sit under different match types, the symptom the club saw", wrong.get("formats_differ"), True)
     check("the wrong game is not also offered to the card that belongs to it while it is still taken",
           any(k[1] == str(ids["m_wA"]) for k in by), False)
-    check("a link a person decided is not second-guessed",
+    k_chosen = ("relink", str(ids["m_chosen"]), str(ids["g_ct"]))
+    check("a card whose display a person CHOSE by hand is still offered a better game when its link is wrong",
+          k_chosen in by, True)
+    check("a link a person confirmed as the same match is not second-guessed",
           any(str(ids["m_hand"]) in (k[1], k[2]) or str(ids["g_hw"]) in (k[1], k[2]) for k in by), False)
     check("a link that already matches is not touched",
           any(k[0] == "relink" and str(ids["m_linked"]) in (k[1], k[2]) for k in by), False)
@@ -770,6 +782,18 @@ async def main():
         await act.restore_double(s, ORG, ids["m_wB"], ids["g_wB"], "relink", USER)
     check("and can be put back", k_wrong in kinds(await scan()), True)
 
+    async with async_session_maker() as s:
+        await act.relink(s, ORG, ids["m_chosen"], ids["g_ct"], USER)
+    st_c = (await q("SELECT superseded_by_game_id, review_choice, review_source, pair_prefers_import FROM manual_games WHERE id = :m",
+                    m=ids["m_chosen"]))[0]
+    check("moving a hand-chosen card's link keeps the person's choice and puts it on the right game",
+          (st_c[0], st_c[1], st_c[2], st_c[3]), (ids["g_ct"], "ca", "hand", False))
+    check("and the site shows the right Cricket Australia game, with the game it left free to count on its own",
+          {r[0] for r in await q("SELECT id::text FROM v_effective_games WHERE id IN (:a, :b, :c)", a=ids["m_chosen"], b=ids["g_cw"], c=ids["g_ct"])},
+          {str(ids["g_ct"]), str(ids["g_cw"])})
+    async with async_session_maker() as s:
+        await act.undo_last(s, ORG, ids["m_chosen"], USER)
+
     print("\n-- the bulk fix: every strong double in one batch, then the games it freed --")
     async with async_session_maker() as s:
         pv = act.bulk_doubles_preview((await dbl.find_doubles(s, ORG))["rows"])
@@ -783,7 +807,7 @@ async def main():
     check("it reports what it did", (res["relinked"] >= 1, res["linked"] >= 2, res["skipped"]), (True, True, []))
     check("the match counts once now", (await q("SELECT count(*) FROM v_effective_batting_innings WHERE player_id = :p AND game_id IN (:a, :b)",
                                                 p=pid_b, a=ids["m_wB"], b=ids["g_wB"]))[0][0], 1)
-    check("a link a person decided was left exactly as it was",
+    check("a link a person confirmed was left exactly as it was",
           (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_hand"]))[0][0], ids["g_hw"])
     check("a weaker match was not touched by the bulk fix", (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_part1"]))[0][0], None)
     check("one audit row records the batch", (await q("SELECT count(*) FROM audit_logs WHERE action = 'card_review_bulk' AND details->>'kind' = 'doubles'"))[0][0], 1)
@@ -795,7 +819,7 @@ async def main():
     print("\n-- nothing was deleted by any of it --")
     check("every card is still there",
           ((await q("SELECT count(*) FROM manual_games WHERE organisation_id = :o", o=ORG))[0][0],
-           (await q("SELECT count(*) FROM games WHERE home_org_id = :o", o=ORG))[0][0]), (22, 10))
+           (await q("SELECT count(*) FROM games WHERE home_org_id = :o", o=ORG))[0][0]), (23, 12))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     await engine.dispose()
