@@ -11,6 +11,11 @@ double is known before anything is changed.
 
     python -m app.scripts.inspect_player_matches <org-id-or-slug> "<player name>" <YYYY-MM-DD> [...] [--window DAYS]
 
+After each date it EXPLAINS the Possible doubles scan for every club card shown: the card's own flags
+(a link confirmed or decided by hand is never second-guessed, a "different matches" answer hides a
+pair), how many of its batters are on the game it is linked to, how it compares with every synced game
+nobody has linked, and whether the scan lists it now.
+
 The name is matched the way Card review matches it (every word, or a close fit, so "richie" finds
 "Ritchie"). `--window` is how many days either side to look (default 3: a two-day match is dated by
 a different day in each source). Run it through compose:
@@ -25,7 +30,10 @@ from datetime import date, timedelta
 from sqlalchemy import text
 
 from app.models.db import async_session_maker
+from app.services import card_review as cr
+from app.services import card_review_doubles as dbl
 from app.services import card_review_find as fnd
+from app.services import match_pairing as mp
 
 _SYNCED = """
     SELECT g.id::text AS id, g.played_at, g.match_format, g.home_team, g.away_team, g.opp_club_name,
@@ -75,6 +83,59 @@ async def lines(db, kind, gid, pids):
     return "bat " + (", ".join(bat) or "-") + " | bowl " + (", ".join(bowl) or "-")
 
 
+_FLAGS = """
+    SELECT m.id::text AS id, m.review_pair_ok, m.review_source, m.review_choice, m.superseded_by_game_id::text AS linked_to,
+           m.played_at, COALESCE(m.opposition, '') AS opposition, COALESCE(m.home_team, '') AS home_team,
+           COALESCE(m.away_team, '') AS away_team,
+           (SELECT count(*) FROM card_review_log l WHERE l.manual_game_id = m.id AND l.action = 'not_double'
+               AND l.undone_at IS NULL) AS dismissals
+      FROM manual_games m WHERE m.id = ANY(CAST(:ids AS UUID[]))
+"""
+
+
+def _pct(a, b):
+    return f"{a} of {b}"
+
+
+async def explain(db, org_id: str, club_ids: list, lo, hi, found: dict) -> None:
+    """Why the scan does or does not offer each club card shown above."""
+    if not club_ids:
+        return
+    club_tokens = mp.team_tokens((await db.execute(text(mp._CLUB_NAME_SQL), {"org": org_id})).scalar() or "")
+    flags = {r["id"]: r for r in (await db.execute(text(_FLAGS), {"ids": club_ids})).mappings()}
+    cards = await mp._cards(db, mp._IMPORTED_CARD_SQL, {"ids": club_ids})
+    games = await mp.load_synced(db, org_id, club_tokens=club_tokens, from_day=lo - timedelta(days=7),
+                                 to_day=hi + timedelta(days=7), exclude_twinned=True)
+    print("  --- why the scan does or does not offer each club card")
+    for cid in club_ids:
+        f = flags[cid]
+        sig = frozenset(cards.get(cid, ()))
+        ours, opp = mp.split_sides(f["home_team"], f["away_team"], f["opposition"], club_tokens)
+        me = mp.MatchRow(cid, f["played_at"], opp, sig, ours)
+        print(f"  card {cid[:8]}: {len(sig)} batters; pair confirmed by a person={bool(f['review_pair_ok'])}; "
+              f"decided by={f['review_source'] or 'nobody'}; 'different matches' answers={f['dismissals']}")
+        if f["linked_to"]:
+            cur = frozenset((await mp._cards(db, mp._SYNCED_CARD_SQL, {"org": org_id, "ids": [f["linked_to"]]})).get(f["linked_to"], ()))
+            ok = cr.confirms_pair(set(sig), set(cur))
+            print(f"    linked game {f['linked_to'][:8]} holds {len(cur)} batters, {len(sig & cur)} in common -> "
+                  f"{'the link matches the card (not a wrong link)' if ok else 'the link does NOT match the card'}")
+        for g in sorted(games, key=lambda x: str(x.played_at)):
+            if g.id == f["linked_to"]:
+                continue
+            ev = dbl._evidence(me, g)
+            if ev["gap_days"] is not None and ev["gap_days"] > 7:
+                continue
+            strength = dbl.strength_of(ev)
+            score = mp.score_pair(me, g)
+            why = (f"offered as {strength}" if strength and score is not None else
+                   "rejected: both cards have batters and too few agree" if ev["both_cards"] else "rejected by the pairing rules")
+            print(f"    unlinked game {g.id[:8]} {g.played_at}: {len(g.signature)} batters, {ev['shared']} in common, "
+                  f"{ev['gap_days']} days apart, opposition {'agrees' if ev['opposition_agrees'] else 'differs'} -> {why}")
+        hit = [r for r in found["rows"] if cid in (r["a"]["id"], r["b"]["id"])]
+        print("    the scan lists it now as: " + (", ".join(f"{r['kind']} ({r['strength']}) with {(r['b'] if r['a']['id'] == cid else r['a'])['id'][:8]}" for r in hit)
+                                                 if hit else "NOT LISTED"))
+
+
 async def main(org: str, name: str, dates: list, window: int) -> None:
     async with async_session_maker() as db:
         org_id = (await db.execute(text("SELECT id::text FROM organisations WHERE id::text = :o OR slug = :o"),
@@ -88,6 +149,7 @@ async def main(org: str, name: str, dates: list, window: int) -> None:
             return
         print(f"Player: {', '.join(who['names'])}{'  (closest match to ' + repr(name) + ')' if who['fuzzy'] else ''}"
               f"  [{len(who['ids'])} record(s)]")
+        found = None
         for d in dates:
             lo, hi = d - timedelta(days=window), d + timedelta(days=window)
             print(f"\n=== {d} (+/- {window} days)")
@@ -109,6 +171,11 @@ async def main(org: str, name: str, dates: list, window: int) -> None:
                       f"  counts={'yes' if r['counts'] else 'no'}  ({src}; {link})")
                 print(f"          {await lines(db, 'manual', r['id'], who['ids'])}")
             print(f"  -> {counted} cop{'y' if counted == 1 else 'ies'} counted in the effective record")
+            club_ids = [r["id"] for r in (await db.execute(text(_MANUAL), {"org": org_id, "lo": lo, "hi": hi, "p": who["ids"]})).mappings()]
+            if club_ids:
+                if found is None:
+                    found = await dbl.find_doubles(db, org_id)
+                await explain(db, org_id, club_ids, lo, hi, found)
 
 
 if __name__ == "__main__":
