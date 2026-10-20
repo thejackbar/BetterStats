@@ -6,6 +6,7 @@
 // A template file is JSON:
 //   {
 //     "format": "bettercricket-template", "version": 1, "name": "LineUp",
+//     "postType": "lineup",                        // lineup | general (default). Decides where it imports.
 //     "canvas": { "w": 1080, "h": 1350 },          // one of the Post size shapes
 //     "background": "data:image/png;base64,...",   // the design with the field text taken out; optional
 //     "fields": [
@@ -17,7 +18,10 @@
 //     ],
 //     "texts": [ { "text": "LINE UP", ...same look keys as a field... } ],  // fixed words, optional
 //     "panels": [ { "x": 70, "y": 130, "w": 450, "h": 950, "source": "picture", "color": "#7b3b3b" } ]
-//                // surfaces behind the text; "color" only when the design's was a solid colour
+//                // surfaces behind the text; "color" only when the design's was a solid colour.
+//                // A picture panel can carry its own picture: "image" (a data URL) and "box"
+//                // ({x,y,w,h,rotation}, the picture's own rectangle before it was turned).
+//     "background": "data:image/png;base64,..."   // the design's own background picture, optional
 //   }
 //
 // STRUCTURE FIRST. By default an import uses the roles, not the designer's own
@@ -107,10 +111,21 @@ export function parseTemplateFile(raw) {
       x: Math.round(num(p.x, 0)), y: Math.round(num(p.y, 0)), w: pw, h: ph,
       hex: HEX.test(p.color || '') ? p.color.toLowerCase() : null,
       source: ['solid', 'picture', 'shape'].includes(p.source) ? p.source : 'picture',
+      // A picture the panel carries (kept as a picture, positioned by its own box and turn).
+      image: typeof p.image === 'string' ? p.image : null,
+      box: p.box && typeof p.box === 'object' && Number(p.box.w) >= 20 && Number(p.box.h) >= 20
+        ? { x: Math.round(num(p.box.x, 0)), y: Math.round(num(p.box.y, 0)), w: Math.round(num(p.box.w, 0)), h: Math.round(num(p.box.h, 0)), rotation: Math.round(num(p.box.rotation, 0)) }
+        : null,
+      imageUrl: null,
     })
   }
   const w = num(doc.canvas && doc.canvas.w, 1080), h = num(doc.canvas && doc.canvas.h, 1080)
+  const postType = doc.postType === 'lineup' ? 'lineup' : 'general'
+  if (postType === 'lineup' && !fields.some((f) => /^lineup\./.test(f.bind || ''))) {
+    warnings.push('This is marked as a line up but has no player places, so nothing will fill from the players you add. In Canva, type {{player 1}}, {{player 2}} and so on.')
+  }
   return {
+    postType,
     name: String(doc.name || 'Imported template').slice(0, 80),
     canvas: { w, h }, background: typeof doc.background === 'string' ? doc.background : null,
     fields, texts, panels, warnings,
@@ -147,6 +162,13 @@ export function itemsFromTemplate(parsed, { designUrl, designName, width, height
   // reads in light or dark mode alike. Keeping the Canva look uses the designer's
   // colour, but only where the panel was a solid colour (a picture's colour is not known).
   const panelItems = parsed.panels.map((p) => {
+    // A panel that brought its own picture (and the editor kept it) is that picture, as designed.
+    if (p.imageUrl && p.box) {
+      return {
+        ...newBlankItem('image', { src: p.imageUrl, srcName: `${parsed.name} panel`, x: p.box.x, y: p.box.y, w: p.box.w, h: p.box.h, fit: 'cover' }),
+        rotation: p.box.rotation, fromTemplate: true,
+      }
+    }
     const own = !clubStyle && p.hex
     return {
       ...newBlankItem('element', { shape: 'rect' }),

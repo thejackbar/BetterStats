@@ -1,7 +1,10 @@
-import type { ExportRequest, ExportResponse } from "@canva/design";
-import { buildTemplateFile, type TemplateFile } from "./buildFile";
+import {
+  buildTemplateFile,
+  type PostType,
+  type Pictures,
+  type TemplateFile,
+} from "./buildFile";
 import { extractFields, isError, nameFonts, type FontLookup } from "./extract";
-import { hideFields, restoreFields, type Hidden } from "./hide";
 import type { SessionCallback } from "./session";
 import type { Extraction, Skipped } from "./types";
 
@@ -10,38 +13,31 @@ export const PICTURE_LIMIT_BYTES = 5 * 1024 * 1024;
 
 export type Picture = { dataUrl: string; bytes: number };
 
+/** Which kind of picture is being fetched, so it can be sized to suit. */
+export type PictureUse = "background" | "panel";
+
 export type ExportDeps = {
   /** Runs a callback inside the one design session (see session.ts). */
   inPage: (callback: SessionCallback) => Promise<void>;
-  requestExport: (request: ExportRequest) => Promise<ExportResponse>;
-  /** Downloads the exported file and returns it as a data URL. */
-  fetchPicture: (url: string) => Promise<Picture>;
+  /** Fetches one of the design's own pictures by Canva's id, sized for BetterCricket. */
+  fetchImage: (ref: string, use: PictureUse) => Promise<Picture>;
   lookupFonts: FontLookup;
 };
 
-export type ExportOutcome =
-  | {
-      status: "done";
-      file: TemplateFile;
-      fieldCount: number;
-      textCount: number;
-      panelCount: number;
-      /** Size of the picture in the file, or null when the file has none. */
-      pictureBytes: number | null;
-      /** Boxes that were left out of the file, and why. */
-      skipped: Skipped[];
-    }
-  | { status: "aborted" }
-  | {
-      status: "no_picture";
-      file: TemplateFile;
-      fieldCount: number;
-      textCount: number;
-      panelCount: number;
-      pictureUrl: string | null;
-      reason: string;
-      skipped: Skipped[];
-    };
+export type ExportOutcome = {
+  file: TemplateFile;
+  fieldCount: number;
+  textCount: number;
+  panelCount: number;
+  /** Whether the design's own background picture is in the file. */
+  background: boolean;
+  /** How many panels carry their own picture. */
+  panelPictures: number;
+  /** Pictures that could not be fetched, one line each. The file is still made. */
+  pictureProblems: string[];
+  /** Boxes that were left out of the file, and why. */
+  skipped: Skipped[];
+};
 
 /** Something on the page has to be fixed before an export would be right. */
 export class ExportBlocked extends Error {
@@ -52,169 +48,23 @@ export class ExportBlocked extends Error {
   }
 }
 
-/** The placeholder words are still hidden; `hidden` is what to put back. */
-export class RestoreFailed extends Error {
-  readonly hidden: Hidden[];
-  constructor(hidden: Hidden[], cause: unknown) {
-    const detail = cause instanceof Error ? cause.message : String(cause);
-    super(
-      `Your {{placeholder}} text boxes are still hidden. Press “Restore placeholders”. (${detail})`,
-    );
-    this.hidden = hidden;
-  }
-}
-
 const detailOf = (e: unknown): string =>
   e instanceof Error ? e.message : String(e);
 
-/** Puts hidden boxes back and saves. Throws RestoreFailed if it cannot. */
-export async function restoreHidden(
-  inPage: ExportDeps["inPage"],
-  hidden: Hidden[],
-): Promise<void> {
-  if (!hidden.length) {
-    return;
-  }
-  try {
-    await inPage(async (session) => {
-      if (session.page.type !== "absolute") {
-        throw new Error("The page is no longer a page apps can edit.");
-      }
-      restoreFields(session.page, hidden);
-      await session.sync();
-    });
-  } catch (e) {
-    throw new RestoreFailed(hidden, e);
-  }
-}
+/** Names a picture in a problem line: the background, or "Panel 2". */
+const nameOf = (use: PictureUse, panel: number): string =>
+  use === "background" ? "Background" : `Panel ${panel}`;
 
 /**
- * Makes the template file: hides the field boxes, has Canva export the page as a
- * picture, ALWAYS puts the boxes back (whether the export finished, was
- * cancelled or failed), then builds the file with the picture in it.
- *
- * `onHidden` is told what was hidden as soon as it is, so a caller can offer a
- * manual "restore" if the automatic one fails.
+ * Reads the page and builds the file: where each field and fixed word sits and
+ * its colour and font roles, the panels behind the words, and the design's own
+ * pictures (its background and any picture a panel is filled with). Nothing on
+ * the page is touched. A picture that cannot be fetched is reported and the
+ * file is still made, because the layout is worth having without it.
  */
 export async function exportTemplate(
   deps: ExportDeps,
-  opts: { name: string; withPicture?: boolean },
-  onHidden: (hidden: Hidden[]) => void = () => {},
-): Promise<ExportOutcome> {
-  if (!opts.withPicture) {
-    return exportStructure(deps, opts.name);
-  }
-  let extraction: Extraction | undefined;
-  let hidden: Hidden[] = [];
-
-  // 1. Check the page and hide the field boxes.
-  try {
-    await deps.inPage(async (session) => {
-      const page = session.page;
-      if (page.type !== "absolute") {
-        throw new ExportBlocked(
-          "This kind of page cannot be exported by apps. Use a normal design page.",
-        );
-      }
-      const read = extractFields(page);
-      if (isError(read)) {
-        throw new ExportBlocked(read.error);
-      }
-      if (read.fields.length === 0) {
-        throw new ExportBlocked(
-          "There are no fields on this page, so there is nothing to export yet.",
-        );
-      }
-      if (read.skipped.length) {
-        throw new ExportBlocked(
-          "Some text boxes would show their {{words}} in the picture. Fix them first.",
-          read.skipped,
-        );
-      }
-      hidden = hideFields(page);
-      onHidden(hidden);
-      extraction = read;
-      await session.sync();
-    });
-  } catch (e) {
-    // The hide may or may not have reached the design before this failed.
-    if (hidden.length) {
-      await restoreHidden(deps.inPage, hidden).catch(() => {
-        throw new RestoreFailed(hidden, e);
-      });
-    }
-    throw e;
-  }
-  if (!extraction) {
-    throw new ExportBlocked("The page could not be read.");
-  }
-  const read = extraction;
-
-  // 2. Export, and put the boxes back whatever happens.
-  let response: ExportResponse | undefined;
-  let exportError: unknown;
-  try {
-    response = await deps.requestExport({ acceptedFileTypes: ["png", "jpg"] });
-  } catch (e) {
-    exportError = e;
-  }
-  await restoreHidden(deps.inPage, hidden);
-  if (exportError) {
-    throw new Error(
-      `Canva could not export the picture: ${detailOf(exportError)}`,
-    );
-  }
-  if (!response || response.status === "aborted") {
-    return { status: "aborted" };
-  }
-
-  // 3. Build the file.
-  const named = await nameFonts(read, deps.lookupFonts);
-  const url = response.exportBlobs[0]?.url ?? null;
-  const fieldCount = named.fields.length;
-  const textCount = named.texts.length;
-  const panelCount = named.panels.length;
-  const withoutPicture = (reason: string): ExportOutcome => ({
-    status: "no_picture",
-    file: buildTemplateFile(named, { name: opts.name }),
-    fieldCount,
-    textCount,
-    panelCount,
-    pictureUrl: url,
-    reason,
-    skipped: named.skipped,
-  });
-  if (!url) {
-    return withoutPicture("Canva did not return a picture.");
-  }
-  try {
-    const picture = await deps.fetchPicture(url);
-    return {
-      status: "done",
-      file: buildTemplateFile(named, {
-        name: opts.name,
-        background: picture.dataUrl,
-      }),
-      fieldCount,
-      textCount,
-      panelCount,
-      pictureBytes: picture.bytes,
-      skipped: named.skipped,
-    };
-  } catch (e) {
-    return withoutPicture(detailOf(e));
-  }
-}
-
-/**
- * Reads the page and builds the file with no picture: where each field and fixed
- * word sits, and its colour and font roles. Nothing on the page is touched, so
- * there is nothing to hide or put back. Boxes that could not be read are listed,
- * not refused, because they cost the file nothing but themselves.
- */
-async function exportStructure(
-  deps: ExportDeps,
-  name: string,
+  opts: { name: string; postType: PostType },
 ): Promise<ExportOutcome> {
   let read: Extraction | undefined;
   await deps.inPage(async (session) => {
@@ -236,14 +86,62 @@ async function exportStructure(
       read?.skipped ?? [],
     );
   }
+  if (
+    opts.postType === "lineup" &&
+    !read.fields.some((f) => f.binding?.startsWith("lineup."))
+  ) {
+    throw new ExportBlocked(
+      "A line up needs at least one player place. Add one with “Add line up”, or type {{player 1}} into a text box.",
+      read.skipped,
+    );
+  }
   const named = await nameFonts(read, deps.lookupFonts);
+
+  // The design's own pictures. Each is fetched once, even if two things share it.
+  const pictureProblems: string[] = [];
+  const byRef = new Map<string, string>();
+  const want: { ref: string; use: PictureUse; panel: number }[] = [];
+  if (named.backgroundRef) {
+    want.push({ ref: named.backgroundRef, use: "background", panel: 0 });
+  }
+  named.panels.forEach((p, i) => {
+    if (p.imageRef && p.box && !want.some((w) => w.ref === p.imageRef)) {
+      want.push({ ref: p.imageRef, use: "panel", panel: i + 1 });
+    }
+  });
+  for (const w of want) {
+    try {
+      const pic = await deps.fetchImage(w.ref, w.use);
+      if (pic.bytes > PICTURE_LIMIT_BYTES) {
+        pictureProblems.push(
+          `${nameOf(w.use, w.panel)}: the picture is over BetterCricket's 5 MB limit.`,
+        );
+      } else {
+        byRef.set(w.ref, pic.dataUrl);
+      }
+    } catch (e) {
+      pictureProblems.push(`${nameOf(w.use, w.panel)}: ${detailOf(e)}`);
+    }
+  }
+  const pictures: Pictures = {
+    background: named.backgroundRef
+      ? byRef.get(named.backgroundRef)
+      : undefined,
+    byRef,
+  };
+  const file = buildTemplateFile(named, {
+    name: opts.name,
+    postType: opts.postType,
+    pictures,
+  });
   return {
-    status: "done",
-    file: buildTemplateFile(named, { name }),
+    file,
     fieldCount: named.fields.length,
     textCount: named.texts.length,
     panelCount: named.panels.length,
-    pictureBytes: null,
+    background: !!pictures.background,
+    panelPictures: (file.panels ?? []).filter((p) => p.image).length,
+    pictureProblems,
     skipped: named.skipped,
   };
 }
