@@ -1,7 +1,7 @@
 export default {
   version: 'v9.128.0',
   date: '2026-10-20',
-  sortKey: '2026-10-20T12:00:00Z',
+  sortKey: '2026-11-05T12:00:00Z',
   title: 'A picture of every club\'s season, for emails and ads',
   items: [
     'Each club with a season snapshot can now have a picture: the club, the season, the top run-scorer or wicket-taker and up to three supporting facts. It is drawn in three sizes: a wide card for emails and link previews, and a feed size and a story size for ads. A club with no logo gets a crest of its initials.',
