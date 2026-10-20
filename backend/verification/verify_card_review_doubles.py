@@ -17,6 +17,7 @@ Mutations (each must make the suite FAIL, which is what proves the checks bite):
   MUTATE=forget     a "different matches" answer is not remembered
   MUTATE=noundo     undo does not know about a link
   MUTATE=halfpair   find a match only searches the club cards, so a pair found by its synced half is missed
+  MUTATE=blindlink  the scan only looks at unlinked cards (how the first release missed a card linked to the wrong game)
 """
 from __future__ import annotations
 
@@ -85,11 +86,12 @@ async def main():
     if mutate == "nolink":
         real_link = act.link_double
 
-        async def link_unlocked(db, org_id, mid, game_id, user_id):
-            res = await real_link(db, org_id, mid, game_id, user_id)
+        async def link_unlocked(db, org_id, mid, game_id, user_id, **kw):
+            res = await real_link(db, org_id, mid, game_id, user_id, **kw)
             await db.execute(text("UPDATE manual_games SET pairing_locked = FALSE, review_pair_ok = FALSE "
                                   "WHERE id = CAST(:m AS UUID)"), {"m": str(mid)})
-            await db.commit()
+            if kw.get("commit", True):
+                await db.commit()
             return res
         act.link_double = link_unlocked
     if mutate == "forget":
@@ -97,6 +99,12 @@ async def main():
             return []
         dbl.dismissed_pairs = forget
 
+    if mutate == "blindlink":
+        real_pairs = dbl.match_pairs_ca
+
+        def unlinked_only(manuals, synced, banned, linked_ids=frozenset()):
+            return real_pairs([m for m in manuals if m.id not in linked_ids], synced, banned, frozenset())
+        dbl.match_pairs_ca = unlinked_only
     if mutate == "halfpair":
         fnd._SYNCED_HITS = fnd._SYNCED_HITS.replace("WHERE (", "WHERE FALSE AND (")
 
@@ -246,6 +254,21 @@ async def main():
     # 6c. The same day and club, only some batters agree (a player named differently): likely.
     await manual("m_part1", date(2003, 3, 1), "Safety Bay", bat=[("Ritchie", 51), ("Hind", 9)] + eleven(8))
     await manual("m_part2", date(2003, 3, 1), "Safety Bay", bat=[("Ritchie", 51), ("Hind", 12)] + eleven(9))
+    # 6d. THE SHOALWATER SHAPE. A club plays two grades against one club on one day. The import's
+    # duplicate check ignores grade, so the B grade card was linked to the A grade game, the real B
+    # grade game stayed unlinked, and the B grade match counted twice. The A grade card is unlinked
+    # too, and its own game is the one the B card is sitting on.
+    g_wA = await synced("g_wA", date(2008, 3, 1), "Safety Bay", fmt="Two Day", bat=bat(11), grade=GRADE_A)
+    g_wB = await synced("g_wB", date(2008, 3, 1), "Safety Bay", fmt="Two Day", bat=bat(10), grade=GRADE_B)
+    await manual("m_wB", date(2008, 3, 1), "Safety Bay", fmt="One Day", bat=bat(10), grade=GRADE_B, link=g_wA)
+    await manual("m_wA", date(2008, 3, 1), "Safety Bay", fmt="One Day", bat=bat(11), grade=GRADE_A)
+    # 6e. A wrong-looking link a person decided is left alone.
+    g_hw = await synced("g_hw", date(2008, 4, 5), "Hillman", grade=GRADE_A)
+    await synced("g_ht", date(2008, 4, 5), "Hillman", bat=bat(12), grade=GRADE_B)
+    await manual("m_hand", date(2008, 4, 5), "Hillman", bat=bat(12), grade=GRADE_B, link=g_hw)
+    async with async_session_maker() as s:
+        await s.execute(text("UPDATE manual_games SET review_source = 'hand' WHERE id = :m"), {"m": ids["m_hand"]})
+        await s.commit()
     # 7. Already linked: neither half is a candidate for anything.
     g_linked = await synced("g_linked", date(2006, 3, 4), "Warnbro", bat=bat(4))
     await manual("m_linked", date(2006, 3, 4), "Warnbro", bat=bat(4), link=g_linked)
@@ -280,6 +303,19 @@ async def main():
     check("a two-day match dated a week apart is found on two shared scores", k_off in by, True)
     check("and called strong", by.get(k_off, {}).get("strength"), "strong")
     check("the gap in days is reported", by.get(k_off, {}).get("gap_days"), 7)
+    k_wrong = ("relink", str(ids["m_wB"]), str(ids["g_wB"]))
+    wrong = by.get(k_wrong) or {"a": {}, "b": {}, "current": None}
+    check("a card linked to the wrong game, with its real game left unlinked, is found", k_wrong in by, True)
+    check("and called strong, because most of the card is on the right game", wrong.get("strength"), "strong")
+    check("it says which game the card is on now, and that none of its batters are there",
+          ((wrong["current"] or {}).get("id"), (wrong["current"] or {}).get("shared_with_club")), (str(ids["g_wA"]), 0))
+    check("the two copies sit under different match types, the symptom the club saw", wrong.get("formats_differ"), True)
+    check("the wrong game is not also offered to the card that belongs to it while it is still taken",
+          any(k[1] == str(ids["m_wA"]) for k in by), False)
+    check("a link a person decided is not second-guessed",
+          any(str(ids["m_hand"]) in (k[1], k[2]) or str(ids["g_hw"]) in (k[1], k[2]) for k in by), False)
+    check("a link that already matches is not touched",
+          any(k[0] == "relink" and str(ids["m_linked"]) in (k[1], k[2]) for k in by), False)
     check("two different matches a week apart that share two low scores are NOT offered, however you pair them",
           any(str(ids[k]) in (x[1], x[2]) for k in ("m_wk1", "m_wk2", "g_wk3") for x in by), False)
     k_part = ("club", str(ids["m_part1"]), str(ids["m_part2"]))
@@ -629,7 +665,7 @@ async def main():
         ov = await route.card_review_overview(fresh=False, club=club, db=s)
         n_open = dbl.counts(await scan())["total"]
         check("the overview counts the doubles as a step", (ov["todo"]["doubles"], ov["groups"]["doubles"]), (n_open, n_open))
-        check("and breaks them down", ov["doubles"]["by_kind"]["ca"] + ov["doubles"]["by_kind"]["club"], n_open)
+        check("and breaks them down", sum(ov["doubles"]["by_kind"].values()), n_open)
         check("a failed scan is reported on the step, not as a broken page", ov["doubles"]["error"], None)
         lst = await route.card_review_doubles(kind=None, strength=None, season=None, shown="open", sort=None,
                                               fresh=True, limit=50, offset=0, club=club, db=s)
@@ -709,10 +745,57 @@ async def main():
         check("and by competition", (await route.card_review_doubles(kind=None, strength=None, season=None, shown="open", sort=None,
               fresh=False, limit=50, offset=0, find=flt(competition="Reserves League"), club=club, db=s))["total"] < d_all["total"], True)
 
+    print("\n-- a wrong link: counted twice, moved, and undone --")
+    eff = lambda p, a, b: q("SELECT count(*) FROM v_effective_batting_innings WHERE player_id = :p AND game_id IN (:a, :b)", p=p, a=a, b=b)  # noqa: E731
+    pid_b = (await q("SELECT player_id FROM manual_batting_innings WHERE manual_game_id = :m ORDER BY batting_position, id LIMIT 1", m=ids["m_wB"]))[0][0]
+    check("before: the B grade match counts twice (the club card shows, and so does the unlinked B game)",
+          (await q("SELECT count(*) FROM v_effective_batting_innings WHERE player_id = :p AND game_id IN (:a, :b)",
+                   p=pid_b, a=ids["m_wB"], b=ids["g_wB"]))[0][0], 2)
+    async with async_session_maker() as s:
+        out = await act.relink(s, ORG, ids["m_wB"], ids["g_wB"], USER)
+    check("moving the link puts the card on its own game", (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0], ids["g_wB"])
+    check("after: it counts once",
+          (await q("SELECT count(*) FROM v_effective_batting_innings WHERE player_id = :p AND game_id IN (:a, :b)",
+                   p=pid_b, a=ids["m_wB"], b=ids["g_wB"]))[0][0], 1)
+    check("and the game it left is free again and is now offered to the card that belongs to it",
+          ("ca", str(ids["m_wA"]), str(ids["g_wA"])) in kinds(await scan()), True)
+    async with async_session_maker() as s:
+        await act.undo_last(s, ORG, ids["m_wB"], USER)
+    check("undo puts the link back where it was, nothing deleted",
+          (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0], ids["g_wA"])
+    async with async_session_maker() as s:
+        await act.dismiss_double(s, ORG, ids["m_wB"], ids["g_wB"], "relink", USER)
+    check("saying it is not the right game is remembered", k_wrong in kinds(await scan()), False)
+    async with async_session_maker() as s:
+        await act.restore_double(s, ORG, ids["m_wB"], ids["g_wB"], "relink", USER)
+    check("and can be put back", k_wrong in kinds(await scan()), True)
+
+    print("\n-- the bulk fix: every strong double in one batch, then the games it freed --")
+    async with async_session_maker() as s:
+        pv = act.bulk_doubles_preview((await dbl.find_doubles(s, ORG))["rows"])
+    check("the preview counts the strong wrong links and the strong unlinked pairs", (pv["relink"] >= 1, pv["ca"] >= 1, len(pv["sample"]) > 0), (True, True, True))
+    check("and never includes a weaker match", all(r["strength"] == "strong" for r in pv["sample"]), True)
+    async with async_session_maker() as s:
+        res = await act.bulk_fix_doubles(s, ORG, USER)
+    check("it moved the wrong link and then linked the game that link had been sitting on",
+          ((await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0],
+           (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wA"]))[0][0]), (ids["g_wB"], ids["g_wA"]))
+    check("it reports what it did", (res["relinked"] >= 1, res["linked"] >= 2, res["skipped"]), (True, True, []))
+    check("the match counts once now", (await q("SELECT count(*) FROM v_effective_batting_innings WHERE player_id = :p AND game_id IN (:a, :b)",
+                                                p=pid_b, a=ids["m_wB"], b=ids["g_wB"]))[0][0], 1)
+    check("a link a person decided was left exactly as it was",
+          (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_hand"]))[0][0], ids["g_hw"])
+    check("a weaker match was not touched by the bulk fix", (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_part1"]))[0][0], None)
+    check("one audit row records the batch", (await q("SELECT count(*) FROM audit_logs WHERE action = 'card_review_bulk' AND details->>'kind' = 'doubles'"))[0][0], 1)
+    async with async_session_maker() as s:
+        undone = await act.bulk_undo(s, ORG, USER, res["batch_id"])
+    check("the whole batch can be undone", (undone["undone"] >= 3, (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0],
+                                            (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wA"]))[0][0]), (True, ids["g_wA"], None))
+
     print("\n-- nothing was deleted by any of it --")
     check("every card is still there",
           ((await q("SELECT count(*) FROM manual_games WHERE organisation_id = :o", o=ORG))[0][0],
-           (await q("SELECT count(*) FROM games WHERE home_org_id = :o", o=ORG))[0][0]), (19, 6))
+           (await q("SELECT count(*) FROM games WHERE home_org_id = :o", o=ORG))[0][0]), (22, 10))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     await engine.dispose()

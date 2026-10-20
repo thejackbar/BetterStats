@@ -2049,6 +2049,8 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v) })
     return request(`/club-admin/card-review/doubles?${q}`)
   },
+  cardReviewDoublesBulkPreview: () => request('/club-admin/card-review/doubles/bulk/preview'),
+  cardReviewDoublesBulk: () => request('/club-admin/card-review/doubles/bulk', { method: 'POST' }),
   cardReviewDoubleLink: (matchId, gameId) =>
     request('/club-admin/card-review/doubles/link', { method: 'POST', body: JSON.stringify({ match_id: matchId, game_id: gameId }) }),
   cardReviewDoubleDismiss: (matchId, otherId, kind) =>

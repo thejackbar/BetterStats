@@ -19,6 +19,7 @@ from typing import Optional
 from sqlalchemy import text
 
 from app.services import card_review as cr
+from app.services import card_review_doubles as dbl
 from app.services import card_review_hybrid as hy
 
 _STATE_COLS = ("pair_prefers_import", "pairing_locked", "review_choice", "review_source",
@@ -246,7 +247,7 @@ async def mark_pair_ok(db, org_id, mid, user_id, note: Optional[str] = None) -> 
     return {"match_id": str(mid), "log_id": log_id}
 
 
-async def relink(db, org_id, mid, game_id, user_id) -> dict:
+async def relink(db, org_id, mid, game_id, user_id, *, batch_id=None, commit: bool = True) -> dict:
     """Link the club card to a different Cricket Australia game."""
     row = await _row(db, org_id, mid)
     gid = str(uuid.UUID(str(game_id)))
@@ -265,19 +266,22 @@ async def relink(db, org_id, mid, game_id, user_id) -> dict:
         raise ReviewError("Another club scorecard is already linked to that Cricket Australia match. "
                           "Re-link that one first, or swap the two.")
     before = _snapshot(row)
+    before_players = await _players_of(db, mid, org_id)  # the card the link leaves counted its players too
     await _revert_inserted(db, mid)
     await db.execute(text("""
         UPDATE manual_games SET superseded_by_game_id = CAST(:g AS UUID), pairing_locked = TRUE,
                review_pair_ok = FALSE, review_detail = NULL,
                review_choice = CASE WHEN review_choice = 'hybrid' THEN 'club' ELSE review_choice END,
                updated_at = NOW() WHERE id = CAST(:m AS UUID)"""), {"g": gid, "m": str(mid)})
-    log_id = await _log(db, org_id, mid, action="relink", from_choice=None, to_choice=None, source="hand",
-                        user_id=user_id, note=None, batch_id=None, before=before, detail={"to_game": gid})
-    players = await _players_of(db, mid, org_id)
-    await db.commit()
-    await recompute(db, org_id, players)
-    await db.commit()
-    return {"match_id": str(mid), "game_id": gid, "log_id": log_id}
+    log_id = await _log(db, org_id, mid, action="relink", from_choice=None, to_choice=None,
+                        source="bulk" if batch_id else "hand", user_id=user_id, note=None, batch_id=batch_id,
+                        before=before, detail={"to_game": gid, "from_game": row["gid"]})
+    players = set(await _players_of(db, mid, org_id)) | set(before_players)
+    if commit:
+        await db.commit()
+        await recompute(db, org_id, players)
+        await db.commit()
+    return {"match_id": str(mid), "game_id": gid, "log_id": log_id, "players": list(players)}
 
 
 async def unlink(db, org_id, mid, user_id) -> dict:
@@ -374,11 +378,12 @@ async def bulk_apply(db, org_id, user_id, *, limit: Optional[int] = None, chunk:
 
 
 async def bulk_undo(db, org_id, user_id, batch_id) -> dict:
-    """Put every match of a batch back, except one a person has changed since."""
+    """Put every match of a batch back, except one a person has changed since. NEWEST FIRST: a link
+    made later in the batch may be holding the game an earlier one is returning to."""
     entries = (await db.execute(text("""
         SELECT l.id, l.manual_game_id::text AS mid FROM card_review_log l
          WHERE l.org_id = CAST(:o AS UUID) AND l.batch_id = CAST(:b AS UUID)
-           AND l.undone_at IS NULL AND l.action = 'choice' ORDER BY l.id"""),
+           AND l.undone_at IS NULL AND l.action IN ('choice', 'relink', 'link') ORDER BY l.id DESC"""),
         {"o": str(org_id), "b": str(batch_id)})).mappings().all()
     undone, changed = 0, []
     for e in entries:
@@ -389,8 +394,12 @@ async def bulk_undo(db, org_id, user_id, batch_id) -> dict:
         if latest != e["id"]:
             changed.append(e["mid"])
             continue
-        await undo_last(db, org_id, e["mid"], user_id)
-        undone += 1
+        try:
+            await undo_last(db, org_id, e["mid"], user_id)
+            undone += 1
+        except ReviewError:
+            await db.rollback()
+            changed.append(e["mid"])
     return {"batch_id": str(batch_id), "undone": undone, "left_alone": changed}
 
 
@@ -405,7 +414,7 @@ async def _club_game_ok(db, org_id, gid: str) -> bool:
         {"g": gid, "o": str(org_id)})).first())
 
 
-async def link_double(db, org_id, mid, game_id, user_id) -> dict:
+async def link_double(db, org_id, mid, game_id, user_id, *, batch_id=None, commit: bool = True) -> dict:
     """A person says this club card and this Cricket Australia game are one match.
 
     The two are linked and locked, and the match joins the normal review (the person has said it
@@ -437,17 +446,19 @@ async def link_double(db, org_id, mid, game_id, user_id) -> dict:
                pairing_locked = TRUE, review_pair_ok = TRUE, review_choice = NULL, updated_at = NOW()
          WHERE id = CAST(:m AS UUID)"""), {"g": gid, "pref": prefer, "m": str(mid)})
     log_id = await _log(db, org_id, mid, action="link", from_choice=None, to_choice="club" if prefer else "ca",
-                        source="hand", user_id=user_id, note=None, batch_id=None, before=before,
-                        detail={"to_game": gid, "shared": len(club_card & ca_card)})
+                        source="bulk" if batch_id else "hand", user_id=user_id, note=None, batch_id=batch_id,
+                        before=before, detail={"to_game": gid, "shared": len(club_card & ca_card)})
     players.update(await _players_of(db, mid, org_id))
-    await db.commit()
-    await recompute(db, org_id, players)
-    await db.commit()
-    return {"match_id": str(mid), "game_id": gid, "log_id": log_id, "shows": "club" if prefer else "ca"}
+    if commit:
+        await db.commit()
+        await recompute(db, org_id, players)
+        await db.commit()
+    return {"match_id": str(mid), "game_id": gid, "log_id": log_id, "shows": "club" if prefer else "ca",
+            "players": list(players)}
 
 
 async def _other_ok(db, org_id, kind: str, mid, other: str) -> None:
-    if kind == "ca":
+    if kind in ("ca", "relink"):
         if not await _club_game_ok(db, org_id, other):
             raise ReviewError("That Cricket Australia match is not one of this club's.")
         return
@@ -471,7 +482,7 @@ def _pair_rows(head: str, org_id, mid, other: str, kind: str) -> tuple:
 
 async def dismiss_double(db, org_id, mid, other_id, kind: str, user_id) -> dict:
     """These two are different matches. Recorded, undoable, and keyed on the pair."""
-    if kind not in ("ca", "club"):
+    if kind not in ("ca", "club", "relink"):
         raise ReviewError("Say whether the other copy is a Cricket Australia card or a club scorecard.")
     other = str(uuid.UUID(str(other_id)))
     row = await _row(db, org_id, mid)
@@ -497,3 +508,61 @@ async def restore_double(db, org_id, mid, other_id, kind: str, user_id) -> dict:
     res = await db.execute(text(sql), params)
     await db.commit()
     return {"match_id": str(mid), "restored": res.rowcount}
+
+
+# --- fixing the strong doubles in one batch ------------------------------------------------------
+
+BULK_DOUBLE_CAP = 600
+
+
+def bulk_doubles_preview(rows: list, *, sample: int = 8) -> dict:
+    """What a bulk fix would do on its first pass: the strong wrong links it would move and the
+    strong unlinked pairs it would link. A later pass can find more (a game freed by a moved link
+    may now match its own card), so the numbers are a floor."""
+    strong = [r for r in rows if r["strength"] == "strong" and r["kind"] in ("relink", "ca")]
+    pick = sorted(strong, key=lambda r: (r["kind"] != "relink", r["date"] or ""))[:sample]
+    return {"relink": sum(1 for r in strong if r["kind"] == "relink"), "ca": sum(1 for r in strong if r["kind"] == "ca"),
+            "sample": pick}
+
+
+async def bulk_fix_doubles(db, org_id, user_id, *, max_rounds: int = 3) -> dict:
+    """Move every strong wrong link to its right game and link every strong unlinked pair, as one
+    batch that can be undone. Moving a link frees a game, and that game's own card may then match
+    it, so the scan is repeated (up to `max_rounds`) until a pass finds nothing."""
+    batch = uuid.uuid4()
+    done = {"relink": 0, "ca": 0}
+    skipped, players = [], set()
+    for _ in range(max_rounds):
+        found = await dbl.find_doubles(db, org_id)
+        todo = [r for r in found["rows"] if r["strength"] == "strong" and r["kind"] in done]
+        todo.sort(key=lambda r: (r["kind"] != "relink", r["date"] or "", r["key"]))
+        todo = todo[:BULK_DOUBLE_CAP - sum(done.values())]
+        if not todo:
+            break
+        progress = 0
+        for r in todo:
+            try:
+                if r["kind"] == "relink":
+                    res = await relink(db, org_id, r["a"]["id"], r["b"]["id"], user_id, batch_id=batch, commit=False)
+                else:
+                    res = await link_double(db, org_id, r["a"]["id"], r["b"]["id"], user_id, batch_id=batch, commit=False)
+                players.update(res["players"])
+                done[r["kind"]] += 1
+                progress += 1
+            except ReviewError as e:
+                skipped.append({"match_id": r["a"]["id"], "reason": str(e)})
+        await db.commit()
+        if not progress or sum(done.values()) >= BULK_DOUBLE_CAP:
+            break
+    await recompute(db, org_id, players)
+    total = sum(done.values())
+    if total:
+        await db.execute(text("""
+            INSERT INTO audit_logs (org_id, action, target_type, target_id, details)
+            VALUES (CAST(:o AS UUID), 'card_review_bulk', 'manual_games', :t, CAST(:d AS JSONB))"""), {
+            "o": str(org_id), "t": str(batch),
+            "d": json.dumps({"why": "Strong possible doubles fixed: wrong links moved to the right game and unlinked pairs linked.",
+                             "kind": "doubles", "batch_id": str(batch), "matches": total,
+                             "relinked": done["relink"], "linked": done["ca"], "skipped": len(skipped)})})
+        await db.commit()
+    return {"batch_id": str(batch), "relinked": done["relink"], "linked": done["ca"], "skipped": skipped}

@@ -15,7 +15,7 @@ import { FindLink } from '../../components/admin/cardReview/MatchFilters'
 // guidance: nothing is locked, and a later step can be opened at any time.
 const STEPS = [
   { group: 'doubles', title: 'Find the doubles', ink: TONES.block.hex, button: 'Open the list',
-    why: 'A match held twice with nothing linking the copies counts twice on careers, match type tabs and records. Link the pair, or remove the extra copy. A linked match joins the steps below.' },
+    why: 'A match held twice counts twice on careers, match type tabs and records: a card with no link, a card linked to the wrong game, or two club cards. Link it, move the link, or remove the extra copy. A fixed match joins the steps below.' },
   { group: 'pairing', title: 'Check the pairings', ink: TONES.block.hex, button: 'Open the list',
     why: 'The two cards may not be the same match. Fix a wrong link first: a match moved to the right Cricket Australia game joins the groups below.' },
   { group: 'agree', title: 'Switch the matches that agree', ink: TONES.ok.hex, button: 'Preview the switch',
@@ -158,8 +158,8 @@ function Batches({ batches, onUndo, busy }) {
         {batches.map(b => (
           <div key={b.batch_id} className="flex flex-wrap items-center gap-3 border-b border-pb-hairline px-4 py-3 last:border-0">
             <div className="min-w-0 flex-1 text-[13px] text-pb-text">
-              {fmtDate(b.created_at)}: {b.matches} matches switched to Cricket Australia
-              <span className="text-pb-dim"> · {b.still_switched} still switched</span>
+              {fmtDate(b.created_at)}: {b.kind === 'doubles' ? `${b.matches} doubles fixed` : `${b.matches} matches switched to Cricket Australia`}
+              <span className="text-pb-dim"> · {b.still_switched} still {b.kind === 'doubles' ? 'fixed' : 'switched'}</span>
             </div>
             <Button size="sm" disabled={busy || b.still_switched === 0} onClick={() => onUndo(b.batch_id)}>Undo this batch</Button>
           </div>

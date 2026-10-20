@@ -72,8 +72,15 @@ export default function DoubleCard({ row, onChanged, dismissed = false }) {
       <Evidence row={row} />
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <SideBox side={a} label={a.kind === 'club' && row.kind === 'club' ? 'Club scorecard (earlier)' : undefined} />
-        <SideBox side={b} label={b.kind === 'club' && row.kind === 'club' ? 'Club scorecard (later)' : undefined} />
+        <SideBox side={b} label={row.kind === 'relink' ? 'The right Cricket Australia match' : b.kind === 'club' && row.kind === 'club' ? 'Club scorecard (later)' : undefined} />
       </div>
+      {row.current && (
+        <p className="mt-2.5 text-[12.5px] text-pb-dim" data-testid="current-link">
+          Linked now to <b className="text-pb-text">{row.current.grade || 'a game'} v {row.current.opposition || '—'}</b>, {fmtDate(row.current.date)}
+          {row.current.format ? ` (${row.current.format})` : ''}, where {row.current.shared_with_club} of this card's {a.batters} batters appear with the same score.{' '}
+          <a className="text-pb-accent-ink hover:underline" href={matchPageUrl(row.current.id)} target="_blank" rel="noreferrer">Open that game</a>
+        </p>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {dismissed ? (
           <>
@@ -91,6 +98,12 @@ export default function DoubleCard({ row, onChanged, dismissed = false }) {
                 Same match: link them
               </Button>
             )}
+            {row.kind === 'relink' && (
+              <Button size="sm" variant="primary" disabled={busy} data-testid="relink"
+                onClick={() => run(() => api.cardReviewRelink(a.id, b.id), 'Link moved to the right match. The game it left counts on its own again.')}>
+                Move the link to the right match
+              </Button>
+            )}
             {row.kind === 'club' && (
               <>
                 <Button size="sm" variant="danger" disabled={busy} onClick={() => remove(a)} data-testid="remove-a">Remove the earlier copy</Button>
@@ -102,6 +115,9 @@ export default function DoubleCard({ row, onChanged, dismissed = false }) {
               Different matches
             </Button>
           </>
+        )}
+        {row.kind === 'relink' && !dismissed && (
+          <span className="ml-auto text-[11.5px] text-pb-faint">Nothing is deleted. The link can be moved back from the match.</span>
         )}
         {row.kind === 'ca' && !dismissed && (
           <span className="ml-auto text-[11.5px] text-pb-faint">Nothing is deleted. Both cards stay, and the link can be undone from the match.</span>

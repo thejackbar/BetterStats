@@ -285,7 +285,7 @@ async def find_fixtures(db, org_id, *, text_q=None, season=None, grade=None, com
             continue
         state = "linked" if f["mid"] and f["gid"] else "club_only" if f["mid"] else "ca_only"
         rv = review.get(f["mid"]) if state == "linked" else None
-        cand = None if state == "linked" else cand_by.get(f["mid"] or f["gid"])
+        cand = cand_by.get(f["mid"] or f["gid"])
         out["rows"].append({
             "key": f"{state}:{f['mid'] or ''}:{f['gid'] or ''}", "state": state,
             "date": str(f["date"]) if f["date"] else None, "copies": copies,

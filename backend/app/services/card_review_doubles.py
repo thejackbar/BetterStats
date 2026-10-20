@@ -10,6 +10,15 @@ TWO KINDS OF DOUBLE.
 * ``ca``    a club scorecard (`manual_games`: a file import, a typed-in card or a photo) with no link,
             and a synced Cricket Australia game with no club scorecard linked to it, that look like
             one match. The fix is to link them, after which the match joins the normal review.
+* ``relink`` a club card that IS linked, but to a game that does not match it, while an unlinked
+            synced game matches it strongly. This is what an import leaves where a club plays several
+            grades against one opposition on one day: its duplicate check ignores grade, so the "B
+            grade" card is linked to the A grade game, the real B grade game stays unlinked, and the
+            match counts twice (once the club card, once the unlinked game). Seen at Shoalwater Bay on
+            four fixtures. The fix is to move the link to the right game (`card_review_actions.relink`);
+            the game it leaves is free again and, if its own card is unlinked, shows up as a ``ca`` pair
+            on the next scan. A link a person decided (`review_source = 'hand'`, or confirmed with
+            `review_pair_ok`) is never second-guessed, and only a strong match is offered.
 * ``club``  two club scorecards that look like one match, at least one of them unlinked (a file
             imported twice, or an import beside a hand-typed or photographed card). The other may
             already be linked to its Cricket Australia game: that is what a second import of a
@@ -59,7 +68,7 @@ from sqlalchemy import text
 from app.services import card_review as cr
 from app.services import match_pairing as mp
 
-KINDS = ("ca", "club")
+KINDS = ("ca", "club", "relink")
 STRENGTHS = ("strong", "likely", "possible")
 
 _MANUALS = """
@@ -69,7 +78,8 @@ _MANUALS = """
            s.name AS season_name, COALESCE(gr.display_name_override, gr.name) AS grade_name,
            mg.cricketstatz_import_id IS NOT NULL AS from_cricketstatz,
            mg.extracted_payload IS NOT NULL AS has_payload, mg.created_at,
-           mg.created_by_user_id, mg.superseded_by_game_id IS NOT NULL AS linked
+           mg.created_by_user_id, mg.superseded_by_game_id IS NOT NULL AS linked,
+           mg.superseded_by_game_id::text AS linked_to, mg.review_pair_ok, mg.review_source
       FROM manual_games mg
       LEFT JOIN seasons s ON s.id = mg.season_id
       LEFT JOIN grades gr ON gr.id = mg.grade_id
@@ -167,10 +177,15 @@ def _greedy(left: list, right: list, banned: set, accept, symmetric: bool) -> li
     return out
 
 
-def match_pairs_ca(manuals: list, synced: list, banned: set) -> list:
-    """Unlinked club cards against synced games nobody has linked. Pure: rows in, pairs out."""
+def match_pairs_ca(manuals: list, synced: list, banned: set, linked_ids=frozenset()) -> list:
+    """Club cards against synced games nobody has linked. Pure: rows in, pairs out.
+
+    `linked_ids` are cards that already have a link and are being offered a better one: only a
+    strong match moves a link, because the card is already counted once and a weaker reason is not
+    enough to take it from the game it is on."""
     def accept(a, b, ev):
-        return True  # `strength_of` has already turned away two cards that are different matches
+        # `strength_of` has already turned away two cards that are different matches
+        return ev["confirmed"] if a.id in linked_ids else True
     return _greedy(manuals, synced, banned, accept, symmetric=False)
 
 
@@ -235,7 +250,7 @@ def _synced_side(g: dict, card: frozenset, bowlers: int, org: str) -> dict:
     }
 
 
-def _line(kind, pair, side_a, side_b) -> dict:
+def _line(kind, pair, side_a, side_b, current=None) -> dict:
     ev = pair["evidence"]
     fa, fb = (side_a["format"] or "").strip().lower(), (side_b["format"] or "").strip().lower()
     return {
@@ -248,6 +263,8 @@ def _line(kind, pair, side_a, side_b) -> dict:
         # player's profile: once under Two Day and once under One Day.
         "formats_differ": bool(fa and fb and fa != fb),
         "date": side_a["date"] or side_b["date"],
+        # for a wrong link: the game the card is on now
+        "current": current,
     }
 
 
@@ -267,6 +284,18 @@ async def find_doubles(db, org_id) -> dict:
         ours, opp = mp.split_sides(m["home_team"], m["away_team"], m["opposition"], club_tokens)
         manuals.append(mp.MatchRow(m["mid"], m["played_at"], opp, frozenset(cards.get(m["mid"], ())), ours))
     open_manuals = [m for m in manuals if not meta[m.id]["linked"]]
+    # Linked cards whose game does not match them are offered a better game too.
+    linked_to = sorted({m["linked_to"] for m in club_cards if m["linked_to"]})
+    cur_cards = await mp._cards(db, mp._SYNCED_CARD_SQL, {"org": org, "ids": linked_to}) if linked_to else {}
+    wrong = []
+    for m in manuals:
+        mm = meta[m.id]
+        if not mm["linked"] or not m.has_card or mm["review_pair_ok"] or mm["review_source"] == "hand":
+            continue
+        if cr.confirms_pair(set(m.signature), set(cur_cards.get(mm["linked_to"], ()))):
+            continue
+        wrong.append(m)
+    wrong_ids = frozenset(m.id for m in wrong)
 
     dates = [m.played_at for m in manuals if m.played_at is not None]
     span = timedelta(days=mp.WINDOW_DAYS)
@@ -275,12 +304,13 @@ async def find_doubles(db, org_id) -> dict:
                                   to_day=(max(dates) + span) if dates else None)
     ban_ca, ban_club = _banned(dismissed)
     pairs_ca, pairs_club = await asyncio.gather(
-        asyncio.to_thread(match_pairs_ca, open_manuals, synced, ban_ca),
+        asyncio.to_thread(match_pairs_ca, open_manuals + wrong, synced, ban_ca, wrong_ids),
         asyncio.to_thread(match_pairs_club, manuals, meta, ban_club))
 
     manual_by = {m.id: m for m in manuals}
     synced_by = {m.id: m for m in synced}
-    gids = sorted({p["b"] for p in pairs_ca})
+    cur_of = {p["a"]: meta[p["a"]]["linked_to"] for p in pairs_ca if p["a"] in wrong_ids}
+    gids = sorted({p["b"] for p in pairs_ca} | set(cur_of.values()))
     gdet = {g["gid"]: g for g in (await _all(db, _SYNCED_DETAIL, org=org, ids=gids))} if gids else {}
     mbow = {r["mid"]: r["n"] for r in await _all(db, _BOWLERS, ids=ids)}
     gbow = {r["gid"]: r["n"] for r in await _all(db, _CA_BOWLERS, org=org, ids=gids)} if gids else {}
@@ -294,8 +324,16 @@ async def find_doubles(db, org_id) -> dict:
         g = gdet.get(p["b"])
         if not g:
             continue
-        rows.append(_line("ca", p, m_side(p["a"]), _synced_side(g, synced_by[p["b"]].signature,
-                                                                gbow.get(p["b"], 0), org)))
+        current = None
+        if p["a"] in wrong_ids:
+            cg = gdet.get(cur_of[p["a"]])
+            if not cg:
+                continue
+            csig = frozenset(cur_cards.get(cg["gid"], ()))
+            current = {**_synced_side(cg, csig, gbow.get(cg["gid"], 0), org),
+                       "shared_with_club": len(manual_by[p["a"]].signature & csig)}
+        rows.append(_line("relink" if current else "ca", p, m_side(p["a"]),
+                          _synced_side(g, synced_by[p["b"]].signature, gbow.get(p["b"], 0), org), current))
     for p in pairs_club:
         rows.append(_line("club", p, m_side(p["a"]), m_side(p["b"])))
     order = {s: i for i, s in enumerate(STRENGTHS)}
@@ -308,7 +346,7 @@ async def _dismissed_lines(db, org: str, dismissed: list) -> list:
     if not dismissed:
         return []
     mids = sorted({d["mid"] for d in dismissed} | {d["other"] for d in dismissed if d["kind"] == "club" and d["other"]})
-    gids = sorted({d["other"] for d in dismissed if d["kind"] == "ca" and d["other"]})
+    gids = sorted({d["other"] for d in dismissed if d["kind"] in ("ca", "relink") and d["other"]})
     by_m = {m["mid"]: m for m in await _all(db, _MANUALS + " AND mg.id = ANY(CAST(:ids AS UUID[]))", org=org, ids=mids)}
     cards = await mp._cards(db, mp._IMPORTED_CARD_SQL, {"ids": mids})
     mbow = {r["mid"]: r["n"] for r in await _all(db, _BOWLERS, ids=mids)}

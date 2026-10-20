@@ -5,6 +5,7 @@ import { PbSpinner } from '../../lib/presskit'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { Button, Note, SegGroup, SegItem } from '../../components/admin/ui'
 import DoubleCard from '../../components/admin/cardReview/DoubleCard'
+import DoublesBulkModal from '../../components/admin/cardReview/DoublesBulkModal'
 import MatchFilters, { FindLink, filterParams, useFilterParams } from '../../components/admin/cardReview/MatchFilters'
 
 const PAGE = 25
@@ -23,6 +24,7 @@ export default function AdminCardReviewDoubles() {
   // Which list the rows on screen belong to. The buttons follow the rows, not the tab just clicked,
   // so the open pairs never show "Put back" while the dismissed list is still loading.
   const [rowsAre, setRowsAre] = useState('open')
+  const [bulk, setBulk] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const seq = useRef(0)
@@ -55,6 +57,9 @@ export default function AdminCardReviewDoubles() {
       caption={counts ? `${counts.total.toLocaleString()} to look at` : undefined}
       actions={
         <div className="flex flex-wrap gap-2">
+          {(counts?.by_kind?.relink > 0 || counts?.by_kind?.ca > 0) && counts?.by_strength?.strong > 0 && (
+            <Button size="sm" variant="primary" onClick={() => setBulk(true)} data-testid="bulk-fix">Fix the strong ones…</Button>
+          )}
           <FindLink filters={filters} />
           <Button as={Link} to="/admin/card-review" size="sm">Back to Card review</Button>
         </div>
@@ -62,9 +67,9 @@ export default function AdminCardReviewDoubles() {
     >
       <p className="max-w-[760px] text-[13.5px] text-pb-dim mb-4">
         These are matches the record holds twice with nothing linking the copies, so a batter's career, the match type tabs and the
-        record boards count them twice. Each pair is a club scorecard (imported, typed in or read from a photo) beside a Cricket
-        Australia match, or beside another club scorecard. If it is the same match, link the two (or remove the extra copy). If it
-        is not, say so and it will not be offered again.
+        record boards count them twice. Each one is a club scorecard (imported, typed in or read from a photo) that is not linked to its Cricket
+        Australia match, or is linked to the wrong one, or a second club scorecard of the same match. Link it, move the link to the
+        right match, or remove the extra copy. If it is not a double, say so and it will not be offered again.
       </p>
       <MatchFilters value={filters} onApply={setFilters} playerNote={playerNote}
         hint="The same words narrow every step of Card review." />
@@ -87,7 +92,8 @@ export default function AdminCardReviewDoubles() {
             </SegGroup>
             <SegGroup>
               <SegItem active={!kind} onClick={() => setKind('')}>Both kinds</SegItem>
-              <SegItem active={kind === 'ca'} onClick={() => setKind('ca')} data-testid="k-ca">Against Cricket Australia</SegItem>
+              <SegItem active={kind === 'relink'} onClick={() => setKind('relink')} data-testid="k-relink">Wrong link ({counts?.by_kind?.relink || 0})</SegItem>
+              <SegItem active={kind === 'ca'} onClick={() => setKind('ca')} data-testid="k-ca">Not linked ({counts?.by_kind?.ca || 0})</SegItem>
               <SegItem active={kind === 'club'} onClick={() => setKind('club')} data-testid="k-club">Two club scorecards</SegItem>
             </SegGroup>
             <SegGroup>
@@ -115,6 +121,7 @@ export default function AdminCardReviewDoubles() {
           <Button disabled={loading} onClick={() => load(true, rows.length)}>Show more ({total - rows.length} left)</Button>
         </div>
       )}
+      {bulk && <DoublesBulkModal onClose={() => setBulk(false)} onDone={() => { setBulk(false); changed() }} />}
     </BetterStatsLayout>
   )
 }

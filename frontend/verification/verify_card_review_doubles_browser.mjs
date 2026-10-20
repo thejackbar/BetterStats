@@ -31,6 +31,7 @@ const MA = 'aaaaaaaa-0000-4000-8000-00000000000a', GA = 'bbbbbbbb-0000-4000-8000
 const MB = 'aaaaaaaa-0000-4000-8000-00000000000b', GB = 'bbbbbbbb-0000-4000-8000-00000000000b'
 const MC = 'aaaaaaaa-0000-4000-8000-00000000000c', MD = 'aaaaaaaa-0000-4000-8000-00000000000d'
 const ML = 'aaaaaaaa-0000-4000-8000-00000000000e', GL = 'bbbbbbbb-0000-4000-8000-00000000000e'
+const MR = 'aaaaaaaa-0000-4000-8000-000000000010', GR = 'bbbbbbbb-0000-4000-8000-000000000010', GW = 'bbbbbbbb-0000-4000-8000-000000000011'
 
 const side = (kind, id, o = {}) => ({
   kind, id, linked: false, date: '2006-02-04', season: 'Summer 2005/06', grade: 'A Grade', opposition: 'Warnbro',
@@ -48,7 +49,12 @@ const ROWS = [
     b: side('club', MD, { date: '2007-02-24' }), shared: 9, gap_days: 0, same_day: true, opposition_agrees: true,
     both_cards: true, formats_differ: true, date: '2007-02-24' },
 ]
-const COUNTS = { total: 3, dismissed: 1, by_strength: { strong: 2, likely: 0, possible: 1 }, by_kind: { ca: 2, club: 1 }, formats_differ: 2 }
+// A card linked to the wrong game: the B grade card sits on the A grade game, the real B game is free.
+ROWS.push({ key: `relink:${MR}:${GR}`, kind: 'relink', strength: 'strong', a: side('club', MR, { linked: true, date: '2006-02-04', grade: 'B grade', opposition: 'Safety Bay' }),
+  b: side('ca', GR, { date: '2006-02-04', grade: 'B Grade: McIntosh Cup', opposition: 'Safety Bay Cricket Club' }), shared: 9, gap_days: 0, same_day: true,
+  opposition_agrees: true, both_cards: true, confirmed: true, formats_differ: true, date: '2006-02-04',
+  current: side('ca', GW, { date: '2006-02-04', grade: 'A Grade', opposition: 'Safety Bay Cricket Club', batters: 0, shared_with_club: 0 }) })
+const COUNTS = { total: 4, dismissed: 1, by_strength: { strong: 3, likely: 0, possible: 1 }, by_kind: { ca: 2, club: 1, relink: 1 }, formats_differ: 3 }
 const DISMISSED = [{ key: `ca:${MA}:${GB}`, kind: 'ca', a: side('club', MA), b: side('ca', GB), date: '2006-02-04', dismissed_by: 'jack' }]
 const OVERVIEW = {
   total: 3328, groups: { agree: 2112, small: 533, differ: 222, pairing: 233, nocard: 228, doubles: 3 },
@@ -80,6 +86,9 @@ const routes = (page, calls, o = {}) => page.route('**/api/**', async (route) =>
   if (/card-review\/bulk\/batches/.test(url)) return json({ batches: [] })
   if (/card-review\/find\/options/.test(url)) return json({ seasons: ['Summer 2005/06', 'Summer 2004/05'], competitions: ['Reserves League'], players: ['Ritchie, Peter', 'Ritchie, Rod', 'Hind, Darren', 'Smith, John'], oppositions: ['Warnbro Knights', 'Old Irwinians', 'Hillman'], grades: ['A Grade', 'B Grade', 'C1 Grade'] })
   if (/card-review\/find\?/.test(url)) return json({ total: FIND_ROWS.length, offset: 0, limit: 25, capped: false, rows: FIND_ROWS })
+  if (/card-review\/doubles\/bulk\/preview/.test(url)) return json({ relink: 1, ca: 2, sample: [ROWS[3], ROWS[0]] })
+  if (/card-review\/doubles\/bulk/.test(url) && req.method() === 'POST') return json({ batch_id: 'bt9', relinked: 1, linked: 2, skipped: [] })
+  if (/card-review\/matches\/[^/]+\/relink/.test(url) && req.method() === 'POST') return json({ ok: true })
   if (/card-review\/doubles\/(link|dismiss|restore)/.test(url) && req.method() === 'POST') return json({ ok: true, shows: 'ca' })
   if (/card-review\/doubles\?/.test(url)) {
     const sp = new URL(url).searchParams
@@ -149,13 +158,13 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   const first = gets(calls, /card-review\/doubles\?/)[0]
   const q = new URL(first.url).searchParams
   check('it asks for the open pairs, strongest first, 25 a page', q.get('shown') === 'open' && q.get('sort') === 'strongest' && q.get('limit') === '25', first.url)
-  check('one card per pair', (await page.locator('[data-testid="double-card"]').count()) === 3)
+  check('one card per pair', (await page.locator('[data-testid="double-card"]').count()) === 4)
   check('every card draws both copies', (await page.locator('[data-testid="double-card"]').first().locator('[data-testid="side"]').count()) === 2)
   const ev = (await page.locator('[data-testid="evidence"]').first().innerText()).toLowerCase()
   check('the evidence says strength, batters in common, the gap and the opposition', /strong match/i.test(ev) && ev.includes('9 of 9 batters in common') && /same day/i.test(ev) && /same opposition/i.test(ev), ev)
   check('two copies under different match types are flagged', /different match types/i.test(ev))
   check('a pair where one card has no batters says so', (await page.locator('[data-testid="evidence"]').nth(1).innerText()).toLowerCase().includes('no batters to compare'))
-  check('the formats note counts them', (await page.locator('[data-testid="formats-note"]').innerText()).includes('2'))
+  check('the formats note counts them', (await page.locator('[data-testid="formats-note"]').innerText()).includes('3'))
   check('each side links to its real scorecard page', (await page.locator('[data-testid="side"] a').first().getAttribute('href')) === `/games/${MA}`)
   await page.screenshot({ path: SHOTS + 'card_review_doubles_1440.png', fullPage: true })
   const n = calls.length
@@ -168,6 +177,14 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   await page.waitForTimeout(300)
   const dis = posts(calls, /doubles\/dismiss/)
   check('Different matches is ONE POST naming both ids and the kind', dis.length === 1 && JSON.parse(dis[0].body).kind === 'ca' && JSON.parse(dis[0].body).other_id === GB, JSON.stringify(dis.map(d => d.body)))
+  const wrong = page.locator('[data-testid="double-card"][data-kind="relink"]')
+  check('a card linked to the wrong game says where it is linked now and that none of its batters are there', (await wrong.locator('[data-testid="current-link"]').innerText()).includes('A Grade v Safety Bay Cricket Club') && (await wrong.locator('[data-testid="current-link"]').innerText()).includes("0 of this card's 9 batters"))
+  check('it offers moving the link, not a plain link', (await wrong.locator('[data-testid="relink"]').count()) === 1 && (await wrong.locator('[data-testid="link"]').count()) === 0)
+  await wrong.locator('[data-testid="relink"]').click()
+  await page.waitForTimeout(400)
+  const rl = posts(calls, /matches\/[^/]+\/relink/)
+  check('moving the link is ONE POST to that card with the right game', rl.length === 1 && rl[0].url.includes(MR) && JSON.parse(rl[0].body).game_id === GR, JSON.stringify(rl.map(r => [r.url, r.body])))
+  check('and it did not send a plain link', posts(calls, /doubles\/link/).length === 1)
   const clubCard = page.locator('[data-testid="double-card"][data-kind="club"]')
   check('two club scorecards offer removing a copy, not a link', (await clubCard.locator('[data-testid="link"]').count()) === 0 && (await clubCard.locator('[data-testid="remove-b"]').count()) === 1)
   await clubCard.locator('[data-testid="remove-b"]').click()
@@ -282,6 +299,29 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   check('no horizontal overflow at 390px', (await overflow(narrow.page)) <= 0, String(await overflow(narrow.page)))
   await narrow.page.screenshot({ path: SHOTS + 'card_review_find_390.png', fullPage: true })
   await narrow.ctx.close()
+}
+
+// ── the bulk fix ───────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n-- fix the strong ones --')
+  const { ctx, page, calls, errors } = await open(browser, 1440, '/admin/card-review/doubles')
+  await page.waitForSelector('[data-testid="bulk-fix"]', { timeout: 15000 })
+  await page.click('[data-testid="bulk-fix"]')
+  await page.waitForSelector('[data-testid="doubles-bulk-modal"]')
+  await page.waitForSelector('[data-testid="bulk-relink"]')
+  check('it opens a preview, not an action', posts(calls, /doubles\/bulk$/).length === 0)
+  check('the preview says how many wrong links and how many unlinked pairs', (await page.locator('[data-testid="bulk-relink"]').innerText()).startsWith('1') && (await page.locator('[data-testid="bulk-link"]').innerText()).startsWith('2'))
+  check('and that nothing is deleted', (await page.locator('[data-testid="doubles-bulk-modal"]').innerText()).includes('Nothing is deleted'))
+  check('Fix stays disabled until the sample has been looked at', await page.isDisabled('[data-testid="doubles-bulk-apply"]'))
+  await page.check('[data-testid="doubles-bulk-ack"]')
+  check('and unlocks when ticked', !(await page.isDisabled('[data-testid="doubles-bulk-apply"]')))
+  await page.screenshot({ path: SHOTS + 'card_review_doubles_bulk_1440.png', fullPage: true })
+  await page.click('[data-testid="doubles-bulk-apply"]')
+  await page.waitForTimeout(500)
+  check('one POST goes to /doubles/bulk', posts(calls, /doubles\/bulk$/).length === 1)
+  check('and the list is asked for again with a fresh scan', gets(calls, /card-review\/doubles\?/).some(c => new URL(c.url).searchParams.get('fresh') === 'true'))
+  check('the screen raised no errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
 }
 
 // ── typeahead and the season dropdown ──────────────────────────────────────────────────────────

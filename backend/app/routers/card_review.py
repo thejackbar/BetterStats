@@ -338,7 +338,9 @@ async def card_review_relink(match_id: str, data: RelinkIn,
                              club: Organisation = Depends(get_current_club),
                              db: AsyncSession = Depends(get_db)):
     match_id = _id(match_id)
-    return await _do(club, act.relink(db, club.id, match_id, _id(data.game_id), user.id))
+    res = await _do(club, act.relink(db, club.id, match_id, _id(data.game_id), user.id))
+    res.pop("players", None)
+    return res
 
 
 @router.post("/matches/{match_id}/unlink")
@@ -402,8 +404,9 @@ async def card_review_batches(club: Organisation = Depends(get_current_club),
                               db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(text("""
         SELECT a.target_id AS batch_id, a.created_at, (a.details->>'matches')::int AS matches,
+               COALESCE(a.details->>'kind', 'switch') AS kind,
                (SELECT count(*) FROM card_review_log l WHERE l.batch_id = CAST(a.target_id AS UUID)
-                   AND l.undone_at IS NULL AND l.action = 'choice') AS still_switched
+                   AND l.undone_at IS NULL AND l.action IN ('choice', 'relink', 'link')) AS still_switched
           FROM audit_logs a
          WHERE a.org_id = CAST(:o AS UUID) AND a.action = 'card_review_bulk'
          ORDER BY a.created_at DESC LIMIT 20"""), {"o": str(club.id)})).mappings().all()
@@ -484,12 +487,30 @@ async def card_review_find(
         raise HTTPException(status_code=422, detail=str(e))
 
 
+@router.get("/doubles/bulk/preview", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
+async def card_review_doubles_bulk_preview(club: Organisation = Depends(get_current_club),
+                                           db: AsyncSession = Depends(get_db)):
+    return act.bulk_doubles_preview((await _doubles(db, club.id, True))["rows"])
+
+
+@router.post("/doubles/bulk")
+async def card_review_doubles_bulk(user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+                                   club: Organisation = Depends(get_current_club),
+                                   db: AsyncSession = Depends(get_db)):
+    """Fix every strong possible double in one undoable batch (see `act.bulk_fix_doubles`)."""
+    res = await act.bulk_fix_doubles(db, club.id, user.id)
+    _drop(club.id)
+    return res
+
+
 @router.post("/doubles/link")
 async def card_review_double_link(data: LinkIn, user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
                                   club: Organisation = Depends(get_current_club),
                                   db: AsyncSession = Depends(get_db)):
     """Say a club card and a Cricket Australia game are one match. Both stay stored."""
-    return await _do(club, act.link_double(db, club.id, _id(data.match_id), _id(data.game_id), user.id))
+    res = await _do(club, act.link_double(db, club.id, _id(data.match_id), _id(data.game_id), user.id))
+    res.pop("players", None)
+    return res
 
 
 @router.post("/doubles/dismiss")
