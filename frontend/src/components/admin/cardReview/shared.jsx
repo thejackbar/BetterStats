@@ -13,6 +13,7 @@ export const CHOICES = [
 export const CHOICE_NAME = { ca: 'Cricket Australia', club: 'Club scorecard', hybrid: 'Club scorecard with Cricket Australia detail' }
 
 export const GROUPS = {
+  doubles: { label: 'Possible doubles', tone: 'block', blurb: 'The same match held twice with nothing linking the copies, so it is counted twice.' },
   agree: { label: 'Scores agree', tone: 'ok', blurb: 'Same runs, wickets and result on both. Cricket Australia usually also holds bowler and fielder names, balls faced and the opposition innings.' },
   small: { label: 'Small differences', tone: 'accent', blurb: 'The batting agrees. The date, the extras, the bowling figures or how a batter was out differ slightly.' },
   differ: { label: 'Scores differ', tone: 'warn', blurb: 'At least one batter, or the winner, is different. These need a person to choose.' },

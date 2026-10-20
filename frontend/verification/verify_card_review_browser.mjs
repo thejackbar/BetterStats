@@ -54,9 +54,9 @@ const ROWS = [
     items: [{ kind: 'extras', category: 'extras', label: 'Extras', ca: 11, club: 12 }], size: 8, suggested: 'ca' }),
 ]
 const OVERVIEW = {
-  total: 3328, groups: { agree: 2112, small: 533, differ: 222, pairing: 233, nocard: 228 },
+  total: 3328, groups: { agree: 2112, small: 533, differ: 222, pairing: 233, nocard: 228, doubles: 0 },
   current: { ca: 0, club: 3328, hybrid: 0 }, decided_by_hand: 0, agree_club_richer: 87, bulk_left: 2025,
-  todo: { pairing: 233, agree: 2112, small: 533, differ: 222 },
+  todo: { doubles: 0, pairing: 233, agree: 2112, small: 533, differ: 222 },
   seasons: [
     { season: 'Summer 2025/26', matches: 253, ca: 0, club: 253, hybrid: 0, needs_decision: 31 },
     { season: 'Summer 2024/25', matches: 232, ca: 0, club: 232, hybrid: 0, needs_decision: 27 },
@@ -160,10 +160,10 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   check('the agree card says how many are held back from the switch, with a way to look at them',
     (await page.locator('[data-testid="richer-note"]').innerText()).includes('87') && (await page.getAttribute('[data-testid="richer-link"]', 'href')) === '/admin/card-review/agree?richer=yes')
   const order = await page.locator('[data-testid^="step-"]').evaluateAll(els => els.map(e => e.dataset.testid))
-  check('the four steps run pairing, agree, small, differ', order.join(',') === 'step-pairing,step-agree,step-small,step-differ', order.join(','))
+  check('the five steps run doubles, pairing, agree, small, differ', order.join(',') === 'step-doubles,step-pairing,step-agree,step-small,step-differ', order.join(','))
   check('the pairing step is the one marked to start with',
     (await page.getAttribute('[data-testid="step-pairing"]', 'data-state')) === 'next' && (await page.getAttribute('[data-testid="step-agree"]', 'data-state')) === 'later')
-  check('each step says its place in the order', (await page.locator('[data-testid="step-differ"]').innerText()).toLowerCase().includes('step 4 of 4'))
+  check('each step says its place in the order', (await page.locator('[data-testid="step-differ"]').innerText()).toLowerCase().includes('step 5 of 5'))
   check('the progress line counts what is reviewed out of what can be compared', (await page.locator('[data-testid="progress"]').innerText()).includes('0 of 3,100 matches reviewed'))
   check('the matches with no Cricket Australia card are a note, not a step', (await page.locator('[data-testid="nocard-note"]').innerText()).includes('228'))
   check('a previous bulk switch is offered an undo', (await page.locator('[data-testid="batches"]').innerText()).includes('Undo this batch'))
@@ -260,7 +260,7 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   check('each is marked as holding more on the club card', (await page.locator('[data-testid="richer-badge"]').count()) === 1)
   check('and its suggestion is the combined choice, not Cricket Australia', (await page.locator('[data-testid="queue-row"]').first().innerText()).toLowerCase().includes('club + ca detail'))
   await page.click('[data-testid="richer-filter"]')
-  await page.click('text=Any')
+  await page.getByRole('button', { name: 'Any', exact: true }).click()
   await page.waitForTimeout(300)
   const last = calls.filter(c => /card-review\/matches\?/.test(c.url)).pop()
   check('turning the filter off stops asking for them', !new URL(last.url).searchParams.has('richer'), last.url)

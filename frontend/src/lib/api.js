@@ -2016,7 +2016,7 @@ export const api = {
   // Card review: a match stored twice (Cricket Australia card + the club's own), compared,
   // chosen between three ways, and undone. The long id lists ride in the URL as a GET and every
   // change is a POST, because a capability held at View level answers reads and refuses writes.
-  cardReviewOverview: () => request('/club-admin/card-review/overview'),
+  cardReviewOverview: (fresh = false) => request(`/club-admin/card-review/overview${fresh ? '?fresh=true' : ''}`),
   cardReviewMatches: (params = {}) => {
     const q = new URLSearchParams()
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v) })
@@ -2042,6 +2042,25 @@ export const api = {
   cardReviewBulkUndo: (batchId) =>
     request('/club-admin/card-review/bulk/undo', { method: 'POST', body: JSON.stringify({ batch_id: batchId }) }),
   cardReviewBatches: () => request('/club-admin/card-review/bulk/batches'),
+  // Possible doubles (the first step), Find a match, and the filters every list shares: q, player,
+  // grade, competition, date_from, date_to. Reads are GETs; every change is a POST.
+  cardReviewDoubles: (params = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v) })
+    return request(`/club-admin/card-review/doubles?${q}`)
+  },
+  cardReviewDoubleLink: (matchId, gameId) =>
+    request('/club-admin/card-review/doubles/link', { method: 'POST', body: JSON.stringify({ match_id: matchId, game_id: gameId }) }),
+  cardReviewDoubleDismiss: (matchId, otherId, kind) =>
+    request('/club-admin/card-review/doubles/dismiss', { method: 'POST', body: JSON.stringify({ match_id: matchId, other_id: otherId, kind }) }),
+  cardReviewDoubleRestore: (matchId, otherId, kind) =>
+    request('/club-admin/card-review/doubles/restore', { method: 'POST', body: JSON.stringify({ match_id: matchId, other_id: otherId, kind }) }),
+  cardReviewFind: (params = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v) })
+    return request(`/club-admin/card-review/find?${q}`)
+  },
+  cardReviewFindOptions: () => request('/club-admin/card-review/find/options'),
   cardReviewExportUrl: () => `${BASE}/club-admin/card-review/export.csv`,
   adminListSeasonAdjustments: () => request('/club-admin/manual-entries/season-adjustments'),
   adminCreateSeasonAdjustment: (data) =>

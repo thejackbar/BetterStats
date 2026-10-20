@@ -155,10 +155,11 @@ async def set_choice(db, org_id, mid, choice: str, user_id, *, note: Optional[st
 async def undo_last(db, org_id, mid, user_id) -> dict:
     """Put the match back as it was before its most recent change."""
     row = await _row(db, org_id, mid)
+    players_before = await _players_of(db, mid, org_id)
     entry = (await db.execute(text("""
         SELECT id, action, before_state, from_choice, to_choice, detail FROM card_review_log
          WHERE manual_game_id = CAST(:mid AS UUID) AND undone_at IS NULL
-           AND action IN ('choice', 'pair_ok', 'relink', 'unlink')
+           AND action IN ('choice', 'pair_ok', 'relink', 'unlink', 'link')
          ORDER BY id DESC LIMIT 1"""), {"mid": str(mid)})).mappings().first()
     if not entry:
         raise ReviewError("There is nothing to undo for this match.")
@@ -202,7 +203,7 @@ async def undo_last(db, org_id, mid, user_id) -> dict:
                         source="hand", user_id=user_id, note=None, batch_id=None, before=now_state,
                         detail={"undid": entry["id"], "inserted": inserted, "brought": brought,
                                 "left_out": left_out} if inserted else {"undid": entry["id"]})
-    players = await _players_of(db, mid, org_id)
+    players = list({*players_before, *await _players_of(db, mid, org_id)})
     await db.commit()
     await recompute(db, org_id, players)
     await db.commit()
@@ -293,6 +294,11 @@ async def unlink(db, org_id, mid, user_id) -> dict:
          WHERE id = CAST(:m AS UUID)"""), {"m": str(mid)})
     log_id = await _log(db, org_id, mid, action="unlink", from_choice=None, to_choice=None, source="hand",
                         user_id=user_id, note=None, batch_id=None, before=before, detail={})
+    # Saying these are two matches is also the answer to "possible doubles", so that step does
+    # not offer the same pair straight back.
+    await _log(db, org_id, mid, action="not_double", from_choice=None, to_choice=None, source="hand",
+               user_id=user_id, note=None, batch_id=None, before=before,
+               detail={"other_id": row["gid"], "other_kind": "ca", "via": "unlink"})
     await db.commit()
     await recompute(db, org_id, players)
     await db.commit()
@@ -378,7 +384,7 @@ async def bulk_undo(db, org_id, user_id, batch_id) -> dict:
     for e in entries:
         latest = (await db.execute(text("""
             SELECT id FROM card_review_log WHERE manual_game_id = CAST(:m AS UUID) AND undone_at IS NULL
-               AND action IN ('choice', 'pair_ok', 'relink', 'unlink') ORDER BY id DESC LIMIT 1"""),
+               AND action IN ('choice', 'pair_ok', 'relink', 'unlink', 'link') ORDER BY id DESC LIMIT 1"""),
             {"m": e["mid"]})).scalar()
         if latest != e["id"]:
             changed.append(e["mid"])
@@ -386,3 +392,108 @@ async def bulk_undo(db, org_id, user_id, batch_id) -> dict:
         await undo_last(db, org_id, e["mid"], user_id)
         undone += 1
     return {"batch_id": str(batch_id), "undone": undone, "left_alone": changed}
+
+
+# --- possible doubles: two copies of one match that nothing links ----------------------------------
+
+async def _club_game_ok(db, org_id, gid: str) -> bool:
+    return bool((await db.execute(text("""
+        SELECT 1 FROM games g WHERE g.id = CAST(:g AS UUID)
+           AND (g.home_org_id = CAST(:o AS UUID) OR g.away_org_id = CAST(:o AS UUID)
+                OR EXISTS (SELECT 1 FROM grades gr JOIN seasons s ON s.id = gr.season_id
+                            WHERE gr.id = g.grade_id AND s.organisation_id = CAST(:o AS UUID)))"""),
+        {"g": gid, "o": str(org_id)})).first())
+
+
+async def link_double(db, org_id, mid, game_id, user_id) -> dict:
+    """A person says this club card and this Cricket Australia game are one match.
+
+    The two are linked and locked, and the match joins the normal review (the person has said it
+    is the same match, so it is not parked under "pairing looks wrong"). Which card the site shows
+    follows the rule the automatic pairing keeps: Cricket Australia's, unless the club card holds
+    batters and Cricket Australia's has none or does not agree with them, in which case the club's
+    stays so nothing the club typed disappears before someone compares the two. Both cards stay
+    stored; the choice is for the next steps to make.
+    """
+    row = await _row(db, org_id, mid)
+    if row["gid"]:
+        raise ReviewError("This club scorecard is already linked to a Cricket Australia card.")
+    gid = str(uuid.UUID(str(game_id)))
+    if not await _club_game_ok(db, org_id, gid):
+        raise ReviewError("That Cricket Australia match is not one of this club's.")
+    held = (await db.execute(text(
+        "SELECT 1 FROM manual_games WHERE superseded_by_game_id = CAST(:g AS UUID)"), {"g": gid})).first()
+    if held:
+        raise ReviewError("Another club scorecard is already linked to that Cricket Australia match.")
+    club_card = {(r["pid"], r["runs"]) for r in await cr._all(db, cr._CLUB_BAT, ids=[str(mid)])
+                 if not r["dnb"] and r["runs"] is not None}
+    ca_card = {(r["pid"], r["runs"]) for r in await cr._all(db, cr._CA_BAT, org=str(org_id), ids=[gid])
+               if not r["dnb"] and r["runs"] is not None}
+    prefer = bool(club_card) and not cr.confirms_pair(club_card, ca_card)
+    before = _snapshot(row)
+    players = set(await _players_of(db, mid, org_id))
+    await db.execute(text("""
+        UPDATE manual_games SET superseded_by_game_id = CAST(:g AS UUID), pair_prefers_import = :pref,
+               pairing_locked = TRUE, review_pair_ok = TRUE, review_choice = NULL, updated_at = NOW()
+         WHERE id = CAST(:m AS UUID)"""), {"g": gid, "pref": prefer, "m": str(mid)})
+    log_id = await _log(db, org_id, mid, action="link", from_choice=None, to_choice="club" if prefer else "ca",
+                        source="hand", user_id=user_id, note=None, batch_id=None, before=before,
+                        detail={"to_game": gid, "shared": len(club_card & ca_card)})
+    players.update(await _players_of(db, mid, org_id))
+    await db.commit()
+    await recompute(db, org_id, players)
+    await db.commit()
+    return {"match_id": str(mid), "game_id": gid, "log_id": log_id, "shows": "club" if prefer else "ca"}
+
+
+async def _other_ok(db, org_id, kind: str, mid, other: str) -> None:
+    if kind == "ca":
+        if not await _club_game_ok(db, org_id, other):
+            raise ReviewError("That Cricket Australia match is not one of this club's.")
+        return
+    if not (await db.execute(text("SELECT 1 FROM manual_games WHERE id = CAST(:i AS UUID) "
+                                  "AND organisation_id = CAST(:o AS UUID)"),
+                             {"i": other, "o": str(org_id)})).first():
+        raise ReviewError("That match was not found for this club.")
+
+
+def _pair_rows(head: str, org_id, mid, other: str, kind: str) -> tuple:
+    """`head` plus a WHERE naming the live "different matches" answers for one pair. Two club
+    cards are one pair whichever of them the answer was written on."""
+    where = """ WHERE org_id = CAST(:o AS UUID) AND action = 'not_double' AND undone_at IS NULL
+                 AND ((manual_game_id = CAST(:m AS UUID) AND detail->>'other_id' = :x_t)"""
+    params = {"o": str(org_id), "m": str(mid), "x_t": other}
+    if kind == "club":
+        where += " OR (manual_game_id = CAST(:x AS UUID) AND detail->>'other_id' = :m_t)"
+        params.update({"x": other, "m_t": str(mid)})
+    return head + where + ")", params
+
+
+async def dismiss_double(db, org_id, mid, other_id, kind: str, user_id) -> dict:
+    """These two are different matches. Recorded, undoable, and keyed on the pair."""
+    if kind not in ("ca", "club"):
+        raise ReviewError("Say whether the other copy is a Cricket Australia card or a club scorecard.")
+    other = str(uuid.UUID(str(other_id)))
+    row = await _row(db, org_id, mid)
+    await _other_ok(db, org_id, kind, mid, other)
+    if kind == "club" and other == str(mid):
+        raise ReviewError("A match cannot be a double of itself.")
+    sql, params = _pair_rows("SELECT id FROM card_review_log", org_id, mid, other, kind)
+    mine = (await db.execute(text(sql + " LIMIT 1"), params)).first()
+    if mine:
+        return {"match_id": str(mid), "log_id": mine[0], "already": True}
+    log_id = await _log(db, org_id, mid, action="not_double", from_choice=None, to_choice=None, source="hand",
+                        user_id=user_id, note=None, batch_id=None, before=_snapshot(row),
+                        detail={"other_id": other, "other_kind": kind})
+    await db.commit()
+    return {"match_id": str(mid), "log_id": log_id, "already": False}
+
+
+async def restore_double(db, org_id, mid, other_id, kind: str, user_id) -> dict:
+    """Take back a "different matches" answer, so the pair is offered again."""
+    other = str(uuid.UUID(str(other_id)))
+    await _row(db, org_id, mid)
+    sql, params = _pair_rows("UPDATE card_review_log SET undone_at = NOW()", org_id, mid, other, kind)
+    res = await db.execute(text(sql), params)
+    await db.commit()
+    return {"match_id": str(mid), "restored": res.rowcount}

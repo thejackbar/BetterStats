@@ -85,7 +85,7 @@
 
 ## Open follow-ups
 
-- Missed pairs (about 234 per 3,500 in the awkward case) still count twice, unshown; a "same match?" review list is unbuilt.
+- Missed pairs (about 234 per 3,500 in the awkward case) are now listed by Card review's Possible doubles step (v9.125.1), where a person links them (locked, so the nightly pass leaves them alone). Nothing yet reports how many a pass missed before anyone looks.
 - Unused: `mode=106` ball by ball, their league JSON API, level-8 extract.
 - Nothing flags boundary counts nulled; nothing detects seasons held twice from before pairing.
 - The outside process that once overwrote two views was never named beyond our 266 mirror.

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import time
 import uuid
 from datetime import date as date_cls
@@ -29,9 +30,12 @@ from app.models.db import Organisation, User, get_db
 from app.routers.auth import get_current_club
 from app.services import card_review as cr
 from app.services import card_review_actions as act
+from app.services import card_review_doubles as dbl
+from app.services import card_review_find as fnd
 from app.services import card_review_hybrid as hy
 
 router = APIRouter(prefix="/club-admin/card-review", tags=["card-review"])
+logger = logging.getLogger(__name__)
 
 # Comparing 3,000+ matches reads about eight queries' worth of rows. Several screens ask for the
 # same comparison in a row, so it is kept for a short time per club and dropped by every change.
@@ -39,18 +43,35 @@ _TTL = 30.0
 _CACHE: dict = {}
 
 
-async def _rows(db, club_id) -> list:
+async def _rows(db, club_id, fresh: bool = False) -> list:
     key = str(club_id)
     hit = _CACHE.get(key)
-    if hit and time.monotonic() - hit[0] < _TTL:
+    if hit and not fresh and time.monotonic() - hit[0] < _TTL:
         return hit[1]
     rows = await cr.review_rows(db, club_id)
     _CACHE[key] = (time.monotonic(), rows)
     return rows
 
 
+# The possible-doubles scan reads every unlinked card and every synced game of the club and
+# matches them, which is seconds of work on a long history, so it is kept apart and a little longer.
+_DOUBLES_TTL = 60.0
+_DOUBLES: dict = {}
+
+
+async def _doubles(db, club_id, fresh: bool = False) -> dict:
+    key = str(club_id)
+    hit = _DOUBLES.get(key)
+    if hit and not fresh and time.monotonic() - hit[0] < _DOUBLES_TTL:
+        return hit[1]
+    res = await dbl.find_doubles(db, club_id)
+    _DOUBLES[key] = (time.monotonic(), res)
+    return res
+
+
 def _drop(club_id) -> None:
     _CACHE.pop(str(club_id), None)
+    _DOUBLES.pop(str(club_id), None)
 
 
 def _line(r: dict) -> dict:
@@ -77,6 +98,40 @@ def _fail(e: act.ReviewError):
     return HTTPException(status_code=409, detail=str(e))
 
 
+class MatchFilter:
+    """The words people use to name a match, the same on every step of the review and on Find a
+    match. Used as a dependency so every list takes exactly the same query parameters."""
+
+    def __init__(
+        self,
+        q: Optional[str] = Query(None, max_length=120, description="words from the opposition or a team name"),
+        grade: Optional[str] = Query(None, max_length=80),
+        competition: Optional[str] = Query(None, max_length=120),
+        player: Optional[str] = Query(None, max_length=120, description="every word must be in a batter's or bowler's name"),
+        date_from: Optional[date_cls] = Query(None),
+        date_to: Optional[date_cls] = Query(None),
+    ):
+        self.kw = dict(text_q=q, grade=grade, competition=competition, player=player,
+                       date_from=date_from, date_to=date_to)
+
+    @property
+    def active(self) -> bool:
+        return fnd.has_filter(**self.kw)
+
+
+def _active(f) -> bool:
+    # A route body called directly (the verification suites) gets the Depends marker, not a filter.
+    return bool(getattr(f, "active", False))
+
+
+async def _narrow(db, club_id, rows: list, f: "MatchFilter", season: Optional[str] = None) -> list:
+    """Keep the rows whose pair matches the filter on either copy (season is the lists' own filter)."""
+    if not _active(f):
+        return rows
+    ids = await fnd.matching_ids(db, club_id, **f.kw)
+    return [r for r in rows if r.get("match_id") in ids or r.get("game_id") in ids]
+
+
 class ChoiceIn(BaseModel):
     choice: str
     note: Optional[str] = Field(None, max_length=500)
@@ -98,10 +153,36 @@ class BulkUndoIn(BaseModel):
     batch_id: str
 
 
+class LinkIn(BaseModel):
+    match_id: str
+    game_id: str
+
+
+class DoubleAnswerIn(BaseModel):
+    match_id: str
+    other_id: str
+    kind: str
+
+
 @router.get("/overview", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
-async def card_review_overview(club: Organisation = Depends(get_current_club),
+async def card_review_overview(fresh: bool = Query(False),
+                               club: Organisation = Depends(get_current_club),
                                db: AsyncSession = Depends(get_db)):
-    return cr.overview(await _rows(db, club.id))
+    club_id = club.id
+    out = cr.overview(await _rows(db, club_id, fresh))
+    # Possible doubles are the first step, but a failure to scan for them must not take the
+    # rest of the page down: say so on the step instead.
+    try:
+        found = dbl.counts(await _doubles(db, club_id, fresh))
+        n, failed = found["total"], None
+    except Exception:
+        logger.exception("card review: possible-doubles scan failed for %s", club_id)
+        await db.rollback()
+        found, n, failed = None, 0, "The scan for possible doubles failed. Reload to try again."
+    out["groups"]["doubles"] = n
+    out["todo"]["doubles"] = n
+    out["doubles"] = {**(found or {}), "error": failed}
+    return out
 
 
 @router.get("/matches", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
@@ -115,12 +196,14 @@ async def card_review_matches(
     sort: Optional[str] = Query(None, description="'newest' (the default) or 'worst': the match that most needs a look first"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    find: MatchFilter = Depends(MatchFilter),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
     if group and group not in cr.GROUPS:
         raise HTTPException(status_code=422, detail="Unknown group.")
     rows = list(await _rows(db, club.id))
+    rows = await _narrow(db, club.id, rows, find)
     if group:
         rows = [r for r in rows if r["group"] == group]
     if season:
@@ -310,6 +393,104 @@ async def card_review_batches(club: Organisation = Depends(get_current_club),
          WHERE a.org_id = CAST(:o AS UUID) AND a.action = 'card_review_bulk'
          ORDER BY a.created_at DESC LIMIT 20"""), {"o": str(club.id)})).mappings().all()
     return {"batches": [dict(r) for r in rows]}
+
+
+@router.get("/doubles", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
+async def card_review_doubles(
+    kind: Optional[str] = Query(None, description="ca: club card against a Cricket Australia game; club: two club cards"),
+    strength: Optional[str] = Query(None, description="strong, likely or possible"),
+    season: Optional[str] = Query(None),
+    shown: str = Query("open", description="'open' the pairs still to answer, 'dismissed' the ones marked as different matches"),
+    sort: Optional[str] = Query(None, description="'strongest' (the default) or 'newest'"),
+    fresh: bool = Query(False, description="skip the short-lived copy; sent after a change made elsewhere"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    find: MatchFilter = Depends(MatchFilter),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    if kind and kind not in dbl.KINDS:
+        raise HTTPException(status_code=422, detail="Unknown kind.")
+    if strength and strength not in dbl.STRENGTHS:
+        raise HTTPException(status_code=422, detail="Unknown strength.")
+    if shown not in ("open", "dismissed"):
+        raise HTTPException(status_code=422, detail="Unknown view.")
+    if sort not in (None, "strongest", "newest"):
+        raise HTTPException(status_code=422, detail="Unknown sort.")
+    res = await _doubles(db, club.id, fresh)
+    rows = list(res["dismissed"] if shown == "dismissed" else res["rows"])
+    if _active(find):
+        ids = await fnd.matching_ids(db, club.id, **find.kw)
+        rows = [r for r in rows if r["a"]["id"] in ids or r["b"]["id"] in ids]
+    seasons = sorted({s for r in rows for s in (r["a"]["season"], r["b"]["season"]) if s},
+                     key=lambda x: (cr.season_sort_key(x), x))
+    if kind:
+        rows = [r for r in rows if r["kind"] == kind]
+    if strength and shown == "open":
+        rows = [r for r in rows if r["strength"] == strength]
+    if season:
+        rows = [r for r in rows if season in (r["a"]["season"], r["b"]["season"])]
+    if sort == "newest":
+        rows.sort(key=lambda r: r["date"] or "", reverse=True)
+    return {"total": len(rows), "offset": offset, "limit": limit, "seasons": seasons,
+            "counts": dbl.counts(res), "rows": rows[offset:offset + limit]}
+
+
+@router.get("/find/options", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
+async def card_review_find_options(club: Organisation = Depends(get_current_club),
+                                   db: AsyncSession = Depends(get_db)):
+    return await fnd.facets(db, club.id)
+
+
+@router.get("/find", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
+async def card_review_find(
+    season: Optional[str] = Query(None, max_length=80),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    find: MatchFilter = Depends(MatchFilter),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every copy of the fixtures that match, linked or not, for checking a figure on a card or
+    finding a double the scan did not suggest. Read only."""
+    club_id = club.id
+    try:
+        doubles = await _doubles(db, club_id)
+    except Exception:
+        logger.exception("card review: possible-doubles scan failed for %s", club_id)
+        await db.rollback()
+        doubles = None
+    try:
+        return await fnd.find_fixtures(db, club_id, season=season, limit=limit, offset=offset,
+                                       doubles=doubles, **find.kw)
+    except fnd.FindError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/doubles/link")
+async def card_review_double_link(data: LinkIn, user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+                                  club: Organisation = Depends(get_current_club),
+                                  db: AsyncSession = Depends(get_db)):
+    """Say a club card and a Cricket Australia game are one match. Both stay stored."""
+    return await _do(club, act.link_double(db, club.id, _id(data.match_id), _id(data.game_id), user.id))
+
+
+@router.post("/doubles/dismiss")
+async def card_review_double_dismiss(data: DoubleAnswerIn,
+                                     user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+                                     club: Organisation = Depends(get_current_club),
+                                     db: AsyncSession = Depends(get_db)):
+    return await _do(club, act.dismiss_double(db, club.id, _id(data.match_id), _id(data.other_id),
+                                              data.kind, user.id))
+
+
+@router.post("/doubles/restore")
+async def card_review_double_restore(data: DoubleAnswerIn,
+                                     user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+                                     club: Organisation = Depends(get_current_club),
+                                     db: AsyncSession = Depends(get_db)):
+    return await _do(club, act.restore_double(db, club.id, _id(data.match_id), _id(data.other_id),
+                                              data.kind, user.id))
 
 
 @router.get("/export.csv", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])

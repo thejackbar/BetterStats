@@ -6,12 +6,16 @@ import { PbSpinner } from '../../lib/presskit'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { Button, Badge, Note, StatCard, SectionHeading, TONES } from '../../components/admin/ui'
 import { GROUPS, matchPageUrl, fmtDate } from '../../components/admin/cardReview/shared'
+import { FindLink } from '../../components/admin/cardReview/MatchFilters'
 
-// The review goes in this order. A wrong pairing makes the comparison meaningless and, once
+// The review goes in this order. A match held twice and never linked is first: it is counted twice
+// until someone links it, and a linked pair joins the steps below. A wrong pairing makes the comparison meaningless and, once
 // fixed, moves matches into the other groups, so it is first. The matches the bulk switch can take
 // come next, then the small differences, then the ones that need a real decision. The order is
 // guidance: nothing is locked, and a later step can be opened at any time.
 const STEPS = [
+  { group: 'doubles', title: 'Find the doubles', ink: TONES.block.hex, button: 'Open the list',
+    why: 'A match held twice with nothing linking the copies counts twice on careers, match type tabs and records. Link the pair, or remove the extra copy. A linked match joins the steps below.' },
   { group: 'pairing', title: 'Check the pairings', ink: TONES.block.hex, button: 'Open the list',
     why: 'The two cards may not be the same match. Fix a wrong link first: a match moved to the right Cricket Australia game joins the groups below.' },
   { group: 'agree', title: 'Switch the matches that agree', ink: TONES.ok.hex, button: 'Preview the switch',
@@ -192,13 +196,14 @@ export default function AdminCardReview() {
 
   const header = {
     title: 'Card review',
-    caption: data ? `${data.total.toLocaleString()} matches stored twice` : undefined,
+    caption: data ? `${data.total.toLocaleString()} matches stored twice${data.groups.doubles ? `, ${data.groups.doubles.toLocaleString()} possible doubles` : ''}` : undefined,
   }
   if (error) return <BetterStatsLayout {...header}><Note toneKey="block">{error}</Note></BetterStatsLayout>
   if (!data) return <BetterStatsLayout {...header}><PbSpinner message="Comparing the two cards of every match…" /></BetterStatsLayout>
 
   const todo = g => data.todo?.[g] ?? data.groups[g]
-  const reviewable = data.total - data.groups.nocard
+  // A double that gets linked becomes a paired match, so the unlinked ones count as work to do.
+  const reviewable = data.total - data.groups.nocard + (data.groups.doubles || 0)
   const left = STEPS.reduce((n, st) => n + todo(st.group), 0)
   const reviewed = Math.max(0, reviewable - left)
   const first = STEPS.find(st => todo(st.group) > 0)
@@ -206,11 +211,11 @@ export default function AdminCardReview() {
   return (
     <BetterStatsLayout
       {...header}
-      actions={<Button as="a" href={api.cardReviewExportUrl()} data-testid="export-link">Download the spreadsheet</Button>}
+      actions={<div className="flex flex-wrap gap-2"><FindLink filters={{}} /><Button as="a" href={api.cardReviewExportUrl()} data-testid="export-link">Download the spreadsheet</Button></div>}
     >
       <p className="max-w-[760px] text-[13.5px] text-pb-dim mb-5">
-        These matches exist in two versions: the Cricket Australia scorecard and the club's own scorecard (imported from a file,
-        typed in, or read from a photo). One is shown on the site. Work through the four steps in order and each match ends up showing the card you chose.
+        Most of these matches exist in two versions: the Cricket Australia scorecard and the club's own scorecard (imported from a file,
+        typed in, or read from a photo). One is shown on the site. Work through the five steps in order and each match ends up showing the card you chose.
       </p>
 
       <div className="mb-5 rounded-[10px] border border-pb-hairline bg-pb-surface px-4 py-3.5" data-testid="progress">
@@ -230,7 +235,7 @@ export default function AdminCardReview() {
       </div>
 
       <div data-testid="groups" className="mb-6">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {STEPS.map((st, i) => {
             const n = todo(st.group)
             const here = first && first.group === st.group
@@ -243,7 +248,7 @@ export default function AdminCardReview() {
                   {n === 0 ? <Badge toneKey="ok">Done</Badge> : here ? <Badge toneKey={GROUPS[st.group].tone}>Start here</Badge> : null}
                 </div>
                 <div className="font-display text-[15px] font-semibold text-pb-text">{st.title}</div>
-                <StatCard value={data.groups[st.group].toLocaleString()} label={GROUPS[st.group].label} ink={st.ink} className="!p-0 !border-0 !bg-transparent mt-2" />
+                <StatCard value={(data.groups[st.group] ?? 0).toLocaleString()} label={GROUPS[st.group].label} ink={st.ink} className="!p-0 !border-0 !bg-transparent mt-2" />
                 <p className="mt-2 flex-1 text-[12px] leading-[1.45] text-pb-dim">{st.why}</p>
                 {st.group === 'agree' && data.agree_club_richer > 0 && (
                   <p className="mt-2 text-[12px] leading-[1.45] text-pb-dim" data-testid="richer-note">
@@ -257,12 +262,13 @@ export default function AdminCardReview() {
                 <div className="mt-3">
                   {st.group === 'agree'
                     ? <Button variant={here ? 'primary' : 'secondary'} size="sm" disabled={(data.bulk_left ?? data.groups.agree) === 0} onClick={() => setBulk(true)} data-testid="preview-switch">{st.button}</Button>
-                    : <Button size="sm" variant={here ? 'primary' : 'secondary'} disabled={data.groups[st.group] === 0} onClick={() => go(st.group)}>{st.button}</Button>}
+                    : <Button size="sm" variant={here ? 'primary' : 'secondary'} disabled={!data.groups[st.group]} onClick={() => go(st.group)}>{st.button}</Button>}
                 </div>
               </div>
             )
           })}
         </div>
+        {data.doubles?.error && <div className="mt-3"><Note toneKey="warn">{data.doubles.error}</Note></div>}
         <p className="mt-3 text-[12px] text-pb-dim" data-testid="nocard-note">
           {GROUPS.nocard.label}: {data.groups.nocard.toLocaleString()} matches. {GROUPS.nocard.blurb} They stay as the club scorecard and need nothing from you.
         </p>

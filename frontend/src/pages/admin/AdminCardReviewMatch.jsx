@@ -8,6 +8,7 @@ import { Button, Badge, Note, TextArea, TONES } from '../../components/admin/ui'
 import {
   CHOICE_NAME, GROUPS, ChoiceControl, DifferenceTable, GroupBadge, fmtDate, matchPageUrl,
 } from '../../components/admin/cardReview/shared'
+import { FindLink } from '../../components/admin/cardReview/MatchFilters'
 import { QUEUE_KEY } from './AdminCardReviewList'
 
 const MARK = { background: 'rgba(245,181,66,0.16)', color: '#ffd88a', fontWeight: 700, borderRadius: 3, padding: '1px 6px' }
@@ -225,6 +226,7 @@ export default function AdminCardReviewMatch() {
           {at >= 0 && <span className="font-mono text-[11px] text-pb-faint" data-testid="position">{at + 1} of {queue.ids.length}</span>}
           <Button size="sm" disabled={at <= 0} onClick={() => go(at - 1)}>‹ Previous</Button>
           <Button size="sm" disabled={at < 0 || at >= queue.ids.length - 1} onClick={() => go(at + 1)}>Next ›</Button>
+          <FindLink filters={{ q: m.opposition || '' }} />
           <Button size="sm" as={Link} to={`/admin/card-review/${m.group === 'agree' ? 'agree' : m.group}`}>Back to the list</Button>
         </div>
       }

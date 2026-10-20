@@ -8,6 +8,7 @@ import { Button, Badge, Note, Select, SegGroup, SegItem } from '../../components
 import {
   GROUPS, ChoiceControl, DifferenceTable, SizeBar, SuggestionBadge, fmtDate, matchPageUrl,
 } from '../../components/admin/cardReview/shared'
+import MatchFilters, { FindLink, filterParams, useFilterParams } from '../../components/admin/cardReview/MatchFilters'
 
 const PAGE = 50
 export const QUEUE_KEY = 'card-review-queue'
@@ -149,6 +150,7 @@ export default function AdminCardReviewList() {
   const navigate = useNavigate()
   const toast = useToast()
   const g = GROUPS[group]
+  const [find, setFind] = useFilterParams()
   const [rows, setRows] = useState([])
   const [total, setTotal] = useState(0)
   const [sources, setSources] = useState([])
@@ -165,8 +167,8 @@ export default function AdminCardReviewList() {
     group, limit: PAGE, offset, season: filters.season || undefined,
     decided: filters.decided === 'all' ? undefined : filters.decided,
     recent_seasons: filters.recent ? 3 : undefined, source_file: filters.source_file || undefined,
-    richer: filters.richer ? 'yes' : undefined, sort: filters.sort,
-  }), [group, filters])
+    richer: filters.richer ? 'yes' : undefined, sort: filters.sort, ...filterParams(find),
+  }), [group, filters, find])
 
   const load = useCallback((more = false) => {
     const mine = ++seq.current
@@ -183,7 +185,7 @@ export default function AdminCardReviewList() {
       .finally(() => { if (mine === seq.current) setLoading(false) })
   }, [query, rows.length])
 
-  useEffect(() => { load(false) }, [group, filters]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(false) }, [group, filters, find]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { api.cardReviewOverview().then(o => setSeasons(o.seasons.map(s => s.season))).catch(() => {}) }, [])
   // The compare page walks the same order with Previous and Next.
   useEffect(() => {
@@ -221,7 +223,7 @@ export default function AdminCardReviewList() {
     <BetterStatsLayout
       title={g.label}
       caption={`${total.toLocaleString()} match${total === 1 ? '' : 'es'}`}
-      actions={<Button as={Link} to="/admin/card-review">Back to Card review</Button>}
+      actions={<div className="flex flex-wrap gap-2"><FindLink filters={find} /><Button as={Link} to="/admin/card-review">Back to Card review</Button></div>}
     >
       <p className="max-w-[760px] text-[13.5px] text-pb-dim mb-4">
         {isPairing
@@ -230,6 +232,7 @@ export default function AdminCardReviewList() {
             ? 'Newest first, one line per match. These agree on the scores, but the club card holds more than Cricket Australia\'s in the ones marked.'
             : 'One line per match, the one that most needs a look first (or newest first, if you switch it). The line shows the biggest difference. When there are more, a caret opens the full list without leaving the page.'}
       </p>
+      <MatchFilters value={find} onApply={setFind} hint="Narrows this step by opposition, player, grade, competition or date. Find a match shows every copy of a fixture." />
       <div className="mb-4 flex flex-wrap items-center gap-3">
         {group !== 'agree' && (
           <SegGroup>
