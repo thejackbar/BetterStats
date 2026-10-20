@@ -164,7 +164,26 @@ export default function SelectionInspector({
           </>
         )}
 
-        {single?.type === 'image' && (
+        {single?.type === 'image' && single.bind && (
+          <>
+            {/* A photo area filled from the post: choose whose picture it shows. The featured photo is the one
+                set in the Hero Image panel (a player, or an upload); the others follow a lineup place. */}
+            <span className="h-7 px-2 inline-flex items-center rounded-md border text-[11px] text-pb-accent"
+              style={{ borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' }}
+              title="This picture is filled in from the post's players">Field: {bindLabel(single.bind)}</span>
+            <select value={single.bind} onChange={e => patch({ bind: e.target.value })} data-testid="photo-source"
+              title="Whose photo this area shows"
+              className="h-7 max-w-[170px] px-1.5 rounded-md border pb-hairline2 bg-pb-surface2 text-pb-text text-[11px]">
+              <option value="photo">Featured photo (Hero Image)</option>
+              {Array.from({ length: 15 }, (_, i) => <option key={i} value={`lineup.${i + 1}.photo`}>Player {i + 1}</option>)}
+            </select>
+            <Btn onClick={() => patch({ fit: single.fit === 'cover' ? 'contain' : 'cover' })}>
+              {single.fit === 'cover' ? 'Fill' : 'Fit'}
+            </Btn>
+            <Btn title="Stop filling this in automatically and keep a plain picture you can replace" onClick={() => patch({ bind: null })}>Unbind</Btn>
+          </>
+        )}
+        {single?.type === 'image' && !single.bind && (
           <>
             <Btn onClick={() => onPickImage(single.id)}>Replace</Btn>
             {/* Crop and background removal for the image already in the block —

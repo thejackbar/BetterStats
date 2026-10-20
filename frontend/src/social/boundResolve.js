@@ -26,6 +26,8 @@ export function bindFromToken(token) {
     return n >= 1 && n <= LINEUP_SLOTS ? `lineup.${n}.${PART_ALIAS[m[2]] || m[2] || 'name'}` : null
   }
   if (t === 'captain' || t === 'keeper' || t === 'headline' || t === 'sponsors') return t
+  // The featured photo: whoever the Hero Image panel names (or the captain), or the photo uploaded there.
+  if (t === 'photo' || t === 'player photo' || t === 'featured photo' || t === 'hero' || t === 'hero photo') return 'photo'
   if (t === 'wicketkeeper' || t === 'wicket keeper') return 'keeper'
   if (t === 'vice captain' || t === 'vicecaptain' || t === 'vice') return 'vice'
   if (t === 'opponent') return 'opponent'
@@ -37,6 +39,7 @@ export function bindFromToken(token) {
 const WORD = { name: '', first: ' (first name)', last: ' (last name)', role: ' (role)', photo: ' (photo)', captain: ' (captain mark)', vice: ' (vice-captain mark)', keeper: ' (keeper mark)', debut: ' (debut mark)' }
 export function bindLabel(bind) {
   if (!bind) return ''
+  if (bind === 'photo') return 'Featured photo'
   const p = bind.match(/^lineup\.(\d+)\.(\w+)$/)
   if (p) return `Player ${p[1]}${WORD[p[2]] || ''}`
   if (bind.startsWith('match.')) return bind.slice(6).replace(/^./, (c) => c.toUpperCase())
@@ -44,12 +47,23 @@ export function bindLabel(bind) {
 }
 
 // An area block (a photo, the sponsors) takes its size from the template rather than from text.
-export const isAreaBind = (bind) => bind === 'sponsors' || /^lineup\.\d+\.photo$/.test(bind || '')
+export const isAreaBind = (bind) => bind === 'sponsors' || bind === 'photo' || /^lineup\.\d+\.photo$/.test(bind || '')
 export const isBoundPlayerSlot = (bind) => /^lineup\./.test(bind || '')
 export const boundSlotCount = (items) => (items || []).reduce((n, it) => {
   const m = (it.bind || '').match(/^lineup\.(\d+)\./)
   return m ? Math.max(n, Number(m[1])) : n
 }, 0)
+
+// What follows a name on its own: (C), (VC), (WK) and DEBUT for the players who are one, so a template needs no
+// mark boxes of its own. '' for a player with none, and when the club has the marks switched off.
+export function autoMarks(bind, data = {}) {
+  const p = (bind || '').match(/^lineup\.(\d+)\.(name|last)$/)
+  if (!p || data.marksOn === false) return ''
+  const row = (Array.isArray(data.lineup) ? data.lineup : [])[Number(p[1]) - 1]
+  if (!row) return ''
+  const got = [row.captain && 'C', row.viceCaptain && 'VC', row.keeper && 'WK', row.debut && 'DEBUT'].filter(Boolean)
+  return got.length ? ` (${got.join(', ')})` : ''
+}
 
 export const MARKS = { captain: 'C', vice: 'VC', keeper: 'WK', debut: 'DEBUT' }
 
@@ -79,6 +93,8 @@ export function resolveBind(bind, data = {}) {
     if (!lineup.length) return null
     return (lineup.find((r) => r[bind === 'vice' ? 'viceCaptain' : bind]) || {}).name || ''
   }
+  // The featured photo comes from the Hero Image panel: null before any player is held, '' when there is none.
+  if (bind === 'photo') return data.featuredPhoto === undefined ? null : data.featuredPhoto
   if (bind === 'opponent') return data.opponent || null
   if (bind === 'team') return (data.team && (data.team.fullName || data.team.name)) || null
   if (bind === 'headline') return data.headline || null

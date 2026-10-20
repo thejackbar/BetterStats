@@ -32,6 +32,15 @@ async function downloadBlob(url: string): Promise<Blob | null> {
   }
 }
 
+/** Canva's own words for why it would not hand over a picture, in plain terms. */
+export function refusal(e: unknown): string {
+  const detail = e instanceof Error ? e.message : String(e);
+  if (/missing_scope|scope/i.test(detail)) {
+    return "Canva says the app is missing the permission to read your pictures (canva:asset:private:read). Add it under Scopes in the Developer Portal, then reload the app.";
+  }
+  return `Canva would not give the app this picture (${detail || "no reason given"}). It may be a Canva library photo the app is not allowed to read. Upload your own copy into the design, or add the background in BetterPosts.`;
+}
+
 /**
  * Brings one of the design's own pictures across by its Canva id: asks Canva for a
  * temporary link, downloads it, and redraws it at a size BetterCricket takes. A
@@ -46,8 +55,8 @@ export async function fetchImage(
   try {
     const got = await getTemporaryUrl({ type: "image", ref: ref as ImageRef });
     url = got.url;
-  } catch {
-    throw new Error("Canva would not give the app this picture.");
+  } catch (e) {
+    throw new Error(refusal(e));
   }
   const blob = await downloadBlob(url);
   const img = blob

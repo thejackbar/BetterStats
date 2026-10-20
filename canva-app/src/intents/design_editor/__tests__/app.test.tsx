@@ -443,6 +443,23 @@ describe("BetterCricket template panel", () => {
       expect(JSON.stringify(calls.created[1])).toContain("{{sponsors}}");
     });
 
+    it("adds the featured photo area, which BetterPosts fills from its photo settings", async () => {
+      const { calls } = useSession();
+      renderInTestProvider(<App />);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Add featured photo" }),
+      );
+      await waitFor(() => expect(calls.created).toHaveLength(2));
+      expect(JSON.stringify(calls.created[1])).toContain("{{photo}}");
+    });
+
+    it("says the marks are automatic", () => {
+      renderInTestProvider(<App />);
+      expect(
+        screen.getByText(/added after the names automatically/),
+      ).toBeTruthy();
+    });
+
     it("adds a photo area for a chosen player place", async () => {
       const { calls } = useSession();
       renderInTestProvider(<App />);

@@ -166,5 +166,21 @@
   {
     "token": "wicketkeeper",
     "binding": "keeper"
+  },
+  {
+    "token": "photo",
+    "binding": "photo"
+  },
+  {
+    "token": "Featured Photo",
+    "binding": "photo"
+  },
+  {
+    "token": "hero photo",
+    "binding": "photo"
+  },
+  {
+    "token": "player photo",
+    "binding": "photo"
   }
 ]
