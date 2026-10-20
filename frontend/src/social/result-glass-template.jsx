@@ -22,6 +22,7 @@ import { AutoFitText, CreditMark, heroFocusStyle } from './cricket-templates'
 import { mixHex } from './split-template'
 import { aspectOf, pick } from './postAspect'
 import { LayerRoot } from './postLayers'
+import { pc, pt, registerParts, colorPart as C, textPart as T } from './layoutParts'
 
 // The club's chosen display face and weight (Style, Font in the editor).
 const FONT = "var(--social-display-font, 'Hanken Grotesk', 'Inter', sans-serif)"
@@ -39,7 +40,7 @@ export const GLASS_POSITIONS = [
 export const GLASS_DEFAULTS = { position: 'top-center', tint: 0.55, perfUs: 'bat', perfThem: 'bat' }
 export const GLASS_FOCUS = { x: 50, y: 50, scale: 1 }
 
-const parts = (position) => {
+const positionParts = (position) => {
   const [v, h] = String(position || '').split('-')
   return { top: v !== 'bottom', side: h === 'left' || h === 'right' ? h : 'center' }
 }
@@ -49,7 +50,7 @@ const parts = (position) => {
 // type size and breathing room, and the story keeps clear of the app's chrome.
 export function glassGeo(width = 1080, height = 1080, position = 'top-center') {
   const A = aspectOf(width, height)
-  const { top, side } = parts(position)
+  const { top, side } = positionParts(position)
   const f = pick(A, { square: 1, portrait: 1.06, story: 1.2 })
   const edge = pick(A, { square: 52, portrait: 54, story: 56 })
   // A story's top carries the profile row and its bottom the reply bar.
@@ -117,18 +118,18 @@ function scoreOf(score) {
   return !s || s === '—' || s === '-' ? '' : s.replace('/', '-')
 }
 
-const Trophy = ({ size }) => (
+const Trophy = ({ size, color = GOLD }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
-    <path d="M7 3h10v5a5 5 0 0 1-10 0V3z" fill={GOLD} />
-    <path d="M7 4.5H4v1.5a3.5 3.5 0 0 0 3.2 3.5M17 4.5h3v1.5a3.5 3.5 0 0 1-3.2 3.5" fill="none" stroke={GOLD} strokeWidth="1.6" />
-    <rect x="10.8" y="12.5" width="2.4" height="4" fill={GOLD} />
-    <rect x="7.5" y="17" width="9" height="3" rx="1" fill={GOLD} />
+    <path d="M7 3h10v5a5 5 0 0 1-10 0V3z" fill={color} />
+    <path d="M7 4.5H4v1.5a3.5 3.5 0 0 0 3.2 3.5M17 4.5h3v1.5a3.5 3.5 0 0 1-3.2 3.5" fill="none" stroke={color} strokeWidth="1.6" />
+    <rect x="10.8" y="12.5" width="2.4" height="4" fill={color} />
+    <rect x="7.5" y="17" width="9" height="3" rx="1" fill={color} />
   </svg>
 )
 Trophy.displayName = 'Trophy'
 
 export function ResultGlass({
-  palette = {}, width = 1080, height = 1080, result: r = {}, look, photo, focus, sponsorCount = 0,
+  palette = {}, width = 1080, height = 1080, result: r = {}, look, photo, focus, sponsorCount = 0, parts,
 }) {
   const L = { ...GLASS_DEFAULTS, ...(look || {}) }
   const g = glassGeo(width, height, L.position)
@@ -197,10 +198,21 @@ export function ResultGlass({
   const longTeam = Math.max(String(us.name || '').length, String(them.name || '').length, 8)
   const teamFs = Math.max(13, Math.min(Math.round(25 * s), Math.floor(teamRoom / (0.66 * longTeam))))
 
+  // The pane's shine and tint are translucent by design, so a picked colour keeps that
+  // see-through strength (0.26 / 0.08 / 0.03 / 0.16 for the shine, 0.16 for the tint).
+  const sheenHex = pc(parts, 'rs7Sheen', null)
+  const sheen = sheenHex
+    ? `linear-gradient(135deg, ${sheenHex}42 0%, ${sheenHex}14 38%, ${sheenHex}08 62%, ${sheenHex}29 100%)`
+    : 'linear-gradient(135deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.08) 38%, rgba(255,255,255,0.03) 62%, rgba(255,255,255,0.16) 100%)'
+  const tintHex = pc(parts, 'cardBg', null)
+  const glassTint = tintHex ? `${tintHex}29` : 'rgba(8,12,20,0.16)'
+  const hotInk = pc(parts, 'rs7HotColor', GOLD)
+  const figInk = pc(parts, 'rs7FigColor', '#fff')
+
   const glassPane = (x, y, w, h, key, body) => (
     <div key={key} data-layer={key} style={{
       position: 'absolute', left: x, top: y, width: w, height: h, boxSizing: 'border-box', overflow: 'hidden',
-      borderRadius: Math.round(14 * s), border: '1.5px solid rgba(255,255,255,0.34)',
+      borderRadius: Math.round(14 * s), border: `1.5px solid ${pc(parts, 'cardBorder', 'rgba(255,255,255,0.34)')}`,
       boxShadow: '0 14px 40px rgba(0,0,0,0.38), inset 0 1.5px 0 rgba(255,255,255,0.5), inset 0 -1px 0 rgba(255,255,255,0.12)',
       background: photo ? 'transparent' : 'rgba(255,255,255,0.09)',
     }}>
@@ -209,8 +221,8 @@ export function ResultGlass({
           {photoImg({ left: -x - 1.5, top: -y - 1.5, filter: 'blur(26px) saturate(1.4) brightness(0.78)' })}
         </div>
       )}
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.08) 38%, rgba(255,255,255,0.03) 62%, rgba(255,255,255,0.16) 100%)' }} />
-      <div style={{ position: 'absolute', inset: 0, background: 'rgba(8,12,20,0.16)' }} />
+      <div style={{ position: 'absolute', inset: 0, background: sheen }} />
+      <div style={{ position: 'absolute', inset: 0, background: glassTint }} />
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>{body}</div>
     </div>
   )
@@ -229,21 +241,21 @@ export function ResultGlass({
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: Math.round(10 * s) }}>
             <div style={{ minWidth: 0, flexShrink: 1 }}>
               <AutoFitText text={String(t.name || '').toUpperCase()} max={teamFs} min={12} lines={1} measureDeps={[teamFs, ...fitKey]}
-                style={{ fontWeight: win ? BOLD : 500, letterSpacing: 0.4, lineHeight: 1.1, color: '#fff' }} />
+                style={{ fontWeight: win ? BOLD : 500, letterSpacing: 0.4, lineHeight: 1.1, color: pc(parts, 'clubColor', '#fff') }} />
             </div>
-            {win && <Trophy size={Math.round(22 * s)} />}
+            {win && <Trophy size={Math.round(22 * s)} color={pc(parts, 'winColor', GOLD)} />}
           </div>
           {score && (
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: Math.round(5 * s), fontWeight: win ? BOLD : 500, color: '#fff' }}>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: Math.round(5 * s), fontWeight: win ? BOLD : 500, color: pc(parts, 'statColor', '#fff') }}>
               <span style={{ fontSize: Math.round(31 * s), lineHeight: 1, letterSpacing: 0.3 }}>{score}</span>
-              {t.overs ? <span style={{ fontSize: Math.round(14 * s), fontWeight: 500, opacity: 0.7 }}>({t.overs})</span> : null}
+              {t.overs ? <span style={{ fontSize: Math.round(14 * s), fontWeight: 500, opacity: 0.7, color: pc(parts, 'subColor', undefined) }}>({t.overs})</span> : null}
             </div>
           )}
         </div>
-        <div style={{ margin: `0 ${pad}px`, borderTop: '1.5px dashed rgba(255,255,255,0.4)' }} />
+        <div style={{ margin: `0 ${pad}px`, borderTop: `1.5px dashed ${pc(parts, 'dividerColor', 'rgba(255,255,255,0.4)')}` }} />
         <div style={{ padding: `${Math.round(8 * s)}px ${pad}px 0` }}>
           {yet ? (
-            <div style={{ height: rowHt * 3, display: 'flex', alignItems: 'center', fontSize: Math.round(20 * s), fontWeight: 500, color: '#fff', opacity: 0.75 }}>Yet to bat</div>
+            <div style={{ height: rowHt * 3, display: 'flex', alignItems: 'center', fontSize: Math.round(20 * s), fontWeight: 500, color: pc(parts, 'rs7YetColor', '#fff'), opacity: 0.75 }}>{pt(parts, 'rs7Yet', 'Yet to bat')}</div>
           ) : rows.slice(0, 3).map((p, i) => {
             const n = nameParts(p)
             const fg = figures(p, bat ? 'bat' : 'bowl')
@@ -252,13 +264,13 @@ export function ResultGlass({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <AutoFitText max={nameFs} min={11} lines={1} measureDeps={[p.n, p.first, p.sn, nameFs, ...fitKey]}
                     style={{ lineHeight: 1.1, letterSpacing: 0.2, color: '#fff' }}>
-                    {n.first ? <span style={{ fontWeight: 400, opacity: 0.92 }}>{n.first} </span> : null}
-                    <span style={{ fontWeight: BOLD }}>{n.last}</span>
+                    {n.first ? <span style={{ fontWeight: 400, opacity: 0.92, color: pc(parts, 'firstColor', undefined) }}>{n.first} </span> : null}
+                    <span style={{ fontWeight: BOLD, color: pc(parts, 'nameColor', undefined) }}>{n.last}</span>
                   </AutoFitText>
                 </div>
-                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: Math.round(4 * s), color: fg.hot ? GOLD : '#fff' }}>
+                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: Math.round(4 * s), color: fg.hot ? hotInk : figInk }}>
                   <span style={{ fontSize: Math.round(22 * s), fontWeight: BOLD, lineHeight: 1 }}>{fg.main}</span>
-                  {fg.sub ? <span style={{ fontSize: Math.round(12 * s), fontWeight: 500, opacity: 0.7, color: '#fff' }}>({fg.sub})</span> : null}
+                  {fg.sub ? <span style={{ fontSize: Math.round(12 * s), fontWeight: 500, opacity: 0.7, color: pc(parts, 'subColor', '#fff') }}>({fg.sub})</span> : null}
                 </div>
               </div>
             )
@@ -308,12 +320,12 @@ export function ResultGlass({
         textShadow: '0 2px 14px rgba(0,0,0,0.5)',
       }}>
         <div style={{ width: leftW, minWidth: 0 }}>
-          <AutoFitText text={headParts.grade} max={headFs} min={14} lines={1} measureDeps={fitKey} style={{ fontWeight: BOLD, letterSpacing: 0.6, lineHeight: 1.15, color: '#fff' }} />
-          <AutoFitText text={headParts.venue} max={subFs} min={11} lines={1} measureDeps={fitKey} style={{ fontWeight: 400, letterSpacing: 1.2, lineHeight: 1.3, color: '#fff', opacity: 0.78 }} />
+          <AutoFitText text={headParts.grade} max={headFs} min={14} lines={1} measureDeps={fitKey} style={{ fontWeight: BOLD, letterSpacing: 0.6, lineHeight: 1.15, color: pc(parts, 'rs7GradeColor', '#fff') }} />
+          <AutoFitText text={headParts.venue} max={subFs} min={11} lines={1} measureDeps={fitKey} style={{ fontWeight: 400, letterSpacing: 1.2, lineHeight: 1.3, color: pc(parts, 'rs7VenueColor', '#fff'), opacity: 0.78 }} />
         </div>
         <div style={{ width: rightW, minWidth: 0, textAlign: 'right' }}>
-          <AutoFitText text={headParts.round} max={headFs} min={14} lines={1} measureDeps={fitKey} style={{ fontWeight: BOLD, letterSpacing: 0.6, lineHeight: 1.15, color: '#fff' }} />
-          <AutoFitText text={headParts.date} max={subFs} min={11} lines={1} measureDeps={fitKey} style={{ fontWeight: 400, letterSpacing: 1.2, lineHeight: 1.3, color: '#fff', opacity: 0.78 }} />
+          <AutoFitText text={headParts.round} max={headFs} min={14} lines={1} measureDeps={fitKey} style={{ fontWeight: BOLD, letterSpacing: 0.6, lineHeight: 1.15, color: pc(parts, 'roundColor', '#fff') }} />
+          <AutoFitText text={headParts.date} max={subFs} min={11} lines={1} measureDeps={fitKey} style={{ fontWeight: 400, letterSpacing: 1.2, lineHeight: 1.3, color: pc(parts, 'rs7DateColor', '#fff'), opacity: 0.78 }} />
         </div>
       </div>
 
@@ -324,8 +336,8 @@ export function ResultGlass({
         <div data-layer="Sponsor label" style={{
           position: 'absolute', left: sp.x, width: sp.w, top: sp.y - sp._labelH, height: sp._labelH,
           display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
-          fontSize: Math.round(14 * f), fontWeight: 600, letterSpacing: 1.4, textTransform: 'uppercase', textShadow: '0 1px 8px rgba(0,0,0,0.6)',
-        }}>Proudly sponsored by</div>
+          fontSize: Math.round(14 * f), fontWeight: 600, letterSpacing: 1.4, textTransform: 'uppercase', textShadow: '0 1px 8px rgba(0,0,0,0.6)', color: pc(parts, 'rs7SponsorColor', undefined),
+        }}>{pt(parts, 'rs7Sponsor', 'Proudly sponsored by')}</div>
       )}
 
       <div data-layer="BetterCricket logo" style={{
@@ -338,6 +350,34 @@ export function ResultGlass({
   )
 }
 ResultGlass.displayName = 'ResultGlass'
+
+// What the club can set on the Glass Card (Brand, "Glass Card elements"). The panes stay
+// see-through: a tint or shine picked here keeps the strength the glass was drawn at.
+const G_HEAD = 'Match header', G_GLASS = 'Glass panes', G_TEAM = 'Team line', G_ROWS = 'Top performers', G_SPON = 'Sponsor label'
+registerParts({
+  RS7: [
+    C('rs7GradeColor', 'Grade', G_HEAD, () => '#ffffff'),
+    C('rs7VenueColor', 'Venue', G_HEAD, () => '#ffffff'),
+    C('roundColor', 'Round', G_HEAD, () => '#ffffff'),
+    C('rs7DateColor', 'Date', G_HEAD, () => '#ffffff'),
+    C('cardBg', 'Glass tint', G_GLASS, null, { autoLabel: 'Dark glass' }),
+    C('rs7Sheen', 'Glass shine', G_GLASS, null, { autoLabel: 'White shine' }),
+    C('cardBorder', 'Glass outline', G_GLASS, () => '#ffffff'),
+    C('dividerColor', 'Line under the team', G_GLASS, () => '#ffffff'),
+    C('clubColor', 'Team name', G_TEAM, () => '#ffffff'),
+    C('statColor', 'Team score', G_TEAM, () => '#ffffff'),
+    C('winColor', 'Winner trophy', G_TEAM, () => GOLD),
+    C('subColor', 'Overs and balls', G_TEAM, () => '#ffffff'),
+    T('rs7Yet', 'Yet to bat words', G_TEAM, () => 'Yet to bat'),
+    C('rs7YetColor', 'Yet to bat colour', G_TEAM, () => '#ffffff'),
+    C('firstColor', 'First name', G_ROWS, () => '#ffffff'),
+    C('nameColor', 'Surname', G_ROWS, () => '#ffffff'),
+    C('rs7FigColor', 'Runs and wickets', G_ROWS, () => '#ffffff'),
+    C('rs7HotColor', 'Hundred or five-for', G_ROWS, () => GOLD),
+    T('rs7Sponsor', 'Sponsor label words', G_SPON, () => 'Proudly sponsored by'),
+    C('rs7SponsorColor', 'Sponsor label colour', G_SPON, () => '#ffffff'),
+  ],
+})
 
 // Where this file's layout keeps the sponsor grid (see sponsorSlots.js).
 export const SPONSOR_SLOTS = { RS7: glassSponsorSlot }
