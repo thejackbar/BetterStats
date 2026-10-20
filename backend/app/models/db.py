@@ -1579,6 +1579,10 @@ class Game(Base):
     # player's matches-played count; `result` cannot answer that question,
     # since a NULL result also covers an upcoming or in-progress fixture.
     status = Column(Text, nullable=True)
+    # CA called the fixture off but left `status` COMPLETED: both teams' resultType on the card
+    # read ABANDONED (services/game_status.card_called_off). NULL = not read yet, FALSE = read and
+    # not called off. Read like an ABANDONED status by the matches-played rules.
+    ca_called_off = Column(Boolean, nullable=True)
 
     grade = relationship("Grade", back_populates="games")
     batting_innings = relationship("BattingInnings", back_populates="game")

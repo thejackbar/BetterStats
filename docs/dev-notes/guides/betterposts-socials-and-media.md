@@ -124,6 +124,10 @@
 74. Icon search goes through our server only (`services/icon_library.py`): licence-safe sets, cached, paced, SVG refused if it carries script or an external reference. The post stores a data URI. A new outbound call to Iconify, or a new set, goes through `SETS` and the sanitiser. Sets with an attribution condition (CC BY and similar) are not added.
 75. A player photo chosen anywhere in BetterPosts goes through `ImageEditorModal` (crop, cut-out) before it is uploaded to the profile, and an existing player's photo is only filled when empty, never replaced.
 
+**Your own Canva design (v9.123.7)**
+60. A club's own design is an image block with `design: true, locked: true`, built by `withDesign()` and always at the back; `BlankCanvas` draws it at the live canvas size. Never keep a `blob:` URL for it, upload to the library first and change nothing on failure. Canva is a one-way door here (exported stills in); Connect and the Apps SDK are unbuilt, see the archive. Check: `verify_own_design_browser.mjs`.
+61. A text block with `bind` prints a live value (`social/boundResolve.js`); `resolveBind` null means "nothing held yet, show the sample", an empty string means "held, but not this slot, print nothing". Never reach `selectedPlayers` from a block: add the value to `blankData`. An imported template (`bettercricket-template` v1, spec in `boundFields.js`) marks every block it makes `fromTemplate: true` so a re-import replaces only those. Check: `probe_bound_fields.mjs`, `verify_template_import_browser.mjs`.
+
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
 - Hero layouts show a crest, not the cut-out: harness roster stubbed `photo_url: null`. Stubs must cover every conditional's data (give players a photo and a route for it).

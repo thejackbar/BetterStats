@@ -19,7 +19,7 @@ from app.models.db import (
 )
 from app.services import auto_sync, dismissal, merge_redirects, participant_names, playhq_client, reserve_players
 from app.services.boundary_counts import clean as _bounds
-from app.services.game_status import NOT_PLAYED_STATUSES, not_played_game_sql
+from app.services.game_status import NOT_PLAYED_STATUSES, card_called_off, not_played_game_sql
 from app.services.grade_labels import suggest_categories, suggest_category
 
 logger = logging.getLogger(__name__)
@@ -2392,6 +2392,21 @@ async def sync_grassroots_game_level_data(
                     )
                     await session.commit()
 
+                # CA left the fixture COMPLETED but both teams' resultType read ABANDONED
+                # (game_status.card_called_off). The match list does not carry resultType, so this
+                # card is the only place it can be read, and it is written here, ahead of the
+                # appearances gate, because a finished game never gets past that gate again.
+                # Neutral to the club (one games row serves both sides), so any club's sync may
+                # write it. None (card not COMPLETED, or no summary) leaves the column alone.
+                _called_off = card_called_off(scorecard)
+                if game_exists and _called_off is not None:
+                    await session.execute(
+                        text("UPDATE games SET ca_called_off = :v "
+                             "WHERE id = :gid AND ca_called_off IS DISTINCT FROM :v"),
+                        {"v": _called_off, "gid": match_id_str},
+                    )
+                    await session.commit()
+
                 our_appearances_done = True
                 if game_exists and our_team_pids:
                     our_appear_check = await session.execute(
@@ -2578,6 +2593,7 @@ async def sync_grassroots_game_level_data(
                         is_final=match_to_is_final.get(match_id_str, False),
                         match_format=match_to_format.get(match_id_str),
                         status=match_to_status.get(match_id_str),
+                        ca_called_off=card_called_off(scorecard),
                         venue=venue_name,
                     ))
                     try:

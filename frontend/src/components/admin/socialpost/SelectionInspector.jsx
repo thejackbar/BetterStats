@@ -16,6 +16,7 @@
 //   onSendTo(itemId, 'front'|'back')   jump to either end of the whole stack
 //   layoutName                         the built-in layout, named in the tooltip
 //                                      (null on the blank canvas, which has none)
+import { bindLabel } from '../../../social/boundResolve'
 import { useState } from 'react'
 import { Icon } from '../../../pages/admin/betterselect/ui'
 import { BLANK_FONTS } from '../../../social/blank-template'
@@ -126,6 +127,18 @@ export default function SelectionInspector({
           </>
         )}
 
+        {single?.type === 'text' && single.bind && (
+          <>
+            {/* The words come from the post's lineup and match details, so editing
+                the text here would change nothing. Unbind keeps the sample words
+                as plain text you can type over. */}
+            <span className="h-7 px-2 inline-flex items-center rounded-md border text-[11px] text-pb-accent"
+              style={{ borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' }}
+              title="This text is filled in from the post's players and match details">Field: {bindLabel(single.bind)}</span>
+            <Btn title="Stop filling this in automatically and keep the sample words as plain text" onClick={() => patch({ bind: null })}>Unbind</Btn>
+          </>
+        )}
+
         {single?.type === 'brand' && (
           <>
             <Btn active={single.layout === 'row'} title="Logo and name side by side" onClick={() => patch({ layout: 'row' })}>Row</Btn>
@@ -162,6 +175,15 @@ export default function SelectionInspector({
             <Btn onClick={() => patch({ fit: single.fit === 'cover' ? 'contain' : 'cover' })}>
               {single.fit === 'cover' ? 'Fill' : 'Fit'}
             </Btn>
+            {/* Your uploaded design stays put so dragging a block over it moves
+                the block. Unlock to move or resize the picture itself. */}
+            {single.design && (
+              <Btn
+                title={single.locked ? 'Locked to the whole post. Click to move or resize it.' : 'Click to lock it back to the whole post.'}
+                onClick={() => patch({ locked: !single.locked })}>
+                {single.locked ? 'Unlock' : 'Lock'}
+              </Btn>
+            )}
           </>
         )}
 
