@@ -526,7 +526,7 @@ Reported: a captain sometimes outsources vote counting to another person, who is
 - Not changed: the football twin (it has no per-team voter mode), and a nominee who is not a player of the club cannot be picked, since they could not verify on the voting link.
 - Checked with `backend/scripts/verify_vote_counters.py` (41 checks against Postgres; the previous commit fails 28) and `backend/scripts/drive_vote_counters.py` (13 checks in Chromium on the production build, including 390px). `verify_vote_grade_voter_modes.py` (25), `verify_vote_medals.py` (59, its table setup now also runs the 347 statement), `verify_vote_grade_weights.py` (33), `verification/verify_vote_landing_own_games.py` (16) and `verify_player_votes_reminder.py` (37) unchanged.
 
-## v9.124.0.1: a level week is settled on countback by default (migration 352)
+## v9.124.1.1: a level week is settled on countback by default (migration 352)
 
 Reported: Round 1 vs Hola Health WSCC 1st XI, a 3-2-1 medal. Dagg and Roach both had 17 raw votes (Dagg 4 threes, 1 two, 3 ones; Roach 1 three, 6 twos, 2 ones). With `tie_policy` 'share' both took 2, so the game handed out 7 points. The club wants Dagg 2 and Roach 1: countback on most 3s, and a maximum number of points per game unless it is a true dead heat.
 
