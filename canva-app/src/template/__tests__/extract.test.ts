@@ -775,3 +775,35 @@ describe("free-standing pictures and page counts", () => {
     });
   });
 });
+
+describe("placeholder words typed without the braces", () => {
+  it("warns that CLUB LOGO is plain text, and how to fix it", () => {
+    const r = ok(
+      extractFields(
+        page([
+          textBox("CLUB LOGO"),
+          textBox("{{player 1}}"),
+          textBox("Sponsors"),
+        ]),
+      ),
+    );
+    expect(r.warnings).toEqual([
+      "“CLUB LOGO” is plain text, so BetterCricket prints those words. To fill it in automatically, type {{club logo}} instead, or use the Add buttons.",
+      "“Sponsors” is plain text, so BetterCricket prints those words. To fill it in automatically, type {{sponsors}} instead, or use the Add buttons.",
+    ]);
+    expect(r.texts.map((t) => t.text)).toEqual(["CLUB LOGO", "Sponsors"]);
+  });
+
+  it("does not warn about ordinary headings or a real token", () => {
+    const r = ok(
+      extractFields(
+        page([
+          textBox("LINE UP"),
+          textBox("{{club logo}}"),
+          textBox("North Perth Cricket Club"),
+        ]),
+      ),
+    );
+    expect(r.warnings).toEqual([]);
+  });
+});
