@@ -511,6 +511,6 @@ The v9.123.2.4 rule (`attachable_by_full_name`: link by name only to a record wi
 - **Built (v9.123.7).** The rule is now applied: see `archive/stats-figures-records-and-filters.md`, "A 12th man who did not play is not a match". The audit stays as the way to test any club before its games are backfilled. It now labels a flagged game in a player-season where CA's total is ABOVE what we hold as `CA_ABOVE_HELD` (cannot be judged), not `OVER_FLAGS`.
 
 
-## CA fixtures called off but left COMPLETED (v9.123.8)
+## CA fixtures called off but left COMPLETED (v9.123.9)
 
 CA's match list entry carries `status` and `resultText` but not the per-team `resultType`; the scorecard's `matchSummary.teams[]` does. For the six Leederville games of 14 Nov 2020 the card reads status COMPLETED, `resultText` "Match drawn" and `resultType` ABANDONED on both teams, while Applecross's genuine draw reads DREW. The sync stores `games.ca_called_off` from the card it already fetches for every game, so there is no extra request. Backfill: `scripts/backfill_ca_called_off.py`, about one request per stored game with a named-only player. Full write-up in `archive/stats-figures-records-and-filters.md`.

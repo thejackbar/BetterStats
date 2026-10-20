@@ -1,0 +1,20 @@
+[
+  { "token": "player 1", "binding": "lineup.1.name" },
+  { "token": "{{Player 12}}", "binding": "lineup.12.name" },
+  { "token": "player3", "binding": "lineup.3.name" },
+  { "token": "player 4 first", "binding": "lineup.4.first" },
+  { "token": "player  4   LAST", "binding": "lineup.4.last" },
+  { "token": "player 2 role", "binding": "lineup.2.role" },
+  { "token": "player 15", "binding": "lineup.15.name" },
+  { "token": "player 16", "binding": null },
+  { "token": "player 0", "binding": null },
+  { "token": "opponent", "binding": "opponent" },
+  { "token": "date", "binding": "match.date" },
+  { "token": "Venue", "binding": "match.venue" },
+  { "token": "captain", "binding": "captain" },
+  { "token": "club", "binding": "team" },
+  { "token": "batsman 1", "binding": null },
+  { "token": "", "binding": null },
+  { "token": "player", "binding": null },
+  { "token": "player 1 banana", "binding": null }
+]

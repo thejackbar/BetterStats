@@ -2542,7 +2542,7 @@ Reported off Leederville CC: after a weekend most players on 99 games read 101, 
 - **Not fixed, open.** 2020/21 (one game for 18 players): Bissett's D Grade game on 14 Nov 2020 is held as COMPLETED with scored innings, he is named with no row, and CA's total does not count it. `audit_twelfth_man <club> --year 2020` classifies it. Left alone until that is read.
 
 
-## A fixture CA called off but left COMPLETED no longer counts for a player who was only named (v9.123.8)
+## A fixture CA called off but left COMPLETED no longer counts for a player who was only named (v9.123.9)
 
 - **Reported.** Leederville CC, 2020/21: about 18 to 22 players one match over PlayCricket, none of it explained by the 12th man rule or by the washout fix of v9.123.7.1. Example: Wilbur Bissett, held 13, CA 12, audit verdict MISSED with a single `SIDE_DID_NOT_BAT`.
 - **Cause.** One date, 14 Nov 2020: six games across six grades (G, D, J, I, C and Kookaburra A) with CA status COMPLETED and `resultText` "Match drawn", where both teams' `matchSummary.teams[].resultType` is ABANDONED. CA does not count a named-only player in them. In five of the six, Leederville never batted. Our row carried nothing that said so: `result` NULL (`classify_match_result` maps ABANDONED to None), `status` COMPLETED, no `raw_payload`, and the opposition scored 19 to 22 overs, so `looks_unplayed_sql` (which needs an empty scorecard) did not fire. The season table read CA's total (right, 12); the profile header is raised to the grid, which took `max(held, CA's claim)` with held = 13, so it read 13. Contrast Applecross's 8a5f61d3: resultType DREW, and CA does count it.

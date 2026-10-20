@@ -49,7 +49,8 @@ import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
-import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
+import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign } from '../../social/blank-template'
+import { parseTemplateFile, itemsFromTemplate, templateWarnings, boundSlotCount } from '../../social/boundFields'
 import { sponsorSlotFor } from '../../social/sponsorSlots'
 import { useBlankLayer } from '../../social/useBlankLayer'
 import { useTemplateLayers } from '../../social/useTemplateLayers'
@@ -1302,6 +1303,13 @@ export default function AdminSocialPost() {
   // block to fill.
   const blankImgInputRef = useRef(null)
   const pendingImgItem = useRef(null)
+  // The club's own design (a Canva export) for the blank canvas.
+  const designInputRef = useRef(null)
+  const [designBusy, setDesignBusy] = useState(false)
+  const templateFileRef = useRef(null)
+  const [clubStyle, setClubStyle] = useState(true)
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [pasteText, setPasteText] = useState('')
   // Club media library (persisted via the social-media API).
   const [mediaAssets, setMediaAssets] = useState([])
   // Below md the editor drops its drag canvas for a guided phone quick-post
@@ -3261,6 +3269,10 @@ export default function AdminSocialPost() {
   const blankData = {
     team, match: matchData, fixtures, results, record: blankRecord,
     scorecard: scorecardMatch, players: allPlayers, playerStats: playerStatsCache,
+    // What bound text fields print (an imported template's player slots, opponent
+    // and so on). null means the editor holds nothing for it yet.
+    lineup: templatePlayers.map((p) => ({ name: [p.first, p.last].filter(Boolean).join(' '), first: p.first, last: p.last, role: p.roleLong || p.role || '', captain: p.captain, keeper: p.keeper })),
+    opponent: opponent.name ? oppData.name : null, headline: headline || null,
     // Sponsor grids resolve their ids against the club's live list, so a saved
     // template always draws current logos.
     sponsors: adminSponsors.filter(sponsorLogoUrl).map((s) => ({ id: s.id, name: s.name, url: sponsorLogoUrl(s) })),
@@ -3709,9 +3721,14 @@ export default function AdminSocialPost() {
   })()
 
   // ─── Controls ────────────────────────────────────────────────────────────────
-  const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab)
-  const showOpponent  = !['scorecard', 'fixtures', 'results', 'totw', 'milestones', 'events', 'blank'].includes(activeTab)
-  const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
+  // An imported template (bound text fields) is a Blank canvas that still needs
+  // the lineup, the opponent and the match details those fields print.
+  const boundSlots = isBlankTab ? boundSlotCount(canvas.items) : 0
+  const hasBound = isBlankTab && canvas.items.some((it) => it.bind)
+  const playerCap = tmpl.maxPlayers > 0 ? tmpl.maxPlayers : boundSlots
+  const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab) || hasBound
+  const showOpponent  = !['scorecard', 'fixtures', 'results', 'totw', 'milestones', 'events', 'blank'].includes(activeTab) || hasBound
+  const showPlayers   = (activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0) || boundSlots > 0
   const showHeroImage = HERO_SLOT_TEMPLATES.includes(templateId)
   const HERO_SLOT_LAYOUT_NAMES = HERO_SLOT_TEMPLATES
     .map((id) => TEMPLATES.find((t) => t.id === id)?.name)
@@ -3971,6 +3988,94 @@ export default function AdminSocialPost() {
     try { await api.deleteSocialMedia(asset.id) } catch { /* asset stays removed locally */ }
   }
   const pickImageForItem = (itemId) => { pendingImgItem.current = itemId; blankImgInputRef.current?.click() }
+  // Bring the club's own design (a PNG or JPG exported from Canva) in as the
+  // bottom layer of the blank canvas. It is stored in the club's library, never
+  // kept as a blob: a blob would die with the tab and the saved template would
+  // come back without its picture. A failed upload says so and changes nothing.
+  const uploadDesign = async (file) => {
+    if (!file) return
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
+      flashNote({ warn: true, text: `“${file.name}” is not a PNG, JPG or WebP. In Canva, choose Share, Download, then PNG or JPG.`, tool: 'content' }, 12000)
+      return
+    }
+    setDesignBusy(true)
+    try {
+      const dims = await new Promise((resolve) => {
+        const url = URL.createObjectURL(file)
+        const img = new Image()
+        img.onload = () => { resolve({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(url) }
+        img.onerror = () => { resolve(null); URL.revokeObjectURL(url) }
+        img.src = url
+      })
+      const saved = await api.uploadSocialMedia(file)
+      setMediaAssets((a) => [saved, ...a])
+      record('Add your design')
+      canvas.setItems((its) => withDesign(its, saved.url, file.name, W, H))
+      // The picture fills the post edge to edge, so a different shape is cropped.
+      // Say so, with the size that would not be.
+      const off = dims && Math.abs(dims.w / dims.h - W / H) > 0.02
+      flashNote(off
+        ? { warn: true, text: `Your design is ${dims.w}×${dims.h}, this post is ${W}×${H}, so the edges are cropped. In Canva, resize to ${W}×${H} and upload it again to keep everything.`, tool: 'content' }
+        : { text: 'Your design is the bottom layer, locked. Add Club data, text or sponsors on top, then Save as template.', tool: 'content' }, 12000)
+    } catch (e) {
+      flashNote({ warn: true, text: `Your design did not upload (${e?.message || 'no answer from the server'}). Images over 5 MB are refused: export from Canva as JPG, or at a smaller size, and try again.`, tool: 'content' }, 14000)
+    } finally {
+      setDesignBusy(false)
+    }
+  }
+  // A template file from the BetterCricket Canva app: the design with the field
+  // words taken out, plus where each field sits and how it is styled. It becomes
+  // the locked design and one bound text block per field, ready for the players.
+  // Nothing changes if the file or its picture cannot be used.
+  const importTemplateText = async (text, label) => {
+    if (!text || !String(text).trim()) {
+      flashNote({ warn: true, text: 'There is no template text to import. Copy it from the BetterCricket Canva app first.', tool: 'content' }, 10000)
+      return
+    }
+    setDesignBusy(true)
+    try {
+      const parsed = parseTemplateFile(text)
+      if (parsed.error) { flashNote({ warn: true, text: parsed.error, tool: 'content' }, 14000); return }
+      const warnings = templateWarnings(parsed, { clubStyle })
+      let designUrl = null
+      if (parsed.background) {
+        if (!/^data:image\/(png|jpeg|webp);base64,/.test(parsed.background)) {
+          flashNote({ warn: true, text: 'The picture inside that template is not a PNG, JPG or WebP, so nothing was imported.', tool: 'content' }, 14000)
+          return
+        }
+        const blob = await (await fetch(parsed.background)).blob()
+        const saved = await api.uploadSocialMedia(new File([blob], `${parsed.name}.${blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png'}`, { type: blob.type }))
+        setMediaAssets((a) => [saved, ...a])
+        designUrl = saved.url
+      }
+      // The post takes the template's shape when it is one BetterPosts makes.
+      const shape = POST_SIZES.find((z) => z.w === parsed.canvas.w && z.h === parsed.canvas.h)
+      if (shape) setPostSize(shape.key)
+      else warnings.push(`The template is ${parsed.canvas.w}×${parsed.canvas.h}, which is not a BetterPosts size, so it stays on ${W}×${H} and the design is cropped to fit.`)
+      record('Import template')
+      const target = shape || { w: W, h: H }
+      canvas.setItems(itemsFromTemplate(parsed, { designUrl, designName: label, width: target.w, height: target.h, keep: canvas.items, clubStyle }))
+      canvas.setSelIds([])
+      const slots = parsed.fields.reduce((n, f) => { const m = (f.bind || '').match(/^lineup\.(\d+)\./); return m ? Math.max(n, Number(m[1])) : n }, 0)
+      const bound = parsed.fields.filter((f) => f.bind).length
+      flashNote({
+        warn: warnings.length > 0,
+        text: `Imported “${parsed.name}”: ${bound} field${bound === 1 ? '' : 's'}${slots ? `, ${slots} player slot${slots === 1 ? '' : 's'}` : ''}${parsed.texts.length ? `, ${parsed.texts.length} fixed word${parsed.texts.length === 1 ? '' : 's'}` : ''}${parsed.panels.length ? `, ${parsed.panels.length} panel${parsed.panels.length === 1 ? '' : 's'} (recolour with the block's colour swatches)` : ''}. ${clubStyle ? 'Colours and fonts come from your club, so changing your palette or font restyles it. ' : ''}Add the players, opponent and match details in the panels on the left.${warnings.length ? ` ${warnings.join(' ')}` : ''}`,
+        tool: 'content',
+      }, 16000)
+    } catch (e) {
+      flashNote({ warn: true, text: `That template did not import (${e?.message || 'it could not be read'}). Nothing was changed.`, tool: 'content' }, 14000)
+    } finally {
+      setDesignBusy(false)
+    }
+  }
+  const importTemplateFile = async (file) => {
+    if (!file) return
+    let text = ''
+    try { text = await file.text() } catch { /* reported by importTemplateText as no text */ }
+    await importTemplateText(text, file.name)
+    return
+  }
   // Crop / remove the background on the image ALREADY in a block. The hero
   // photo and sponsor logos have had this since they were built; an image block
   // only ever got the editor on the way in (replace), so an uploaded PNG that
@@ -4959,6 +5064,62 @@ export default function AdminSocialPost() {
                 <p className="text-[11px] text-pb-dim leading-relaxed">
                   A blank canvas — use the tools on the left (<span className="text-pb-text">Text</span>, <span className="text-pb-text">Shapes</span>, <span className="text-pb-text">Photos</span>, <span className="text-pb-text">Club data</span>) to add blocks, then drag them on the canvas. Or pick a starting layout under <span className="text-pb-text">Design</span>.
                 </p>
+                <div className="mt-3 pt-3 border-t pb-hairline flex flex-col gap-2" data-testid="own-design">
+                  <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Your own design (Canva)</div>
+                  <p className="text-[11px] text-pb-dim leading-relaxed">
+                    Make the look in Canva at <span className="text-pb-text">{W} × {H}</span>, download it as PNG or JPG (leave out the fixtures, scores and names), and upload it here. It becomes the locked bottom layer. Put live Club data, text and sponsors on top, then Save as template.
+                  </p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button onClick={() => designInputRef.current?.click()} disabled={designBusy} data-testid="own-design-upload"
+                      className="px-3 py-1.5 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors disabled:opacity-50">
+                      {designBusy ? 'Uploading…' : (canvas.items.some((it) => it.design) ? 'Replace your design' : 'Upload your design')}
+                    </button>
+                    {canvas.items.some((it) => it.design) && (
+                      <button onClick={() => { record('Remove your design'); canvas.setItems((its) => its.filter((it) => !it.design)) }}
+                        className="px-3 py-1.5 rounded text-[11px] font-mono border pb-hairline text-pb-dim hover:text-pb-text transition-colors">
+                        Remove it
+                      </button>
+                    )}
+                  </div>
+                  <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mt-1">Or import a template with its fields</div>
+                  <p className="text-[11px] text-pb-dim leading-relaxed">
+                    From the BetterCricket Canva app: a file that brings the design and a text field for every {'{{'}player 1{'}}'}, {'{{'}opponent{'}}'} or {'{{'}date{'}}'} you typed in Canva. The slots then fill from the players you add here.
+                  </p>
+                  <label className="flex items-start gap-2 text-[11px] text-pb-dim leading-relaxed cursor-pointer" data-testid="club-style">
+                    <input type="checkbox" checked={clubStyle} onChange={(e) => setClubStyle(e.target.checked)} className="mt-0.5" data-testid="club-style-input" />
+                    <span>Use my club's colours and fonts <span className="text-pb-faintest">(recommended). Untick to keep the colours and fonts from Canva.</span></span>
+                  </label>
+                  <div>
+                    <button onClick={() => templateFileRef.current?.click()} disabled={designBusy} data-testid="template-file-import"
+                      className="px-3 py-1.5 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors disabled:opacity-50">
+                      Import a template file
+                    </button>
+                  </div>
+                  <input ref={templateFileRef} type="file" accept=".json,application/json" className="sr-only" data-testid="template-file-input"
+                    onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; importTemplateFile(f) }} />
+                  <div>
+                    <button onClick={() => setPasteOpen((o) => !o)} data-testid="template-paste-toggle"
+                      className="text-[11px] font-mono text-pb-dim hover:text-pb-text underline underline-offset-2">
+                      {pasteOpen ? 'Hide paste box' : 'Or paste the template text'}
+                    </button>
+                  </div>
+                  {pasteOpen && (
+                    <div className="flex flex-col gap-1.5">
+                      <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} data-testid="template-paste"
+                        rows={4} placeholder="Paste what the Canva app copied here"
+                        className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-[11px] font-mono text-pb-text placeholder:text-pb-faintest" />
+                      <div>
+                        <button onClick={async () => { await importTemplateText(pasteText, 'Pasted template'); setPasteText('') }} disabled={designBusy || !pasteText.trim()}
+                          data-testid="template-paste-import"
+                          className="px-3 py-1.5 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors disabled:opacity-50">
+                          Import pasted text
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <input ref={designInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" data-testid="own-design-input"
+                    onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadDesign(f) }} />
+                </div>
               </div>
             )}
             {/* Match Info */}
@@ -5046,7 +5207,7 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
-                    Players <span className="ml-1 text-pb-faintest">{selectedPlayers.length}/{tmpl.maxPlayers}</span>
+                    Players <span className="ml-1 text-pb-faintest">{selectedPlayers.length}/{playerCap}</span>
                   </h2>
                   <div className="flex items-center gap-1.5">
                     {selectedPlayers.length > 1 && (alphaFrom
@@ -5099,13 +5260,13 @@ export default function AdminSocialPost() {
                     </p>
                   </div>
                 )}
-                {!IS_AFL && selectedPlayers.length < tmpl.maxPlayers && (
+                {!IS_AFL && selectedPlayers.length < playerCap && (
                   manualPlayerOpen
                     ? <ManualPlayerForm roster={allPlayers} onAdd={onManualPlayer} onClose={() => setManualPlayerOpen(false)} />
                     : <button onClick={() => setManualPlayerOpen(true)} data-testid="add-manual-player"
                         className="mb-3 font-mono text-[10px] tracking-wide2 px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text">+ ADD A PLAYER BY HAND</button>
                 )}
-                {selectedPlayers.length < tmpl.maxPlayers && (
+                {selectedPlayers.length < playerCap && (
                   <>
                     <input value={playerSearch} onChange={e => setPlayerSearch(e.target.value)} placeholder="Search players..."
                       className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text placeholder:text-pb-faintest mb-2" />
