@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { PbSpinner } from '../../lib/presskit'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
-import { Button, Note, Select, SegGroup, SegItem } from '../../components/admin/ui'
+import { Button, Note, SegGroup, SegItem } from '../../components/admin/ui'
 import DoubleCard from '../../components/admin/cardReview/DoubleCard'
 import MatchFilters, { FindLink, filterParams, useFilterParams } from '../../components/admin/cardReview/MatchFilters'
 
@@ -14,13 +14,15 @@ export default function AdminCardReviewDoubles() {
   const [filters, setFilters] = useFilterParams()
   const [kind, setKind] = useState('')
   const [strength, setStrength] = useState('')
-  const [season, setSeason] = useState('')
   const [shown, setShown] = useState('open')
   const [sort, setSort] = useState('strongest')
   const [rows, setRows] = useState([])
   const [total, setTotal] = useState(0)
   const [counts, setCounts] = useState(null)
-  const [seasons, setSeasons] = useState([])
+  const [playerNote, setPlayerNote] = useState(null)
+  // Which list the rows on screen belong to. The buttons follow the rows, not the tab just clicked,
+  // so the open pairs never show "Put back" while the dismissed list is still loading.
+  const [rowsAre, setRowsAre] = useState('open')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const seq = useRef(0)
@@ -30,16 +32,16 @@ export default function AdminCardReviewDoubles() {
     const mine = ++seq.current
     setLoading(true)
     api.cardReviewDoubles({
-      kind, strength: shown === 'open' ? strength : '', season, shown, sort, limit: PAGE, offset,
+      kind, strength: shown === 'open' ? strength : '', shown, sort, limit: PAGE, offset,
       fresh: fresh.current ? 'true' : undefined, ...filterParams(filters),
     }).then(r => {
       if (mine !== seq.current) return
       fresh.current = false
       setRows(prev => (more ? [...prev, ...r.rows] : r.rows))
-      setTotal(r.total); setCounts(r.counts); setSeasons(r.seasons); setError(null)
+      setRowsAre(shown); setTotal(r.total); setCounts(r.counts); setPlayerNote(r.player_note || null); setError(null)
     }).catch(e => { if (mine === seq.current) setError(e.message) })
       .finally(() => { if (mine === seq.current) setLoading(false) })
-  }, [kind, strength, season, shown, sort, filters])
+  }, [kind, strength, shown, sort, filters])
 
   useEffect(() => { load(false, 0) }, [load])
   // After a change the server's saved scan is dropped for a link or a dismissal, but a copy removed
@@ -64,7 +66,7 @@ export default function AdminCardReviewDoubles() {
         Australia match, or beside another club scorecard. If it is the same match, link the two (or remove the extra copy). If it
         is not, say so and it will not be offered again.
       </p>
-      <MatchFilters value={filters} onApply={setFilters}
+      <MatchFilters value={filters} onApply={setFilters} playerNote={playerNote}
         hint="The same words narrow every step of Card review." />
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <SegGroup>
@@ -94,10 +96,6 @@ export default function AdminCardReviewDoubles() {
             </SegGroup>
           </>
         )}
-        <Select className="!w-auto" value={season} onChange={e => setSeason(e.target.value)} aria-label="Season">
-          <option value="">Every season</option>
-          {seasons.map(s => <option key={s} value={s}>{s}</option>)}
-        </Select>
       </div>
       {counts && counts.formats_differ > 0 && shown === 'open' && (
         <p className="mb-3 text-[12.5px] text-pb-dim" data-testid="formats-note">
@@ -110,7 +108,7 @@ export default function AdminCardReviewDoubles() {
         <Note toneKey="calm">{shown === 'open' ? 'No possible doubles here.' : 'Nothing has been marked as different matches.'}</Note>
       )}
       <div className="space-y-3">
-        {rows.map(r => <DoubleCard key={r.key} row={r} dismissed={shown === 'dismissed'} onChanged={changed} />)}
+        {rows.map(r => <DoubleCard key={r.key} row={r} dismissed={rowsAre === 'dismissed'} onChanged={changed} />)}
       </div>
       {rows.length < total && (
         <div className="mt-4 text-center">

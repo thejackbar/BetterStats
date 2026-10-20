@@ -35,11 +35,18 @@ A person's "these are different matches" is a row in ``card_review_log`` (action
 so it is undoable and keyed on the pair, not on the match: a second candidate for the same club
 card is still offered. Each card and each synced game is offered at most once, strongest first.
 
-STRENGTH, so the list can be read from the top:
+STRENGTH, so the list can be read from the top. When both cards hold batters the bar is the one
+the automatic pairing trusts (`card_review.confirms_pair`: 60% of the smaller card, at least two),
+NOT a count of coincidences: a low-scoring team shares two scores with any other week's card, and
+two shared scores once offered two different matches (different opposition, one a win and one a
+loss) as "strong".
 
-* ``strong``   three or more batters with the same scores, or two within ten days.
-* ``likely``   one shared score.
-* ``possible`` the date and the opposition only, because one card has no batters to compare.
+* ``strong``   both cards hold batters and the smaller card is mostly on the other.
+* ``likely``   both hold batters, only some agree (the two sources can name a player differently),
+               but it is the same day and the opposition names agree.
+* ``possible`` one card has no batters to compare, so the date and the opposition are all there is.
+
+Two cards that both hold batters and are neither are two different matches and are never offered.
 """
 from __future__ import annotations
 
@@ -114,14 +121,19 @@ def _evidence(a: mp.MatchRow, b: mp.MatchRow) -> dict:
     gap = mp._day_gap(a.played_at, b.played_at)
     return {"shared": len(a.signature & b.signature), "gap_days": gap, "same_day": gap == 0,
             "opposition_agrees": mp.teams_agree(a.opposition, b.opposition),
-            "both_cards": a.has_card and b.has_card}
+            "both_cards": a.has_card and b.has_card,
+            "confirmed": cr.confirms_pair(a.signature, b.signature)}
 
 
-def strength_of(ev: dict) -> str:
-    gap = ev["gap_days"]
-    if ev["shared"] >= 3 or (ev["shared"] >= 2 and gap is not None and gap <= mp.NEAR_DAYS):
+def strength_of(ev: dict) -> Optional[str]:
+    """strong, likely or possible; None when the two cards are plainly two matches."""
+    if not ev["both_cards"]:
+        return "possible"
+    if ev["confirmed"]:
         return "strong"
-    return "likely" if ev["shared"] >= 1 else "possible"
+    if ev["shared"] >= 1 and ev["same_day"] and ev["opposition_agrees"]:
+        return "likely"
+    return None
 
 
 def _greedy(left: list, right: list, banned: set, accept, symmetric: bool) -> list:
@@ -137,9 +149,11 @@ def _greedy(left: list, right: list, banned: set, accept, symmetric: bool) -> li
             if key is None:
                 continue
             ev = _evidence(a, b)
-            if not accept(a, b, ev):
+            if strength_of(ev) is None or not accept(a, b, ev):
                 continue
-            scored.append((key, a.id, b.id, ev))
+            # strongest evidence first, so a weak neighbour never takes a card a strong one needs
+            rank = (2 - STRENGTHS.index(strength_of(ev)), ev["shared"], ev["same_day"], ev["opposition_agrees"], key)
+            scored.append((rank, a.id, b.id, ev))
     scored.sort(key=lambda r: (r[0], r[1], r[2]), reverse=True)
     used_a, used_b, out = set(), set(), []
     for key, a_id, b_id, ev in scored:
@@ -156,8 +170,7 @@ def _greedy(left: list, right: list, banned: set, accept, symmetric: bool) -> li
 def match_pairs_ca(manuals: list, synced: list, banned: set) -> list:
     """Unlinked club cards against synced games nobody has linked. Pure: rows in, pairs out."""
     def accept(a, b, ev):
-        # Two cards that both hold batters and share none are two different matches.
-        return not (ev["both_cards"] and ev["shared"] == 0)
+        return True  # `strength_of` has already turned away two cards that are different matches
     return _greedy(manuals, synced, banned, accept, symmetric=False)
 
 
@@ -170,8 +183,6 @@ def match_pairs_club(manuals: list, meta: dict, banned: set) -> list:
         if ev["gap_days"] is not None and ev["gap_days"] > mp.NEAR_DAYS:
             return False
         if ev["both_cards"]:
-            return ev["shared"] >= 2 or (ev["shared"] >= 1 and ev["same_day"])
-        if ev["shared"]:
             return True
         ga, gb = meta[a.id]["grade_id"], meta[b.id]["grade_id"]
         return bool(ev["same_day"] and ev["opposition_agrees"] and ga and ga == gb)
@@ -232,6 +243,7 @@ def _line(kind, pair, side_a, side_b) -> dict:
         "a": side_a, "b": side_b,
         "shared": ev["shared"], "gap_days": ev["gap_days"], "same_day": ev["same_day"],
         "opposition_agrees": ev["opposition_agrees"], "both_cards": ev["both_cards"],
+        "confirmed": ev["confirmed"],
         # The two copies sit under different match types, which is how a double shows up on a
         # player's profile: once under Two Day and once under One Day.
         "formats_differ": bool(fa and fb and fa != fb),

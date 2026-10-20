@@ -65,21 +65,27 @@ const FIND_ROWS = [
   { key: `club_only:${MC}:`, state: 'club_only', date: '2007-02-24', match_id: MC, game_id: null, copies: [side('club', MC, { date: '2007-02-24' })], review: null, candidate: null },
 ]
 
+// A real server takes time. The stub waits too: with instant answers a page that refetches in a loop
+// still looks fine (each answer lands before the next request), which is how that bug got through.
+const LATENCY = 150
 const routes = (page, calls, o = {}) => page.route('**/api/**', async (route) => {
   const req = route.request(), url = req.url(), body = req.postData()
   calls.push({ url, method: req.method(), body })
+  if (/card-review\/(doubles\?|find\?|matches\?)/.test(url)) await new Promise(r => setTimeout(r, LATENCY))
   const json = (b, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(b) })
   if (url.includes('/auth/me')) {
     return json({ id: 'boss', username: 'boss', display_name: 'Boss', role: 'club_admin', club_slug: 'test-cc', club_id: 'org1', entitlements: { modules: ['admin'], status: 'active' } })
   }
   if (/card-review\/overview/.test(url)) return json(o.scanFailed ? { ...OVERVIEW, groups: { ...OVERVIEW.groups, doubles: 0 }, todo: { ...OVERVIEW.todo, doubles: 0 }, doubles: { error: 'The scan for possible doubles failed. Reload to try again.' } } : OVERVIEW)
   if (/card-review\/bulk\/batches/.test(url)) return json({ batches: [] })
-  if (/card-review\/find\/options/.test(url)) return json({ seasons: ['Summer 2005/06'], competitions: ['Reserves League'] })
+  if (/card-review\/find\/options/.test(url)) return json({ seasons: ['Summer 2005/06', 'Summer 2004/05'], competitions: ['Reserves League'], players: ['Ritchie, Peter', 'Ritchie, Rod', 'Hind, Darren', 'Smith, John'], oppositions: ['Warnbro Knights', 'Old Irwinians', 'Hillman'], grades: ['A Grade', 'B Grade', 'C1 Grade'] })
   if (/card-review\/find\?/.test(url)) return json({ total: FIND_ROWS.length, offset: 0, limit: 25, capped: false, rows: FIND_ROWS })
   if (/card-review\/doubles\/(link|dismiss|restore)/.test(url) && req.method() === 'POST') return json({ ok: true, shows: 'ca' })
   if (/card-review\/doubles\?/.test(url)) {
     const sp = new URL(url).searchParams
     const dis = sp.get('shown') === 'dismissed'
+    if (sp.get('player') === 'Nobody') return json({ total: 0, offset: 0, limit: 25, seasons: [], counts: COUNTS, rows: [], player_note: { query: 'Nobody', matched: [], fuzzy: false } })
+    if (sp.get('player') === 'peter richie') return json({ total: 1, offset: 0, limit: 25, seasons: [], counts: COUNTS, rows: [ROWS[0]], player_note: { query: 'peter richie', matched: ['Ritchie, Peter'], fuzzy: true } })
     const rows = dis ? DISMISSED : ROWS.filter(r => !sp.get('kind') || r.kind === sp.get('kind'))
     return json({ total: rows.length, offset: 0, limit: 25, seasons: ['Summer 2005/06'], counts: COUNTS, rows })
   }
@@ -146,7 +152,7 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   check('one card per pair', (await page.locator('[data-testid="double-card"]').count()) === 3)
   check('every card draws both copies', (await page.locator('[data-testid="double-card"]').first().locator('[data-testid="side"]').count()) === 2)
   const ev = (await page.locator('[data-testid="evidence"]').first().innerText()).toLowerCase()
-  check('the evidence says strength, batters in common, the gap and the opposition', /strong match/i.test(ev) && ev.includes('9 batters in common') && /same day/i.test(ev) && /same opposition/i.test(ev), ev)
+  check('the evidence says strength, batters in common, the gap and the opposition', /strong match/i.test(ev) && ev.includes('9 of 9 batters in common') && /same day/i.test(ev) && /same opposition/i.test(ev), ev)
   check('two copies under different match types are flagged', /different match types/i.test(ev))
   check('a pair where one card has no batters says so', (await page.locator('[data-testid="evidence"]').nth(1).innerText()).toLowerCase().includes('no batters to compare'))
   check('the formats note counts them', (await page.locator('[data-testid="formats-note"]').innerText()).includes('2'))
@@ -177,9 +183,31 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   await page.click('[data-testid="restore"]')
   await page.waitForTimeout(300)
   const res = posts(calls, /doubles\/restore/)
-  check('Put back is ONE POST', res.length === 1 && JSON.parse(res[0].body).match_id === MA)
+  check('Put back is ONE POST', res.length === 1 && JSON.parse(res[0].body).match_id === MA, JSON.stringify(res.map(r => r.body)))
   check('the screen raised no errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
+  // the list settles: loaded once, and no further requests while it sits there
+  const quiet = await open(browser, 1440, '/admin/card-review/doubles?player=Ritchie')
+  await quiet.page.waitForSelector('[data-testid="double-card"]', { timeout: 15000 })
+  const n1 = gets(quiet.calls, /card-review\/doubles\?/).length
+  await quiet.page.waitForTimeout(1500)
+  const n2 = gets(quiet.calls, /card-review\/doubles\?/).length
+  check('the list loads once and then stays quiet (no refetch loop)', n1 <= 2 && n2 === n1, `after load ${n1}, 1.5s later ${n2}`)
+  await quiet.ctx.close()
+  // a search with no answer says so instead of spinning
+  const none = await open(browser, 1440, '/admin/card-review/doubles?player=Nobody')
+  await none.page.waitForSelector('[data-testid="player-note"]', { timeout: 8000 })
+  const m1 = gets(none.calls, /card-review\/doubles\?/).length
+  await none.page.waitForTimeout(1200)
+  check('no result shows the empty message, not the spinner', (await none.page.locator('body').innerText()).includes('No possible doubles here.') && !(await none.page.locator('body').innerText()).includes('Looking for matches held twice'))
+  check('and says that no player at the club matches', (await none.page.locator('[data-testid="player-note"]').innerText()).includes('No player at this club matches "Nobody"'))
+  check('and it did not keep asking', gets(none.calls, /card-review\/doubles\?/).length === m1)
+  await none.ctx.close()
+  // a misspelt name is matched and the page says what it showed
+  const typo = await open(browser, 1440, '/admin/card-review/doubles?player=peter%20richie')
+  await typo.page.waitForSelector('[data-testid="player-note"]', { timeout: 8000 })
+  check('a close name shows its pairs and says which player it used', (await typo.page.locator('[data-testid="player-note"]').innerText()).includes('Ritchie, Peter') && (await typo.page.locator('[data-testid="double-card"]').count()) === 1)
+  await typo.ctx.close()
   const narrow = await open(browser, 390, '/admin/card-review/doubles')
   await narrow.page.waitForSelector('[data-testid="double-card"]', { timeout: 15000 })
   check('no horizontal overflow at 390px', (await overflow(narrow.page)) <= 0, String(await overflow(narrow.page)))
@@ -254,6 +282,59 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   check('no horizontal overflow at 390px', (await overflow(narrow.page)) <= 0, String(await overflow(narrow.page)))
   await narrow.page.screenshot({ path: SHOTS + 'card_review_find_390.png', fullPage: true })
   await narrow.ctx.close()
+}
+
+// ── typeahead and the season dropdown ──────────────────────────────────────────────────────────
+{
+  console.log('\n-- suggestions and the season dropdown --')
+  const { ctx, page, calls, errors } = await open(browser, 1440, '/admin/card-review/doubles')
+  await page.waitForSelector('[data-testid="match-filters"]', { timeout: 15000 })
+  await page.waitForTimeout(500)
+  await page.fill('[data-testid="f-player"]', 'richie')
+  await page.waitForSelector('[data-testid="suggestion"]', { timeout: 5000 })
+  const sug = await page.locator('[data-testid="suggestion"]').allInnerTexts()
+  check('a misspelt surname still offers the player', sug.includes('Ritchie, Peter') && sug.includes('Ritchie, Rod') && !sug.includes('Hind, Darren'), sug.join(' | '))
+  check('and says these are the closest matches', (await page.locator('[data-testid="f-player-list"]').innerText()).toLowerCase().includes('closest matches'))
+  const firstOffered = sug[0]
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  check('the keyboard picks the first one offered', (await page.inputValue('[data-testid="f-player"]')) === firstOffered, `${await page.inputValue('[data-testid="f-player"]')} v ${firstOffered}`)
+  check('and the list closes', (await page.locator('[data-testid="suggestion"]').count()) === 0)
+  await page.fill('[data-testid="f-q"]', 'warnbo')
+  await page.waitForSelector('[data-testid="suggestion"]')
+  await page.locator('[data-testid="suggestion"]').first().click()
+  check('a click picks too (the list is not inside a label)', (await page.inputValue('[data-testid="f-q"]')) === 'Warnbro Knights')
+  await page.click('[data-testid="f-grade"]')
+  await page.waitForSelector('[data-testid="f-grade-list"]')
+  check('the grade box lists every grade on focus', (await page.locator('[data-testid="f-grade-list"] [data-testid="suggestion"]').count()) === 3)
+  await page.locator('[data-testid="f-grade-list"] [data-testid="suggestion"]').nth(1).click()
+  check('a grade can be picked', (await page.inputValue('[data-testid="f-grade"]')) === 'B Grade')
+  const seasons = await page.locator('[data-testid="f-season"] option').allInnerTexts()
+  check('there is a season dropdown, with the club\'s seasons', seasons.join('|') === 'Any season|Summer 2005/06|Summer 2004/05', seasons.join('|'))
+  await page.selectOption('[data-testid="f-season"]', 'Summer 2005/06')
+  const n = calls.length
+  await page.click('[data-testid="f-apply"]')
+  await page.waitForTimeout(600)
+  const q = new URL(gets(calls.slice(n), /card-review\/doubles\?/).pop().url).searchParams
+  check('searching sends all of it', q.get('player') === firstOffered && q.get('q') === 'Warnbro Knights' && q.get('grade') === 'B Grade' && q.get('season') === 'Summer 2005/06', [...q.entries()].join('&'))
+  check('and the season rides in the address bar', page.url().includes('season=Summer'))
+  check('Find a match carries the season too', (await page.getAttribute('[data-testid="find-link"]', 'href')).includes('season='))
+  check('the screen raised no errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+  const lst = await open(browser, 1440, '/admin/card-review/differ')
+  await lst.page.waitForSelector('[data-testid="match-filters"]', { timeout: 15000 })
+  check('every step has the season dropdown too', (await lst.page.locator('[data-testid="f-season"]').count()) === 1)
+  await lst.page.waitForTimeout(500)
+  const l1 = gets(lst.calls, /card-review\/matches\?/).length
+  await lst.page.waitForTimeout(1500)
+  check('a step list loads once and stays quiet', gets(lst.calls, /card-review\/matches\?/).length === l1 && l1 <= 2, String(l1))
+  await lst.ctx.close()
+  const fnd = await open(browser, 1440, '/admin/card-review/find?player=Ritchie')
+  await fnd.page.waitForSelector('[data-testid="fixture"]', { timeout: 15000 })
+  const f1 = gets(fnd.calls, /card-review\/find\?/).length
+  await fnd.page.waitForTimeout(1500)
+  check('Find a match loads once and stays quiet', gets(fnd.calls, /card-review\/find\?/).length === f1 && f1 <= 2, String(f1))
+  await fnd.ctx.close()
 }
 
 await browser.close()

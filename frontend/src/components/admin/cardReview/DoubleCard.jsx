@@ -6,8 +6,8 @@ import { Button, Badge } from '../ui'
 import { fmtDate, matchPageUrl } from './shared'
 
 const STRENGTH = {
-  strong: { label: 'Strong match', tone: 'ok', why: 'Several batters have the same scores on both.' },
-  likely: { label: 'Likely match', tone: 'accent', why: 'One batter has the same score on both, and the date and opposition fit.' },
+  strong: { label: 'Strong match', tone: 'ok', why: 'Most of the smaller card is on the other card with the same scores.' },
+  likely: { label: 'Likely match', tone: 'accent', why: 'The same day and opposition, and some batters have the same score. The two cards may name a player differently.' },
   possible: { label: 'Possible match', tone: 'warn', why: 'Only the date and the opposition fit. One of the cards has no batters to compare.' },
 }
 
@@ -37,11 +37,12 @@ export function SideBox({ side, label }) {
 
 export function Evidence({ row }) {
   const s = STRENGTH[row.strength]
+  const smaller = Math.min(row.a?.batters ?? 0, row.b?.batters ?? 0)
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="evidence">
       {s && <span title={s.why}><Badge toneKey={s.tone}>{s.label}</Badge></span>}
       <Badge toneKey={row.shared ? 'ok' : 'calm'}>
-        {row.both_cards ? `${row.shared} batters in common` : 'One card has no batters to compare'}
+        {row.both_cards ? `${row.shared} of ${smaller} batters in common` : 'One card has no batters to compare'}
       </Badge>
       <Badge toneKey="calm">{row.same_day ? 'Same day' : row.gap_days == null ? 'No date to compare' : `${row.gap_days} days apart`}</Badge>
       <Badge toneKey={row.opposition_agrees ? 'calm' : 'warn'}>{row.opposition_agrees ? 'Same opposition' : 'Opposition spelt differently'}</Badge>

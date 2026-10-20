@@ -154,17 +154,17 @@ export default function AdminCardReviewList() {
   const [rows, setRows] = useState([])
   const [total, setTotal] = useState(0)
   const [sources, setSources] = useState([])
-  const [seasons, setSeasons] = useState([])
+  const [playerNote, setPlayerNote] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState({})
   const [picked, setPicked] = useState({})
-  const [filters, setFilters] = useState({ season: '', decided: 'no', recent: false, source_file: '', richer: search.get('richer') === 'yes', sort: group === 'agree' ? 'newest' : 'worst' })
+  const [filters, setFilters] = useState({ decided: 'no', recent: false, source_file: '', richer: search.get('richer') === 'yes', sort: group === 'agree' ? 'newest' : 'worst' })
   const seq = useRef(0)
 
   const query = useCallback((offset) => ({
-    group, limit: PAGE, offset, season: filters.season || undefined,
+    group, limit: PAGE, offset,
     decided: filters.decided === 'all' ? undefined : filters.decided,
     recent_seasons: filters.recent ? 3 : undefined, source_file: filters.source_file || undefined,
     richer: filters.richer ? 'yes' : undefined, sort: filters.sort, ...filterParams(find),
@@ -179,6 +179,7 @@ export default function AdminCardReviewList() {
         setRows(prev => (more ? [...prev, ...r.rows] : r.rows))
         setTotal(r.total)
         setSources(r.sources)
+        setPlayerNote(r.player_note || null)
         setError(null)
       })
       .catch(e => { if (mine === seq.current) setError(e.message) })
@@ -186,7 +187,6 @@ export default function AdminCardReviewList() {
   }, [query, rows.length])
 
   useEffect(() => { load(false) }, [group, filters, find]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { api.cardReviewOverview().then(o => setSeasons(o.seasons.map(s => s.season))).catch(() => {}) }, [])
   // The compare page walks the same order with Previous and Next.
   useEffect(() => {
     try { sessionStorage.setItem(QUEUE_KEY, JSON.stringify({ group, ids: rows.map(r => r.match_id) })) } catch { /* private window */ }
@@ -232,7 +232,7 @@ export default function AdminCardReviewList() {
             ? 'Newest first, one line per match. These agree on the scores, but the club card holds more than Cricket Australia\'s in the ones marked.'
             : 'One line per match, the one that most needs a look first (or newest first, if you switch it). The line shows the biggest difference. When there are more, a caret opens the full list without leaving the page.'}
       </p>
-      <MatchFilters value={find} onApply={setFind} hint="Narrows this step by opposition, player, grade, competition or date. Find a match shows every copy of a fixture." />
+      <MatchFilters value={find} onApply={setFind} playerNote={playerNote} hint="Narrows this step by opposition, player, grade, competition or date. Find a match shows every copy of a fixture." />
       <div className="mb-4 flex flex-wrap items-center gap-3">
         {group !== 'agree' && (
           <SegGroup>
@@ -255,10 +255,6 @@ export default function AdminCardReviewList() {
             <SegItem active={filters.richer} onClick={() => setFilters(f => ({ ...f, richer: true }))} data-testid="richer-filter">Club card holds more</SegItem>
           </SegGroup>
         )}
-        <Select className="!w-auto" value={filters.season} onChange={e => setFilters(f => ({ ...f, season: e.target.value }))} aria-label="Season">
-          <option value="">Every season</option>
-          {seasons.map(s => <option key={s} value={s}>{s}</option>)}
-        </Select>
         {sources.length > 1 && (
           <Select className="!w-auto" value={filters.source_file} onChange={e => setFilters(f => ({ ...f, source_file: e.target.value }))} aria-label="Source file">
             <option value="">Every source</option>

@@ -4,7 +4,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import { PbSpinner } from '../../lib/presskit'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
-import { Button, Badge, Note, Select } from '../../components/admin/ui'
+import { Button, Badge, Note } from '../../components/admin/ui'
 import { SideBox, Evidence } from '../../components/admin/cardReview/DoubleCard'
 import MatchFilters, { filterParams, hasFilters, useFilterParams } from '../../components/admin/cardReview/MatchFilters'
 import { GROUPS, CHOICE_NAME, fmtDate } from '../../components/admin/cardReview/shared'
@@ -22,8 +22,7 @@ const STATE = {
 export default function AdminCardReviewFind() {
   const toast = useToast()
   const [filters, setFilters] = useFilterParams()
-  const [season, setSeason] = useState('')
-  const [opts, setOpts] = useState(null)
+  const [playerNote, setPlayerNote] = useState(null)
   const [rows, setRows] = useState([])
   const [total, setTotal] = useState(0)
   const [capped, setCapped] = useState(false)
@@ -32,22 +31,20 @@ export default function AdminCardReviewFind() {
   const [picked, setPicked] = useState({})
   const [busy, setBusy] = useState(false)
   const seq = useRef(0)
-  const searched = hasFilters(filters) || !!season
-
-  useEffect(() => { api.cardReviewFindOptions().then(setOpts).catch(() => {}) }, [])
+  const searched = hasFilters(filters)
 
   const load = useCallback((more = false, offset = 0) => {
     if (!searched) { setRows([]); setTotal(0); return }
     const mine = ++seq.current
     setLoading(true)
-    api.cardReviewFind({ ...filterParams(filters), season, limit: PAGE, offset })
+    api.cardReviewFind({ ...filterParams(filters), limit: PAGE, offset })
       .then(r => {
         if (mine !== seq.current) return
-        setRows(prev => (more ? [...prev, ...r.rows] : r.rows)); setTotal(r.total); setCapped(r.capped); setError(null)
+        setRows(prev => (more ? [...prev, ...r.rows] : r.rows)); setTotal(r.total); setCapped(r.capped); setPlayerNote(r.player_note || null); setError(null)
       })
       .catch(e => { if (mine === seq.current) setError(e.message) })
       .finally(() => { if (mine === seq.current) setLoading(false) })
-  }, [filters, season, searched])
+  }, [filters, searched])
   useEffect(() => { load(false, 0) }, [load])
 
   const chosen = rows.filter(r => picked[r.key])
@@ -74,15 +71,7 @@ export default function AdminCardReviewFind() {
         Look up a fixture and see every copy the record holds of it: the Cricket Australia match, the club scorecard, or both. Use it to
         check a figure someone has questioned, or to find two copies of one match that Card review did not suggest.
       </p>
-      <MatchFilters value={filters} onApply={setFilters}
-        extra={
-          <label className="block min-w-0 text-[11.5px] text-pb-dim">Season
-            <Select className="mt-1" value={season} onChange={e => setSeason(e.target.value)} data-testid="f-season">
-              <option value="">Any season</option>
-              {(opts?.seasons || []).map(s => <option key={s} value={s}>{s}</option>)}
-            </Select>
-          </label>
-        } />
+      <MatchFilters value={filters} onApply={setFilters} playerNote={playerNote} />
       {!searched && <Note toneKey="calm">Give at least one thing to look for: an opposition, a player, a grade, a competition, a season or a date.</Note>}
       {error && <Note toneKey="block">{error}</Note>}
       {capped && <div className="mb-3"><Note toneKey="warn">That matches more fixtures than can be listed. The newest are shown. Add a player, a grade or a date range to narrow it.</Note></div>}

@@ -11,7 +11,7 @@ Run:  DATABASE_URL=postgresql+asyncpg://root@/pl_verify?host=/var/run/postgresql
 
 Mutations (each must make the suite FAIL, which is what proves the checks bite):
   MUTATE=blind      the scan finds nothing (what Card review did before this step existed)
-  MUTATE=nocards    two cards that both hold batters and share none still count as a double
+  MUTATE=nocards    the first release's rule: two shared scores within ten days is a strong match
   MUTATE=loose      two club cards need only a date and an opposition
   MUTATE=nolink     linking writes the link but leaves the pair unlocked and unconfirmed
   MUTATE=forget     a "different matches" answer is not remembered
@@ -70,11 +70,13 @@ async def main():
             return {"rows": [], "dismissed": []}
         dbl.find_doubles = blind
     if mutate == "nocards":
-        real_ca = dbl.match_pairs_ca
-
-        def loose_ca(manuals, synced, banned):
-            return dbl._greedy(manuals, synced, banned, lambda a, b, ev: True, symmetric=False)
-        dbl.match_pairs_ca = loose_ca
+        # the rule this release first shipped: two shared scores within ten days is a strong match
+        def old_strength(ev):
+            gap = ev["gap_days"]
+            if ev["shared"] >= 3 or (ev["shared"] >= 2 and gap is not None and gap <= 10):
+                return "strong"
+            return "likely" if ev["shared"] >= 1 else "possible"
+        dbl.strength_of = old_strength
     if mutate == "loose":
         def loose_club(manuals, meta, banned):
             return dbl._greedy(manuals, manuals, set(banned) | {(y, x) for x, y in banned},
@@ -231,6 +233,19 @@ async def main():
     await manual("m_nb", date(2005, 12, 10), "Safety Bay", grade=GRADE_B)
     await manual("m_sa", date(2005, 12, 17), "Safety Bay", grade=GRADE_A, created=datetime(2026, 9, 1, tzinfo=timezone.utc))
     await manual("m_sb", date(2005, 12, 17), "Safety Bay", grade=GRADE_A, created=datetime(2026, 10, 1, tzinfo=timezone.utc))
+    # 6b. The reported false positive: two DIFFERENT matches a week apart (other opposition, one a
+    # win and one a loss) that happen to share two low scores out of eleven.
+    def eleven(n):
+        """Eleven batters, never Ritchie or Hind, whom the cards below add themselves."""
+        pool = names[2:-1]  # not Quill either: one search below needs a player on a single card
+        return [(pool[(n + i) % len(pool)], 100 + n * 13 + i * 2) for i in range(11)]
+    low = [("Ritchie", 0), ("Hind", 4)]
+    await manual("m_wk1", date(2002, 10, 19), "Warnbro Knights", bat=low + eleven(5))
+    await manual("m_wk2", date(2002, 10, 26), "Old Irwinians", bat=low + eleven(6))
+    await synced("g_wk3", date(2002, 11, 2), "Hillman", bat=low + eleven(7))
+    # 6c. The same day and club, only some batters agree (a player named differently): likely.
+    await manual("m_part1", date(2003, 3, 1), "Safety Bay", bat=[("Ritchie", 51), ("Hind", 9)] + eleven(8))
+    await manual("m_part2", date(2003, 3, 1), "Safety Bay", bat=[("Ritchie", 51), ("Hind", 12)] + eleven(9))
     # 7. Already linked: neither half is a candidate for anything.
     g_linked = await synced("g_linked", date(2006, 3, 4), "Warnbro", bat=bat(4))
     await manual("m_linked", date(2006, 3, 4), "Warnbro", bat=bat(4), link=g_linked)
@@ -256,6 +271,7 @@ async def main():
     check("a club card and a synced game with the same four scores are found", k_strong in by, True)
     check("and called strong", by.get(k_strong, {}).get("strength"), "strong")
     check("the evidence says how many batters are in common", by.get(k_strong, {}).get("shared"), 4)
+    check("and that the smaller card is mostly on the other", by.get(k_strong, {}).get("confirmed"), True)
     check("two copies under different match types say so (the Two Day and One Day tabs)",
           by.get(k_strong, {}).get("formats_differ"), True)
     check("Cricket Australia holding the fixture and no batters is found on the date alone", k_date in by, True)
@@ -264,7 +280,12 @@ async def main():
     check("a two-day match dated a week apart is found on two shared scores", k_off in by, True)
     check("and called strong", by.get(k_off, {}).get("strength"), "strong")
     check("the gap in days is reported", by.get(k_off, {}).get("gap_days"), 7)
-    check("two cards with batters that share none are two matches, not a double",
+    check("two different matches a week apart that share two low scores are NOT offered, however you pair them",
+          any(str(ids[k]) in (x[1], x[2]) for k in ("m_wk1", "m_wk2", "g_wk3") for x in by), False)
+    k_part = ("club", str(ids["m_part1"]), str(ids["m_part2"]))
+    check("the same day and club with only some batters agreeing is offered, as likely",
+          (by.get(k_part) or {}).get("strength"), "likely")
+    check("two cards that both have batters and share none are two matches, not a double",
           any(k[1] == str(ids["m_grades"]) for k in by), False)
     check("the synced half of that is not offered to anything either",
           any(k[2] == str(ids["g_grades"]) for k in by), False)
@@ -573,6 +594,16 @@ async def main():
         fx = await fnd.facets(s, ORG)
     check("the filters can offer the club's seasons and competitions", (fx["seasons"], fx["competitions"]),
           (["Summer 2006/07"], ["Reserves League"]))
+    check("and its players for the typeahead, the club's own and only the club's",
+          ("Ritchie, R" in fx["players"], "Ames, A" in fx["players"], len(fx["players"])), (True, False, len(names)))
+    check("its opposition names, from the club cards and the synced games alike",
+          {"Warnbro", "Hillman", "Rockingham", "Kwinana", "Safety Bay"} <= set(fx["oppositions"]), True)
+    check("and its grade names, once each", sorted(fx["grades"]), ["A Grade", "B Grade"])
+    async with async_session_maker() as s:
+        fx2 = await fnd.facets(s, ORG2)
+    check("another club is offered its own names and none of the first club's",
+          (fx2["players"] and "Ritchie, R" not in fx2["players"], "Warnbro" in fx2["oppositions"], "Preston Trinity" in fx2["oppositions"]),
+          (True, False, True))
 
     # --- the routes --------------------------------------------------------------------------
     print("\n-- the routes --")
@@ -681,7 +712,7 @@ async def main():
     print("\n-- nothing was deleted by any of it --")
     check("every card is still there",
           ((await q("SELECT count(*) FROM manual_games WHERE organisation_id = :o", o=ORG))[0][0],
-           (await q("SELECT count(*) FROM games WHERE home_org_id = :o", o=ORG))[0][0]), (15, 5))
+           (await q("SELECT count(*) FROM games WHERE home_org_id = :o", o=ORG))[0][0]), (19, 6))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     await engine.dispose()

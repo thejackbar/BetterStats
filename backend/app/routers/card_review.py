@@ -127,6 +127,12 @@ def match_filter(
                        date_from=date_from, date_to=date_to)
 
 
+async def _player_note(db, club_id, f):
+    if not _active(f) or not f.kw.get("player"):
+        return None
+    return fnd.player_note(await fnd.resolve_players(db, club_id, f.kw["player"]))
+
+
 def _active(f) -> bool:
     # A route body called directly (the verification suites) gets the Depends marker, not a filter.
     return bool(getattr(f, "active", False))
@@ -212,6 +218,7 @@ async def card_review_matches(
         raise HTTPException(status_code=422, detail="Unknown group.")
     rows = list(await _rows(db, club.id))
     rows = await _narrow(db, club.id, rows, find)
+    note = await _player_note(db, club.id, find)
     if group:
         rows = [r for r in rows if r["group"] == group]
     if season:
@@ -238,7 +245,7 @@ async def card_review_matches(
         # the biggest difference first for everything else
         rows.sort(key=(lambda r: r["shared"]) if group == "pairing" else (lambda r: -r["size"]))
     sources = sorted({(r["source"].get("filename") or r["source"]["label"]) for r in await _rows(db, club.id)})
-    return {"total": len(rows), "offset": offset, "limit": limit, "sources": sources,
+    return {"total": len(rows), "offset": offset, "limit": limit, "sources": sources, "player_note": note,
             "rows": [_line(r) for r in rows[offset:offset + limit]]}
 
 
@@ -427,9 +434,11 @@ async def card_review_doubles(
         raise HTTPException(status_code=422, detail="Unknown sort.")
     res = await _doubles(db, club.id, fresh)
     rows = list(res["dismissed"] if shown == "dismissed" else res["rows"])
+    note = None
     if _active(find):
         ids = await fnd.matching_ids(db, club.id, **find.kw)
         rows = [r for r in rows if r["a"]["id"] in ids or r["b"]["id"] in ids]
+        note = await _player_note(db, club.id, find)
     seasons = sorted({s for r in rows for s in (r["a"]["season"], r["b"]["season"]) if s},
                      key=lambda x: (cr.season_sort_key(x), x))
     if kind:
@@ -440,7 +449,7 @@ async def card_review_doubles(
         rows = [r for r in rows if season in (r["a"]["season"], r["b"]["season"])]
     if sort == "newest":
         rows.sort(key=lambda r: r["date"] or "", reverse=True)
-    return {"total": len(rows), "offset": offset, "limit": limit, "seasons": seasons,
+    return {"total": len(rows), "offset": offset, "limit": limit, "seasons": seasons, "player_note": note,
             "counts": dbl.counts(res), "rows": rows[offset:offset + limit]}
 
 
