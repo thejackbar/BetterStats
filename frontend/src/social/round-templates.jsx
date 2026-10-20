@@ -11,6 +11,7 @@ import { useRef, useState, useLayoutEffect } from 'react'
 import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, BrandLockup, CreditMark } from './cricket-templates'
 import { aspectOf, pick, share, grow } from './postAspect'
 import { LayerRoot } from './postLayers'
+import { pc } from './layoutParts'
 
 const DISPLAY = "var(--social-display-font, 'Anton', sans-serif)"
 const MONO = "'JetBrains Mono', monospace"
@@ -219,10 +220,10 @@ function barGeo(width = 1080, height = 1080, rule = true) {
 // then the sponsor panel's reserved box, then the club shield. A plain function
 // returning a div (not a component) so it is one layer in the stack like the div it
 // replaced. `rule` is the accent line under it.
-function topBar({ pal, width, height, team, left, rule = true }) {
+function topBar({ pal, width, height, team, left, rule = true, parts }) {
   const g = barGeo(width, height, rule)
   return (
-    <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: g.h, boxSizing: 'border-box', padding: '0 56px', display: 'flex', alignItems: 'center', gap: 22, borderBottom: rule ? `3px solid ${pal.accent}` : 'none' }}>
+    <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: g.h, boxSizing: 'border-box', padding: '0 56px', display: 'flex', alignItems: 'center', gap: 22, borderBottom: rule ? `3px solid ${pc(parts, 'headerRule', pal.accent)}` : 'none', background: pc(parts, 'headerBg', undefined) }}>
       <div style={{ flex: 1, minWidth: 0 }}>{left}</div>
       <div style={{ width: g.slot.w, height: g.slot.h, flexShrink: 0 }} />
       <Shield logo={team.logo} monogram={team.mono} color={pal.ink} size={g.shield} />
@@ -234,9 +235,9 @@ function topBar({ pal, width, height, team, left, rule = true }) {
 // reaches down to it. `bodyEnd` is how far above the canvas bottom a body stops.
 const creditH = (height) => grow(height, 62, 0.03)
 const bodyEnd = (height) => creditH(height) + grow(height, 22, 0.04)
-function creditStrip(pal, height) {
+function creditStrip(pal, height, parts) {
   return (
-    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: creditH(height), boxSizing: 'border-box', padding: '0 56px', background: pal.primary, borderTop: `2px solid ${pal.accent}`, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: creditH(height), boxSizing: 'border-box', padding: '0 56px', background: pc(parts, 'footerBg', pal.primary), borderTop: `2px solid ${pc(parts, 'footerRule', pal.accent)}`, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
       <Bug ink={pal.ink} />
     </div>
   )

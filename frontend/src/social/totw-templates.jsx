@@ -14,7 +14,51 @@ import { FOOT_BUG_W } from './round-templates'
 import { aspectOf, pick, grow } from './postAspect'
 import { LayerRoot } from './postLayers'
 import { usePostLook } from './postLook'
-import { pc, pt, inkOn } from './layoutParts'
+import { pc, pt, inkOn, registerParts, colorPart as C, textPart as T } from './layoutParts'
+
+// What the club can set on each layout (Brand, "Team Sheet elements"). Same keys
+// across the two, so a heading or a name colour carries from one to the other.
+const HEAD = 'Heading', CARD = 'Player cards', ROW = 'Player rows', FOOT = 'Footer'
+const HEADING_PARTS = [
+  T('title1', 'First word(s)', HEAD, () => 'TEAM OF'),
+  C('title1Color', 'First word colour', HEAD, (p) => p.ink),
+  T('title2', 'Second word(s)', HEAD, () => 'THE WEEK'),
+  C('title2Color', 'Second word colour', HEAD, (p) => p.accent),
+  C('roundColor', 'Round line', HEAD, (p) => p.accent),
+  C('clubColor', 'Club name', HEAD, (p) => p.ink),
+]
+const FOOTER_PARTS = [
+  C('footerBg', 'Footer bar', FOOT, (p) => p.primary),
+  C('footerRule', 'Footer line', FOOT, (p) => p.accent),
+]
+registerParts({
+  TW1: [
+    ...HEADING_PARTS,
+    C('photoBg', 'Photo backdrop', CARD, null, { autoLabel: 'Card colour' }),
+    C('cardBorder', 'Card outline', CARD, (p) => p.accent),
+    C('numColor', 'Card number', CARD, (p) => p.ink),
+    C('bandBg', 'Name band', CARD, (p) => p.accent),
+    C('nameColor', 'Surname', CARD, (p) => p.primary),
+    C('statColor', 'Score line', CARD, (p) => p.primary),
+    C('gradeColor', 'Grade line', CARD, (p) => p.primary),
+    C('pointsBg', 'Points tag', CARD, (p) => p.accent),
+    C('pointsColor', 'Points text', CARD, (p) => p.primary),
+    ...FOOTER_PARTS,
+  ],
+  TW2: [
+    ...HEADING_PARTS,
+    C('ruleColor', 'Top line', ROW, (p) => p.accent),
+    C('dividerColor', 'Row dividers', ROW, (p) => p.ink),
+    C('numColor', 'Row number', ROW, (p) => p.accent),
+    C('faceBg', 'Photo backdrop', ROW, null, { autoLabel: 'Soft tint' }),
+    C('faceBorder', 'Photo ring', ROW, (p) => p.accent),
+    C('firstColor', 'First name', ROW, (p) => p.ink),
+    C('nameColor', 'Surname', ROW, (p) => p.ink),
+    C('statColor', 'Score line', ROW, (p) => p.accent),
+    C('subColor', 'Grade and opposition', ROW, (p) => p.ink),
+    ...FOOTER_PARTS,
+  ],
+})
 
 const DISPLAY = "var(--social-display-font, 'Anton', sans-serif)"
 const MONO = "'JetBrains Mono', monospace"
