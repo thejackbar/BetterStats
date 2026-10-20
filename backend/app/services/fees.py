@@ -14,9 +14,11 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from datetime import date, datetime
 from decimal import Decimal
 from difflib import SequenceMatcher
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, func, text
 
@@ -29,6 +31,8 @@ from app.models.db import (
 )
 
 logger = logging.getLogger(__name__)
+
+FEE_TZ = ZoneInfo("Australia/Perth")
 
 
 # ── Free-text → member matching ─────────────────────────────────────────────
@@ -349,8 +353,21 @@ async def _football_appearances(session, game_ids) -> list:
     return [SimpleNamespace(game_id=r[0], player_id=r[1]) for r in rows.fetchall()]
 
 
+def fee_settled_before(now: datetime | None = None) -> date:
+    """A game is charged only when its match day is before this date.
+
+    That is the day after the match day: a game played on the 18th is charged
+    from the 19th. The app holds no per-club timezone, so "today" is Perth's,
+    the latest of the mainland zones, which means no club is charged early.
+    """
+    now = now or datetime.now(FEE_TZ)
+    return now.astimezone(FEE_TZ).date()
+
+
 async def recompute_fee_match_days(organisation_id: str, season_id: str | None = None) -> dict:
     """Rebuild auto-derived match-day rows for one season.
+
+    A game is only charged from the day after its match day (`fee_settled_before`).
 
     - Auto-creates fee_members (linked to the stats player) + fee_member_seasons
       for anyone who appears in a game (an appearance row or any batting, bowling
@@ -385,11 +402,18 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
         ).scalars().all()
 
         game_meta: dict = {}  # game_id -> (fee_format, default_days, played_at)
+        settled_before = fee_settled_before()
         for g in games:
             grade = grades.get(g.grade_id)
             ff, days = derive_fee_format(grade.fee_format if grade else None, g.match_format)
             if ff is None:
                 continue  # excluded grade
+            if g.played_at is not None and g.played_at >= settled_before:
+                # Not settled yet: a game is charged from the day after its match
+                # day, so a late change of date can't leave a player billed for
+                # the wrong day. Leaving it out of `game_meta` also lets the stale
+                # cleanup below withdraw an unpaid row already made for it.
+                continue
             game_meta[g.id] = (ff, days, g.played_at)
 
         # No scored games yet is no reason to stop: a player who only exists in
