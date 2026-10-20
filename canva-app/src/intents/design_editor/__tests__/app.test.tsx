@@ -1,6 +1,6 @@
 import { useFeatureSupport } from "@canva/app-hooks";
 import { findFonts } from "@canva/asset";
-import { openDesign } from "@canva/design";
+import { addPage, openDesign } from "@canva/design";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { App } from "src/intents/design_editor/app";
 import {
@@ -368,6 +368,90 @@ describe("BetterCricket template panel", () => {
             b.getAttribute("aria-disabled") === "true",
         ).toBe(true);
       }
+    });
+  });
+
+  describe("areas, marks and the square page", () => {
+    const useSession = () => {
+      const fake = fakeSession();
+      jest.mocked(openDesign).mockImplementation((async (
+        _options: unknown,
+        callback: (session: unknown) => Promise<void>,
+      ) => {
+        await callback(fake.session);
+      }) as never);
+      return fake;
+    };
+    it("adds a square 1080 x 1080 page", async () => {
+      jest.mocked(addPage).mockResolvedValue({} as never);
+      renderInTestProvider(<App />);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Start on a square page" }),
+      );
+      await waitFor(() =>
+        expect(addPage).toHaveBeenCalledWith({
+          dimensions: { width: 1080, height: 1080 },
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByText(/square page \(1080 × 1080\) was added/),
+        ).toBeTruthy(),
+      );
+    });
+
+    it("says why when Canva refuses the page", async () => {
+      jest.mocked(addPage).mockRejectedValue(new Error("nope from canva"));
+      renderInTestProvider(<App />);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Start on a square page" }),
+      );
+      await waitFor(() =>
+        expect(screen.getByText(/nope from canva/)).toBeTruthy(),
+      );
+    });
+
+    it("offers the square page when the page is not a post shape", async () => {
+      showPage(page([textBox("{{player 1}}")], { width: 800, height: 600 }));
+      renderInTestProvider(<App />);
+      check();
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Add a square page to build on" }),
+        ).toBeTruthy(),
+      );
+    });
+
+    it("does not offer it on a square page", async () => {
+      showPage(page([textBox("{{player 1}}")]));
+      renderInTestProvider(<App />);
+      check();
+      await waitFor(() =>
+        expect(screen.getByText(/1 field found/)).toBeTruthy(),
+      );
+      expect(
+        screen.queryByRole("button", { name: "Add a square page to build on" }),
+      ).toBeNull();
+    });
+
+    it("adds a sponsors box: a grey rectangle and the {{sponsors}} word", async () => {
+      const { calls } = useSession();
+      renderInTestProvider(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Add sponsors box" }));
+      await waitFor(() => expect(calls.created).toHaveLength(2));
+      expect(calls.created[0]).toHaveProperty("rect");
+      expect(JSON.stringify(calls.created[1])).toContain("{{sponsors}}");
+    });
+
+    it("adds a photo area for a chosen player place", async () => {
+      const { calls } = useSession();
+      renderInTestProvider(<App />);
+      fireEvent.change(screen.getByLabelText(/Player place/), {
+        target: { value: "3" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add to player" }));
+      await waitFor(() => expect(calls.created).toHaveLength(2));
+      expect(JSON.stringify(calls.created[1])).toContain("{{player 3 photo}}");
     });
   });
 

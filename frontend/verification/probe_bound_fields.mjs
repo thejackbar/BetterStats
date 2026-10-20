@@ -69,6 +69,28 @@ eq('captain not chosen in a real lineup is blank', resolveBind('captain', { line
 eq('no bind', resolveBind(null, data), null)
 eq('a bind it does not know', resolveBind('whatever', data), null)
 
+
+// Markers and photos (a template puts "C" or a photo beside every name; only the right ones print)
+const MK = { lineup: [
+  { name: 'A One', captain: true, photo: '/img/a.jpg' },
+  { name: 'B Two', keeper: true, viceCaptain: true, debut: true },
+  { name: 'C Three' },
+] }
+eq('captain mark prints C for the captain', resolveBind('lineup.1.captain', MK), 'C')
+eq('captain mark is blank for another player', resolveBind('lineup.2.captain', MK), '')
+eq('keeper mark prints WK', resolveBind('lineup.2.keeper', MK), 'WK')
+eq('vice mark prints VC', resolveBind('lineup.2.vice', MK), 'VC')
+eq('debut mark prints DEBUT', resolveBind('lineup.2.debut', MK), 'DEBUT')
+eq('debut mark is blank when not a debutant', resolveBind('lineup.3.debut', MK), '')
+eq('photo is the headshot address', resolveBind('lineup.1.photo', MK), '/img/a.jpg')
+eq('a player with no photo prints nothing', resolveBind('lineup.3.photo', MK), '')
+eq('a place beyond the lineup prints nothing', resolveBind('lineup.9.photo', MK), '')
+eq('no lineup yet: a photo shows its placeholder (null)', resolveBind('lineup.1.photo', { lineup: [] }), null)
+eq('no lineup yet: a mark shows its sample (null)', resolveBind('lineup.1.captain', {}), null)
+eq('vice captain by name', resolveBind('vice', MK), 'B Two')
+eq('keeper by name', resolveBind('keeper', MK), 'B Two')
+eq('bindLabel for a photo', bindLabel('lineup.2.photo'), 'Player 2 (photo)')
+
 // Counting slots
 eq('slot count is the highest slot used', boundSlotCount([{ bind: 'lineup.3.name' }, { bind: 'lineup.11.last' }, { bind: 'opponent' }, {}]), 11)
 eq('no player slots', boundSlotCount([{ bind: 'opponent' }]), 0)

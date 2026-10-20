@@ -310,7 +310,9 @@ function releaseSponsorAuto(items, patchMap) {
   Object.entries(patchMap).forEach(([id, patch]) => {
     const it = items.find((x) => x.id === id)
     const takesOver = it && it.type === 'sponsors' && it.auto && SPONSOR_TAKEOVER_KEYS.some((k) => k in patch)
-    out[id] = takesOver ? { ...patch, auto: false } : patch
+    // A template's sponsors box follows the post's sponsors until somebody picks their own.
+    const picks = it && it.type === 'sponsors' && it.followDefault && 'sponsorIds' in patch
+    out[id] = takesOver ? { ...patch, auto: false } : picks ? { followDefault: false, ...patch } : patch
   })
   return out
 }
@@ -3276,7 +3278,7 @@ export default function AdminSocialPost() {
     scorecard: scorecardMatch, players: allPlayers, playerStats: playerStatsCache,
     // What bound text fields print (an imported template's player slots, opponent
     // and so on). null means the editor holds nothing for it yet.
-    lineup: templatePlayers.map((p) => ({ name: [p.first, p.last].filter(Boolean).join(' '), first: p.first, last: p.last, role: p.roleLong || p.role || '', captain: p.captain, keeper: p.keeper })),
+    lineup: templatePlayers.map((p) => ({ name: [p.first, p.last].filter(Boolean).join(' '), first: p.first, last: p.last, role: p.roleLong || p.role || '', captain: p.captain, keeper: p.keeper, viceCaptain: p.viceCaptain, debut: p.debut, photo: p.headshot })),
     opponent: opponent.name ? oppData.name : null, headline: headline || null,
     // Sponsor grids resolve their ids against the club's live list, so a saved
     // template always draws current logos.
@@ -3546,6 +3548,8 @@ export default function AdminSocialPost() {
     const geo = sponsorSlotFor(templateId, sponsorCanvas.w, sponsorCanvas.h, sponsorDefault.ids.length, slotOpts)
     if (!existing) {
       if (sponsorDismissed.current[sponsorKey]) return
+      // "Your template" has no sponsor band unless the template drew a sponsors box.
+      if (templateId === CUSTOM_LAYOUT_ID) return
       const fresh = newBlankItem('sponsors', { ...geo, sponsorIds: sponsorDefault.ids, auto: true })
       // Functional, so two runs of this effect before React re-renders cannot
       // put two grids on the post.
@@ -3558,6 +3562,8 @@ export default function AdminSocialPost() {
       // A layout's own padding and backing come with its slot, but only when the
       // slot itself moves: a backing somebody picked is theirs until then.
       if (!same) sponsorTarget.patchMany({ [existing.id]: { sponsorIds: sponsorDefault.ids, ...geo } })
+    } else if (existing.followDefault && existing.sponsorIds.join(',') !== sponsorDefault.ids.join(',')) {
+      sponsorTarget.patchMany({ [existing.id]: { sponsorIds: sponsorDefault.ids, followDefault: true } })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, sponsorDefault, sponsorTarget.items, sponsorKey, sponsorCanvas.w, sponsorCanvas.h, nativeSponsors, templateId, slotOpts?.position, slotOpts?.players])
@@ -3886,11 +3892,11 @@ export default function AdminSocialPost() {
       checkDebuts(picked, d.fixture?.played_on || null)
       const fx = d.fixture
       if (fx) {
-        setMatch((m) => ({ ...m, competition: fx.grade || m.competition, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.played_on || m.date, time: fx.start_time || m.time }))
+        setMatch((m) => ({ ...m, competition: fx.grade_name || fx.grade || m.competition, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.played_on || m.date, time: fx.start_time || m.time }))
         if (fx.opponent_name) setOpponent((o) => ({ ...o, name: fx.opponent_name }))
         const tn = teamHeadline(
           (fx.home_away === 'AWAY' ? fx.away_team : fx.home_team) || '',
-          settings?.name, fx.grade || match.competition)
+          settings?.name, fx.grade_name || fx.grade || match.competition)
         if (tn) setHeadline(tn)
       }
       setLineupLoad(`ok:${picked.length}`)
@@ -3923,7 +3929,7 @@ export default function AdminSocialPost() {
     checkDebuts(picked, fx.date || null)
     setMatch((m) => ({ ...m, competition: fx.grade || m.competition, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
     if (oppTeam?.club || oppTeam?.name) setOpponent((o) => ({ ...o, name: oppTeam.club || oppTeam.name || o.name, logo: oppTeam.logo_url || o.logo }))
-    const tn = teamHeadline(ourTeam.name || ourTeam.club || '', settings?.name, fx.grade || match.competition)
+    const tn = teamHeadline(ourTeam.name || ourTeam.club || '', settings?.name, fx.grade_name || fx.grade || match.competition)
     if (tn) setHeadline(tn)
     setLineupLoad(`ok:${picked.length}`)
   }
@@ -4082,6 +4088,9 @@ export default function AdminSocialPost() {
         overlayHistory.commit('Import template')
         // Importing again into the same layout updates it; coming from another layout starts clean
         // (the post's own sponsor grid is kept either way).
+        // A template starts with the post's own extras off (crest watermark, texture, background word):
+        // the Canva design is the look, and the club turns anything back on under Design.
+        if (templateId !== CUSTOM_LAYOUT_ID) { setBgLogoOn(false); setBgStyle('none'); setBgBigText('') }
         overlay.setItems(build(templateId === CUSTOM_LAYOUT_ID ? overlay.items : overlay.items.filter((it) => it.type === 'sponsors')))
         overlay.setSelIds([])
         setTemplateId(CUSTOM_LAYOUT_ID)

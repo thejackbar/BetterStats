@@ -13,7 +13,7 @@ import {
   Title,
 } from "@canva/app-ui-kit";
 import { findFonts } from "@canva/asset";
-import { openDesign } from "@canva/design";
+import { addPage, openDesign } from "@canva/design";
 import type { DesignEditing } from "@canva/design";
 import { useState } from "react";
 import { useIntl } from "react-intl";
@@ -31,6 +31,9 @@ import {
   lineUpBlock,
   matchDetailsBlock,
   MAX_LINEUP,
+  PLAYER_EXTRAS,
+  playerExtraBlock,
+  sponsorsBlock,
 } from "src/template/blocks";
 import type { BlockSpec, PageSize } from "src/template/blocks";
 import {
@@ -89,6 +92,8 @@ export const App = () => {
   const [count, setCount] = useState(11);
   const [groupIt, setGroupIt] = useState(false);
   const [field, setField] = useState("player 1");
+  const [place, setPlace] = useState(1);
+  const [extra, setExtra] = useState<string>("photo");
   const [placed, setPlaced] = useState(0);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | undefined>(undefined);
@@ -226,6 +231,28 @@ export const App = () => {
     }
   };
 
+  // A new design is often 800 x 600, which is not a BetterCricket post shape. This adds a
+  // square page (1080 x 1080) to build on instead.
+  const addSquarePage = async () => {
+    setBusy(true);
+    setNotice(undefined);
+    try {
+      await addPage({ dimensions: { width: 1080, height: 1080 } });
+      setNotice({
+        tone: "positive",
+        text: intl.formatMessage({
+          defaultMessage:
+            "A square page (1080 × 1080) was added at the end of the design. Open it, build your post there, and delete the old page if you do not need it.",
+          description: "A square page was added to the design",
+        }),
+      });
+    } catch (e) {
+      setNotice({ tone: "critical", text: messageOf(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const runExport = async () => {
     if (!postType) {
       return;
@@ -323,7 +350,7 @@ export const App = () => {
     const use = intl.formatMessage(
       {
         defaultMessage:
-          "{use, select, panel {a panel behind your text} background {the background} other {left out}}",
+          "{use, select, panel {a panel behind your text} background {the background} area {the photo or sponsors area} other {left out}}",
         description: "What the export does with a non-text element",
       },
       { use: sf.use },
@@ -368,6 +395,19 @@ export const App = () => {
           )}
         </Text>
 
+        <Button
+          variant="secondary"
+          onClick={addSquarePage}
+          loading={busy}
+          disabled={off}
+          stretch
+        >
+          {intl.formatMessage({
+            defaultMessage: "Start on a square page",
+            description:
+              "Button that adds a 1080 by 1080 page, a BetterCricket post shape",
+          })}
+        </Button>
         <FormField
           label={intl.formatMessage({
             defaultMessage: "What kind of post is this?",
@@ -523,6 +563,110 @@ export const App = () => {
             description: "Button that adds one field's text box to the design",
           })}
         </Button>
+        <Title size="xsmall">
+          {intl.formatMessage({
+            defaultMessage: "Add a player's photo or mark",
+            description:
+              "Heading of the section that adds a photo area or a captain, keeper or debut mark",
+          })}
+        </Title>
+        <Text size="small">
+          {intl.formatMessage({
+            defaultMessage:
+              "A photo is an area BetterCricket fills with that player's picture. A mark prints C, VC, WK or DEBUT only for the players who are one.",
+            description: "Explains photos and marks",
+          })}
+        </Text>
+        <FormField
+          label={intl.formatMessage({
+            defaultMessage: "Player place",
+            description: "Label for which player place a photo or mark is for",
+          })}
+          control={(props) => (
+            <NumberInput
+              {...props}
+              value={place}
+              min={1}
+              max={MAX_LINEUP}
+              hasSpinButtons
+              decrementAriaLabel={intl.formatMessage({
+                defaultMessage: "One place earlier",
+                description: "Accessible label for the minus button",
+              })}
+              incrementAriaLabel={intl.formatMessage({
+                defaultMessage: "One place later",
+                description: "Accessible label for the plus button",
+              })}
+              onChange={(value) => {
+                if (value !== undefined) {
+                  setPlace(value);
+                }
+              }}
+            />
+          )}
+        />
+        <FormField
+          label={intl.formatMessage({
+            defaultMessage: "What to add",
+            description: "Label for choosing a photo or a mark",
+          })}
+          control={(props) => (
+            <Select
+              {...props}
+              options={PLAYER_EXTRAS.map((e) => ({
+                value: e,
+                label: intl.formatMessage(
+                  {
+                    defaultMessage:
+                      "{kind, select, photo {Photo area} captain {Captain mark} keeper {Keeper mark} debut {Debut mark} other {Vice-captain mark}}",
+                    description: "A photo area or a mark a player can carry",
+                  },
+                  { kind: e === "vice captain" ? "vice" : e },
+                ),
+              }))}
+              value={extra}
+              onChange={setExtra}
+              stretch
+            />
+          )}
+        />
+        <Button
+          variant="secondary"
+          onClick={async () => {
+            const slot = placed;
+            setPlaced((n) => n + 1);
+            await addBlock((size) =>
+              playerExtraBlock(size, place, extra, slot),
+            );
+          }}
+          loading={busy}
+          disabled={off}
+          stretch
+        >
+          {intl.formatMessage({
+            defaultMessage: "Add to player",
+            description: "Button that adds a photo area or a mark for a player",
+          })}
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => addBlock((size) => sponsorsBlock(size))}
+          loading={busy}
+          disabled={off}
+          stretch
+        >
+          {intl.formatMessage({
+            defaultMessage: "Add sponsors box",
+            description: "Button that adds a sponsors area to the design",
+          })}
+        </Button>
+        <Text size="small" tone="tertiary">
+          {intl.formatMessage({
+            defaultMessage:
+              "The grey rectangle only marks the area. Resize it and BetterCricket uses its size and place.",
+            description: "Explains the grey marker rectangles",
+          })}
+        </Text>
         {notice && <Alert tone={notice.tone}>{notice.text}</Alert>}
 
         <Button
@@ -618,6 +762,20 @@ export const App = () => {
                 {skippedText(s)}
               </Alert>
             ))}
+            {!state.result.postSize && (
+              <Button
+                variant="secondary"
+                onClick={addSquarePage}
+                disabled={off}
+                stretch
+              >
+                {intl.formatMessage({
+                  defaultMessage: "Add a square page to build on",
+                  description:
+                    "Button shown when the page is not a BetterCricket post shape",
+                })}
+              </Button>
+            )}
             {state.result.warnings.map((w, i) => (
               <Alert key={`${w}-${i}`} tone="warn">
                 {w}

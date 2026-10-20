@@ -55,7 +55,8 @@ const ROWS = [
 ]
 const OVERVIEW = {
   total: 3328, groups: { agree: 2112, small: 533, differ: 222, pairing: 233, nocard: 228 },
-  current: { ca: 0, club: 3328, hybrid: 0 }, decided_by_hand: 0, agree_club_richer: 87,
+  current: { ca: 0, club: 3328, hybrid: 0 }, decided_by_hand: 0, agree_club_richer: 87, bulk_left: 2025,
+  todo: { pairing: 233, agree: 2112, small: 533, differ: 222 },
   seasons: [
     { season: 'Summer 2025/26', matches: 253, ca: 0, club: 253, hybrid: 0, needs_decision: 31 },
     { season: 'Summer 2024/25', matches: 232, ca: 0, club: 232, hybrid: 0, needs_decision: 27 },
@@ -88,7 +89,9 @@ const routes = (page, calls, o = {}) => page.route('**/api/**', async (route) =>
       ? { id: 'mem', username: 'mem', display_name: 'Member', role: 'club_member', capabilities: [], club_slug: 'test-cc', club_id: 'org1', entitlements: { modules: ['admin'], status: 'active' } }
       : { id: 'boss', username: 'boss', display_name: 'Boss', role: 'club_admin', club_slug: 'test-cc', club_id: 'org1', entitlements: { modules: ['admin'], status: 'active' } })
   }
-  if (/card-review\/overview/.test(url)) return json(OVERVIEW)
+  if (/card-review\/overview/.test(url)) {
+    return json(o.pairingDone ? { ...OVERVIEW, groups: { ...OVERVIEW.groups, pairing: 0 }, todo: { ...OVERVIEW.todo, pairing: 0 } } : OVERVIEW)
+  }
   if (/card-review\/bulk\/batches/.test(url)) return json({ batches: [{ batch_id: 'bt1', created_at: '2026-10-19T05:00:00Z', matches: 12, still_switched: 12 }] })
   if (/card-review\/bulk\/preview/.test(url)) return json({ matches: 2112, held_back: 87, by_season: [{ season: 'Summer 2025/26', matches: 162 }], sample: [{ match_id: M1, game_id: G1, date: '2026-03-14', grade: '1st XI', opposition: 'Northfield' }] })
   if (/card-review\/bulk\/apply/.test(url)) return json({ batch_id: 'bt2', switched: 2112, skipped: [] })
@@ -148,7 +151,7 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
 {
   console.log('\n-- the overview --')
   const { ctx, page, calls, errors } = await open(browser, 1440, '/admin/card-review')
-  await page.waitForSelector('[data-testid="groups"]', { timeout: 15000 })
+  await page.waitForSelector('[data-testid="groups"]', { timeout: 15000 }).catch(async e => { console.log('PAGEERRORS', errors, (await page.locator('body').innerText()).slice(0, 400)); throw e })
   const text = await page.locator('[data-testid="groups"]').innerText()
   check('the five groups show their counts', ['2,112', '533', '222', '233', '228'].every(n => text.includes(n)), text.slice(0, 200))
   check('and their names', ['Scores agree', 'Small differences', 'Scores differ', 'Pairing looks wrong', 'No Cricket Australia card'].every(n => text.toLowerCase().includes(n.toLowerCase())))
@@ -156,6 +159,13 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   check('the spreadsheet link points at the export', (await page.getAttribute('[data-testid="export-link"]', 'href')).endsWith('/club-admin/card-review/export.csv'))
   check('the agree card says how many are held back from the switch, with a way to look at them',
     (await page.locator('[data-testid="richer-note"]').innerText()).includes('87') && (await page.getAttribute('[data-testid="richer-link"]', 'href')) === '/admin/card-review/agree?richer=yes')
+  const order = await page.locator('[data-testid^="step-"]').evaluateAll(els => els.map(e => e.dataset.testid))
+  check('the four steps run pairing, agree, small, differ', order.join(',') === 'step-pairing,step-agree,step-small,step-differ', order.join(','))
+  check('the pairing step is the one marked to start with',
+    (await page.getAttribute('[data-testid="step-pairing"]', 'data-state')) === 'next' && (await page.getAttribute('[data-testid="step-agree"]', 'data-state')) === 'later')
+  check('each step says its place in the order', (await page.locator('[data-testid="step-differ"]').innerText()).toLowerCase().includes('step 4 of 4'))
+  check('the progress line counts what is reviewed out of what can be compared', (await page.locator('[data-testid="progress"]').innerText()).includes('0 of 3,100 matches reviewed'))
+  check('the matches with no Cricket Australia card are a note, not a step', (await page.locator('[data-testid="nocard-note"]').innerText()).includes('228'))
   check('a previous bulk switch is offered an undo', (await page.locator('[data-testid="batches"]').innerText()).includes('Undo this batch'))
   await page.screenshot({ path: SHOTS + 'card_review_overview_1440.png', fullPage: true })
   await page.click('[data-testid="preview-switch"]')
@@ -163,6 +173,7 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   check('the bulk switch opens a preview, not an action', posts(calls, /bulk\/apply/).length === 0)
   check('and says how many agreeing matches it leaves out, and why',
     (await page.locator('[data-testid="bulk-held-back"]').innerText()).includes('87') && (await page.locator('[data-testid="bulk-held-back"]').innerText()).includes('club card holds something'))
+  check('the switch warns that unchecked pairings can add to it', (await page.locator('[data-testid="bulk-pairing-note"]').innerText()).includes('233'))
   const dis = await page.isDisabled('[data-testid="bulk-apply"]')
   check('Apply stays disabled until the sample has been looked at', dis === true)
   await page.check('[data-testid="bulk-ack"]')
@@ -174,6 +185,28 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   await ctx.close()
 }
 
+// ── start here ─────────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n-- start here --')
+  const { ctx, page, errors } = await open(browser, 1440, '/admin/card-review')
+  await page.waitForSelector('[data-testid="start-here"]', { timeout: 15000 })
+  check('the button names the first step with work in it', (await page.locator('[data-testid="start-here"]').innerText()).toLowerCase().includes('check the pairings'))
+  await page.click('[data-testid="start-here"]')
+  await page.waitForURL(/card-review\/pairing$/, { timeout: 8000 })
+  check('and opens that list', page.url().endsWith('/admin/card-review/pairing'))
+  await ctx.close()
+  const done = await open(browser, 1440, '/admin/card-review', { pairingDone: true })
+  await done.page.waitForSelector('[data-testid="start-here"]', { timeout: 15000 })
+  check('with the pairings done the next step is the switch',
+    (await done.page.getAttribute('[data-testid="step-pairing"]', 'data-state')) === 'done' && (await done.page.getAttribute('[data-testid="step-agree"]', 'data-state')) === 'next')
+  check('and start here moves on to it', (await done.page.locator('[data-testid="start-here"]').innerText()).toLowerCase().includes('switch the matches that agree'))
+  await done.page.click('[data-testid="preview-switch"]')
+  await done.page.waitForSelector('[data-testid="bulk-modal"]')
+  check('no pairing warning once none are left', (await done.page.locator('[data-testid="bulk-pairing-note"]').count()) === 0)
+  check('the screen raised no errors', errors.length === 0 && done.errors.length === 0, errors.concat(done.errors).join(' | '))
+  await done.ctx.close()
+}
+
 // ── queue ──────────────────────────────────────────────────────────────────────────────────────
 {
   console.log('\n-- the queue --')
@@ -182,6 +215,7 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   const first = calls.find(c => /card-review\/matches\?/.test(c.url))
   const q = new URL(first.url).searchParams
   check('it asks for one group, undecided, 50 a page', q.get('group') === 'differ' && q.get('decided') === 'no' && q.get('limit') === '50', first.url)
+  check('the worst match comes first by default, and newest is a click away', q.get('sort') === 'worst')
   check('every match is one uniform line', (await page.locator('[data-testid="queue-row"]').count()) === 2)
   check('a caret shows only where there is more than one difference', (await page.locator('[data-testid="caret"]').count()) === 1)
   check('the caret says how many more', (await page.locator('[data-testid="caret"]').innerText()).includes('+5 more'))

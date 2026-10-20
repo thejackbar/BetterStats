@@ -9,16 +9,41 @@ const MATCH_KEYS = ["competition", "round", "venue", "date", "time", "season"];
 const normalise = (s: string): string =>
   s.toLowerCase().replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
 
+const PART_ALIAS: Record<string, string> = {
+  headshot: "photo",
+  "vice captain": "vice",
+  vc: "vice",
+  wicketkeeper: "keeper",
+  "wicket keeper": "keeper",
+  wk: "keeper",
+};
+
 /** "player 3 last" becomes "lineup.3.last". null when the words are not a field. */
 export function bindFromToken(token: string): string | null {
   const t = normalise(token);
-  const m = t.match(/^player ?(\d{1,2})(?: (name|first|last|role))?$/);
+  const m = t.match(
+    /^player ?(\d{1,2})(?: (name|first|last|role|photo|headshot|captain|vice captain|vice|vc|keeper|wicketkeeper|wicket keeper|wk|debut))?$/,
+  );
   if (m) {
     const n = Number(m[1]);
-    return n >= 1 && n <= LINEUP_SLOTS ? `lineup.${n}.${m[2] ?? "name"}` : null;
+    const part = m[2] ?? "name";
+    return n >= 1 && n <= LINEUP_SLOTS
+      ? `lineup.${n}.${PART_ALIAS[part] ?? part}`
+      : null;
   }
-  if (t === "captain" || t === "keeper" || t === "headline") {
+  if (
+    t === "captain" ||
+    t === "keeper" ||
+    t === "headline" ||
+    t === "sponsors"
+  ) {
     return t;
+  }
+  if (t === "wicketkeeper" || t === "wicket keeper") {
+    return "keeper";
+  }
+  if (t === "vice captain" || t === "vicecaptain" || t === "vice") {
+    return "vice";
   }
   if (t === "opponent") {
     return "opponent";
@@ -37,7 +62,16 @@ const WORD: Record<string, string> = {
   first: " (first name)",
   last: " (last name)",
   role: " (role)",
+  photo: " (photo)",
+  captain: " (captain mark)",
+  vice: " (vice-captain mark)",
+  keeper: " (keeper mark)",
+  debut: " (debut mark)",
 };
+
+/** A photo or the sponsors takes an area of the design, not a line of text. */
+export const isAreaBinding = (binding: string | null): boolean =>
+  binding === "sponsors" || /^lineup\.\d+\.photo$/.test(binding ?? "");
 
 /** A short plain label for the panel, e.g. "Player 3 (last name)". */
 export function bindLabel(binding: string): string {

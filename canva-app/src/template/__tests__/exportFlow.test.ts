@@ -150,6 +150,38 @@ describe("exportTemplate", () => {
     });
   });
 
+  describe("photo and sponsors areas", () => {
+    it("writes the area's box into the file and does not draw the marker as a panel", async () => {
+      const els = [
+        rect({
+          left: 600,
+          top: 100,
+          width: 200,
+          height: 260,
+          colour: "#9aa0a6",
+        }),
+        textBox("{{player 1 photo}}", {
+          left: 600,
+          top: 220,
+          width: 200,
+          format: { textAlign: "center" },
+        }),
+        textBox("{{sponsors}}", { left: 100, top: 900, width: 800 }),
+        textBox("{{player 1}}"),
+      ];
+      const out = await exportTemplate(harness(els).deps, lineup);
+      const photo = out.file.fields.find((f) => f.token === "player 1 photo");
+      expect([photo?.x, photo?.y, photo?.w, photo?.h]).toEqual([
+        600, 100, 200, 260,
+      ]);
+      const strip = out.file.fields.find((f) => f.token === "sponsors");
+      expect(strip?.h).toBe(160);
+      const name = out.file.fields.find((f) => f.token === "player 1");
+      expect(name).not.toHaveProperty("h");
+      expect(out.file.panels).toBeUndefined();
+    });
+  });
+
   describe("the design's own pictures", () => {
     const maroon = (extra: Record<string, unknown> = {}) =>
       rect({

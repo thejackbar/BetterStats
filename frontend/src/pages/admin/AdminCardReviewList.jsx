@@ -158,14 +158,14 @@ export default function AdminCardReviewList() {
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState({})
   const [picked, setPicked] = useState({})
-  const [filters, setFilters] = useState({ season: '', decided: 'no', recent: false, source_file: '', richer: search.get('richer') === 'yes' })
+  const [filters, setFilters] = useState({ season: '', decided: 'no', recent: false, source_file: '', richer: search.get('richer') === 'yes', sort: group === 'agree' ? 'newest' : 'worst' })
   const seq = useRef(0)
 
   const query = useCallback((offset) => ({
     group, limit: PAGE, offset, season: filters.season || undefined,
     decided: filters.decided === 'all' ? undefined : filters.decided,
     recent_seasons: filters.recent ? 3 : undefined, source_file: filters.source_file || undefined,
-    richer: filters.richer ? 'yes' : undefined,
+    richer: filters.richer ? 'yes' : undefined, sort: filters.sort,
   }), [group, filters])
 
   const load = useCallback((more = false) => {
@@ -226,9 +226,17 @@ export default function AdminCardReviewList() {
       <p className="max-w-[760px] text-[13.5px] text-pb-dim mb-4">
         {isPairing
           ? 'These club scorecards are linked to a Cricket Australia match, but the two do not look like the same game. Fix the link first. Once the pairing is right, the match moves into the normal review.'
-          : 'Newest first, one line per match. The line shows the biggest difference. When there are more, a caret opens the full list without leaving the page.'}
+          : group === 'agree'
+            ? 'Newest first, one line per match. These agree on the scores, but the club card holds more than Cricket Australia\'s in the ones marked.'
+            : 'One line per match, the one that most needs a look first (or newest first, if you switch it). The line shows the biggest difference. When there are more, a caret opens the full list without leaving the page.'}
       </p>
       <div className="mb-4 flex flex-wrap items-center gap-3">
+        {group !== 'agree' && (
+          <SegGroup>
+            <SegItem active={filters.sort === 'worst'} onClick={() => setFilters(f => ({ ...f, sort: 'worst' }))} data-testid="sort-worst">{isPairing ? 'Least in common first' : 'Biggest difference first'}</SegItem>
+            <SegItem active={filters.sort === 'newest'} onClick={() => setFilters(f => ({ ...f, sort: 'newest' }))} data-testid="sort-newest">Newest first</SegItem>
+          </SegGroup>
+        )}
         <SegGroup>
           <SegItem active={!filters.recent} onClick={() => setFilters(f => ({ ...f, recent: false }))}>All seasons</SegItem>
           <SegItem active={filters.recent} onClick={() => setFilters(f => ({ ...f, recent: true }))}>Last 3 seasons</SegItem>

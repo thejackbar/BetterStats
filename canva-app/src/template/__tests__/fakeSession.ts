@@ -30,9 +30,12 @@ export function fakeSession(
         "dimensions" in o ? o.dimensions : { width: 1080, height: 1080 },
       elements: {
         toArray: () => existing,
-        insertAfter: (after: unknown, state: { text: unknown }) => {
+        insertAfter: (after: unknown, state: object) => {
           calls.inserted.push({ after, state });
-          return o.insertFails ? undefined : { type: "text", id: `new${n++}` };
+          const isRect = "rect" in (state as object);
+          return o.insertFails
+            ? undefined
+            : { type: isRect ? "rect" : "text", id: `new${n++}` };
         },
       },
     },
@@ -41,6 +44,10 @@ export function fakeSession(
         createTextElement: (opts: unknown) => {
           calls.created.push(opts);
           return { text: opts };
+        },
+        createRectElement: (opts: unknown) => {
+          calls.created.push({ rect: opts });
+          return { rect: opts };
         },
       },
       group: async ({ elements }: { elements: unknown[] }) => {

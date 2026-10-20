@@ -7,15 +7,20 @@ import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { Button, Badge, Note, StatCard, SectionHeading, TONES } from '../../components/admin/ui'
 import { GROUPS, matchPageUrl, fmtDate } from '../../components/admin/cardReview/shared'
 
-const ORDER = ['agree', 'small', 'differ', 'pairing', 'nocard']
-const INK = { agree: TONES.ok.hex, small: '#7fb0ff', differ: TONES.warn.hex, pairing: TONES.block.hex, nocard: 'var(--pb-dim)' }
-const NEXT = {
-  agree: 'Switch to Cricket Australia',
-  small: 'Skim and confirm',
-  differ: 'Needs a decision',
-  pairing: 'Check the pairing first',
-  nocard: 'Stays as the club scorecard',
-}
+// The review goes in this order. A wrong pairing makes the comparison meaningless and, once
+// fixed, moves matches into the other groups, so it is first. The matches the bulk switch can take
+// come next, then the small differences, then the ones that need a real decision. The order is
+// guidance: nothing is locked, and a later step can be opened at any time.
+const STEPS = [
+  { group: 'pairing', title: 'Check the pairings', ink: TONES.block.hex, button: 'Open the list',
+    why: 'The two cards may not be the same match. Fix a wrong link first: a match moved to the right Cricket Australia game joins the groups below.' },
+  { group: 'agree', title: 'Switch the matches that agree', ink: TONES.ok.hex, button: 'Preview the switch',
+    why: 'Same runs, wickets and result on both. One click moves them to Cricket Australia, which usually holds the bowler and fielder names, balls faced and the opposition innings. A sample is shown first and it can be undone.' },
+  { group: 'small', title: 'Skim the small differences', ink: '#7fb0ff', button: 'Open the list',
+    why: 'The batting agrees. The date, extras, a bowling figure or how a batter was out differ slightly. Most are one number, and the suggestion is Cricket Australia.' },
+  { group: 'differ', title: 'Decide the real differences', ink: TONES.warn.hex, button: 'Open the list',
+    why: 'A batter or the winner is different. These come last because they take the longest, and the list is shorter by now.' },
+]
 
 function SeasonSplit({ s }) {
   const t = s.matches || 1
@@ -29,7 +34,7 @@ function SeasonSplit({ s }) {
 }
 
 // The confirmation before switching every match whose two cards agree.
-function BulkModal({ onClose, onDone }) {
+function BulkModal({ onClose, onDone, pairingLeft = 0 }) {
   const toast = useToast()
   const [preview, setPreview] = useState(null)
   const [ack, setAck] = useState(false)
@@ -62,6 +67,13 @@ function BulkModal({ onClose, onDone }) {
             <p className="mt-1.5 text-[13px] text-pb-dim">
               In these matches both cards have the same scores and result. Switching only changes which card the site shows.
             </p>
+            {pairingLeft > 0 && (
+              <div className="mt-3" data-testid="bulk-pairing-note">
+                <Note toneKey="warn">
+                  {pairingLeft.toLocaleString()} pairings are still unchecked. Fixing those first can add matches to this switch.
+                </Note>
+              </div>
+            )}
             {preview.held_back > 0 && (
               <p className="mt-2 text-[12.5px] text-pb-dim" data-testid="bulk-held-back">
                 {preview.held_back.toLocaleString()} more agree but are left out, because the club card holds something Cricket Australia's lacks (such as balls faced). Those need a person to choose.
@@ -185,7 +197,12 @@ export default function AdminCardReview() {
   if (error) return <BetterStatsLayout {...header}><Note toneKey="block">{error}</Note></BetterStatsLayout>
   if (!data) return <BetterStatsLayout {...header}><PbSpinner message="Comparing the two cards of every match…" /></BetterStatsLayout>
 
-  const agreeLeft = data.groups.agree
+  const todo = g => data.todo?.[g] ?? data.groups[g]
+  const reviewable = data.total - data.groups.nocard
+  const left = STEPS.reduce((n, st) => n + todo(st.group), 0)
+  const reviewed = Math.max(0, reviewable - left)
+  const first = STEPS.find(st => todo(st.group) > 0)
+  const go = g => (g === 'agree' ? setBulk(true) : navigate(`/admin/card-review/${g}`))
   return (
     <BetterStatsLayout
       {...header}
@@ -193,32 +210,62 @@ export default function AdminCardReview() {
     >
       <p className="max-w-[760px] text-[13.5px] text-pb-dim mb-5">
         These matches exist in two versions: the Cricket Australia scorecard and the club's own scorecard (imported from a file,
-        typed in, or read from a photo). One is shown on the site. This page shows which, and helps you choose without opening every match.
+        typed in, or read from a photo). One is shown on the site. Work through the four steps in order and each match ends up showing the card you chose.
       </p>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5 mb-6" data-testid="groups">
-        {ORDER.map(g => (
-          <div key={g} className="flex flex-col rounded-[10px] border border-pb-hairline bg-pb-surface px-4 py-3.5">
-            <StatCard value={data.groups[g].toLocaleString()} label={GROUPS[g].label} ink={INK[g]} className="!p-0 !border-0 !bg-transparent" />
-            <p className="mt-2 flex-1 text-[12px] leading-[1.45] text-pb-dim">{GROUPS[g].blurb}</p>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Badge toneKey={GROUPS[g].tone}>{NEXT[g]}</Badge>
-            </div>
-            {g === 'agree' && data.agree_club_richer > 0 && (
-              <p className="mt-2 text-[12px] leading-[1.45] text-pb-dim" data-testid="richer-note">
-                {data.agree_club_richer.toLocaleString()} of these hold something on the club card that Cricket Australia's lacks, so the switch leaves them out.{' '}
-                <Link className="underline" to="/admin/card-review/agree?richer=yes" data-testid="richer-link">Look at them</Link>
-              </p>
-            )}
-            <div className="mt-3">
-              {g === 'agree' && agreeLeft > 0
-                ? <Button variant="primary" size="sm" onClick={() => setBulk(true)} data-testid="preview-switch">Preview the switch</Button>
-                : <Button size="sm" disabled={data.groups[g] === 0 || g === 'nocard'} onClick={() => navigate(`/admin/card-review/${g}`)}>
-                    {g === 'nocard' ? 'Nothing to do' : 'Open the list'}
-                  </Button>}
-            </div>
+      <div className="mb-5 rounded-[10px] border border-pb-hairline bg-pb-surface px-4 py-3.5" data-testid="progress">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="text-[13px] text-pb-text">
+            <b>{reviewed.toLocaleString()}</b> of {reviewable.toLocaleString()} matches reviewed
           </div>
-        ))}
+          {first
+            ? <Button className="ml-auto" variant="primary" size="sm" onClick={() => go(first.group)} data-testid="start-here">
+                Start here: {first.title.toLowerCase()}
+              </Button>
+            : <span className="ml-auto"><Badge toneKey="ok">All steps done</Badge></span>}
+        </div>
+        <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-pb-surface2" role="progressbar" aria-valuemin={0} aria-valuemax={reviewable} aria-valuenow={reviewed}>
+          <div className="h-full rounded-full" style={{ width: `${reviewable ? Math.round((reviewed / reviewable) * 100) : 100}%`, background: TONES.ok.hex }} />
+        </div>
+      </div>
+
+      <div data-testid="groups" className="mb-6">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {STEPS.map((st, i) => {
+            const n = todo(st.group)
+            const here = first && first.group === st.group
+            return (
+              <div key={st.group} data-testid={`step-${st.group}`} data-state={n === 0 ? 'done' : here ? 'next' : 'later'}
+                className="flex flex-col rounded-[10px] border bg-pb-surface px-4 py-3.5"
+                style={{ borderColor: here ? st.ink : 'var(--pb-hairline)', opacity: n === 0 ? 0.75 : 1 }}>
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-pb-faint">Step {i + 1} of {STEPS.length}</span>
+                  {n === 0 ? <Badge toneKey="ok">Done</Badge> : here ? <Badge toneKey={GROUPS[st.group].tone}>Start here</Badge> : null}
+                </div>
+                <div className="font-display text-[15px] font-semibold text-pb-text">{st.title}</div>
+                <StatCard value={data.groups[st.group].toLocaleString()} label={GROUPS[st.group].label} ink={st.ink} className="!p-0 !border-0 !bg-transparent mt-2" />
+                <p className="mt-2 flex-1 text-[12px] leading-[1.45] text-pb-dim">{st.why}</p>
+                {st.group === 'agree' && data.agree_club_richer > 0 && (
+                  <p className="mt-2 text-[12px] leading-[1.45] text-pb-dim" data-testid="richer-note">
+                    {data.agree_club_richer.toLocaleString()} of these hold something on the club card that Cricket Australia's lacks, so the switch leaves them out.{' '}
+                    <Link className="underline" to="/admin/card-review/agree?richer=yes" data-testid="richer-link">Look at them</Link>
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Badge toneKey={n === 0 ? 'ok' : 'calm'}>{n === 0 ? 'Nothing left' : `${n.toLocaleString()} to go`}</Badge>
+                </div>
+                <div className="mt-3">
+                  {st.group === 'agree'
+                    ? <Button variant={here ? 'primary' : 'secondary'} size="sm" disabled={(data.bulk_left ?? data.groups.agree) === 0} onClick={() => setBulk(true)} data-testid="preview-switch">{st.button}</Button>
+                    : <Button size="sm" variant={here ? 'primary' : 'secondary'} disabled={data.groups[st.group] === 0} onClick={() => go(st.group)}>{st.button}</Button>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <p className="mt-3 text-[12px] text-pb-dim" data-testid="nocard-note">
+          {GROUPS.nocard.label}: {data.groups.nocard.toLocaleString()} matches. {GROUPS.nocard.blurb} They stay as the club scorecard and need nothing from you.
+        </p>
       </div>
 
       <div className="mb-2 flex flex-wrap items-center gap-3">
@@ -263,7 +310,7 @@ export default function AdminCardReview() {
       </p>
 
       <Batches batches={batches} onUndo={undoBatch} busy={busy} />
-      {bulk && <BulkModal onClose={() => setBulk(false)} onDone={() => { setBulk(false); load() }} />}
+      {bulk && <BulkModal pairingLeft={todo('pairing')} onClose={() => setBulk(false)} onDone={() => { setBulk(false); load() }} />}
     </BetterStatsLayout>
   )
 }
