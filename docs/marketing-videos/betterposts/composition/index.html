@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="vendor/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "Barlow Condensed"; font-weight: 700; src: url("assets/fonts/barlow-condensed-700.woff2") format("woff2"); }
+      @font-face { font-family: "Barlow Condensed"; font-weight: 800; src: url("assets/fonts/barlow-condensed-800.woff2") format("woff2"); }
+      @font-face { font-family: "Inter"; font-weight: 500; src: url("assets/fonts/inter-500.woff2") format("woff2"); }
+      @font-face { font-family: "Inter"; font-weight: 700; src: url("assets/fonts/inter-700.woff2") format("woff2"); }
+      @font-face { font-family: "JetBrains Mono"; font-weight: 500; src: url("assets/fonts/jetbrains-mono-500.woff2") format("woff2"); }
+      @font-face { font-family: "JetBrains Mono"; font-weight: 700; src: url("assets/fonts/jetbrains-mono-700.woff2") format("woff2"); }
+
+      :root {
+        --bg: #0a0d14;
+        --surface: #10141d;
+        --text: #e6e8ef;
+        --dim: #aab2c4;
+        --green: #16c784;
+        --pink: #ec4899;
+        --amber: #f5c242;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; background: var(--bg); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--bg); font-family: "Inter", sans-serif; color: var(--text); }
+
+      .scene { position: absolute; inset: 0; overflow: hidden; }
+      .big {
+        position: absolute; left: 70px; width: 960px;
+        font-family: "Barlow Condensed", sans-serif; font-weight: 800; text-transform: uppercase;
+        font-size: 128px; line-height: 1; letter-spacing: -0.005em; color: #ffffff;
+      }
+      .amber { color: var(--amber); }
+      .cap {
+        position: absolute; left: 70px; width: 940px; text-align: left;
+        font-family: "Barlow Condensed", sans-serif; font-weight: 800; text-transform: uppercase;
+        font-size: 128px; line-height: 0.95; color: #ffffff;
+      }
+      .cap2 {
+        position: absolute; left: 70px; width: 940px;
+        font-family: "Barlow Condensed", sans-serif; font-weight: 700;
+        font-size: 82px; line-height: 1.02; color: #ffffff;
+      }
+      .cap2 em { font-style: normal; color: var(--amber); }
+      .sub { position: absolute; left: 70px; width: 940px; font-family: "Inter", sans-serif; font-weight: 500; font-size: 46px; line-height: 1.22; color: var(--dim); }
+
+      /* backgrounds */
+      #bg { position: absolute; inset: 0; background:
+        radial-gradient(900px 700px at 100% 0%, rgba(22,199,132,0.10), transparent 70%),
+        radial-gradient(900px 800px at 0% 100%, rgba(236,72,153,0.10), transparent 70%),
+        var(--bg); }
+
+      /* watermark: the BetterCricket mark, small, on every shot */
+      #wm { position: absolute; inset: 0; z-index: 40; pointer-events: none; }
+      #wm img { position: absolute; left: 912px; top: 150px; width: 96px; height: 96px; opacity: 0.7; }
+
+      /* scene wipes */
+      .wipe { position: absolute; inset: 0; z-index: 50; overflow: hidden; pointer-events: none; }
+      .panel { position: absolute; top: 0; left: 0; width: 1500px; height: 1920px; background: var(--bg);
+        box-shadow: -40px 0 90px 10px rgba(236,72,153,0.55), -8px 0 0 0 rgba(22,199,132,0.9); }
+
+      /* S1 */
+      #s1card { position: absolute; left: 90px; top: 1000px; width: 900px; height: 900px; border-radius: 28px; overflow: hidden;
+        border: 2px solid rgba(255,255,255,0.14); box-shadow: 0 40px 90px rgba(0,0,0,0.6); }
+      #s1card img { width: 100%; height: 100%; display: block; }
+
+      /* lockup (S2, S6) */
+      .lockup { position: absolute; left: 0; width: 1080px; display: flex; align-items: center; justify-content: center; gap: 28px; }
+      .lockup img { display: block; }
+      .word { font-family: "Inter", sans-serif; font-weight: 700; letter-spacing: -0.035em; color: #ffffff; line-height: 1; }
+      .word b { font-weight: 700; color: var(--pink); }
+      .glow { position: absolute; width: 1200px; height: 1200px; border-radius: 50%;
+        background: radial-gradient(closest-side, rgba(236,72,153,0.40), rgba(236,72,153,0.0)); }
+
+      .gp { position: absolute; inset: 0; border-radius: 50%; opacity: 0; background: radial-gradient(closest-side, rgba(236,72,153,0.38), rgba(236,72,153,0)); }
+
+      /* S3: the real editor, seen through a window */
+      #win { position: absolute; left: 40px; top: 560px; width: 1000px; height: 1000px; border-radius: 28px; overflow: hidden;
+        background: #0a0d14; border: 2px solid rgba(255,255,255,0.12); box-shadow: 0 40px 100px rgba(0,0,0,0.65); }
+      #cam { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; transform-origin: 0 0; }
+      #cam .L { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; display: block; }
+      .rowhl { position: absolute; border: 2px solid var(--green); border-radius: 5px; opacity: 0; box-shadow: 0 0 14px rgba(22,199,132,0.6); }
+      #cursor { position: absolute; left: 0; top: 0; width: 24px; height: 30px; z-index: 20; }
+      .ripple { position: absolute; width: 40px; height: 40px; margin: -20px 0 0 -20px; border: 2px solid var(--green); border-radius: 50%; opacity: 0; z-index: 19; }
+      #flash { position: absolute; left: 540px; top: 500px; width: 340px; height: 90px; border-radius: 50%; opacity: 0;
+        background: radial-gradient(closest-side, rgba(245,194,66,0.75), rgba(245,194,66,0)); }
+
+      /* S4: one post, three native sizes */
+      .s4f { position: absolute; left: 240px; width: 600px; border-radius: 26px; overflow: hidden; border: 2px solid rgba(255,255,255,0.14); box-shadow: 0 40px 70px rgba(0,0,0,0.6); }
+      .s4f img { width: 100%; height: 100%; display: block; }
+      .lab { position: absolute; left: 70px; font-family: "Barlow Condensed", sans-serif; font-weight: 800; text-transform: uppercase; font-size: 132px; line-height: 0.95; color: var(--amber); }
+
+      /* S5 */
+      .tcard { position: absolute; width: 520px; height: 520px; border-radius: 22px; overflow: hidden; border: 2px solid rgba(255,255,255,0.14); box-shadow: 0 30px 70px rgba(0,0,0,0.6); }
+      .tcard img { width: 100%; height: 100%; display: block; }
+      #pills { position: absolute; left: 70px; top: 500px; width: 940px; display: flex; flex-wrap: wrap; gap: 12px; }
+      .pill { padding: 12px 20px; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.22);
+        font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: 24px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim); background: rgba(16,20,29,0.9); white-space: nowrap; }
+      .pill.on { color: var(--green); border-color: var(--green); background: rgba(22,199,132,0.14); }
+
+      /* S6 */
+      #cta { position: absolute; left: 90px; width: 900px; top: 1000px; padding: 34px 0; border-radius: 22px; background: var(--green); text-align: center;
+        font-family: "Inter", sans-serif; font-weight: 700; font-size: 50px; letter-spacing: -0.01em; color: #04130b; }
+      #url { position: absolute; left: 70px; width: 940px; top: 1160px; text-align: center; font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: 42px; color: var(--text); letter-spacing: 0.02em; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="25" data-width="1080" data-height="1920">
+      <div id="bg" class="clip" data-start="0" data-duration="25" data-track-index="0"></div>
+
+      <!-- Scene 1: hook, 0.00 to 3.70 -->
+      <section id="s1" class="clip scene" data-start="0" data-duration="3.7" data-track-index="1">
+        <div id="s1a" class="big" style="top: 300px;">Stumps called.</div>
+        <div id="s1b" class="big amber" style="top: 450px;">Post still blank.</div>
+        <div id="s1card" data-layout-allow-overflow><img src="assets/shots/rs1-empty-square.png" alt="BetterPosts Margin Hero result card, empty" /></div>
+      </section>
+
+      <!-- Scene 2: reveal, 3.70 to 6.34 -->
+      <section id="s2" class="clip scene" data-start="3.7" data-duration="2.64" data-track-index="1">
+        <div id="s2glow" class="glow" data-layout-allow-overflow style="left: -60px; top: 200px;"><div class="gp"></div></div>
+        <div id="s2lock" class="lockup" style="top: 640px;">
+          <img src="assets/brand/bettersocials.svg" width="150" height="150" alt="BetterPosts" />
+          <div class="word" style="font-size: 112px;">Better<b>Posts</b></div>
+        </div>
+        <div id="s2tag" class="sub" style="top: 850px; text-align: center; font-size: 56px; color: #e6e8ef;">Your match, already in it.</div>
+      </section>
+
+      <!-- Scene 3: pick the game, it fills, 6.34 to 15.28 -->
+      <section id="s3" class="clip scene" data-start="6.34" data-duration="8.94" data-track-index="1">
+        <div id="s3c1" class="cap" style="top: 270px;">Pick the game.</div>
+        <div id="s3c2" class="cap2" data-layout-allow-occlusion style="top: 270px;">Score, margin, top performers, <em>player of the match.</em></div>
+        <div id="win">
+          <div id="cam" data-layout-allow-overflow>
+            <img class="L" id="Lempty" src="assets/shots/editor-empty.png" alt="" />
+            <img class="L" id="Lscr" src="assets/shots/editor-scrolled.png" alt="" />
+            <img class="L" id="Lpick" src="assets/shots/editor-picker.png" alt="" />
+            <!-- the filled state, shown piece by piece: left panel first, then the canvas -->
+            <div class="L" id="Fpanel" style="clip-path: inset(135px 912px 0px 0px); background: url(assets/shots/editor-filled.png) 0 0 / 1440px 900px no-repeat;"></div>
+            <div class="L" id="Fmeta" style="clip-path: inset(198px 176px 677px 557px); background: url(assets/shots/editor-filled.png) 0 0 / 1440px 900px no-repeat;"></div>
+            <div class="L" id="Fscore" style="clip-path: inset(584px 176px 220px 557px); background: url(assets/shots/editor-filled.png) 0 0 / 1440px 900px no-repeat;"></div>
+            <div class="L" id="Fpotm" style="clip-path: inset(736px 176px 105px 557px); background: url(assets/shots/editor-filled.png) 0 0 / 1440px 900px no-repeat;"></div>
+            <div id="flash"></div>
+            <div class="L" id="Fmargin" style="clip-path: inset(478px 176px 355px 557px); transform-origin: 600px 511px; background: url(assets/shots/editor-filled.png) 0 0 / 1440px 900px no-repeat;"></div>
+            <div class="rowhl" id="rh1" style="left: 118px; top: 632px; width: 217px; height: 46px;"></div>
+            <div class="rowhl" id="rh2" style="left: 118px; top: 681px; width: 217px; height: 46px;"></div>
+            <div class="rowhl" id="rh3" style="left: 118px; top: 731px; width: 217px; height: 46px;"></div>
+            <div class="ripple" id="ripple"></div><div class="ripple" id="ripple2"></div>
+            <svg id="cursor" viewBox="0 0 24 30" xmlns="http://www.w3.org/2000/svg"><path d="M2 2 L2 24 L8 18.5 L12 27.5 L16 25.8 L12 17 L20 17 Z" fill="#ffffff" stroke="#0a0d14" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          </div>
+        </div>
+      </section>
+
+      <!-- Scene 4: every size, 15.28 to 19.49 -->
+      <section id="s4" class="clip scene" data-start="15.28" data-duration="4.21" data-track-index="1">
+        <div id="l1" class="lab" style="top: 270px;">Square.</div>
+        <div id="l2" class="lab" style="top: 270px;">Portrait.</div>
+        <div id="l3" class="lab" style="top: 270px;">Story.</div>
+        <div id="s4cap" class="sub" style="top: 410px; font-size: 44px; text-wrap: balance;">A layout for each size, not a stretched square.</div>
+        <div class="s4f" id="f1" style="top: 805px; height: 600px;"><img src="assets/shots/rs1-square.png" alt="" /></div>
+        <div class="s4f" id="f2" style="top: 730px; height: 750px;"><img src="assets/shots/rs1-portrait.png" alt="" /></div>
+        <div class="s4f" id="f3" style="top: 560px; height: 1067px;"><img src="assets/shots/rs1-story.png" alt="" /></div>
+      </section>
+
+      <!-- Scene 5: same game, any layout, 19.49 to 22.65 -->
+      <section id="s5" class="clip scene" data-start="19.49" data-duration="3.16" data-track-index="1">
+        <div id="s5cap" class="cap" data-layout-allow-occlusion style="top: 260px; font-size: 104px; text-wrap: balance;">Same game, any layout.</div>
+        <div id="pills">
+          <div class="pill" id="p1">Lineup</div>
+          <div class="pill" id="p2">Fixtures</div>
+          <div class="pill on" id="p3">Final Score</div>
+          <div class="pill" id="p4">Results</div>
+          <div class="pill" id="p5">Player of the Match</div>
+          <div class="pill" id="p6">Team of the Week</div>
+          <div class="pill" id="p7">Milestones</div>
+          </div>
+        <div class="tcard" id="c1" style="left: 80px; top: 700px;"><img src="assets/shots/rs3-square.png" alt="" /></div>
+        <div class="tcard" id="c2" style="left: 470px; top: 920px;"><img src="assets/shots/rs5-square.png" alt="" /></div>
+        <div class="tcard" id="c3" style="left: 130px; top: 1140px;"><img src="assets/shots/rs6-square.png" alt="" /></div>
+      </section>
+
+      <!-- Scene 6: outro, 22.65 to 25.00 -->
+      <section id="s6" class="clip scene" data-start="22.65" data-duration="2.35" data-track-index="1">
+        <div id="s6glow" class="glow" data-layout-allow-overflow style="left: -60px; top: 80px;"><div class="gp"></div></div>
+        <div id="s6lock" class="lockup" style="top: 330px;">
+          <img src="assets/brand/bettersocials.svg" width="120" height="120" alt="BetterPosts" />
+          <div class="word" style="font-size: 92px;">Better<b>Posts</b></div>
+        </div>
+        <div id="s6a" class="big" style="top: 560px; font-size: 112px;">Match-day graphics,</div>
+        <div id="s6b" class="big amber" style="top: 690px; font-size: 112px;">in seconds.</div>
+        <div id="cta">Start your BetterCricket trial</div>
+        <div id="url">betterat.cricket/trial</div>
+      </section>
+
+      <!-- the BetterCricket mark, on every shot -->
+      <div id="wm" class="clip" data-start="0" data-duration="25" data-track-index="9"><img src="assets/brand/bettercricket-logo.png" alt="BetterCricket" /></div>
+
+      <!-- scene wipes, centred on the cuts at 3.70, 6.34, 15.28, 19.49, 22.65 -->
+      <div class="clip wipe" id="w1" data-start="3.4" data-duration="0.6" data-track-index="10"><div class="panel" id="wp1" data-layout-allow-overflow data-layout-allow-occlusion></div></div>
+      <div class="clip wipe" id="w2" data-start="6.04" data-duration="0.6" data-track-index="10"><div class="panel" id="wp2" data-layout-allow-overflow data-layout-allow-occlusion></div></div>
+      <div class="clip wipe" id="w3" data-start="14.98" data-duration="0.6" data-track-index="10"><div class="panel" id="wp3" data-layout-allow-overflow data-layout-allow-occlusion></div></div>
+      <div class="clip wipe" id="w4" data-start="19.19" data-duration="0.6" data-track-index="10"><div class="panel" id="wp4" data-layout-allow-overflow data-layout-allow-occlusion></div></div>
+      <div class="clip wipe" id="w5" data-start="22.35" data-duration="0.6" data-track-index="10"><div class="panel" id="wp5" data-layout-allow-overflow data-layout-allow-occlusion></div></div>
+
+      <!-- audio: music bed, a synthesised bat-on-ball crack, a few interface ticks -->
+      <audio id="music" src="assets/music/happy-beats-business-moves-vol-11-by-ende-dot-app.mp3" data-start="0" data-duration="25" data-track-index="20" data-volume="0.5"
+        data-automation="{&quot;version&quot;:1,&quot;lanes&quot;:[{&quot;target&quot;:&quot;volume&quot;,&quot;points&quot;:[{&quot;t&quot;:0,&quot;v&quot;:0},{&quot;t&quot;:0.5,&quot;v&quot;:1},{&quot;t&quot;:12.5,&quot;v&quot;:1},{&quot;t&quot;:12.7,&quot;v&quot;:0.55},{&quot;t&quot;:13.8,&quot;v&quot;:1},{&quot;t&quot;:24.0,&quot;v&quot;:1},{&quot;t&quot;:25,&quot;v&quot;:0}]}]}"></audio>
+      <audio id="sx-t1" src="assets/sfx/click_002.ogg" data-start="0.3" data-duration="0.02" data-track-index="21" data-volume="0.45"></audio>
+      <audio id="sx-t2" src="assets/sfx/click_002.ogg" data-start="1.7" data-duration="0.02" data-track-index="22" data-volume="0.45"></audio>
+      <audio id="sx-reveal" src="assets/sfx/impactSoft_medium_001.ogg" data-start="3.7" data-duration="0.18" data-track-index="23" data-volume="0.55"></audio>
+      <audio id="sx-c1" src="assets/sfx/click_003.ogg" data-start="7.7" data-duration="0.02" data-track-index="24" data-volume="0.7"></audio>
+      <audio id="sx-r1" src="assets/sfx/click_002.ogg" data-start="7.91" data-duration="0.02" data-track-index="25" data-volume="0.25"></audio>
+      <audio id="sx-r2" src="assets/sfx/click_002.ogg" data-start="8.44" data-duration="0.02" data-track-index="26" data-volume="0.25"></audio>
+      <audio id="sx-r3" src="assets/sfx/click_002.ogg" data-start="8.96" data-duration="0.02" data-track-index="27" data-volume="0.25"></audio>
+      <audio id="sx-c2" src="assets/sfx/click_003.ogg" data-start="9.5" data-duration="0.02" data-track-index="28" data-volume="0.7"></audio>
+      <audio id="sx-crack" src="assets/sfx/bat-crack.wav" data-start="12.65" data-duration="0.7" data-track-index="29" data-volume="1"></audio>
+      <audio id="sx-s1" src="assets/sfx/card-slide-1.ogg" data-start="15.5" data-duration="0.6" data-track-index="30" data-volume="0.5"></audio>
+      <audio id="sx-s2" src="assets/sfx/card-slide-1.ogg" data-start="16.86" data-duration="0.6" data-track-index="31" data-volume="0.5"></audio>
+      <audio id="sx-s3" src="assets/sfx/card-slide-1.ogg" data-start="17.91" data-duration="0.6" data-track-index="32" data-volume="0.5"></audio>
+      <audio id="sx-k1" src="assets/sfx/card-slide-1.ogg" data-start="20.02" data-duration="0.6" data-track-index="33" data-volume="0.5"></audio>
+      <audio id="sx-k2" src="assets/sfx/card-slide-1.ogg" data-start="20.54" data-duration="0.6" data-track-index="34" data-volume="0.5"></audio>
+      <audio id="sx-k3" src="assets/sfx/card-slide-1.ogg" data-start="21.07" data-duration="0.6" data-track-index="35" data-volume="0.5"></audio>
+      <audio id="sx-out" src="assets/sfx/impactSoft_medium_001.ogg" data-start="22.65" data-duration="0.18" data-track-index="36" data-volume="0.45"></audio>
+      <audio id="sx-crack2" src="assets/sfx/bat-crack.wav" data-start="22.85" data-duration="0.7" data-track-index="37" data-volume="0.42"></audio>
+    </div>
+
+    <script src="assets/audio-data.js"></script>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      const IN = "expo.out";
+
+      // wipes: the panel is fully across the frame at the cut
+      [3.7, 6.34, 15.28, 19.49, 22.65].forEach((c, i) => {
+        tl.fromTo("#wp" + (i + 1), { x: -1500 }, { x: 1080, duration: 0.5, ease: "power2.inOut" }, c - 0.25 - (c - c) );
+      });
+
+      // ---- Scene 1: hook ----
+      tl.fromTo("#s1a", { y: 70, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: IN }, 0.3);
+      tl.fromTo("#s1b", { y: 70, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: IN }, 1.7);
+      tl.fromTo("#s1card", { y: 900, opacity: 1 }, { y: 0, duration: 0.8, ease: "power3.out" }, 2.0);
+
+      // ---- Scene 2: reveal. beat-locked: 3.70s (strong cue), lockup lands as the wipe clears ----
+      tl.fromTo("#s2lock", { scale: 0.86, y: 30, opacity: 0 }, { scale: 1, y: 0, opacity: 1, duration: 0.7, ease: IN }, 3.82);
+      tl.fromTo("#s2glow", { scale: 0.85, opacity: 0 }, { scale: 1.08, opacity: 1, duration: 1.8, ease: "sine.out" }, 3.82);
+      tl.fromTo("#s2tag", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 4.5);
+
+      // ---- Scene 3: pick the game, it fills ----
+      // camera: window-relative centre mapping, x = 500 - cx*s, y = 500 - cy*s
+      tl.set("#cam", { x: 0.4, y: 187.7, scale: 0.694 }, 0);
+      tl.set(["#Lscr", "#Lpick", "#Fpanel", "#Fmeta", "#Fscore", "#Fpotm", "#Fmargin"], { opacity: 0 }, 0);
+      tl.set("#cursor", { x: 320, y: 585, opacity: 0 }, 0);
+      tl.fromTo("#win", { opacity: 0, y: 60 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 6.5);
+      tl.to("#cam", { x: -236, y: -1548, scale: 3.2, duration: 0.95, ease: "power3.inOut" }, 7.0);
+      tl.fromTo("#s3c1", { y: 50, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: IN }, 7.0);
+      tl.to("#s3c1", { opacity: 0, duration: 0.2 }, 9.3);
+      // the panel scrolls to Match Result (closed picker), then the click opens it
+      tl.to("#Lscr", { opacity: 1, duration: 0.2 }, 7.1);
+      tl.to("#cursor", { opacity: 1, duration: 0.15 }, 7.2);
+      tl.to("#cursor", { x: 192, y: 523, duration: 0.45, ease: "power2.inOut" }, 7.2);
+      // click at 7.70: picker opens
+      tl.fromTo("#ripple", { x: 192, y: 523, scale: 0.2, opacity: 0.9 }, { scale: 1.6, opacity: 0, duration: 0.45, ease: "power2.out" }, 7.7);
+      tl.to("#Lpick", { opacity: 1, duration: 0.12 }, 7.7);
+      // beat-grid: three games, one per beat, 7.91 / 8.44 / 8.96
+      [["#rh1", 7.91], ["#rh2", 8.44], ["#rh3", 8.96]].forEach(([id, t]) => {
+        tl.fromTo(id, { opacity: 0 }, { opacity: 1, duration: 0.14, ease: "power2.out" }, t);
+        tl.to(id, { opacity: 0, duration: 0.3 }, t + 0.38);
+      });
+      tl.to("#cursor", { x: 196, y: 650, duration: 0.5, ease: "power2.inOut" }, 8.96);
+      // click at 9.50 (strong beat): the game is picked
+      tl.fromTo("#ripple2", { x: 196, y: 650, scale: 0.2, opacity: 0.9 }, { scale: 1.6, opacity: 0, duration: 0.45, ease: "power2.out" }, 9.5);
+      tl.fromTo("#rh1", { opacity: 0 }, { opacity: 1, duration: 0.1, immediateRender: false }, 9.5);
+      tl.to("#rh1", { opacity: 0, duration: 0.2 }, 9.62);
+      tl.to("#Fpanel", { opacity: 1, duration: 0.15 }, 9.55);
+      tl.to("#cursor", { opacity: 0, duration: 0.2 }, 9.9);
+      // camera moves to the post
+      tl.to("#cam", { x: -683, y: -150, scale: 1.3, duration: 1.0, ease: "power3.inOut" }, 9.65);
+      tl.fromTo("#s3c2", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: IN }, 10.4);
+      // the card fills: header, scores, player of the match
+      tl.set("#Fmeta", { opacity: 1 }, 10.7);
+      tl.fromTo("#Fmeta", { clipPath: "inset(198px 1240px 677px 557px)" }, { clipPath: "inset(198px 176px 677px 557px)", duration: 0.45, ease: "power2.out" }, 10.7);
+      tl.set("#Fscore", { opacity: 1 }, 10.7);
+      tl.fromTo("#Fscore", { clipPath: "inset(584px 1240px 220px 557px)" }, { clipPath: "inset(584px 176px 220px 557px)", duration: 0.6, ease: "power2.out" }, 11.0);
+      tl.set("#Fpotm", { opacity: 1 }, 10.7);
+      tl.fromTo("#Fpotm", { clipPath: "inset(736px 1240px 105px 557px)" }, { clipPath: "inset(736px 176px 105px 557px)", duration: 0.55, ease: "power2.out" }, 11.7);
+      // beat-locked: 12.65s (strong cue). "BY 63 RUNS" slams in with the bat crack
+      tl.set("#Fmargin", { opacity: 1 }, 12.65);
+      tl.fromTo("#Fmargin", { scale: 1.5 }, { scale: 1, duration: 0.35, ease: "back.out(2.2)" }, 12.65);
+      tl.fromTo("#flash", { opacity: 0.0, scale: 0.7 }, { opacity: 1, scale: 1.4, duration: 0.12, ease: "power2.out" }, 12.65);
+      tl.to("#flash", { opacity: 0, duration: 0.6, ease: "power2.in" }, 12.77);
+      tl.to("#cam", { x: -774, y: -186, scale: 1.4, duration: 0.5, ease: "power3.out" }, 12.65);
+
+      // ---- Scene 4: every size ----
+      tl.set(["#f2", "#f3", "#l2", "#l3"], { opacity: 0 }, 0);
+      tl.fromTo("#f1", { y: 50, opacity: 0 }, { y: 0, opacity: 1, duration: 0.55, ease: IN }, 15.5);
+      tl.fromTo("#l1", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: IN }, 15.5);
+      tl.fromTo("#s4cap", { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power2.out" }, 16.0);
+      // portrait
+      tl.to("#l1", { opacity: 0, duration: 0.12 }, 16.78);
+      tl.fromTo("#l2", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: IN, immediateRender: false }, 16.86);
+      tl.fromTo("#f2", { scale: 0.93, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.45, ease: IN, immediateRender: false }, 16.86);
+      tl.to("#f1", { scale: 1.05, opacity: 0, duration: 0.3, ease: "power2.in" }, 16.86);
+      // beat-locked: 17.91s (strong cue). story
+      tl.to("#l2", { opacity: 0, duration: 0.12 }, 17.83);
+      tl.fromTo("#l3", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: IN, immediateRender: false }, 17.91);
+      tl.fromTo("#f3", { scale: 0.93, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.45, ease: IN, immediateRender: false }, 17.91);
+      tl.to("#f2", { scale: 1.05, opacity: 0, duration: 0.3, ease: "power2.in" }, 17.91);
+
+      // ---- Scene 5: same game, any layout (beat-grid 20.02 / 20.54 / 21.07) ----
+      tl.fromTo("#s5cap", { y: 50, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: IN }, 19.8);
+      ["#p1", "#p2", "#p3", "#p4", "#p5", "#p6", "#p7"].forEach((id, i) => {
+        tl.fromTo(id, { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: "power2.out" }, 19.9 + i * 0.05);
+      });
+      tl.fromTo("#c1", { x: -700, rotation: -8 }, { x: 0, rotation: -3, duration: 0.55, ease: "power3.out" }, 20.02);
+      tl.fromTo("#c2", { x: 800, rotation: 8 }, { x: 0, rotation: 2.5, duration: 0.55, ease: "power3.out" }, 20.54);
+      tl.fromTo("#c3", { x: -700, rotation: -8 }, { x: 0, rotation: -2, duration: 0.55, ease: "power3.out" }, 21.07);
+      tl.set(["#c1", "#c2", "#c3"], { opacity: 0 }, 0);
+      tl.set("#c1", { opacity: 1 }, 20.02);
+      tl.set("#c2", { opacity: 1 }, 20.54);
+      tl.set("#c3", { opacity: 1 }, 21.07);
+
+      // ---- Scene 6: outro. beat-locked: 22.65s (strong cue), lockup lands as the wipe clears ----
+      tl.fromTo("#s6lock", { scale: 0.88, y: 30, opacity: 0 }, { scale: 1, y: 0, opacity: 1, duration: 0.6, ease: IN }, 22.8);
+      tl.fromTo("#s6glow", { scale: 0.85, opacity: 0 }, { scale: 1.05, opacity: 1, duration: 1.6, ease: "sine.out" }, 22.8);
+      tl.fromTo("#s6a", { y: 60, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: IN }, 23.05);
+      tl.fromTo("#s6b", { y: 60, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: IN }, 23.3);
+      tl.fromTo("#cta", { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: "power3.out" }, 23.7);
+      tl.fromTo("#url", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: "power2.out" }, 23.85);
+
+      // audio-reactive (subtle): the glow behind the BetterPosts lockup swells with the bass.
+      // Pre-extracted band data, sampled every frame; nothing runs at render time except tl.call.
+      for (let f = 0; f < AUDIO_DATA.totalFrames; f++) {
+        tl.call(((bass) => () => {
+          gsap.set(".gp", { opacity: 0.2 + 0.8 * bass, scale: 0.94 + 0.12 * bass });
+        })(AUDIO_DATA.frames[f].bands[0]), [], f / AUDIO_DATA.fps);
+      }
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

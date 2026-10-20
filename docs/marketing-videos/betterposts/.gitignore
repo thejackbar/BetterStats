@@ -1,0 +1,8 @@
+# Large or regenerable. See README.md for how to rebuild each.
+brag.mp4
+composition/.hyperframes/
+composition/node_modules/
+composition/assets/shots/*.png
+composition/assets/music/
+composition/CLAUDE.md
+composition/AGENTS.md

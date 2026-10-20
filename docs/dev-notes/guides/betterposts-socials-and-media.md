@@ -161,6 +161,7 @@
 - Confirm both mounts before enabling the hand-off: `docker compose exec betterstats-backend ls /mnt/media/bettercricket/internal/videos` and the same on `betterstats-frontend`, then set `VIDEO_ACCEL_LOCATION=/_internal_videos/`.
 - After a database restore onto a new box, videos show titles and thumbnails but will not play: re-upload (super admin sees the count); `orphaned_files()` lists strays.
 - No scripts owned by this area. Migrations: 226 (`public_header_logo`), 280 (`instructional_videos`).
+- Marketing videos made with `/brag` live in `docs/marketing-videos/<name>/` (plan, brief, composition, capture script, README with the rebuild steps). Their frames are shot from the real editor with `capture/capture.mjs`, so a layout change can be re-shot instead of redrawn. Keep sources in the repo: a scratchpad does not survive a resume.
 
 ## Open follow-ups
 - Set mode: a team-list set (cover plus one slide per grade) and a highlights set (cover plus photo-only slides) are still one post at a time. The blank carousel and the derived roundup pages are the only multi-slide posts.
