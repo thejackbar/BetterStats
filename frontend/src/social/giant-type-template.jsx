@@ -52,8 +52,9 @@ export function giantTypeSponsorSlot(width = 1080, height = 1080, count = 1) {
 const statsOf = (s) => String(s || '').split(/\s*[·|]\s*/).map((t) => t.trim()).filter(Boolean)
 
 export function GiantType({
-  width = 1080, height = 1080, announcement, team = {}, match = {}, palette = {}, sponsorCount = 0, player: legacyPlayer,
+  width = 1080, height = 1080, announcement, team = {}, match = {}, palette = {}, sponsorCount = 0, player: legacyPlayer, parts,
 }) {
+  const texture = usePostLook().texture !== false
   const a = announcement || {}
   const player = a.player || legacyPlayer
   const g = giantTypeGeo(width, height, sponsorCount)
@@ -62,7 +63,7 @@ export function GiantType({
   const ink = palette.ink || '#ffffff'
   const base = palette.primary || '#0b1530'
   const glow = glowColor(palette, mixHex)
-  const shade = mixHex(base, '#000000', 0.6)
+  const shade = pc(parts, 'c5ShadeColor', mixHex(base, '#000000', 0.6))
   const word = String(a.headline || '').toUpperCase()
   const kind = String(a.kind || '').toUpperCase()
   const stats = statsOf(a.subheadline)
@@ -77,12 +78,12 @@ export function GiantType({
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden', background: base, color: ink, fontFamily: FONT, fontWeight: WEIGHT,
     }}>
-      {glowDisc('Glow', glow, { left: -Math.round(width * 0.05), top: Math.round(height * 0.12), size: Math.round(width * 1.1) })}
-      {hatch('Hatch', ink, { left: 0, top: 0, width, height, gap: 14, angle: -45, opacity: 0.05 })}
-      {cornerLine('Corner top left', accent, { width, height })}
-      {cornerLine('Corner bottom right', accent, { width, height, flip: true })}
+      {glowDisc('Glow', pc(parts, 'c5GlowColor', glow), { left: -Math.round(width * 0.05), top: Math.round(height * 0.12), size: Math.round(width * 1.1) })}
+      {texture ? hatch('Hatch', ink, { left: 0, top: 0, width, height, gap: 14, angle: -45, opacity: 0.05 }) : null}
+      {cornerLine('Corner top left', pc(parts, 'c5CornerColor', accent), { width, height })}
+      {cornerLine('Corner bottom right', pc(parts, 'c5CornerColor', accent), { width, height, flip: true })}
 
-      <div data-layer="Giant type" style={{ position: 'absolute', left: 40, right: 40, top: g.wordTop, height: wordBoxH, color: accent }}>
+      <div data-layer="Giant type" style={{ position: 'absolute', left: 40, right: 40, top: g.wordTop, height: wordBoxH, color: pc(parts, 'headlineColor', accent) }}>
         <AutoFitText text={word || '—'} max={g.wordMax} min={80} lines={1} measureDeps={[width, height, word]} style={wordStyle} />
       </div>
 
@@ -102,7 +103,7 @@ export function GiantType({
       {/* The same word again, outline only, over the player. */}
       <div data-layer="Giant type outline" style={{
         position: 'absolute', left: 40, right: 40, top: g.wordTop, height: wordBoxH, pointerEvents: 'none',
-        color: 'transparent', WebkitTextStroke: `${Math.max(2, Math.round(3 * f))}px ${ink}b8`,
+        color: 'transparent', WebkitTextStroke: `${Math.max(2, Math.round(3 * f))}px ${pc(parts, 'c5OutlineColor', ink)}b8`,
       }}>
         <AutoFitText text={word || '—'} max={g.wordMax} min={80} lines={1} measureDeps={[width, height, word]} style={wordStyle} />
       </div>
@@ -115,7 +116,7 @@ export function GiantType({
       {kind && (
         <div data-layer="Kind chip" style={{
           position: 'absolute', left: 48, top: pick(g.A, { square: 44, portrait: 60, story: 170 }), padding: `${Math.round(8 * f)}px ${Math.round(16 * f)}px`,
-          background: accent, color: base, fontSize: Math.round(24 * f), letterSpacing: 4, lineHeight: 1,
+          background: pc(parts, 'badgeBg', accent), color: pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(pc(parts, 'badgeBg', accent)) : base), fontSize: Math.round(24 * f), letterSpacing: 4, lineHeight: 1,
         }}>{kind}</div>
       )}
       <div data-layer="Club logo" style={{ position: 'absolute', right: 48, top: pick(g.A, { square: 36, portrait: 50, story: 160 }), width: Math.round(76 * f), height: Math.round(76 * f) }}>
@@ -125,22 +126,22 @@ export function GiantType({
       <div data-layer="Name and line" style={{
         position: 'absolute', left: 48, right: 48, bottom: g.stackBottom, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
       }}>
-        {first && <div style={{ fontSize: Math.round(46 * f), letterSpacing: 2, lineHeight: 1, opacity: 0.85 }}>{first.toUpperCase()}</div>}
+        {first && <div style={{ fontSize: Math.round(46 * f), letterSpacing: 2, lineHeight: 1, opacity: 0.85, color: pc(parts, 'firstColor', undefined) }}>{first.toUpperCase()}</div>}
         <div style={{ width: '100%' }}>
           <AutoFitText text={(last || '—').toUpperCase()} max={Math.round(150 * f)} min={36} lines={1} measureDeps={[width, height, last]}
-            style={{ color: ink, lineHeight: 1, letterSpacing: 0, textAlign: 'center' }} />
+            style={{ color: pc(parts, 'nameColor', ink), lineHeight: 1, letterSpacing: 0, textAlign: 'center' }} />
         </div>
         {stats.length > 1 ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: Math.round(22 * f), marginTop: Math.round(14 * f), flexWrap: 'wrap' }}>
             {stats.map((t, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: Math.round(22 * f) }}>
-                {i > 0 && <span style={{ width: 2, height: Math.round(26 * f), background: accent, opacity: 0.8 }} />}
-                <span style={{ fontSize: Math.round(30 * f), letterSpacing: 1.5, color: i === 0 ? accent : ink, lineHeight: 1.1 }}>{t.toUpperCase()}</span>
+                {i > 0 && <span style={{ width: 2, height: Math.round(26 * f), background: pc(parts, 'dividerColor', accent), opacity: 0.8 }} />}
+                <span style={{ fontSize: Math.round(30 * f), letterSpacing: 1.5, color: i === 0 ? pc(parts, 'statColor', accent) : pc(parts, 'subColor', ink), lineHeight: 1.1 }}>{t.toUpperCase()}</span>
               </div>
             ))}
           </div>
         ) : (
-          stats[0] && <div style={{ fontSize: Math.round(30 * f), letterSpacing: 2, color: accent, marginTop: Math.round(12 * f), lineHeight: 1.1 }}>{stats[0].toUpperCase()}</div>
+          stats[0] && <div style={{ fontSize: Math.round(30 * f), letterSpacing: 2, color: pc(parts, 'statColor', accent), marginTop: Math.round(12 * f), lineHeight: 1.1 }}>{stats[0].toUpperCase()}</div>
         )}
       </div>
 
@@ -151,6 +152,23 @@ export function GiantType({
   )
 }
 GiantType.displayName = 'GiantType'
+
+registerParts({
+  C5: [
+    colorPart('c5GlowColor', 'Glow behind the player', 'Background', (p) => glowColor(p, mixHex)),
+    colorPart('c5CornerColor', 'Corner lines', 'Background', (p) => p.accent || '#ffc233'),
+    colorPart('c5ShadeColor', 'Fade behind the name', 'Background', (p) => mixHex(p.primary || '#0b1530', '#000000', 0.6)),
+    colorPart('headlineColor', 'Giant word', 'Giant word', (p) => p.accent || '#ffc233'),
+    colorPart('c5OutlineColor', 'Outline over the player', 'Giant word', (p) => p.ink || '#ffffff'),
+    colorPart('badgeBg', 'Kind tag', 'Giant word', (p) => p.accent || '#ffc233'),
+    colorPart('badgeColor', 'Kind tag text', 'Giant word', (p) => p.primary || '#0b1530'),
+    colorPart('firstColor', 'First name', 'Name block', (p) => p.ink || '#ffffff'),
+    colorPart('nameColor', 'Surname', 'Name block', (p) => p.ink || '#ffffff'),
+    colorPart('statColor', 'First figure or line under the name', 'Name block', (p) => p.accent || '#ffc233'),
+    colorPart('subColor', 'Other figures', 'Name block', (p) => p.ink || '#ffffff'),
+    colorPart('dividerColor', 'Bars between figures', 'Name block', (p) => p.accent || '#ffc233'),
+  ],
+})
 
 // Where this file's layouts keep the sponsor grid (see sponsorSlots.js).
 export const SPONSOR_SLOTS = { C5: giantTypeSponsorSlot }
