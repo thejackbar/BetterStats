@@ -100,23 +100,31 @@ def _fail(e: act.ReviewError):
 
 class MatchFilter:
     """The words people use to name a match, the same on every step of the review and on Find a
-    match. Used as a dependency so every list takes exactly the same query parameters."""
+    match. Every list takes it through `match_filter`, so they all read the same query parameters."""
 
-    def __init__(
-        self,
-        q: Optional[str] = Query(None, max_length=120, description="words from the opposition or a team name"),
-        grade: Optional[str] = Query(None, max_length=80),
-        competition: Optional[str] = Query(None, max_length=120),
-        player: Optional[str] = Query(None, max_length=120, description="every word must be in a batter's or bowler's name"),
-        date_from: Optional[date_cls] = Query(None),
-        date_to: Optional[date_cls] = Query(None),
-    ):
+    def __init__(self, q=None, grade=None, competition=None, player=None, date_from=None, date_to=None):
         self.kw = dict(text_q=q, grade=grade, competition=competition, player=player,
                        date_from=date_from, date_to=date_to)
 
     @property
     def active(self) -> bool:
         return fnd.has_filter(**self.kw)
+
+
+# A FUNCTION, NOT THE CLASS ITSELF. This module uses `from __future__ import annotations`, and the
+# pinned FastAPI (0.111) resolves a dependency's string annotations against `call.__globals__`,
+# which a class does not have: `Depends(MatchFilter)` raised "name 'Optional' is not defined" at
+# import and the backend never started. A function has its globals.
+def match_filter(
+    q: Optional[str] = Query(None, max_length=120, description="words from the opposition or a team name"),
+    grade: Optional[str] = Query(None, max_length=80),
+    competition: Optional[str] = Query(None, max_length=120),
+    player: Optional[str] = Query(None, max_length=120, description="every word must be in a batter's or bowler's name"),
+    date_from: Optional[date_cls] = Query(None),
+    date_to: Optional[date_cls] = Query(None),
+) -> MatchFilter:
+    return MatchFilter(q=q, grade=grade, competition=competition, player=player,
+                       date_from=date_from, date_to=date_to)
 
 
 def _active(f) -> bool:
@@ -196,7 +204,7 @@ async def card_review_matches(
     sort: Optional[str] = Query(None, description="'newest' (the default) or 'worst': the match that most needs a look first"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    find: MatchFilter = Depends(MatchFilter),
+    find: MatchFilter = Depends(match_filter),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -405,7 +413,7 @@ async def card_review_doubles(
     fresh: bool = Query(False, description="skip the short-lived copy; sent after a change made elsewhere"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    find: MatchFilter = Depends(MatchFilter),
+    find: MatchFilter = Depends(match_filter),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
@@ -447,7 +455,7 @@ async def card_review_find(
     season: Optional[str] = Query(None, max_length=80),
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    find: MatchFilter = Depends(MatchFilter),
+    find: MatchFilter = Depends(match_filter),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):

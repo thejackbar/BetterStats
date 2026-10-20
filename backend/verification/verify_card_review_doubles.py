@@ -576,9 +576,20 @@ async def main():
 
     # --- the routes --------------------------------------------------------------------------
     print("\n-- the routes --")
-    from fastapi import HTTPException
+    from fastapi import FastAPI, HTTPException
     from app.models.db import Organisation, User
     from app.routers import card_review as route
+    # The pinned FastAPI (0.111) analyses every dependency when a router is included, and a class used
+    # as a dependency in a module with `from __future__ import annotations` made the backend crash at
+    # import ("name 'Optional' is not defined"). Newer FastAPI hides it, so this bites only when the
+    # suite runs under the pinned requirements (python 3.11, `pip install -r requirements.txt`).
+    try:
+        FastAPI().include_router(route.router)
+        built = True
+    except Exception as e:  # noqa: BLE001
+        print(f"       (router could not be built: {e})")
+        built = False
+    check("the router builds under the installed FastAPI, so the backend can start", built, True)
 
     async with async_session_maker() as s:
         club, user = await s.get(Organisation, ORG), await s.get(User, USER)
