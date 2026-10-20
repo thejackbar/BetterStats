@@ -2013,6 +2013,36 @@ export const api = {
     request('/club-admin/sync-drift/acknowledge', { method: 'POST' }),
 
   // Manual stat entries — historical backfill (v1.0.0.0 Beta)
+  // Card review: a match stored twice (Cricket Australia card + the club's own), compared,
+  // chosen between three ways, and undone. The long id lists ride in the URL as a GET and every
+  // change is a POST, because a capability held at View level answers reads and refuses writes.
+  cardReviewOverview: () => request('/club-admin/card-review/overview'),
+  cardReviewMatches: (params = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v) })
+    return request(`/club-admin/card-review/matches?${q}`)
+  },
+  cardReviewMatch: (id) => request(`/club-admin/card-review/matches/${id}`),
+  cardReviewPreview: (id) => request(`/club-admin/card-review/matches/${id}/preview`),
+  cardReviewCandidates: (id) => request(`/club-admin/card-review/matches/${id}/candidates`),
+  cardReviewForGame: (gameId) => request(`/club-admin/card-review/game/${gameId}`),
+  cardReviewChoose: (id, choice, note) =>
+    request(`/club-admin/card-review/matches/${id}/choice`, { method: 'POST', body: JSON.stringify({ choice, note: note || null }) }),
+  cardReviewUndo: (id) => request(`/club-admin/card-review/matches/${id}/undo`, { method: 'POST' }),
+  cardReviewRefresh: (id) => request(`/club-admin/card-review/matches/${id}/refresh`, { method: 'POST' }),
+  cardReviewPairOk: (id) => request(`/club-admin/card-review/matches/${id}/pair-ok`, { method: 'POST' }),
+  cardReviewRelink: (id, gameId) =>
+    request(`/club-admin/card-review/matches/${id}/relink`, { method: 'POST', body: JSON.stringify({ game_id: gameId }) }),
+  cardReviewUnlink: (id) => request(`/club-admin/card-review/matches/${id}/unlink`, { method: 'POST' }),
+  cardReviewAccept: (ids) =>
+    request('/club-admin/card-review/accept', { method: 'POST', body: JSON.stringify({ match_ids: ids }) }),
+  cardReviewBulkPreview: () => request('/club-admin/card-review/bulk/preview'),
+  cardReviewBulkApply: (limit) =>
+    request('/club-admin/card-review/bulk/apply', { method: 'POST', body: JSON.stringify({ limit: limit || null }) }),
+  cardReviewBulkUndo: (batchId) =>
+    request('/club-admin/card-review/bulk/undo', { method: 'POST', body: JSON.stringify({ batch_id: batchId }) }),
+  cardReviewBatches: () => request('/club-admin/card-review/bulk/batches'),
+  cardReviewExportUrl: () => `${BASE}/club-admin/card-review/export.csv`,
   adminListSeasonAdjustments: () => request('/club-admin/manual-entries/season-adjustments'),
   adminCreateSeasonAdjustment: (data) =>
     request('/club-admin/manual-entries/season-adjustments', { method: 'POST', body: JSON.stringify(data) }),

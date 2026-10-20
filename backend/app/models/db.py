@@ -1579,6 +1579,10 @@ class Game(Base):
     # player's matches-played count; `result` cannot answer that question,
     # since a NULL result also covers an upcoming or in-progress fixture.
     status = Column(Text, nullable=True)
+    # CA called the fixture off but left `status` COMPLETED: both teams' resultType on the card
+    # read ABANDONED (services/game_status.card_called_off). NULL = not read yet, FALSE = read and
+    # not called off. Read like an ABANDONED status by the matches-played rules.
+    ca_called_off = Column(Boolean, nullable=True)
 
     grade = relationship("Grade", back_populates="games")
     batting_innings = relationship("BattingInnings", back_populates="game")
@@ -2379,6 +2383,16 @@ class ManualGame(Base):
     # Migration 311: FALSE when the source recorded both innings but not which
     # was batted first (a CSFW scorebook import). NULL means known.
     innings_order_known = Column(Boolean, nullable=True)
+    # Migration 349 (services/card_review_ddl): which stored version a person chose for a
+    # paired match. NULL until somebody does. Mapped here as well as in the DDL so a read
+    # through the ORM does not fail at request time.
+    review_choice = Column(Text, nullable=True)
+    review_source = Column(Text, nullable=True)
+    review_decided_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_decided_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    review_note = Column(Text, nullable=True)
+    review_pair_ok = Column(Boolean, nullable=False, server_default="false")
+    review_detail = Column(JSONB, nullable=True)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

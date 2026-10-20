@@ -19,7 +19,7 @@ from app.routers import audit as audit_router
 from app.routers import admin_broadcasts
 from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, fines, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import card_review, auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, fines, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours, role_programs
@@ -4533,6 +4533,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _DORMANCY_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 351: card review, the club's choice between a match's two stored
+        # versions, with its history. Same one-copy rule: this and alembic's 351 both run
+        # services/card_review_ddl.STATEMENTS.
+        from app.services.card_review_ddl import STATEMENTS as _CARD_REVIEW_DDL
+        for _stmt in _CARD_REVIEW_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 335: a net session's own check-in link and the squads it is
         # for. Same one-copy rule: this and alembic's 335 both run
         # services/net_session_link_ddl.STATEMENTS.
@@ -6484,6 +6491,7 @@ app.include_router(stripe_connect.router)       # Member portal: club-to-member 
 app.include_router(public_stripe_connect.router)  # Member portal: Stripe Connect webhook (public, unauthenticated)
 app.include_router(public_member_portal.router)   # Member self-service portal (public, unauthenticated, flag-gated)
 app.include_router(manual_entries.router)
+app.include_router(card_review.router)
 app.include_router(imports.router)  # BetterImport — overlap-safe historical CSV import
 app.include_router(cricketstatz.router)  # import a club's own CricketStatz history
 app.include_router(player_import.router)  # BetterImport (profiles) — bulk player contact/profile CSV import

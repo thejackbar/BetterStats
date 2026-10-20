@@ -5,6 +5,7 @@ import { PbSpinner, Card, ResultPill } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
 import { fmtOvers, oversToBalls, ballsToOvers } from '../lib/cricketFormat'
 import { useAuth } from '../contexts/AuthContext'
+import CardReviewBar from '../components/admin/cardReview/CardReviewBar'
 import { CAP } from '../lib/capabilities'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { rememberClubSlug, readClubSlug } from '../lib/clubSlug'
@@ -1011,6 +1012,7 @@ export default function MatchScorecard() {
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
+      <CardReviewBar gameId={gameId} />
       <main className="max-w-[1300px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <button
           onClick={() => navigate(-1)}

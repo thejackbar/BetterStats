@@ -13,7 +13,7 @@ from app.services.summary_only_seasons import (
     summary_only_seasons_clause as _summary_only_seasons_clause,
 )
 from app.services.grade_scope import GradeScope
-from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match, not_played_game_sql
+from app.services.game_status import appearance_counts_as_match, called_off_sql, not_played_game_sql
 from app.services import rate_coverage as rc
 from app.services.game_sides import sides_sql
 
@@ -1910,7 +1910,7 @@ async def _grid_clauses(session: AsyncSession, org_id, season_id, scope: Optiona
 def _empty_grid_inputs() -> dict:
     return {"season_grade_games": {}, "exact": {}, "season_aggregate": {},
             "manual_by_season": {}, "mixed_seasons": set(), "without_season": 0,
-            "reserve": {}}
+            "uncounted": {}}
 
 
 # The relations the grid reads, by default the effective views. A caller that has already
@@ -2140,12 +2140,17 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
         gn = r["grade_name"]
         by_grade[gn] = by_grade.get(gn, 0) + int(r["matches"] or 0)
 
-    # RESERVES: games the player was only a 12th man or substitute in (`game_appearances.is_reserve`,
-    # no row of their own), per season and grade. CA's per-grade claim COUNTS some of them, so
-    # `_attribute_cells` takes them back off it, but only as far as the claim runs past the games
-    # we can show the player played. One bound array of players and one read of the per-innings
-    # views for them: never a per-row probe, which was measured at 38s on 40,000 appearances.
-    reserve_rows = await session.execute(
+    # NAMED, NOT PLAYED: games the player was only named in and that do not count, per season and
+    # grade. Two kinds: a RESERVE (`game_appearances.is_reserve`: a 12th man or substitute fielder,
+    # no row of their own) and a CALLED-OFF fixture (status ABANDONED or CANCELLED, no row of their
+    # own, which `v_effective_player_season_stats` already takes off CA's season total). CA's
+    # per-grade claim counts some of both, so `_attribute_cells` takes them back off it, but only
+    # as far as the claim runs past the games we can show were played. Without the called-off half
+    # the grid put a washed-out round straight back (Leederville: the season table read 7, the
+    # grid 8 with a D Grade cell of 1 and no scorecard held, and the header was raised to the grid).
+    # One bound array of players and one read of the per-innings views for them: never a per-row
+    # probe, which was measured at 38s on 40,000 appearances.
+    uncounted_rows = await session.execute(
         text(f"""
             WITH rows AS (
                 SELECT bi.player_id, bi.game_id FROM {rels['bi']} bi
@@ -2163,16 +2168,15 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
             JOIN {rels['games']} g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id{_GRID_GRADE_NAME_JOINS}
             WHERE ga.player_id = ANY(CAST(:pids AS uuid[]))
-              AND ga.is_reserve IS TRUE
               AND rows.game_id IS NULL
-              AND COALESCE(g.status, '') NOT IN ({NOT_PLAYED_SQL_LIST})
+              AND (ga.is_reserve IS TRUE OR {called_off_sql('g')})
               {club_games_clause}{season_clause_gr}{game_scope_clause}
             GROUP BY ga.player_id, gr.season_id, {_GRID_GRADE_NAME}
         """),
         params,
     )
-    for r in reserve_rows.mappings():
-        per = out[str(r["player_id"])]["reserve"].setdefault(_canonical_season(r["season_id"]), {})
+    for r in uncounted_rows.mappings():
+        per = out[str(r["player_id"])]["uncounted"].setdefault(_canonical_season(r["season_id"]), {})
         gn = r["grade_name"]
         per[gn] = per.get(gn, 0) + int(r["games"] or 0)
 
@@ -2238,14 +2242,14 @@ def _attribute_cells(gi: dict) -> tuple:
         if exact:
             # CA's own per-grade count is the source of truth, but never below
             # the number of scorecards we actually hold for that grade.
-            reserve = gi.get("reserve", {}).get(sid, {})
+            uncounted = gi.get("uncounted", {}).get(sid, {})
             for gn in set(scorecards) | set(exact):
                 held = scorecards.get(gn, 0)
                 claimed = exact.get(gn, 0)
-                # CA counts a 12th man about as often as it leaves one out. Whatever its claim
-                # runs past the games we can show were played, up to the reserves, is the
-                # reserve: take it off, never below what we hold.
-                r = reserve.get(gn, 0)
+                # CA counts a 12th man, and a washed-out fixture, about as often as it leaves one
+                # out. Whatever its claim runs past the games we can show were played, up to the
+                # games that do not count, is one of them: take it off, never below what we hold.
+                r = uncounted.get(gn, 0)
                 if r:
                     claimed -= min(r, max(claimed - held, 0))
                 if max(held, claimed) > 0:
