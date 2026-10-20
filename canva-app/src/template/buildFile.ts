@@ -11,6 +11,8 @@ type Look = {
   x: number;
   y: number;
   w: number;
+  /** Only for a photo or sponsors area. */
+  h?: number;
   fontFamily?: string;
   fontSize: number;
   bold: boolean;
@@ -49,6 +51,7 @@ const lookOf = (f: Field | FixedText): Look => ({
   x: f.x,
   y: f.y,
   w: f.w,
+  ...("h" in f && f.h ? { h: f.h } : null),
   ...(f.fontFamily ? { fontFamily: f.fontFamily } : null),
   fontSize: f.fontSize,
   bold: f.bold,

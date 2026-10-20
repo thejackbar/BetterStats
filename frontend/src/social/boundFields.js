@@ -26,32 +26,35 @@
 //
 // STRUCTURE FIRST. By default an import uses the roles, not the designer's own
 // values: a colour role becomes a palette token (so the club's palette tints it and
-// a palette switch re-tints it) and a font role becomes the club's display font or
-// Inter. The designer's colour and font name are kept in the file for a club that
+// a palette switch re-tints it) and a font role becomes the post font (the club font,
+// or whichever the club picks under Brand). The designer's colour and font name are kept in the file for a club that
 // chooses "keep my Canva look". A panel is drawn as a rectangle behind the text, tinted
 // with the club's accent (a flat copy of a picture's colour cannot be known).
 //
 // Tokens (case and spacing do not matter; an unknown one is kept as plain text
 // and reported, never guessed):
 //   player N | player N first | player N last | player N role   N = 1 to LINEUP_MAX
-//   captain | keeper | opponent | team | headline
+//   player N photo        a picture area bound to that player's photo (h is the area's height)
+//   player N captain | vice | keeper | debut   print C, VC, WK or DEBUT when the player is one
+//   sponsors              a sponsors area (h is the area's height)
+//   captain | vice | keeper | opponent | team | headline
 //   competition | round | venue | date | time | season
 import { newBlankItem, withDesign, BLANK_FONTS, BLANK_STARTERS } from './blank-template'
-import { bindFromToken, bindLabel } from './boundResolve'
+import { bindFromToken, bindLabel, isAreaBind } from './boundResolve'
 
 // How much of the club's accent a panel carries: enough to show, not enough to fight the text.
 export const PANEL_TINT = 0.22
 const COLOR_ROLES = ['ink', 'accent', 'primary', 'secondary', 'white', 'black']
 const FONT_ROLES = ['display', 'body']
 const fontByKey = (key) => BLANK_FONTS.find((x) => x.key === key)
-export { bindFromToken, bindLabel, resolveBind, boundSlotCount, isBoundPlayerSlot, LINEUP_SLOTS } from './boundResolve'
+export { bindFromToken, bindLabel, resolveBind, boundSlotCount, isBoundPlayerSlot, isAreaBind, LINEUP_SLOTS } from './boundResolve'
 
 export const FORMAT = 'bettercricket-template'
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[{}]/g, '').replace(/\s+/g, ' ').trim()
 
 // A design tool names its fonts however it likes. Match on the font's name; a
-// font the editor does not carry falls back to Inter and is reported.
+// font the editor does not carry falls back to the post font and is reported.
 export function matchFont(name) {
   const n = norm(name)
   if (!n) return null
@@ -77,6 +80,8 @@ export function parseTemplateFile(raw) {
     const font = matchFont(f.fontFamily)
     return {
       x: Math.round(num(f.x, 0)), y: Math.round(num(f.y, 0)), w: Math.max(40, Math.round(num(f.w, 400))),
+      // Only an area (a photo, the sponsors) has a height of its own; text grows to fit.
+      h: Math.max(0, Math.round(num(f.h, 0))),
       // The designer's own values, used only when a club keeps the Canva look.
       hex: HEX.test(f.color || '') ? f.color.toLowerCase() : null,
       fontName: f.fontFamily ? String(f.fontFamily) : null,
@@ -134,12 +139,17 @@ export function parseTemplateFile(raw) {
 
 // A font BetterPosts does not have is only a problem where the designer's font name
 // is the one used: when the club keeps the Canva look, or a file carries no font role
-// (an older one). Where the club's own font fills in, the name is never used.
+// (an older one). Where the club's own font fills in, the name is never used. One line
+// per missing font, saying how many pieces of text fall back to the post font.
 export function templateWarnings(parsed, { clubStyle = true } = {}) {
   const out = [...parsed.warnings]
+  const missing = new Map()
   for (const f of [...parsed.fields, ...parsed.texts]) {
-    const nameIsUsed = !clubStyle || !f.fontRole
-    if (nameIsUsed && f.fontName && !f.font) out.push(`The font “${f.fontName}” is not in BetterPosts, so “${f.token || f.text}” uses Inter.`)
+    const nameIsUsed = (!clubStyle || !f.fontRole) && !isAreaBind(f.bind)
+    if (nameIsUsed && f.fontName && !f.font) missing.set(f.fontName, (missing.get(f.fontName) || 0) + 1)
+  }
+  for (const [name, n] of missing) {
+    out.push(`The font “${name}” is only in Canva, so ${n} piece${n === 1 ? '' : 's'} of text use${n === 1 ? 's' : ''} the post font instead. Change the post font under Brand, or use a font BetterPosts has.`)
   }
   return out
 }
@@ -150,9 +160,11 @@ export function templateWarnings(parsed, { clubStyle = true } = {}) {
 // `bind` is absent on a field that is not one (plain text).
 export function itemsFromTemplate(parsed, { designUrl, designName, width, height, keep = [], clubStyle = true }) {
   const colorOf = (f) => (clubStyle && f.colorRole ? f.colorRole : (f.hex || 'ink'))
+  // The post font (Design, Font) fills every role, so changing it restyles the whole
+  // template. A Canva font BetterPosts does not have falls back to it as well.
   const fontOf = (f) => {
-    if (clubStyle && f.fontRole) return (fontByKey(f.fontRole === 'display' ? 'club' : 'inter') || fontByKey('inter')).family
-    return (f.font || fontByKey('inter')).family
+    if (clubStyle && f.fontRole) return fontByKey('club').family
+    return (f.font || fontByKey('club')).family
   }
   const make = (text, f) => newBlankItem('text', {
     text, x: f.x, y: f.y, w: f.w, fontFamily: fontOf(f), fontSize: f.fontSize, bold: f.bold,
@@ -178,13 +190,26 @@ export function itemsFromTemplate(parsed, { designUrl, designName, width, height
     }
   })
   const fixed = parsed.texts.map((t) => ({ ...make(t.text, t), fromTemplate: true }))
-  const fields = parsed.fields.map((f) => ({
-    ...make(f.bind ? bindLabel(f.bind).toUpperCase() : f.token, f),
-    // Every block an import makes is marked, including a word that is not a field,
-    // so importing again replaces exactly these and leaves the club's own blocks.
-    fromTemplate: true,
-    ...(f.bind ? { bind: f.bind } : null),
-  }))
+  const fields = parsed.fields.map((f) => {
+    // A photo or the sponsors is an area, not words: it takes the box the designer drew.
+    if (f.bind === 'sponsors') {
+      return {
+        ...newBlankItem('sponsors', { x: f.x, y: f.y, w: f.w, h: f.h || Math.round(f.w * 0.2), panel: 'light' }),
+        // Follows the sponsors the club has chosen for the post, without moving.
+        followDefault: true, fromTemplate: true,
+      }
+    }
+    if (isAreaBind(f.bind)) {
+      return { ...newBlankItem('image', { x: f.x, y: f.y, w: f.w, h: f.h || f.w, fit: 'cover' }), bind: f.bind, fromTemplate: true }
+    }
+    return {
+      ...make(f.bind ? bindLabel(f.bind).toUpperCase() : f.token, f),
+      // Every block an import makes is marked, including a word that is not a field,
+      // so importing again replaces exactly these and leaves the club's own blocks.
+      fromTemplate: true,
+      ...(f.bind ? { bind: f.bind } : null),
+    }
+  })
   // Whatever the club put on top before stays, except an earlier import's own
   // fields and design (so importing the same template again updates it) and the
   // editor's own starter blocks when nobody has touched them, which would only
@@ -192,7 +217,10 @@ export function itemsFromTemplate(parsed, { designUrl, designName, width, height
   const own = keep.filter((it) => !it.fromTemplate && !it.design && it.type !== 'sponsors')
   const sig = (it) => [it.type, it.x, it.y, it.w, it.size, it.text].join('|')
   const untouched = BLANK_STARTERS.some((st) => { const b = st.build(); return b.length === own.length && b.every((x, i) => sig(x) === sig(own[i])) })
-  const others = keep.filter((it) => !it.fromTemplate && !it.design && !(untouched && own.includes(it)))
+  // The editor's own sponsor band is not the template's: it goes, and so does any sponsor grid
+  // when the template has a sponsors box of its own.
+  const hasSponsorBox = parsed.fields.some((f) => f.bind === 'sponsors')
+  const others = keep.filter((it) => !it.fromTemplate && !it.design && !(untouched && own.includes(it)) && !(it.type === 'sponsors' && (it.auto || hasSponsorBox)))
   const base = designUrl ? withDesign(others, designUrl, designName, width, height) : [...keep.filter((it) => it.design), ...others]
   return [...base, ...panelItems, ...fixed, ...fields]
 }

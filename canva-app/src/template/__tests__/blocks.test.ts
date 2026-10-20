@@ -4,6 +4,9 @@ import {
   lineUpBlock,
   matchDetailsBlock,
   MAX_LINEUP,
+  playerExtraBlock,
+  PLAYER_EXTRAS,
+  sponsorsBlock,
 } from "../blocks";
 import { bindFromToken } from "../tokens";
 import type { PageSize } from "../blocks";
@@ -185,5 +188,44 @@ describe("fieldBlock", () => {
       expect(box.left + box.width).toBeLessThanOrEqual(page.width);
       expect(box.top + box.fontSize * 1.4).toBeLessThanOrEqual(page.height);
     }
+  });
+});
+
+describe("area and mark blocks", () => {
+  it("a sponsors box is a rectangle with {{sponsors}} inside it", () => {
+    for (const size of SIZES) {
+      const b = sponsorsBlock(size);
+      const r = must(b.rects?.[0]);
+      const t = must(b.boxes[0]);
+      expect(t.text).toBe("{{sponsors}}");
+      expect(t.left).toBe(r.left);
+      expect(t.width).toBe(r.width);
+      expect(t.top).toBeGreaterThanOrEqual(r.top);
+      expect(t.top).toBeLessThan(r.top + r.height);
+      expect(r.left + r.width).toBeLessThanOrEqual(size.width);
+      expect(r.top + r.height).toBeLessThanOrEqual(size.height);
+    }
+  });
+
+  it("a photo area is a square with the player's photo word in it", () => {
+    const b = playerExtraBlock({ width: 1080, height: 1080 }, 4, "photo");
+    const r = must(b.rects?.[0]);
+    expect(r.width).toBe(r.height);
+    expect(must(b.boxes[0]).text).toBe("{{player 4 photo}}");
+    expect(b.name).toBe("Player 4 (photo)");
+  });
+
+  it("every extra becomes a token BetterCricket knows", () => {
+    for (const e of PLAYER_EXTRAS) {
+      const b = playerExtraBlock({ width: 1080, height: 1080 }, 2, e);
+      const text = must(b.boxes[0]).text;
+      expect(bindFromToken(text)).toMatch(/^lineup\.2\./);
+    }
+  });
+
+  it("a mark is a plain box with no rectangle", () => {
+    const b = playerExtraBlock({ width: 1080, height: 1080 }, 1, "captain");
+    expect(b.rects).toBeUndefined();
+    expect(must(b.boxes[0]).text).toBe("{{player 1 captain}}");
   });
 });

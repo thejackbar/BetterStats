@@ -65,7 +65,7 @@ const rootText = (page) => page.evaluate((rootSrc) => { const r = (new Function(
 const flat = async (page) => { const r = await read(page); return r ? { ...r, at: undefined } : null }
 
 async function open(opts = {}) {
-  const e = await makeEditor(browser, BASE, { layout: 'BL1', size: 'square', viewport: { width: 1700, height: 1700 } })
+  const e = await makeEditor(browser, BASE, { layout: 'BL1', size: 'square', viewport: { width: 1700, height: 1700 }, photos: opts.photos, debutIds: opts.debutIds })
   const { page } = e
   const uploads = [], puts = []
   await page.route('**/api/admin/social/media**', (route) => {
@@ -108,7 +108,7 @@ const ys = [300, 362, 424, 486, 548, 610, 672, 734, 796, 858, 920, 120, 1200]
   ck('slot size and left edge come from the file', g && g[0] && g[0].size === 44 && g[0].x === 90, JSON.stringify(g && g[0]))
   ck('a known font is used (Anton)', g && g[0] && /Anton/.test(g[0].family), JSON.stringify(g && g[0] && g[0].family))
   ck('opponent slot is centred and white', g && g[11] && g[11].align === 'center' && g[11].color === 'rgb(255, 255, 255)', JSON.stringify(g && g[11]))
-  ck('an unknown font falls back to Inter', g && g[11] && /Inter/.test(g[11].family) && !/Comic/.test(g[11].family), JSON.stringify(g && g[11] && g[11].family))
+  ck('an unknown font falls back to the post font (Barlow Condensed), not Comic Sans or Inter', g && g[11] && /Barlow Condensed/.test(g[11].family) && !/Comic|Inter/.test(g[11].family), JSON.stringify(g && g[11] && g[11].family))
   const t = await say(page)
   ck('the note says how many places were imported', /Imported “LineUp”/.test(t) && /11 player places/.test(t), t.slice(0, 0))
   ck('the note names the unknown font', /Comic Sans MS/.test(t))
@@ -234,17 +234,24 @@ const asRgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `rgb(${(n 
   ck('the fixed word uses the same club ink', head && p1 && head.color === p1.color, JSON.stringify([head && head.color, p1 && p1.color]))
   ck('an accent field uses the club accent, not the designer\'s red', opp && opp.color !== asRgb('#e63946') && opp.color !== p1.color, JSON.stringify(opp && opp.color))
   ck('a display-role field uses the club\'s display font (this club\'s is Barlow Condensed), not the designer\'s Oswald', opp && /Barlow Condensed/.test(opp.family) && !/Oswald/.test(opp.family), JSON.stringify(opp && opp.family))
-  ck('a body-role field uses Inter, not the designer\'s Oswald or Comic Sans', p1 && /Inter/.test(p1.family) && p2 && /Inter/.test(p2.family) && !/Oswald|Comic/.test(p1.family + p2.family), JSON.stringify([p1 && p1.family, p2 && p2.family]))
+  ck('a body-role field uses the post font too, not the designer\'s Oswald or Comic Sans', p1 && /Barlow Condensed/.test(p1.family) && p2 && /Barlow Condensed/.test(p2.family) && !/Oswald|Comic/.test(p1.family + p2.family), JSON.stringify([p1 && p1.family, p2 && p2.family]))
   const t = await say(page)
   ck('the note counts the fixed word', /1 fixed word/.test(t))
   ck('the note says the colours and fonts come from the club', /come from your club/.test(t))
-  ck('no font warning when the club\'s own fonts are used', !/not in BetterPosts/.test(t))
+  ck('no font warning when the club\'s own fonts are used', !/only in Canva/.test(t))
   await tab(page, 'Design'); await page.waitForTimeout(400)
   await page.getByPlaceholder('Template name...').fill('Maroon')
   await press(page.getByRole('button', { name: /^Save current$/ })); await page.waitForTimeout(1200)
   const saved = puts.length ? JSON.stringify(puts[puts.length - 1]) : ''
   ck('the saved template holds palette tokens, so a palette switch re-tints it', /"color":"ink"/.test(saved) && /"color":"accent"/.test(saved) && !/#ffe14d|#e63946/.test(saved), saved.slice(0, 200))
   ck('the saved template holds the club font by name, so a font change follows', /--social-display-font/.test(saved), saved.slice(0, 200))
+  // The reported bug: changing the post font (Brand tool) changed only the heading.
+  await tab(page, 'Brand'); await page.waitForTimeout(300)
+  await page.locator('select').filter({ has: page.locator('option[value="oswald"]') }).first().selectOption('oswald').catch(() => {})
+  await page.waitForTimeout(500)
+  const after = await rows(page, [240, 330, 390, 120])
+  const [h2, q1, q2, o2] = after || []
+  ck('changing the post font changes the heading AND the player slots AND the opponent', [h2, q1, q2, o2].every((x) => x && /Oswald/.test(x.family)), JSON.stringify(after && after.map((x) => x && x.family)))
   await page.close()
 }
 {
@@ -255,9 +262,9 @@ const asRgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `rgb(${(n 
   const [head, p1, p2, opp] = g || []
   ck('keeping the Canva look: the designer\'s colours', p1 && p1.color === asRgb('#ffe14d') && opp && opp.color === asRgb('#e63946') && head && head.color === asRgb('#ffffff'), JSON.stringify([p1 && p1.color, opp && opp.color, head && head.color]))
   ck('keeping the Canva look: the designer\'s fonts', p1 && /Oswald/.test(p1.family) && opp && /Oswald/.test(opp.family), JSON.stringify([p1 && p1.family, opp && opp.family]))
-  ck('keeping the Canva look: an unknown font falls back to Inter', p2 && /Inter/.test(p2.family), JSON.stringify(p2 && p2.family))
+  ck('keeping the Canva look: an unknown font falls back to the post font', p2 && /Barlow Condensed/.test(p2.family) && !/Comic/.test(p2.family), JSON.stringify(p2 && p2.family))
   const t = await say(page)
-  ck('keeping the Canva look: the unknown font is reported', /Comic Sans MS/.test(t) && /not in BetterPosts/.test(t))
+  ck('keeping the Canva look: the unknown font is reported once, with a count', /Comic Sans MS/.test(t) && /only in Canva/.test(t) && (t.match(/Comic Sans MS/g) || []).length === 1 && /1 piece of text uses/.test(t), t.slice(-400))
   ck('keeping the Canva look: the note does not claim club colours', !/come from your club/.test(t))
   await page.close()
 }
@@ -406,6 +413,68 @@ const lineupYs = Array.from({ length: 11 }, (_, i) => 330 + i * 58)
   const { page } = await open()
   await importFile(page, { ...LINEUP, name: 'NoPlayers', fields: [{ token: 'date', x: 100, y: 100, w: 300, fontSize: 30, align: 'left' }] })
   ck('a line up with no player places says so', /no player places/.test(await say(page)))
+  await page.close()
+}
+
+// 6g. Photos, marks, the sponsors box, competition, and a template starting with the extras off.
+const LINEUP2 = {
+  ...LINEUP, name: 'WithAreas',
+  fields: [
+    ...LINEUP.fields,
+    { token: 'competition', x: 560, y: 260, w: 450, fontSize: 36, colorRole: 'ink', fontRole: 'body', align: 'left' },
+    { token: 'player 1 photo', x: 700, y: 330, w: 200, h: 260 },
+    { token: 'player 2 photo', x: 700, y: 620, w: 200, h: 260 },
+    { token: 'player 1 captain', x: 120, y: 330, w: 40, fontSize: 30, bold: true, colorRole: 'accent', fontRole: 'display', align: 'left' },
+    { token: 'player 5 keeper', x: 120, y: 562, w: 60, fontSize: 30, bold: true, colorRole: 'accent', fontRole: 'display', align: 'left' },
+    { token: 'player 2 debut', x: 120, y: 388, w: 100, fontSize: 30, bold: true, colorRole: 'accent', fontRole: 'display', align: 'left' },
+    { token: 'sponsors', x: 60, y: 880, w: 900, h: 140 },
+  ],
+}
+const gridsOnPost = (page) => page.evaluate((rootSrc) => { const root = (new Function(`return (${rootSrc})()`))(); if (!root) return null; const rr = root.getBoundingClientRect(); return [...root.querySelectorAll('[data-sponsor-grid]')].map((g) => { const b = g.parentElement.getBoundingClientRect(); return { x: Math.round(b.left - rr.left), y: Math.round(b.top - rr.top), w: Math.round(g.getBoundingClientRect().width), h: Math.round(g.getBoundingClientRect().height), logos: g.querySelectorAll('img').length } }) }, ROOT.toString())
+const photosOnPost = (page) => page.evaluate((rootSrc) => { const root = (new Function(`return (${rootSrc})()`))(); if (!root) return null; const rr = root.getBoundingClientRect(); return [...root.querySelectorAll('img')].filter((i) => /players\/.+\/photo/.test(i.getAttribute('src') || '')).map((i) => ({ x: Math.round(i.getBoundingClientRect().left - rr.left), y: Math.round(i.getBoundingClientRect().top - rr.top), w: Math.round(i.getBoundingClientRect().width), h: Math.round(i.getBoundingClientRect().height) })) }, ROOT.toString())
+{
+  const e = await open({ photos: ['p1'], debutIds: ['p2'] })
+  const { page } = e
+  await importFile(page, LINEUP2)
+  const t0 = await say(page)
+  ck('areas and marks are fields, so no font warning and no "not a field" warning', !/only in Canva/.test(t0) && !/is not a field/.test(t0), t0.slice(0, 300))
+  const bare = await rows(page, [330, 562, 388])
+  ck('before data, a mark shows its sample label', bare && bare[0] && /CAPTAIN|PLAYER 1/i.test(bare[0].text), JSON.stringify(bare && bare[0]))
+  await e.run.loadXI(); await page.waitForTimeout(900)
+  const marks = await rows(page, [330, 562, 388, 260])
+  const hasText = (r, re) => r && re.test(r.text)
+  const textAt = async (x, y) => page.evaluate(([rootSrc, x, y]) => { const root = (new Function(`return (${rootSrc})()`))(); const rr = root.getBoundingClientRect(); const l = [...root.querySelectorAll('div')].find((d) => d.children.length === 0 && Math.abs(d.getBoundingClientRect().left - rr.left - x) < 4 && Math.abs(d.getBoundingClientRect().top - rr.top - y) < 6 && d.innerText.trim() && d.getBoundingClientRect().width < 200); return l ? l.innerText.trim() : null }, [ROOT.toString(), x, y])
+  ck('the captain mark prints C beside the captain', (await textAt(120, 330)) === 'C', String(await textAt(120, 330)))
+  ck('the keeper mark prints WK beside the keeper', (await textAt(120, 562)) === 'WK', String(await textAt(120, 562)))
+  ck('the debut mark prints DEBUT beside the debutant', (await textAt(120, 388)) === 'DEBUT', String(await textAt(120, 388)))
+  ck('competition fills from the fixture\'s grade (1st Grade)', hasText(marks && marks[3], /1ST GRADE|1st Grade/i), JSON.stringify(marks && marks[3]))
+  const ph = await photosOnPost(page)
+  ck('player 1 photo shows in its own area (700,330 200x260)', ph && ph.length === 1 && ph[0].x === 700 && ph[0].y === 330 && ph[0].w === 200 && ph[0].h === 260, JSON.stringify(ph))
+  ck('player 2 has no photo, so nothing is drawn there', ph && !ph.some((x) => x.y === 620), JSON.stringify(ph))
+  const g = await gridsOnPost(page)
+  ck('the sponsors box is where the template put it and holds the club\'s logos', g && g.length === 1 && g[0].x === 60 && g[0].y === 880 && g[0].w === 900 && g[0].logos >= 1, JSON.stringify(g))
+  await page.close()
+}
+{
+  // Without a sponsors box in the template there is no sponsor band at all.
+  const { page } = await open()
+  await importFile(page, LINEUP); await page.waitForTimeout(1500)
+  const g = await gridsOnPost(page)
+  ck('no sponsor band when the template has no sponsors box', g && g.length === 0, JSON.stringify(g))
+  await page.close()
+}
+{
+  // Importing starts with the crest watermark, texture and background word off.
+  const { page } = await open()
+  await page.evaluate(() => { localStorage.setItem('bs_social_bg_logo', '1'); localStorage.setItem('bs_social_bg', 'concrete-grit'); localStorage.setItem('bs_social_bg_text', '100') })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /DOWNLOAD PNG|SLIDES/ }).first().waitFor({ timeout: 30000 })
+  await tab(page, 'Content'); await page.waitForTimeout(300)
+  const was = await page.evaluate(() => [localStorage.getItem('bs_social_bg_logo'), localStorage.getItem('bs_social_bg')])
+  await importFile(page, LINEUP)
+  const now = await page.evaluate(() => [localStorage.getItem('bs_social_bg_logo'), localStorage.getItem('bs_social_bg'), localStorage.getItem('bs_social_bg_text')])
+  ck('control: the extras were on before the import', was[0] === '1' && was[1] === 'concrete-grit', JSON.stringify(was))
+  ck('after importing a line up the crest watermark, texture and background word are off', now[0] === '0' && now[1] === 'none' && now[2] === '', JSON.stringify(now))
   await page.close()
 }
 

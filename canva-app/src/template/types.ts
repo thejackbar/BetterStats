@@ -93,6 +93,8 @@ export type Field = {
   x: number;
   y: number;
   w: number;
+  /** Height of a photo or sponsors area (null for text, which grows to fit). */
+  h: number | null;
   /** Canva's id for the font; named later through findFonts. */
   fontRef: string | null;
   fontFamily: string | null;
@@ -108,7 +110,9 @@ export type Field = {
 };
 
 /** Plain words that stay as written, such as a heading. Same look as a field. */
-export type FixedText = Omit<Field, "token" | "binding"> & { text: string };
+export type FixedText = Omit<Field, "token" | "binding" | "h"> & {
+  text: string;
+};
 
 export type Canvas = { w: number; h: number };
 
