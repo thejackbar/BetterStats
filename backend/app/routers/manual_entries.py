@@ -53,6 +53,7 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_club, get_current_user
 from app.services import dismissal, game_import_staging, import_cleanup, manual_game_check, manual_result, scorebook_innings
+from app.services import import_grade_match as ijg
 from app.services import import_ingest as ingest
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.season_resolve import (
@@ -3306,10 +3307,24 @@ def _season_label_year(label: str) -> Optional[int]:
 # week's difference in the date is ordinary for a two-day game. A synced game
 # is a candidate there whether the club's own season holds it or the other
 # side of the fixture does.
+#
+# BOTH LOOKS ARE GRADE-AWARE, because a club plays several grades against one
+# opposition on one day: the date and one shared word fitted every one of them
+# and the first game found won, so the B grade card was linked to the A grade
+# game and the real B grade game stayed unlinked and counted (the match held
+# twice, under One Day and under Two Day). `import_grade_match` says how a
+# sheet match is weighed against a candidate (its card, then its grade) and
+# leaves a match UNLINKED where neither can decide. Never link a sheet match
+# to a game whose card contradicts it.
 
-def _opp_tokens(*vals) -> set:
+def _opp_tokens(*vals, drop=frozenset()) -> set:
+    """The words that name an opposition. `drop` is the club's own words: the
+    team names both sources write carry them, so left in they make every game
+    on the day look like the same opposition. Dropped from BOTH sides alike,
+    and kept when dropping them would leave nothing to compare."""
     text = " ".join((v or "").lower() for v in vals)
-    return {w for w in re.split(r"[^a-z0-9]+", text) if len(w) > 2}
+    words = {w for w in re.split(r"[^a-z0-9]+", text) if len(w) > 2}
+    return (words - drop) or words
 
 
 async def _existing_game_index(db: AsyncSession, org_id: uuid.UUID) -> dict:
@@ -3325,13 +3340,19 @@ async def _existing_game_index(db: AsyncSession, org_id: uuid.UUID) -> dict:
     replaces a locked stand-in can carry the pair onto the replacement rather
     than dropping it and bringing the synced copy back into the count.
     """
+    from app.services import match_pairing as mp
+    club_words = set(mp.team_tokens((await db.execute(
+        _t("SELECT name FROM organisations WHERE id = :org"),
+        {"org": str(org_id)})).scalar() or ""))
     rows = (await db.execute(_t("""
         SELECT g.id::text AS id, g.played_at, g.source,
                g.opp_club_name, g.home_team, g.away_team,
                pm.superseded_by_game_id::text AS paired_to,
-               pm.pair_prefers_import, pm.pairing_locked
+               pm.pair_prefers_import, pm.pairing_locked,
+               COALESCE(NULLIF(gr.display_name_override, ''), gr.name, '') AS grade
         FROM v_effective_games g
         LEFT JOIN manual_games pm ON g.source = 'manual' AND pm.id = g.id
+        LEFT JOIN grades gr ON gr.id = g.grade_id
         WHERE (g.organisation_id = :org
                OR g.home_org_id = :org OR g.away_org_id = :org)
           AND g.played_at IS NOT NULL
@@ -3340,7 +3361,9 @@ async def _existing_game_index(db: AsyncSession, org_id: uuid.UUID) -> dict:
     for r in rows:
         index.setdefault(r["played_at"], []).append({
             "id": r["id"], "source": r["source"],
-            "tokens": _opp_tokens(r["opp_club_name"], r["home_team"], r["away_team"]),
+            "tokens": _opp_tokens(r["opp_club_name"], r["home_team"], r["away_team"],
+                                  drop=club_words),
+            "grade": r["grade"],
             "paired_to": r["paired_to"],
             "pair_prefers_import": bool(r["pair_prefers_import"]),
             "pairing_locked": bool(r["pairing_locked"]),
@@ -3348,45 +3371,80 @@ async def _existing_game_index(db: AsyncSession, org_id: uuid.UUID) -> dict:
     return index
 
 
-def _match_existing(index: dict, played_at: str, opp_vals: tuple, consumed: set):
-    """The existing game this sheet game is the same match as, or None.
+def _existing_match(ex: dict) -> dict:
+    """The shape the review and the commit read for a game a sheet match is."""
+    return {"id": ex["id"], "source": ex["source"], "matched_on": "date",
+            "evidence": ex.get("evidence"),
+            "paired_to": ex.get("paired_to"),
+            "pair_prefers_import": ex.get("pair_prefers_import", False),
+            "pairing_locked": ex.get("pairing_locked", False)}
 
-    Each existing game is matched at most once (a `consumed` set), so two sheet
-    games landing on the same date and opposition as one existing record do not
-    both claim it — the second reads as new.
+
+def _sheet_games(by_game: dict, pmatch: dict, gmatch: dict, synced_ids: set,
+                 club_words: set) -> list:
+    """Every sheet match as the grade-aware looks weigh it: its date, its
+    opposition words, its grade as the review will file it and its card.
+
+    The grade is the one the import will WRITE (the matched or created name,
+    or none for a label the admin said is no grade), falling back to the raw
+    label only for a sheet the review has not resolved.
     """
-    if not played_at:
-        return None
-    try:
-        d = date_cls.fromisoformat(played_at.strip())
-    except Exception:
-        return None
-    toks = _opp_tokens(*opp_vals)
-    if not toks:
-        return None
-    for ex in index.get(d, []):
-        if ex["id"] in consumed:
+    out = []
+    for game_key, group in by_game.items():
+        first = group[0][1]
+        try:
+            played_at = date_cls.fromisoformat((first.get("played_at") or "").strip())
+        except Exception:
+            played_at = None
+        label = (first.get("grade_name") or "").strip()
+        resolved = gmatch.get(label)
+        grade = (resolved.get("grade_name") or "") if resolved else label
+        sig = _sheet_signature(group, pmatch)
+        out.append(ijg.SheetGame(
+            key=game_key, played_at=played_at,
+            tokens=_opp_tokens(first.get("opposition"), first.get("home_team"),
+                               first.get("away_team"), drop=club_words),
+            card=ijg.SheetCard(grade=grade, signature=sig,
+                               known=_sheet_signature(group, pmatch, only=synced_ids))))
+    return out
+
+
+async def _candidate_cards(db: AsyncSession, club: Organisation, index: dict,
+                           sheets: list) -> dict:
+    """Our batting card for each existing game a sheet match could be, so a
+    card that contradicts it can be told. Only games on a sheet date that
+    share an opposition word with a sheet match there are read."""
+    want_synced: set = set()
+    want_manual: set = set()
+    for s in sheets:
+        if s.played_at is None or not s.tokens:
             continue
-        if toks & ex["tokens"]:
-            consumed.add(ex["id"])
-            return {"id": ex["id"], "source": ex["source"], "matched_on": "date",
-                    "paired_to": ex.get("paired_to"),
-                    "pair_prefers_import": ex.get("pair_prefers_import", False),
-                    "pairing_locked": ex.get("pairing_locked", False)}
-    return None
+        for ex in index.get(s.played_at, ()):
+            if s.tokens & ex["tokens"]:
+                (want_manual if ex["source"] == "manual" else want_synced).add(ex["id"])
+    if not (want_synced or want_manual):
+        return {}
+    from app.services import match_pairing as mp
+    return await mp.load_cards(db, club.id, synced_ids=sorted(want_synced),
+                               manual_ids=sorted(want_manual))
 
 
-def _sheet_signature(group: list, pmatch: dict) -> frozenset:
+def _sheet_signature(group: list, pmatch: dict, only: Optional[set] = None) -> frozenset:
     """(player_id, runs) for every batted innings on a sheet match whose
     player already resolves to a record — the same shape `match_pairing` reads
     off a scorecard. A player still to be created has no id to compare and is
-    left out, which only ever makes the match harder to pair, never wrong."""
+    left out, which only ever makes the match harder to pair, never wrong.
+
+    `only` narrows it to those players (the synced ones), which is the half a
+    card may be allowed to CONTRADICT: see `import_grade_match`."""
     sig: set = set()
     for _row_num, raw in group:
         pname = (raw.get("player_name") or "").strip()
         m = pmatch.get(pname) or {}
         pid = m.get("player_id")
         if not pid or _parse_bool(raw.get("did_not_bat")):
+            continue
+        if only is not None and str(pid) not in only:
             continue
         runs = _parse_int(raw.get("batting_runs"), nullable=True)
         if runs is None:
@@ -3398,6 +3456,7 @@ def _sheet_signature(group: list, pmatch: dict) -> frozenset:
 async def _match_unmatched_by_scores(
     db: AsyncSession, club: Organisation, by_game: dict, pmatch: dict,
     existing_by_game: dict, consumed: set,
+    sheets: Optional[dict] = None,
 ) -> int:
     """The second look: pair the sheet matches the date-and-opponent rule
     left unmatched against the club's synced games on their scorecards.
@@ -3409,6 +3468,12 @@ async def _match_unmatched_by_scores(
     synced first all resolve the way they already do for that import. Only
     SYNCED games are candidates here: a manual duplicate is a re-import of the
     same sheet, and the exact date-and-opponent rule is the right one for it.
+
+    `sheets` (game_key -> `ijg.SheetGame`) makes it grade-aware the way the
+    first look is: a synced game whose card contradicts the sheet's is never
+    a candidate, and where several fit, the card and then the grade rank them
+    (`import_grade_match.SheetJudge`). Without it the pass is grade-blind, as it
+    was.
 
     Returns how many were matched this way, and writes them into
     `existing_by_game` marked `matched_on: 'scores'`.
@@ -3455,8 +3520,10 @@ async def _match_unmatched_by_scores(
     if not synced:
         return 0
 
+    judge = (ijg.SheetJudge({k: sg.card for k, sg in sheets.items()})
+             if sheets is not None else None)
     matched = 0
-    for game_key, (syn_id, _prefer) in mp.assign(sheet_rows, synced).items():
+    for game_key, (syn_id, _prefer) in mp.assign(sheet_rows, synced, judge).items():
         existing_by_game[game_key] = {"id": syn_id, "source": "api",
                                       "matched_on": "scores"}
         consumed.add(syn_id)
@@ -3634,22 +3701,30 @@ async def _resolve_games(
     consumed: set = set()
     existing_by_game: dict = {}
     dup_manual = dup_synced = 0
-    for game_key, group in by_game.items():
-        first = group[0][1]
-        dup = _match_existing(
-            existing_index, (first.get("played_at") or "").strip(),
-            (first.get("opposition"), first.get("home_team"), first.get("away_team")),
-            consumed)
-        if not dup:
+    synced_ids = {str(p.id) for p in players if p.grassroots_id or p.playhq_id}
+    from app.services import match_pairing as _mp
+    sheets = _sheet_games(by_game, pmatch, gmatch, synced_ids,
+                          set(_mp.team_tokens(club.name or "")))
+    matched, undecided = ijg.match_by_date(
+        sheets, existing_index,
+        await _candidate_cards(db, club, existing_index, sheets), consumed)
+    for game_key in by_game:
+        ex = matched.get(game_key)
+        if not ex:
             continue
-        existing_by_game[game_key] = dup
-        if dup["source"] == "manual":
+        consumed.add(ex["id"])
+        existing_by_game[game_key] = _existing_match(ex)
+        if ex["source"] == "manual":
             dup_manual += 1
         else:
             dup_synced += 1
     dup_scores = await _match_unmatched_by_scores(
-        db, club, by_game, pmatch, existing_by_game, consumed)
+        db, club, by_game, pmatch, existing_by_game, consumed,
+        sheets={sg.key: sg for sg in sheets})
     dup_synced += dup_scores
+    # A match the date look could not place that the scorecards then did is no
+    # longer undecided; one that neither could place stays unlinked.
+    undecided = [k for k in undecided if k not in existing_by_game]
 
     warnings = []
     if bad_cells:
@@ -3668,6 +3743,14 @@ async def _resolve_games(
                         + ", ".join(ambiguous[:5]))
     if group_errors:
         warnings.append(f"{len(group_errors)} row(s) have no game_key and will be skipped.")
+    if undecided:
+        warnings.append(
+            f"{len(undecided)} match(es) were played on the same day against the same "
+            "opposition as more than one game already in BetterCricket, and neither the "
+            "scorecard nor the grade could say which is which. They will import as new "
+            "matches and stay unlinked, so they are counted beside the game they may be "
+            "a copy of. Card review's possible doubles step can link them once you "
+            "confirm each pair.")
 
     return {
         "games": len(by_game),
@@ -3703,6 +3786,9 @@ async def _resolve_games(
             # scorecard matcher found — a two-day match dated a week apart, an
             # opponent spelt differently, a fixture the other club synced first.
             "matched_on_scores": dup_scores,
+            # Sheet matches that fitted more than one game on their day and
+            # were left UNLINKED rather than guessed (see `import_grade_match`).
+            "undecided": len(undecided),
         },
         "_plan": {"by_game": by_game, "smatch": smatch, "gmatch": gmatch,
                   "pmatch": pmatch, "grade_pairs": {k: sorted(v) for k, v in grade_pairs.items()},

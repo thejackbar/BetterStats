@@ -197,6 +197,10 @@ class MatchRow:
     # club's name on it, so comparing it would agree with everything — but a
     # real tiebreaker when a Saturday has five of our teams out at once.
     ours: str = ""
+    # The grade's name where the side keeps one (synced games only). Read by the
+    # CSV import's judge and nothing else: `score_pair` never looks at it,
+    # because the two sources name a grade too differently for it to be a test.
+    grade: str = ""
 
     @property
     def has_card(self) -> bool:
@@ -297,7 +301,8 @@ def _candidates(imported: list[MatchRow], synced: list[MatchRow]
     return out
 
 
-def assign(imported: list[MatchRow], synced: list[MatchRow]) -> dict[str, tuple[str, bool]]:
+def assign(imported: list[MatchRow], synced: list[MatchRow],
+           judge=None) -> dict[str, tuple[str, bool]]:
     """Pair the two sides one-to-one. Returns imported id -> (game id, prefer).
 
     ONE SYNCED GAME TAKES AT MOST ONE IMPORTED MATCH and the other way round —
@@ -320,14 +325,38 @@ def assign(imported: list[MatchRow], synced: list[MatchRow]) -> dict[str, tuple[
     two, and it is worth less than the double count refusing guarantees.
     The one hard NO is in `score_pair` — our 2nd XI's match is never our 1st
     XI's, however well everything else agrees.
+
+    `judge` is for a caller that knows more than a scorecard and a date, and
+    today that is the CSV import (`import_grade_match.SheetJudge`). It may
+    refuse a pair outright (`admits`) and ranks the rest (`rank`), the rank
+    sitting straight after the shared-score count so a card still decides
+    first and the grade decides between pairs the card cannot separate. With
+    no judge nothing changes: the CricketStatz pass and the repair scripts
+    call this exactly as before.
     """
     candidates = _candidates(imported, synced)
     scored: list[tuple[tuple, str, str]] = []
     for imp in imported:
         for syn in candidates.get(imp.id, ()):
             key = score_pair(imp, syn)
-            if key is not None:
+            if key is not None and (judge is None or judge.admits(imp, syn)):
                 scored.append((key, imp.id, syn.id))
+
+    if judge is not None:
+        per_imp: dict[str, int] = {}
+        per_syn: dict[str, int] = {}
+        for _key, imp_id, syn_id in scored:
+            per_imp[imp_id] = per_imp.get(imp_id, 0) + 1
+            per_syn[syn_id] = per_syn.get(syn_id, 0) + 1
+        by_syn = {m.id: m for m in synced}
+        by_imp = {m.id: m for m in imported}
+        ranked: list[tuple[tuple, str, str]] = []
+        for key, imp_id, syn_id in scored:
+            rank = judge.rank(by_imp[imp_id], by_syn[syn_id],
+                              per_imp[imp_id] == 1 and per_syn[syn_id] == 1)
+            if rank is not None:
+                ranked.append(((key[0], rank) + tuple(key[1:]), imp_id, syn_id))
+        scored = ranked
 
     # THE IDS ARE THE FINAL TIEBREAK, so the same data always gives the same
     # assignment. Without them the order of equally-scored candidates follows
@@ -359,7 +388,8 @@ _SYNCED_SQL = """
     SELECT g.id::text AS id, g.played_at,
            COALESCE(g.opp_club_name, '') AS opposition,
            COALESCE(g.home_team, '') AS home_team,
-           COALESCE(g.away_team, '') AS away_team
+           COALESCE(g.away_team, '') AS away_team,
+           COALESCE(NULLIF(gr.display_name_override, ''), gr.name, '') AS grade
       FROM games g
       LEFT JOIN grades gr ON gr.id = g.grade_id
       LEFT JOIN seasons s ON s.id = gr.season_id
@@ -505,8 +535,30 @@ async def load_synced(db: AsyncSession, org_id, *, club_tokens=None,
         ours, opp = split_sides(row["home_team"], row["away_team"],
                                 row["opposition"], club_tokens)
         synced.append(MatchRow(row["id"], row["played_at"], opp,
-                               frozenset(syn_cards.get(row["id"], ())), ours))
+                               frozenset(syn_cards.get(row["id"], ())), ours,
+                               row["grade"]))
     return synced
+
+
+async def load_cards(db: AsyncSession, org_id, *, synced_ids=(), manual_ids=()
+                     ) -> dict[str, frozenset]:
+    """Our own batting card ((player, runs) pairs) for the games named.
+
+    One reader of both card tables for a caller that holds ids already and
+    needs no `MatchRow`: the CSV import's date-and-opposition look, which
+    compares a sheet match with the games a day already holds. A game with no
+    batters is simply absent.
+    """
+    out: dict[str, frozenset] = {}
+    if synced_ids:
+        for gid, card in (await _cards(db, _SYNCED_CARD_SQL, {
+                "org": str(org_id), "ids": [str(i) for i in synced_ids]})).items():
+            out[gid] = frozenset(card)
+    if manual_ids:
+        for gid, card in (await _cards(db, _IMPORTED_CARD_SQL, {
+                "ids": [str(i) for i in manual_ids]})).items():
+            out[gid] = frozenset(card)
+    return out
 
 
 async def reconcile_org(db: AsyncSession, org_id, *, season_ids=None,
