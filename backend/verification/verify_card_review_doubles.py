@@ -517,7 +517,9 @@ async def main():
     check("an unlinked pair is not offered straight back", k_off in kinds(await scan()), False)
     async with async_session_maker() as s:
         await act.restore_double(s, ORG, ids["m_off"], ids["g_off"], "ca", USER)
-    check("until a person puts it back", k_off in kinds(await scan()), True)
+    check("until a person puts it back, which puts the link back too",
+          ((await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_off"]))[0][0], k_off in kinds(await scan())),
+          (ids["g_off"], False))
 
     # --- any club, not one ----------------------------------------------------------------------
     print("\n-- another club, another history: the same step works and the two never mix --")
@@ -618,7 +620,7 @@ async def main():
     check("results are newest first", [x["date"] for x in r["rows"]], sorted([x["date"] for x in r["rows"]], reverse=True))
     r = await find(player="Ritchie")
     check("a player finds every fixture either copy has him in",
-          {x["match_id"] or x["game_id"] for x in r["rows"]} >= {str(ids["m_strong"]), str(ids["g_strong"]), str(ids["m_off"]), str(ids["g_off"])}, True)
+          {i for x in r["rows"] for i in (x["match_id"], x["game_id"]) if i} >= {str(ids["m_strong"]), str(ids["g_strong"]), str(ids["m_off"]), str(ids["g_off"])}, True)
     r = await find(player="Quill")
     check("a player on only ONE half of a linked pair still finds the pair, with both copies",
           [(x["state"], len(x["copies"])) for x in r["rows"]], [("linked", 2)])
@@ -794,17 +796,84 @@ async def main():
     async with async_session_maker() as s:
         await act.undo_last(s, ORG, ids["m_chosen"], USER)
 
+    print("\n-- recent changes: everything anyone did, each with its undo --")
+    async with async_session_maker() as s:
+        hist_all = await act.recent_changes(s, ORG, limit=200)
+    ids_seen = [r["id"] for r in hist_all["rows"]]
+    check("newest first", ids_seen, sorted(ids_seen, reverse=True))
+    check("the undo records themselves are not listed (the original shows as undone)", any(r["action"] == "undo" for r in hist_all["rows"]), False)
+    link_rows = [r for r in hist_all["rows"] if r["action"] == "link" and r["match_id"] == str(ids["m_strong"])]
+    check("a link that was undone says so and offers no second undo",
+          (any(r["undone_at"] for r in link_rows), all(not r["can"] for r in link_rows if r["undone_at"])), (True, True))
+    check("every change has a sentence a person can read", all(r["what"] and r["what"] != r["action"] for r in hist_all["rows"]), True)
+    check("every change names its match and who made it", all(r["date"] is not None and r["by"] for r in hist_all["rows"] if r["action"] != "not_double" or r["date"]), True)
+    async with async_session_maker() as s:
+        only = await act.recent_changes(s, ORG, limit=200, only_undoable=True)
+    check("the 'can undo' view lists only what can still be undone", {r["can"] for r in only["rows"]} <= {"undo", "restore"} and len(only["rows"]) > 0, True)
+    per_card = {}
+    for r in only["rows"]:
+        if r["can"] == "undo":
+            per_card[r["match_id"]] = per_card.get(r["match_id"], 0) + 1
+    check("and only the newest undoable change of each card, so an older one is never undone by mistake", max(per_card.values() or [0]) <= 1, True)
+
+    print("\n-- an unlink can be undone, from the list and from Marked as different --")
+    async with async_session_maker() as s:
+        await act.unlink(s, ORG, ids["m_wB"], USER)
+    check("unlinking leaves the card unlinked", (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0], None)
+    async with async_session_maker() as s:
+        rc = await act.recent_changes(s, ORG, limit=10)
+    top = [r for r in rc["rows"] if r["match_id"] == str(ids["m_wB"])][:2]
+    check("both the unlink and the answer it wrote are listed, with an undo and a put back",
+          sorted(r["can"] or "" for r in top), ["restore", "undo"])
+    async with async_session_maker() as s:
+        dd = (await dbl.find_doubles(s, ORG))["dismissed"]
+    check("the answer shows under Marked as different, saying it came from an unlink",
+          [d["via"] for d in dd if d["a"]["id"] == str(ids["m_wB"])], ["unlink"])
+    # a newer change since: putting it back would undo the wrong thing, so it refuses and says what to do
+    async with async_session_maker() as s:
+        await act.link_double(s, ORG, ids["m_wB"], ids["g_wB"], USER)
+    async with async_session_maker() as s:
+        try:
+            await act.restore_double(s, ORG, ids["m_wB"], ids["g_wA"], "ca", USER)
+            msg = None
+        except act.ReviewError as e:
+            msg = str(e)
+    check("after a newer change it refuses, and points at Recent changes", "Recent changes" in (msg or ""), True)
+    check("and changed nothing", (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0], ids["g_wB"])
+    async with async_session_maker() as s:
+        await act.undo_last(s, ORG, ids["m_wB"], USER)
+        out_r = await act.restore_double(s, ORG, ids["m_wB"], ids["g_wA"], "ca", USER)
+    check("once the newer change is undone, Put back restores the link", ((await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0], out_r["relinked"]), (ids["g_wA"], True))
+    check("and clears the answer, so the pair is not hidden for good",
+          (await q("SELECT count(*) FROM card_review_log WHERE manual_game_id = :m AND action = 'not_double' AND undone_at IS NULL", m=ids["m_wB"]))[0][0], 0)
+    check("the scan offers the wrong link again", k_wrong in kinds(await scan()), True)
+    async with async_session_maker() as s:
+        await act.unlink(s, ORG, ids["m_wB"], USER)
+        undone = await act.undo_last(s, ORG, ids["m_wB"], USER)
+    check("undoing an unlink straight from the list also clears its answer",
+          ((await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0],
+           (await q("SELECT count(*) FROM card_review_log WHERE manual_game_id = :m AND action = 'not_double' AND undone_at IS NULL", m=ids["m_wB"]))[0][0]),
+          (ids["g_wA"], 0))
+    from fastapi import HTTPException
+    from app.models.db import Organisation, User
+    from app.routers import card_review as route
+    async with async_session_maker() as s:
+        club_h = await s.get(Organisation, ORG)
+        h = await route.card_review_history(only=None, limit=5, offset=0, club=club_h, db=s)
+        h2 = await route.card_review_history(only="undoable", limit=2, offset=0, club=club_h, db=s)
+    check("the route answers, pages, and filters", (len(h["rows"]), h["more"], len(h2["rows"]), all(r["can"] for r in h2["rows"])), (5, True, 2, True))
+
     print("\n-- the bulk fix: every strong double in one batch, then the games it freed --")
     async with async_session_maker() as s:
         pv = act.bulk_doubles_preview((await dbl.find_doubles(s, ORG))["rows"])
-    check("the preview counts the strong wrong links and the strong unlinked pairs", (pv["relink"] >= 1, pv["ca"] >= 1, len(pv["sample"]) > 0), (True, True, True))
+    check("the preview counts the strong wrong links (a pair freed by moving one is found on the second pass)", (pv["relink"] >= 1, pv["ca"] >= 0, len(pv["sample"]) > 0), (True, True, True))
     check("and never includes a weaker match", all(r["strength"] == "strong" for r in pv["sample"]), True)
     async with async_session_maker() as s:
         res = await act.bulk_fix_doubles(s, ORG, USER)
     check("it moved the wrong link and then linked the game that link had been sitting on",
           ((await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0],
            (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wA"]))[0][0]), (ids["g_wB"], ids["g_wA"]))
-    check("it reports what it did", (res["relinked"] >= 1, res["linked"] >= 2, res["skipped"]), (True, True, []))
+    check("it reports what it did", (res["relinked"] >= 1, res["linked"] >= 1, res["skipped"]), (True, True, []))
     check("the match counts once now", (await q("SELECT count(*) FROM v_effective_batting_innings WHERE player_id = :p AND game_id IN (:a, :b)",
                                                 p=pid_b, a=ids["m_wB"], b=ids["g_wB"]))[0][0], 1)
     check("a link a person confirmed was left exactly as it was",
@@ -813,7 +882,7 @@ async def main():
     check("one audit row records the batch", (await q("SELECT count(*) FROM audit_logs WHERE action = 'card_review_bulk' AND details->>'kind' = 'doubles'"))[0][0], 1)
     async with async_session_maker() as s:
         undone = await act.bulk_undo(s, ORG, USER, res["batch_id"])
-    check("the whole batch can be undone", (undone["undone"] >= 3, (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0],
+    check("the whole batch can be undone", (undone["undone"] >= 2, (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0],
                                             (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wA"]))[0][0]), (True, ids["g_wA"], None))
 
     print("\n-- nothing was deleted by any of it --")

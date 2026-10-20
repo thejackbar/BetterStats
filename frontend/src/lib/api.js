@@ -2049,6 +2049,11 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v) })
     return request(`/club-admin/card-review/doubles?${q}`)
   },
+  cardReviewHistory: (params = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v) })
+    return request(`/club-admin/card-review/history?${q}`)
+  },
   cardReviewDoublesBulkPreview: () => request('/club-admin/card-review/doubles/bulk/preview'),
   cardReviewDoublesBulk: () => request('/club-admin/card-review/doubles/bulk', { method: 'POST' }),
   cardReviewDoubleLink: (matchId, gameId) =>

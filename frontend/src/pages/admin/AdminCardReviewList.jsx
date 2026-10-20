@@ -8,7 +8,7 @@ import { Button, Badge, Note, Select, SegGroup, SegItem } from '../../components
 import {
   GROUPS, ChoiceControl, DifferenceTable, SizeBar, SuggestionBadge, fmtDate, matchPageUrl,
 } from '../../components/admin/cardReview/shared'
-import MatchFilters, { FindLink, filterParams, useFilterParams } from '../../components/admin/cardReview/MatchFilters'
+import MatchFilters, { FindLink, HistoryLink, filterParams, useFilterParams } from '../../components/admin/cardReview/MatchFilters'
 
 const PAGE = 50
 export const QUEUE_KEY = 'card-review-queue'
@@ -223,7 +223,7 @@ export default function AdminCardReviewList() {
     <BetterStatsLayout
       title={g.label}
       caption={`${total.toLocaleString()} match${total === 1 ? '' : 'es'}`}
-      actions={<div className="flex flex-wrap gap-2"><FindLink filters={find} /><Button as={Link} to="/admin/card-review">Back to Card review</Button></div>}
+      actions={<div className="flex flex-wrap gap-2"><FindLink filters={find} /><HistoryLink /><Button as={Link} to="/admin/card-review">Back to Card review</Button></div>}
     >
       <p className="max-w-[760px] text-[13.5px] text-pb-dim mb-4">
         {isPairing

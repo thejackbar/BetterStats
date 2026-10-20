@@ -6,7 +6,7 @@ import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { Button, Note, SegGroup, SegItem } from '../../components/admin/ui'
 import DoubleCard from '../../components/admin/cardReview/DoubleCard'
 import DoublesBulkModal from '../../components/admin/cardReview/DoublesBulkModal'
-import MatchFilters, { FindLink, filterParams, useFilterParams } from '../../components/admin/cardReview/MatchFilters'
+import MatchFilters, { FindLink, HistoryLink, filterParams, useFilterParams } from '../../components/admin/cardReview/MatchFilters'
 
 const PAGE = 25
 
@@ -61,6 +61,7 @@ export default function AdminCardReviewDoubles() {
             <Button size="sm" variant="primary" onClick={() => setBulk(true)} data-testid="bulk-fix">Fix the strong ones…</Button>
           )}
           <FindLink filters={filters} />
+          <HistoryLink />
           <Button as={Link} to="/admin/card-review" size="sm">Back to Card review</Button>
         </div>
       }

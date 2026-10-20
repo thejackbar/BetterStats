@@ -43,6 +43,12 @@ export function FindLink({ filters, size = 'sm' }) {
   return <Button size={size} as={Link} to={findUrl(filters)} data-testid="find-link">Find a match</Button>
 }
 
+// The link to every change anyone has made in Card review, each with its undo. On every page,
+// because a wrong click is made on whichever page the person happens to be on.
+export function HistoryLink({ size = 'sm' }) {
+  return <Button size={size} as={Link} to="/admin/card-review/history" data-testid="history-link">Recent changes</Button>
+}
+
 let optionsCache = null
 
 export default function MatchFilters({ value, onApply, hint, extra, playerNote }) {

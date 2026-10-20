@@ -531,6 +531,18 @@ async def card_review_double_restore(data: DoubleAnswerIn,
                                               data.kind, user.id))
 
 
+@router.get("/history", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
+async def card_review_history(
+    only: Optional[str] = Query(None, description="'undoable' lists only the changes that can still be undone"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every change anyone has made in Card review, newest first, each with its undo."""
+    return await act.recent_changes(db, club.id, limit=limit, offset=offset, only_undoable=only == "undoable")
+
+
 @router.get("/export.csv", dependencies=[Depends(require_cap(MANAGE_MANUAL_ENTRIES))])
 async def card_review_export(club: Organisation = Depends(get_current_club),
                              db: AsyncSession = Depends(get_db)):

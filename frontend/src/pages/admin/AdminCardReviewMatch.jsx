@@ -8,7 +8,7 @@ import { Button, Badge, Note, TextArea, TONES } from '../../components/admin/ui'
 import {
   CHOICE_NAME, GROUPS, ChoiceControl, DifferenceTable, GroupBadge, fmtDate, matchPageUrl,
 } from '../../components/admin/cardReview/shared'
-import { FindLink } from '../../components/admin/cardReview/MatchFilters'
+import { FindLink, HistoryLink } from '../../components/admin/cardReview/MatchFilters'
 import { QUEUE_KEY } from './AdminCardReviewList'
 
 const MARK = { background: 'rgba(245,181,66,0.16)', color: '#ffd88a', fontWeight: 700, borderRadius: 3, padding: '1px 6px' }
@@ -133,7 +133,7 @@ function Choice({ title, tone, children, active, rec }) {
 }
 
 function History({ rows, onUndo, busy }) {
-  const undoable = rows.find(h => !h.undone_at && ['choice', 'pair_ok', 'relink', 'unlink'].includes(h.action))
+  const undoable = rows.find(h => !h.undone_at && ['choice', 'pair_ok', 'relink', 'unlink', 'link'].includes(h.action))
   const word = h => {
     if (h.action === 'choice') return `Switched from ${CHOICE_NAME[h.from_choice] || '?'} to ${CHOICE_NAME[h.to_choice]}`
     if (h.action === 'undo') return `Undone: back to ${CHOICE_NAME[h.to_choice]}`
@@ -141,6 +141,7 @@ function History({ rows, onUndo, busy }) {
     if (h.action === 'pair_ok') return 'Marked as the same match'
     if (h.action === 'relink') return 'Linked to a different Cricket Australia match'
     if (h.action === 'unlink') return 'Unlinked: two different matches'
+    if (h.action === 'link') return 'Linked the club scorecard to this Cricket Australia match'
     return h.action
   }
   return (
@@ -227,6 +228,7 @@ export default function AdminCardReviewMatch() {
           <Button size="sm" disabled={at <= 0} onClick={() => go(at - 1)}>‹ Previous</Button>
           <Button size="sm" disabled={at < 0 || at >= queue.ids.length - 1} onClick={() => go(at + 1)}>Next ›</Button>
           <FindLink filters={{ q: m.opposition || '' }} />
+          <HistoryLink />
           <Button size="sm" as={Link} to={`/admin/card-review/${m.group === 'agree' ? 'agree' : m.group}`}>Back to the list</Button>
         </div>
       }

@@ -117,6 +117,7 @@ const AdminCardReviewList = lazy(() => import('./pages/admin/AdminCardReviewList
 const AdminCardReviewMatch = lazy(() => import('./pages/admin/AdminCardReviewMatch'))
 const AdminCardReviewDoubles = lazy(() => import('./pages/admin/AdminCardReviewDoubles'))
 const AdminCardReviewFind = lazy(() => import('./pages/admin/AdminCardReviewFind'))
+const AdminCardReviewHistory = lazy(() => import('./pages/admin/AdminCardReviewHistory'))
 const AdminScorecardUpload = lazy(() => import('./pages/admin/AdminScorecardUpload'))
 const AdminImport = lazy(() => import('./pages/admin/AdminImport'))
 const AdminPlayerImport = lazy(() => import('./pages/admin/AdminPlayerImport'))
@@ -487,6 +488,7 @@ export default function App() {
           <Route path="/admin/card-review" element={<ProtectedRoute requireCore><AdminCardReview /></ProtectedRoute>} />
           <Route path="/admin/card-review/match/:matchId" element={<ProtectedRoute requireCore><AdminCardReviewMatch /></ProtectedRoute>} />
           <Route path="/admin/card-review/doubles" element={<ProtectedRoute requireCore><AdminCardReviewDoubles /></ProtectedRoute>} />
+          <Route path="/admin/card-review/history" element={<ProtectedRoute requireCore><AdminCardReviewHistory /></ProtectedRoute>} />
           <Route path="/admin/card-review/find" element={<ProtectedRoute requireCore><AdminCardReviewFind /></ProtectedRoute>} />
           <Route path="/admin/card-review/:group" element={<ProtectedRoute requireCore><AdminCardReviewList /></ProtectedRoute>} />
           <Route path="/admin/upload-scorecard" element={<ProtectedRoute requireCore><AdminScorecardUpload /></ProtectedRoute>} />

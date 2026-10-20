@@ -6,7 +6,7 @@ import { PbSpinner } from '../../lib/presskit'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { Button, Badge, Note, StatCard, SectionHeading, TONES } from '../../components/admin/ui'
 import { GROUPS, matchPageUrl, fmtDate } from '../../components/admin/cardReview/shared'
-import { FindLink } from '../../components/admin/cardReview/MatchFilters'
+import { FindLink, HistoryLink } from '../../components/admin/cardReview/MatchFilters'
 
 // The review goes in this order. A match held twice and never linked is first: it is counted twice
 // until someone links it, and a linked pair joins the steps below. A wrong pairing makes the comparison meaningless and, once
@@ -211,7 +211,7 @@ export default function AdminCardReview() {
   return (
     <BetterStatsLayout
       {...header}
-      actions={<div className="flex flex-wrap gap-2"><FindLink filters={{}} /><Button as="a" href={api.cardReviewExportUrl()} data-testid="export-link">Download the spreadsheet</Button></div>}
+      actions={<div className="flex flex-wrap gap-2"><FindLink filters={{}} /><HistoryLink /><Button as="a" href={api.cardReviewExportUrl()} data-testid="export-link">Download the spreadsheet</Button></div>}
     >
       <p className="max-w-[760px] text-[13.5px] text-pb-dim mb-5">
         Most of these matches exist in two versions: the Cricket Australia scorecard and the club's own scorecard (imported from a file,

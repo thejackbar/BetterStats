@@ -84,6 +84,18 @@ const routes = (page, calls, o = {}) => page.route('**/api/**', async (route) =>
   }
   if (/card-review\/overview/.test(url)) return json(o.scanFailed ? { ...OVERVIEW, groups: { ...OVERVIEW.groups, doubles: 0 }, todo: { ...OVERVIEW.todo, doubles: 0 }, doubles: { error: 'The scan for possible doubles failed. Reload to try again.' } } : OVERVIEW)
   if (/card-review\/bulk\/batches/.test(url)) return json({ batches: [] })
+  if (/card-review\/history/.test(url)) {
+    const only = new URL(url).searchParams.get('only') === 'undoable'
+    const all = [
+      { id: 9, action: 'not_double', what: 'Said the suggested game is not the right one', match_id: MR, date: '2004-12-11', grade: 'B grade', opposition: 'Safety Bay', season: 'Summer 2004/05', by: 'elton', bulk: false, at: '2026-10-20T01:00:00Z', undone_at: null, can: 'restore', linked_now: true, other_id: GR, other_kind: 'relink' },
+      { id: 8, action: 'unlink', what: 'Unlinked: said these are two different matches', match_id: MA, date: '2006-02-04', grade: 'A Grade', opposition: 'Warnbro', season: 'Summer 2005/06', by: 'elton', bulk: false, at: '2026-10-20T00:50:00Z', undone_at: null, can: 'undo', linked_now: false, other_id: null, other_kind: null },
+      { id: 7, action: 'choice', what: 'Switched to Cricket Australia (was the club scorecard)', match_id: MB, date: '2004-12-11', grade: 'A Grade', opposition: 'Hillman', season: 'Summer 2004/05', by: 'jack', bulk: true, at: '2026-10-19T23:00:00Z', undone_at: null, can: null, linked_now: true, other_id: null, other_kind: null },
+      { id: 6, action: 'link', what: 'Linked the club scorecard to a Cricket Australia match', match_id: MC, date: '2007-02-24', grade: 'B grade', opposition: 'Halls Head', season: 'Summer 2006/07', by: 'elton', bulk: false, at: '2026-10-19T22:00:00Z', undone_at: '2026-10-19T22:05:00Z', can: null, linked_now: false, other_id: null, other_kind: null },
+    ]
+    const rows = only ? all.filter(r => r.can) : all
+    return json({ rows, more: false, offset: 0, limit: 50 })
+  }
+  if (/card-review\/matches\/[^/]+\/undo/.test(url) && req.method() === 'POST') return json({ ok: true, match: null })
   if (/card-review\/find\/options/.test(url)) return json({ seasons: ['Summer 2005/06', 'Summer 2004/05'], competitions: ['Reserves League'], players: ['Ritchie, Peter', 'Ritchie, Rod', 'Hind, Darren', 'Smith, John'], oppositions: ['Warnbro Knights', 'Old Irwinians', 'Hillman'], grades: ['A Grade', 'B Grade', 'C1 Grade'] })
   if (/card-review\/find\?/.test(url)) return json({ total: FIND_ROWS.length, offset: 0, limit: 25, capped: false, rows: FIND_ROWS })
   if (/card-review\/doubles\/bulk\/preview/.test(url)) return json({ relink: 1, ca: 2, sample: [ROWS[3], ROWS[0]] })
@@ -93,6 +105,7 @@ const routes = (page, calls, o = {}) => page.route('**/api/**', async (route) =>
   if (/card-review\/doubles\?/.test(url)) {
     const sp = new URL(url).searchParams
     const dis = sp.get('shown') === 'dismissed'
+    if (dis && sp.get('player') === 'Unlinked') return json({ total: 1, offset: 0, limit: 25, seasons: [], counts: COUNTS, rows: [{ ...DISMISSED[0], via: 'unlink' }] })
     if (sp.get('player') === 'Nobody') return json({ total: 0, offset: 0, limit: 25, seasons: [], counts: COUNTS, rows: [], player_note: { query: 'Nobody', matched: [], fuzzy: false } })
     if (sp.get('player') === 'peter richie') return json({ total: 1, offset: 0, limit: 25, seasons: [], counts: COUNTS, rows: [ROWS[0]], player_note: { query: 'peter richie', matched: ['Ritchie, Peter'], fuzzy: true } })
     const rows = dis ? DISMISSED : ROWS.filter(r => !sp.get('kind') || r.kind === sp.get('kind'))
@@ -322,6 +335,54 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   check('and the list is asked for again with a fresh scan', gets(calls, /card-review\/doubles\?/).some(c => new URL(c.url).searchParams.get('fresh') === 'true'))
   check('the screen raised no errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
+}
+
+// ── recent changes ─────────────────────────────────────────────────────────────────────────────
+{
+  console.log('\n-- recent changes: every change, each with its undo --')
+  const { ctx, page, calls, errors } = await open(browser, 1440, '/admin/card-review/history')
+  await page.waitForSelector('[data-testid="change"]', { timeout: 15000 })
+  check('every change is a row', (await page.locator('[data-testid="change"]').count()) === 4)
+  const text = (await page.locator('[data-testid="history-table"]').innerText()).toLowerCase()
+  check('each says what happened, in plain words', text.includes('said the suggested game is not the right one') && text.includes('unlinked: said these are two different matches') && text.includes('linked the club scorecard'))
+  check('a batch change is marked as one', (await page.locator('[data-testid="change"][data-id="7"]').innerText()).toLowerCase().includes('batch'))
+  check('a change that was undone says so and has no button', (await page.locator('[data-testid="change"][data-id="6"]').innerText()).toLowerCase().includes('undone') && (await page.locator('[data-testid="change"][data-id="6"] [data-testid="undo-change"]').count()) === 0)
+  check('an older change to a card that has a newer one says why it cannot be undone', (await page.locator('[data-testid="change"][data-id="7"]').innerText()).toLowerCase().includes('replaced by a newer change') && (await page.locator('[data-testid="change"][data-id="7"] [data-testid="undo-change"]').count()) === 0)
+  check('the "different matches" answer offers Put back, the others Undo',
+    (await page.locator('[data-testid="change"][data-id="9"] [data-testid="undo-change"]').innerText()) === 'Put back' && (await page.locator('[data-testid="change"][data-id="8"] [data-testid="undo-change"]').innerText()) === 'Undo')
+  await page.screenshot({ path: SHOTS + 'card_review_history_1440.png', fullPage: true })
+  await page.click('[data-testid="change"][data-id="9"] [data-testid="undo-change"]')
+  await page.waitForTimeout(400)
+  const rs = posts(calls, /doubles\/restore/)
+  check('Put back is ONE POST naming the card, the other game and the kind', rs.length === 1 && JSON.parse(rs[0].body).match_id === MR && JSON.parse(rs[0].body).other_id === GR && JSON.parse(rs[0].body).kind === 'relink', JSON.stringify(rs.map(r => r.body)))
+  await page.click('[data-testid="change"][data-id="8"] [data-testid="undo-change"]')
+  await page.waitForTimeout(400)
+  const un = posts(calls, /matches\/[^/]+\/undo/)
+  check('Undo is ONE POST to that card, even though the card is no longer paired', un.length === 1 && un[0].url.includes(MA))
+  check('the list is asked for again after each', gets(calls, /card-review\/history/).length >= 3)
+  const n = calls.length
+  await page.click('[data-testid="h-undoable"]')
+  await page.waitForTimeout(400)
+  check('"Can be undone" asks for just those', gets(calls.slice(n), /card-review\/history/).some(c => new URL(c.url).searchParams.get('only') === 'undoable'))
+  check('and shows only them', (await page.locator('[data-testid="change"]').count()) === 2)
+  check('the screen raised no errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+  for (const path of ['/admin/card-review', '/admin/card-review/doubles', '/admin/card-review/find', '/admin/card-review/differ']) {
+    const p = await open(browser, 1440, path)
+    await p.page.waitForSelector('[data-testid="history-link"]', { timeout: 15000 })
+    check(`${path} links to Recent changes`, (await p.page.getAttribute('[data-testid="history-link"]', 'href')) === '/admin/card-review/history')
+    await p.ctx.close()
+  }
+  const unl = await open(browser, 1440, '/admin/card-review/doubles?player=Unlinked')
+  await unl.page.click('[data-testid="shown-dismissed"]')
+  await unl.page.waitForSelector('[data-testid="restore"]', { timeout: 8000 })
+  check('a pair dismissed by unlinking says so and offers to link it again', (await unl.page.locator('[data-testid="restore"]').innerText()).includes('Undo the unlink'))
+  await unl.ctx.close()
+  const narrow = await open(browser, 390, '/admin/card-review/history')
+  await narrow.page.waitForSelector('[data-testid="change"]', { timeout: 15000 })
+  check('no horizontal overflow at 390px', (await overflow(narrow.page)) <= 0, String(await overflow(narrow.page)))
+  await narrow.page.screenshot({ path: SHOTS + 'card_review_history_390.png', fullPage: true })
+  await narrow.ctx.close()
 }
 
 // ── typeahead and the season dropdown ──────────────────────────────────────────────────────────

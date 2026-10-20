@@ -200,6 +200,13 @@ async def undo_last(db, org_id, mid, user_id) -> dict:
             inserted = await hy.apply_plan(db, org_id, mid, plan)
             brought, left_out = plan["brought"], plan["left_out"]
     await db.execute(text("UPDATE card_review_log SET undone_at = NOW() WHERE id = :i"), {"i": entry["id"]})
+    if entry["action"] == "unlink":
+        # An unlink also wrote a "different matches" answer for the pair. Putting the link back
+        # takes that answer with it, or the pair would be hidden from Possible doubles for good.
+        await db.execute(text("""
+            UPDATE card_review_log SET undone_at = NOW()
+             WHERE manual_game_id = CAST(:m AS UUID) AND action = 'not_double' AND undone_at IS NULL
+               AND detail->>'via' = 'unlink'"""), {"m": str(mid)})
     log_id = await _log(db, org_id, mid, action="undo", from_choice=current, to_choice=restored,
                         source="hand", user_id=user_id, note=None, batch_id=None, before=now_state,
                         detail={"undid": entry["id"], "inserted": inserted, "brought": brought,
@@ -501,13 +508,32 @@ async def dismiss_double(db, org_id, mid, other_id, kind: str, user_id) -> dict:
 
 
 async def restore_double(db, org_id, mid, other_id, kind: str, user_id) -> dict:
-    """Take back a "different matches" answer, so the pair is offered again."""
+    """Take back a "different matches" answer, so the pair is offered again.
+
+    An answer written by UNLINKING a pair is different: there the link itself was taken away, so
+    putting the answer back means putting the link back (`undo_last`). That only makes sense while
+    the unlink is still the newest change to the card; otherwise the person is told what to undo
+    first, because undoing a newer change by accident is worse than doing nothing."""
     other = str(uuid.UUID(str(other_id)))
     await _row(db, org_id, mid)
+    sql, params = _pair_rows("SELECT id, manual_game_id::text, detail FROM card_review_log", org_id, mid, other, kind)
+    rows = (await db.execute(text(sql), params)).all()
+    unlinked = [r for r in rows if (r[2] or {}).get("via") == "unlink"]
+    if unlinked:
+        owner = unlinked[0][1]
+        newest = (await db.execute(text("""
+            SELECT action FROM card_review_log WHERE manual_game_id = CAST(:m AS UUID) AND undone_at IS NULL
+               AND action IN ('choice', 'pair_ok', 'relink', 'unlink', 'link') ORDER BY id DESC LIMIT 1"""),
+            {"m": owner})).scalar()
+        if newest != "unlink":
+            raise ReviewError("This pair was unlinked, and the card has been changed since. Undo the newer "
+                              "changes first (they are listed under Recent changes), then put this one back.")
+        res = await undo_last(db, org_id, owner, user_id)
+        return {"match_id": str(mid), "restored": len(rows), "relinked": True, "log_id": res["log_id"]}
     sql, params = _pair_rows("UPDATE card_review_log SET undone_at = NOW()", org_id, mid, other, kind)
     res = await db.execute(text(sql), params)
     await db.commit()
-    return {"match_id": str(mid), "restored": res.rowcount}
+    return {"match_id": str(mid), "restored": res.rowcount, "relinked": False}
 
 
 # --- fixing the strong doubles in one batch ------------------------------------------------------
@@ -566,3 +592,78 @@ async def bulk_fix_doubles(db, org_id, user_id, *, max_rounds: int = 3) -> dict:
                              "relinked": done["relink"], "linked": done["ca"], "skipped": len(skipped)})})
         await db.commit()
     return {"batch_id": str(batch), "relinked": done["relink"], "linked": done["ca"], "skipped": skipped}
+
+
+# --- recent changes: every change anyone has made, with its undo -----------------------------------
+
+_UNDOABLE = ("choice", "pair_ok", "relink", "unlink", "link")
+
+_RECENT = """
+    SELECT * FROM (
+        SELECT l.id, l.action, l.from_choice, l.to_choice, l.source, l.batch_id::text AS batch_id,
+               l.created_at, l.undone_at, l.manual_game_id::text AS mid, l.detail, u.username,
+               mg.played_at, mg.opposition, COALESCE(gr.display_name_override, gr.name) AS grade,
+               s.name AS season, mg.superseded_by_game_id IS NOT NULL AS linked_now,
+               CASE
+                 WHEN l.undone_at IS NOT NULL THEN NULL
+                 WHEN l.action = 'not_double' THEN 'restore'
+                 WHEN l.action IN ('choice', 'pair_ok', 'relink', 'unlink', 'link') AND l.id = (
+                      SELECT max(l2.id) FROM card_review_log l2
+                       WHERE l2.manual_game_id = l.manual_game_id AND l2.undone_at IS NULL
+                         AND l2.action IN ('choice', 'pair_ok', 'relink', 'unlink', 'link')) THEN 'undo'
+               END AS can
+          FROM card_review_log l
+          LEFT JOIN users u ON u.id = l.user_id
+          LEFT JOIN manual_games mg ON mg.id = l.manual_game_id
+          LEFT JOIN grades gr ON gr.id = mg.grade_id
+          LEFT JOIN seasons s ON s.id = mg.season_id
+         WHERE l.org_id = CAST(:org AS UUID) AND l.action <> 'undo'
+    ) t
+     WHERE (CAST(:only AS BOOLEAN) = FALSE OR t.can IS NOT NULL)
+     ORDER BY t.id DESC LIMIT :lim OFFSET :off
+"""
+
+
+def describe_change(r: dict) -> str:
+    """One sentence for a change, in the words the rest of Card review uses."""
+    names = {"ca": "Cricket Australia", "club": "the club scorecard", "hybrid": "the club scorecard with Cricket Australia detail"}
+    d = r.get("detail") or {}
+    a = r["action"]
+    if a == "choice":
+        return f"Switched to {names.get(r['to_choice'], '?')} (was {names.get(r['from_choice'], '?')})"
+    if a == "pair_ok":
+        return "Said the two cards are the same match"
+    if a == "link":
+        return "Linked the club scorecard to a Cricket Australia match"
+    if a == "relink":
+        return "Moved the link to a different Cricket Australia match"
+    if a == "unlink":
+        return "Unlinked: said these are two different matches"
+    if a == "not_double":
+        if d.get("via") == "unlink":
+            return "Marked as different matches (by unlinking)"
+        return {"club": "Said two club scorecards are different matches",
+                "relink": "Said the suggested game is not the right one"}.get(d.get("other_kind"), "Said these are different matches")
+    if a == "refresh":
+        return "Refreshed the Cricket Australia detail"
+    return a
+
+
+async def recent_changes(db, org_id, *, limit: int = 50, offset: int = 0, only_undoable: bool = False) -> dict:
+    rows = [dict(r) for r in (await db.execute(text(_RECENT), {
+        "org": str(org_id), "only": only_undoable, "lim": limit + 1, "off": offset})).mappings().all()]
+    more = len(rows) > limit
+    out = []
+    for r in rows[:limit]:
+        d = r.get("detail") or {}
+        out.append({
+            "id": r["id"], "action": r["action"], "what": describe_change(r), "match_id": r["mid"],
+            "date": str(r["played_at"]) if r["played_at"] else None, "grade": r["grade"],
+            "opposition": r["opposition"], "season": r["season"], "by": r["username"],
+            "bulk": bool(r["batch_id"]), "batch_id": r["batch_id"],
+            "at": r["created_at"].isoformat() if r["created_at"] else None,
+            "undone_at": r["undone_at"].isoformat() if r["undone_at"] else None,
+            "can": r["can"], "linked_now": bool(r["linked_now"]),
+            "other_id": d.get("other_id"), "other_kind": d.get("other_kind"),
+        })
+    return {"rows": out, "more": more, "offset": offset, "limit": limit}

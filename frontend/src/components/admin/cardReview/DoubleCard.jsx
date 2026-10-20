@@ -84,9 +84,10 @@ export default function DoubleCard({ row, onChanged, dismissed = false }) {
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {dismissed ? (
           <>
-            <span className="text-[12px] text-pb-dim">Marked as different matches{row.dismissed_by ? ` by ${row.dismissed_by}` : ''}.</span>
-            <Button size="sm" disabled={busy} onClick={() => run(() => api.cardReviewDoubleRestore(a.id, b.id, row.kind), 'Put back in the list')} data-testid="restore">
-              Put back in the list
+            <span className="text-[12px] text-pb-dim">Marked as different matches{row.dismissed_by ? ` by ${row.dismissed_by}` : ''}{row.via === 'unlink' ? ', by unlinking them' : ''}.</span>
+            <Button size="sm" disabled={busy} data-testid="restore"
+              onClick={() => run(() => api.cardReviewDoubleRestore(a.id, b.id, row.kind), r => (r.relinked ? 'The link is back' : 'Put back in the list'))}>
+              {row.via === 'unlink' ? 'Undo the unlink (link them again)' : 'Put back in the list'}
             </Button>
           </>
         ) : (

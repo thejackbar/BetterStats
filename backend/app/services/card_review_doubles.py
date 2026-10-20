@@ -111,7 +111,7 @@ _CA_BOWLERS = """
 
 _DISMISSED = """
     SELECT l.id, l.manual_game_id::text AS mid, l.detail->>'other_id' AS other,
-           COALESCE(l.detail->>'other_kind', 'ca') AS kind, l.created_at, u.username
+           COALESCE(l.detail->>'other_kind', 'ca') AS kind, l.detail->>'via' AS via, l.created_at, u.username
       FROM card_review_log l LEFT JOIN users u ON u.id = l.user_id
      WHERE l.org_id = CAST(:org AS UUID) AND l.action = 'not_double' AND l.undone_at IS NULL
      ORDER BY l.id DESC
@@ -372,7 +372,7 @@ async def _dismissed_lines(db, org: str, dismissed: list) -> list:
             side_b = _synced_side(g, frozenset(gcards.get(d["other"], ())), 0, org)
         out.append({"kind": d["kind"], "a": side_a, "b": side_b, "date": side_a["date"] or side_b["date"],
                     "dismissed_at": d["created_at"].isoformat() if d["created_at"] else None,
-                    "dismissed_by": d["username"], "key": f"{d['kind']}:{side_a['id']}:{side_b['id']}"})
+                    "dismissed_by": d["username"], "via": d["via"], "key": f"{d['kind']}:{side_a['id']}:{side_b['id']}"})
     return out
 
 

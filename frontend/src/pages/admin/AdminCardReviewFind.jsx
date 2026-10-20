@@ -6,7 +6,7 @@ import { PbSpinner } from '../../lib/presskit'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { Button, Badge, Note } from '../../components/admin/ui'
 import { SideBox, Evidence } from '../../components/admin/cardReview/DoubleCard'
-import MatchFilters, { filterParams, hasFilters, useFilterParams } from '../../components/admin/cardReview/MatchFilters'
+import MatchFilters, { HistoryLink, filterParams, hasFilters, useFilterParams } from '../../components/admin/cardReview/MatchFilters'
 import { GROUPS, CHOICE_NAME, fmtDate } from '../../components/admin/cardReview/shared'
 
 const PAGE = 25
@@ -65,7 +65,7 @@ export default function AdminCardReviewFind() {
     <BetterStatsLayout
       title="Find a match"
       caption={searched ? `${total.toLocaleString()} fixture${total === 1 ? '' : 's'}` : undefined}
-      actions={<Button as={Link} to="/admin/card-review" size="sm">Back to Card review</Button>}
+      actions={<div className="flex flex-wrap gap-2"><HistoryLink /><Button as={Link} to="/admin/card-review" size="sm">Back to Card review</Button></div>}
     >
       <p className="max-w-[760px] text-[13.5px] text-pb-dim mb-4">
         Look up a fixture and see every copy the record holds of it: the Cricket Australia match, the club scorecard, or both. Use it to
