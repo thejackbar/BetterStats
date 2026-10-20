@@ -73,19 +73,19 @@ const sub = (it) => [it.time, it.venue].filter(Boolean).join('  ·  ')
 const headingH = (A, titleMax, event = {}) =>
   56 + pick(A, { square: 14, portrait: 20, story: 26 }) + (event.kicker ? 28 : 0) + Math.round(titleMax * 0.98) + (event.subtitle ? 72 : 0)
 
-function Heading({ team, event, P, ink, A, titleMax, kickerColor, fontFamily = SPORT, uppercase = true }) {
+function Heading({ team, event, P, ink, A, titleMax, kickerColor, fontFamily = SPORT, uppercase = true, parts }) {
   return (
     <div style={{ flexShrink: 0, height: headingH(A, titleMax, event), overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: pick(A, { square: 14, portrait: 20, story: 26 }) }}>
         {team.logo ? <ClubLogo src={team.logo} size={56} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={56} shape="shield" />}
-        <div style={{ fontFamily: SPORT, fontSize: 26, fontWeight: 700, letterSpacing: 2.5, textTransform: 'uppercase', color: ink, lineHeight: 1, maxWidth: 640, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{team.fullName || team.name}</div>
+        <div style={{ fontFamily: SPORT, fontSize: 26, fontWeight: 700, letterSpacing: 2.5, textTransform: 'uppercase', color: pc(parts, 'clubColor', ink), lineHeight: 1, maxWidth: 640, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{team.fullName || team.name}</div>
       </div>
-      {event.kicker ? <div style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 5, textTransform: 'uppercase', color: kickerColor || P.accent, marginBottom: 8 }}>{event.kicker}</div> : null}
+      {event.kicker ? <div style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 5, textTransform: 'uppercase', color: pc(parts, 'kickerColor', kickerColor || P.accent), marginBottom: 8 }}>{event.kicker}</div> : null}
       <div style={{ height: Math.round(titleMax * 0.98) }}>
         <AutoFitText text={uppercase ? (event.title || '').toUpperCase() : event.title} max={titleMax} min={44} lines={1} measureDeps={[event.title]}
-          style={{ fontFamily, fontWeight: 800, lineHeight: 0.96, letterSpacing: uppercase ? 1 : -1, color: ink, textTransform: uppercase ? 'uppercase' : 'none' }} />
+          style={{ fontFamily, fontWeight: 800, lineHeight: 0.96, letterSpacing: uppercase ? 1 : -1, color: pc(parts, 'title1Color', ink), textTransform: uppercase ? 'uppercase' : 'none' }} />
       </div>
-      {event.subtitle ? <div style={{ fontSize: 24, color: a(ink, 0.7), marginTop: 8, lineHeight: 1.3, maxWidth: 820, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{event.subtitle}</div> : null}
+      {event.subtitle ? <div style={{ fontSize: 24, color: pc(parts, 'subtitleColor', a(ink, 0.7)), marginTop: 8, lineHeight: 1.3, maxWidth: 820, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{event.subtitle}</div> : null}
     </div>
   )
 }
@@ -98,9 +98,9 @@ function Empty({ ink }) {
   )
 }
 
-function Credit({ event, color }) {
+function Credit({ event, color, parts }) {
   return (
-    <div style={{ flexShrink: 0, fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color, marginTop: 10 }}>
+    <div style={{ flexShrink: 0, fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'creditColor', color), marginTop: 10 }}>
       Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}
     </div>
   )
@@ -109,8 +109,9 @@ function Credit({ event, color }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // EL1 — AGENDA · a dated list, one row per event
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVL_Agenda({ team, event = {}, list = {}, width = 1080, height = 1080, palette }) {
+export function EVL_Agenda({ team, event = {}, list = {}, width = 1080, height = 1080, palette, parts }) {
   const P = palette
+  const texture = usePostLook().texture !== false
   const A = aspectOf(width, height)
   const box = bodyBox(width, height)
   const items = (list.items || []).slice(0, MAX_LIST_ITEMS)
@@ -129,34 +130,56 @@ export function EVL_Agenda({ team, event = {}, list = {}, width = 1080, height =
   const visSize = Math.min(Math.round(rowH * 0.7), 104)
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
-      <div style={{ position: 'absolute', left: -200, top: -200, width: 560, height: 560, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.26)}, transparent 68%)`, pointerEvents: 'none' }} />
+      {texture ? <div style={{ position: 'absolute', left: -200, top: -200, width: 560, height: 560, borderRadius: '50%', background: `radial-gradient(circle, ${a(pc(parts, 'glowColor', P.accent), 0.26)}, transparent 68%)`, pointerEvents: 'none' }} /> : null}
       <div data-layer="Event list" style={{ position: 'absolute', left: 64, right: 64, top: box.top, bottom: box.bottom, display: 'flex', flexDirection: 'column' }}>
-        <Heading team={team} event={event} P={P} ink="#fff" A={A} titleMax={titleMax} />
+        <Heading team={team} event={event} P={P} ink="#fff" A={A} titleMax={titleMax} parts={parts} />
         <div style={{ marginTop: 24, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap, justifyContent: A === 'square' ? 'flex-start' : 'center' }}>
           {items.length === 0 ? <Empty ink="#fff" /> : items.map((it) => (
-            <div key={it.id} style={{ height: rowH, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 20, padding: '0 20px 0 0', background: a(P.accent, 0.09), borderRadius: 12, overflow: 'hidden' }}>
-              <div style={{ width: dateW, alignSelf: 'stretch', background: P.accent, color: P.primary, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <div key={it.id} style={{ height: rowH, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 20, padding: '0 20px 0 0', background: pc(parts, 'cardBg', a(P.accent, 0.09)), borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ width: dateW, alignSelf: 'stretch', background: pc(parts, 'dateBg', P.accent), color: pc(parts, 'dateColor', partPicked(parts, 'dateBg') ? inkOn(pc(parts, 'dateBg', P.accent)) : P.primary), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <div style={{ fontFamily: SPORT, fontWeight: 800, fontSize: day, lineHeight: 0.9 }}>{it.day || '·'}</div>
                 <div style={{ fontFamily: MONO, fontWeight: 700, fontSize: small, letterSpacing: 2, marginTop: 2 }}>{[it.mon, it.wd].filter(Boolean).join(' ')}</div>
               </div>
-              <Visual v={it.visual} size={visSize} accent={P.accent} radius={10} />
+              <Visual v={it.visual} size={visSize} accent={P.accent} radius={10} fill={pc(parts, 'photoBg', undefined)} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 {/* Fitted, not clipped: a long name shrinks to the room beside the price. */}
                 <div style={{ height: Math.round(title * 1.12) }}>
                   <AutoFitText text={(it.title || '').toUpperCase()} max={title} min={16} lines={1} measureDeps={[it.title, title]}
-                    style={{ fontFamily: SPORT, fontWeight: 700, lineHeight: 1.05, letterSpacing: 0.5, textTransform: 'uppercase' }} />
+                    style={{ fontFamily: SPORT, fontWeight: 700, lineHeight: 1.05, letterSpacing: 0.5, textTransform: 'uppercase', color: pc(parts, 'nameColor', undefined) }} />
                 </div>
-                {sub(it) ? <div style={{ fontFamily: MONO, fontSize: small, letterSpacing: 1.5, color: 'rgba(255,255,255,0.62)', marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub(it)}</div> : null}
+                {sub(it) ? <div style={{ fontFamily: MONO, fontSize: small, letterSpacing: 1.5, color: pc(parts, 'subColor', 'rgba(255,255,255,0.62)'), marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub(it)}</div> : null}
               </div>
-              {it.price ? <div style={{ fontFamily: SPORT, fontWeight: 800, fontSize: Math.round(title * 0.9), color: P.accent, flexShrink: 0, letterSpacing: 0.5 }}>{it.price}</div> : null}
+              {it.price ? <div style={{ fontFamily: SPORT, fontWeight: 800, fontSize: Math.round(title * 0.9), color: pc(parts, 'priceColor', P.accent), flexShrink: 0, letterSpacing: 0.5 }}>{it.price}</div> : null}
             </div>
           ))}
         </div>
-        <Credit event={event} color="rgba(255,255,255,0.42)" />
+        <Credit event={event} color="rgba(255,255,255,0.42)" parts={parts} />
       </div>
     </LayerRoot>
   )
 }
+// The heading (club name, line above the title, title, subtitle) and the credit line are the same on all three.
+const EL_HEAD = 'Heading'
+const headingParts = (clubAuto, kickerAuto, titleAuto, subAuto) => [
+  colorPart('clubColor', 'Club name', EL_HEAD, clubAuto),
+  colorPart('kickerColor', 'Line above the title', EL_HEAD, kickerAuto),
+  colorPart('title1Color', 'Title', EL_HEAD, titleAuto),
+  colorPart('subtitleColor', 'Subtitle', EL_HEAD, subAuto),
+]
+registerParts({
+  EL1: [
+    ...headingParts(() => '#ffffff', (p) => p.accent, () => '#ffffff', () => '#ffffff'),
+    colorPart('glowColor', 'Glow in the corner', 'Page', (p) => p.accent),
+    colorPart('cardBg', 'Event row', 'Event rows', (p) => p.accent),
+    colorPart('dateBg', 'Date block', 'Event rows', (p) => p.accent),
+    colorPart('dateColor', 'Date text', 'Event rows', (p) => p.primary),
+    colorPart('photoBg', 'Backdrop behind the icon or photo', 'Event rows', (p) => p.accent),
+    colorPart('nameColor', 'Event name', 'Event rows', () => '#ffffff'),
+    colorPart('subColor', 'Time and venue', 'Event rows', () => '#ffffff'),
+    colorPart('priceColor', 'Price', 'Event rows', (p) => p.accent),
+    colorPart('creditColor', 'Credit and sponsor line', 'Foot', () => '#ffffff'),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EL2 — CALENDAR · a month grid with the event days lit, the list beneath
@@ -176,12 +199,15 @@ export function monthWeeks(year, month) {
   return weeks
 }
 
-export function EVL_Calendar({ team, event = {}, list = {}, width = 1080, height = 1080, palette }) {
+export function EVL_Calendar({ team, event = {}, list = {}, width = 1080, height = 1080, palette, parts }) {
   const P = palette
   const A = aspectOf(width, height)
   const box = bodyBox(width, height)
-  const paper = P.paper || '#f4efe4'
-  const ink = P.deepInk || '#1f1c14'
+  const paper = pc(parts, 'el2Paper', P.paper || '#f4efe4')
+  const ink = pc(parts, 'el2Ink', P.deepInk || '#1f1c14')
+  // Text on a lit day and on a date tag follows the colour once the club has set it.
+  const litBg = pc(parts, 'el2LitBg', P.accent)
+  const tagBg = pc(parts, 'badgeBg', ink)
   const items = (list.items || []).slice(0, MAX_LIST_ITEMS)
   const weeks = monthWeeks(list.year, list.month)
   const lit = new Map()
@@ -204,14 +230,14 @@ export function EVL_Calendar({ team, event = {}, list = {}, width = 1080, height
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink }}>
       <div data-layer="Event calendar" style={{ position: 'absolute', left: 64, right: 64, top: box.top, bottom: box.bottom, display: 'flex', flexDirection: 'column' }}>
-        <Heading team={team} event={event} P={P} ink={ink} A={A} titleMax={titleMax} kickerColor={P.accent} fontFamily="'Helvetica Neue', Helvetica, Arial, sans-serif" uppercase={false} />
-        <div style={{ marginTop: 18, flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', borderTop: `2px solid ${ink}`, paddingTop: 8 }}>
-          <div style={{ fontFamily: MONO, fontSize: 20, letterSpacing: 4, textTransform: 'uppercase', fontWeight: 700 }}>{list.monthLabel || ''}</div>
-          <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: a(ink, 0.5) }}>{items.length} {items.length === 1 ? 'event' : 'events'}</div>
+        <Heading team={team} event={event} P={P} ink={ink} A={A} titleMax={titleMax} kickerColor={P.accent} fontFamily="'Helvetica Neue', Helvetica, Arial, sans-serif" uppercase={false} parts={parts} />
+        <div style={{ marginTop: 18, flexShrink: 0, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', borderTop: `2px solid ${pc(parts, 'el2TopRule', ink)}`, paddingTop: 8 }}>
+          <div style={{ fontFamily: MONO, fontSize: 20, letterSpacing: 4, textTransform: 'uppercase', fontWeight: 700, color: pc(parts, 'el2MonthColor', undefined) }}>{list.monthLabel || ''}</div>
+          <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'el2CountColor', a(ink, 0.5)) }}>{items.length} {items.length === 1 ? 'event' : 'events'}</div>
         </div>
         <div style={{ flexShrink: 0 }}>
           <div style={{ display: 'flex', height: dowH, alignItems: 'center' }}>
-            {WEEKDAYS.map((d, i) => <div key={i} style={{ width: cellW, textAlign: 'center', fontFamily: MONO, fontSize: 13, letterSpacing: 2, color: a(ink, 0.5) }}>{d}</div>)}
+            {WEEKDAYS.map((d, i) => <div key={i} style={{ width: cellW, textAlign: 'center', fontFamily: MONO, fontSize: 13, letterSpacing: 2, color: pc(parts, 'el2DowColor', a(ink, 0.5)) }}>{d}</div>)}
           </div>
           {weeks.length === 0 ? <div style={{ height: cellH * 4 }}><Empty ink={ink} /></div> : weeks.map((w, wi) => (
             <div key={wi} style={{ display: 'flex', height: cellH }}>
@@ -220,7 +246,7 @@ export function EVL_Calendar({ team, event = {}, list = {}, width = 1080, height
                 return (
                   <div key={di} style={{ width: cellW, height: cellH, boxSizing: 'border-box', padding: 3 }}>
                     {d ? (
-                      <div style={{ width: '100%', height: '100%', borderRadius: 10, background: ev ? P.accent : 'transparent', border: ev ? 'none' : `1px solid ${a(ink, 0.12)}`, color: ev ? (P.primary || '#fff') : ink, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+                      <div style={{ width: '100%', height: '100%', borderRadius: 10, background: ev ? litBg : 'transparent', border: ev ? 'none' : `1px solid ${pc(parts, 'cardBorder', a(ink, 0.12))}`, color: ev ? pc(parts, 'el2LitColor', partPicked(parts, 'el2LitBg') ? inkOn(litBg) : (P.primary || '#fff')) : pc(parts, 'el2DayColor', ink), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
                         <div style={{ fontFamily: SPORT, fontWeight: ev ? 800 : 500, fontSize: Math.round(cellH * (ev && ev.visual?.src ? 0.3 : 0.4)), lineHeight: 1 }}>{d}</div>
                         {ev && ev.visual?.src ? <img src={ev.visual.src} alt="" crossOrigin={ev.visual.kind === 'image' ? 'anonymous' : undefined} style={{ width: Math.round(cellH * 0.38), height: Math.round(cellH * 0.38), objectFit: ev.visual.kind === 'image' ? 'cover' : 'contain', borderRadius: ev.visual.kind === 'image' ? 6 : 0 }} /> : null}
                       </div>
@@ -231,28 +257,50 @@ export function EVL_Calendar({ team, event = {}, list = {}, width = 1080, height
             </div>
           ))}
         </div>
-        <div style={{ marginTop: 'auto', flexShrink: 0, height: legendH, borderTop: `2px solid ${ink}`, paddingTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gridAutoRows: legendRowH, columnGap: 28 }}>
+        <div style={{ marginTop: 'auto', flexShrink: 0, height: legendH, borderTop: `2px solid ${pc(parts, 'el2LegendRule', ink)}`, paddingTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gridAutoRows: legendRowH, columnGap: 28 }}>
           {items.map((it) => (
             <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-              <div style={{ minWidth: Math.round(legendRowH * 0.95), height: Math.round(legendRowH * 0.8), padding: '0 6px', boxSizing: 'border-box', borderRadius: 8, background: ink, color: paper, fontFamily: SPORT, fontWeight: 800, fontSize: Math.round(legendRowH * 0.5), display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, whiteSpace: 'nowrap' }}>{it.day ? `${it.day}${lit.has(Number(it.day)) && lit.get(Number(it.day)) === it ? '' : ' ' + (it.mon || '')}` : '·'}</div>
+              <div style={{ minWidth: Math.round(legendRowH * 0.95), height: Math.round(legendRowH * 0.8), padding: '0 6px', boxSizing: 'border-box', borderRadius: 8, background: tagBg, color: pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(tagBg) : paper), fontFamily: SPORT, fontWeight: 800, fontSize: Math.round(legendRowH * 0.5), display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, whiteSpace: 'nowrap' }}>{it.day ? `${it.day}${lit.has(Number(it.day)) && lit.get(Number(it.day)) === it ? '' : ' ' + (it.mon || '')}` : '·'}</div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: Math.round(legendRowH * 0.4), lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.title}</div>
-                {it.time ? <div style={{ fontFamily: MONO, fontSize: Math.round(legendRowH * 0.26), letterSpacing: 1, color: a(ink, 0.55), whiteSpace: 'nowrap' }}>{it.time}</div> : null}
+                <div style={{ fontWeight: 700, fontSize: Math.round(legendRowH * 0.4), lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{it.title}</div>
+                {it.time ? <div style={{ fontFamily: MONO, fontSize: Math.round(legendRowH * 0.26), letterSpacing: 1, color: pc(parts, 'subColor', a(ink, 0.55)), whiteSpace: 'nowrap' }}>{it.time}</div> : null}
               </div>
             </div>
           ))}
         </div>
-        <Credit event={event} color={a(ink, 0.45)} />
+        <Credit event={event} color={a(ink, 0.45)} parts={parts} />
       </div>
     </LayerRoot>
   )
 }
+registerParts({
+  EL2: [
+    colorPart('el2Paper', 'Paper', 'Page', (p) => p.paper || '#f4efe4'),
+    colorPart('el2Ink', 'Ink (text and lines)', 'Page', (p) => p.deepInk || '#1f1c14'),
+    ...headingParts((p) => p.deepInk || '#1f1c14', (p) => p.accent, (p) => p.deepInk || '#1f1c14', (p) => p.deepInk || '#1f1c14'),
+    colorPart('el2TopRule', 'Line above the month', 'Calendar', (p) => p.deepInk || '#1f1c14'),
+    colorPart('el2MonthColor', 'Month name', 'Calendar', (p) => p.deepInk || '#1f1c14'),
+    colorPart('el2CountColor', 'Number of events', 'Calendar', (p) => p.deepInk || '#1f1c14'),
+    colorPart('el2DowColor', 'Weekday letters', 'Calendar', (p) => p.deepInk || '#1f1c14'),
+    colorPart('el2LitBg', 'Day with an event', 'Calendar', (p) => p.accent),
+    colorPart('el2LitColor', 'Number on a day with an event', 'Calendar', (p) => p.primary || '#ffffff'),
+    colorPart('el2DayColor', 'Number on other days', 'Calendar', (p) => p.deepInk || '#1f1c14'),
+    colorPart('cardBorder', 'Outline of other days', 'Calendar', (p) => p.deepInk || '#1f1c14'),
+    colorPart('el2LegendRule', 'Line above the list', 'Event list', (p) => p.deepInk || '#1f1c14'),
+    colorPart('badgeBg', 'Date tag', 'Event list', (p) => p.deepInk || '#1f1c14'),
+    colorPart('badgeColor', 'Date tag text', 'Event list', (p) => p.paper || '#f4efe4'),
+    colorPart('nameColor', 'Event name', 'Event list', (p) => p.deepInk || '#1f1c14'),
+    colorPart('subColor', 'Event time', 'Event list', (p) => p.deepInk || '#1f1c14'),
+    colorPart('creditColor', 'Credit and sponsor line', 'Foot', (p) => p.deepInk || '#1f1c14'),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EL3 — ICON CARDS · a grid of cards, each led by its icon or photo
 // ─────────────────────────────────────────────────────────────────────────────
-export function EVL_Cards({ team, event = {}, list = {}, width = 1080, height = 1080, palette }) {
+export function EVL_Cards({ team, event = {}, list = {}, width = 1080, height = 1080, palette, parts }) {
   const P = palette
+  const texture = usePostLook().texture !== false
   const A = aspectOf(width, height)
   const box = bodyBox(width, height)
   const items = (list.items || []).slice(0, MAX_LIST_ITEMS)
@@ -275,37 +323,52 @@ export function EVL_Cards({ team, event = {}, list = {}, width = 1080, height = 
   const visH = tall ? Math.max(56, Math.min(pick(A, { square: 190, portrait: 250, story: 330 }), inner - textH - 12)) : Math.round(inner * 0.9)
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
-      <div style={{ position: 'absolute', right: -220, bottom: -220, width: 620, height: 620, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.22)}, transparent 68%)`, pointerEvents: 'none' }} />
+      {texture ? <div style={{ position: 'absolute', right: -220, bottom: -220, width: 620, height: 620, borderRadius: '50%', background: `radial-gradient(circle, ${a(pc(parts, 'glowColor', P.accent), 0.22)}, transparent 68%)`, pointerEvents: 'none' }} /> : null}
       <div data-layer="Event cards" style={{ position: 'absolute', left: 64, right: 64, top: box.top, bottom: box.bottom, display: 'flex', flexDirection: 'column' }}>
-        <Heading team={team} event={event} P={P} ink="#fff" A={A} titleMax={titleMax} />
+        <Heading team={team} event={event} P={P} ink="#fff" A={A} titleMax={titleMax} parts={parts} />
         <div style={{ marginTop: 20, flex: 1, minHeight: 0 }}>
           {items.length === 0 ? <Empty ink="#fff" /> : (
             <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, ${cardW}px)`, gridAutoRows: cardH, gap }}>
               {items.map((it) => (
-                <div key={it.id} style={{ boxSizing: 'border-box', borderRadius: 18, background: a('#ffffff', 0.06), border: `1px solid ${a(P.accent, 0.32)}`, padding: 18, display: 'flex', flexDirection: tall ? 'column' : 'row', alignItems: tall ? 'stretch' : 'center', justifyContent: tall ? 'center' : 'flex-start', gap: tall ? 14 : 16, overflow: 'hidden', minWidth: 0 }}>
+                <div key={it.id} style={{ boxSizing: 'border-box', borderRadius: 18, background: pc(parts, 'cardBg', a('#ffffff', 0.06)), border: `1px solid ${pc(parts, 'cardBorder', a(P.accent, 0.32))}`, padding: 18, display: 'flex', flexDirection: tall ? 'column' : 'row', alignItems: tall ? 'stretch' : 'center', justifyContent: tall ? 'center' : 'flex-start', gap: tall ? 14 : 16, overflow: 'hidden', minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: tall ? visH : undefined, flexShrink: 0 }}>
                     {tall && it.visual?.kind === 'image'
-                      ? <div style={{ width: '100%', height: visH, borderRadius: 12, overflow: 'hidden' }}><img src={it.visual.src} alt="" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /></div>
-                      : <Visual v={it.visual} size={tall ? visH : visH} accent={P.accent} radius={14} />}
+                      ? <div style={{ width: '100%', height: visH, borderRadius: 12, overflow: 'hidden', background: pc(parts, 'photoBg', undefined) }}><img src={it.visual.src} alt="" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /></div>
+                      : <Visual v={it.visual} size={tall ? visH : visH} accent={P.accent} radius={14} fill={pc(parts, 'photoBg', undefined)} />}
                   </div>
                   <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: tall ? 'flex-start' : 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
-                      <div style={{ background: P.accent, color: P.primary, fontFamily: MONO, fontWeight: 700, fontSize: s, letterSpacing: 2, textTransform: 'uppercase', padding: '3px 10px', borderRadius: 6, whiteSpace: 'nowrap' }}>{it.dateLabel || 'Date'}</div>
-                      {it.price ? <div style={{ fontFamily: SPORT, fontWeight: 800, fontSize: Math.round(t * 0.9), color: P.accent, letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{it.price}</div> : null}
+                      <div style={{ background: pc(parts, 'badgeBg', P.accent), color: pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(pc(parts, 'badgeBg', P.accent)) : P.primary), fontFamily: MONO, fontWeight: 700, fontSize: s, letterSpacing: 2, textTransform: 'uppercase', padding: '3px 10px', borderRadius: 6, whiteSpace: 'nowrap' }}>{it.dateLabel || 'Date'}</div>
+                      {it.price ? <div style={{ fontFamily: SPORT, fontWeight: 800, fontSize: Math.round(t * 0.9), color: pc(parts, 'priceColor', P.accent), letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{it.price}</div> : null}
                     </div>
-                    <div style={{ fontFamily: SPORT, fontWeight: 800, fontSize: t, lineHeight: 1.02, textTransform: 'uppercase', letterSpacing: 0.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{it.title}</div>
-                    {sub(it) ? <div style={{ fontFamily: MONO, fontSize: s, letterSpacing: 1, color: 'rgba(255,255,255,0.62)', marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub(it)}</div> : null}
+                    <div style={{ fontFamily: SPORT, fontWeight: 800, fontSize: t, lineHeight: 1.02, textTransform: 'uppercase', letterSpacing: 0.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', color: pc(parts, 'nameColor', undefined) }}>{it.title}</div>
+                    {sub(it) ? <div style={{ fontFamily: MONO, fontSize: s, letterSpacing: 1, color: pc(parts, 'subColor', 'rgba(255,255,255,0.62)'), marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub(it)}</div> : null}
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
-        <Credit event={event} color="rgba(255,255,255,0.42)" />
+        <Credit event={event} color="rgba(255,255,255,0.42)" parts={parts} />
       </div>
     </LayerRoot>
   )
 }
+registerParts({
+  EL3: [
+    ...headingParts(() => '#ffffff', (p) => p.accent, () => '#ffffff', () => '#ffffff'),
+    colorPart('glowColor', 'Glow in the corner', 'Page', (p) => p.accent),
+    colorPart('cardBg', 'Card', 'Cards', () => '#ffffff'),
+    colorPart('cardBorder', 'Card outline', 'Cards', (p) => p.accent),
+    colorPart('photoBg', 'Backdrop behind the icon or photo', 'Cards', (p) => p.accent),
+    colorPart('badgeBg', 'Date tag', 'Cards', (p) => p.accent),
+    colorPart('badgeColor', 'Date tag text', 'Cards', (p) => p.primary),
+    colorPart('nameColor', 'Event name', 'Cards', () => '#ffffff'),
+    colorPart('subColor', 'Time and venue', 'Cards', () => '#ffffff'),
+    colorPart('priceColor', 'Price', 'Cards', (p) => p.accent),
+    colorPart('creditColor', 'Credit and sponsor line', 'Foot', () => '#ffffff'),
+  ],
+})
 
 // Registry entries, appended to EVENT_TEMPLATES by event-templates.jsx. `list: true`
 // is what tells the editor to show the event list instead of one event's facts.
