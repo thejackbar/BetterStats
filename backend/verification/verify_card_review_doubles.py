@@ -840,16 +840,23 @@ async def main():
             msg = str(e)
     check("after a newer change it refuses, and points at Recent changes", "Recent changes" in (msg or ""), True)
     check("and changed nothing", (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0], ids["g_wB"])
-    async with async_session_maker() as s:
-        await act.undo_last(s, ORG, ids["m_wB"], USER)
-        out_r = await act.restore_double(s, ORG, ids["m_wB"], ids["g_wA"], "ca", USER)
+    out_r = {"relinked": None}
+    try:
+        async with async_session_maker() as s:
+            await act.undo_last(s, ORG, ids["m_wB"], USER)
+            out_r = await act.restore_double(s, ORG, ids["m_wB"], ids["g_wA"], "ca", USER)
+    except act.ReviewError as e:
+        print(f"       (refused: {e})")
     check("once the newer change is undone, Put back restores the link", ((await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0], out_r["relinked"]), (ids["g_wA"], True))
     check("and clears the answer, so the pair is not hidden for good",
           (await q("SELECT count(*) FROM card_review_log WHERE manual_game_id = :m AND action = 'not_double' AND undone_at IS NULL", m=ids["m_wB"]))[0][0], 0)
     check("the scan offers the wrong link again", k_wrong in kinds(await scan()), True)
-    async with async_session_maker() as s:
-        await act.unlink(s, ORG, ids["m_wB"], USER)
-        undone = await act.undo_last(s, ORG, ids["m_wB"], USER)
+    try:
+        async with async_session_maker() as s:
+            await act.unlink(s, ORG, ids["m_wB"], USER)
+            await act.undo_last(s, ORG, ids["m_wB"], USER)
+    except act.ReviewError as e:
+        print(f"       (refused: {e})")
     check("undoing an unlink straight from the list also clears its answer",
           ((await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0],
            (await q("SELECT count(*) FROM card_review_log WHERE manual_game_id = :m AND action = 'not_double' AND undone_at IS NULL", m=ids["m_wB"]))[0][0]),
