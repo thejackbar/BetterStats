@@ -13,8 +13,7 @@ import {
   Title,
 } from "@canva/app-ui-kit";
 import { findFonts } from "@canva/asset";
-import { requestOpenExternalUrl } from "@canva/platform";
-import { openDesign, requestExport } from "@canva/design";
+import { openDesign } from "@canva/design";
 import type { DesignEditing } from "@canva/design";
 import { useState } from "react";
 import { useIntl } from "react-intl";
@@ -36,15 +35,12 @@ import {
 import type { BlockSpec, PageSize } from "src/template/blocks";
 import {
   ExportBlocked,
-  PICTURE_LIMIT_BYTES,
-  RestoreFailed,
   exportTemplate,
-  restoreHidden,
   type ExportDeps,
+  type ExportOutcome,
 } from "src/template/exportFlow";
-import type { TemplateFile } from "src/template/buildFile";
-import type { Hidden } from "src/template/hide";
-import { fetchPicture } from "src/template/picture";
+import type { PostType, TemplateFile } from "src/template/buildFile";
+import { fetchImage } from "src/template/picture";
 import { copyTemplate } from "src/template/saveFile";
 import { insertBlock, type InsertResult } from "src/template/insert";
 import { inCurrentPage } from "src/template/session";
@@ -62,36 +58,16 @@ const tokenText = (token: string): string => `{{${token}}}`;
 
 const exportDeps: ExportDeps = {
   inPage: inCurrentPage,
-  requestExport,
-  fetchPicture,
+  fetchImage,
   lookupFonts,
 };
 
 type ExportView =
   | { status: "idle" }
   | { status: "working" }
-  | { status: "aborted" }
   | { status: "blocked"; message: string; skipped: Skipped[] }
   | { status: "error"; message: string }
-  | {
-      status: "done";
-      file: TemplateFile;
-      fieldCount: number;
-      textCount: number;
-      panelCount: number;
-      bytes: number | null;
-      skipped: Skipped[];
-    }
-  | {
-      status: "no_picture";
-      file: TemplateFile;
-      fieldCount: number;
-      textCount: number;
-      panelCount: number;
-      reason: string;
-      url: string | null;
-      skipped: Skipped[];
-    };
+  | ({ status: "done" } & ExportOutcome);
 
 const fieldOptions = FIELD_TOKENS.map((t) => ({
   value: t,
@@ -117,9 +93,8 @@ export const App = () => {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | undefined>(undefined);
   const [templateName, setTemplateName] = useState("Line up");
-  const [withPicture, setWithPicture] = useState(false);
+  const [postType, setPostType] = useState<PostType | undefined>(undefined);
   const [exp, setExp] = useState<ExportView>({ status: "idle" });
-  const [stuck, setStuck] = useState<Hidden[] | null>(null);
 
   const readPage = (
     session: DesignEditing.CurrentPageSession,
@@ -252,71 +227,24 @@ export const App = () => {
   };
 
   const runExport = async () => {
+    if (!postType) {
+      return;
+    }
     setBusy(true);
     setNotice(undefined);
-    setStuck(null);
     setExp({ status: "working" });
     try {
       const out = await exportTemplate(exportDeps, {
         name: templateName,
-        withPicture,
+        postType,
       });
-      if (out.status === "aborted") {
-        setExp({ status: "aborted" });
-      } else if (out.status === "done") {
-        setExp({
-          status: "done",
-          file: out.file,
-          fieldCount: out.fieldCount,
-          textCount: out.textCount,
-          panelCount: out.panelCount,
-          bytes: out.pictureBytes,
-          skipped: out.skipped,
-        });
-      } else {
-        setExp({
-          status: "no_picture",
-          file: out.file,
-          fieldCount: out.fieldCount,
-          textCount: out.textCount,
-          panelCount: out.panelCount,
-          reason: out.reason,
-          url: out.pictureUrl,
-          skipped: out.skipped,
-        });
-      }
+      setExp({ status: "done", ...out });
     } catch (e) {
-      if (e instanceof RestoreFailed) {
-        setStuck(e.hidden);
-        setExp({ status: "error", message: e.message });
-      } else if (e instanceof ExportBlocked) {
+      if (e instanceof ExportBlocked) {
         setExp({ status: "blocked", message: e.message, skipped: e.skipped });
       } else {
         setExp({ status: "error", message: messageOf(e) });
       }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const restoreNow = async () => {
-    if (!stuck) {
-      return;
-    }
-    setBusy(true);
-    try {
-      await restoreHidden(inCurrentPage, stuck);
-      setStuck(null);
-      setExp({ status: "idle" });
-      setNotice({
-        tone: "positive",
-        text: intl.formatMessage({
-          defaultMessage: "Your text boxes are back.",
-          description: "The hidden placeholder boxes were restored",
-        }),
-      });
-    } catch (e) {
-      setNotice({ tone: "critical", text: messageOf(e) });
     } finally {
       setBusy(false);
     }
@@ -330,7 +258,7 @@ export const App = () => {
             tone: "positive",
             text: intl.formatMessage({
               defaultMessage:
-                "Template text copied. In BetterCricket, open BetterPosts, then the Blank canvas, then Content, and paste it under “Or paste the template text”.",
+                "Template text copied. In BetterCricket, open BetterPosts, then paste it into “Import pasted text”. A line up goes into the Lineup design, anything else into the Blank canvas.",
               description: "After the template text was copied",
             }),
           }
@@ -352,14 +280,6 @@ export const App = () => {
           defaultMessage:
             "“{text}” has other words with the token. Put each token in its own text box.",
           description: "A text box mixes a token with other words",
-        },
-        { text: s.text },
-      ),
-      locked: intl.formatMessage(
-        {
-          defaultMessage:
-            "“{text}” is locked. Unlock it so it can be hidden when the picture is exported.",
-          description: "A token text box is locked",
         },
         { text: s.text },
       ),
@@ -448,52 +368,97 @@ export const App = () => {
           )}
         </Text>
 
+        <FormField
+          label={intl.formatMessage({
+            defaultMessage: "What kind of post is this?",
+            description: "Label for choosing the kind of post being made",
+          })}
+          description={intl.formatMessage({
+            defaultMessage:
+              "A line up goes into the Lineup design in BetterPosts, so the players you pick fill it in. Anything else goes onto the Blank canvas.",
+            description: "Explains why the kind of post is asked for",
+          })}
+          control={(props) => (
+            <Select
+              {...props}
+              options={[
+                {
+                  value: "lineup",
+                  label: intl.formatMessage({
+                    defaultMessage: "Line up",
+                    description: "A kind of post: the team line up",
+                  }),
+                },
+                {
+                  value: "general",
+                  label: intl.formatMessage({
+                    defaultMessage: "Other post",
+                    description:
+                      "A kind of post: anything that is not a line up",
+                  }),
+                },
+              ]}
+              value={postType}
+              placeholder={intl.formatMessage({
+                defaultMessage: "Choose one",
+                description: "Placeholder before a kind of post is chosen",
+              })}
+              onChange={(v) => setPostType(v as PostType)}
+              stretch
+            />
+          )}
+        />
+
         <Title size="xsmall">
           {intl.formatMessage({
             defaultMessage: "Add to this design",
             description: "Heading of the section that adds ready-made blocks",
           })}
         </Title>
-        <FormField
-          label={intl.formatMessage({
-            defaultMessage: "Players in the line up",
-            description: "Label for the number of player places to add",
-          })}
-          control={(props) => (
-            <NumberInput
-              {...props}
-              value={count}
-              min={1}
-              max={MAX_LINEUP}
-              hasSpinButtons
-              decrementAriaLabel={intl.formatMessage({
-                defaultMessage: "One fewer player",
-                description: "Accessible label for the minus button",
+        {postType !== "general" && (
+          <Rows spacing="1u">
+            <FormField
+              label={intl.formatMessage({
+                defaultMessage: "Players in the line up",
+                description: "Label for the number of player places to add",
               })}
-              incrementAriaLabel={intl.formatMessage({
-                defaultMessage: "One more player",
-                description: "Accessible label for the plus button",
-              })}
-              onChange={(value) => {
-                if (value !== undefined) {
-                  setCount(value);
-                }
-              }}
+              control={(props) => (
+                <NumberInput
+                  {...props}
+                  value={count}
+                  min={1}
+                  max={MAX_LINEUP}
+                  hasSpinButtons
+                  decrementAriaLabel={intl.formatMessage({
+                    defaultMessage: "One fewer player",
+                    description: "Accessible label for the minus button",
+                  })}
+                  incrementAriaLabel={intl.formatMessage({
+                    defaultMessage: "One more player",
+                    description: "Accessible label for the plus button",
+                  })}
+                  onChange={(value) => {
+                    if (value !== undefined) {
+                      setCount(value);
+                    }
+                  }}
+                />
+              )}
             />
-          )}
-        />
-        <Button
-          variant="secondary"
-          onClick={() => addBlock((size) => lineUpBlock(size, count))}
-          loading={busy}
-          disabled={off}
-          stretch
-        >
-          {intl.formatMessage({
-            defaultMessage: "Add line up",
-            description: "Button that adds a line up block to the design",
-          })}
-        </Button>
+            <Button
+              variant="secondary"
+              onClick={() => addBlock((size) => lineUpBlock(size, count))}
+              loading={busy}
+              disabled={off}
+              stretch
+            >
+              {intl.formatMessage({
+                defaultMessage: "Add line up",
+                description: "Button that adds a line up block to the design",
+              })}
+            </Button>
+          </Rows>
+        )}
         <Button
           variant="secondary"
           onClick={() => addBlock((size) => matchDetailsBlock(size))}
@@ -670,24 +635,10 @@ export const App = () => {
         <Text size="small">
           {intl.formatMessage({
             defaultMessage:
-              "Makes a template file with the layout: where each field and fixed word sits, how big it is, and which colour and font it uses. BetterCricket fills in the club's own colours, fonts and background.",
+              "Makes a template with the layout: where each field and fixed word sits, how big it is, the panels behind your words, and which colour and font each uses. Your background picture and any picture a panel is made from come across as pictures. BetterCricket fills in the club's own colours and fonts.",
             description: "Explains the export",
           })}
         </Text>
-        <Switch
-          value={withPicture}
-          onChange={setWithPicture}
-          disabled={busy}
-          label={intl.formatMessage({
-            defaultMessage: "Also include my Canva picture",
-            description: "Switch: put the design as a picture in the template",
-          })}
-          description={intl.formatMessage({
-            defaultMessage:
-              "Keeps your Canva background and artwork as a flat picture, instead of the club's own. Your field words are hidden for a moment while it is made, then put back.",
-            description: "Explains the picture switch",
-          })}
-        />
         <FormField
           label={intl.formatMessage({
             defaultMessage: "Template name",
@@ -706,36 +657,22 @@ export const App = () => {
           variant="primary"
           onClick={runExport}
           loading={exp.status === "working"}
-          disabled={off}
+          disabled={off || !postType}
           stretch
+          tooltipLabel={
+            !postType
+              ? intl.formatMessage({
+                  defaultMessage: "Choose the kind of post first",
+                  description: "Tooltip while no kind of post is chosen",
+                })
+              : undefined
+          }
         >
           {intl.formatMessage({
             defaultMessage: "Export for BetterCricket",
             description: "Button that exports the template",
           })}
         </Button>
-        {stuck && (
-          <Button
-            variant="secondary"
-            onClick={restoreNow}
-            disabled={busy}
-            stretch
-          >
-            {intl.formatMessage({
-              defaultMessage: "Restore placeholders",
-              description: "Button that puts hidden text boxes back",
-            })}
-          </Button>
-        )}
-        {exp.status === "aborted" && (
-          <Alert tone="info">
-            {intl.formatMessage({
-              defaultMessage:
-                "Export cancelled. Your text boxes are back as they were.",
-              description: "The export dialog was closed",
-            })}
-          </Alert>
-        )}
         {exp.status === "error" && <Alert tone="critical">{exp.message}</Alert>}
         {exp.status === "blocked" && (
           <Rows spacing="1u">
@@ -750,121 +687,108 @@ export const App = () => {
         {exp.status === "done" && (
           <Rows spacing="1u">
             <Alert tone="positive">
-              {exp.bytes == null
-                ? intl.formatMessage(
-                    {
-                      defaultMessage: "Template ready: {parts}.",
-                      description: "The export finished, with no picture",
-                    },
-                    {
-                      parts: intl.formatList(
-                        [
-                          intl.formatMessage(
-                            {
-                              defaultMessage:
-                                "{count, plural, one {# field} other {# fields}}",
-                              description: "A number of fields",
-                            },
-                            { count: exp.fieldCount },
-                          ),
-                          intl.formatMessage(
-                            {
-                              defaultMessage:
-                                "{count, plural, one {# fixed word} other {# fixed words}}",
-                              description: "A number of fixed words",
-                            },
-                            { count: exp.textCount },
-                          ),
-                          ...(exp.panelCount
-                            ? [
-                                intl.formatMessage(
-                                  {
-                                    defaultMessage:
-                                      "{count, plural, one {# panel} other {# panels}}",
-                                    description: "A number of panels",
-                                  },
-                                  { count: exp.panelCount },
-                                ),
-                              ]
-                            : []),
-                        ],
-                        { type: "conjunction" },
+              {intl.formatMessage(
+                {
+                  defaultMessage: "Template ready: {parts}.",
+                  description: "The export finished",
+                },
+                {
+                  parts: intl.formatList(
+                    [
+                      intl.formatMessage(
+                        {
+                          defaultMessage:
+                            "{count, plural, one {# field} other {# fields}}",
+                          description: "A number of fields",
+                        },
+                        { count: exp.fieldCount },
                       ),
-                    },
-                  )
-                : intl.formatMessage(
-                    {
-                      defaultMessage:
-                        "Template ready: {fields, plural, one {# field} other {# fields}} and the picture ({size} MB).",
-                      description: "The export finished, with a picture",
-                    },
-                    {
-                      fields: exp.fieldCount,
-                      size: (exp.bytes / 1024 / 1024).toFixed(1),
-                    },
-                  )}
+                      intl.formatMessage(
+                        {
+                          defaultMessage:
+                            "{count, plural, one {# fixed word} other {# fixed words}}",
+                          description: "A number of fixed words",
+                        },
+                        { count: exp.textCount },
+                      ),
+                      ...(exp.panelCount
+                        ? [
+                            intl.formatMessage(
+                              {
+                                defaultMessage:
+                                  "{count, plural, one {# panel} other {# panels}}",
+                                description: "A number of panels",
+                              },
+                              { count: exp.panelCount },
+                            ),
+                          ]
+                        : []),
+                    ],
+                    { type: "conjunction" },
+                  ),
+                },
+              )}
             </Alert>
+            {(exp.background || exp.panelPictures > 0) && (
+              <Alert tone="positive">
+                {intl.formatMessage(
+                  {
+                    defaultMessage: "Pictures included: {parts}.",
+                    description:
+                      "Which of the design's pictures are in the file",
+                  },
+                  {
+                    parts: intl.formatList(
+                      [
+                        ...(exp.background
+                          ? [
+                              intl.formatMessage({
+                                defaultMessage: "the background",
+                                description:
+                                  "The background picture is included",
+                              }),
+                            ]
+                          : []),
+                        ...(exp.panelPictures
+                          ? [
+                              intl.formatMessage(
+                                {
+                                  defaultMessage:
+                                    "{count, plural, one {# panel picture} other {# panel pictures}}",
+                                  description: "Panel pictures are included",
+                                },
+                                { count: exp.panelPictures },
+                              ),
+                            ]
+                          : []),
+                      ],
+                      { type: "conjunction" },
+                    ),
+                  },
+                )}
+              </Alert>
+            )}
+            {exp.pictureProblems.map((problem, i) => (
+              <Alert key={`${problem}-${i}`} tone="warn">
+                {intl.formatMessage(
+                  {
+                    defaultMessage:
+                      "A picture was left out. {problem} BetterCricket will draw a plain panel or its own background there.",
+                    description: "A picture could not be brought across",
+                  },
+                  { problem },
+                )}
+              </Alert>
+            ))}
             {exp.skipped.map((sk, i) => (
               <Alert key={`${sk.text}-${i}`} tone="warn">
                 {skippedText(sk)}
               </Alert>
             ))}
-            {exp.bytes != null && exp.bytes > PICTURE_LIMIT_BYTES && (
-              <Alert tone="warn">
-                {intl.formatMessage({
-                  defaultMessage:
-                    "BetterCricket takes pictures up to 5 MB, so it may refuse this one. Export again and choose JPG.",
-                  description:
-                    "The exported picture is over BetterCricket's limit",
-                })}
-              </Alert>
-            )}
             <Button variant="primary" onClick={() => copyOut(exp.file)} stretch>
               {intl.formatMessage({
                 defaultMessage: "Copy template text",
                 description: "Button that copies the template text",
-              })}
-            </Button>
-          </Rows>
-        )}
-        {exp.status === "no_picture" && (
-          <Rows spacing="1u">
-            <Alert tone="warn">
-              {intl.formatMessage(
-                {
-                  defaultMessage:
-                    "The {count, plural, one {# field is} other {# fields are}} ready, but the picture could not be fetched ({reason}). You can still use the fields and upload the picture in BetterCricket under Your own design.",
-                  description:
-                    "The export worked but the picture could not be fetched",
-                },
-                { count: exp.fieldCount, reason: exp.reason },
-              )}
-            </Alert>
-            {exp.url && (
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  if (exp.url) {
-                    void requestOpenExternalUrl({ url: exp.url });
-                  }
-                }}
-                stretch
-              >
-                {intl.formatMessage({
-                  defaultMessage: "Open the picture",
-                  description: "Button that opens the exported picture",
-                })}
-              </Button>
-            )}
-            <Button
-              variant="secondary"
-              onClick={() => copyOut(exp.file)}
-              stretch
-            >
-              {intl.formatMessage({
-                defaultMessage: "Copy fields only",
-                description:
-                  "Button that copies a template without its picture",
               })}
             </Button>
           </Rows>

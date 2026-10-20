@@ -76,12 +76,21 @@ export function must<T>(value: T | undefined | null): T {
   return value;
 }
 
-const fillOf = (colour?: string, media?: "image" | "video"): FillLike => ({
+const fillOf = (
+  colour?: string,
+  media?: "image" | "video",
+  imageRef?: string,
+): FillLike => ({
   colorContainer: {
     ref: colour ? { type: "solid", color: colour } : undefined,
   },
   mediaContainer: {
-    ref: media ? ({ type: media } as FillRefLike) : undefined,
+    ref: media
+      ? ({
+          type: media,
+          ...(media === "image" && imageRef ? { imageRef } : null),
+        } as FillRefLike)
+      : undefined,
   },
 });
 
@@ -106,16 +115,25 @@ const box = (o: BoxOpts) => ({
 });
 
 export const rect = (
-  o: BoxOpts & { colour?: string; media?: "image" | "video" } = {},
+  o: BoxOpts & {
+    colour?: string;
+    media?: "image" | "video";
+    imageRef?: string;
+  } = {},
 ): RectElementLike => ({
   type: "rect",
   ...box(o),
-  fill: fillOf(o.colour, o.media),
+  fill: fillOf(o.colour, o.media, o.imageRef),
 });
 
 export const shape = (
   o: BoxOpts & {
-    paths?: { d: string; colour?: string; media?: "image" | "video" }[];
+    paths?: {
+      d: string;
+      colour?: string;
+      media?: "image" | "video";
+      imageRef?: string;
+    }[];
   } = {},
 ): ShapeElementLike => ({
   type: "shape",
@@ -124,7 +142,7 @@ export const shape = (
     toArray: () =>
       (o.paths ?? [{ d: "M0 0H10V10Z", colour: "#000000" }]).map((p) => ({
         d: p.d,
-        fill: fillOf(p.colour, p.media),
+        fill: fillOf(p.colour, p.media, p.imageRef),
       })),
   },
 });

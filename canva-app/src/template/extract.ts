@@ -107,8 +107,6 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
       skipped.push({ reason: "mixed", text: clean });
     } else if (box.rotated) {
       skipped.push({ reason: "rotated_group", text: clean });
-    } else if (box.locked) {
-      skipped.push({ reason: "locked", text: clean });
     } else {
       fields.push({
         token,
@@ -145,6 +143,10 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
     page.dimensions,
     scale,
   );
+  // A picture that covers the whole page is the design's own background.
+  const cover = found.surfaces.find(
+    (sf) => sf.use === "background" && sf.fill.kind === "image",
+  );
   return {
     canvas,
     postSize,
@@ -152,6 +154,8 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
     fields,
     texts,
     panels: found.panels,
+    backgroundRef:
+      cover && cover.fill.kind === "image" ? cover.fill.imageRef : null,
     surfaces: found.surfaces,
     skipped,
     warnings,

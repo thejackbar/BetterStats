@@ -36,7 +36,8 @@ export type GroupElementLike = {
 
 export type FillRefLike =
   | { readonly type: "solid"; readonly color: string }
-  | { readonly type: "image" | "video" | "unsupported" };
+  | { readonly type: "image"; readonly imageRef?: string }
+  | { readonly type: "video" | "unsupported" };
 
 export type FillLike = {
   readonly colorContainer: { readonly ref: FillRefLike | undefined };
@@ -82,7 +83,7 @@ export type PageLike = {
   readonly elements: { toArray(): readonly ElementLike[] };
 };
 
-export type SkipReason = "locked" | "mixed" | "rotated_group";
+export type SkipReason = "mixed" | "rotated_group";
 
 export type Skipped = { reason: SkipReason; text: string };
 
@@ -126,6 +127,8 @@ export type Extraction = {
   texts: FixedText[];
   /** Surfaces behind text, which BetterCricket redraws in the club's colours. */
   panels: Panel[];
+  /** Canva's id for the picture that covers the whole page, when there is one. */
+  backgroundRef: string | null;
   /** Rects, shapes and other non-text elements, for the "what is on this page" list. */
   surfaces: Surface[];
   skipped: Skipped[];
