@@ -49,6 +49,31 @@ export function bindFromToken(token: string): string | null {
   ) {
     return "photo";
   }
+  // Crests: the club's own, and the opposition's.
+  if (
+    [
+      "logo",
+      "club logo",
+      "team logo",
+      "our logo",
+      "crest",
+      "club crest",
+      "badge",
+    ].includes(t)
+  ) {
+    return "logo.team";
+  }
+  if (
+    [
+      "opponent logo",
+      "opposition logo",
+      "opponent crest",
+      "opposition crest",
+      "opponent badge",
+    ].includes(t)
+  ) {
+    return "logo.opponent";
+  }
   if (t === "wicketkeeper" || t === "wicket keeper") {
     return "keeper";
   }
@@ -83,6 +108,7 @@ const WORD: Record<string, string> = {
 export const isAreaBinding = (binding: string | null): boolean =>
   binding === "sponsors" ||
   binding === "photo" ||
+  /^logo\.(team|opponent)$/.test(binding ?? "") ||
   /^lineup\.\d+\.photo$/.test(binding ?? "");
 
 /** A short plain label for the panel, e.g. "Player 3 (last name)". */
@@ -93,6 +119,12 @@ export function bindLabel(binding: string): string {
   }
   if (binding === "photo") {
     return "Featured photo";
+  }
+  if (binding === "logo.team") {
+    return "Club logo";
+  }
+  if (binding === "logo.opponent") {
+    return "Opponent logo";
   }
   const name = binding.startsWith("match.") ? binding.slice(6) : binding;
   return name.replace(/^./, (c) => c.toUpperCase());

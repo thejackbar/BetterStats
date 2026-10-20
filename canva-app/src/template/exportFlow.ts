@@ -31,6 +31,8 @@ export type ExportOutcome = {
   panelCount: number;
   /** Whether the design's own background picture is in the file. */
   background: boolean;
+  /** How many free-standing pictures are in the file. */
+  loosePictures: number;
   /** How many panels carry their own picture. */
   panelPictures: number;
   /** Pictures that could not be fetched, one line each. The file is still made. */
@@ -52,8 +54,12 @@ const detailOf = (e: unknown): string =>
   e instanceof Error ? e.message : String(e);
 
 /** Names a picture in a problem line: the background, or "Panel 2". */
-const nameOf = (use: PictureUse, panel: number): string =>
-  use === "background" ? "Background" : `Panel ${panel}`;
+const nameOf = (use: PictureUse, panel: number, loose = false): string =>
+  use === "background"
+    ? "Background"
+    : loose
+      ? `Picture ${panel}`
+      : `Panel ${panel}`;
 
 /**
  * Reads the page and builds the file: where each field and fixed word sits and
@@ -100,7 +106,12 @@ export async function exportTemplate(
   // The design's own pictures. Each is fetched once, even if two things share it.
   const pictureProblems: string[] = [];
   const byRef = new Map<string, string>();
-  const want: { ref: string; use: PictureUse; panel: number }[] = [];
+  const want: {
+    ref: string;
+    use: PictureUse;
+    panel: number;
+    loose?: boolean;
+  }[] = [];
   if (named.backgroundRef) {
     want.push({ ref: named.backgroundRef, use: "background", panel: 0 });
   }
@@ -109,18 +120,25 @@ export async function exportTemplate(
       want.push({ ref: p.imageRef, use: "panel", panel: i + 1 });
     }
   });
+  named.pictures.forEach((p, i) => {
+    if (!want.some((w) => w.ref === p.imageRef)) {
+      want.push({ ref: p.imageRef, use: "panel", panel: i + 1, loose: true });
+    }
+  });
   for (const w of want) {
     try {
       const pic = await deps.fetchImage(w.ref, w.use);
       if (pic.bytes > PICTURE_LIMIT_BYTES) {
         pictureProblems.push(
-          `${nameOf(w.use, w.panel)}: the picture is over BetterCricket's 5 MB limit.`,
+          `${nameOf(w.use, w.panel, w.loose)}: the picture is over BetterCricket's 5 MB limit.`,
         );
       } else {
         byRef.set(w.ref, pic.dataUrl);
       }
     } catch (e) {
-      pictureProblems.push(`${nameOf(w.use, w.panel)}: ${detailOf(e)}`);
+      pictureProblems.push(
+        `${nameOf(w.use, w.panel, w.loose)}: ${detailOf(e)}`,
+      );
     }
   }
   const pictures: Pictures = {
@@ -140,6 +158,7 @@ export async function exportTemplate(
     textCount: named.texts.length,
     panelCount: named.panels.length,
     background: !!pictures.background,
+    loosePictures: (file.pictures ?? []).length,
     panelPictures: (file.panels ?? []).filter((p) => p.image).length,
     pictureProblems,
     skipped: named.skipped,

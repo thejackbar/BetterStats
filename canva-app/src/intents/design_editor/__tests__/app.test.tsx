@@ -453,6 +453,43 @@ describe("BetterCricket template panel", () => {
       expect(JSON.stringify(calls.created[1])).toContain("{{photo}}");
     });
 
+    it("adds a club logo and an opponent logo area", async () => {
+      const { calls } = useSession();
+      renderInTestProvider(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Add club logo" }));
+      await waitFor(() => expect(calls.created).toHaveLength(2));
+      expect(JSON.stringify(calls.created[1])).toContain("{{club logo}}");
+      fireEvent.click(
+        screen.getByRole("button", { name: "Add opponent logo" }),
+      );
+      await waitFor(() => expect(calls.created).toHaveLength(4));
+      expect(JSON.stringify(calls.created[3])).toContain("{{opponent logo}}");
+    });
+
+    it("tells the person what Canva lists on the page", async () => {
+      showPage(
+        page([
+          textBox("{{player 1}}"),
+          rect({
+            colour: "#112233",
+            left: 600,
+            top: 0,
+            width: 100,
+            height: 100,
+          }),
+        ]),
+      );
+      renderInTestProvider(<App />);
+      check();
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            /Canva lists on this page: 1 text box, 1 rectangle, 0 shapes, 0 groups, and 0 other elements\./,
+          ),
+        ).toBeTruthy(),
+      );
+    });
+
     it("says the marks are automatic", () => {
       renderInTestProvider(<App />);
       expect(

@@ -172,10 +172,19 @@ export default function SelectionInspector({
               style={{ borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' }}
               title="This picture is filled in from the post's players">Field: {bindLabel(single.bind)}</span>
             <select value={single.bind} onChange={e => patch({ bind: e.target.value })} data-testid="photo-source"
-              title="Whose photo this area shows"
+              title="What this area shows"
               className="h-7 max-w-[170px] px-1.5 rounded-md border pb-hairline2 bg-pb-surface2 text-pb-text text-[11px]">
-              <option value="photo">Featured photo (Hero Image)</option>
-              {Array.from({ length: 15 }, (_, i) => <option key={i} value={`lineup.${i + 1}.photo`}>Player {i + 1}</option>)}
+              {/^logo\./.test(single.bind) ? (
+                <>
+                  <option value="logo.team">Club logo</option>
+                  <option value="logo.opponent">Opponent logo</option>
+                </>
+              ) : (
+                <>
+                  <option value="photo">Featured photo (Hero Image)</option>
+                  {Array.from({ length: 15 }, (_, i) => <option key={i} value={`lineup.${i + 1}.photo`}>Player {i + 1}</option>)}
+                </>
+              )}
             </select>
             <Btn onClick={() => patch({ fit: single.fit === 'cover' ? 'contain' : 'cover' })}>
               {single.fit === 'cover' ? 'Fill' : 'Fit'}

@@ -627,3 +627,151 @@ describe("photo and sponsors areas", () => {
     expect(r.surfaces.map((s) => s.use)).toEqual(["background"]);
   });
 });
+
+describe("free-standing pictures and page counts", () => {
+  const words = textBox("{{player 1}}", { top: 100, left: 40, width: 300 });
+
+  it("keeps a picture nothing is written on, at its own place", () => {
+    const r = ok(
+      extractFields(
+        page([
+          rect({
+            left: 700,
+            top: 150,
+            width: 300,
+            height: 700,
+            media: "image",
+            imageRef: "batter",
+          }),
+          words,
+        ]),
+      ),
+    );
+    expect(r.pictures).toEqual([
+      {
+        imageRef: "batter",
+        box: { x: 700, y: 150, w: 300, h: 700, rotation: 0 },
+      },
+    ]);
+    expect(r.surfaces.map((s) => s.use)).toEqual(["picture"]);
+    expect(r.panels).toEqual([]);
+  });
+
+  it("scales it with the page and keeps its turn", () => {
+    const r = ok(
+      extractFields(
+        page(
+          [
+            rect({
+              left: 350,
+              top: 75,
+              width: 150,
+              height: 350,
+              rotation: 10,
+              media: "image",
+              imageRef: "batter",
+            }),
+            words,
+          ],
+          { width: 540, height: 540 },
+        ),
+      ),
+    );
+    expect(r.pictures[0]?.box).toEqual({
+      x: 700,
+      y: 150,
+      w: 300,
+      h: 700,
+      rotation: 10,
+    });
+  });
+
+  it("leaves out a picture with no id, one in a turned group, and the page background", () => {
+    const r = ok(
+      extractFields(
+        page([
+          rect({ width: 1080, height: 1080, media: "image", imageRef: "bg" }),
+          rect({
+            left: 700,
+            top: 150,
+            width: 300,
+            height: 700,
+            media: "image",
+          }),
+          group(
+            [
+              rect({
+                left: 10,
+                top: 10,
+                width: 200,
+                height: 200,
+                media: "image",
+                imageRef: "tilted",
+              }),
+            ],
+            { rotation: 20 },
+          ),
+          words,
+        ]),
+      ),
+    );
+    expect(r.pictures).toEqual([]);
+    expect(r.backgroundRef).toBe("bg");
+  });
+
+  it("keeps at most four", () => {
+    const six = Array.from({ length: 6 }, (_, i) =>
+      rect({
+        left: 600,
+        top: 50 + i * 150,
+        width: 100,
+        height: 100,
+        media: "image",
+        imageRef: `p${i}`,
+      }),
+    );
+    const r = ok(extractFields(page([...six, words])));
+    expect(r.pictures.map((p) => p.imageRef)).toEqual(["p0", "p1", "p2", "p3"]);
+  });
+
+  it("does not take a picture a panel already is", () => {
+    const r = ok(
+      extractFields(
+        page([
+          rect({
+            left: 30,
+            top: 60,
+            width: 400,
+            height: 400,
+            media: "image",
+            imageRef: "paper",
+          }),
+          words,
+        ]),
+      ),
+    );
+    expect(r.pictures).toEqual([]);
+    expect(r.panels[0]?.imageRef).toBe("paper");
+  });
+
+  it("counts what Canva lists", () => {
+    const r = ok(
+      extractFields(
+        page([
+          textBox("a"),
+          textBox("{{date}}"),
+          rect({ colour: "#112233" }),
+          shape(),
+          group([textBox("b")]),
+        ]),
+      ),
+    );
+    expect(r.counts).toEqual({
+      text: 3,
+      rects: 1,
+      shapes: 1,
+      groups: 1,
+      other: 0,
+    });
+  });
+});

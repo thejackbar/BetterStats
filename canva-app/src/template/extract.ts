@@ -2,13 +2,14 @@ import { describeSurfaces, type Surface } from "./describe";
 import { findPanels, wordsPoint } from "./panels";
 import { colorRole, fontRole } from "./roles";
 import { bindFromToken, isAreaBinding, wantsUppercase } from "./tokens";
-import { textBoxes, type TextBox } from "./walk";
+import { countGroups, textBoxes, type TextBox } from "./walk";
 import type {
   Canvas,
   Extraction,
   Field,
   FixedText,
   FormatLike,
+  PicturePlacement,
   PageLike,
   Skipped,
   TextElementLike,
@@ -44,6 +45,7 @@ function readLook(el: TextElementLike): FormatLike {
 }
 
 const MAX_FIXED = 40;
+const MAX_PICTURES = 4;
 
 /** What a box looks like, in BetterPosts' 1080 wide space, with its roles. */
 function boxLook(box: TextBox, scale: number) {
@@ -206,6 +208,31 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
     }
   });
   const found = findPanels(surfaces, anchors, page.dimensions, scale);
+  // A picture with no words on it (a cut-out player, a logo) stays a picture, under the words.
+  const pictures: PicturePlacement[] = [];
+  found.surfaces.forEach((sf, i) => {
+    if (
+      sf.use === "left_out" &&
+      sf.fill.kind === "image" &&
+      sf.fill.imageRef &&
+      !sf.fullPage &&
+      !sf.inRotatedGroup &&
+      sf.kind !== "other" &&
+      pictures.length < MAX_PICTURES
+    ) {
+      pictures.push({
+        imageRef: sf.fill.imageRef,
+        box: {
+          x: Math.round(sf.x * scale),
+          y: Math.round(sf.y * scale),
+          w: Math.round(sf.w * scale),
+          h: Math.round(sf.h * scale),
+          rotation: sf.rotation,
+        },
+      });
+      found.surfaces[i] = { ...sf, use: "picture" };
+    }
+  });
   // A picture that covers the whole page is the design's own background.
   const cover = found.surfaces.find(
     (sf) => sf.use === "background" && sf.fill.kind === "image",
@@ -217,6 +244,14 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
     fields,
     texts,
     panels: found.panels,
+    pictures,
+    counts: {
+      text: textBoxes(page.elements.toArray()).length,
+      rects: found.surfaces.filter((sf) => sf.kind === "rect").length,
+      shapes: found.surfaces.filter((sf) => sf.kind === "shape").length,
+      groups: countGroups(page.elements.toArray()),
+      other: found.surfaces.filter((sf) => sf.kind === "other").length,
+    },
     backgroundRef:
       cover && cover.fill.kind === "image" ? cover.fill.imageRef : null,
     surfaces: found.surfaces,

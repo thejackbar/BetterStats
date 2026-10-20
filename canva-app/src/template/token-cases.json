@@ -182,5 +182,29 @@
   {
     "token": "player photo",
     "binding": "photo"
+  },
+  {
+    "token": "logo",
+    "binding": "logo.team"
+  },
+  {
+    "token": "Club Logo",
+    "binding": "logo.team"
+  },
+  {
+    "token": "crest",
+    "binding": "logo.team"
+  },
+  {
+    "token": "opponent logo",
+    "binding": "logo.opponent"
+  },
+  {
+    "token": "opposition crest",
+    "binding": "logo.opponent"
+  },
+  {
+    "token": "logo 2",
+    "binding": null
   }
 ]

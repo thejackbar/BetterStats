@@ -120,6 +120,21 @@ import type { Surface } from "./describe";
 import type { Panel } from "./panels";
 import type { ColorRole, FontRole } from "./roles";
 
+/** A picture on the design that no words sit on (a cut-out player, a logo), with its place. */
+export type PicturePlacement = {
+  imageRef: string;
+  box: { x: number; y: number; w: number; h: number; rotation: number };
+};
+
+/** What Canva reports on the page, for telling a club what the app can and cannot see. */
+export type PageCounts = {
+  text: number;
+  rects: number;
+  shapes: number;
+  groups: number;
+  other: number;
+};
+
 export type Extraction = {
   canvas: Canvas;
   /** The scale applied so the page is 1080 wide, as BetterPosts posts are. */
@@ -133,6 +148,9 @@ export type Extraction = {
   panels: Panel[];
   /** Canva's id for the picture that covers the whole page, when there is one. */
   backgroundRef: string | null;
+  /** Pictures standing on their own on the design, drawn under the words. */
+  pictures: PicturePlacement[];
+  counts: PageCounts;
   /** Rects, shapes and other non-text elements, for the "what is on this page" list. */
   surfaces: Surface[];
   skipped: Skipped[];

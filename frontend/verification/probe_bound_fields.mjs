@@ -111,6 +111,22 @@ eq('but not the first-name field (it would print twice)', autoMarks('lineup.1.fi
 eq('marks can be switched off', autoMarks('lineup.1.name', { ...AM, marksOn: false }), '')
 eq('a place beyond the lineup has none', autoMarks('lineup.9.name', AM), '')
 
+// Logos (crests)
+eq('logo is the club crest', bindFromToken('logo'), 'logo.team')
+eq('club logo', bindFromToken('{{Club Logo}}'), 'logo.team')
+eq('crest', bindFromToken('crest'), 'logo.team')
+eq('opponent logo', bindFromToken('opponent logo'), 'logo.opponent')
+eq('opposition crest', bindFromToken('opposition crest'), 'logo.opponent')
+eq('logo 2 is not a field', bindFromToken('logo 2'), null)
+eq('a logo is an area', isAreaBind('logo.team') && isAreaBind('logo.opponent'), true)
+eq('labels', [bindLabel('logo.team'), bindLabel('logo.opponent')], ['Club logo', 'Opponent logo'])
+eq('club logo before any data is null (placeholder)', resolveBind('logo.team', {}), null)
+eq('club logo is the address the editor holds', resolveBind('logo.team', { teamLogo: '/c.png' }), '/c.png')
+eq('a club with no logo prints nothing', resolveBind('logo.team', { teamLogo: '' }), '')
+eq('opponent logo before an opponent is chosen is null', resolveBind('logo.opponent', { opponent: null, opponentLogo: null }), null)
+eq('an opponent with no logo prints nothing', resolveBind('logo.opponent', { opponent: 'South Perth', opponentLogo: null }), '')
+eq('an opponent logo is the address held', resolveBind('logo.opponent', { opponent: 'South Perth', opponentLogo: '/o.png' }), '/o.png')
+
 // Counting slots
 eq('slot count is the highest slot used', boundSlotCount([{ bind: 'lineup.3.name' }, { bind: 'lineup.11.last' }, { bind: 'opponent' }, {}]), 11)
 eq('no player slots', boundSlotCount([{ bind: 'opponent' }]), 0)
