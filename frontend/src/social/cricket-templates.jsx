@@ -1946,10 +1946,10 @@ export const SLOT_C3 = _footerSlot
 // so it is a real root child that can take a z-index. `left` is the footer's own
 // line of text; the empty rounded box is the reserved slot, so a club with no
 // sponsors still sees a deliberate, tidy space (a grid drawn over it covers it).
-function _companionFooter({ width, height, palette, left }) {
+function _companionFooter({ width, height, palette, left, parts }) {
   const { bar, slot } = _footerGeom(width, height)
   return (
-    <div data-layer="credit-footer" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: bar, boxSizing: 'border-box', padding: '0 40px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', alignItems: 'center', zIndex: 3 }}>
+    <div data-layer="credit-footer" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: bar, boxSizing: 'border-box', padding: '0 40px', background: pc(parts, 'footerBg', palette.primary), borderTop: `2px solid ${pc(parts, 'footerRule', palette.accent)}`, display: 'flex', alignItems: 'center', zIndex: 3 }}>
       <div style={{ flex: 1, minWidth: 0, paddingRight: 20 }}>{left}</div>
       <div style={{ width: slot.w, height: slot.h, flexShrink: 0, marginRight: 16, borderRadius: 18, background: `${palette.ink}0d` }} />
       <div style={{ width: _CREDIT_W, flexShrink: 0, display: 'flex', justifyContent: 'flex-end' }}>
@@ -1978,7 +1978,8 @@ export const SLOT_C4 = (width, height) => _c4Geom(width, height).slot
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 1 — Generic announcement
 // ─────────────────────────────────────────────────────────────────────────────
-export function C1_CaptainAnnounce({ width = 1080, height = 1080, announcement, team, opponent, match, palette, player: legacyPlayer }) {
+export function C1_CaptainAnnounce({ width = 1080, height = 1080, announcement, team, opponent, match, palette, player: legacyPlayer, parts }) {
+  const texture = usePostLook().texture !== false
   const a = announcement || { kind: 'ANNOUNCEMENT', headline: 'NAMED', subheadline: '', player: legacyPlayer }
   const player = a.player || legacyPlayer
   const hasHead = !!(player && player.headshot)
@@ -2000,7 +2001,7 @@ export function C1_CaptainAnnounce({ width = 1080, height = 1080, announcement, 
     }}>
       <Halftone color={palette.ink} opacity={0.07} size={11} />
       <Stripes color={palette.accent} opacity={0.04} gap={28} angle={-22} />
-      <div style={{ position: 'absolute', left: -40, top: -30, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 360), lineHeight: 0.82, color: palette.accent, opacity: 0.09, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{(a.kind || 'ANNOUNCEMENT')}</div>
+      {texture ? <div style={{ position: 'absolute', left: -40, top: -30, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 360), lineHeight: 0.82, color: pc(parts, 'c1GhostColor', palette.accent), opacity: 0.09, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{(a.kind || 'ANNOUNCEMENT')}</div> : null}
       <div style={{ position: 'absolute', left: 60, top: 90, right: 60, bottom: bar + 122, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {hasHead ? (
           // Same cut-out rule as T7 and C3 — height follows the canvas so the
@@ -2012,31 +2013,51 @@ export function C1_CaptainAnnounce({ width = 1080, height = 1080, announcement, 
         )}
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '36px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', zIndex: 3 }}>
-        <div><div style={{ display: 'inline-block', padding: '7px 14px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 3 }}>{(a.kind || 'ANNOUNCEMENT').toUpperCase()}</div></div>
-        <BrandLockup team={team} palette={palette} size={184} align="right" nameSize={30} style={{ maxWidth: 560 }} />
+        <div><div style={{ display: 'inline-block', padding: '7px 14px', background: pc(parts, 'badgeBg', palette.accent), color: pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(pc(parts, 'badgeBg', palette.accent)) : palette.primary), fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 3 }}>{(a.kind || 'ANNOUNCEMENT').toUpperCase()}</div></div>
+        <BrandLockup team={team} palette={palette} size={184} align="right" nameSize={30} nameColor={pc(parts, 'clubColor', undefined)} style={{ maxWidth: 560 }} />
       </div>
       <div style={{ position: 'absolute', left: 40, bottom: bar + 52, right: 40, zIndex: 3 }}>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 56, letterSpacing: 3, color: palette.accent, marginBottom: 8, lineHeight: 1 }}>{(a.headline || '').toUpperCase()}</div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 64, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: lastSize, letterSpacing: -3, color: palette.ink, lineHeight: 0.84, marginTop: -6 }}>{player?.last || '—'}</div>
-        {a.subheadline && <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 2, color: palette.accent, marginTop: 10 }}>{a.subheadline.toUpperCase()}</div>}
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 56, letterSpacing: 3, color: pc(parts, 'headlineColor', palette.accent), marginBottom: 8, lineHeight: 1 }}>{(a.headline || '').toUpperCase()}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 64, letterSpacing: 1, color: pc(parts, 'firstColor', palette.ink), opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: lastSize, letterSpacing: -3, color: pc(parts, 'nameColor', palette.ink), lineHeight: 0.84, marginTop: -6 }}>{player?.last || '—'}</div>
+        {a.subheadline && <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 2, color: pc(parts, 'statColor', palette.accent), marginTop: 10 }}>{a.subheadline.toUpperCase()}</div>}
       </div>
-      {_companionFooter({ width, height, palette, left: (
+      {_companionFooter({ width, height, palette, parts, left: (
         <>
           <AutoFitText text={(team.fullName || team.name).toUpperCase()} max={28} min={14} lines={1} measureDeps={[width, height]}
-            style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: palette.ink, lineHeight: 1.05 }} />
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.65, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[match.competition, match.season].filter(Boolean).join(' · ')}</div>
+            style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: pc(parts, 'c1FooterText', palette.ink), lineHeight: 1.05 }} />
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: pc(parts, 'c1FooterSub', palette.ink), opacity: 0.65, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[match.competition, match.season].filter(Boolean).join(' · ')}</div>
         </>
       ) })}
       <GrainSVG opacity={0.32} id="ca1" />
     </LayerRoot>
   )
 }
+registerParts({
+  C1: [
+    colorPart('badgeBg', 'Kind tag', 'Heading', (p) => p.accent),
+    colorPart('badgeColor', 'Kind tag text', 'Heading', (p) => p.primary),
+    colorPart('clubColor', 'Club name', 'Heading', (p) => p.ink),
+    colorPart('c1GhostColor', 'Big faint word', 'Heading', (p) => p.accent),
+    colorPart('headlineColor', 'Headline', 'Name block', (p) => p.accent),
+    colorPart('firstColor', 'First name', 'Name block', (p) => p.ink),
+    colorPart('nameColor', 'Surname', 'Name block', (p) => p.ink),
+    colorPart('statColor', 'Line under the name', 'Name block', (p) => p.accent),
+    colorPart('footerBg', 'Footer bar', 'Footer', (p) => p.primary),
+    colorPart('footerRule', 'Footer line', 'Footer', (p) => p.accent),
+    colorPart('c1FooterText', 'Footer club name', 'Footer', (p) => p.ink),
+    colorPart('c1FooterSub', 'Footer competition line', 'Footer', (p) => p.ink),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 2 — Toss
 // ─────────────────────────────────────────────────────────────────────────────
-export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, match, palette }) {
+export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, match, palette, parts }) {
+  const texture = usePostLook().texture !== false
+  const disc = pc(parts, 'c2DiscColor', palette.accent)
+  const bandBg = pc(parts, 'bandBg', palette.secondary)
+  const onBand = partPicked(parts, 'bandBg') ? inkOn(bandBg) : palette.ink
   const winnerIsOpponent = toss?.winner === 'OPPONENT'
   const decision = (toss?.decision || 'BAT').toUpperCase()
   const A = aspectOf(width, height)
@@ -2057,14 +2078,14 @@ export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, 
     }}>
       <Halftone color={palette.ink} opacity={0.07} size={10} />
       <Stripes color={palette.accent} opacity={0.04} gap={24} angle={-20} />
-      <div style={{ position: 'absolute', right: -100, top: -100, width: 660, height: 660, borderRadius: '50%', background: `radial-gradient(circle at 35% 30%, ${palette.accent} 0%, ${palette.accent}dd 50%, ${palette.accent}88 100%)`, boxShadow: `inset 0 0 0 14px ${palette.primary}, inset 0 0 0 20px ${palette.accent}` }} />
-      <div style={{ position: 'absolute', right: 90, top: 130, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 280, letterSpacing: -4, color: palette.primary, lineHeight: 0.85, transform: 'rotate(-6deg)' }}>TOSS</div>
-      <div style={{ position: 'absolute', left: -50, bottom: share(height, 180), fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 460), lineHeight: 0.8, color: palette.ink, opacity: 0.05, letterSpacing: -10, userSelect: 'none' }}>{decision}</div>
+      <div style={{ position: 'absolute', right: -100, top: -100, width: 660, height: 660, borderRadius: '50%', background: `radial-gradient(circle at 35% 30%, ${disc} 0%, ${disc}dd 50%, ${disc}88 100%)`, boxShadow: `inset 0 0 0 14px ${palette.primary}, inset 0 0 0 20px ${disc}` }} />
+      <div style={{ position: 'absolute', right: 90, top: 130, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 280, letterSpacing: -4, color: pc(parts, 'c2TossColor', partPicked(parts, 'c2DiscColor') ? inkOn(disc) : palette.primary), lineHeight: 0.85, transform: 'rotate(-6deg)' }}>{pt(parts, 'c2TossWord', 'TOSS')}</div>
+      {texture ? <div style={{ position: 'absolute', left: -50, bottom: share(height, 180), fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 460), lineHeight: 0.8, color: pc(parts, 'c2GhostColor', palette.ink), opacity: 0.05, letterSpacing: -10, userSelect: 'none' }}>{decision}</div> : null}
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '32px 40px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 14, zIndex: 3 }}>
         <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={96} shape="shield" />
         <div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.accent }}>// {match.competition} · {match.round}</div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 1.5, marginTop: 2, color: palette.ink }}>{team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: pc(parts, 'roundColor', palette.accent) }}>// {match.competition} · {match.round}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 1.5, marginTop: 2, color: pc(parts, 'nameColor', palette.ink) }}>{team.name} <span style={{ color: pc(parts, 'c2VsColor', palette.accent) }}>v</span> {opponent.name}</div>
         </div>
       </div>
       {/* Centred between the header and the fixture band on a taller post. The
@@ -2074,37 +2095,67 @@ export function C2_TossWon({ width = 1080, height = 1080, toss, team, opponent, 
       <div style={A === 'square'
         ? { position: 'absolute', left: 40, top: 296, right: 40 }
         : { position: 'absolute', left: 40, top: 300, right: 40, bottom: bar + 170, zIndex: 2, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-        <div style={{ ...(A === 'square' ? { display: 'inline-block' } : { alignSelf: 'flex-start' }), padding: '6px 14px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3, marginBottom: 12 }}>
+        <div style={{ ...(A === 'square' ? { display: 'inline-block' } : { alignSelf: 'flex-start' }), padding: '6px 14px', background: pc(parts, 'badgeBg', palette.accent), color: pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(pc(parts, 'badgeBg', palette.accent)) : palette.primary), fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3, marginBottom: 12 }}>
           {winnerIsOpponent ? `${opponent.name} WON THE TOSS` : `${team.name} WON THE TOSS`}
         </div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: Math.round(decSize * 0.31), letterSpacing: 2, color: palette.ink, opacity: 0.55, lineHeight: 1, marginTop: 16 }}>{winnerIsOpponent ? "THEY'RE" : "WE'RE"}</div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: decSize, letterSpacing: -6, color: palette.ink, lineHeight: 0.85, marginTop: -4 }}>{decision}</div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: Math.round(decSize * 0.26), letterSpacing: 3, color: palette.accent, lineHeight: 1, marginTop: -8 }}>FIRST</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: Math.round(decSize * 0.31), letterSpacing: 2, color: pc(parts, 'c2LeadColor', palette.ink), opacity: 0.55, lineHeight: 1, marginTop: 16 }}>{pt(parts, 'c2LeadWord', winnerIsOpponent ? "THEY'RE" : "WE'RE")}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: decSize, letterSpacing: -6, color: pc(parts, 'c2DecisionColor', palette.ink), lineHeight: 0.85, marginTop: -4 }}>{decision}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: Math.round(decSize * 0.26), letterSpacing: 3, color: pc(parts, 'c2FirstColor', palette.accent), lineHeight: 1, marginTop: -8 }}>{pt(parts, 'c2FirstWord', 'FIRST')}</div>
       </div>
-      <div style={{ position: 'absolute', left: 40, right: 40, bottom: bar + 22, zIndex: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', background: palette.secondary, borderLeft: `4px solid ${palette.accent}` }}>
+      <div style={{ position: 'absolute', left: 40, right: 40, bottom: bar + 22, zIndex: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', background: bandBg, borderLeft: `4px solid ${pc(parts, 'c2BandRule', palette.accent)}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, color: palette.accent }}>VS</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, color: pc(parts, 'c2VsColor', palette.accent) }}>VS</div>
           <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={64} shape="shield" />
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{match.date}</div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.75, marginTop: 4 }}>{match.time} · {match.venue.toUpperCase()}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 1, color: pc(parts, 'c2DateColor', onBand), lineHeight: 1 }}>{match.date}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: pc(parts, 'subColor', onBand), opacity: 0.75, marginTop: 4 }}>{match.time} · {match.venue.toUpperCase()}</div>
         </div>
       </div>
-      {_companionFooter({ width, height, palette, left: (
+      {_companionFooter({ width, height, palette, parts, left: (
         <AutoFitText text={(team.fullName || team.name).toUpperCase()} max={26} min={14} lines={1} measureDeps={[width, height]}
-          style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: palette.ink, lineHeight: 1.05 }} />
+          style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: pc(parts, 'c2FooterText', palette.ink), lineHeight: 1.05 }} />
       ) })}
       <GrainSVG opacity={0.3} id="ca2" />
     </LayerRoot>
   )
 }
+registerParts({
+  C2: [
+    colorPart('roundColor', 'Competition line', 'Header', (p) => p.accent),
+    colorPart('nameColor', 'Team names', 'Header', (p) => p.ink),
+    colorPart('c2VsColor', 'The "v" and "VS"', 'Header', (p) => p.accent),
+    colorPart('c2DiscColor', 'Big circle', 'Toss circle', (p) => p.accent),
+    textPart('c2TossWord', 'Word on the circle', 'Toss circle', () => 'TOSS'),
+    colorPart('c2TossColor', 'Word on the circle colour', 'Toss circle', (p) => p.primary),
+    colorPart('c2GhostColor', 'Big faint word', 'Toss circle', (p) => p.ink),
+    colorPart('badgeBg', 'Toss winner tag', 'The call', (p) => p.accent),
+    colorPart('badgeColor', 'Toss winner tag text', 'The call', (p) => p.primary),
+    textPart('c2LeadWord', 'Small word above the call', 'The call', () => "WE'RE"),
+    colorPart('c2LeadColor', 'Small word colour', 'The call', (p) => p.ink),
+    colorPart('c2DecisionColor', 'The call (bat or bowl)', 'The call', (p) => p.ink),
+    textPart('c2FirstWord', 'Word under the call', 'The call', () => 'FIRST'),
+    colorPart('c2FirstColor', 'Word under the call colour', 'The call', (p) => p.accent),
+    colorPart('bandBg', 'Fixture band', 'Fixture band', (p) => p.secondary),
+    colorPart('c2BandRule', 'Band edge', 'Fixture band', (p) => p.accent),
+    colorPart('c2DateColor', 'Date', 'Fixture band', (p) => p.ink),
+    colorPart('subColor', 'Time and venue', 'Fixture band', (p) => p.ink),
+    colorPart('footerBg', 'Footer bar', 'Footer', (p) => p.primary),
+    colorPart('footerRule', 'Footer line', 'Footer', (p) => p.accent),
+    colorPart('c2FooterText', 'Footer club name', 'Footer', (p) => p.ink),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 3 — Man of the Match
 // ─────────────────────────────────────────────────────────────────────────────
-export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponent, match, palette }) {
+export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponent, match, palette, parts }) {
+  const texture = usePostLook().texture !== false
+  const firstTileBg = pc(parts, 'c3FirstTileBg', palette.accent)
+  const firstTileInk = partPicked(parts, 'c3FirstTileBg') ? inkOn(firstTileBg) : palette.primary
+  const tileBg = pc(parts, 'cardBg', `${palette.ink}0c`)
+  const tileInk = partPicked(parts, 'cardBg') ? inkOn(tileBg) : palette.ink
   const player = motm?.player
   const stats = motm?.stats || []
   const hasHead = !!(player && player.headshot)
@@ -2125,17 +2176,17 @@ export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponen
       width, height, position: 'relative', overflow: 'hidden',
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
-      <div style={{ position: 'absolute', left: -100, top: -100, width: 700, height: Math.round(height * 1.3), background: palette.secondary, transform: 'rotate(8deg)', transformOrigin: 'top left' }} />
+      {texture ? <div style={{ position: 'absolute', left: -100, top: -100, width: 700, height: Math.round(height * 1.3), background: pc(parts, 'c3SlabColor', palette.secondary), transform: 'rotate(8deg)', transformOrigin: 'top left' }} /> : null}
       <Halftone color={palette.ink} opacity={0.06} size={11} />
       <Stripes color={palette.accent} opacity={0.04} gap={28} angle={-22} />
-      <div style={{ position: 'absolute', right: 60, top: 90, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 320, lineHeight: 0.8, color: palette.accent, opacity: 0.18, letterSpacing: -8, userSelect: 'none' }}>★</div>
+      {texture ? <div style={{ position: 'absolute', right: 60, top: 90, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 320, lineHeight: 0.8, color: pc(parts, 'c3StarColor', palette.accent), opacity: 0.18, letterSpacing: -8, userSelect: 'none' }}>★</div> : null}
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '32px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', zIndex: 3 }}>
         <div>
-          <div style={{ display: 'inline-block', padding: '6px 14px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, letterSpacing: 3 }}>{IS_AFL ? '★ BEST ON GROUND' : '★ MAN OF THE MATCH'}</div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 32, letterSpacing: 1.5, marginTop: 14, color: palette.ink }}>{team.name} <span style={{ color: palette.accent }}>v</span> {opponent.name}</div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 6 }}>{match.competition} · {match.round} · {match.date}</div>
+          <div style={{ display: 'inline-block', padding: '6px 14px', background: pc(parts, 'badgeBg', palette.accent), color: pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(pc(parts, 'badgeBg', palette.accent)) : palette.primary), fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 18, letterSpacing: 3 }}>{pt(parts, 'c3ChipText', IS_AFL ? '★ BEST ON GROUND' : '★ MAN OF THE MATCH')}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 32, letterSpacing: 1.5, marginTop: 14, color: pc(parts, 'c3TeamsColor', palette.ink) }}>{team.name} <span style={{ color: pc(parts, 'c3VsColor', palette.accent) }}>v</span> {opponent.name}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: pc(parts, 'roundColor', palette.ink), opacity: 0.7, marginTop: 6 }}>{match.competition} · {match.round} · {match.date}</div>
         </div>
-        <BrandLockup team={team} palette={palette} size={150} layout="stack" nameSize={22} style={{ maxWidth: 320 }} />
+        <BrandLockup team={team} palette={palette} size={150} layout="stack" nameSize={22} nameColor={pc(parts, 'clubColor', undefined)} style={{ maxWidth: 320 }} />
       </div>
       <div style={{ position: 'absolute', left: 0, top: 220, width: 520, bottom: bar + 82, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {hasHead ? (
@@ -2150,31 +2201,57 @@ export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponen
       <div style={A === 'square'
         ? { position: 'absolute', right: 36, top: 230, width: 520, zIndex: 3 }
         : { position: 'absolute', right: 36, top: 230, bottom: bar + 32, width: 520, zIndex: 3, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 44, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: lastSize, letterSpacing: -1, color: palette.ink, lineHeight: 0.88, marginTop: -2 }}>{player?.last || ''}</div>
-        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: palette.accent, marginTop: 8 }}>{(player?.roleLong || player?.role || '').toUpperCase()}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 44, letterSpacing: 1, color: pc(parts, 'firstColor', palette.ink), opacity: 0.78, lineHeight: 1 }}>{(player?.first || '').toUpperCase()}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: lastSize, letterSpacing: -1, color: pc(parts, 'nameColor', palette.ink), lineHeight: 0.88, marginTop: -2 }}>{player?.last || ''}</div>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: pc(parts, 'subColor', palette.accent), marginTop: 8 }}>{(player?.roleLong || player?.role || '').toUpperCase()}</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 22 }}>
           {stats.map((s, i) => (
-            <div key={i} style={{ padding: '14px 18px', background: i === 0 ? palette.accent : `${palette.ink}0c`, border: `1.5px solid ${palette.accent}`, color: i === 0 ? palette.primary : palette.ink }}>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, opacity: 0.75 }}>{s.label.toUpperCase()}</div>
-              <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: statSize, lineHeight: 0.9, letterSpacing: -1, marginTop: 4 }}>{s.value}</div>
+            <div key={i} style={{ padding: '14px 18px', background: i === 0 ? firstTileBg : tileBg, border: `1.5px solid ${pc(parts, 'cardBorder', palette.accent)}`, color: i === 0 ? firstTileInk : tileInk }}>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, opacity: 0.75, color: pc(parts, 'c3StatLabel', undefined) }}>{s.label.toUpperCase()}</div>
+              <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: statSize, lineHeight: 0.9, letterSpacing: -1, marginTop: 4, color: pc(parts, 'statColor', undefined) }}>{s.value}</div>
             </div>
           ))}
         </div>
         {motm?.summary && (
-          <div style={{ marginTop: 16, fontFamily: "'Inter', sans-serif", fontSize: 15, lineHeight: 1.4, color: palette.ink, opacity: 0.78, fontStyle: 'italic', borderLeft: `3px solid ${palette.accent}`, paddingLeft: 14 }}>
+          <div style={{ marginTop: 16, fontFamily: "'Inter', sans-serif", fontSize: 15, lineHeight: 1.4, color: pc(parts, 'c3QuoteColor', palette.ink), opacity: 0.78, fontStyle: 'italic', borderLeft: `3px solid ${pc(parts, 'c3QuoteRule', palette.accent)}`, paddingLeft: 14 }}>
             "{motm.summary}"
           </div>
         )}
       </div>
-      {_companionFooter({ width, height, palette, left: (
+      {_companionFooter({ width, height, palette, parts, left: (
         <AutoFitText text={match.venue.toUpperCase()} max={20} min={12} lines={1} measureDeps={[width, height]}
-          style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: palette.ink, lineHeight: 1.05 }} />
+          style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: pc(parts, 'c3FooterText', palette.ink), lineHeight: 1.05 }} />
       ) })}
       <GrainSVG opacity={0.3} id="ca3" />
     </LayerRoot>
   )
 }
+registerParts({
+  C3: [
+    textPart('c3ChipText', 'Tag words', 'Heading', () => (IS_AFL ? '★ BEST ON GROUND' : '★ MAN OF THE MATCH')),
+    colorPart('badgeBg', 'Tag', 'Heading', (p) => p.accent),
+    colorPart('badgeColor', 'Tag text', 'Heading', (p) => p.primary),
+    colorPart('c3TeamsColor', 'Team names', 'Heading', (p) => p.ink),
+    colorPart('c3VsColor', 'The "v"', 'Heading', (p) => p.accent),
+    colorPart('roundColor', 'Competition, round and date', 'Heading', (p) => p.ink),
+    colorPart('clubColor', 'Club name', 'Heading', (p) => p.ink),
+    colorPart('firstColor', 'First name', 'Player', (p) => p.ink),
+    colorPart('nameColor', 'Surname', 'Player', (p) => p.ink),
+    colorPart('subColor', 'Role line', 'Player', (p) => p.accent),
+    colorPart('c3FirstTileBg', 'First stat tile', 'Stat tiles', (p) => p.accent),
+    colorPart('cardBg', 'Other stat tiles', 'Stat tiles', null, { autoLabel: 'Soft tint' }),
+    colorPart('cardBorder', 'Tile outline', 'Stat tiles', (p) => p.accent),
+    colorPart('c3StatLabel', 'Tile labels', 'Stat tiles', (p) => p.ink),
+    colorPart('statColor', 'Tile figures', 'Stat tiles', (p) => p.ink),
+    colorPart('c3QuoteColor', 'Summary quote', 'Summary', (p) => p.ink),
+    colorPart('c3QuoteRule', 'Summary line', 'Summary', (p) => p.accent),
+    colorPart('c3SlabColor', 'Slanted panel', 'Background art', (p) => p.secondary),
+    colorPart('c3StarColor', 'Big faint star', 'Background art', (p) => p.accent),
+    colorPart('footerBg', 'Footer bar', 'Footer', (p) => p.primary),
+    colorPart('footerRule', 'Footer line', 'Footer', (p) => p.accent),
+    colorPart('c3FooterText', 'Footer venue', 'Footer', (p) => p.ink),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 4 — Final score with top performers
@@ -2185,22 +2262,22 @@ export function C3_ManOfMatch({ width = 1080, height = 1080, motm, team, opponen
 // portrait post the square's top-anchored rows left the bottom half of the box
 // empty. Batting holds the top of the panel and bowling the bottom, which is
 // also the reading order a scorecard already has.
-function PerfPanel({ title, titleColor, titleOpacity = 1, edge, batters = [], bowlers = [], palette, Perf, tall = false }) {
+function PerfPanel({ title, titleColor, titleOpacity = 1, edge, batters = [], bowlers = [], palette, Perf, tall = false, parts }) {
   const Label = ({ children }) => (
-    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: palette.ink, opacity: 0.6, marginBottom: 6 }}>{children}</div>
+    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 1.5, color: pc(parts, 'c4LabelColor', palette.ink), opacity: 0.6, marginBottom: 6 }}>{children}</div>
   )
   return (
-    <div style={{ padding: '24px 26px', background: `${palette.ink}08`, borderLeft: `4px solid ${edge}`, display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }}>
+    <div style={{ padding: '24px 26px', background: pc(parts, 'cardBg', `${palette.ink}08`), borderLeft: `4px solid ${edge}`, display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }}>
       <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 27, letterSpacing: 2, lineHeight: 1, color: titleColor, opacity: titleOpacity, flexShrink: 0 }}>{title}</div>
       <div style={{ ...(tall ? { flex: 1, minHeight: 0, justifyContent: 'space-between' } : null), display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div><Label>BATTING</Label>{batters.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}</div>
-        <div><Label>BOWLING</Label>{bowlers.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}</div>
+        <div><Label>{pt(parts, 'c4BattingLabel', 'BATTING')}</Label>{batters.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}</div>
+        <div><Label>{pt(parts, 'c4BowlingLabel', 'BOWLING')}</Label>{bowlers.slice(0, 3).map((p, i) => <Perf key={i} p={p} />)}</div>
       </div>
     </div>
   )
 }
 
-export function C4_FinalScore({ width = 1080, height = 1080, result, team, opponent, match, palette }) {
+export function C4_FinalScore({ width = 1080, height = 1080, result, team, opponent, match, palette, parts }) {
   const winnerSide = result?.winner === 'OPPONENT' ? 'opponent' : (result?.winner === 'TIE' ? 'tie' : 'team')
   const tb = result?.topBatters || {}
   const tw = result?.topBowlers || {}
@@ -2211,9 +2288,9 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
   // C4 feedback: shrink the result/score blocks, blow the performers up. These
   // rows are the focus now, so name + figures are markedly larger.
   const Perf = ({ p, accent }) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: `1px solid ${palette.ink}1a`, padding: '9px 0', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: palette.ink, lineHeight: 1.05, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: `1px solid ${pc(parts, 'dividerColor', `${palette.ink}1a`)}`, padding: '9px 0', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: pc(parts, 'nameColor', palette.ink), lineHeight: 1.05, whiteSpace: 'nowrap', overflow: 'hidden' }}>
       <span style={{ fontSize: 30, letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8 }}>{p.last}</span>
-      <span style={{ fontSize: 24, color: accent || palette.accent, letterSpacing: 1 }}>{p.line}</span>
+      <span style={{ fontSize: 24, color: pc(parts, 'c4PerfFigure', accent || palette.accent), letterSpacing: 1 }}>{p.line}</span>
     </div>
   )
   // The season rides on the date ("SAT 1 JAN · 2025-26") and the venue is its
@@ -2227,11 +2304,18 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
   const motm = !!result?.motmLast
   const tied = result?.winner === 'TIE'
   const winnerName = winnerSide === 'team' ? team.name : opponent.name
-  const winLine = `WIN ${result?.margin || ''}`.trim()
+  const winLine = `${pt(parts, 'c4WinWord', 'WIN')} ${result?.margin || ''}`.trim()
   // "M. EDWARDS" when the first name is known, else just the surname; the
   // figures are whatever the scorecard import filled (batting, bowling).
   const motmName = [result?.motmFirst ? `${result.motmFirst[0]}.` : '', result?.motmLast].filter(Boolean).join(' ').toUpperCase()
   const motmFigures = [result?.motmBat, result?.motmBowl].filter(Boolean).join(' · ')
+  // The winning side's card and the other side's outline. A tie draws neither.
+  const winC = pc(parts, 'winColor', palette.accent)
+  const otherEdge = pc(parts, 'lossColor', palette.ink + '22')
+  const bandBg = pc(parts, 'bandBg', palette.secondary)
+  const onBand = partPicked(parts, 'bandBg') ? inkOn(bandBg) : palette.ink
+  const tagBg = pc(parts, 'badgeBg', palette.accent)
+  const tagInk = pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(tagBg) : palette.primary)
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -2240,77 +2324,118 @@ export function C4_FinalScore({ width = 1080, height = 1080, result, team, oppon
       <Halftone color={palette.ink} opacity={0.06} size={10} />
       <Stripes color={palette.accent} opacity={0.03} gap={28} angle={0} />
       <div style={{ position: 'absolute', inset: 0, paddingBottom: foot, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '32px 48px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `3px solid ${palette.accent}` }}>
+        <div style={{ padding: '32px 48px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `3px solid ${pc(parts, 'headerRule', palette.accent)}` }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ display: 'inline-block', padding: '7px 15px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3 }}>RESULT</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 9 }}>{metaLine}</div>
-            {match.venue && <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 4 }}>{match.venue.toUpperCase()}</div>}
+            <div style={{ display: 'inline-block', padding: '7px 15px', background: tagBg, color: tagInk, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 3 }}>{pt(parts, 'c4ChipText', 'RESULT')}</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: pc(parts, 'roundColor', palette.ink), opacity: 0.7, marginTop: 9 }}>{metaLine}</div>
+            {match.venue && <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: pc(parts, 'subColor', palette.ink), opacity: 0.7, marginTop: 4 }}>{match.venue.toUpperCase()}</div>}
           </div>
-          <BrandLockup team={team} palette={palette} size={92} align="right" nameSize={26} style={{ maxWidth: 460 }} />
+          <BrandLockup team={team} palette={palette} size={92} align="right" nameSize={26} nameColor={pc(parts, 'clubColor', undefined)} style={{ maxWidth: 460 }} />
         </div>
         <div style={{ padding: '18px 48px 12px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 20, alignItems: 'center' }}>
-          <div style={{ textAlign: 'center', padding: '13px 16px', background: winnerSide === 'team' ? `${palette.accent}22` : 'transparent', border: `2px solid ${winnerSide === 'team' ? palette.accent : palette.ink + '22'}`, position: 'relative' }}>
-            {winnerSide === 'team' && <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', padding: '3px 11px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 2 }}>WINNER</div>}
+          <div style={{ textAlign: 'center', padding: '13px 16px', background: winnerSide === 'team' ? `${winC}22` : 'transparent', border: `2px solid ${winnerSide === 'team' ? winC : otherEdge}`, position: 'relative' }}>
+            {winnerSide === 'team' && <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', padding: '3px 11px', background: tagBg, color: tagInk, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 2 }}>WINNER</div>}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
               <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={84} shape="shield" />
               <div style={{ textAlign: 'left' }}>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{team.name}</div>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: palette.ink, marginTop: 4 }}>{result?.teamScore || '—'}</div>
+                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: pc(parts, 'c4TeamName', palette.ink), lineHeight: 1 }}>{team.name}</div>
+                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: pc(parts, 'statColor', palette.ink), marginTop: 4 }}>{result?.teamScore || '—'}</div>
               </div>
             </div>
           </div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 38, letterSpacing: 2, color: palette.accent }}>VS</div>
-          <div style={{ textAlign: 'center', padding: '13px 16px', background: winnerSide === 'opponent' ? `${palette.accent}22` : 'transparent', border: `2px solid ${winnerSide === 'opponent' ? palette.accent : palette.ink + '22'}`, position: 'relative' }}>
-            {winnerSide === 'opponent' && <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', padding: '3px 11px', background: palette.accent, color: palette.primary, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 2 }}>WINNER</div>}
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 38, letterSpacing: 2, color: pc(parts, 'c4VsColor', palette.accent) }}>VS</div>
+          <div style={{ textAlign: 'center', padding: '13px 16px', background: winnerSide === 'opponent' ? `${winC}22` : 'transparent', border: `2px solid ${winnerSide === 'opponent' ? winC : otherEdge}`, position: 'relative' }}>
+            {winnerSide === 'opponent' && <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', padding: '3px 11px', background: tagBg, color: tagInk, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 2 }}>WINNER</div>}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
               <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={64} shape="shield" />
               <div style={{ textAlign: 'left' }}>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: palette.ink, lineHeight: 1 }}>{opponent.name}</div>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: palette.ink, marginTop: 4 }}>{result?.oppScore || '—'}</div>
+                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 1, color: pc(parts, 'c4TeamName', palette.ink), lineHeight: 1 }}>{opponent.name}</div>
+                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 46, letterSpacing: -0.5, lineHeight: 1, color: pc(parts, 'statColor', palette.ink), marginTop: 4 }}>{result?.oppScore || '—'}</div>
               </div>
             </div>
           </div>
         </div>
         <div style={{ margin: '6px 48px 18px', flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, minHeight: 0 }}>
-          <PerfPanel title={`${team.short} · TOP PERFORMERS`} titleColor={palette.accent} edge={palette.accent}
-            batters={teamBatters} bowlers={teamBowlers} palette={palette} Perf={Perf} tall={A !== 'square'} />
-          <PerfPanel title={`${opponent.short} · TOP PERFORMERS`} titleColor={palette.ink} titleOpacity={0.85} edge={`${palette.ink}55`}
-            batters={oppBatters} bowlers={oppBowlers} palette={palette} Perf={Perf} tall={A !== 'square'} />
+          <PerfPanel title={`${team.short} · ${pt(parts, 'c4PerfTitle', 'TOP PERFORMERS')}`} titleColor={pc(parts, 'c4TeamTitle', palette.accent)} edge={pc(parts, 'cardBorder', palette.accent)}
+            batters={teamBatters} bowlers={teamBowlers} palette={palette} Perf={Perf} tall={A !== 'square'} parts={parts} />
+          <PerfPanel title={`${opponent.short} · ${pt(parts, 'c4PerfTitle', 'TOP PERFORMERS')}`} titleColor={pc(parts, 'c4OppTitle', palette.ink)} titleOpacity={0.85} edge={pc(parts, 'c4OppEdge', `${palette.ink}55`)}
+            batters={oppBatters} bowlers={oppBowlers} palette={palette} Perf={Perf} tall={A !== 'square'} parts={parts} />
         </div>
-        <div style={{ margin: '0 48px 18px', height: bandH, flexShrink: 0, boxSizing: 'border-box', padding: `${inset}px ${inset}px ${inset}px 24px`, background: palette.secondary, borderLeft: `4px solid ${palette.accent}`, display: 'flex', alignItems: 'stretch', gap: 20 }}>
+        <div style={{ margin: '0 48px 18px', height: bandH, flexShrink: 0, boxSizing: 'border-box', padding: `${inset}px ${inset}px ${inset}px 24px`, background: bandBg, borderLeft: `4px solid ${pc(parts, 'c4BandRule', palette.accent)}`, display: 'flex', alignItems: 'stretch', gap: 20 }}>
           {/* Result left-aligned and stacked: who won small, the margin big, and the
               player of the match as a full-width chip under it. Stacking (not one
               wrapped line) is what lets the margin and the chip both be large. */}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6, textAlign: 'left' }}>
             {tied ? (
               <AutoFitText text="MATCH TIED" max={56} min={26} measureDeps={[width, height]}
-                style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: -0.5, lineHeight: 1.05, color: palette.ink }}>MATCH TIED</AutoFitText>
+                style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: -0.5, lineHeight: 1.05, color: pc(parts, 'c4MarginColor', onBand) }}>MATCH TIED</AutoFitText>
             ) : (
               <>
                 <AutoFitText text={winnerName} max={26} min={14} measureDeps={[width, height]}
-                  style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 1, lineHeight: 1.05, color: palette.ink, opacity: 0.85 }}>{winnerName}</AutoFitText>
+                  style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 1, lineHeight: 1.05, color: pc(parts, 'c4WinnerName', onBand), opacity: 0.85 }}>{winnerName}</AutoFitText>
                 <AutoFitText text={winLine} max={54} min={24} measureDeps={[width, height]}
-                  style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: -0.5, lineHeight: 1.05, color: palette.accent }}>{winLine}</AutoFitText>
+                  style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: -0.5, lineHeight: 1.05, color: pc(parts, 'c4MarginColor', palette.accent) }}>{winLine}</AutoFitText>
               </>
             )}
             {motm && (
-              <div style={{ alignSelf: 'flex-start', maxWidth: '100%', boxSizing: 'border-box', display: 'flex', alignItems: 'baseline', gap: 12, padding: '6px 16px', marginTop: 4, background: `${palette.ink}10`, border: `1px solid ${palette.accent}`, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 2, color: palette.accent, flexShrink: 0 }}>★ MOTM</span>
-                <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 0.5, lineHeight: 1.05, color: palette.ink, overflow: 'hidden', textOverflow: 'ellipsis' }}>{motmName}</span>
-                {motmFigures && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, letterSpacing: 1, color: palette.ink, opacity: 0.75, flexShrink: 0 }}>{motmFigures}</span>}
+              <div style={{ alignSelf: 'flex-start', maxWidth: '100%', boxSizing: 'border-box', display: 'flex', alignItems: 'baseline', gap: 12, padding: '6px 16px', marginTop: 4, background: pc(parts, 'c4MotmBg', `${palette.ink}10`), border: `1px solid ${pc(parts, 'c4MotmBorder', palette.accent)}`, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 2, color: pc(parts, 'c4MotmLabelColor', palette.accent), flexShrink: 0 }}>{pt(parts, 'c4MotmLabel', '★ MOTM')}</span>
+                <span style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 0.5, lineHeight: 1.05, color: pc(parts, 'c4MotmName', onBand), overflow: 'hidden', textOverflow: 'ellipsis' }}>{motmName}</span>
+                {motmFigures && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, letterSpacing: 1, color: pc(parts, 'c4MotmFigures', onBand), opacity: 0.75, flexShrink: 0 }}>{motmFigures}</span>}
               </div>
             )}
           </div>
           <div style={{ width: slot.w, height: slot.h, flexShrink: 0, alignSelf: 'center', borderRadius: 18, background: `${palette.ink}0d` }} />
         </div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: foot, boxSizing: 'border-box', padding: '0 48px', background: palette.primary, borderTop: `2px solid ${palette.accent}`, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: foot, boxSizing: 'border-box', padding: '0 48px', background: pc(parts, 'footerBg', palette.primary), borderTop: `2px solid ${pc(parts, 'footerRule', palette.accent)}`, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
         <CreditMark ink={palette.ink} h={40} />
       </div>
       <GrainSVG opacity={0.3} id="ca4" />
     </LayerRoot>
   )
 }
+registerParts({
+  C4: [
+    textPart('c4ChipText', 'Tag words', 'Header', () => 'RESULT'),
+    colorPart('badgeBg', 'Tags (Result and Winner)', 'Header', (p) => p.accent),
+    colorPart('badgeColor', 'Tag text', 'Header', (p) => p.primary),
+    colorPart('roundColor', 'Competition, round and date', 'Header', (p) => p.ink),
+    colorPart('subColor', 'Venue', 'Header', (p) => p.ink),
+    colorPart('clubColor', 'Club name', 'Header', (p) => p.ink),
+    colorPart('headerRule', 'Line under the header', 'Header', (p) => p.accent),
+    colorPart('winColor', 'Winning side outline', 'Scores', (p) => p.accent),
+    colorPart('lossColor', 'Other side outline', 'Scores', (p) => `${p.ink}22`),
+    colorPart('c4TeamName', 'Team names', 'Scores', (p) => p.ink),
+    colorPart('statColor', 'Scores', 'Scores', (p) => p.ink),
+    colorPart('c4VsColor', 'The "VS"', 'Scores', (p) => p.accent),
+    textPart('c4PerfTitle', 'Panel title words', 'Top performers', () => 'TOP PERFORMERS'),
+    colorPart('cardBg', 'Panels', 'Top performers', null, { autoLabel: 'Soft tint' }),
+    colorPart('cardBorder', 'Your panel edge', 'Top performers', (p) => p.accent),
+    colorPart('c4OppEdge', 'Opposition panel edge', 'Top performers', (p) => `${p.ink}55`),
+    colorPart('c4TeamTitle', 'Your panel title', 'Top performers', (p) => p.accent),
+    colorPart('c4OppTitle', 'Opposition panel title', 'Top performers', (p) => p.ink),
+    textPart('c4BattingLabel', 'Batting heading', 'Top performers', () => 'BATTING'),
+    textPart('c4BowlingLabel', 'Bowling heading', 'Top performers', () => 'BOWLING'),
+    colorPart('c4LabelColor', 'Batting and bowling headings', 'Top performers', (p) => p.ink),
+    colorPart('nameColor', 'Surnames', 'Top performers', (p) => p.ink),
+    colorPart('c4PerfFigure', 'Runs and wickets', 'Top performers', (p) => p.accent),
+    colorPart('dividerColor', 'Lines between rows', 'Top performers', (p) => `${p.ink}1a`),
+    colorPart('bandBg', 'Result band', 'Result band', (p) => p.secondary),
+    colorPart('c4BandRule', 'Band edge', 'Result band', (p) => p.accent),
+    colorPart('c4WinnerName', 'Winning team name', 'Result band', (p) => p.ink),
+    textPart('c4WinWord', 'Win word', 'Result band', () => 'WIN'),
+    colorPart('c4MarginColor', 'Margin line', 'Result band', (p) => p.accent),
+    textPart('c4MotmLabel', 'Player of the match label', 'Result band', () => '★ MOTM'),
+    colorPart('c4MotmLabelColor', 'Label colour', 'Result band', (p) => p.accent),
+    colorPart('c4MotmBg', 'Player of the match chip', 'Result band', null, { autoLabel: 'Soft tint' }),
+    colorPart('c4MotmBorder', 'Chip outline', 'Result band', (p) => p.accent),
+    colorPart('c4MotmName', 'Player of the match name', 'Result band', (p) => p.ink),
+    colorPart('c4MotmFigures', 'Player of the match figures', 'Result band', (p) => p.ink),
+    colorPart('footerBg', 'Footer bar', 'Footer', (p) => p.primary),
+    colorPart('footerRule', 'Footer line', 'Footer', (p) => p.accent),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SCORECARD TEMPLATES — 1920×1080 full match scorecards
