@@ -51,6 +51,8 @@ import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPalet
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign } from '../../social/blank-template'
 import { parseTemplateFile, itemsFromTemplate, templateWarnings, boundSlotCount } from '../../social/boundFields'
+import { CustomLayout, CUSTOM_LAYOUT_ID } from '../../social/custom-layout'
+import CanvaImportBox from '../../components/admin/socialpost/CanvaImportBox'
 import { sponsorSlotFor } from '../../social/sponsorSlots'
 import { useBlankLayer } from '../../social/useBlankLayer'
 import { useTemplateLayers } from '../../social/useTemplateLayers'
@@ -133,13 +135,16 @@ const ALL_TEMPLATES = [
   // Club-event / announcement posters — own "Events" tab, surface + photo flags
   // come from the event registry.
   ...EVENT_TEMPLATES.map((t) => ({ id: t.id, name: t.name, component: t.component, desc: t.desc, maxPlayers: 0, kind: 'event', surface: t.surface, photo: t.photo, list: !!t.list })),
+  // A layout imported from the BetterCricket Canva app. It sits on the Lineup tab so the Data tab,
+  // Players, Opponent and Match Info all link up; the template's own blocks are the overlay on it.
+  { id: CUSTOM_LAYOUT_ID, name: 'Your template', component: CustomLayout, desc: 'Imported from the Canva app', maxPlayers: LINEUP_MAX },
   // Freeform WYSIWYG canvas — add/move/resize your own text & images.
   { id: 'BL1', name: 'Blank Canvas', component: BlankCanvas, desc: 'Freeform — add your own text & images', maxPlayers: 0, kind: 'blank' },
 ]
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'MS1', 'MS2'])
+const AFL_HIDDEN_TEMPLATES = new Set([CUSTOM_LAYOUT_ID, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'MS1', 'MS2'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -163,7 +168,7 @@ const DEBUT_TEMPLATE_NAMES = { T1: 'Hero List', T3: 'Side Numbered', T10: 'Team 
 
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
-  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup', T13: 'lineup',
+  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup', T13: 'lineup', [CUSTOM_LAYOUT_ID]: 'lineup',
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
   C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result', RS7: 'result', RS8: 'result',
@@ -367,7 +372,7 @@ function readEventDraft() {
 // the round-ups, results and toss posts are not named by a side. Every layout
 // prints the Competition except Round Cover and Giant Type (a round number and a
 // figure are their headlines). A field the open layout ignores says so on screen.
-const HEADLINE_TEMPLATES = ['T1', 'T2', 'T3', 'T5', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13']
+const HEADLINE_TEMPLATES = ['T1', 'T2', 'T3', 'T5', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', CUSTOM_LAYOUT_ID]
 const NO_COMPETITION_TEMPLATES = ['T13', 'C5']
 const ROLE_OPTIONS = IS_AFL ? ['', 'FB', 'HB', 'C', 'W', 'MID', 'RUCK', 'HF', 'FF', 'UTIL'] : ['BAT', 'BOWL', 'AR', 'WK']
 const ROLE_LONG = IS_AFL
@@ -1306,10 +1311,7 @@ export default function AdminSocialPost() {
   // The club's own design (a Canva export) for the blank canvas.
   const designInputRef = useRef(null)
   const [designBusy, setDesignBusy] = useState(false)
-  const templateFileRef = useRef(null)
   const [clubStyle, setClubStyle] = useState(true)
-  const [pasteOpen, setPasteOpen] = useState(false)
-  const [pasteText, setPasteText] = useState('')
   // Club media library (persisted via the social-media API).
   const [mediaAssets, setMediaAssets] = useState([])
   // Below md the editor drops its drag canvas for a guided phone quick-post
@@ -1697,6 +1699,8 @@ export default function AdminSocialPost() {
   // Custom Edit mode: overlay freeform blocks on top of the current (non-blank)
   // template so it can be tweaked and saved as a custom template.
   const [customEdit, setCustomEdit] = useState(false)
+  // The imported-template layout is its blocks, so the freeform layer is always on for it.
+  const customOn = customEdit || templateId === CUSTOM_LAYOUT_ID
   // Career stats for players referenced by "player" data blocks, fetched on
   // demand and cached by id (keeps saved templates live — config only).
   const [playerStatsCache, setPlayerStatsCache] = useState({})
@@ -1782,7 +1786,7 @@ export default function AdminSocialPost() {
       const key = existing ? existing.key : `tpl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
       const finalName = (name || '').trim() || existing?.name || `Template ${templatesRef.current.length + 1}`
       const blankTab = templateId === 'BL1'
-      const usingOverlay = customEdit && !blankTab
+      const usingOverlay = customOn && !blankTab
       const srcItems = blankTab ? canvas.items : usingOverlay ? overlay.items : null
       const { items, lost: blocksLost } = srcItems ? await persistBlobImages(srcItems) : { items: null, lost: 0 }
       // An event poster IS its content: the title, date, details, motif and
@@ -2963,7 +2967,8 @@ export default function AdminSocialPost() {
       setLineupSourceKind('playcricket')
     }
   }, [sourceFixtures, pcFixtures])
-  const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab)
+  // The imported-template layout is offered only once there is one (it is its blocks, so an empty one is a blank post).
+  const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab && (t.id !== CUSTOM_LAYOUT_ID || templateId === CUSTOM_LAYOUT_ID))
   const displayFont = (fontKey === 'club_font' && clubFont)
     ? clubFont
     : (DISPLAY_FONTS.find(f => f.key === fontKey) || DISPLAY_FONTS[0])
@@ -3015,7 +3020,7 @@ export default function AdminSocialPost() {
   // Which freeform layer is being edited, and whether the freeform tools show.
   // Blank tab → the standalone canvas; Custom Edit on a real template → overlay.
   const isBlankTab = tmpl.kind === 'blank'
-  const showBlankTools = isBlankTab || customEdit
+  const showBlankTools = isBlankTab || customOn
   // Fixtures/results roundups can spread across derived carousel pages: same
   // template, each page rendering its even slice of the rows (chunkEven).
   const isRoundTab = tmpl.kind === 'fixtures' || tmpl.kind === 'results'
@@ -3058,7 +3063,7 @@ export default function AdminSocialPost() {
   // Declared up here with the rest of the layer state, not down beside the
   // render — `layerStack` reads it, and a const declared below its own reader
   // is a temporal-dead-zone crash the first time the panel draws.
-  const overlayOn = customEdit && !isBlankTab
+  const overlayOn = customOn && !isBlankTab
   // The post's sponsor grid is part of the post, not of Custom Edit, so it draws
   // (and exports) with Custom Edit off. Every other block waits for Custom Edit.
   const overlayItems = overlayOn ? overlay.items : overlay.items.filter((it) => it.type === 'sponsors')
@@ -3723,9 +3728,11 @@ export default function AdminSocialPost() {
   // ─── Controls ────────────────────────────────────────────────────────────────
   // An imported template (bound text fields) is a Blank canvas that still needs
   // the lineup, the opponent and the match details those fields print.
-  const boundSlots = isBlankTab ? boundSlotCount(canvas.items) : 0
-  const hasBound = isBlankTab && canvas.items.some((it) => it.bind)
-  const playerCap = tmpl.maxPlayers > 0 ? tmpl.maxPlayers : boundSlots
+  const boundItems = isBlankTab ? canvas.items : templateId === CUSTOM_LAYOUT_ID ? overlay.items : []
+  const boundSlots = boundSlotCount(boundItems)
+  const hasBound = boundItems.some((it) => it.bind)
+  // A template with eleven places holds eleven players; a built-in lineup holds its own ceiling.
+  const playerCap = (templateId === CUSTOM_LAYOUT_ID || tmpl.maxPlayers === 0) && boundSlots > 0 ? boundSlots : tmpl.maxPlayers
   const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab) || hasBound
   const showOpponent  = !['scorecard', 'fixtures', 'results', 'totw', 'milestones', 'events', 'blank'].includes(activeTab) || hasBound
   const showPlayers   = (activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0) || boundSlots > 0
@@ -3853,7 +3860,7 @@ export default function AdminSocialPost() {
   // Blank tab, else the overlay on top of a real template (turning on Custom
   // Edit so it shows).
   const addBlock = (type, opts = {}) => {
-    if (!isBlankTab && !customEdit) setCustomEdit(true)
+    if (!isBlankTab && !customOn) setCustomEdit(true)
     const target = isBlankTab ? canvas : overlay
     record(`Add ${type}`)
     return target.add(type, opts)
@@ -4027,54 +4034,85 @@ export default function AdminSocialPost() {
   // words taken out, plus where each field sits and how it is styled. It becomes
   // the locked design and one bound text block per field, ready for the players.
   // Nothing changes if the file or its picture cannot be used.
-  const importTemplateText = async (text, label) => {
+  // Stores a picture that arrived inside a template (a data URL) in the club's library.
+  // Returns its address, or null if it could not be kept (the caller says so and carries on).
+  const keepTemplatePicture = async (dataUrl, name) => {
+    if (typeof dataUrl !== 'string' || !/^data:image\/(png|jpeg|webp);base64,/.test(dataUrl)) return null
+    try {
+      const blob = await (await fetch(dataUrl)).blob()
+      const ext = blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png'
+      const saved = await api.uploadSocialMedia(new File([blob], `${name}.${ext}`, { type: blob.type }))
+      setMediaAssets((a) => [saved, ...a])
+      return saved.url
+    } catch { return null }
+  }
+  // A template from the BetterCricket Canva app, as pasted text. The file says where it goes:
+  // a line up becomes the "Your template" layout on the Lineup tab (so the Data tab, the players
+  // and the match details all link up), anything else the Blank canvas. Nothing changes if the
+  // text cannot be used. Resolves true when the import went ahead.
+  const importTemplateText = async (text) => {
     if (!text || !String(text).trim()) {
       flashNote({ warn: true, text: 'There is no template text to import. Copy it from the BetterCricket Canva app first.', tool: 'content' }, 10000)
-      return
+      return false
     }
     setDesignBusy(true)
     try {
       const parsed = parseTemplateFile(text)
-      if (parsed.error) { flashNote({ warn: true, text: parsed.error, tool: 'content' }, 14000); return }
+      if (parsed.error) { flashNote({ warn: true, text: parsed.error, tool: 'content' }, 14000); return false }
       const warnings = templateWarnings(parsed, { clubStyle })
+      // The pictures the designer used (the background, a picture panel) are kept as real pictures.
       let designUrl = null
       if (parsed.background) {
-        if (!/^data:image\/(png|jpeg|webp);base64,/.test(parsed.background)) {
-          flashNote({ warn: true, text: 'The picture inside that template is not a PNG, JPG or WebP, so nothing was imported.', tool: 'content' }, 14000)
-          return
-        }
-        const blob = await (await fetch(parsed.background)).blob()
-        const saved = await api.uploadSocialMedia(new File([blob], `${parsed.name}.${blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png'}`, { type: blob.type }))
-        setMediaAssets((a) => [saved, ...a])
-        designUrl = saved.url
+        designUrl = await keepTemplatePicture(parsed.background, `${parsed.name} background`)
+        if (!designUrl) warnings.push('The background picture could not be saved (it may be over 5 MB or not a PNG, JPG or WebP), so the post uses your own background.')
+      }
+      for (const [i, p] of parsed.panels.entries()) {
+        if (!p.image) continue
+        p.imageUrl = await keepTemplatePicture(p.image, `${parsed.name} panel ${i + 1}`)
+        if (!p.imageUrl) warnings.push(`The picture for panel ${i + 1} could not be saved, so it is drawn as a plain panel in your accent colour.`)
       }
       // The post takes the template's shape when it is one BetterPosts makes.
       const shape = POST_SIZES.find((z) => z.w === parsed.canvas.w && z.h === parsed.canvas.h)
       if (shape) setPostSize(shape.key)
       else warnings.push(`The template is ${parsed.canvas.w}×${parsed.canvas.h}, which is not a BetterPosts size, so it stays on ${W}×${H} and the design is cropped to fit.`)
-      record('Import template')
       const target = shape || { w: W, h: H }
-      canvas.setItems(itemsFromTemplate(parsed, { designUrl, designName: label, width: target.w, height: target.h, keep: canvas.items, clubStyle }))
-      canvas.setSelIds([])
-      const slots = parsed.fields.reduce((n, f) => { const m = (f.bind || '').match(/^lineup\.(\d+)\./); return m ? Math.max(n, Number(m[1])) : n }, 0)
+      const toLineup = parsed.postType === 'lineup' && !IS_AFL
+      const build = (keep) => itemsFromTemplate(parsed, { designUrl, designName: `${parsed.name} background`, width: target.w, height: target.h, keep, clubStyle })
+      if (toLineup) {
+        overlayHistory.commit('Import template')
+        // Importing again into the same layout updates it; coming from another layout starts clean
+        // (the post's own sponsor grid is kept either way).
+        overlay.setItems(build(templateId === CUSTOM_LAYOUT_ID ? overlay.items : overlay.items.filter((it) => it.type === 'sponsors')))
+        overlay.setSelIds([])
+        setTemplateId(CUSTOM_LAYOUT_ID)
+        setCustomEdit(false)
+        setTool('source')
+      } else {
+        canvasHistory.commit('Import template')
+        canvas.setItems(build(templateId === 'BL1' ? canvas.items : []))
+        canvas.setSelIds([])
+        if (templateId !== 'BL1') { setTemplateId('BL1'); setCustomEdit(false) }
+      }
+      const slots = boundSlotCount([...parsed.fields.filter((f) => f.bind)])
       const bound = parsed.fields.filter((f) => f.bind).length
+      const parts = [
+        `${bound} field${bound === 1 ? '' : 's'}`,
+        ...(slots ? [`${slots} player place${slots === 1 ? '' : 's'}`] : []),
+        ...(parsed.texts.length ? [`${parsed.texts.length} fixed word${parsed.texts.length === 1 ? '' : 's'}`] : []),
+        ...(parsed.panels.length ? [`${parsed.panels.length} panel${parsed.panels.length === 1 ? '' : 's'}${parsed.panels.some((p) => !p.imageUrl) ? ' (recolour a plain panel with its colour swatches)' : ''}`] : []),
+      ]
       flashNote({
         warn: warnings.length > 0,
-        text: `Imported “${parsed.name}”: ${bound} field${bound === 1 ? '' : 's'}${slots ? `, ${slots} player slot${slots === 1 ? '' : 's'}` : ''}${parsed.texts.length ? `, ${parsed.texts.length} fixed word${parsed.texts.length === 1 ? '' : 's'}` : ''}${parsed.panels.length ? `, ${parsed.panels.length} panel${parsed.panels.length === 1 ? '' : 's'} (recolour with the block's colour swatches)` : ''}. ${clubStyle ? 'Colours and fonts come from your club, so changing your palette or font restyles it. ' : ''}Add the players, opponent and match details in the panels on the left.${warnings.length ? ` ${warnings.join(' ')}` : ''}`,
-        tool: 'content',
-      }, 16000)
+        text: `Imported “${parsed.name}” as ${toLineup ? 'a Lineup layout called “Your template”' : 'a Blank canvas post'}: ${parts.join(', ')}. ${clubStyle ? 'Colours and fonts come from your club, so changing your palette or font restyles it. ' : ''}${toLineup ? 'Now pull the XI in Data (BetterSelect or Play-Cricket), or add players in Content.' : 'Add the players, opponent and match details in the panels on the left.'}${warnings.length ? ` ${warnings.join(' ')}` : ''}`,
+        tool: toLineup ? 'source' : 'content',
+      }, 18000)
+      return true
     } catch (e) {
       flashNote({ warn: true, text: `That template did not import (${e?.message || 'it could not be read'}). Nothing was changed.`, tool: 'content' }, 14000)
+      return false
     } finally {
       setDesignBusy(false)
     }
-  }
-  const importTemplateFile = async (file) => {
-    if (!file) return
-    let text = ''
-    try { text = await file.text() } catch { /* reported by importTemplateText as no text */ }
-    await importTemplateText(text, file.name)
-    return
   }
   // Crop / remove the background on the image ALREADY in a block. The hero
   // photo and sponsor logos have had this since they were built; an image block
@@ -5011,7 +5049,13 @@ export default function AdminSocialPost() {
                       </button>
                     )}
                   </div>
-                  {!isBlankTab && (
+                  {activeTab === 'lineup' && !IS_AFL && (
+                    <div className="pt-2 border-t pb-hairline" data-testid="design-canva-import">
+                      <CanvaImportBox clubStyle={clubStyle} onClubStyle={setClubStyle} onImport={importTemplateText} busy={designBusy}
+                        hint="Choose Line up in the Canva app, and the template becomes a Lineup layout here, with the Data tab, players and match details linked up." />
+                    </div>
+                  )}
+                  {!isBlankTab && templateId !== CUSTOM_LAYOUT_ID && (
                     <div className="flex flex-col gap-1 self-start">
                       <button
                         onClick={customEdit ? stopCustomEdit : beginCustomEdit}
@@ -5081,42 +5125,9 @@ export default function AdminSocialPost() {
                       </button>
                     )}
                   </div>
-                  <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mt-1">Or import a template with its fields</div>
-                  <p className="text-[11px] text-pb-dim leading-relaxed">
-                    From the BetterCricket Canva app: a file that brings the design and a text field for every {'{{'}player 1{'}}'}, {'{{'}opponent{'}}'} or {'{{'}date{'}}'} you typed in Canva. The slots then fill from the players you add here.
-                  </p>
-                  <label className="flex items-start gap-2 text-[11px] text-pb-dim leading-relaxed cursor-pointer" data-testid="club-style">
-                    <input type="checkbox" checked={clubStyle} onChange={(e) => setClubStyle(e.target.checked)} className="mt-0.5" data-testid="club-style-input" />
-                    <span>Use my club's colours and fonts <span className="text-pb-faintest">(recommended). Untick to keep the colours and fonts from Canva.</span></span>
-                  </label>
-                  <div>
-                    <button onClick={() => templateFileRef.current?.click()} disabled={designBusy} data-testid="template-file-import"
-                      className="px-3 py-1.5 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors disabled:opacity-50">
-                      Import a template file
-                    </button>
+                  <div className="mt-2 pt-3 border-t pb-hairline">
+                    <CanvaImportBox clubStyle={clubStyle} onClubStyle={setClubStyle} onImport={importTemplateText} busy={designBusy} hint="A line up goes to the Lineup post type; anything else stays on this canvas." />
                   </div>
-                  <input ref={templateFileRef} type="file" accept=".json,application/json" className="sr-only" data-testid="template-file-input"
-                    onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; importTemplateFile(f) }} />
-                  <div>
-                    <button onClick={() => setPasteOpen((o) => !o)} data-testid="template-paste-toggle"
-                      className="text-[11px] font-mono text-pb-dim hover:text-pb-text underline underline-offset-2">
-                      {pasteOpen ? 'Hide paste box' : 'Or paste the template text'}
-                    </button>
-                  </div>
-                  {pasteOpen && (
-                    <div className="flex flex-col gap-1.5">
-                      <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} data-testid="template-paste"
-                        rows={4} placeholder="Paste what the Canva app copied here"
-                        className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-[11px] font-mono text-pb-text placeholder:text-pb-faintest" />
-                      <div>
-                        <button onClick={async () => { await importTemplateText(pasteText, 'Pasted template'); setPasteText('') }} disabled={designBusy || !pasteText.trim()}
-                          data-testid="template-paste-import"
-                          className="px-3 py-1.5 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors disabled:opacity-50">
-                          Import pasted text
-                        </button>
-                      </div>
-                    </div>
-                  )}
                   <input ref={designInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" data-testid="own-design-input"
                     onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadDesign(f) }} />
                 </div>

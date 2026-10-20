@@ -145,10 +145,10 @@ describe("extractFields", () => {
     ]);
   });
 
-  it("leaves out and reports a locked box, which could not be hidden", () => {
+  it("reads a locked box, since nothing on the page is changed", () => {
     const r = ok(extractFields(page([textBox("{{date}}", { locked: true })])));
-    expect(r.fields).toEqual([]);
-    expect(r.skipped).toEqual([{ reason: "locked", text: "{{date}}" }]);
+    expect(r.fields.map((f) => f.token)).toEqual(["date"]);
+    expect(r.skipped).toEqual([]);
   });
 
   it("reads a box inside a group, with the group's position added back in", () => {
@@ -212,12 +212,12 @@ describe("extractFields", () => {
     ]);
   });
 
-  it("leaves out and reports a box in a locked group", () => {
+  it("reads a box in a locked group", () => {
     const r = ok(
       extractFields(page([group([textBox("{{player 1}}")], { locked: true })])),
     );
-    expect(r.fields).toEqual([]);
-    expect(r.skipped.map((x) => x.reason)).toEqual(["locked"]);
+    expect(r.fields.map((f) => f.token)).toEqual(["player 1"]);
+    expect(r.skipped).toEqual([]);
   });
 
   it("still reads a plain box beside a group", () => {
@@ -462,12 +462,17 @@ describe("buildTemplateFile", () => {
     expect(
       buildTemplateFile(e, {
         name: "  LineUp  ",
-        background: "data:image/png;base64,AAAA",
+        postType: "lineup",
+        pictures: {
+          background: "data:image/png;base64,AAAA",
+          byRef: new Map(),
+        },
       }),
     ).toEqual({
       format: "bettercricket-template",
       version: 1,
       name: "LineUp",
+      postType: "lineup",
       canvas: { w: 1080, h: 1080 },
       background: "data:image/png;base64,AAAA",
       fields: [
@@ -493,7 +498,7 @@ describe("buildTemplateFile", () => {
 
   it("leaves out what it does not know, and names an unnamed template", () => {
     const e = ok(extractFields(page([textBox("{{date}}")])));
-    const f = buildTemplateFile(e, { name: " " });
+    const f = buildTemplateFile(e, { name: " ", postType: "general" });
     expect(f.name).toBe("Canva template");
     expect("background" in f).toBe(false);
     expect("fontFamily" in (f.fields[0] ?? {})).toBe(false);

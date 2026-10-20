@@ -1,7 +1,6 @@
 import { useFeatureSupport } from "@canva/app-hooks";
 import { findFonts } from "@canva/asset";
-import { openDesign, requestExport } from "@canva/design";
-import { requestOpenExternalUrl } from "@canva/platform";
+import { openDesign } from "@canva/design";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { App } from "src/intents/design_editor/app";
 import {
@@ -12,12 +11,8 @@ import {
   textBox,
 } from "src/template/__tests__/fakePage";
 import { fakeSession } from "src/template/__tests__/fakeSession";
-import type {
-  ElementLike,
-  PageLike,
-  TextElementLike,
-} from "src/template/types";
-import { fetchPicture } from "src/template/picture";
+import type { ElementLike, PageLike } from "src/template/types";
+import { fetchImage } from "src/template/picture";
 import { copyTemplate } from "src/template/saveFile";
 import { renderInTestProvider } from "src/utils/test_render";
 
@@ -80,7 +75,6 @@ describe("BetterCricket template panel", () => {
     showPage(
       page([
         textBox("vs {{opponent}}"),
-        textBox("{{date}}", { locked: true }),
         group([textBox("{{venue}}")], { rotation: 40 }),
       ]),
     );
@@ -89,7 +83,6 @@ describe("BetterCricket template panel", () => {
     await waitFor(() =>
       expect(screen.getByText(/has other words with the token/)).toBeTruthy(),
     );
-    expect(screen.getByText(/is locked\. Unlock it/)).toBeTruthy();
     expect(screen.getByText(/is in a rotated group/)).toBeTruthy();
     expect(screen.getByText(/0 fields found|No fields found/)).toBeTruthy();
   });
@@ -380,9 +373,8 @@ describe("BetterCricket template panel", () => {
 
   describe("exporting", () => {
     // A live page, so what one session changes the next one sees.
-    const livePage = (elements: ElementLike[], syncFailsAt: number[] = []) => {
+    const livePage = (elements: ElementLike[]) => {
       const p = page(elements);
-      let syncs = 0;
       const calls = { syncs: 0 };
       jest.mocked(openDesign).mockImplementation((async (
         _o: unknown,
@@ -392,11 +384,7 @@ describe("BetterCricket template panel", () => {
           page: p,
           helpers: {},
           sync: async () => {
-            syncs++;
-            calls.syncs = syncs;
-            if (syncFailsAt.includes(syncs)) {
-              throw new Error("[internal_error]: sync failed");
-            }
+            calls.syncs++;
           },
         });
       }) as never);
@@ -404,70 +392,105 @@ describe("BetterCricket template panel", () => {
     };
     const els = () => [
       textBox("LINE UP"),
-      textBox("{{player 1}}", { top: 300, left: 90, transparency: 0 }),
-      textBox("{{opponent}}", { top: 100, left: 90, transparency: 0.25 }),
+      textBox("{{player 1}}", { top: 300, left: 90 }),
+      textBox("{{opponent}}", { top: 100, left: 90 }),
     ];
-    const back = (list: ElementLike[]) =>
-      list.map((e) => (e as TextElementLike).transparency);
-    const pictureOn = () =>
-      fireEvent.click(
-        screen.getByRole("switch", { name: /Also include my Canva picture/ }),
-      );
     const exportButton = () =>
       screen.getByRole("button", { name: "Export for BetterCricket" });
-    const url = "https://export.example/design.png";
+    const isDisabled = (b: HTMLElement) =>
+      b.hasAttribute("disabled") || b.getAttribute("aria-disabled") === "true";
+    // The kind-of-post picker is the first select in the panel.
+    const choose = (label: "Line up" | "Other post") => {
+      const picker = screen.getAllByRole("combobox")[0];
+      if (!picker) {
+        throw new Error("The post type picker is missing.");
+      }
+      fireEvent.click(picker);
+      fireEvent.click(screen.getByRole("option", { name: label }));
+    };
+    const copied = async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Copy template text" }),
+      );
+      await waitFor(() => expect(copyTemplate).toHaveBeenCalled());
+      return jest.mocked(copyTemplate).mock.calls[0]?.[0];
+    };
+    const picture = (bytes = 2 * 1024 * 1024) => ({
+      dataUrl: "data:image/png;base64,AAAA",
+      bytes,
+    });
 
     beforeEach(() => {
-      jest.mocked(requestExport).mockResolvedValue({
-        status: "completed",
-        exportBlobs: [{ url }],
-      });
-      jest.mocked(fetchPicture).mockResolvedValue({
-        dataUrl: "data:image/png;base64,AAAA",
-        bytes: 2 * 1024 * 1024,
-      });
+      jest.mocked(fetchImage).mockResolvedValue(picture());
       jest.mocked(copyTemplate).mockResolvedValue(true);
     });
 
-    it("exports, hides the words while Canva makes the picture, and puts them back", async () => {
-      const list = els();
-      livePage(list);
-      let hiddenAtExport: number[] = [];
-      jest.mocked(requestExport).mockImplementation((async () => {
-        hiddenAtExport = back(list);
-        return { status: "completed", exportBlobs: [{ url }] };
-      }) as never);
+    it("makes the person choose the kind of post before exporting", async () => {
+      livePage(els());
       renderInTestProvider(<App />);
-      pictureOn();
+      expect(isDisabled(exportButton())).toBe(true);
+      choose("Line up");
+      expect(isDisabled(exportButton())).toBe(false);
+    });
+
+    it("writes the chosen kind into the file", async () => {
+      livePage(els());
+      renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(exportButton());
       await waitFor(() =>
-        expect(
-          screen.getByText(
-            /Template ready: 2 fields and the picture \(2.0 MB\)/,
-          ),
-        ).toBeTruthy(),
+        expect(screen.getByText(/Template ready/)).toBeTruthy(),
       );
-      expect(hiddenAtExport).toEqual([0, 1, 1]);
-      expect(back(list)).toEqual([0, 0, 0.25]);
-      expect(requestExport).toHaveBeenCalledWith({
-        acceptedFileTypes: ["png", "jpg"],
-      });
+      expect(await copied()).toEqual(
+        expect.objectContaining({ postType: "lineup" }),
+      );
+    });
+
+    it("exports other posts as general", async () => {
+      livePage([textBox("{{opponent}}"), textBox("{{date}}")]);
+      renderInTestProvider(<App />);
+      choose("Other post");
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/Template ready/)).toBeTruthy(),
+      );
+      expect(await copied()).toEqual(
+        expect.objectContaining({ postType: "general" }),
+      );
+    });
+
+    it("refuses a line up that has no player place", async () => {
+      livePage([textBox("{{opponent}}"), textBox("{{date}}")]);
+      renderInTestProvider(<App />);
+      choose("Line up");
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/at least one player place/)).toBeTruthy(),
+      );
+      expect(copyTemplate).not.toHaveBeenCalled();
+    });
+
+    it("offers the line up block only for a line up", async () => {
+      renderInTestProvider(<App />);
+      expect(screen.getByRole("button", { name: "Add line up" })).toBeTruthy();
+      choose("Other post");
+      expect(screen.queryByRole("button", { name: "Add line up" })).toBeNull();
+      expect(
+        screen.getByRole("button", { name: "Add match details" }),
+      ).toBeTruthy();
     });
 
     it("uses the name typed in the box", async () => {
       livePage(els());
       renderInTestProvider(<App />);
+      choose("Line up");
       const input = screen.getByLabelText(/Template name/);
       fireEvent.change(input, { target: { value: "Saturday XI" } });
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(screen.getByText(/Template ready/)).toBeTruthy(),
       );
-      fireEvent.click(
-        screen.getByRole("button", { name: "Copy template text" }),
-      );
-      await waitFor(() => expect(copyTemplate).toHaveBeenCalled());
-      expect(copyTemplate).toHaveBeenCalledWith(
+      expect(await copied()).toEqual(
         expect.objectContaining({
           name: "Saturday XI",
           format: "bettercricket-template",
@@ -478,67 +501,39 @@ describe("BetterCricket template panel", () => {
     it("copies the template text, and says where to paste it in BetterCricket", async () => {
       livePage(els());
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(screen.getByText(/Template ready/)).toBeTruthy(),
       );
-      fireEvent.click(
-        screen.getByRole("button", { name: "Copy template text" }),
-      );
+      const file = await copied();
       await waitFor(() =>
         expect(
-          screen.getByText(
-            /Template text copied\. In BetterCricket, open BetterPosts/,
-          ),
+          screen.getByText(/Template text copied\. In BetterCricket/),
         ).toBeTruthy(),
       );
-      expect(screen.getByText(/Or paste the template text/)).toBeTruthy();
-      // The default file is the layout alone: no picture, and roles for the look.
-      expect(copyTemplate).toHaveBeenCalledWith(
+      expect(screen.getByText(/Import pasted text/)).toBeTruthy();
+      // The layout alone: roles for the look, and no flat picture.
+      expect(file).toEqual(
         expect.objectContaining({
           fields: expect.arrayContaining([
             expect.objectContaining({ token: "player 1", colorRole: "ink" }),
           ]),
         }),
       );
-      expect(copyTemplate).toHaveBeenCalledWith(
-        expect.not.objectContaining({ background: expect.anything() }),
-      );
+      expect(file).not.toHaveProperty("background");
+      expect(fetchImage).not.toHaveBeenCalled();
     });
 
-    it("includes the picture only when asked", async () => {
-      livePage(els());
-      renderInTestProvider(<App />);
-      pictureOn();
-      fireEvent.click(exportButton());
-      await waitFor(() =>
-        expect(screen.getByText(/and the picture/)).toBeTruthy(),
-      );
-      fireEvent.click(
-        screen.getByRole("button", { name: "Copy template text" }),
-      );
-      await waitFor(() => expect(copyTemplate).toHaveBeenCalled());
-      expect(copyTemplate).toHaveBeenCalledWith(
-        expect.objectContaining({ background: "data:image/png;base64,AAAA" }),
-      );
-    });
-
-    it("does not use Canva's export at all by default", async () => {
-      livePage(els());
-      renderInTestProvider(<App />);
-      fireEvent.click(exportButton());
-      await waitFor(() =>
-        expect(
-          screen.getByText(/Template ready: 2 fields and 1 fixed word/),
-        ).toBeTruthy(),
-      );
-      expect(requestExport).not.toHaveBeenCalled();
-      expect(fetchPicture).not.toHaveBeenCalled();
-    });
-
-    it("carries a panel behind the text, and says so", async () => {
+    it("carries a plain panel behind the text, and says so", async () => {
       livePage([
-        rect({ left: 60, top: 100, width: 450, height: 900, media: "image" }),
+        rect({
+          left: 60,
+          top: 100,
+          width: 450,
+          height: 900,
+          colour: "#7b3b3b",
+        }),
         textBox("LINE UP", { top: 150, left: 100, width: 300, height: 50 }),
         textBox("{{player 1}}", {
           top: 250,
@@ -548,6 +543,7 @@ describe("BetterCricket template panel", () => {
         }),
       ]);
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(
@@ -556,20 +552,86 @@ describe("BetterCricket template panel", () => {
           ),
         ).toBeTruthy(),
       );
-      fireEvent.click(
-        screen.getByRole("button", { name: "Copy template text" }),
-      );
-      await waitFor(() => expect(copyTemplate).toHaveBeenCalled());
-      expect(copyTemplate).toHaveBeenCalledWith(
+      expect(await copied()).toEqual(
         expect.objectContaining({
-          panels: [{ x: 60, y: 100, w: 450, h: 900, source: "picture" }],
+          panels: [
+            {
+              x: 60,
+              y: 100,
+              w: 450,
+              h: 900,
+              source: "solid",
+              color: "#7b3b3b",
+            },
+          ],
         }),
       );
+    });
+
+    it("brings the background and a panel's picture across", async () => {
+      livePage([
+        rect({ width: 1080, height: 1080, media: "image", imageRef: "bg" }),
+        rect({
+          left: 60,
+          top: 100,
+          width: 450,
+          height: 900,
+          media: "image",
+          imageRef: "paper",
+        }),
+        textBox("{{player 1}}", {
+          top: 250,
+          left: 100,
+          width: 300,
+          height: 50,
+        }),
+      ]);
+      renderInTestProvider(<App />);
+      choose("Line up");
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            /Pictures included: the background and 1 panel picture\./,
+          ),
+        ).toBeTruthy(),
+      );
+      expect(fetchImage).toHaveBeenCalledWith("bg", "background");
+      expect(fetchImage).toHaveBeenCalledWith("paper", "panel");
+      const file = await copied();
+      expect(file?.background).toBe("data:image/png;base64,AAAA");
+      expect(file?.panels?.[0]).toEqual(
+        expect.objectContaining({
+          image: "data:image/png;base64,AAAA",
+          box: { x: 60, y: 100, w: 450, h: 900, rotation: 0 },
+        }),
+      );
+    });
+
+    it("still makes the file, and says which picture was left out", async () => {
+      jest
+        .mocked(fetchImage)
+        .mockRejectedValue(
+          new Error("Canva would not give the app this picture."),
+        );
+      livePage([
+        rect({ width: 1080, height: 1080, media: "image", imageRef: "bg" }),
+        textBox("{{player 1}}"),
+      ]);
+      renderInTestProvider(<App />);
+      choose("Line up");
+      fireEvent.click(exportButton());
+      await waitFor(() =>
+        expect(screen.getByText(/A picture was left out\./)).toBeTruthy(),
+      );
+      expect(screen.getByText(/Background: Canva would not give/)).toBeTruthy();
+      expect(await copied()).not.toHaveProperty("background");
     });
 
     it("offers no download, because Canva's panel cannot save files", async () => {
       livePage(els());
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(screen.getByText(/Template ready/)).toBeTruthy(),
@@ -577,9 +639,17 @@ describe("BetterCricket template panel", () => {
       expect(screen.queryByRole("button", { name: /Download/ })).toBeNull();
     });
 
+    it("has no flat picture switch any more", () => {
+      renderInTestProvider(<App />);
+      expect(
+        screen.queryByRole("switch", { name: /Canva picture/ }),
+      ).toBeNull();
+    });
+
     it("lists a box that was left out of the file", async () => {
       livePage([textBox("{{player 1}}"), textBox("vs {{opponent}}")]);
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(screen.getByText(/Template ready/)).toBeTruthy(),
@@ -591,6 +661,7 @@ describe("BetterCricket template panel", () => {
       jest.mocked(copyTemplate).mockResolvedValue(false);
       livePage(els());
       renderInTestProvider(<App />);
+      choose("Line up");
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(screen.getByText(/Template ready/)).toBeTruthy(),
@@ -603,113 +674,21 @@ describe("BetterCricket template panel", () => {
       );
     });
 
-    it("warns when the picture is over BetterCricket's limit", async () => {
-      jest.mocked(fetchPicture).mockResolvedValue({
-        dataUrl: "data:image/png;base64,AAAA",
-        bytes: 6 * 1024 * 1024,
-      });
-      livePage(els());
-      renderInTestProvider(<App />);
-      pictureOn();
-      fireEvent.click(exportButton());
-      await waitFor(() => expect(screen.getByText(/up to 5 MB/)).toBeTruthy());
-    });
-
-    it("leaves the design as it was when the export is cancelled", async () => {
-      const list = els();
-      livePage(list);
-      jest.mocked(requestExport).mockResolvedValue({ status: "aborted" });
-      renderInTestProvider(<App />);
-      pictureOn();
-      fireEvent.click(exportButton());
-      await waitFor(() =>
-        expect(screen.getByText(/Export cancelled/)).toBeTruthy(),
-      );
-      expect(back(list)).toEqual([0, 0, 0.25]);
-      expect(fetchPicture).not.toHaveBeenCalled();
-    });
-
-    it("refuses, and touches nothing, while a box would show its words", async () => {
-      const list = [textBox("{{player 1}}"), textBox("vs {{opponent}}")];
-      livePage(list);
-      renderInTestProvider(<App />);
-      pictureOn();
-      fireEvent.click(exportButton());
-      await waitFor(() =>
-        expect(
-          screen.getByText(/would show their {{words}} in the picture/),
-        ).toBeTruthy(),
-      );
-      expect(screen.getByText(/has other words with the token/)).toBeTruthy();
-      expect(requestExport).not.toHaveBeenCalled();
-      expect(back(list)).toEqual([0, 0]);
-    });
-
     it("explains a page with no fields", async () => {
       livePage([textBox("LINE UP")]);
       renderInTestProvider(<App />);
+      choose("Other post");
       fireEvent.click(exportButton());
       await waitFor(() =>
         expect(screen.getByText(/nothing to export yet/)).toBeTruthy(),
       );
     });
 
-    it("still gives the fields when the picture cannot be fetched", async () => {
-      jest
-        .mocked(fetchPicture)
-        .mockRejectedValue(new Error("blocked by the security policy"));
-      const list = els();
-      livePage(list);
-      renderInTestProvider(<App />);
-      pictureOn();
-      fireEvent.click(exportButton());
-      await waitFor(() =>
-        expect(screen.getByText(/picture could not be fetched/)).toBeTruthy(),
-      );
-      expect(screen.getByText(/blocked by the security policy/)).toBeTruthy();
-      expect(back(list)).toEqual([0, 0, 0.25]);
-      fireEvent.click(screen.getByRole("button", { name: "Open the picture" }));
-      expect(requestOpenExternalUrl).toHaveBeenCalledWith({ url });
-      fireEvent.click(screen.getByRole("button", { name: "Copy fields only" }));
-      await waitFor(() => expect(copyTemplate).toHaveBeenCalled());
-      expect(copyTemplate).toHaveBeenCalledWith(
-        expect.not.objectContaining({ background: expect.anything() }),
-      );
-      expect(screen.queryByRole("button", { name: /Download/ })).toBeNull();
-    });
-
-    it("offers a manual restore when the words cannot be put back, and it works", async () => {
-      const list = els();
-      // the second save (the automatic restore) fails; the manual one is the third
-      livePage(list, [2]);
-      renderInTestProvider(<App />);
-      pictureOn();
-      fireEvent.click(exportButton());
-      await waitFor(() =>
-        expect(
-          screen.getByText(/still hidden\. Press “Restore placeholders”/),
-        ).toBeTruthy(),
-      );
-      fireEvent.click(
-        screen.getByRole("button", { name: "Restore placeholders" }),
-      );
-      await waitFor(() =>
-        expect(screen.getByText(/Your text boxes are back/)).toBeTruthy(),
-      );
-      expect(
-        screen.queryByRole("button", { name: "Restore placeholders" }),
-      ).toBeNull();
-      expect(back(list)).toEqual([0, 0, 0.25]);
-    });
-
     it("does not offer to export where the design cannot be edited", () => {
       jest.mocked(useFeatureSupport).mockReturnValue(() => false);
       renderInTestProvider(<App />);
-      const b = exportButton();
-      expect(
-        b.hasAttribute("disabled") ||
-          b.getAttribute("aria-disabled") === "true",
-      ).toBe(true);
+      choose("Line up");
+      expect(isDisabled(exportButton())).toBe(true);
     });
   });
 });

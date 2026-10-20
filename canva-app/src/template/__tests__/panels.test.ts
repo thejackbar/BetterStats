@@ -86,8 +86,107 @@ describe("panels", () => {
       textBox("{{player 1}}", { top: 100, left: 80, width: 300, height: 40 }),
     ]);
     expect(r.panels).toEqual([
-      { x: 50, y: 50, w: 400, h: 600, color: "#7b3b3b", source: "solid" },
+      {
+        x: 50,
+        y: 50,
+        w: 400,
+        h: 600,
+        color: "#7b3b3b",
+        source: "solid",
+        imageRef: null,
+        box: null,
+      },
     ]);
+  });
+
+  describe("pictures", () => {
+    const words = textBox("{{player 1}}", {
+      top: 400,
+      left: 60,
+      width: 300,
+      height: 40,
+    });
+
+    it("keeps the id and the unturned box of a picture panel", () => {
+      const r = onPage([
+        rect({
+          left: 50,
+          top: 100,
+          width: 400,
+          height: 800,
+          rotation: 90,
+          media: "image",
+          imageRef: "paper",
+        }),
+        words,
+      ]);
+      expect(r.panels).toHaveLength(1);
+      expect(r.panels[0]).toMatchObject({
+        source: "picture",
+        imageRef: "paper",
+        box: { x: 50, y: 100, w: 400, h: 800, rotation: 90 },
+      });
+    });
+
+    it("scales the box with the page", () => {
+      const r = onPage(
+        [
+          rect({
+            left: 25,
+            top: 50,
+            width: 200,
+            height: 400,
+            media: "image",
+            imageRef: "paper",
+          }),
+          textBox("{{player 1}}", {
+            top: 100,
+            left: 40,
+            width: 100,
+            height: 20,
+          }),
+        ],
+        { width: 540, height: 540 },
+      );
+      expect(r.panels[0]?.box).toEqual({
+        x: 50,
+        y: 100,
+        w: 400,
+        h: 800,
+        rotation: 0,
+      });
+    });
+
+    it("has no box for a picture Canva gave no id for", () => {
+      const r = onPage([
+        rect({
+          left: 50,
+          top: 100,
+          width: 400,
+          height: 800,
+          media: "image",
+        }),
+        words,
+      ]);
+      expect(r.panels[0]).toMatchObject({ imageRef: null, box: null });
+    });
+
+    it("takes a picture covering the page as the background", () => {
+      const r = onPage([
+        rect({ width: 1080, height: 1080, media: "image", imageRef: "bg" }),
+        words,
+      ]);
+      expect(r.backgroundRef).toBe("bg");
+      expect(r.panels).toEqual([]);
+    });
+
+    it("has no background picture for a solid page", () => {
+      const r = onPage([
+        rect({ width: 1080, height: 1080, colour: "#112233" }),
+        words,
+      ]);
+      expect(r.backgroundRef).toBeNull();
+    });
   });
 
   it("calls a vector shape with mixed fills a shape panel", () => {

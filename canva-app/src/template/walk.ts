@@ -24,15 +24,6 @@ export type TokenBox = {
 /** Every text box at any depth, token or not. */
 export type TextBox = TokenBox & { hasToken: boolean };
 
-/**
- * Every text box holding a {{ }}, at any depth. A box inside a group is
- * positioned relative to the group, so the groups' own positions are carried
- * along as `offset`.
- */
-export function tokenBoxes(elements: readonly ElementLike[]): TokenBox[] {
-  return textBoxes(elements).filter((b) => b.hasToken);
-}
-
 /** All text boxes, with the same context, so fixed words can be read too. */
 export function textBoxes(elements: readonly ElementLike[]): TextBox[] {
   const out: TextBox[] = [];

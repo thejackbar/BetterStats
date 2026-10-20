@@ -9,6 +9,13 @@ export type Panel = {
   /** The designer's colour when the surface is a solid fill, else null (a picture). */
   color: string | null;
   source: "solid" | "picture" | "shape";
+  /** Canva's id for the panel's own picture, when it is filled with one. */
+  imageRef: string | null;
+  /**
+   * Where that picture really sits, before it was turned (BetterPosts draws the
+   * picture in its own box and turns it): not cut to the page, in the 1080 space.
+   */
+  box: { x: number; y: number; w: number; h: number; rotation: number } | null;
 };
 
 /** A box of text on the page, in the page's own pixels, and how it is aligned. */
@@ -143,6 +150,17 @@ export function findPanels(
           : sf.kind === "shape"
             ? "shape"
             : "picture",
+      imageRef: sf.fill.kind === "image" ? sf.fill.imageRef : null,
+      box:
+        sf.fill.kind === "image" && sf.fill.imageRef
+          ? {
+              x: Math.round(sf.x * scale),
+              y: Math.round(sf.y * scale),
+              w: Math.round(sf.w * scale),
+              h: Math.round(sf.h * scale),
+              rotation: sf.rotation,
+            }
+          : null,
     };
   });
   return { panels, surfaces: marked };
