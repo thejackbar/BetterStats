@@ -967,3 +967,17 @@ Slice 4 of the teaser campaign. Meta cannot carry a per-viewer token, so an ad c
 
 **Verification.** `verify_club_teaser_adpack.py` (43; control with the copy naming the player and customers allowed in fails 6, old code reports the missing module), the panel browser suite (62; control with the row unmounted fails 12). A full local run drew real pictures with Chromium for two clubs, then downloaded the pack over HTTP through the shipped route: right headers, six files, manifest rows with location, radius 20 and the campaign name cleaned to `spring-push`.
 
+## Token to club linkage (v9.128.2, Oct 2026)
+
+The requirement: the ad flow lets a visitor name and confirm their club on /trial, and the email flow knows each contact's club through its UTM code; in both, the club has to lead to its teaser token.
+
+**What already existed.** The token sits on `club_teaser_snapshots`, keyed to one `marketing_clubs` row, which holds the UTM code and PlayHQ's guid. Email resolves contact to club (`marketing_club_id`) to token. What did not exist was a way to go from the identifiers a visitor or a link carries (a UTM code, the id /trial's picker returns) to the token, with rules for when an identifier is unusable.
+
+**What was built, and what was dropped.** A single service of lookups over the one club row, and a read-only report. A first pass also changed BetterComms (resolving a contact's club by the UTM code it carries, an audience rule to match) and put the teaser image into the /trial club-confirmed step; the user said they wanted only the linkage, so all of that was reverted before commit and is not in this change.
+
+**The traps.** `marketing_clubs.utm_code` is indexed but not unique, and `club_teaser_snapshots.snapshot.club.ca_org_id` is not constrained either, so both can be shared; the lookups return None on a tie. The /trial search id is Cricket Australia's `organisationGuid`; `marketing_clubs.grassroots_guid` is PlayHQ's different namespace (see `club_teaser.resolve_org`), so a visitor's club is matched on either, CA first. A snapshot written before schema 2 has no `ca_org_id` and is only reachable by the guid until it is re-pulled.
+
+**Open question for the real data.** How many of the pulled clubs have a missing or shared UTM code is only known from `report_club_teaser_links` against production. Clubs it cannot reach by UTM can still be reached by CA id or by the token link itself.
+
+**Verification.** `verify_club_teaser_link.py` (26; the control with ties resolved by guessing fails the shared-UTM, shared-CA-id and report-agreement checks).
+
