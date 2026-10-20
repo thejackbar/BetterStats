@@ -279,94 +279,128 @@ const slotTicket = (w, h, count) => ticketGeo(w, h, count).slot
 
 // ═══════════════════════════════ FIXTURES ROUNDUP ═══════════════════════════
 
-export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureList({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors, parts }) {
   const S = roundScale(width, height)
   const t = sz(S.row)
   const rows = fixtures
+  const texture = usePostLook().texture !== false
+  const bandBg = pc(parts, 'bandBg', pal.accent)
+  const title = pt(parts, 'title1', 'FIXTURES')
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.035} gap={26} angle={0} />
-      <div style={{ position: 'absolute', right: -40, bottom: 60, fontFamily: DISPLAY, fontSize: 560, lineHeight: 0.8, color: pal.ink, opacity: 0.04, letterSpacing: -16, userSelect: 'none' }}>{(meta.round || '').replace(/[^0-9]/g, '') ? 'R' + (meta.round || '').replace(/[^0-9]/g, '') : ''}</div>
-      {topBar({ pal, width, height, team: { logo: club.logo, mono: club.mono }, left: (
+      {texture ? <div style={{ position: 'absolute', right: -40, bottom: 60, fontFamily: DISPLAY, fontSize: 560, lineHeight: 0.8, color: pc(parts, 'ghostColor', pal.ink), opacity: 0.04, letterSpacing: -16, userSelect: 'none' }}>{(meta.round || '').replace(/[^0-9]/g, '') ? 'R' + (meta.round || '').replace(/[^0-9]/g, '') : ''}</div> : null}
+      {topBar({ pal, width, height, parts, team: { logo: club.logo, mono: club.mono }, left: (
         <>
-          <Slab bg={pal.accent} fg={pal.primary} size={30} style={{ padding: '9px 18px' }}>FIXTURES</Slab>
-          <Kicker color={pal.accent} size={14} style={{ marginTop: 14 }}>{`// ${meta.round} · ${meta.date} · ${meta.comp}`}</Kicker>
+          {title ? <Slab bg={bandBg} fg={pc(parts, 'title1Color', partPicked(parts, 'bandBg') ? inkOn(bandBg) : pal.primary)} size={30} style={{ padding: '9px 18px' }}>{title}</Slab> : null}
+          <Kicker color={pc(parts, 'roundColor', pal.accent)} size={14} style={{ marginTop: 14 }}>{`// ${meta.round} · ${meta.date} · ${meta.comp}`}</Kicker>
         </>
       ) })}
       <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height).h + 8, bottom: bodyEnd(height), display: 'flex', flexDirection: 'column' }}>
         {rows.map((r, i) => {
           const home = r.ha === 'H'
           return (
-            <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: `${pick(S.A, { square: 162, portrait: 178, story: 204 })}px minmax(0,1fr) 206px`, alignItems: 'center', gap: 18, borderBottom: i < rows.length - 1 ? `1px solid ${pal.ink}1a` : 'none' }}>
+            <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: `${pick(S.A, { square: 162, portrait: 178, story: 204 })}px minmax(0,1fr) 206px`, alignItems: 'center', gap: 18, borderBottom: i < rows.length - 1 ? `1px solid ${pc(parts, 'dividerColor', `${pal.ink}1a`)}` : 'none' }}>
               <div>
-                <div style={{ width: 30, height: 4, background: pal.accent, marginBottom: 8 }} />
-                <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95 }}>{r.grade}</div>
+                <div style={{ width: 30, height: 4, background: pc(parts, 'fx1TickColor', pal.accent), marginBottom: 8 }} />
+                <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.55, width: 40, flexShrink: 0 }}>{home ? 'VS' : '@'}</span>
-                <Monogram text={r.oppMono} logo={r.oppLogo} size={50} fg={pal.ink} bg={`${pal.ink}12`} ring={`${pal.ink}33`} />
+                <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.55, width: 40, flexShrink: 0 }}>{home ? 'VS' : '@'}</span>
+                <Monogram text={r.oppMono} logo={r.oppLogo} size={50} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}12`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontFamily: DISPLAY, fontSize: t(31), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</div>
-                  <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, color: pal.ink, opacity: 0.55, marginTop: 4 }}>{home ? 'HOME' : 'AWAY'}</div>
+                  <div style={{ fontFamily: DISPLAY, fontSize: t(31), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
+                  <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, color: pc(parts, 'haColor', pal.ink), opacity: 0.55, marginTop: 4 }}>{home ? 'HOME' : 'AWAY'}</div>
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontFamily: DISPLAY, fontSize: t(27), letterSpacing: 1, lineHeight: 1, color: pal.accent, whiteSpace: 'nowrap' }}>{r.time}</div>
-                <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: pal.ink, opacity: 0.7, marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.venue}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(27), letterSpacing: 1, lineHeight: 1, color: pc(parts, 'timeColor', pal.accent), whiteSpace: 'nowrap' }}>{r.time}</div>
+                <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: pc(parts, 'venueColor', pal.ink), opacity: 0.7, marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.venue}</div>
               </div>
             </div>
           )
         })}
       </div>
-      {creditStrip(pal, height)}
+      {creditStrip(pal, height, parts)}
       <Grain opacity={0.3} id="fl-g" />
     </Post>
   )
 }
+registerParts({
+  FX1: [
+    textPart('title1', 'Title words', 'Heading', () => 'FIXTURES'),
+    colorPart('title1Color', 'Title text colour', 'Heading', (p) => p.primary),
+    colorPart('bandBg', 'Title label background', 'Heading', (p) => p.accent),
+    colorPart('roundColor', 'Round, date and competition line', 'Heading', (p) => p.accent),
+    colorPart('headerBg', 'Header bar', 'Header and footer', null, { autoLabel: 'Background colour' }),
+    colorPart('headerRule', 'Line under the header', 'Header and footer', (p) => p.accent),
+    colorPart('footerBg', 'Footer bar', 'Header and footer', (p) => p.primary),
+    colorPart('footerRule', 'Line over the footer', 'Header and footer', (p) => p.accent),
+    colorPart('ghostColor', 'Big faint round number', 'Background', (p) => p.ink),
+    colorPart('dividerColor', 'Lines between rows', 'Rows', null, { autoLabel: 'Soft line' }),
+    colorPart('fx1TickColor', 'Small bar above the grade', 'Rows', (p) => p.accent),
+    colorPart('gradeColor', 'Grade', 'Rows', (p) => p.ink),
+    colorPart('homeColor', 'VS mark (home games)', 'Rows', (p) => p.accent),
+    colorPart('awayColor', '@ mark (away games)', 'Rows', (p) => p.ink),
+    colorPart('crestColor', 'Opposition badge letters', 'Opposition', (p) => p.ink),
+    colorPart('crestBg', 'Opposition badge fill', 'Opposition', null, { autoLabel: 'Soft tint' }),
+    colorPart('crestRing', 'Opposition badge ring', 'Opposition', null, { autoLabel: 'Soft ring' }),
+    colorPart('nameColor', 'Opposition name', 'Opposition', (p) => p.ink),
+    colorPart('haColor', 'Home or Away word', 'Opposition', (p) => p.ink),
+    colorPart('timeColor', 'Start time', 'Time and ground', (p) => p.accent),
+    colorPart('venueColor', 'Ground', 'Time and ground', (p) => p.ink),
+  ],
+})
 
-export function FixtureHype({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureHype({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors, parts }) {
   const S = roundScale(width, height)
   const t = sz(S.row)
   const G = hypeGeo(width, height)
   const rows = fixtures
   const roundNum = (meta.round || '').replace(/[^0-9]/g, '') || '9'
+  const texture = usePostLook().texture !== false
+  const bandBg = pc(parts, 'bandBg', pal.accent)
+  // Everything on the tilted band is the background colour until the band itself is recoloured.
+  const bandInk = partPicked(parts, 'bandBg') ? inkOn(bandBg) : pal.primary
+  const head1 = pt(parts, 'title1', 'THIS')
+  const head2 = pt(parts, 'title2', 'SATURDAY')
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.07} size={10} />
       {/* The ghost round number starts below the sponsor panel, so no text sits under it. */}
-      <div style={{ position: 'absolute', right: -90, top: share(height, 150) + 70, fontFamily: DISPLAY, fontSize: share(height, 900), lineHeight: 0.7, color: pal.accent, opacity: 0.1, letterSpacing: -20, userSelect: 'none' }}>{roundNum}</div>
-      <div style={{ position: 'absolute', left: -200, width: 1600, top: 30, height: G.band, background: pal.accent, transform: 'rotate(-5deg)', transformOrigin: 'top left' }} />
+      {texture ? <div style={{ position: 'absolute', right: -90, top: share(height, 150) + 70, fontFamily: DISPLAY, fontSize: share(height, 900), lineHeight: 0.7, color: pc(parts, 'ghostColor', pal.accent), opacity: 0.1, letterSpacing: -20, userSelect: 'none' }}>{roundNum}</div> : null}
+      <div style={{ position: 'absolute', left: -200, width: 1600, top: 30, height: G.band, background: bandBg, transform: 'rotate(-5deg)', transformOrigin: 'top left' }} />
       <div style={{ position: 'absolute', left: 56, top: 70, zIndex: 3, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-        <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 3, color: pal.primary, fontWeight: 700, maxWidth: G.slot.x - 56 - 20, marginBottom: 6 }}>{`// ${meta.round} · ${meta.comp}`}</div>
-        <div style={{ fontFamily: DISPLAY, fontSize: G.fs, lineHeight: 0.86, letterSpacing: -1, color: pal.primary }}>THIS</div>
-        <div style={{ fontFamily: DISPLAY, fontSize: G.fs, lineHeight: 0.86, letterSpacing: -1, color: pal.primary }}>SATURDAY</div>
+        <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 3, color: pc(parts, 'roundColor', bandInk), fontWeight: 700, maxWidth: G.slot.x - 56 - 20, marginBottom: 6 }}>{`// ${meta.round} · ${meta.comp}`}</div>
+        {head1 ? <div style={{ fontFamily: DISPLAY, fontSize: G.fs, lineHeight: 0.86, letterSpacing: -1, color: pc(parts, 'title1Color', bandInk) }}>{head1}</div> : null}
+        {head2 ? <div style={{ fontFamily: DISPLAY, fontSize: G.fs, lineHeight: 0.86, letterSpacing: -1, color: pc(parts, 'title2Color', bandInk) }}>{head2}</div> : null}
       </div>
       {/* The sponsor panel (G.slot) is left clear between the title and the shield; the date sits under it. */}
-      <div style={{ position: 'absolute', right: width - (G.slot.x + G.slot.w), top: G.slot.y + G.slot.h + 10, zIndex: 3, fontFamily: DISPLAY, fontSize: pick(G.A, { square: 26, portrait: 28, story: 30 }), letterSpacing: 1, color: pal.primary, opacity: 0.85, whiteSpace: 'nowrap' }}>{meta.date}</div>
+      <div style={{ position: 'absolute', right: width - (G.slot.x + G.slot.w), top: G.slot.y + G.slot.h + 10, zIndex: 3, fontFamily: DISPLAY, fontSize: pick(G.A, { square: 26, portrait: 28, story: 30 }), letterSpacing: 1, color: pc(parts, 'dateColor', bandInk), opacity: 0.85, whiteSpace: 'nowrap' }}>{meta.date}</div>
       <div style={{ position: 'absolute', right: 56, top: G.slot.y, zIndex: 3 }}>
-        <Shield logo={club.logo} monogram={club.mono} color={pal.primary} size={G.shield} />
+        <Shield logo={club.logo} monogram={club.mono} color={bandInk} size={G.shield} />
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: G.bandLow + 30, bottom: grow(height, 108, 0.03), display: 'flex', flexDirection: 'column', gap: 0 }}>
         {rows.map((r, i) => {
           const home = r.ha === 'H'
           return (
-            <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: `52px ${pick(S.A, { square: 150, portrait: 166, story: 196 })}px minmax(0,1fr) 184px`, alignItems: 'center', gap: 20, padding: '0 6px', borderTop: `2px solid ${pal.ink}22` }}>
-              <div style={{ fontFamily: MONO, fontSize: 22, letterSpacing: 1, color: pal.accent }}>{String(i + 1).padStart(2, '0')}</div>
-              <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95 }}>{r.grade}</div>
+            <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: `52px ${pick(S.A, { square: 150, portrait: 166, story: 196 })}px minmax(0,1fr) 184px`, alignItems: 'center', gap: 20, padding: '0 6px', borderTop: `2px solid ${pc(parts, 'dividerColor', `${pal.ink}22`)}` }}>
+              <div style={{ fontFamily: MONO, fontSize: 22, letterSpacing: 1, color: pc(parts, 'numColor', pal.accent) }}>{String(i + 1).padStart(2, '0')}</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 0.95, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 14 }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 1, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home ? 'V' : '@'}</span>
-                <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: t(38), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</div>
+                <span style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 1, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home ? 'V' : '@'}</span>
+                <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: t(38), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontFamily: DISPLAY, fontSize: 26, color: pal.ink, lineHeight: 1, whiteSpace: 'nowrap' }}>{r.time}</div>
-                <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.2, color: pal.ink, opacity: 0.6, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.venue} · {home ? 'H' : 'A'}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: 26, color: pc(parts, 'timeColor', pal.ink), lineHeight: 1, whiteSpace: 'nowrap' }}>{r.time}</div>
+                <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.2, color: pc(parts, 'venueColor', pal.ink), opacity: 0.6, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.venue} · {home ? 'H' : 'A'}</div>
               </div>
             </div>
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: -200, bottom: -28, width: 1600, height: 84, background: pal.secondary, transform: 'rotate(-2deg)', transformOrigin: 'bottom left' }} />
+      {texture ? <div style={{ position: 'absolute', left: -200, bottom: -28, width: 1600, height: 84, background: pc(parts, 'footerBg', pal.secondary), transform: 'rotate(-2deg)', transformOrigin: 'bottom left' }} /> : null}
       <div style={{ position: 'absolute', left: 56, right: 56, bottom: 22, zIndex: 3, display: 'flex', justifyContent: 'flex-end' }}>
         <Bug ink={pal.ink} />
       </div>
@@ -374,94 +408,175 @@ export function FixtureHype({ palette: pal, width = 1080, height = 1080, meta = 
     </Post>
   )
 }
+registerParts({
+  FX2: [
+    textPart('title1', 'Title, first line', 'Heading', () => 'THIS'),
+    colorPart('title1Color', 'Title, first line colour', 'Heading', (p) => p.primary),
+    textPart('title2', 'Title, second line', 'Heading', () => 'SATURDAY'),
+    colorPart('title2Color', 'Title, second line colour', 'Heading', (p) => p.primary),
+    colorPart('roundColor', 'Round and competition line', 'Heading', (p) => p.primary),
+    colorPart('dateColor', 'Date', 'Heading', (p) => p.primary),
+    colorPart('bandBg', 'Tilted title band', 'Heading', (p) => p.accent),
+    colorPart('ghostColor', 'Big faint round number', 'Background', (p) => p.accent),
+    colorPart('footerBg', 'Tilted strip along the bottom', 'Background', (p) => p.secondary),
+    colorPart('dividerColor', 'Lines between rows', 'Rows', null, { autoLabel: 'Soft line' }),
+    colorPart('numColor', 'Row number', 'Rows', (p) => p.accent),
+    colorPart('gradeColor', 'Grade', 'Rows', (p) => p.ink),
+    colorPart('homeColor', 'V mark (home games)', 'Rows', (p) => p.accent),
+    colorPart('awayColor', '@ mark (away games)', 'Rows', (p) => p.ink),
+    colorPart('nameColor', 'Opposition name', 'Rows', (p) => p.ink),
+    colorPart('timeColor', 'Start time', 'Rows', (p) => p.ink),
+    colorPart('venueColor', 'Ground', 'Rows', (p) => p.ink),
+  ],
+})
 
-export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureGrid({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors, parts }) {
   const S = roundScale(width, height)
   const t = sz(S.row)
   const rows = fixtures
+  const title = pt(parts, 'title1', 'FIXTURES')
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={12} />
       <Stripes color={pal.accent} opacity={0.03} gap={30} angle={-18} />
-      {topBar({ pal, width, height, rule: false, team: { logo: club.logo, mono: club.mono }, left: (
+      {topBar({ pal, width, height, parts, rule: false, team: { logo: club.logo, mono: club.mono }, left: (
         <>
-          <div style={{ fontFamily: DISPLAY, fontSize: pick(S.A, { square: 76, portrait: 76, story: 70 }), letterSpacing: -1, lineHeight: 0.9 }}>FIXTURES</div>
-          <Kicker color={pal.accent} size={15} style={{ marginTop: 8 }}>{`// ${meta.round} · ${meta.comp}`}</Kicker>
-          <div style={{ fontFamily: DISPLAY, fontSize: 22, color: pal.accent, marginTop: 6 }}>{meta.date}</div>
+          {title ? <div style={{ fontFamily: DISPLAY, fontSize: pick(S.A, { square: 76, portrait: 76, story: 70 }), letterSpacing: -1, lineHeight: 0.9, color: pc(parts, 'title1Color', undefined) }}>{title}</div> : null}
+          <Kicker color={pc(parts, 'roundColor', pal.accent)} size={15} style={{ marginTop: 8 }}>{`// ${meta.round} · ${meta.comp}`}</Kicker>
+          <div style={{ fontFamily: DISPLAY, fontSize: 22, color: pc(parts, 'dateColor', pal.accent), marginTop: 6 }}>{meta.date}</div>
         </>
       ) })}
       <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height, false).h + 4, bottom: bodyEnd(height), display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: `repeat(${Math.max(3, Math.ceil(rows.length / 2))}, 1fr)`, gap: 18 }}>
         {rows.map((r, i) => {
           const home = r.ha === 'H'
+          const tagBg = home ? pc(parts, 'badgeBg', pal.accent) : pc(parts, 'awayBadgeBg', `${pal.ink}1a`)
+          const tagInk = home
+            ? pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(tagBg) : pal.primary)
+            : pc(parts, 'awayBadgeColor', partPicked(parts, 'awayBadgeBg') ? inkOn(tagBg) : pal.ink)
           return (
-            <div key={i} style={{ position: 'relative', background: pal.secondary, borderTop: `3px solid ${pal.accent}`, padding: '20px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
+            <div key={i} style={{ position: 'relative', background: pc(parts, 'cardBg', pal.secondary), borderTop: `3px solid ${pc(parts, 'cardBorder', pal.accent)}`, padding: '20px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap' }}>{r.grade}</div>
-                <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, padding: '4px 9px', borderRadius: 3, background: home ? pal.accent : `${pal.ink}1a`, color: home ? pal.primary : pal.ink, fontWeight: 700, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(30), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
+                <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.5, padding: '4px 9px', borderRadius: 3, background: tagBg, color: tagInk, fontWeight: 700, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={46} />
-                <span style={{ fontFamily: DISPLAY, fontSize: 22, color: pal.accent, opacity: 0.9 }}>v</span>
-                <Monogram text={r.oppMono} logo={r.oppLogo} size={46} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
-                <div style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</div>
+                <span style={{ fontFamily: DISPLAY, fontSize: 22, color: pc(parts, 'vsColor', pal.accent), opacity: 0.9 }}>v</span>
+                <Monogram text={r.oppMono} logo={r.oppLogo} size={46} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={pc(parts, 'crestRing', `${pal.ink}33`)} />
+                <div style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderTop: `1px solid ${pal.ink}1a`, paddingTop: 12 }}>
-                <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.2, color: pal.ink, opacity: 0.7 }}>{r.venue}</div>
-                <div style={{ fontFamily: DISPLAY, fontSize: 26, color: pal.ink, lineHeight: 1 }}>{r.time}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderTop: `1px solid ${pc(parts, 'dividerColor', `${pal.ink}1a`)}`, paddingTop: 12 }}>
+                <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.2, color: pc(parts, 'venueColor', pal.ink), opacity: 0.7 }}>{r.venue}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: 26, color: pc(parts, 'timeColor', pal.ink), lineHeight: 1 }}>{r.time}</div>
               </div>
             </div>
           )
         })}
       </div>
-      {creditStrip(pal, height)}
+      {creditStrip(pal, height, parts)}
       <Grain opacity={0.3} id="fg-g" />
     </Post>
   )
 }
+registerParts({
+  FX3: [
+    textPart('title1', 'Title word', 'Heading', () => 'FIXTURES'),
+    colorPart('title1Color', 'Title colour', 'Heading', (p) => p.ink),
+    colorPart('roundColor', 'Round and competition line', 'Heading', (p) => p.accent),
+    colorPart('dateColor', 'Date', 'Heading', (p) => p.accent),
+    colorPart('headerBg', 'Header bar', 'Header and footer', null, { autoLabel: 'Background colour' }),
+    colorPart('footerBg', 'Footer bar', 'Header and footer', (p) => p.primary),
+    colorPart('footerRule', 'Line over the footer', 'Header and footer', (p) => p.accent),
+    colorPart('cardBg', 'Match card', 'Cards', (p) => p.secondary),
+    colorPart('cardBorder', 'Line across the top of a card', 'Cards', (p) => p.accent),
+    colorPart('gradeColor', 'Grade', 'Cards', (p) => p.ink),
+    colorPart('badgeBg', 'HOME tag', 'Cards', (p) => p.accent),
+    colorPart('badgeColor', 'HOME tag text', 'Cards', (p) => p.primary),
+    colorPart('awayBadgeBg', 'AWAY tag', 'Cards', null, { autoLabel: 'Soft tint' }),
+    colorPart('awayBadgeColor', 'AWAY tag text', 'Cards', (p) => p.ink),
+    colorPart('vsColor', 'Small v between the clubs', 'Cards', (p) => p.accent),
+    colorPart('crestColor', 'Opposition badge letters', 'Cards', (p) => p.ink),
+    colorPart('crestBg', 'Opposition badge fill', 'Cards', null, { autoLabel: 'Soft tint' }),
+    colorPart('crestRing', 'Opposition badge ring', 'Cards', null, { autoLabel: 'Soft ring' }),
+    colorPart('nameColor', 'Opposition name', 'Cards', (p) => p.ink),
+    colorPart('dividerColor', 'Line above the ground and time', 'Cards', null, { autoLabel: 'Soft line' }),
+    colorPart('venueColor', 'Ground', 'Cards', (p) => p.ink),
+    colorPart('timeColor', 'Start time', 'Cards', (p) => p.ink),
+  ],
+})
 
-export function FixtureBoard({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureBoard({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors, parts }) {
   const S = roundScale(width, height)
   const t = sz(S.row)
   const rows = fixtures
   const cols = `${pick(S.A, { square: 150, portrait: 150, story: 184 })}px minmax(0,1fr) 122px 184px`
+  const bandBg = pc(parts, 'bandBg', pal.accent)
+  const title = pt(parts, 'title1', 'FIXTURES')
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.05} size={11} />
-      {topBar({ pal, width, height, team: { logo: club.logo, mono: club.mono }, left: (
+      {topBar({ pal, width, height, parts, team: { logo: club.logo, mono: club.mono }, left: (
         <>
-          <Slab bg={pal.accent} fg={pal.primary} size={30} style={{ padding: '9px 18px' }}>FIXTURES</Slab>
-          <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date} · ${meta.comp}`}</Kicker>
+          {title ? <Slab bg={bandBg} fg={pc(parts, 'title1Color', partPicked(parts, 'bandBg') ? inkOn(bandBg) : pal.primary)} size={30} style={{ padding: '9px 18px' }}>{title}</Slab> : null}
+          <Kicker color={pc(parts, 'roundColor', pal.ink)} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date} · ${meta.comp}`}</Kicker>
         </>
       ) })}
-      <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height).h + 8, display: 'grid', gridTemplateColumns: cols, gap: 18, padding: '0 14px 10px', borderBottom: `1px solid ${pal.ink}22` }}>
-        {['GRADE', 'MATCH', 'TIME', 'GROUND'].map((h, i) => (
-          <div key={i} style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.8, color: pal.ink, opacity: 0.5, textAlign: i >= 2 ? 'right' : 'left' }}>{h}</div>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height).h + 8, display: 'grid', gridTemplateColumns: cols, gap: 18, padding: '0 14px 10px', borderBottom: `1px solid ${pc(parts, 'fx4HeadLine', `${pal.ink}22`)}` }}>
+        {[pt(parts, 'fx4ColGrade', 'GRADE'), pt(parts, 'fx4ColMatch', 'MATCH'), pt(parts, 'fx4ColTime', 'TIME'), pt(parts, 'fx4ColGround', 'GROUND')].map((h, i) => (
+          <div key={i} style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.8, color: pc(parts, 'fx4LabelColor', pal.ink), opacity: 0.5, textAlign: i >= 2 ? 'right' : 'left' }}>{h}</div>
         ))}
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height).h + 54, bottom: bodyEnd(height), display: 'flex', flexDirection: 'column' }}>
         {rows.map((r, i) => {
           const home = r.ha === 'H'
           return (
-            <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: cols, gap: 18, alignItems: 'center', padding: '0 14px', background: i % 2 ? `${pal.ink}08` : 'transparent' }}>
-              <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.92 }}>{r.grade}</div>
+            <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: cols, gap: 18, alignItems: 'center', padding: '0 14px', background: i % 2 ? pc(parts, 'cardBg', `${pal.ink}08`) : 'transparent' }}>
+              <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.92, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.5, flexShrink: 0, width: 22 }}>{home ? 'VS' : '@'}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
-                <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 1.2, padding: '2px 7px', borderRadius: 3, border: `1px solid ${pal.ink}30`, color: pal.ink, opacity: 0.6, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>
+                <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0, width: 22 }}>{home ? 'VS' : '@'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: t(28), letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
+                <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 1.2, padding: '2px 7px', borderRadius: 3, border: `1px solid ${pc(parts, 'fx4TagBorder', `${pal.ink}30`)}`, color: pc(parts, 'haColor', pal.ink), opacity: 0.6, flexShrink: 0 }}>{home ? 'HOME' : 'AWAY'}</span>
               </div>
-              <div style={{ fontFamily: MONO, fontSize: 20, fontWeight: 700, letterSpacing: 0.5, color: pal.accent, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.time}</div>
-              <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1, color: pal.ink, opacity: 0.7, textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.venue}</div>
+              <div style={{ fontFamily: MONO, fontSize: 20, fontWeight: 700, letterSpacing: 0.5, color: pc(parts, 'timeColor', pal.accent), textAlign: 'right', whiteSpace: 'nowrap' }}>{r.time}</div>
+              <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1, color: pc(parts, 'venueColor', pal.ink), opacity: 0.7, textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.venue}</div>
             </div>
           )
         })}
       </div>
-      {creditStrip(pal, height)}
+      {creditStrip(pal, height, parts)}
       <Grain opacity={0.3} id="fb-g" />
     </Post>
   )
 }
+registerParts({
+  FX4: [
+    textPart('title1', 'Title words', 'Heading', () => 'FIXTURES'),
+    colorPart('title1Color', 'Title text colour', 'Heading', (p) => p.primary),
+    colorPart('bandBg', 'Title label background', 'Heading', (p) => p.accent),
+    colorPart('roundColor', 'Round, date and competition line', 'Heading', (p) => p.ink),
+    colorPart('headerBg', 'Header bar', 'Header and footer', null, { autoLabel: 'Background colour' }),
+    colorPart('headerRule', 'Line under the header', 'Header and footer', (p) => p.accent),
+    colorPart('footerBg', 'Footer bar', 'Header and footer', (p) => p.primary),
+    colorPart('footerRule', 'Line over the footer', 'Header and footer', (p) => p.accent),
+    textPart('fx4ColGrade', 'Column title, grade', 'Column titles', () => 'GRADE'),
+    textPart('fx4ColMatch', 'Column title, match', 'Column titles', () => 'MATCH'),
+    textPart('fx4ColTime', 'Column title, time', 'Column titles', () => 'TIME'),
+    textPart('fx4ColGround', 'Column title, ground', 'Column titles', () => 'GROUND'),
+    colorPart('fx4LabelColor', 'Column title colour', 'Column titles', (p) => p.ink),
+    colorPart('fx4HeadLine', 'Line under the column titles', 'Column titles', null, { autoLabel: 'Soft line' }),
+    colorPart('cardBg', 'Shaded rows', 'Rows', null, { autoLabel: 'Soft tint' }),
+    colorPart('gradeColor', 'Grade', 'Rows', (p) => p.ink),
+    colorPart('homeColor', 'VS mark (home games)', 'Rows', (p) => p.accent),
+    colorPart('awayColor', '@ mark (away games)', 'Rows', (p) => p.ink),
+    colorPart('nameColor', 'Opposition name', 'Rows', (p) => p.ink),
+    colorPart('haColor', 'Home or Away tag text', 'Rows', (p) => p.ink),
+    colorPart('fx4TagBorder', 'Home or Away tag outline', 'Rows', null, { autoLabel: 'Soft outline' }),
+    colorPart('timeColor', 'Start time', 'Rows', (p) => p.accent),
+    colorPart('venueColor', 'Ground', 'Rows', (p) => p.ink),
+  ],
+})
 
-export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors, parts }) {
   const S = roundScale(width, height)
   const t = sz(S.row)
   const b = sz(S.big)
@@ -474,56 +589,89 @@ export function FixtureHeadline({ palette: pal, width = 1080, height = 1080, met
   const headB = barGeo(width, height, false).h + 8
   const panelH = pick(S.A, { square: 426, portrait: 520, story: 900 })
   const crest = pick(S.A, { square: 150, portrait: 170, story: 230 })
+  const bandBg = pc(parts, 'bandBg', pal.accent)
+  const title = pt(parts, 'title1', 'FIXTURES')
+  const featureLabel = pt(parts, 'fx5FeatureText', 'FEATURE MATCH')
+  const alsoLabel = pt(parts, 'fx5AlsoText', 'ALSO ON')
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.03} gap={28} angle={0} />
-      {topBar({ pal, width, height, team: { logo: club.logo, mono: club.mono }, rule: false, left: (
+      {topBar({ pal, width, height, parts, team: { logo: club.logo, mono: club.mono }, rule: false, left: (
         <>
-          <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>FIXTURES</Slab>
-          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${kickParts(meta)}`}</Kicker>
+          {title ? <Slab bg={bandBg} fg={pc(parts, 'title1Color', partPicked(parts, 'bandBg') ? inkOn(bandBg) : pal.primary)} size={26} style={{ padding: '8px 16px' }}>{title}</Slab> : null}
+          <Kicker color={pc(parts, 'roundColor', pal.ink)} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{`// ${kickParts(meta)}`}</Kicker>
         </>
       ) })}
-      <div style={{ position: 'absolute', left: 56, right: 56, top: headB, height: panelH, boxSizing: 'border-box', background: pal.secondary, borderTop: `3px solid ${pal.accent}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <Kicker color={pal.accent} size={13} style={{ marginBottom: 22 }}>{`// FEATURE MATCH · ${feat.grade}`}</Kicker>
+      <div style={{ position: 'absolute', left: 56, right: 56, top: headB, height: panelH, boxSizing: 'border-box', background: pc(parts, 'cardBg', pal.secondary), borderTop: `3px solid ${pc(parts, 'cardBorder', pal.accent)}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <Kicker color={pc(parts, 'fx5FeatureColor', pal.accent)} size={13} style={{ marginBottom: 22 }}>{`// ${featureLabel ? featureLabel + ' · ' : ''}${feat.grade}`}</Kicker>
         <div style={{ display: 'flex', alignItems: 'center', gap: 44 }}>
           <div style={{ textAlign: 'center', width: 280 }}>
             <Shield logo={club.logo} monogram={club.mono} color={pal.ink} size={crest} />
-            <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, marginTop: 12 }}>{club.name}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, marginTop: 12, color: pc(parts, 'clubColor', undefined) }}>{club.name}</div>
           </div>
-          <div style={{ fontFamily: DISPLAY, fontSize: b(60), color: pal.accent, letterSpacing: 1 }}>VS</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: b(60), color: pc(parts, 'vsColor', pal.accent), letterSpacing: 1 }}>{pt(parts, 'fx5VsText', 'VS')}</div>
           <div style={{ textAlign: 'center', width: 280 }}>
             <Shield logo={feat.oppLogo} monogram={feat.oppMono} color={pal.ink} size={crest} />
-            <AutoFit max={30} min={16} style={{ fontFamily: DISPLAY, letterSpacing: 0.5, marginTop: 12, textAlign: 'center' }} deps={[feat.opp]}>{feat.opp}</AutoFit>
+            <AutoFit max={30} min={16} style={{ fontFamily: DISPLAY, letterSpacing: 0.5, marginTop: 12, textAlign: 'center', color: pc(parts, 'nameColor', undefined) }} deps={[feat.opp]}>{feat.opp}</AutoFit>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 26, marginTop: 26, fontFamily: MONO, fontSize: 14, letterSpacing: 1.5, color: pal.ink, opacity: 0.85, alignItems: 'center' }}>
-          <span style={{ color: pal.accent, fontWeight: 700 }}>{feat.time}</span><span style={{ opacity: 0.4 }}>·</span><span>{feat.venue}</span><span style={{ opacity: 0.4 }}>·</span><span>{fHome ? 'HOME' : 'AWAY'}</span>
+          <span style={{ color: pc(parts, 'timeColor', pal.accent), fontWeight: 700 }}>{feat.time}</span><span style={{ opacity: 0.4 }}>·</span><span style={{ color: pc(parts, 'venueColor', undefined) }}>{feat.venue}</span><span style={{ opacity: 0.4 }}>·</span><span style={{ color: pc(parts, 'haColor', undefined) }}>{fHome ? 'HOME' : 'AWAY'}</span>
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: headB + panelH + 28, bottom: bodyEnd(height), display: 'flex', flexDirection: 'column' }}>
-        <Kicker color={pal.ink} size={12} style={{ opacity: 0.55, marginBottom: 12 }}>{`// ALSO ON ${meta.date}`}</Kicker>
+        <Kicker color={pc(parts, 'fx5AlsoColor', pal.ink)} size={12} style={{ opacity: 0.55, marginBottom: 12 }}>{`// ${alsoLabel ? alsoLabel + ' ' : ''}${meta.date}`}</Kicker>
         <div style={{ ...(S.A === 'square' ? null : { flex: 1, minHeight: 0, gridAutoRows: '1fr' }), display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 34px' }}>
           {rest.map((r, i) => {
             const home = r.ha === 'H'
             return (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${pal.ink}14` }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: t(19), width: 104, flexShrink: 0, lineHeight: 1 }}>{r.grade}</span>
-                <span style={{ fontFamily: MONO, fontSize: 11, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home ? 'v' : '@'}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: t(20), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
-                <span style={{ fontFamily: MONO, fontSize: 12, color: pal.accent, flexShrink: 0 }}>{r.time}</span>
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '7px 0', borderBottom: `1px solid ${pc(parts, 'dividerColor', `${pal.ink}14`)}` }}>
+                <span style={{ fontFamily: DISPLAY, fontSize: t(19), width: 104, flexShrink: 0, lineHeight: 1, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0 }}>{home ? 'v' : '@'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: t(20), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
+                <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'fx5ListTimeColor', pal.accent), flexShrink: 0 }}>{r.time}</span>
               </div>
             )
           })}
         </div>
       </div>
-      {creditStrip(pal, height)}
+      {creditStrip(pal, height, parts)}
       <Grain opacity={0.3} id="fhd-g" />
     </Post>
   )
 }
+registerParts({
+  FX5: [
+    textPart('title1', 'Title words', 'Heading', () => 'FIXTURES'),
+    colorPart('title1Color', 'Title text colour', 'Heading', (p) => p.primary),
+    colorPart('bandBg', 'Title label background', 'Heading', (p) => p.accent),
+    colorPart('roundColor', 'Round, date and competition line', 'Heading', (p) => p.ink),
+    colorPart('headerBg', 'Header bar', 'Header and footer', null, { autoLabel: 'Background colour' }),
+    colorPart('footerBg', 'Footer bar', 'Header and footer', (p) => p.primary),
+    colorPart('footerRule', 'Line over the footer', 'Header and footer', (p) => p.accent),
+    colorPart('cardBg', 'Feature match panel', 'Feature match', (p) => p.secondary),
+    colorPart('cardBorder', 'Line across the top of the panel', 'Feature match', (p) => p.accent),
+    textPart('fx5FeatureText', 'Feature match label', 'Feature match', () => 'FEATURE MATCH'),
+    colorPart('fx5FeatureColor', 'Feature match label colour', 'Feature match', (p) => p.accent),
+    colorPart('clubColor', 'Club name', 'Feature match', (p) => p.ink),
+    textPart('fx5VsText', 'Word between the clubs', 'Feature match', () => 'VS'),
+    colorPart('vsColor', 'Word between the clubs colour', 'Feature match', (p) => p.accent),
+    colorPart('nameColor', 'Opposition name', 'Feature match', (p) => p.ink),
+    colorPart('timeColor', 'Start time', 'Feature match', (p) => p.accent),
+    colorPart('venueColor', 'Ground', 'Feature match', (p) => p.ink),
+    colorPart('haColor', 'Home or Away word', 'Feature match', (p) => p.ink),
+    textPart('fx5AlsoText', 'List heading', 'Other matches', () => 'ALSO ON'),
+    colorPart('fx5AlsoColor', 'List heading colour', 'Other matches', (p) => p.ink),
+    colorPart('dividerColor', 'Lines between rows', 'Other matches', null, { autoLabel: 'Soft line' }),
+    colorPart('gradeColor', 'Grade', 'Other matches', (p) => p.ink),
+    colorPart('homeColor', 'v mark (home games)', 'Other matches', (p) => p.accent),
+    colorPart('awayColor', '@ mark (away games)', 'Other matches', (p) => p.ink),
+    colorPart('fx5ListTimeColor', 'Start time in the list', 'Other matches', (p) => p.accent),
+  ],
+})
 
-export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors }) {
+export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, meta = {}, fixtures = [], club = {}, sponsors, parts }) {
   const S = roundScale(width, height)
   const t = sz(S.row)
   const toMin = (t) => {
@@ -534,40 +682,63 @@ export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, met
     return h * 60 + mm
   }
   const rows = [...fixtures].sort((a, b) => toMin(a.time) - toMin(b.time))
+  const bandBg = pc(parts, 'bandBg', pal.accent)
+  const title = pt(parts, 'title1', 'MATCH-DAY')
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
-      {topBar({ pal, width, height, team: { logo: club.logo, mono: club.mono }, left: (
+      {topBar({ pal, width, height, parts, team: { logo: club.logo, mono: club.mono }, left: (
         <>
-          <Slab bg={pal.accent} fg={pal.primary} size={28} style={{ padding: '9px 17px' }}>MATCH-DAY</Slab>
-          <Kicker color={pal.ink} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date} · ${meta.comp}`}</Kicker>
+          {title ? <Slab bg={bandBg} fg={pc(parts, 'title1Color', partPicked(parts, 'bandBg') ? inkOn(bandBg) : pal.primary)} size={28} style={{ padding: '9px 17px' }}>{title}</Slab> : null}
+          <Kicker color={pc(parts, 'roundColor', pal.ink)} size={14} style={{ marginTop: 14, opacity: 0.72 }}>{`// ${meta.round} · ${meta.date} · ${meta.comp}`}</Kicker>
         </>
       ) })}
       <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height).h + 10, bottom: bodyEnd(height) }}>
-        <div style={{ position: 'absolute', left: 158, top: 12, bottom: 12, width: 2, background: `${pal.ink}22` }} />
+        <div style={{ position: 'absolute', left: 158, top: 12, bottom: 12, width: 2, background: pc(parts, 'dividerColor', `${pal.ink}22`) }} />
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           {rows.map((r, i) => {
             const home = r.ha === 'H'
             return (
               <div key={i} style={{ flex: 1, display: 'flex', alignItems: 'center', position: 'relative' }}>
-                <div style={{ width: 150, textAlign: 'right', paddingRight: 26, fontFamily: DISPLAY, fontSize: t(32), color: pal.accent, lineHeight: 1, flexShrink: 0 }}>{String(r.time || '').replace(' ', '')}</div>
-                <div style={{ width: 16, height: 16, borderRadius: '50%', background: pal.accent, border: `3px solid ${pal.primary}`, zIndex: 2, flexShrink: 0 }} />
+                <div style={{ width: 150, textAlign: 'right', paddingRight: 26, fontFamily: DISPLAY, fontSize: t(32), color: pc(parts, 'timeColor', pal.accent), lineHeight: 1, flexShrink: 0 }}>{String(r.time || '').replace(' ', '')}</div>
+                <div style={{ width: 16, height: 16, borderRadius: '50%', background: pc(parts, 'fx6DotColor', pal.accent), border: `3px solid ${pc(parts, 'fx6DotRing', pal.primary)}`, zIndex: 2, flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0, paddingLeft: 26, display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <span style={{ fontFamily: DISPLAY, fontSize: 26, width: 132, flexShrink: 0, lineHeight: 0.95 }}>{r.grade}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 13, color: home ? pal.accent : pal.ink, opacity: home ? 1 : 0.5, flexShrink: 0, width: 24 }}>{home ? 'VS' : '@'}</span>
-                  <span style={{ fontFamily: DISPLAY, fontSize: t(30), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.opp}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 12, color: pal.ink, opacity: 0.6, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.venue} · {home ? 'H' : 'A'}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: 26, width: 132, flexShrink: 0, lineHeight: 0.95, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 13, color: home ? pc(parts, 'homeColor', pal.accent) : pc(parts, 'awayColor', pal.ink), opacity: home ? 1 : 0.5, flexShrink: 0, width: 24 }}>{home ? 'VS' : '@'}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: t(30), flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{r.opp}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'venueColor', pal.ink), opacity: 0.6, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.venue} · {home ? 'H' : 'A'}</span>
                 </div>
               </div>
             )
           })}
         </div>
       </div>
-      {creditStrip(pal, height)}
+      {creditStrip(pal, height, parts)}
       <Grain opacity={0.3} id="fsch-g" />
     </Post>
   )
 }
+registerParts({
+  FX6: [
+    textPart('title1', 'Title words', 'Heading', () => 'MATCH-DAY'),
+    colorPart('title1Color', 'Title text colour', 'Heading', (p) => p.primary),
+    colorPart('bandBg', 'Title label background', 'Heading', (p) => p.accent),
+    colorPart('roundColor', 'Round, date and competition line', 'Heading', (p) => p.ink),
+    colorPart('headerBg', 'Header bar', 'Header and footer', null, { autoLabel: 'Background colour' }),
+    colorPart('headerRule', 'Line under the header', 'Header and footer', (p) => p.accent),
+    colorPart('footerBg', 'Footer bar', 'Header and footer', (p) => p.primary),
+    colorPart('footerRule', 'Line over the footer', 'Header and footer', (p) => p.accent),
+    colorPart('dividerColor', 'Line down the timeline', 'Timeline', null, { autoLabel: 'Soft line' }),
+    colorPart('timeColor', 'Start time', 'Timeline', (p) => p.accent),
+    colorPart('fx6DotColor', 'Timeline dot', 'Timeline', (p) => p.accent),
+    colorPart('fx6DotRing', 'Timeline dot outline', 'Timeline', (p) => p.primary),
+    colorPart('gradeColor', 'Grade', 'Matches', (p) => p.ink),
+    colorPart('homeColor', 'VS mark (home games)', 'Matches', (p) => p.accent),
+    colorPart('awayColor', '@ mark (away games)', 'Matches', (p) => p.ink),
+    colorPart('nameColor', 'Opposition name', 'Matches', (p) => p.ink),
+    colorPart('venueColor', 'Ground', 'Matches', (p) => p.ink),
+  ],
+})
 
 // ════════════════════════════════ SINGLE RESULT ═════════════════════════════
 
