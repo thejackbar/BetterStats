@@ -4262,7 +4262,13 @@ export default function AdminSocialPost() {
           // team — so nothing to add or remove, just switch between them.
           <PageStrip count={2} index={scSplitIdx} onGoTo={setScSplitIdx} fixed />
         )}
-        <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
+        {/* A press that reaches this box was not on a block: blocks, their
+            handles and the quick toolbar all stop propagation. So it is a
+            click on the empty canvas or the layout, and clears the selection.
+            It has to live here, not on BlankCanvas: a layout's blocks layer is
+            pass-through, so its own root never sees the click. */}
+        <div onPointerDown={() => { if (layer.selIds.length) layer.deselect() }}
+          style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
           <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative', background: canvasFill }}>
             {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
             {/* On a built-in layout the blocks are drawn inside it, in among

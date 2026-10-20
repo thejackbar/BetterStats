@@ -86,6 +86,8 @@
 54. A new tag or option on a lineup layout is a prop that is absent when off, so a post without it stays byte for byte what it was (compare `outerHTML` against the previous build). Where a row's base style uses the `padding` shorthand, override the shorthand, never add a longhand beside it. Hooks for the editor go with the other state, above every early return (React #310).
 55. `matchData` fills an empty competition with the literal `COMPETITION`, so a layout that should print nothing there must treat that literal as empty. Lineup loaders put the grade in `match.competition`. A background variant's Ink role is the palette's ink (white on the built-in palettes), so use Primary for any shade that has to stay dark.
 
+32a. Deselect lives on the canvas box in `renderCanvas`, not in `BlankCanvas` (a layout's blocks layer is pass-through, so its own root never sees a click). Anything drawn inside a selectable block must stop `pointerdown` propagation or a click on it clears the selection.
+
 **Final Score from the Games page (v9.105.3, `socialpost/ClubGamesPicker.jsx`)**
 56. The picker lists what `GamesPage` lists (`getOrgSeasons`, `getOrgResults`) and hands `games.id` to `loadResultMatch`; do not give it a second list or route it through `match-lookup`. The scorecard import is live Cricket Australia only, so a manual or scorebook-imported game on that list answers "Scorecard not found" until a DB fallback exists (see Open follow-ups).
 
