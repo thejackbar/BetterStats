@@ -512,7 +512,8 @@ export const LINEUP_MAX = 15
 // nothing reads it through here.
 const realComp = (m) => (m && m.competition && m.competition !== 'COMPETITION' ? m.competition : '')
 
-export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
+export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero, parts }) {
+  const texture = usePostLook().texture !== false
   const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   const slot = SLOT_T1(width, height)
@@ -542,7 +543,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
     }}>
       <div style={{
         position: 'absolute', left: 0, top: 0, bottom: 0, width: 56,
-        background: palette.secondary,
+        background: pc(parts, 't1SpineBg', palette.secondary),
         borderRight: `1px solid ${palette.ink}1a`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
@@ -550,15 +551,15 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
           transform: 'rotate(-90deg)',
           whiteSpace: 'nowrap',
           fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 27, letterSpacing: 8,
-          color: palette.ink, opacity: 0.92,
+          color: pc(parts, 't1SpineColor', palette.ink), opacity: 0.92,
         }}>{(team.fullName || team.name).toUpperCase()}</div>
       </div>
-      <div style={{
+      {texture ? <div style={{
         position: 'absolute', left: 70, top: 80,
         fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 160, lineHeight: 0.88,
         color: palette.ink, opacity: 0.06, letterSpacing: -2, userSelect: 'none',
         maxWidth: 540,
-      }}>{(team.fullName || team.name + ' CRICKET CLUB').toUpperCase()}</div>
+      }}>{(team.fullName || team.name + ' CRICKET CLUB').toUpperCase()}</div> : null}
       <Halftone color={palette.ink} opacity={0.08} size={12} />
       <Stripes color={palette.ink} opacity={0.04} gap={20} angle={-30} />
       {/* Bottom-anchored rather than a fixed 845 high: at 1080 that is the same
@@ -570,7 +571,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
       }}>
         <div style={{
           position: 'absolute', left: -60, bottom: -120, width: 620, height: 620,
-          background: `radial-gradient(circle at 45% 45%, ${palette.accent}33 0%, transparent 60%)`,
+          background: `radial-gradient(circle at 45% 45%, ${pc(parts, 'glowColor', palette.accent)}33 0%, transparent 60%)`,
         }} />
         {(() => {
           const featured = featuredOf(players, featuredId)
@@ -596,20 +597,20 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
         fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 3,
         color: palette.ink, lineHeight: 1.1, maxWidth: 240,
       }}>
-        <div style={{ background: palette.accent, color: palette.primary, padding: '4px 10px', display: 'inline-block', fontSize: 16 }}>MATCH DAY</div>
-        <div style={{ marginTop: 10, fontSize: 16 }}>{match.venue.toUpperCase()}</div>
-        <div style={{ opacity: 0.65, marginTop: 2, fontSize: 14, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5 }}>{match.date} · {match.time}</div>
+        <div style={{ background: pc(parts, 'badgeBg', palette.accent), color: pc(parts, 'badgeColor', palette.primary), padding: '4px 10px', display: 'inline-block', fontSize: 16 }}>{pt(parts, 't1BadgeText', 'MATCH DAY')}</div>
+        <div style={{ marginTop: 10, fontSize: 16, color: pc(parts, 'subColor', undefined) }}>{match.venue.toUpperCase()}</div>
+        <div style={{ opacity: 0.65, marginTop: 2, fontSize: 14, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, color: pc(parts, 'roundColor', undefined) }}>{match.date} · {match.time}</div>
       </div>
       <div style={{ position: 'absolute', right: 40, top: 56, bottom: 100, width: 480, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start' }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{
               fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, letterSpacing: 2,
-              color: palette.ink, opacity: 0.85, lineHeight: 1,
+              color: pc(parts, 't1CompColor', palette.ink), opacity: 0.85, lineHeight: 1,
             }}>{match.competition}</div>
             <div style={{
               fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5,
-              color: palette.accent, marginTop: 6,
+              color: pc(parts, 't1SeasonColor', palette.accent), marginTop: 6,
             }}>{match.season}</div>
           </div>
         </div>
@@ -618,10 +619,10 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
             text={(headline || 'SQUAD').toUpperCase()} max={pick(A, { square: 180, portrait: 210, story: 250 })} min={48} lines={2} pad={14}
             style={{
               fontFamily: "var(--social-display-font, 'Anton', sans-serif)", lineHeight: 0.85,
-              letterSpacing: -2, color: palette.ink, textAlign: 'right', width: '100%',
+              letterSpacing: -2, color: pc(parts, 'title1Color', palette.ink), textAlign: 'right', width: '100%',
             }} />
         </div>
-        <div style={{ width: 60, height: 4, background: palette.accent, marginTop: 10, marginBottom: 24 }} />
+        <div style={{ width: 60, height: 4, background: pc(parts, 't1RuleColor', palette.accent), marginTop: 10, marginBottom: 24 }} />
         {/* The two club names sit either side of the crests in a column only
             480px wide, and a full club name ("Applecross Cricket Club") does
             not fit there at a fixed 34px. This used to wrap onto two lines and
@@ -634,18 +635,18 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
         }}>
           <div style={{ flex: 1, minWidth: 0, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
             <AutoFitText text={team.name} max={34} min={13} lines={2} pad={4}
-              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 1.5, lineHeight: 1, textAlign: 'right', width: '100%' }} />
+              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 1.5, lineHeight: 1, textAlign: 'right', width: '100%', color: pc(parts, 'clubColor', undefined) }} />
           </div>
           <div style={{ flexShrink: 0 }}>
             <ClubLogo src={team.logo} monogram={team.monogram} color={palette.accent} size={76} shape="shield" />
           </div>
-          <div style={{ flexShrink: 0, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, opacity: 0.7 }}>V</div>
+          <div style={{ flexShrink: 0, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, opacity: 0.7, color: pc(parts, 'vsColor', undefined) }}>{pt(parts, 'vsText', 'V')}</div>
           <div style={{ flexShrink: 0 }}>
             <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={52} shape="shield" />
           </div>
           <div style={{ flex: 1, minWidth: 0, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
             <AutoFitText text={opponent.name} max={30} min={13} lines={2} pad={4}
-              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 1.5, lineHeight: 1, textAlign: 'left', width: '100%' }} />
+              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 1.5, lineHeight: 1, textAlign: 'left', width: '100%', color: pc(parts, 'oppColor', undefined) }} />
           </div>
         </div>
         <div style={{
@@ -656,7 +657,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
           {P.map((p, i) => {
             const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
             return (
-              <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, width: '100%', ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), palette.accent, { side: 'right' }) }}>
+              <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, width: '100%', ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), pc(parts, 'markColor', palette.accent), { side: 'right' }) }}>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
                   <AutoFitText max={rowMax} min={16} lines={1} pad={8} measureDeps={[chip ? 1 : 0, p.debut ? 1 : 0]}
                     style={{
@@ -664,13 +665,13 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
                       letterSpacing: 0.5, color: palette.ink,
                     }}>
                     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.25em', whiteSpace: 'nowrap' }}>
-                      <span style={{ fontWeight: 300, opacity: 0.72, fontSize: '0.75em' }}>{p.first.toUpperCase()}</span>
-                      <span>{p.last}</span>
+                      <span style={{ fontWeight: 300, opacity: 0.72, fontSize: '0.75em', color: pc(parts, 'firstColor', undefined) }}>{p.first.toUpperCase()}</span>
+                      <span style={{ color: pc(parts, 'nameColor', undefined) }}>{p.last}</span>
                     </span>
                   </AutoFitText>
                 </div>
-                {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
-                {p.debut && <DebutTag accent={palette.ink} ink={palette.primary} />}
+                {chip && <RoleChip kind={chip} accent={pc(parts, 'chipBg', palette.accent)} ink={pc(parts, 'chipColor', palette.primary)} />}
+                {p.debut && <DebutTag accent={pc(parts, 'debutBg', palette.ink)} ink={pc(parts, 'debutColor', palette.primary)} />}
               </div>
             )
           })}
@@ -687,6 +688,34 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
   )
 }
 
+registerParts({
+  T1: [
+    textPart('t1BadgeText', 'Tag words', 'Match day tag', () => 'MATCH DAY'),
+    colorPart('badgeBg', 'Tag', 'Match day tag', (p) => p.accent),
+    colorPart('badgeColor', 'Tag text', 'Match day tag', (p) => p.primary),
+    colorPart('subColor', 'Venue', 'Match details', (p) => p.ink),
+    colorPart('roundColor', 'Date and time', 'Match details', (p) => p.ink),
+    colorPart('t1CompColor', 'Competition', 'Match details', (p) => p.ink),
+    colorPart('t1SeasonColor', 'Season', 'Match details', (p) => p.accent),
+    colorPart('title1Color', 'Headline', 'Heading', (p) => p.ink),
+    colorPart('t1RuleColor', 'Line under the headline', 'Heading', (p) => p.accent),
+    colorPart('clubColor', 'Club name', 'Clubs', (p) => p.ink),
+    colorPart('oppColor', 'Opposition name', 'Clubs', (p) => p.ink),
+    textPart('vsText', 'Word between the clubs', 'Clubs', () => 'V'),
+    colorPart('vsColor', 'Word between the clubs colour', 'Clubs', (p) => p.ink),
+    colorPart('firstColor', 'First name', 'Players', (p) => p.ink),
+    colorPart('nameColor', 'Surname', 'Players', (p) => p.ink),
+    colorPart('markColor', 'Highlight on the photo player', 'Players', (p) => p.accent),
+    colorPart('chipBg', 'Captain, vice and keeper tag', 'Players', (p) => p.accent),
+    colorPart('chipColor', 'Captain, vice and keeper text', 'Players', (p) => p.primary),
+    colorPart('debutBg', 'Debut tag', 'Players', (p) => p.ink),
+    colorPart('debutColor', 'Debut text', 'Players', (p) => p.primary),
+    colorPart('glowColor', 'Glow behind the photo', 'Photo', (p) => p.accent),
+    colorPart('t1SpineBg', 'Side strip', 'Side strip', (p) => p.secondary),
+    colorPart('t1SpineColor', 'Club name on the strip', 'Side strip', (p) => p.ink),
+  ],
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 2 — Trading card grid (4×3)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -695,7 +724,8 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
 // so the slot stops well short of it. The grid opens under the slot on every
 // canvas shape.
 const SLOT_T2 = (width, height) => ({ x: 56, y: 268, w: 500, h: 100, pad: 8, gap: 14, panel: 'light' })
-export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match, players, palette, headline }) {
+export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match, players, palette, headline, parts }) {
+  const texture = usePostLook().texture !== false
   const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   const slot = SLOT_T2(width, height)
@@ -716,6 +746,12 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
   // its cards at 440 leaves a dead band nobody put anything in.
   // Now it opens under the sponsor slot, which sits under the header.
   const gridTop = slot.y + slot.h + 16
+  // The corner shapes, lines and dots are one colour, the accent.
+  const deco = pc(parts, 't2DecoColor', palette.accent)
+  // The name band's text follows the band's colour once the club has set one.
+  const bandBg = pc(parts, 'bandBg', palette.accent)
+  const nameInk = pc(parts, 'nameColor', partPicked(parts, 'bandBg') ? inkOn(bandBg) : palette.primary)
+  const cardBorder = pc(parts, 'cardBorder', palette.accent)
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -723,62 +759,62 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
     }}>
       <Halftone color={palette.ink} opacity={0.05} size={10} />
       <Stripes color={palette.accent} opacity={0.04} gap={30} angle={45} />
-      <div style={{
+      {texture ? <div style={{
         position: 'absolute', left: -50, bottom: -60,
         fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 320, lineHeight: 0.8,
         color: palette.ink, opacity: 0.04, letterSpacing: -6,
         transform: 'rotate(-8deg)', userSelect: 'none', whiteSpace: 'nowrap',
-      }}>{(headline || 'LINEUP').toUpperCase()}</div>
-      <svg style={{ position: 'absolute', left: -180, top: -180, width: 560, height: 560, opacity: 0.08 }}>
+      }}>{(headline || 'LINEUP').toUpperCase()}</div> : null}
+      {texture ? <svg style={{ position: 'absolute', left: -180, top: -180, width: 560, height: 560, opacity: 0.08 }}>
         <circle cx="280" cy="280" r="260" fill="none" stroke={palette.ink} strokeWidth="2" />
         <circle cx="280" cy="280" r="200" fill="none" stroke={palette.ink} strokeWidth="2" />
         <circle cx="280" cy="280" r="140" fill="none" stroke={palette.ink} strokeWidth="2" />
-      </svg>
-      <svg style={{ position: 'absolute', right: -160, bottom: -160, width: 480, height: 480, opacity: 0.06 }}>
-        <circle cx="240" cy="240" r="220" fill="none" stroke={palette.accent} strokeWidth="3" />
-        <circle cx="240" cy="240" r="160" fill="none" stroke={palette.accent} strokeWidth="3" />
-      </svg>
-      <div style={{ position: 'absolute', left: -40, bottom: 80, width: 240, height: 4, background: palette.accent, transform: 'rotate(-30deg)', opacity: 0.7 }} />
-      <div style={{
+      </svg> : null}
+      {texture ? <svg style={{ position: 'absolute', right: -160, bottom: -160, width: 480, height: 480, opacity: 0.06 }}>
+        <circle cx="240" cy="240" r="220" fill="none" stroke={deco} strokeWidth="3" />
+        <circle cx="240" cy="240" r="160" fill="none" stroke={deco} strokeWidth="3" />
+      </svg> : null}
+      {texture ? <div style={{ position: 'absolute', left: -40, bottom: 80, width: 240, height: 4, background: deco, transform: 'rotate(-30deg)', opacity: 0.7 }} /> : null}
+      {texture ? <div style={{
         position: 'absolute', top: -20, right: -40, width: 380, height: 180,
-        background: palette.accent, opacity: 0.9,
+        background: deco, opacity: 0.9,
         clipPath: 'polygon(0% 30%, 100% 0%, 100% 70%, 18% 100%)',
-      }} />
-      <svg style={{ position: 'absolute', left: 40, top: 16, width: 220, height: 60, opacity: 0.55 }}>
+      }} /> : null}
+      {texture ? <svg style={{ position: 'absolute', left: 40, top: 16, width: 220, height: 60, opacity: 0.55 }}>
         {Array.from({ length: 36 }).map((_, i) => (
-          <circle key={i} cx={(i % 12) * 18 + 6} cy={Math.floor(i / 12) * 18 + 6} r={2.4} fill={palette.accent} />
+          <circle key={i} cx={(i % 12) * 18 + 6} cy={Math.floor(i / 12) * 18 + 6} r={2.4} fill={deco} />
         ))}
-      </svg>
-      <div style={{ position: 'absolute', left: 260, top: 36, width: 220, height: 3, background: palette.accent, opacity: 0.7 }} />
-      <div style={{ position: 'absolute', left: 482, top: 30, width: 14, height: 14, background: palette.accent, borderRadius: '50%' }} />
-      <div style={{ position: 'absolute', left: 40, top: 90, display: 'flex', gap: 6, alignItems: 'center' }}>
+      </svg> : null}
+      {texture ? <div style={{ position: 'absolute', left: 260, top: 36, width: 220, height: 3, background: deco, opacity: 0.7 }} /> : null}
+      {texture ? <div style={{ position: 'absolute', left: 482, top: 30, width: 14, height: 14, background: deco, borderRadius: '50%' }} /> : null}
+      {texture ? <div style={{ position: 'absolute', left: 40, top: 90, display: 'flex', gap: 6, alignItems: 'center' }}>
         {[20, 32, 14, 28, 22, 36, 18, 26].map((h, i) => (
-          <div key={i} style={{ width: 5, height: h, background: palette.accent, opacity: 0.6 }} />
+          <div key={i} style={{ width: 5, height: h, background: deco, opacity: 0.6 }} />
         ))}
-      </div>
+      </div> : null}
       <div style={{ position: 'relative', padding: '44px 56px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', zIndex: 2 }}>
         <div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: Math.max(44, Math.min(96, Math.floor(640 / (Math.max((headline || 'LINEUP').length, 1) * 0.5)))), lineHeight: 0.85, color: palette.ink, letterSpacing: -1, maxWidth: 640, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(headline || 'LINEUP').toUpperCase()}</div>
-          <div style={{ width: 84, height: 4, background: palette.accent, margin: '10px 0 14px' }} />
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: Math.max(44, Math.min(96, Math.floor(640 / (Math.max((headline || 'LINEUP').length, 1) * 0.5)))), lineHeight: 0.85, color: pc(parts, 'title1Color', palette.ink), letterSpacing: -1, maxWidth: 640, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(headline || 'LINEUP').toUpperCase()}</div>
+          <div style={{ width: 84, height: 4, background: pc(parts, 't2RuleColor', palette.accent), margin: '10px 0 14px' }} />
           {/* One fitted line, so a long pairing shrinks instead of wrapping onto
               the venue line and into the sponsor slot below. */}
           <div style={{ width: 700, height: 36, display: 'flex', alignItems: 'center' }}>
             <AutoFitText max={30} min={16} lines={1}
-              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: palette.ink, opacity: 0.95, lineHeight: 1.2 }}>
+              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: pc(parts, 't2MatchupColor', palette.ink), opacity: 0.95, lineHeight: 1.2 }}>
               {team.name} <span style={{ opacity: 0.5 }}>×</span> {opponent.name}
             </AutoFitText>
           </div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, letterSpacing: 1.8, color: palette.accent, marginTop: 10, fontWeight: 500 }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, letterSpacing: 1.8, color: pc(parts, 'roundColor', palette.accent), marginTop: 10, fontWeight: 500 }}>
             {[realComp(match), match.round, match.date, match.time].filter(Boolean).join(' · ')}
           </div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 4 }}>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: pc(parts, 'subColor', palette.ink), opacity: 0.7, marginTop: 4 }}>
             {match.venue.toUpperCase()}
           </div>
         </div>
       </div>
       <div style={{ position: 'absolute', top: 24, right: 32, zIndex: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', width: 260 }}>
         <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={200} shape="shield" />
-        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1, color: palette.ink, lineHeight: 0.95, textAlign: 'center', marginTop: 8 }}>{(team.fullName || team.name).toUpperCase()}</div>
+        <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1, color: pc(parts, 'clubColor', palette.ink), lineHeight: 0.95, textAlign: 'center', marginTop: 8 }}>{(team.fullName || team.name).toUpperCase()}</div>
       </div>
       <div style={{
         position: 'absolute', left: 56, right: 56, top: gridTop, bottom: 100,
@@ -790,11 +826,11 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
           return (
             <div key={i} style={{
               position: 'relative', overflow: 'hidden',
-              background: `linear-gradient(180deg, ${palette.secondary} 0%, ${palette.primary} 100%)`,
-              border: `2px solid ${palette.accent}`,
+              background: pc(parts, 'cardBg', `linear-gradient(180deg, ${palette.secondary} 0%, ${palette.primary} 100%)`),
+              border: `2px solid ${cardBorder}`,
               display: 'flex', flexDirection: 'column',
             }}>
-              <div style={{ height: '75%', display: 'grid', placeItems: 'center', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ height: '75%', display: 'grid', placeItems: 'center', position: 'relative', overflow: 'hidden', background: pc(parts, 'photoBg', undefined) }}>
                 <Halftone color={palette.ink} opacity={0.08} size={6} />
                 {p.headshot ? (
                   <img src={p.headshot} alt={p.first + ' ' + p.last}
@@ -805,11 +841,11 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
                 ) : (
                   <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 96, color: palette.accent, opacity: 0.85, letterSpacing: -2, lineHeight: 1 }}>{team.monogram}</div>
                 )}
-                {chip && <div style={{ position: 'absolute', top: 8, right: 8 }}><RoleChip kind={chip} accent={palette.accent} ink={palette.primary} /></div>}
-                <div style={{ position: 'absolute', top: 8, left: 8, fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: palette.ink, opacity: 0.4, letterSpacing: 1.5 }}>#{String(i + 1).padStart(2, '0')}</div>
+                {chip && <div style={{ position: 'absolute', top: 8, right: 8 }}><RoleChip kind={chip} accent={pc(parts, 'chipBg', palette.accent)} ink={pc(parts, 'chipColor', palette.primary)} /></div>}
+                <div style={{ position: 'absolute', top: 8, left: 8, fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: pc(parts, 'numColor', palette.ink), opacity: 0.4, letterSpacing: 1.5 }}>#{String(i + 1).padStart(2, '0')}</div>
               </div>
               <div style={{
-                height: '25%', background: palette.accent, color: palette.primary,
+                height: '25%', background: bandBg, color: nameInk,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px',
               }}>
                 <AutoFitText text={p.last} max={26} min={11} lines={1}
@@ -827,6 +863,26 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
   )
 }
 
+registerParts({
+  T2: [
+    colorPart('title1Color', 'Headline', 'Heading', (p) => p.ink),
+    colorPart('t2RuleColor', 'Line under the headline', 'Heading', (p) => p.accent),
+    colorPart('t2MatchupColor', 'Team v team line', 'Heading', (p) => p.ink),
+    colorPart('roundColor', 'Competition, round and date', 'Match details', (p) => p.accent),
+    colorPart('subColor', 'Venue', 'Match details', (p) => p.ink),
+    colorPart('clubColor', 'Club name under the crest', 'Match details', (p) => p.ink),
+    colorPart('cardBg', 'Card', 'Player cards', null, { autoLabel: 'Colour fade' }),
+    colorPart('cardBorder', 'Card outline', 'Player cards', (p) => p.accent),
+    colorPart('photoBg', 'Photo backdrop', 'Player cards', null, { autoLabel: 'Card colour' }),
+    colorPart('numColor', 'Card number', 'Player cards', (p) => p.ink),
+    colorPart('bandBg', 'Name band', 'Player cards', (p) => p.accent),
+    colorPart('nameColor', 'Surname', 'Player cards', (p) => p.primary),
+    colorPart('chipBg', 'Captain, vice and keeper tag', 'Player cards', (p) => p.accent),
+    colorPart('chipColor', 'Captain, vice and keeper text', 'Player cards', (p) => p.primary),
+    colorPart('t2DecoColor', 'Corner shapes, lines and dots', 'Decoration', (p) => p.accent),
+  ],
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 3 — Side image + numbered XI
 // ─────────────────────────────────────────────────────────────────────────────
@@ -838,7 +894,8 @@ const SLOT_T3 = (width, height) => {
   const x = strip + 80
   return { x, y: height - 40 - 96, w: width - 40 - 64 - x, h: 96, pad: 8, gap: 14, panel: 'light' }
 }
-export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero }) {
+export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero, parts }) {
+  const texture = usePostLook().texture !== false
   const P = players.slice(0, LINEUP_MAX)
   const slot = SLOT_T3(width, height)
   // The vertical spine label echoes the post headline (defaults to STARTING XI).
@@ -880,16 +937,16 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
           </linearGradient>
         </defs>
         <rect width="1080" height="1080" fill="url(#bgwv)" />
-        <path d="M 900 0 C 1050 200 950 400 1080 600 L 1080 0 Z" fill={palette.ink} opacity="0.04" />
-        <path d="M 1000 1080 C 850 900 1100 700 980 500 L 1080 500 L 1080 1080 Z" fill={palette.accent} opacity="0.06" />
+        {texture ? <path d="M 900 0 C 1050 200 950 400 1080 600 L 1080 0 Z" fill={palette.ink} opacity="0.04" /> : null}
+        {texture ? <path d="M 1000 1080 C 850 900 1100 700 980 500 L 1080 500 L 1080 1080 Z" fill={palette.accent} opacity="0.06" /> : null}
       </svg>
       <div style={{
         position: 'absolute', left: 0, top: 0, width: strip, bottom: 0,
-        background: `linear-gradient(180deg, ${palette.secondary} 0%, ${palette.primary} 100%)`,
+        background: pc(parts, 'photoBg', `linear-gradient(180deg, ${palette.secondary} 0%, ${palette.primary} 100%)`),
         overflow: 'hidden',
       }}>
         <Halftone color={palette.ink} opacity={0.1} size={8} />
-        <div style={{ position: 'absolute', left: -120, bottom: -120, width: 600, height: 600, background: `radial-gradient(circle at center, ${palette.accent}33 0%, transparent 60%)` }} />
+        <div style={{ position: 'absolute', left: -120, bottom: -120, width: 600, height: 600, background: `radial-gradient(circle at center, ${pc(parts, 'glowColor', palette.accent)}33 0%, transparent 60%)` }} />
         {(() => {
           const featured = featuredOf(players, featuredId)
           const hasHead = !!(heroImage || heroSrcOf(featured))
@@ -912,17 +969,17 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
               }} />
           )
         })()}
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 240, background: `linear-gradient(180deg, transparent 0%, ${palette.primary}ee 100%)` }} />
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 240, background: `linear-gradient(180deg, transparent 0%, ${pc(parts, 't3ScrimColor', palette.primary)}ee 100%)` }} />
         {(() => {
           const featured = featuredOf(players, featuredId)
           if (!featured) return null
           const chip = featured.captain ? 'C' : featured.viceCaptain ? 'VC' : featured.keeper ? 'WK' : null
           return (
             <div style={{ position: 'absolute', left: 16, right: 16, bottom: 22, zIndex: 2 }}>
-              <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 1, color: palette.ink, opacity: 0.78, lineHeight: 1 }}>{featured.first.toUpperCase()}</div>
+              <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 1, color: pc(parts, 't3FeatFirst', palette.ink), opacity: 0.78, lineHeight: 1 }}>{featured.first.toUpperCase()}</div>
               <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 44, letterSpacing: 0.5, color: palette.ink, lineHeight: 1, marginTop: 2, display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                <span>{featured.last}</span>
-                {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+                <span style={{ color: pc(parts, 't3FeatLast', undefined) }}>{featured.last}</span>
+                {chip && <RoleChip kind={chip} accent={pc(parts, 'chipBg', palette.accent)} ink={pc(parts, 'chipColor', palette.primary)} />}
               </div>
             </div>
           )
@@ -934,20 +991,20 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
         position: 'absolute', left: strip - 20, top: Math.round(height / 2),
         transform: 'rotate(-90deg)', transformOrigin: 'left top',
         fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: spineSize, letterSpacing: 4,
-        color: 'transparent', WebkitTextStroke: `2px ${palette.accent}`,
+        color: 'transparent', WebkitTextStroke: `2px ${pc(parts, 't3SpineColor', palette.accent)}`,
         whiteSpace: 'nowrap', lineHeight: 0.8,
       }}>{spine}</div>
       <div style={{ position: 'absolute', left: strip + 80, top: 50, right: 40, bottom: 40, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink, lineHeight: 1, marginBottom: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
+        <div style={{ textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: pc(parts, 'clubColor', palette.ink), lineHeight: 1, marginBottom: 14 }}>{(team.fullName || team.name).toUpperCase()}</div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, marginBottom: 24 }}>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={132} shape="circle" />
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 3, color: palette.accent }}>VS</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 3, color: pc(parts, 'vsColor', palette.accent) }}>{pt(parts, 'vsText', 'VS')}</div>
           <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={104} shape="circle" />
         </div>
-        <div style={{ textAlign: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.8, color: palette.ink, opacity: 0.7, marginBottom: 4 }}>
+        <div style={{ textAlign: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.8, color: pc(parts, 'roundColor', palette.ink), opacity: 0.7, marginBottom: 4 }}>
           {match.competition} · {match.round} · {match.date}
         </div>
-        <div style={{ textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 2, color: palette.accent, marginBottom: 22, lineHeight: 1 }}>
+        <div style={{ textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 2, color: pc(parts, 'subColor', palette.accent), marginBottom: 22, lineHeight: 1 }}>
           {match.venue.toUpperCase()}
         </div>
         {/* `minHeight: 0` is TALL-ONLY: at square it lets this column shrink
@@ -960,26 +1017,26 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
               // runs down to the credit rule instead of stopping where it did on
               // the square and leaving 270px of nothing under it. The square
               // keeps its own naturally-sized rows.
-              <div key={i} style={{ ...(flexRows ? { flex: 1, minHeight: 0 } : null), display: 'flex', alignItems: 'center', gap: 12, padding: `${rowPad}px 0`, borderBottom: `1px solid ${palette.ink}1c`, ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), palette.accent, { bleed: 8, padY: rowPad }) }}>
-                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: numSize, color: palette.accent, lineHeight: 1, width: Math.round(numSize * 1.2), textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
+              <div key={i} style={{ ...(flexRows ? { flex: 1, minHeight: 0 } : null), display: 'flex', alignItems: 'center', gap: 12, padding: `${rowPad}px 0`, borderBottom: `1px solid ${pc(parts, 'dividerColor', palette.ink)}${partPicked(parts, 'dividerColor') ? '' : '1c'}`, ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), pc(parts, 'markColor', palette.accent), { bleed: 8, padY: rowPad }) }}>
+                <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: numSize, color: pc(parts, 'numColor', palette.accent), lineHeight: 1, width: Math.round(numSize * 1.2), textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
                   <AutoFitText max={nameMax} min={16} lines={1} pad={8} measureDeps={[p.debut ? 1 : 0]}
                     style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>
                     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.26em', whiteSpace: 'nowrap' }}>
-                      <span style={{ opacity: 0.65, fontWeight: 300, fontSize: '0.74em' }}>{p.first.toUpperCase()}</span>
-                      <span>{p.last}</span>
+                      <span style={{ opacity: 0.65, fontWeight: 300, fontSize: '0.74em', color: pc(parts, 'firstColor', undefined) }}>{p.first.toUpperCase()}</span>
+                      <span style={{ color: pc(parts, 'nameColor', undefined) }}>{p.last}</span>
                     </span>
                   </AutoFitText>
                 </div>
-                {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
-                {p.debut && <DebutTag accent={palette.ink} ink={palette.primary} />}
+                {chip && <RoleChip kind={chip} accent={pc(parts, 'chipBg', palette.accent)} ink={pc(parts, 'chipColor', palette.primary)} />}
+                {p.debut && <DebutTag accent={pc(parts, 'debutBg', palette.ink)} ink={pc(parts, 'debutColor', palette.primary)} />}
               </div>
             )
           })}
         </div>
         {/* The footer is as tall as the sponsor slot (the grid sits in its left
             side, bottom-aligned with the column), with the credit on the right. */}
-        <div style={{ boxSizing: 'border-box', height: slot.h + 12, flexShrink: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 12, paddingTop: 10, borderTop: `2px solid ${palette.accent}` }}>
+        <div style={{ boxSizing: 'border-box', height: slot.h + 12, flexShrink: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 12, paddingTop: 10, borderTop: `2px solid ${pc(parts, 'footerRule', palette.accent)}` }}>
           <CreditMark ink={palette.ink} h={44} />
         </div>
       </div>
@@ -987,6 +1044,32 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
     </LayerRoot>
   )
 }
+
+registerParts({
+  T3: [
+    colorPart('photoBg', 'Photo strip backdrop', 'Photo strip', null, { autoLabel: 'Colour fade' }),
+    colorPart('glowColor', 'Glow behind the photo', 'Photo strip', (p) => p.accent),
+    colorPart('t3ScrimColor', 'Fade under the photo name', 'Photo strip', (p) => p.primary),
+    colorPart('t3FeatFirst', 'Photo player first name', 'Photo strip', (p) => p.ink),
+    colorPart('t3FeatLast', 'Photo player surname', 'Photo strip', (p) => p.ink),
+    colorPart('t3SpineColor', 'Side word outline', 'Photo strip', (p) => p.accent),
+    colorPart('clubColor', 'Club name', 'Match details', (p) => p.ink),
+    textPart('vsText', 'Word between the clubs', 'Match details', () => 'VS'),
+    colorPart('vsColor', 'Word between the clubs colour', 'Match details', (p) => p.accent),
+    colorPart('roundColor', 'Competition, round and date', 'Match details', (p) => p.ink),
+    colorPart('subColor', 'Venue', 'Match details', (p) => p.accent),
+    colorPart('numColor', 'Number', 'Players', (p) => p.accent),
+    colorPart('firstColor', 'First name', 'Players', (p) => p.ink),
+    colorPart('nameColor', 'Surname', 'Players', (p) => p.ink),
+    colorPart('dividerColor', 'Row dividers', 'Players', (p) => p.ink),
+    colorPart('markColor', 'Highlight on the photo player', 'Players', (p) => p.accent),
+    colorPart('chipBg', 'Captain, vice and keeper tag', 'Players', (p) => p.accent),
+    colorPart('chipColor', 'Captain, vice and keeper text', 'Players', (p) => p.primary),
+    colorPart('debutBg', 'Debut tag', 'Players', (p) => p.ink),
+    colorPart('debutColor', 'Debut text', 'Players', (p) => p.primary),
+    colorPart('footerRule', 'Line over the credit', 'Footer', (p) => p.accent),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 4 — Batting order with role-coded rows
@@ -996,7 +1079,7 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
 // tall as the slot, and the order's rows give up that height.
 const T4_FOOT_BOTTOM = 22
 const SLOT_T4 = (width, height) => ({ x: 440, y: height - T4_FOOT_BOTTOM - 96, w: 500, h: 96, pad: 8, gap: 14, panel: 'light' })
-export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, match, players, palette }) {
+export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, match, players, palette, parts }) {
   const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   const slot = SLOT_T4(width, height)
@@ -1020,28 +1103,28 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
     }}>
       <Stripes color={palette.ink} opacity={0.04} gap={40} angle={0} />
       <Halftone color={palette.ink} opacity={0.04} size={11} />
-      <div style={{ position: 'relative', flexShrink: 0, padding: '32px 56px 18px', borderBottom: `3px solid ${palette.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ position: 'relative', flexShrink: 0, padding: '32px 56px 18px', borderBottom: `3px solid ${pc(parts, 'headerRule', palette.accent)}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: palette.accent, marginBottom: 4 }}>// PROBABLE XI</div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: headSize, lineHeight: 0.85, color: palette.ink, letterSpacing: -1 }}>BATTING ORDER</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 2, color: pc(parts, 't4KickerColor', palette.accent), marginBottom: 4 }}>{pt(parts, 't4Kicker', '// PROBABLE XI')}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: headSize, lineHeight: 0.85, color: pc(parts, 'title1Color', palette.ink), letterSpacing: -1 }}>{pt(parts, 'title1', 'BATTING ORDER')}</div>
         </div>
         <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={116} shape="shield" />
       </div>
-      <div style={{ flexShrink: 0, padding: '16px 56px', background: palette.secondary, borderBottom: `1px solid ${palette.ink}22`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ flexShrink: 0, padding: '16px 56px', background: pc(parts, 't4MetaBg', palette.secondary), borderBottom: `1px solid ${pc(parts, 't4MetaRule', palette.ink)}${partPicked(parts, 't4MetaRule') ? '' : '22'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <ClubLogo src={team.logo} monogram={team.monogram} color={palette.ink} size={58} shape="shield" />
-            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 1, color: palette.accent }}>v</div>
+            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 1, color: pc(parts, 'vsColor', palette.accent) }}>{pt(parts, 'vsText', 'v')}</div>
             <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={44} shape="shield" />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: palette.ink, opacity: 0.78 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 1.5, color: pc(parts, 'roundColor', palette.ink), opacity: 0.78 }}>
             <span>{match.competition} · {match.round}</span>
-            <span style={{ opacity: 0.7 }}>{match.venue.toUpperCase()}</span>
+            <span style={{ opacity: 0.7, color: pc(parts, 'subColor', undefined) }}>{match.venue.toUpperCase()}</span>
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 1, lineHeight: 1, color: palette.accent }}>{match.date}</div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.7, marginTop: 4 }}>{match.time}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 28, letterSpacing: 1, lineHeight: 1, color: pc(parts, 't4DateColor', palette.accent) }}>{match.date}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: pc(parts, 't4TimeColor', palette.ink), opacity: 0.7, marginTop: 4 }}>{match.time}</div>
         </div>
       </div>
       {/* The rows share whatever is left, so the order fills the post instead of
@@ -1055,33 +1138,33 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
               flex: 1, minHeight: 0,
               display: 'grid', gridTemplateColumns: `${Math.round(numSize * 1.5)}px 1fr 76px`, alignItems: 'center', gap: 14,
               padding: '8px 16px',
-              background: i % 2 === 0 ? `${palette.ink}08` : 'transparent',
-              borderLeft: `3px solid ${i === 10 ? palette.accent : 'transparent'}`,
+              background: i % 2 === 0 ? pc(parts, 'cardBg', `${palette.ink}08`) : 'transparent',
+              borderLeft: `3px solid ${i === 10 ? pc(parts, 't4CutColor', palette.accent) : 'transparent'}`,
             }}>
-              <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: numSize, color: palette.accent, lineHeight: 1, textAlign: 'center' }}>{i + 1}</div>
+              <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: numSize, color: pc(parts, 'numColor', palette.accent), lineHeight: 1, textAlign: 'center' }}>{i + 1}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
                   <AutoFitText max={nameMax} min={14} lines={1} measureDeps={[chip ? 1 : 0]}
                     style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>
                     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.28em', whiteSpace: 'nowrap' }}>
-                      <span style={{ opacity: 0.62, fontWeight: 300, fontSize: '0.73em' }}>{p.first.toUpperCase()}</span>
-                      <span>{p.last}</span>
+                      <span style={{ opacity: 0.62, fontWeight: 300, fontSize: '0.73em', color: pc(parts, 'firstColor', undefined) }}>{p.first.toUpperCase()}</span>
+                      <span style={{ color: pc(parts, 'nameColor', undefined) }}>{p.last}</span>
                     </span>
                   </AutoFitText>
                 </div>
-                {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+                {chip && <RoleChip kind={chip} accent={pc(parts, 'chipBg', palette.accent)} ink={pc(parts, 'chipColor', palette.primary)} />}
               </div>
-              <div style={{ width: 64, justifySelf: 'end', textAlign: 'center', padding: '5px 0', background: 'transparent', border: `1.5px solid ${palette.ink}55`, color: palette.ink, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 1.5, lineHeight: 1, borderRadius: 2 }}>
+              <div style={{ width: 64, justifySelf: 'end', textAlign: 'center', padding: '5px 0', background: pc(parts, 'badgeBg', 'transparent'), border: `1.5px solid ${pc(parts, 't4BadgeBorder', palette.ink)}${partPicked(parts, 't4BadgeBorder') ? '' : '55'}`, color: pc(parts, 'badgeColor', palette.ink), fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 14, letterSpacing: 1.5, lineHeight: 1, borderRadius: 2 }}>
                 {roleShort(isRole)}
               </div>
             </div>
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, bottom: T4_FOOT_BOTTOM, boxSizing: 'border-box', height: footH, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTop: `1px solid ${palette.ink}22` }}>
-        <div style={{ width: slot.x - 56 - 24, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 1.5, lineHeight: 1.25, color: palette.ink, opacity: 0.9 }}>
+      <div style={{ position: 'absolute', left: 56, right: 56, bottom: T4_FOOT_BOTTOM, boxSizing: 'border-box', height: footH, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTop: `1px solid ${pc(parts, 'footerRule', palette.ink)}${partPicked(parts, 'footerRule') ? '' : '22'}` }}>
+        <div style={{ width: slot.x - 56 - 24, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, letterSpacing: 1.5, lineHeight: 1.25, color: pc(parts, 'clubColor', palette.ink), opacity: 0.9 }}>
           {(team.fullName || team.name).toUpperCase()}
-          <div style={{ opacity: 0.65, fontSize: 13, letterSpacing: 2, marginTop: 3 }}>{match.season}</div>
+          <div style={{ opacity: 0.65, fontSize: 13, letterSpacing: 2, marginTop: 3, color: pc(parts, 't4SeasonColor', undefined) }}>{match.season}</div>
         </div>
         <CreditMark ink={palette.ink} h={44} />
       </div>
@@ -1089,6 +1172,37 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
     </LayerRoot>
   )
 }
+
+registerParts({
+  T4: [
+    textPart('t4Kicker', 'Small line above the title', 'Heading', () => '// PROBABLE XI'),
+    colorPart('t4KickerColor', 'Small line colour', 'Heading', (p) => p.accent),
+    textPart('title1', 'Title', 'Heading', () => 'BATTING ORDER'),
+    colorPart('title1Color', 'Title colour', 'Heading', (p) => p.ink),
+    colorPart('headerRule', 'Line under the heading', 'Heading', (p) => p.accent),
+    colorPart('t4MetaBg', 'Match details bar', 'Match details', (p) => p.secondary),
+    colorPart('t4MetaRule', 'Line under the bar', 'Match details', (p) => p.ink),
+    textPart('vsText', 'Word between the clubs', 'Match details', () => 'v'),
+    colorPart('vsColor', 'Word between the clubs colour', 'Match details', (p) => p.accent),
+    colorPart('roundColor', 'Competition and round', 'Match details', (p) => p.ink),
+    colorPart('subColor', 'Venue', 'Match details', (p) => p.ink),
+    colorPart('t4DateColor', 'Date', 'Match details', (p) => p.accent),
+    colorPart('t4TimeColor', 'Time', 'Match details', (p) => p.ink),
+    colorPart('cardBg', 'Shaded rows', 'Batting order', null, { autoLabel: 'Faint tint' }),
+    colorPart('t4CutColor', 'Marker beside the 11th player', 'Batting order', (p) => p.accent),
+    colorPart('numColor', 'Batting number', 'Batting order', (p) => p.accent),
+    colorPart('firstColor', 'First name', 'Batting order', (p) => p.ink),
+    colorPart('nameColor', 'Surname', 'Batting order', (p) => p.ink),
+    colorPart('chipBg', 'Captain, vice and keeper tag', 'Batting order', (p) => p.accent),
+    colorPart('chipColor', 'Captain, vice and keeper text', 'Batting order', (p) => p.primary),
+    colorPart('badgeBg', 'Role tag', 'Batting order', null, { autoLabel: 'No fill' }),
+    colorPart('badgeColor', 'Role tag text', 'Batting order', (p) => p.ink),
+    colorPart('t4BadgeBorder', 'Role tag outline', 'Batting order', (p) => p.ink),
+    colorPart('footerRule', 'Line over the footer', 'Footer', (p) => p.ink),
+    colorPart('clubColor', 'Club name', 'Footer', (p) => p.ink),
+    colorPart('t4SeasonColor', 'Season', 'Footer', (p) => p.ink),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 5 — Brutalist typographic
@@ -1098,7 +1212,8 @@ export function T4_BattingOrder({ width = 1080, height = 1080, team, opponent, m
 // its own padding; on a taller post the rows share what the bar leaves.
 const T5_FOOT_PAD = 12
 const SLOT_T5 = (width, height) => ({ x: 480, y: height - T5_FOOT_PAD - 92, w: 494, h: 92, pad: 8, gap: 14, panel: 'light' })
-export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, match, players, palette, headline }) {
+export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, match, players, palette, headline, parts }) {
+  const texture = usePostLook().texture !== false
   const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   const slot = SLOT_T5(width, height)
@@ -1114,6 +1229,11 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
   const crowd = P.length > 11 ? 11 / P.length : 1
   const flexRows = A !== 'square' || P.length > 11
   const nameMax = Math.round(pick(A, { square: 60, portrait: 76, story: 92 }) * crowd)
+  // The header band's text follows the band's colour once the club has set one.
+  const headerBg = pc(parts, 'headerBg', palette.accent)
+  const headInk = partPicked(parts, 'headerBg') ? inkOn(headerBg) : palette.primary
+  const deco = pc(parts, 't5DecoColor', palette.accent)
+  const suffix = pt(parts, 't5Suffix', 'XI')
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -1121,22 +1241,22 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
       background: palette.primary, color: palette.ink, fontFamily: "'Inter', sans-serif",
     }}>
       <Stripes color={palette.ink} opacity={0.06} gap={6} angle={0} />
-      <div style={{ position: 'absolute', left: 0, right: 0, top: share(height, 320), textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 520), lineHeight: 0.8, color: palette.ink, opacity: 0.05, letterSpacing: -10, userSelect: 'none' }}>XI</div>
+      {texture ? <div style={{ position: 'absolute', left: 0, right: 0, top: share(height, 320), textAlign: 'center', fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: share(height, 520), lineHeight: 0.8, color: palette.ink, opacity: 0.05, letterSpacing: -10, userSelect: 'none' }}>XI</div> : null}
       <Halftone color={palette.ink} opacity={0.08} size={14} angle={-20} />
-      <div style={{ position: 'absolute', left: -100, top: share(height, 360), width: 1300, height: 100, background: palette.accent, opacity: 0.08, transform: 'rotate(-3deg)' }} />
-      <div style={{ position: 'absolute', left: -120, top: share(height, 700), width: 1300, height: 60, background: palette.accent, opacity: 0.1, transform: 'rotate(2deg)' }} />
-      <svg style={{ position: 'absolute', right: -180, top: share(height, 220), width: 520, height: 520, opacity: 0.08 }}>
-        <circle cx="260" cy="260" r="240" fill="none" stroke={palette.accent} strokeWidth="3" />
-        <circle cx="260" cy="260" r="180" fill="none" stroke={palette.accent} strokeWidth="3" />
-      </svg>
-      <div style={{ flexShrink: 0, background: palette.accent, color: palette.primary, padding: '24px 44px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+      {texture ? <div style={{ position: 'absolute', left: -100, top: share(height, 360), width: 1300, height: 100, background: deco, opacity: 0.08, transform: 'rotate(-3deg)' }} /> : null}
+      {texture ? <div style={{ position: 'absolute', left: -120, top: share(height, 700), width: 1300, height: 60, background: deco, opacity: 0.1, transform: 'rotate(2deg)' }} /> : null}
+      {texture ? <svg style={{ position: 'absolute', right: -180, top: share(height, 220), width: 520, height: 520, opacity: 0.08 }}>
+        <circle cx="260" cy="260" r="240" fill="none" stroke={deco} strokeWidth="3" />
+        <circle cx="260" cy="260" r="180" fill="none" stroke={deco} strokeWidth="3" />
+      </svg> : null}
+      <div style={{ flexShrink: 0, background: headerBg, color: headInk, padding: '24px 44px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, minWidth: 0 }}>
           <ClubLogo src={team.logo} monogram={team.monogram} color={palette.primary} size={96} shape="shield" />
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 52, letterSpacing: 2, lineHeight: 1 }}>{team.name} XI</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 52, letterSpacing: 2, lineHeight: 1, color: pc(parts, 'clubColor', undefined) }}>{team.name}{suffix ? ` ${suffix}` : ''}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 1.5, lineHeight: 1 }}>VS {opponent.name}</div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, marginTop: 6 }}>{match.round} · {match.date}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 1.5, lineHeight: 1, color: pc(parts, 'oppColor', undefined) }}>{`${pt(parts, 'vsText', 'VS')} `}{opponent.name}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, marginTop: 6, color: pc(parts, 'roundColor', undefined) }}>{match.round} · {match.date}</div>
         </div>
       </div>
       {/* Shares the room the header and footer leave on a taller post. At
@@ -1149,30 +1269,30 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
         {P.map((p, i) => {
           const chip = p.captain ? 'C' : p.viceCaptain ? 'VC' : p.keeper ? 'WK' : null
           return (
-            <div key={i} style={{ ...(flexRows ? { flex: 1, minHeight: 0 } : null), display: 'grid', gridTemplateColumns: '56px 1fr 70px 60px', alignItems: 'center', gap: 14, borderBottom: `1px solid ${palette.ink}1a`, padding: '4px 0' }}>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: palette.accent, opacity: 0.9 }}>{String(i + 1).padStart(2, '0')}</div>
+            <div key={i} style={{ ...(flexRows ? { flex: 1, minHeight: 0 } : null), display: 'grid', gridTemplateColumns: '56px 1fr 70px 60px', alignItems: 'center', gap: 14, borderBottom: `1px solid ${pc(parts, 'dividerColor', palette.ink)}${partPicked(parts, 'dividerColor') ? '' : '1a'}`, padding: '4px 0' }}>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, letterSpacing: 1.5, color: pc(parts, 'numColor', palette.accent), opacity: 0.9 }}>{String(i + 1).padStart(2, '0')}</div>
               <div style={{ minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
                 <AutoFitText max={nameMax} min={22} lines={1}
                   style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", color: palette.ink, letterSpacing: -1, lineHeight: 0.95 }}>
                   <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.2em', whiteSpace: 'nowrap' }}>
-                    <span style={{ opacity: 0.5, letterSpacing: 0.5, fontSize: '0.47em' }}>{p.first.toUpperCase()}</span>
-                    <span>{p.last}</span>
+                    <span style={{ opacity: 0.5, letterSpacing: 0.5, fontSize: '0.47em', color: pc(parts, 'firstColor', undefined) }}>{p.first.toUpperCase()}</span>
+                    <span style={{ color: pc(parts, 'nameColor', undefined) }}>{p.last}</span>
                   </span>
                 </AutoFitText>
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                {chip && <RoleChip kind={chip} accent={palette.accent} ink={palette.primary} />}
+                {chip && <RoleChip kind={chip} accent={pc(parts, 'chipBg', palette.accent)} ink={pc(parts, 'chipColor', palette.primary)} />}
               </div>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: palette.ink, opacity: 0.5, textAlign: 'right', whiteSpace: 'nowrap' }}>{roleShort(p.role)}</div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.5, color: pc(parts, 't5RoleColor', palette.ink), opacity: 0.5, textAlign: 'right', whiteSpace: 'nowrap' }}>{roleShort(p.role)}</div>
             </div>
           )
         })}
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, boxSizing: 'border-box', height: footH, background: palette.secondary, padding: `${T5_FOOT_PAD}px 44px`, display: 'grid', gridTemplateColumns: `${slot.x - 44}px ${slot.w}px 1fr`, alignItems: 'center', borderTop: `3px solid ${palette.accent}`, zIndex: 2 }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, boxSizing: 'border-box', height: footH, background: pc(parts, 'footerBg', palette.secondary), padding: `${T5_FOOT_PAD}px 44px`, display: 'grid', gridTemplateColumns: `${slot.x - 44}px ${slot.w}px 1fr`, alignItems: 'center', borderTop: `3px solid ${pc(parts, 'footerRule', palette.accent)}`, zIndex: 2 }}>
         <div style={{ minWidth: 0, paddingRight: 18, textAlign: 'left' }}>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: palette.ink, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(headline || 'STARTING XI').toUpperCase()}</div>
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 2, color: palette.accent, lineHeight: 1, marginTop: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.venue.toUpperCase()}</div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: palette.ink, opacity: 0.85, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.competition} · {match.time}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 2, color: pc(parts, 'title1Color', palette.ink), lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(headline || 'STARTING XI').toUpperCase()}</div>
+          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 20, letterSpacing: 2, color: pc(parts, 'subColor', palette.accent), lineHeight: 1, marginTop: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.venue.toUpperCase()}</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, letterSpacing: 2, color: pc(parts, 't5CompColor', palette.ink), opacity: 0.85, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.competition} · {match.time}</div>
         </div>
         <div />
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -1183,6 +1303,30 @@ export function T5_Brutalist({ width = 1080, height = 1080, team, opponent, matc
     </LayerRoot>
   )
 }
+
+registerParts({
+  T5: [
+    colorPart('headerBg', 'Header band', 'Header', (p) => p.accent),
+    textPart('t5Suffix', 'Word after the club name', 'Header', () => 'XI'),
+    colorPart('clubColor', 'Club name', 'Header', (p) => p.primary),
+    textPart('vsText', 'Word before the opposition', 'Header', () => 'VS'),
+    colorPart('oppColor', 'Opposition name', 'Header', (p) => p.primary),
+    colorPart('roundColor', 'Round and date', 'Header', (p) => p.primary),
+    colorPart('numColor', 'Number', 'Players', (p) => p.accent),
+    colorPart('firstColor', 'First name', 'Players', (p) => p.ink),
+    colorPart('nameColor', 'Surname', 'Players', (p) => p.ink),
+    colorPart('t5RoleColor', 'Role', 'Players', (p) => p.ink),
+    colorPart('dividerColor', 'Row dividers', 'Players', (p) => p.ink),
+    colorPart('chipBg', 'Captain, vice and keeper tag', 'Players', (p) => p.accent),
+    colorPart('chipColor', 'Captain, vice and keeper text', 'Players', (p) => p.primary),
+    colorPart('footerBg', 'Footer bar', 'Footer', (p) => p.secondary),
+    colorPart('footerRule', 'Footer line', 'Footer', (p) => p.accent),
+    colorPart('title1Color', 'Headline', 'Footer', (p) => p.ink),
+    colorPart('subColor', 'Venue', 'Footer', (p) => p.accent),
+    colorPart('t5CompColor', 'Competition and time', 'Footer', (p) => p.ink),
+    colorPart('t5DecoColor', 'Background bands and rings', 'Decoration', (p) => p.accent),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 6 — Diagonal poster
