@@ -533,3 +533,10 @@ Reported: Round 1 vs Hola Health WSCC 1st XI, a 3-2-1 medal. Dagg and Roach both
 - `award_weekly_points` already did countback; the medal was on 'share', the default. `VoteMedal.tie_policy` model default, its `effective_config` fallback and the column default are now 'countback'. Migration 352 sets the column default and moves every existing 'share' medal to 'countback' once (not in the lifespan mirror, which would overwrite a later choice on every boot). The old `VoteSettings` model is history and unchanged.
 - The football twin (`afl_vote_medals`, `services/afl/votes.py`) is not changed.
 - Checked by running the shipped `award_weekly_points` on the reported tallies: 'share' gives Edwards 3, Dagg 2, Roach 2 (the control, reproducing the report); 'countback' gives Edwards 3, Dagg 2, Roach 1; an exact tie after countback still shares. Not run against Postgres or in the browser: no dependencies are installed in this sandbox.
+
+### v9.124.6: share box shows the link, message matches the link
+
+Reported from the Games hub: the message read "Votes are open for Round 2 v Swan Valley 1st XI" while the link underneath was the whole-club link, because `ShareVotePanel` named `fixtures[0]` regardless of scope. The hardcoded "pick your 3, 2 and 1" ignored the medal's `ballot_values`.
+- The base link is `/vote/<medal.link_token>`. It never changes until `POST /votes/medals/{id}/regenerate`. The scope only adds `?team=`, `?round=` or `?fixture=` (`voteUrl`).
+- `ShareVotePanel` now has a read-only link input with Copy link, plus Share (`navigator.share`, hidden where unsupported), like `SelfServiceLinkPanel`. The message names a game only for a fixture scope or a single listed game. The hub's scope label is now "grade · round".
+- Frontend only. Checked in Chromium (stubbed props, 390px, no overflow): whole-club, team and round, and single-game scopes give the expected link, message and note; Copy link wrote the link to the clipboard and Share passed the message to `navigator.share`.

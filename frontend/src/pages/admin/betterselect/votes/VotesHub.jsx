@@ -215,7 +215,12 @@ export default function VotesHub({ canManage, medalId, onOpenFixture }) {
         <div className="flex-1 min-w-0">
           <ShareVotePanel
             settings={data.settings}
-            scope={{ gradeId, roundKey, label: gradeId ? (data.grades.find((g) => g.id === gradeId)?.name) : 'Whole club' }}
+            scope={{
+              gradeId, roundKey,
+              label: [gradeId && data.grades.find((g) => g.id === gradeId)?.name,
+                roundKey && (data.rounds || []).find((r) => r.key === roundKey)?.label]
+                .filter(Boolean).join(' · ') || 'Whole club',
+            }}
             fixtures={rows}
           />
         </div>

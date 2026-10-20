@@ -25,6 +25,12 @@ export function voteUrl(token, { fixtureId, gradeId, roundKey } = {}) {
   return u.toString()
 }
 
+// [3, 2, 1] reads "3, 2 and 1".
+function ballotWords(values) {
+  const v = (values?.length ? values : [3, 2, 1]).map(String)
+  return v.length === 1 ? v[0] : `${v.slice(0, -1).join(', ')} and ${v[v.length - 1]}`
+}
+
 // `onEnable` is passed only by the Settings tab, where the switch lives; on
 // every other screen the notice points there instead.
 export default function ShareVotePanel({ settings, scope, fixtures = [], onPostToSocials, onEnable, busy }) {
@@ -34,13 +40,19 @@ export default function ShareVotePanel({ settings, scope, fixtures = [], onPostT
   const [draft, setDraft] = useState(null)
 
   const url = settings?.enabled && settings?.token ? voteUrl(settings.token, scope) : ''
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
 
+  // The message names a game only when the link opens exactly one. A link for a
+  // whole club or team lists several games, so naming the first row would
+  // promise players a game the link does not take them to.
   const defaultMessage = useMemo(() => {
-    const fx = fixtures[0]
-    const what = fx ? `${fx.round} v ${fx.opponent || 'TBC'}` : 'this weekend'
+    const fx = scope?.fixtureId || fixtures.length === 1 ? fixtures[0] : null
+    const what = fx
+      ? `${fx.round} v ${fx.opponent || 'TBC'}`
+      : scope?.gradeId || scope?.roundKey ? scope?.label : "this week's games"
     const closes = fx?.closes_on ? `\nCloses ${new Date(fx.closes_on + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}.` : ''
-    return `Votes are open for ${what}. 30 seconds, no login — pick your 3, 2 and 1.\n${url}${closes}`
-  }, [fixtures, url])
+    return `Votes are open for ${what}. 30 seconds, no login. Pick your ${ballotWords(settings?.ballot_values)}.\n${url}${closes}`
+  }, [fixtures, url, scope, settings?.ballot_values])
 
   const message = draft ?? defaultMessage
 
@@ -71,6 +83,23 @@ export default function ShareVotePanel({ settings, scope, fixtures = [], onPostT
     catch { toast.error('Copy failed. Select and copy manually.') }
   }
 
+  const copyLink = async () => {
+    try { await navigator.clipboard.writeText(url); toast.success('Link copied') }
+    catch { toast.error('Copy failed. Select and copy manually.') }
+  }
+
+  // The phone's own share sheet (WhatsApp, Messenger, Facebook, email, AirDrop).
+  const shareNative = async () => {
+    try { await navigator.share({ title: 'Player vote', text: message }) }
+    catch (e) { if (e?.name !== 'AbortError') toast.error('Sharing failed. Use Copy link instead.') }
+  }
+
+  const covers = scope?.fixtureId
+    ? 'This link opens that one game and nothing else.'
+    : scope?.gradeId || scope?.roundKey
+      ? `This link opens ${scope.label || 'the games'} only. It changes when you change the filters above.`
+      : 'This link lists every open game in the club. Pick a team or round above to make a narrower link.'
+
   if (!settings?.enabled) {
     return (
       <div className="pb-card px-4 py-4 text-[12.5px] text-pb-amber">
@@ -93,6 +122,13 @@ export default function ShareVotePanel({ settings, scope, fixtures = [], onPostT
         <span className="font-mono text-[10px] text-pb-faintest uppercase tracking-wide2">
           {scope?.label || 'Whole club'}
         </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-3" data-vote-link-row>
+        <input readOnly value={url} onFocus={(e) => e.target.select()} aria-label="Voting link"
+          className="flex-1 min-w-[220px] bg-pb-surface2 border border-pb-hairline2 rounded-lg px-3 py-2 text-sm font-mono text-pb-dim" />
+        <Btn sm variant="primary" onClick={copyLink}>Copy link</Btn>
+        {canShare && <Btn sm onClick={shareNative}>Share</Btn>}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -126,7 +162,7 @@ export default function ShareVotePanel({ settings, scope, fixtures = [], onPostT
 
       <div className="flex items-start gap-2 mt-3 text-[12px] text-pb-faint">
         <Icon name="info" size={14} className="mt-0.5 shrink-0" />
-        Every link is pre-filtered to the team and round you're looking at, so nobody hunts through other grades.
+        {covers}
       </div>
     </div>
   )
