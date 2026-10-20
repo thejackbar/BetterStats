@@ -718,8 +718,10 @@ async def _teaser_html(token: str, page_url: str, base: str, db: AsyncSession) -
     from app.services import club_teaser
     if not re.match(r"^[A-Za-z0-9_-]{8,64}$", token or ""):
         return None
-    snap = await db.scalar(text(
-        "SELECT snapshot FROM club_teaser_snapshots WHERE token = :t AND status = 'ok'"), {"t": token})
+    row = (await db.execute(text(
+        "SELECT snapshot, image_version FROM club_teaser_snapshots "
+        "WHERE token = :t AND status = 'ok'"), {"t": token})).mappings().first()
+    snap = row["snapshot"] if row else None
     if not snap:
         return None
     view = club_teaser.presentation(snap)
@@ -731,7 +733,13 @@ async def _teaser_html(token: str, page_url: str, base: str, db: AsyncSession) -
     else:
         description = f"Your club's {season}, from Cricket Australia's public figures."
     title = f"{name}: your {season} | {SITE_NAME}"
-    return _html(title, description, _abs_url(OG_COVER, base), page_url, image_alt=title,
+    # The club's own card once it has been drawn; the branded cover until then.
+    if row["image_version"] is not None:
+        image = f"{base}/api/public/teaser/{token}/image/card.png?v={row['image_version']}"
+        w, h = 1200, 630
+    else:
+        image, w, h = _abs_url(OG_COVER, base), None, None
+    return _html(title, description, image, page_url, image_w=w, image_h=h, image_alt=title,
                  body_extra=f"<p>{_esc(description)}</p>", noindex=True)
 
 

@@ -95,6 +95,19 @@ class Settings(BaseSettings):
     # not exist.
     video_storage_dir: str = "/mnt/media/bettercricket/internal/videos"
 
+    # Rendered teaser images (the club snapshot card used in emails, share
+    # previews and ads). Same rules as the video directory above: an explicit
+    # host path, outside the regular backup, because every file can be
+    # re-rendered from its snapshot. Override in dev and in tests.
+    teaser_image_dir: str = "/mnt/media/bettercricket/internal/teasers"
+    # The site the renderer opens to take its pictures. Blank means
+    # public_base_url; set it to the frontend container's address to keep the
+    # renderer off the public internet.
+    teaser_render_base_url: str = ""
+    # Chromium for the renderer. Blank lets Playwright find its own; the
+    # backend image installs the distro's and points this at it.
+    teaser_chromium_path: str = ""
+
     # nginx internal location used to hand byte-serving off to nginx via
     # X-Accel-Redirect. OFF BY DEFAULT, and that default is deliberate.
     #

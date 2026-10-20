@@ -8,6 +8,8 @@ import { api } from '../../lib/api'
 // says so rather than adding a second stop control that could disagree.
 
 const POLL_MS = 15000
+const RENDER_POLL_MS = 3000
+const RENDER_BATCH = 50
 
 const STATE = {
   off:           { label: 'Off',           dot: 'bg-pb-faint',  text: 'text-pb-dim',
@@ -57,11 +59,12 @@ export default function TeaserCrawlPanel() {
     } catch (e) { setLoadErr(e.message || 'Could not read the crawl status.') }
   }, [])
 
+  const rendering = !!st?.images?.running
   useEffect(() => {
     load()
-    const t = setInterval(() => { if (!document.hidden) load() }, POLL_MS)
+    const t = setInterval(() => { if (!document.hidden) load() }, rendering ? RENDER_POLL_MS : POLL_MS)
     return () => clearInterval(t)
-  }, [load])
+  }, [load, rendering])
 
   if (!st) {
     return loadErr
@@ -105,6 +108,17 @@ export default function TeaserCrawlPanel() {
       setMsg('Switched off. Nothing more is pulled once the club in flight finishes.')
       await load()
     } catch (e) { setErr(e.message || 'Could not switch it off.') } finally { setBusy('') }
+  }
+
+  const img = st.images
+  const draw = async () => {
+    setBusy('draw'); setMsg(''); setErr('')
+    try {
+      const r = await api.mktTeaserRender(RENDER_BATCH)
+      setMsg(r.started ? `Drawing up to ${RENDER_BATCH} pictures. This updates as they finish.`
+                       : 'A batch is already being drawn.')
+      await load()
+    } catch (e) { setErr(e.message || 'Could not start drawing.') } finally { setBusy('') }
   }
 
   const achieved = p.calls_last_hour ? (p.calls_last_hour / 3600).toFixed(2) : null
@@ -172,6 +186,31 @@ export default function TeaserCrawlPanel() {
             {' '}{est.rate_to_finish_in_one_window} a second would finish it inside one window.
           </p>
         ) : (st.rate > 0 && p.due > 0 ? <p>No estimate until at least one club has been pulled.</p> : null)}
+        {img && (
+          <div className="flex flex-wrap items-center gap-2 pt-1" data-testid="teaser-images">
+            <p>
+              Pictures for emails and ads: <span className="text-pb-text font-semibold" data-testid="teaser-images-ready">{num(img.ready)}</span> drawn
+              {' · '}<span className="text-pb-text font-semibold" data-testid="teaser-images-pending">{num(img.pending)}</span> waiting
+              {img.stale > 0 ? ` (${num(img.stale)} out of date)` : ''}
+              {img.running ? ' · drawing now' : ''}
+            </p>
+            <button className={BTN} data-testid="teaser-draw"
+                    disabled={busy !== '' || img.running || img.pending === 0} onClick={draw}>
+              {busy === 'draw' ? '...' : (img.pending > 0 ? `Draw ${Math.min(img.pending, RENDER_BATCH)} pictures` : 'Draw pictures')}
+            </button>
+          </div>
+        )}
+        {img?.last && img.last.status === 'error' && (
+          <p className="text-red-300" data-testid="teaser-images-error">
+            The last batch could not run: {img.last.error || 'unknown error'}.
+          </p>
+        )}
+        {img?.last && img.last.status === 'ok' && img.last.failed > 0 && (
+          <p className="text-amber-300" data-testid="teaser-images-failed">
+            {num(img.last.failed)} club{img.last.failed === 1 ? '' : 's'} could not be drawn in the last batch
+            (usually a very long name that does not fit the card). They stay waiting.
+          </p>
+        )}
         {p.empty > 0 && p.with_snapshot > 0 && p.empty / p.with_snapshot > 0.2 && (
           <p className="text-amber-300" data-testid="teaser-empty-warn">
             A lot of clubs read as empty. If Cricket Australia is having trouble, that can look like empty clubs

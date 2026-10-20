@@ -2,11 +2,12 @@
 
 A prospect club is emailed (or shown an ad that lands on) a page built from its
 own public Cricket Australia figures. Anything on the page opens the same
-invitation to claim the club through the trial wizard. Two unauthenticated
+invitation to claim the club through the trial wizard. Three unauthenticated
 routes:
 
-  GET  /public/teaser/{token}        the snapshot and what the page leads with
-  POST /public/teaser/{token}/event  a view / tile tap / claim beacon
+  GET  /public/teaser/{token}                 the snapshot and what the page leads with
+  GET  /public/teaser/{token}/image/{fmt}.png the club's picture (email, share card, ads)
+  POST /public/teaser/{token}/event           a view / tile tap / claim beacon
 
 Nothing here needs the self-serve registration flag: the page is an
 introduction, and the wizard it hands over to has its own gate. The token is
@@ -23,12 +24,13 @@ import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
-from app.services import club_teaser, rate_limit
+from app.services import club_teaser, club_teaser_images, rate_limit
 from app.services.login_audit import client_ip
 from app.services.usage_tracker import record_event_bg
 
@@ -80,6 +82,27 @@ async def get_teaser(token: str, request: Request, db: AsyncSession = Depends(ge
         # rather than to a trial it cannot start.
         "registered": {"slug": row["registered_slug"]} if row["registered_slug"] else None,
     }
+
+
+@router.get("/{token}/image/{fmt}.png")
+async def get_teaser_image(token: str, fmt: str, db: AsyncSession = Depends(get_db)):
+    """The drawn picture. No rate limit: mail clients and image proxies fetch it
+    from shared addresses in bursts, and a send fans out to thousands of opens.
+    It is a file read and one indexed lookup. The file is only served for a
+    snapshot that is still good, so a club that turned out unsuitable stops
+    being shown. The address changes with ``?v=`` on every re-draw, so it can be
+    cached hard."""
+    if not TOKEN_RE.match(token or "") or not club_teaser_images.valid_format(fmt):
+        raise HTTPException(status_code=404, detail="Not found")
+    ok = await db.scalar(text(
+        "SELECT 1 FROM club_teaser_snapshots WHERE token = :t AND status = 'ok' "
+        "AND snapshot IS NOT NULL AND image_version IS NOT NULL"), {"t": token})
+    path = club_teaser_images.image_path(token, fmt)
+    if not ok or not path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400",
+                                 "X-Robots-Tag": "noindex"})
 
 
 class TeaserEvent(BaseModel):

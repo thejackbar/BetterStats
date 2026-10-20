@@ -78,7 +78,41 @@ async def teaser_status(db: AsyncSession = Depends(get_db), _=Depends(require_su
             "stopped": stopped, "in_hours": in_hours,
             "max_rate": ps.TEASER_MAX_RATE, "min_rate": ps._FLOAT_KEYS["club_teaser_calls_per_second"][0],
             "progress": progress,
-            "estimate": ct.crawl_estimate(progress["due"], progress["avg_calls"], rate, start, end)}
+            "estimate": ct.crawl_estimate(progress["due"], progress["avg_calls"], rate, start, end),
+            "images": await _images_block(db)}
+
+
+async def _images_block(db: AsyncSession) -> dict:
+    from app.services import club_teaser_images as ti
+    last = ti.RUN_STATE.get("last") or {}
+    return {**await ti.images_progress(db),
+            "running": bool(ti.RUN_STATE.get("running")),
+            "last": ({"drawn": last.get("drawn", 0), "failed": len(last.get("failed") or []),
+                      "status": last.get("status"), "error": last.get("error")}
+                     if last else None)}
+
+
+class RenderBody(BaseModel):
+    limit: int = 50
+
+
+async def _render_in_background(limit: int):
+    from app.services import club_teaser_images as ti
+    await ti.render_pending(async_session_maker, limit=limit)
+
+
+@router.post("/teaser/render")
+async def teaser_render(body: RenderBody, background: BackgroundTasks,
+                        db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+    """Draw the teaser pictures that are due (new snapshots, and snapshots whose
+    figures changed). Runs after the response on its own sessions; the panel
+    reads progress from ``/teaser/status``. One run at a time."""
+    from app.services import club_teaser_images as ti
+    if ti.RUN_STATE.get("running"):
+        return {"started": False, "reason": "already_running"}
+    limit = max(1, min(int(body.limit), 200))
+    background.add_task(_render_in_background, limit)
+    return {"started": True, "limit": limit}
 
 
 # The tri-state directory filters (off / include / exclude). Same keys front to

@@ -34,6 +34,11 @@ services:
       # rename, which is what caused the June 2026 outage. Deliberately outside
       # the regular backup — see ops/backup/backup.sh and config/settings.py.
       - ${VIDEO_STORAGE_DIR:-/mnt/media/bettercricket/internal/videos}:/mnt/media/bettercricket/internal/videos
+      # The rendered club teaser pictures (emails, share cards, ads). Same
+      # reasoning as the videos above, and the same exclusion from the backup:
+      # every file can be re-drawn from its snapshot. The backend writes them
+      # and serves them itself, so the frontend container does not need this.
+      - ${TEASER_IMAGE_DIR:-/mnt/media/bettercricket/internal/teasers}:/mnt/media/bettercricket/internal/teasers
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

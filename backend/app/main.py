@@ -6241,9 +6241,10 @@ async def lifespan(app: FastAPI):
     # Seed every club's BetterComms library with the built-in starter templates
     # (idempotent — ON CONFLICT DO NOTHING per org+name, so this also backfills
     # any club created since the last startup with no separate creation hook).
-    from app.routers.comms import seed_starter_templates
+    from app.routers.comms import seed_starter_templates, seed_outreach_templates
     async with engine.begin() as conn:
         seeded = await seed_starter_templates(conn)
+        seeded += await seed_outreach_templates(conn)
         if seeded:
             logger.info(f"Seeded {seeded} BetterComms starter templates across clubs")
 

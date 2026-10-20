@@ -54,6 +54,12 @@ POSTGRES_USER="${POSTGRES_USER:-cricket}"
 # `<project>_betterstats_<name>`, e.g. betterstats_pgdata for the DB).
 UPLOADS_VOLUME="${UPLOADS_VOLUME:-${COMPOSE_PROJECT_NAME}_betterstats_uploads}"
 #
+# ALSO NOT BACKED UP: /mnt/media/bettercricket/internal/teasers
+# The club teaser pictures (emails, share cards, ads) are screenshots of a card
+# page drawn from a snapshot in Postgres, so any of them can be re-made. After a
+# restore onto a fresh box run `python -m app.scripts.render_club_teasers --apply
+# --missing --limit 500` (repeat until it reports nothing due); until then {{teaser_image_url}} resolves blank for those clubs.
+#
 # DELIBERATELY NOT BACKED UP: /mnt/media/bettercricket/internal/videos
 #
 # The instructional videos behind /videos are excluded from this backup by

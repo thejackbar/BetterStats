@@ -35,6 +35,7 @@ const RUNNING = status({ state: 'running', rate: 2, estimate: { calls: 101500, h
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
 async function open({ initial = status(), width = 1400, refuse = null } = {}) {
+  const renders = []
   const ctx = await browser.newContext({ viewport: { width, height: 1400 } })
   const page = await ctx.newPage()
   const errors = [], patches = []
@@ -64,6 +65,11 @@ async function open({ initial = status(), width = 1400, refuse = null } = {}) {
                estimate: rate ? RUNNING.estimate : null }
       return json({})
     }
+    if (/marketing\/teaser\/render/.test(p) && req.method() === 'POST') {
+      renders.push(JSON.parse(req.postData() || '{}'))
+      live = { ...live, images: { ...live.images, running: true } }
+      return json({ started: true, limit: renders.at(-1).limit })
+    }
     if (/marketing\/teaser\/status/.test(p)) return json(live)
     if (/marketing\/status/.test(p)) {
       return json({ state: 'idle', detail: 'Idle', paused: false, clubs: 40, associations_pending: 0,
@@ -81,7 +87,7 @@ async function open({ initial = status(), width = 1400, refuse = null } = {}) {
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
   await panel(page).waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
   await page.waitForTimeout(500)
-  return { page, ctx, errors, patches, dialogs, setLive: (s) => { live = s },
+  return { page, ctx, errors, patches, renders, dialogs, setLive: (s) => { live = s },
            setAccept: (v) => { acceptDialog = v } }
 }
 
@@ -246,6 +252,56 @@ for (const [label, st, want] of [
   })
   ck('the panel does not overflow itself at 390px', m && m.panel <= 0, JSON.stringify(m))
   ck('no page errors at 390px', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ---- 10. Pictures for emails and ads ------------------------------------------
+const IMAGES = { ready: 12, pending: 7, stale: 2, running: false, last: null }
+{
+  const { page, ctx, errors, renders } = await open({ initial: status({ images: IMAGES }) })
+  const box = textOf(t(page, 'teaser-images'))
+  ck('the drawn and waiting counts show, with how many are out of date',
+     (await textOf(t(page, 'teaser-images-ready'))) === '12' && (await textOf(t(page, 'teaser-images-pending'))) === '7'
+     && /2 out of date/.test(await box), await box)
+  ck('the button names how many it will draw', /Draw 7 pictures/.test(await textOf(t(page, 'teaser-draw'))))
+  await press(t(page, 'teaser-draw'))
+  await page.waitForTimeout(500)
+  ck('pressing it sends exactly one request, for a batch of 50', renders.length === 1 && renders[0].limit === 50, JSON.stringify(renders))
+  ck('and the panel says it is drawing, with the button off', /drawing now/.test(await textOf(t(page, 'teaser-images')))
+     && await dis(t(page, 'teaser-draw')))
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ initial: status({ images: { ready: 5, pending: 0, stale: 0, running: false, last: null } }) })
+  ck('with nothing waiting the button is off and says so', await dis(t(page, 'teaser-draw'))
+     && /Draw pictures/.test(await textOf(t(page, 'teaser-draw'))))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ initial: status({ images: { ...IMAGES, last: { status: 'error', drawn: 0, failed: 0, error: 'no chromium here' } } }) })
+  ck('a batch that could not run says why', /no chromium here/.test(await textOf(t(page, 'teaser-images-error'))))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ initial: status({ images: { ...IMAGES, last: { status: 'ok', drawn: 5, failed: 2, error: null } } }) })
+  ck('clubs that could not be drawn are counted, with the usual reason',
+     /2 clubs could not be drawn/.test(await textOf(t(page, 'teaser-images-failed'))) && /long name/.test(await textOf(t(page, 'teaser-images-failed'))))
+  await ctx.close()
+}
+{
+  const { page, ctx, errors } = await open({ initial: status() })
+  ck('a status with no pictures block (an older server) hides the row and does not crash',
+     (await t(page, 'teaser-images').count()) === 0 && (await panel(page).count()) === 1 && errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ initial: status({ images: { ...IMAGES, last: { status: 'ok', drawn: 5, failed: 2, error: null } } }), width: 390 })
+  const m = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="teaser-panel"]')
+    return el ? { panel: el.scrollWidth - el.clientWidth, page: document.documentElement.scrollWidth - document.documentElement.clientWidth } : null
+  })
+  ck('the pictures row does not overflow at 390px', m && m.panel <= 0 && m.page <= 0, JSON.stringify(m))
   await ctx.close()
 }
 
