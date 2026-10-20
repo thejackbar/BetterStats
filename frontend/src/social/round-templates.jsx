@@ -571,62 +571,121 @@ export function FixtureSchedule({ palette: pal, width = 1080, height = 1080, met
 
 // ════════════════════════════════ SINGLE RESULT ═════════════════════════════
 
-export function ResultMarginHero({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+// What the club can set on the six single-result layouts (Brand, "This layout's elements").
+// RS1 to RS6 share the keys they have in common, so a heading band, a team name or a win
+// colour picked on one is still there on its neighbour. A key with an rs<N> prefix is
+// that layout's own.
+const RS_HEAD = 'Heading', RS_TEAMS = 'Teams and scores', RS_RESULT = 'Result line', RS_POTM = 'Player of the match', RS_FOOT = 'Footer'
+const rsHeading = (rule) => [
+  textPart('title1', 'Heading word', RS_HEAD, () => 'RESULT'),
+  colorPart('title1Color', 'Heading word colour', RS_HEAD, (p) => p.primary),
+  colorPart('bandBg', 'Heading band', RS_HEAD, (p) => p.accent),
+  colorPart('roundColor', 'Round and date line', RS_HEAD, (p) => p.ink),
+  colorPart('headerBg', 'Header bar', RS_HEAD, null, { autoLabel: 'No fill' }),
+  ...(rule ? [colorPart('headerRule', 'Line under the header', RS_HEAD, (p) => p.accent)] : []),
+]
+const rsPotm = (chip) => [
+  colorPart('potmBg', chip ? 'Player of the match chip' : 'Player of the match bar', RS_POTM, chip ? null : (p) => p.secondary, chip ? { autoLabel: 'Soft tint' } : undefined),
+  colorPart('potmRule', chip ? 'Chip outline' : 'Line beside the bar', RS_POTM, (p) => p.accent),
+  textPart('potmLabel', 'Label word', RS_POTM, () => '★ POTM'),
+  colorPart('potmLabelColor', 'Label colour', RS_POTM, (p) => p.accent),
+  colorPart('potmNameColor', 'Player name', RS_POTM, (p) => p.ink),
+  colorPart('potmLineColor', 'Runs and wickets line', RS_POTM, (p) => p.ink),
+]
+const rsFooter = () => [
+  colorPart('footerBg', 'Footer bar', RS_FOOT, (p) => p.primary),
+  colorPart('footerRule', 'Footer line', RS_FOOT, (p) => p.accent),
+]
+// The result panel RS3 and RS5 share: a "MATCH RESULT" label over the result line.
+const rsResultPanel = () => [
+  colorPart('resultBg', 'Result panel', RS_RESULT, (p) => p.secondary),
+  colorPart('resultRule', 'Line beside the panel', RS_RESULT, (p) => p.accent),
+  textPart('resultLabel', 'Label words', RS_RESULT, () => '// MATCH RESULT'),
+  colorPart('resultLabelColor', 'Label colour', RS_RESULT, (p) => p.accent),
+  colorPart('resultLineColor', 'Result line', RS_RESULT, (p) => p.ink),
+]
+
+export function ResultMarginHero({ palette: pal, width = 1080, height = 1080, result: r, sponsors, parts }) {
+  const texture = usePostLook().texture !== false
   const S = roundScale(width, height)
   const b = sz(S.big)
   const { won, winnerName, tied } = outcomeBits(r)
-  const bigWord = tied ? 'TIE' : 'WIN'
+  const bigWord = pt(parts, 'rs1Word', tied ? 'TIE' : 'WIN')
   // The player-of-the-match bar sits just above the credit strip; the score boxes sit above it.
   const potmB = creditH(height) + grow(height, 18, 0.1)
+  const band = pc(parts, 'bandBg', pal.accent)
+  const winC = pc(parts, 'winColor', pal.accent)
+  const lossC = pc(parts, 'lossColor', pal.ink)
+  const ringC = pc(parts, 'markRing', pal.ink)
+  const markC = pc(parts, 'markColor', pal.ink)
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.04} gap={28} angle={-20} />
-      <div style={{ position: 'absolute', left: -60, bottom: -40, fontFamily: DISPLAY, fontSize: share(height, 760), lineHeight: 0.72, color: pal.accent, opacity: 0.08, letterSpacing: -20, userSelect: 'none' }}>{won ? 'W' : tied ? 'T' : 'L'}</div>
-      {topBar({ pal, width, height, team: { logo: r.us.logo, mono: r.us.mono }, left: (
+      {texture ? <div style={{ position: 'absolute', left: -60, bottom: -40, fontFamily: DISPLAY, fontSize: share(height, 760), lineHeight: 0.72, color: pal.accent, opacity: 0.08, letterSpacing: -20, userSelect: 'none' }}>{won ? 'W' : tied ? 'T' : 'L'}</div> : null}
+      {topBar({ pal, width, height, parts, team: { logo: r.us.logo, mono: r.us.mono }, left: (
         <>
-          <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>RESULT</Slab>
-          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r)}</Kicker>
+          <Slab bg={band} fg={pc(parts, 'title1Color', partPicked(parts, 'bandBg') ? inkOn(band) : pal.primary)} size={26} style={{ padding: '8px 16px' }}>{pt(parts, 'title1', 'RESULT')}</Slab>
+          <Kicker color={pc(parts, 'roundColor', pal.ink)} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r)}</Kicker>
         </>
       ) })}
       <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height).h + 56, ...anchor(S.A, null, { bottom: potmB + 148 + 180, justifyContent: 'center' }), display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontFamily: DISPLAY, fontSize: b(60), letterSpacing: 2, color: pal.ink, opacity: 0.55, lineHeight: 1 }}>{winnerName}</div>
-        <AutoFit max={b(260)} min={120} style={{ fontFamily: DISPLAY, color: pal.ink, letterSpacing: -4, lineHeight: 0.82, marginTop: 2 }} deps={[bigWord]}>{bigWord}</AutoFit>
-        <div style={{ fontFamily: DISPLAY, fontSize: b(92), letterSpacing: 1, color: pal.accent, lineHeight: 1, marginTop: 4 }}>{r.margin}</div>
+        <div style={{ fontFamily: DISPLAY, fontSize: b(60), letterSpacing: 2, color: pc(parts, 'rs1WinnerColor', pal.ink), opacity: 0.55, lineHeight: 1 }}>{winnerName}</div>
+        <AutoFit max={b(260)} min={120} style={{ fontFamily: DISPLAY, color: pc(parts, 'rs1WordColor', pal.ink), letterSpacing: -4, lineHeight: 0.82, marginTop: 2 }} deps={[bigWord]}>{bigWord}</AutoFit>
+        <div style={{ fontFamily: DISPLAY, fontSize: b(92), letterSpacing: 1, color: pc(parts, 'rs1MarginColor', pal.accent), lineHeight: 1, marginTop: 4 }}>{r.margin}</div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 700 }, { bottom: potmB + 148 }), display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 22 }}>
-        <div style={{ padding: '18px 22px', background: won ? `${pal.accent}1f` : `${pal.ink}0c`, border: `2px solid ${won ? pal.accent : pal.ink + '22'}`, display: 'flex', alignItems: 'center', gap: 16 }}>
-          <Monogram text={r.us.mono} logo={r.us.logo} size={56} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
+        <div style={{ padding: '18px 22px', background: won ? `${winC}1f` : `${lossC}0c`, border: `2px solid ${won ? winC : lossC + '22'}`, display: 'flex', alignItems: 'center', gap: 16 }}>
+          <Monogram text={r.us.mono} logo={r.us.logo} size={56} fg={markC} bg={`${pal.ink}14`} ring={`${ringC}33`} />
           <div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 1, lineHeight: 1, whiteSpace: 'nowrap' }}>{r.us.name}</div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 52, letterSpacing: -0.5, lineHeight: 1, marginTop: 4 }}>{r.us.score} <span style={{ fontSize: 22, opacity: 0.6 }}>({r.us.overs})</span></div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 1, lineHeight: 1, whiteSpace: 'nowrap', color: pc(parts, 'nameColor', undefined) }}>{r.us.name}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 52, letterSpacing: -0.5, lineHeight: 1, marginTop: 4, color: pc(parts, 'statColor', undefined) }}>{r.us.score} <span style={{ fontSize: 22, opacity: 0.6, color: pc(parts, 'subColor', undefined) }}>({r.us.overs})</span></div>
           </div>
         </div>
-        <div style={{ fontFamily: DISPLAY, fontSize: 40, letterSpacing: 1, color: pal.accent }}>v</div>
-        <div style={{ padding: '18px 22px', background: !won && !tied ? `${pal.accent}1f` : `${pal.ink}0c`, border: `2px solid ${!won && !tied ? pal.accent : pal.ink + '22'}`, display: 'flex', alignItems: 'center', gap: 16, justifyContent: 'flex-end', textAlign: 'right' }}>
+        <div style={{ fontFamily: DISPLAY, fontSize: 40, letterSpacing: 1, color: pc(parts, 'vsColor', pal.accent) }}>v</div>
+        <div style={{ padding: '18px 22px', background: !won && !tied ? `${winC}1f` : `${lossC}0c`, border: `2px solid ${!won && !tied ? winC : lossC + '22'}`, display: 'flex', alignItems: 'center', gap: 16, justifyContent: 'flex-end', textAlign: 'right' }}>
           <div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 1, lineHeight: 1, whiteSpace: 'nowrap' }}>{r.them.name}</div>
-            <div style={{ fontFamily: DISPLAY, fontSize: 52, letterSpacing: -0.5, lineHeight: 1, marginTop: 4 }}>{r.them.score} <span style={{ fontSize: 22, opacity: 0.6 }}>({r.them.overs})</span></div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 22, letterSpacing: 1, lineHeight: 1, whiteSpace: 'nowrap', color: pc(parts, 'nameColor', undefined) }}>{r.them.name}</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 52, letterSpacing: -0.5, lineHeight: 1, marginTop: 4, color: pc(parts, 'statColor', undefined) }}>{r.them.score} <span style={{ fontSize: 22, opacity: 0.6, color: pc(parts, 'subColor', undefined) }}>({r.them.overs})</span></div>
           </div>
-          <Monogram text={r.them.mono} logo={r.them.logo} size={56} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}33`} />
+          <Monogram text={r.them.mono} logo={r.them.logo} size={56} fg={markC} bg={`${pal.ink}14`} ring={`${ringC}33`} />
         </div>
       </div>
       {(r.potm.first || r.potm.last) && (
         <div style={{ position: 'absolute', left: 0, right: 0, bottom: potmB, padding: '0 56px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}` }}>
-            <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.accent, whiteSpace: 'nowrap', flexShrink: 0 }}>★ POTM</span>
-            <span style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, whiteSpace: 'nowrap', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.potm.first} {r.potm.last}</span>
-            <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pal.ink, opacity: 0.75, whiteSpace: 'nowrap', flexShrink: 0 }}>{r.potm.line}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px', background: pc(parts, 'potmBg', pal.secondary), borderLeft: `4px solid ${pc(parts, 'potmRule', pal.accent)}` }}>
+            <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pc(parts, 'potmLabelColor', pal.accent), whiteSpace: 'nowrap', flexShrink: 0 }}>{pt(parts, 'potmLabel', '★ POTM')}</span>
+            <span style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, whiteSpace: 'nowrap', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'potmNameColor', undefined) }}>{r.potm.first} {r.potm.last}</span>
+            <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pc(parts, 'potmLineColor', pal.ink), opacity: 0.75, whiteSpace: 'nowrap', flexShrink: 0 }}>{r.potm.line}</span>
           </div>
         </div>
       )}
-      {creditStrip(pal, height)}
+      {creditStrip(pal, height, parts)}
       <Grain opacity={0.3} id="rmh-g" />
     </Post>
   )
 }
+registerParts({
+  RS1: [
+    ...rsHeading(true),
+    textPart('rs1Word', 'Big word (WIN or TIE)', 'Big result', () => 'WIN'),
+    colorPart('rs1WordColor', 'Big word colour', 'Big result', (p) => p.ink),
+    colorPart('rs1WinnerColor', 'Winning team name', 'Big result', (p) => p.ink),
+    colorPart('rs1MarginColor', 'Margin', 'Big result', (p) => p.accent),
+    colorPart('winColor', 'Winning team box', RS_TEAMS, (p) => p.accent),
+    colorPart('lossColor', 'Losing or tied team box', RS_TEAMS, (p) => p.ink),
+    colorPart('markRing', 'Club badge ring', RS_TEAMS, (p) => p.ink),
+    colorPart('markColor', 'Club badge letters', RS_TEAMS, (p) => p.ink),
+    colorPart('nameColor', 'Team name', RS_TEAMS, (p) => p.ink),
+    colorPart('statColor', 'Score', RS_TEAMS, (p) => p.ink),
+    colorPart('subColor', 'Overs', RS_TEAMS, (p) => p.ink),
+    colorPart('vsColor', 'The v between the teams', RS_TEAMS, (p) => p.accent),
+    ...rsPotm(false),
+    ...rsFooter(),
+  ],
+})
 
-export function ResultBroadcast({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+export function ResultBroadcast({ palette: pal, width = 1080, height = 1080, result: r, sponsors, parts }) {
   const S = roundScale(width, height)
   const b = sz(S.big)
   const { won, tied, line } = outcomeBits(r)
@@ -637,23 +696,27 @@ export function ResultBroadcast({ palette: pal, width = 1080, height = 1080, res
   // `t` is the team in TeamRow, so the two scaled sizes are resolved first.
   const rowName = b(38)
   const rowScore = b(58)
+  const band = pc(parts, 'bandBg', pal.accent)
+  const winC = pc(parts, 'winColor', pal.accent)
+  const lossC = pc(parts, 'lossColor', pal.ink)
+  const badge = pc(parts, 'badgeBg', pal.accent)
   const TeamRow = ({ t, isWinner }) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '15px 24px', background: isWinner ? `${pal.accent}1a` : `${pal.ink}08`, borderLeft: `6px solid ${isWinner ? pal.accent : pal.ink + '22'}` }}>
-      <Monogram text={t.mono} logo={t.logo} size={60} fg={pal.ink} bg={`${pal.ink}14`} ring={`${pal.ink}40`} />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '15px 24px', background: isWinner ? `${winC}1a` : `${lossC}08`, borderLeft: `6px solid ${isWinner ? winC : lossC + '22'}` }}>
+      <Monogram text={t.mono} logo={t.logo} size={60} fg={pc(parts, 'markColor', pal.ink)} bg={`${pal.ink}14`} ring={`${pc(parts, 'markRing', pal.ink)}40`} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontFamily: DISPLAY, fontSize: rowName, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
-        <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: pal.ink, opacity: 0.6, marginTop: 5 }}>{t.overs} OVERS</div>
+        <div style={{ fontFamily: DISPLAY, fontSize: rowName, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{t.name}</div>
+        <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: pc(parts, 'subColor', pal.ink), opacity: 0.6, marginTop: 5 }}>{t.overs} OVERS</div>
       </div>
-      {isWinner && <span style={{ fontFamily: DISPLAY, fontSize: 15, letterSpacing: 2, color: pal.primary, background: pal.accent, padding: '4px 11px' }}>WON</span>}
-      <div style={{ fontFamily: DISPLAY, fontSize: rowScore, letterSpacing: -1, lineHeight: 1 }}>{t.score}</div>
+      {isWinner && <span style={{ fontFamily: DISPLAY, fontSize: 15, letterSpacing: 2, color: pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(badge) : pal.primary), background: badge, padding: '4px 11px' }}>{pt(parts, 'winTagWord', 'WON')}</span>}
+      <div style={{ fontFamily: DISPLAY, fontSize: rowScore, letterSpacing: -1, lineHeight: 1, color: pc(parts, 'statColor', undefined) }}>{t.score}</div>
     </div>
   )
   const Col = ({ title, items, accent }) => (
     <div>
-      <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.8, color: pal.ink, opacity: 0.55, marginBottom: 6 }}>{title}</div>
+      <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.8, color: pc(parts, 'rs2ColTitle', pal.ink), opacity: 0.55, marginBottom: 6 }}>{title}</div>
       {items.map((p, i) => (
-        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '6px 0', borderBottom: `1px solid ${pal.ink}14`, fontFamily: DISPLAY }}>
-          <span style={{ fontSize: 27, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.n}</span>
+        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '6px 0', borderBottom: `1px solid ${pc(parts, 'dividerColor', pal.ink)}14`, fontFamily: DISPLAY }}>
+          <span style={{ fontSize: 27, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'perfNameColor', undefined) }}>{p.n}</span>
           <span style={{ fontSize: 21, color: accent, letterSpacing: 0.5, whiteSpace: 'nowrap', flexShrink: 0 }}>{p.l}</span>
         </div>
       ))}
@@ -662,7 +725,7 @@ export function ResultBroadcast({ palette: pal, width = 1080, height = 1080, res
   const tall = S.A !== 'square'
   const Performers = ({ mono, color, lineColor, bat, bowl }) => (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ fontFamily: DISPLAY, fontSize: b(25), letterSpacing: 2, color, marginBottom: 12, flexShrink: 0 }}>{mono} · TOP PERFORMERS</div>
+      <div style={{ fontFamily: DISPLAY, fontSize: b(25), letterSpacing: 2, color, marginBottom: 12, flexShrink: 0 }}>{mono}{` · ${pt(parts, 'rs2PerfWord', 'TOP PERFORMERS')}`}</div>
       {/* Pushed apart to fill the panel on a taller post. At square the two
           columns keep their original fixed 14px gap — stretching them there
           lets the box shrink past its own content and the BOWLING heading
@@ -677,56 +740,86 @@ export function ResultBroadcast({ palette: pal, width = 1080, height = 1080, res
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={10} />
       <Stripes color={pal.accent} opacity={0.03} gap={30} angle={0} />
-      {topBar({ pal, width, height, team: { logo: r.us.logo, mono: r.us.mono }, left: (
+      {topBar({ pal, width, height, parts, team: { logo: r.us.logo, mono: r.us.mono }, left: (
         <>
-          <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>RESULT</Slab>
-          <Kicker color={pal.ink} size={12} style={{ marginTop: 11, opacity: 0.72 }}>{headLine(r, true)}</Kicker>
+          <Slab bg={band} fg={pc(parts, 'title1Color', partPicked(parts, 'bandBg') ? inkOn(band) : pal.primary)} size={26} style={{ padding: '8px 16px' }}>{pt(parts, 'title1', 'RESULT')}</Slab>
+          <Kicker color={pc(parts, 'roundColor', pal.ink)} size={12} style={{ marginTop: 11, opacity: 0.72 }}>{headLine(r, true)}</Kicker>
         </>
       ) })}
       <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height).h + 18, bottom: bodyEnd(height), display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, flexShrink: 0 }}>
           <TeamRow t={r.us} isWinner={won} />
-          <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: 24, letterSpacing: 3, color: pal.accent }}>{line}</div>
+          <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: 24, letterSpacing: 3, color: pc(parts, 'resultLineColor', pal.accent) }}>{line}</div>
           <TeamRow t={r.them} isWinner={!won && !tied} />
         </div>
         <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 40, marginTop: 28, overflow: 'hidden' }}>
-          <Performers mono={r.us.mono} color={pal.accent} lineColor={pal.accent} bat={r.topBat.us} bowl={r.topBowl.us} />
-          <Performers mono={r.them.mono} color={pal.ink} lineColor={pal.ink} bat={r.topBat.them} bowl={r.topBowl.them} />
+          <Performers mono={r.us.mono} color={pc(parts, 'rs2UsHead', pal.accent)} lineColor={pc(parts, 'rs2UsLine', pal.accent)} bat={r.topBat.us} bowl={r.topBowl.us} />
+          <Performers mono={r.them.mono} color={pc(parts, 'rs2ThemHead', pal.ink)} lineColor={pc(parts, 'rs2ThemLine', pal.ink)} bat={r.topBat.them} bowl={r.topBowl.them} />
         </div>
         {(r.potm.first || r.potm.last) && (
-          <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}`, marginTop: 16 }}>
-            <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.accent, whiteSpace: 'nowrap', flexShrink: 0 }}>★ POTM</span>
-            <span style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, whiteSpace: 'nowrap', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.potm.first} {r.potm.last}</span>
-            <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pal.ink, opacity: 0.75, whiteSpace: 'nowrap', flexShrink: 0 }}>{r.potm.line}</span>
+          <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px', background: pc(parts, 'potmBg', pal.secondary), borderLeft: `4px solid ${pc(parts, 'potmRule', pal.accent)}`, marginTop: 16 }}>
+            <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pc(parts, 'potmLabelColor', pal.accent), whiteSpace: 'nowrap', flexShrink: 0 }}>{pt(parts, 'potmLabel', '★ POTM')}</span>
+            <span style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, whiteSpace: 'nowrap', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'potmNameColor', undefined) }}>{r.potm.first} {r.potm.last}</span>
+            <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pc(parts, 'potmLineColor', pal.ink), opacity: 0.75, whiteSpace: 'nowrap', flexShrink: 0 }}>{r.potm.line}</span>
           </div>
         )}
       </div>
-      {creditStrip(pal, height)}
+      {creditStrip(pal, height, parts)}
       <Grain opacity={0.3} id="rb-g" />
     </Post>
   )
 }
+registerParts({
+  RS2: [
+    ...rsHeading(true),
+    colorPart('winColor', 'Winning team row', RS_TEAMS, (p) => p.accent),
+    colorPart('lossColor', 'Losing or tied team row', RS_TEAMS, (p) => p.ink),
+    colorPart('markRing', 'Club badge ring', RS_TEAMS, (p) => p.ink),
+    colorPart('markColor', 'Club badge letters', RS_TEAMS, (p) => p.ink),
+    colorPart('nameColor', 'Team name', RS_TEAMS, (p) => p.ink),
+    colorPart('subColor', 'Overs', RS_TEAMS, (p) => p.ink),
+    colorPart('statColor', 'Score', RS_TEAMS, (p) => p.ink),
+    textPart('winTagWord', 'Winner tag word', RS_TEAMS, () => 'WON'),
+    colorPart('badgeBg', 'Winner tag', RS_TEAMS, (p) => p.accent),
+    colorPart('badgeColor', 'Winner tag text', RS_TEAMS, (p) => p.primary),
+    colorPart('resultLineColor', 'Result line', RS_RESULT, (p) => p.accent),
+    textPart('rs2PerfWord', 'Performers heading words', 'Top performers', () => 'TOP PERFORMERS'),
+    colorPart('rs2UsHead', 'Our heading', 'Top performers', (p) => p.accent),
+    colorPart('rs2UsLine', 'Our runs and wickets', 'Top performers', (p) => p.accent),
+    colorPart('rs2ThemHead', 'Their heading', 'Top performers', (p) => p.ink),
+    colorPart('rs2ThemLine', 'Their runs and wickets', 'Top performers', (p) => p.ink),
+    colorPart('rs2ColTitle', 'Batting and bowling labels', 'Top performers', (p) => p.ink),
+    colorPart('perfNameColor', 'Player names', 'Top performers', (p) => p.ink),
+    colorPart('dividerColor', 'Lines between players', 'Top performers', (p) => p.ink),
+    ...rsPotm(false),
+    ...rsFooter(),
+  ],
+})
 
-export function ResultVersusColumns({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+export function ResultVersusColumns({ palette: pal, width = 1080, height = 1080, result: r, sponsors, parts }) {
   const S = roundScale(width, height)
   const b = sz(S.big)
   const { won, tied, line } = outcomeBits(r)
   // `t` is the team inside Column, so the scaled size is resolved out here
   // rather than shadowed by the parameter.
   const bigF = b(96)
+  const band = pc(parts, 'bandBg', pal.accent)
+  const winC = pc(parts, 'winColor', pal.accent)
+  const lossC = pc(parts, 'lossColor', pal.ink)
+  const badge = pc(parts, 'badgeBg', pal.accent)
   const Column = ({ t, isWinner }) => (
-    <div style={{ flex: 1, position: 'relative', background: isWinner ? `${pal.accent}16` : 'transparent', border: `2px solid ${isWinner ? pal.accent : pal.ink + '1f'}`, padding: '28px 26px', display: 'flex', flexDirection: 'column' }}>
-      {isWinner && <div style={{ position: 'absolute', top: -15, left: 26, padding: '4px 12px', background: pal.accent, color: pal.primary, fontFamily: DISPLAY, fontSize: 15, letterSpacing: 2 }}>WINNER</div>}
-      <Shield logo={t.logo} monogram={t.mono} color={pal.ink} size={76} />
-      <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 1, marginTop: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
-      <div style={{ fontFamily: DISPLAY, fontSize: bigF, letterSpacing: -2, lineHeight: 0.95, marginTop: 6 }}>{t.score}</div>
-      <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1.5, color: pal.ink, opacity: 0.6 }}>{t.overs} OVERS</div>
-      <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${pal.ink}22` }}>
-        <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.8, color: pal.accent, marginBottom: 8 }}>TOP BAT · TOP BOWL</div>
+    <div style={{ flex: 1, position: 'relative', background: isWinner ? `${winC}16` : 'transparent', border: `2px solid ${isWinner ? winC : lossC + '1f'}`, padding: '28px 26px', display: 'flex', flexDirection: 'column' }}>
+      {isWinner && <div style={{ position: 'absolute', top: -15, left: 26, padding: '4px 12px', background: badge, color: pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(badge) : pal.primary), fontFamily: DISPLAY, fontSize: 15, letterSpacing: 2 }}>{pt(parts, 'winTagWord', 'WINNER')}</div>}
+      <Shield logo={t.logo} monogram={t.mono} color={pc(parts, 'markColor', pal.ink)} size={76} />
+      <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, lineHeight: 1, marginTop: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{t.name}</div>
+      <div style={{ fontFamily: DISPLAY, fontSize: bigF, letterSpacing: -2, lineHeight: 0.95, marginTop: 6, color: pc(parts, 'statColor', undefined) }}>{t.score}</div>
+      <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1.5, color: pc(parts, 'subColor', pal.ink), opacity: 0.6 }}>{t.overs} OVERS</div>
+      <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${pc(parts, 'dividerColor', pal.ink)}22` }}>
+        <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.8, color: pc(parts, 'rs3PerfHead', pal.accent), marginBottom: 8 }}>{pt(parts, 'rs3PerfWord', 'TOP BAT · TOP BOWL')}</div>
         {[t.bat[0], t.bowl[0]].filter(Boolean).map((p, i) => (
           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '5px 0', fontFamily: DISPLAY }}>
-            <span style={{ fontSize: 24, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.n}</span>
-            <span style={{ fontSize: 18, color: pal.ink, opacity: 0.85, whiteSpace: 'nowrap', flexShrink: 0 }}>{p.l}</span>
+            <span style={{ fontSize: 24, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'perfNameColor', undefined) }}>{p.n}</span>
+            <span style={{ fontSize: 18, color: pc(parts, 'rs3PerfLine', pal.ink), opacity: 0.85, whiteSpace: 'nowrap', flexShrink: 0 }}>{p.l}</span>
           </div>
         ))}
       </div>
@@ -736,10 +829,10 @@ export function ResultVersusColumns({ palette: pal, width = 1080, height = 1080,
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.035} gap={26} angle={-22} />
-      {topBar({ pal, width, height, team: { logo: r.us.logo, mono: r.us.mono }, rule: false, left: (
+      {topBar({ pal, width, height, parts, team: { logo: r.us.logo, mono: r.us.mono }, rule: false, left: (
         <>
-          <Slab bg={pal.accent} fg={pal.primary} size={28} style={{ padding: '9px 17px' }}>RESULT</Slab>
-          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r)}</Kicker>
+          <Slab bg={band} fg={pc(parts, 'title1Color', partPicked(parts, 'bandBg') ? inkOn(band) : pal.primary)} size={28} style={{ padding: '9px 17px' }}>{pt(parts, 'title1', 'RESULT')}</Slab>
+          <Kicker color={pc(parts, 'roundColor', pal.ink)} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r)}</Kicker>
         </>
       ) })}
       {/* One column from header to credit strip: the two team columns take what the
@@ -748,29 +841,54 @@ export function ResultVersusColumns({ palette: pal, width = 1080, height = 1080,
         <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'stretch', gap: 0 }}>
           <Column t={{ ...r.us, bat: r.topBat.us, bowl: r.topBowl.us }} isWinner={won} />
           <div style={{ width: 90, display: 'grid', placeItems: 'center' }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: 56, letterSpacing: 1, color: pal.accent }}>VS</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 56, letterSpacing: 1, color: pc(parts, 'vsColor', pal.accent) }}>{pt(parts, 'rs3VsWord', 'VS')}</div>
           </div>
           <Column t={{ ...r.them, bat: r.topBat.them, bowl: r.topBowl.them }} isWinner={!won && !tied} />
         </div>
-        <div style={{ flexShrink: 0, padding: '18px 26px 22px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}`, textAlign: 'center' }}>
-          <Kicker color={pal.accent} size={12} style={{ marginBottom: 8 }}>{`// MATCH RESULT`}</Kicker>
-          <div style={{ fontFamily: DISPLAY, fontSize: b(44), letterSpacing: 0, lineHeight: 1.02 }}>{line}</div>
+        <div style={{ flexShrink: 0, padding: '18px 26px 22px', background: pc(parts, 'resultBg', pal.secondary), borderLeft: `4px solid ${pc(parts, 'resultRule', pal.accent)}`, textAlign: 'center' }}>
+          <Kicker color={pc(parts, 'resultLabelColor', pal.accent)} size={12} style={{ marginBottom: 8 }}>{pt(parts, 'resultLabel', `// MATCH RESULT`)}</Kicker>
+          <div style={{ fontFamily: DISPLAY, fontSize: b(44), letterSpacing: 0, lineHeight: 1.02, color: pc(parts, 'resultLineColor', undefined) }}>{line}</div>
           {(r.potm.first || r.potm.last) && (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 14, marginTop: 14, padding: '10px 20px', background: `${pal.ink}10`, border: `1.5px solid ${pal.accent}` }}>
-              <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: pal.accent, whiteSpace: 'nowrap' }}>★ POTM</span>
-              <span style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{r.potm.first} {r.potm.last}</span>
-              <span style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 1, color: pal.ink, opacity: 0.8, whiteSpace: 'nowrap' }}>{r.potm.line}</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 14, marginTop: 14, padding: '10px 20px', background: pc(parts, 'potmBg', `${pal.ink}10`), border: `1.5px solid ${pc(parts, 'potmRule', pal.accent)}` }}>
+              <span style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 2, color: pc(parts, 'potmLabelColor', pal.accent), whiteSpace: 'nowrap' }}>{pt(parts, 'potmLabel', '★ POTM')}</span>
+              <span style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 0.5, whiteSpace: 'nowrap', color: pc(parts, 'potmNameColor', undefined) }}>{r.potm.first} {r.potm.last}</span>
+              <span style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 1, color: pc(parts, 'potmLineColor', pal.ink), opacity: 0.8, whiteSpace: 'nowrap' }}>{r.potm.line}</span>
             </div>
           )}
         </div>
       </div>
-      {creditStrip(pal, height)}
+      {creditStrip(pal, height, parts)}
       <Grain opacity={0.3} id="rvc-g" />
     </Post>
   )
 }
+registerParts({
+  RS3: [
+    ...rsHeading(false),
+    colorPart('winColor', 'Winning team box', RS_TEAMS, (p) => p.accent),
+    colorPart('lossColor', 'Losing or tied team box', RS_TEAMS, (p) => p.ink),
+    textPart('winTagWord', 'Winner tag word', RS_TEAMS, () => 'WINNER'),
+    colorPart('badgeBg', 'Winner tag', RS_TEAMS, (p) => p.accent),
+    colorPart('badgeColor', 'Winner tag text', RS_TEAMS, (p) => p.primary),
+    colorPart('markColor', 'Club badge letters', RS_TEAMS, (p) => p.ink),
+    colorPart('nameColor', 'Team name', RS_TEAMS, (p) => p.ink),
+    colorPart('statColor', 'Score', RS_TEAMS, (p) => p.ink),
+    colorPart('subColor', 'Overs', RS_TEAMS, (p) => p.ink),
+    textPart('rs3VsWord', 'Word between the teams', RS_TEAMS, () => 'VS'),
+    colorPart('vsColor', 'Word between the teams colour', RS_TEAMS, (p) => p.accent),
+    textPart('rs3PerfWord', 'Performers label words', 'Top performers', () => 'TOP BAT · TOP BOWL'),
+    colorPart('rs3PerfHead', 'Performers label', 'Top performers', (p) => p.accent),
+    colorPart('perfNameColor', 'Player names', 'Top performers', (p) => p.ink),
+    colorPart('rs3PerfLine', 'Runs and wickets', 'Top performers', (p) => p.ink),
+    colorPart('dividerColor', 'Line above the performers', 'Top performers', (p) => p.ink),
+    ...rsResultPanel(),
+    ...rsPotm(true),
+    ...rsFooter(),
+  ],
+})
 
-export function ResultStar({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+export function ResultStar({ palette: pal, width = 1080, height = 1080, result: r, sponsors, parts }) {
+  const texture = usePostLook().texture !== false
   const S = roundScale(width, height)
   const b = sz(S.big)
   const p = r.potm
@@ -778,51 +896,79 @@ export function ResultStar({ palette: pal, width = 1080, height = 1080, result: 
   const initials = (p.first[0] || '') + (p.last[0] || '')
   // The result bar sits just above the credit strip; the stat boxes sit above it.
   const barB = creditH(height) + grow(height, 18, 0.1)
+  const band = pc(parts, 'bandBg', pal.accent)
+  const starBg = pc(parts, 'rs4StarBg', pal.accent)
+  const batBg = pc(parts, 'rs4BatBg', pal.accent)
+  const bowlBg = pc(parts, 'rs4BowlBg', `${pal.ink}0c`)
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.04} gap={28} angle={-22} />
-      <div style={{ position: 'absolute', left: -30, bottom: share(height, 110), fontFamily: DISPLAY, fontSize: share(height, 360), lineHeight: 0.8, color: pal.ink, opacity: 0.05, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{p.last}</div>
-      {topBar({ pal, width, height, team: { logo: r.us.logo, mono: r.us.mono }, rule: false, left: (
+      {texture ? <div style={{ position: 'absolute', left: -30, bottom: share(height, 110), fontFamily: DISPLAY, fontSize: share(height, 360), lineHeight: 0.8, color: pal.ink, opacity: 0.05, letterSpacing: -8, userSelect: 'none', whiteSpace: 'nowrap' }}>{p.last}</div> : null}
+      {topBar({ pal, width, height, parts, team: { logo: r.us.logo, mono: r.us.mono }, rule: false, left: (
         <>
-          <Slab bg={pal.accent} fg={pal.primary} size={26} style={{ padding: '8px 16px' }}>RESULT</Slab>
-          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r)}</Kicker>
+          <Slab bg={band} fg={pc(parts, 'title1Color', partPicked(parts, 'bandBg') ? inkOn(band) : pal.primary)} size={26} style={{ padding: '8px 16px' }}>{pt(parts, 'title1', 'RESULT')}</Slab>
+          <Kicker color={pc(parts, 'roundColor', pal.ink)} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r)}</Kicker>
         </>
       ) })}
       <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height, false).h + 42, ...anchor(S.A, null, { bottom: barB + 148 + 190 }), display: 'flex', alignItems: 'center', gap: 44 }}>
-        <div style={{ width: b(300), height: b(300), borderRadius: '50%', border: `4px solid ${pal.accent}`, background: `${pal.accent}14`, display: 'grid', placeItems: 'center', fontFamily: DISPLAY, fontSize: 150, color: pal.ink, letterSpacing: 2, flexShrink: 0, overflow: 'hidden' }}>
+        <div style={{ width: b(300), height: b(300), borderRadius: '50%', border: `4px solid ${pc(parts, 'rs4PhotoBorder', pal.accent)}`, background: pc(parts, 'photoBg', `${pal.accent}14`), display: 'grid', placeItems: 'center', fontFamily: DISPLAY, fontSize: 150, color: pc(parts, 'rs4InitialsColor', pal.ink), letterSpacing: 2, flexShrink: 0, overflow: 'hidden' }}>
           {p.photo
             ? <img src={p.photo} alt={`${p.first} ${p.last}`} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
             : (initials || '★')}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <Slab bg={pal.accent} fg={pal.primary} size={17} style={{ padding: '6px 12px' }}>★ STAR OF THE DAY</Slab>
-          <div style={{ fontFamily: DISPLAY, fontSize: 44, letterSpacing: 1, opacity: 0.7, lineHeight: 1, marginTop: 18 }}>{(p.first || '').toUpperCase()}</div>
-          <div style={{ fontFamily: DISPLAY, fontSize: b(116), letterSpacing: -1, lineHeight: 0.86, whiteSpace: 'nowrap' }}>{p.last}</div>
-          <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, color: pal.accent, marginTop: 8 }}>{p.role}</div>
+          <Slab bg={starBg} fg={pc(parts, 'rs4StarColor', partPicked(parts, 'rs4StarBg') ? inkOn(starBg) : pal.primary)} size={17} style={{ padding: '6px 12px' }}>{pt(parts, 'rs4StarWord', '★ STAR OF THE DAY')}</Slab>
+          <div style={{ fontFamily: DISPLAY, fontSize: 44, letterSpacing: 1, opacity: 0.7, lineHeight: 1, marginTop: 18, color: pc(parts, 'firstColor', undefined) }}>{(p.first || '').toUpperCase()}</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: b(116), letterSpacing: -1, lineHeight: 0.86, whiteSpace: 'nowrap', color: pc(parts, 'nameColor', undefined) }}>{p.last}</div>
+          <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, color: pc(parts, 'subColor', pal.accent), marginTop: 8 }}>{p.role}</div>
         </div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 576 }, { bottom: barB + 148 }), display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {[['BATTING', p.bat], ['BOWLING', p.bowl]].map(([lab, val], i) => (
-          <div key={i} style={{ padding: '16px 22px', background: i === 0 ? pal.accent : `${pal.ink}0c`, border: `1.5px solid ${pal.accent}`, color: i === 0 ? pal.primary : pal.ink }}>
+          <div key={i} style={{ padding: '16px 22px', background: i === 0 ? batBg : bowlBg, border: `1.5px solid ${pc(parts, 'cardBorder', pal.accent)}`, color: i === 0 ? pc(parts, 'rs4BatColor', partPicked(parts, 'rs4BatBg') ? inkOn(batBg) : pal.primary) : pc(parts, 'rs4BowlColor', partPicked(parts, 'rs4BowlBg') ? inkOn(bowlBg) : pal.ink) }}>
             <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, opacity: 0.75 }}>{lab}</div>
             <div style={{ fontFamily: DISPLAY, fontSize: b(54), lineHeight: 0.95, letterSpacing: -0.5, marginTop: 4 }}>{val || '—'}</div>
           </div>
         ))}
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: barB, padding: '0 56px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}` }}>
-          <span style={{ fontFamily: DISPLAY, fontSize: 24, letterSpacing: 0.5, whiteSpace: 'nowrap', flexShrink: 0 }}>{tied ? 'MATCH TIED' : line}</span>
-          <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pal.ink, opacity: 0.7, marginLeft: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>{r.us.mono} {r.us.score} · {r.them.mono} {r.them.score}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', background: pc(parts, 'resultBg', pal.secondary), borderLeft: `4px solid ${pc(parts, 'resultRule', pal.accent)}` }}>
+          <span style={{ fontFamily: DISPLAY, fontSize: 24, letterSpacing: 0.5, whiteSpace: 'nowrap', flexShrink: 0, color: pc(parts, 'resultLineColor', undefined) }}>{tied ? 'MATCH TIED' : line}</span>
+          <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pc(parts, 'statColor', pal.ink), opacity: 0.7, marginLeft: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>{r.us.mono} {r.us.score} · {r.them.mono} {r.them.score}</span>
         </div>
       </div>
-      {creditStrip(pal, height)}
+      {creditStrip(pal, height, parts)}
       <Grain opacity={0.3} id="rst-g" />
     </Post>
   )
 }
+registerParts({
+  RS4: [
+    ...rsHeading(false),
+    colorPart('photoBg', 'Photo backdrop', 'Player photo', null, { autoLabel: 'Soft tint' }),
+    colorPart('rs4PhotoBorder', 'Photo ring', 'Player photo', (p) => p.accent),
+    colorPart('rs4InitialsColor', 'Initials when there is no photo', 'Player photo', (p) => p.ink),
+    textPart('rs4StarWord', 'Tag words', 'Player', () => '★ STAR OF THE DAY'),
+    colorPart('rs4StarBg', 'Tag', 'Player', (p) => p.accent),
+    colorPart('rs4StarColor', 'Tag text', 'Player', (p) => p.primary),
+    colorPart('firstColor', 'First name', 'Player', (p) => p.ink),
+    colorPart('nameColor', 'Surname', 'Player', (p) => p.ink),
+    colorPart('subColor', 'Role', 'Player', (p) => p.accent),
+    colorPart('rs4BatBg', 'Batting box', 'Batting and bowling boxes', (p) => p.accent),
+    colorPart('rs4BatColor', 'Batting box text', 'Batting and bowling boxes', (p) => p.primary),
+    colorPart('rs4BowlBg', 'Bowling box', 'Batting and bowling boxes', null, { autoLabel: 'Soft tint' }),
+    colorPart('rs4BowlColor', 'Bowling box text', 'Batting and bowling boxes', (p) => p.ink),
+    colorPart('cardBorder', 'Box outline', 'Batting and bowling boxes', (p) => p.accent),
+    colorPart('resultBg', 'Result bar', RS_RESULT, (p) => p.secondary),
+    colorPart('resultRule', 'Line beside the bar', RS_RESULT, (p) => p.accent),
+    colorPart('resultLineColor', 'Result line', RS_RESULT, (p) => p.ink),
+    colorPart('statColor', 'Scores', RS_RESULT, (p) => p.ink),
+    ...rsFooter(),
+  ],
+})
 
-export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, result: r, sponsors, parts }) {
   const S = roundScale(width, height)
   const b = sz(S.big)
   const { won, tied, line } = outcomeBits(r)
@@ -839,22 +985,27 @@ export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, r
   const valF = b(56)
   // POTM bar just above the credit strip; the result panel above it; the bars above that.
   const potmB = creditH(height) + grow(height, 18, 0.1)
+  const band = pc(parts, 'bandBg', pal.accent)
+  const winC = pc(parts, 'winColor', pal.accent)
+  const lossC = pc(parts, 'lossColor', pal.ink)
+  const badge = pc(parts, 'badgeBg', pal.accent)
+  const usBar = pc(parts, 'rs5UsBar', pal.accent)
   const Bar =({ t, val, rr, win, fill, fillInk }) => (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0, flex: 1 }}>
-          <Monogram text={t.mono} logo={t.logo} size={58} fg={pal.ink} bg={`${pal.ink}14`} ring={win ? pal.accent : `${pal.ink}40`} />
-          <span style={{ fontFamily: DISPLAY, fontSize: nameF, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
-          {win && <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.primary, background: pal.accent, padding: '4px 11px', flexShrink: 0 }}>WON</span>}
+          <Monogram text={t.mono} logo={t.logo} size={58} fg={pc(parts, 'markColor', pal.ink)} bg={`${pal.ink}14`} ring={win ? winC : `${lossC}40`} />
+          <span style={{ fontFamily: DISPLAY, fontSize: nameF, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>{t.name}</span>
+          {win && <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(badge) : pal.primary), background: badge, padding: '4px 11px', flexShrink: 0 }}>{pt(parts, 'winTagWord', 'WON')}</span>}
         </div>
-        <span style={{ fontFamily: DISPLAY, fontSize: scoreF, letterSpacing: -1, lineHeight: 1, flexShrink: 0, marginLeft: 16 }}>{t.score}</span>
+        <span style={{ fontFamily: DISPLAY, fontSize: scoreF, letterSpacing: -1, lineHeight: 1, flexShrink: 0, marginLeft: 16, color: pc(parts, 'statColor', undefined) }}>{t.score}</span>
       </div>
-      <div style={{ height: grow(height, 104, 0.14), background: `${pal.ink}10`, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ height: grow(height, 104, 0.14), background: `${pc(parts, 'rs5Track', pal.ink)}10`, position: 'relative', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.max((val / maxR) * 100, 14)}%`, background: fill, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
           <span style={{ fontFamily: DISPLAY, fontSize: valF, lineHeight: 1, letterSpacing: -1, color: fillInk, padding: '0 22px', whiteSpace: 'nowrap' }}>{val}</span>
         </div>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: MONO, fontSize: 14, letterSpacing: 1, color: pal.ink, opacity: 0.7, marginTop: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: MONO, fontSize: 14, letterSpacing: 1, color: pc(parts, 'subColor', pal.ink), opacity: 0.7, marginTop: 10 }}>
         <span>{t.overs} OVERS</span><span>RUN RATE {rr}</span>
       </div>
     </div>
@@ -863,36 +1014,58 @@ export function ResultInningsBars({ palette: pal, width = 1080, height = 1080, r
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.03} gap={30} angle={0} />
-      {topBar({ pal, width, height, team: { logo: r.us.logo, mono: r.us.mono }, left: (
+      {topBar({ pal, width, height, parts, team: { logo: r.us.logo, mono: r.us.mono }, left: (
         <>
-          <Slab bg={pal.accent} fg={pal.primary} size={28} style={{ padding: '9px 17px' }}>RESULT</Slab>
-          <Kicker color={pal.ink} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r, true)}</Kicker>
+          <Slab bg={band} fg={pc(parts, 'title1Color', partPicked(parts, 'bandBg') ? inkOn(band) : pal.primary)} size={28} style={{ padding: '9px 17px' }}>{pt(parts, 'title1', 'RESULT')}</Slab>
+          <Kicker color={pc(parts, 'roundColor', pal.ink)} size={13} style={{ marginTop: 12, opacity: 0.72 }}>{headLine(r, true)}</Kicker>
         </>
       ) })}
       <div style={{ position: 'absolute', left: 56, right: 56, top: barGeo(width, height).h + 30, ...anchor(S.A, null, { bottom: potmB + 248, justifyContent: 'center' }), display: 'flex', flexDirection: 'column', gap: 56 }}>
-        <Bar t={r.us} val={usR} rr={usRR} win={won} fill={pal.accent} fillInk={pal.primary} />
-        <Bar t={r.them} val={themR} rr={themRR} win={!won && !tied} fill={`${pal.ink}55`} fillInk={pal.ink} />
+        <Bar t={r.us} val={usR} rr={usRR} win={won} fill={usBar} fillInk={pc(parts, 'rs5UsBarText', partPicked(parts, 'rs5UsBar') ? inkOn(usBar) : pal.primary)} />
+        <Bar t={r.them} val={themR} rr={themRR} win={!won && !tied} fill={`${pc(parts, 'rs5ThemBar', pal.ink)}55`} fillInk={pc(parts, 'rs5ThemBarText', pal.ink)} />
       </div>
-      <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 720 }, { bottom: potmB + 148 }), padding: '16px 26px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}`, textAlign: 'center' }}>
-        <Kicker color={pal.accent} size={12} style={{ marginBottom: 6 }}>{`// MATCH RESULT`}</Kicker>
-        <div style={{ fontFamily: DISPLAY, fontSize: b(42), letterSpacing: 0, lineHeight: 1.02 }}>{line}</div>
+      <div style={{ position: 'absolute', left: 56, right: 56, ...anchor(S.A, { top: 720 }, { bottom: potmB + 148 }), padding: '16px 26px', background: pc(parts, 'resultBg', pal.secondary), borderLeft: `4px solid ${pc(parts, 'resultRule', pal.accent)}`, textAlign: 'center' }}>
+        <Kicker color={pc(parts, 'resultLabelColor', pal.accent)} size={12} style={{ marginBottom: 6 }}>{pt(parts, 'resultLabel', `// MATCH RESULT`)}</Kicker>
+        <div style={{ fontFamily: DISPLAY, fontSize: b(42), letterSpacing: 0, lineHeight: 1.02, color: pc(parts, 'resultLineColor', undefined) }}>{line}</div>
       </div>
       {(r.potm.first || r.potm.last) && (
         <div style={{ position: 'absolute', left: 0, right: 0, bottom: potmB, padding: '0 56px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px', background: pal.secondary, borderLeft: `4px solid ${pal.accent}` }}>
-            <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.accent, whiteSpace: 'nowrap', flexShrink: 0 }}>★ POTM</span>
-            <span style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, whiteSpace: 'nowrap', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.potm.first} {r.potm.last}</span>
-            <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pal.ink, opacity: 0.75, whiteSpace: 'nowrap', flexShrink: 0 }}>{r.potm.line}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px', background: pc(parts, 'potmBg', pal.secondary), borderLeft: `4px solid ${pc(parts, 'potmRule', pal.accent)}` }}>
+            <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pc(parts, 'potmLabelColor', pal.accent), whiteSpace: 'nowrap', flexShrink: 0 }}>{pt(parts, 'potmLabel', '★ POTM')}</span>
+            <span style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, whiteSpace: 'nowrap', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'potmNameColor', undefined) }}>{r.potm.first} {r.potm.last}</span>
+            <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pc(parts, 'potmLineColor', pal.ink), opacity: 0.75, whiteSpace: 'nowrap', flexShrink: 0 }}>{r.potm.line}</span>
           </div>
         </div>
       )}
-      {creditStrip(pal, height)}
+      {creditStrip(pal, height, parts)}
       <Grain opacity={0.3} id="rib-g" />
     </Post>
   )
 }
+registerParts({
+  RS5: [
+    ...rsHeading(true),
+    colorPart('rs5UsBar', 'Our bar', 'Innings bars', (p) => p.accent),
+    colorPart('rs5UsBarText', 'Our runs on the bar', 'Innings bars', (p) => p.primary),
+    colorPart('rs5ThemBar', 'Their bar', 'Innings bars', (p) => p.ink),
+    colorPart('rs5ThemBarText', 'Their runs on the bar', 'Innings bars', (p) => p.ink),
+    colorPart('rs5Track', 'Empty part of the bar', 'Innings bars', (p) => p.ink),
+    colorPart('winColor', 'Winning team badge ring', RS_TEAMS, (p) => p.accent),
+    colorPart('lossColor', 'Losing or tied team badge ring', RS_TEAMS, (p) => p.ink),
+    colorPart('markColor', 'Club badge letters', RS_TEAMS, (p) => p.ink),
+    colorPart('nameColor', 'Team name', RS_TEAMS, (p) => p.ink),
+    colorPart('statColor', 'Score', RS_TEAMS, (p) => p.ink),
+    colorPart('subColor', 'Overs and run rate', RS_TEAMS, (p) => p.ink),
+    textPart('winTagWord', 'Winner tag word', RS_TEAMS, () => 'WON'),
+    colorPart('badgeBg', 'Winner tag', RS_TEAMS, (p) => p.accent),
+    colorPart('badgeColor', 'Winner tag text', RS_TEAMS, (p) => p.primary),
+    ...rsResultPanel(),
+    ...rsPotm(false),
+    ...rsFooter(),
+  ],
+})
 
-export function ResultTicket({ palette: pal, width = 1080, height = 1080, result: r, sponsors }) {
+export function ResultTicket({ palette: pal, width = 1080, height = 1080, result: r, sponsors, parts }) {
   const S = roundScale(width, height)
   const b = sz(S.big)
   const { won, tied, line } = outcomeBits(r)
@@ -902,50 +1075,82 @@ export function ResultTicket({ palette: pal, width = 1080, height = 1080, result
   const tScore = b(62)
   // The ticket stops above the sponsor panel's row, which `ticketGeo` owns.
   const T = ticketGeo(width, height)
-  const notch =(side) => ({ position: 'absolute', [side]: -17, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: '50%', background: pal.primary })
+  const winC = pc(parts, 'winColor', pal.accent)
+  const lossC = pc(parts, 'lossColor', pal.ink)
+  const badge = pc(parts, 'badgeBg', pal.accent)
+  const dash = pc(parts, 'rs6DashColor', pal.accent)
+  const notch =(side) => ({ position: 'absolute', [side]: -17, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: '50%', background: pc(parts, 'rs6NotchColor', pal.primary) })
   return (
     <Post palette={pal} w={width} h={height}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.04} gap={26} angle={-20} />
-      <div style={{ position: 'absolute', left: 80, right: 80, top: T.ticketTop, bottom: height - T.ticketBottom, background: pal.secondary, border: `2px solid ${pal.accent}`, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '24px 36px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `2px dashed ${pal.accent}66`, position: 'relative' }}>
+      <div style={{ position: 'absolute', left: 80, right: 80, top: T.ticketTop, bottom: height - T.ticketBottom, background: pc(parts, 'cardBg', pal.secondary), border: `2px solid ${pc(parts, 'cardBorder', pal.accent)}`, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '24px 36px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `2px dashed ${dash}66`, position: 'relative' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
-            <Shield logo={r.us.logo} monogram={r.us.mono} color={pal.ink} size={88} />
+            <Shield logo={r.us.logo} monogram={r.us.mono} color={pc(parts, 'markColor', pal.ink)} size={88} />
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 3, color: pal.accent }}>MATCH TICKET · RESULT</div>
-              <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 1, lineHeight: 0.95, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.us.name}</div>
-              <div style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 1, opacity: 0.7, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.grade || r.comp}</div>
+              <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 3, color: pc(parts, 'rs6TicketColor', pal.accent) }}>{pt(parts, 'rs6TicketWord', 'MATCH TICKET · RESULT')}</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: 30, letterSpacing: 1, lineHeight: 0.95, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'clubColor', undefined) }}>{r.us.name}</div>
+              <div style={{ fontFamily: DISPLAY, fontSize: 20, letterSpacing: 1, opacity: 0.7, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'subColor', undefined) }}>{r.grade || r.comp}</div>
             </div>
           </div>
-          <div style={{ textAlign: 'right', fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: pal.ink, opacity: 0.72, lineHeight: 1.7, flexShrink: 0, marginLeft: 16 }}>{r.round}<br />{r.date}<br />{r.venue}</div>
+          <div style={{ textAlign: 'right', fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: pc(parts, 'roundColor', pal.ink), opacity: 0.72, lineHeight: 1.7, flexShrink: 0, marginLeft: 16 }}>{r.round}<br />{r.date}<br />{r.venue}</div>
           <div style={notch('left')} /><div style={notch('right')} />
         </div>
         <div style={{ flex: 1, padding: '28px 36px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 16 }}>
           {[[r.us, won], [r.them, !won && !tied]].map(([t, win], i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-              <Monogram text={t.mono} logo={t.logo} size={62} fg={pal.ink} bg={`${pal.ink}14`} ring={win ? pal.accent : `${pal.ink}40`} />
-              <span style={{ fontFamily: DISPLAY, fontSize: tName, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: win ? 1 : 0.85 }}>{t.name}</span>
-              {win && <span style={{ fontFamily: DISPLAY, fontSize: 14, letterSpacing: 2, color: pal.primary, background: pal.accent, padding: '4px 10px', flexShrink: 0 }}>WON</span>}
-              <span style={{ fontFamily: DISPLAY, fontSize: tScore, letterSpacing: -1, lineHeight: 1, flexShrink: 0 }}>{t.score}</span>
+              <Monogram text={t.mono} logo={t.logo} size={62} fg={pc(parts, 'markColor', pal.ink)} bg={`${pal.ink}14`} ring={win ? winC : `${lossC}40`} />
+              <span style={{ fontFamily: DISPLAY, fontSize: tName, letterSpacing: 0.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: win ? 1 : 0.85, color: pc(parts, 'nameColor', undefined) }}>{t.name}</span>
+              {win && <span style={{ fontFamily: DISPLAY, fontSize: 14, letterSpacing: 2, color: pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(badge) : pal.primary), background: badge, padding: '4px 10px', flexShrink: 0 }}>{pt(parts, 'winTagWord', 'WON')}</span>}
+              <span style={{ fontFamily: DISPLAY, fontSize: tScore, letterSpacing: -1, lineHeight: 1, flexShrink: 0, color: pc(parts, 'statColor', undefined) }}>{t.score}</span>
             </div>
           ))}
-          <div style={{ marginTop: 8, paddingTop: 18, borderTop: `1px solid ${pal.ink}1a`, textAlign: 'center' }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: b(46), letterSpacing: 0 }}>{line}</div>
-            {(r.potm.first || r.potm.last) && <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1.5, color: pal.ink, opacity: 0.75, marginTop: 8 }}>★ POTM · {r.potm.first} {r.potm.last} · {r.potm.line}</div>}
+          <div style={{ marginTop: 8, paddingTop: 18, borderTop: `1px solid ${pc(parts, 'dividerColor', pal.ink)}1a`, textAlign: 'center' }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: b(46), letterSpacing: 0, color: pc(parts, 'resultLineColor', undefined) }}>{line}</div>
+            {(r.potm.first || r.potm.last) && <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1.5, color: pc(parts, 'rs6PotmColor', pal.ink), opacity: 0.75, marginTop: 8 }}>{pt(parts, 'potmLabel', '★ POTM') + ' · '}{r.potm.first} {r.potm.last} · {r.potm.line}</div>}
           </div>
         </div>
-        <div style={{ padding: '16px 36px', borderTop: `2px dashed ${pal.accent}66`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
+        <div style={{ padding: '16px 36px', borderTop: `2px dashed ${dash}66`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
           <div style={notch('left')} /><div style={notch('right')} />
           <div style={{ display: 'flex', gap: 3, alignItems: 'center', height: 40 }}>
-            {Array.from({ length: 30 }).map((_, i) => (<div key={i} style={{ width: i % 4 === 0 ? 4 : 2, height: 30, background: pal.ink, opacity: 0.8 }} />))}
+            {Array.from({ length: 30 }).map((_, i) => (<div key={i} style={{ width: i % 4 === 0 ? 4 : 2, height: 30, background: pc(parts, 'rs6BarcodeColor', pal.ink), opacity: 0.8 }} />))}
           </div>
-          <div style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pal.ink, opacity: 0.85 }}>BETTERCRICKET · ADMIT ONE</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 2, color: pc(parts, 'rs6AdmitColor', pal.ink), opacity: 0.85 }}>{pt(parts, 'rs6AdmitWord', 'BETTERCRICKET · ADMIT ONE')}</div>
         </div>
       </div>
       <Grain opacity={0.3} id="rtk-g" />
     </Post>
   )
 }
+registerParts({
+  RS6: [
+    colorPart('cardBg', 'Ticket', 'Ticket', (p) => p.secondary),
+    colorPart('cardBorder', 'Ticket outline', 'Ticket', (p) => p.accent),
+    colorPart('rs6DashColor', 'Tear-off lines', 'Ticket', (p) => p.accent),
+    colorPart('rs6NotchColor', 'Notches in the edge', 'Ticket', (p) => p.primary),
+    textPart('rs6TicketWord', 'Ticket label words', 'Ticket top', () => 'MATCH TICKET · RESULT'),
+    colorPart('rs6TicketColor', 'Ticket label', 'Ticket top', (p) => p.accent),
+    colorPart('clubColor', 'Club name', 'Ticket top', (p) => p.ink),
+    colorPart('subColor', 'Grade', 'Ticket top', (p) => p.ink),
+    colorPart('roundColor', 'Round, date and ground', 'Ticket top', (p) => p.ink),
+    colorPart('markColor', 'Club badge letters', RS_TEAMS, (p) => p.ink),
+    colorPart('winColor', 'Winning team badge ring', RS_TEAMS, (p) => p.accent),
+    colorPart('lossColor', 'Losing or tied team badge ring', RS_TEAMS, (p) => p.ink),
+    colorPart('nameColor', 'Team name', RS_TEAMS, (p) => p.ink),
+    colorPart('statColor', 'Score', RS_TEAMS, (p) => p.ink),
+    textPart('winTagWord', 'Winner tag word', RS_TEAMS, () => 'WON'),
+    colorPart('badgeBg', 'Winner tag', RS_TEAMS, (p) => p.accent),
+    colorPart('badgeColor', 'Winner tag text', RS_TEAMS, (p) => p.primary),
+    colorPart('dividerColor', 'Line above the result', RS_RESULT, (p) => p.ink),
+    colorPart('resultLineColor', 'Result line', RS_RESULT, (p) => p.ink),
+    textPart('potmLabel', 'Player of the match label', RS_POTM, () => '★ POTM'),
+    colorPart('rs6PotmColor', 'Player of the match line', RS_POTM, (p) => p.ink),
+    colorPart('rs6BarcodeColor', 'Barcode', 'Ticket foot', (p) => p.ink),
+    textPart('rs6AdmitWord', 'Ticket foot words', 'Ticket foot', () => 'BETTERCRICKET · ADMIT ONE'),
+    colorPart('rs6AdmitColor', 'Ticket foot text', 'Ticket foot', (p) => p.ink),
+  ],
+})
 
 // ── Results roundup sponsor slot (RR1 to RR7) ────────────────────────────────
 // The sponsor grid gets a bar of its own rather than a corner of a thin strip.
