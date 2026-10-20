@@ -54,7 +54,7 @@
 29. CA field names: `bowlingEconomyRate`, `fieldingTotalCatches`; no `bowlingOvers` (derive from `bowlingBalls`).
 30. PlayHQ's public game summary API gives no cricket scorecards without a partner JWT.
 31. `stats["player_seasons"]` in sync counts player-season records, not unique players.
-32. Home-screen install follows the web app manifest, not the page URL (iOS 16.4+). The static `/site.webmanifest` has `start_url` "/"; club pages swap the manifest link (`lib/favicon.setManifest`, driven by `FaviconManager`) to `GET /api/clubs/{slug}/manifest`, which sets `start_url` to `/{slug}`. Keep it off a `.webmanifest` path: nginx serves that extension from disk before `/api`.
+32. Home-screen install follows the web app manifest, not the page URL (iOS 16.4+). The static `/site.webmanifest` has `start_url` "/"; club pages must be served with the manifest link already pointing at `GET /api/clubs/{slug}/manifest` (`start_url` `/{slug}`). iOS reads the link as the page loads and ignores one swapped in later by JS, so `nginx.conf` rewrites it in `index.html` with `sub_filter` and a `map $request_uri $manifest_href`; `lib/favicon.setManifest` only keeps it right on in-app navigation. A new top-level route needs adding to that map's reserved list too. Keep it off a `.webmanifest` path: nginx serves that extension from disk before `/api`.
 
 ## Traps and failure signatures
 
