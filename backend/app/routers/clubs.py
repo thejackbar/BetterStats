@@ -3,12 +3,14 @@ password-protected "Draft" page gate (see app/services/club_lock.py)."""
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.models.db import ClubUnpauseRequest, Organisation, Season, Sponsor, get_db
+from app.services import sponsor_tiers, section_names
 from app.routers.organisations import _season_sort_key
 from app.auth.modules import org_core_live
 from app.services import club_lock, email_service, rate_limit
@@ -87,6 +89,49 @@ async def get_club_by_slug(slug: str, request: Request, db: AsyncSession = Depen
         "website_enabled": bool(org.website_enabled),
         "public_header_logo": bool(org.public_header_logo),
     }
+
+
+@router.get("/{slug}/manifest")
+async def get_club_manifest(slug: str, db: AsyncSession = Depends(get_db)):
+    """Web app manifest for a club's public pages, so "Add to Home Screen"
+    (iOS reads the manifest's start_url) opens the club and not the site root.
+    The static /site.webmanifest has start_url "/" and stays the default for
+    every non-club page. Manifest fetches carry no cookies, so a PIN-locked or
+    blocked club gets the start_url only, with the BetterCricket name and icons,
+    and nothing from the club's own record. Not under a .webmanifest path: nginx
+    serves that extension from disk before it ever reaches /api."""
+    org = await _org_by_slug(db, slug)
+    if not org:
+        raise HTTPException(status_code=404, detail="Club not found")
+    start = f"/{org.slug}"
+    manifest = {
+        "id": start,
+        "name": "BetterCricket",
+        "short_name": "BetterCricket",
+        "lang": "en-AU",
+        "start_url": start,
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#0b1220",
+        "theme_color": "#0b1220",
+        "icons": [
+            {"src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any"},
+            {"src": "/favicon.png", "type": "image/png", "sizes": "256x256", "purpose": "any"},
+            {"src": "/apple-touch-icon.png", "type": "image/png", "sizes": "180x180", "purpose": "maskable"},
+        ],
+    }
+    if not org.password_protected and not _public_blocked(org):
+        manifest["name"] = org.name or manifest["name"]
+        manifest["short_name"] = (org.short_name or org.name or manifest["short_name"])[:12]
+        if org.primary_color:
+            manifest["theme_color"] = org.primary_color
+        if org.logo_url:
+            manifest["icons"] = [{"src": org.logo_url, "sizes": "any", "purpose": "any"}]
+    return JSONResponse(
+        manifest,
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 class UnlockBody(BaseModel):
@@ -195,7 +240,8 @@ async def get_club_sponsors(slug: str, request: Request, db: AsyncSession = Depe
         .where(Sponsor.organisation_id == org.id)
         .order_by(Sponsor.display_order, Sponsor.created_at)
     )
-    sponsors = sponsors_result.scalars().all()
+    sponsors = sponsor_tiers.sort_sponsors(sponsors_result.scalars().all())
+    labels = sponsor_tiers.resolve_labels(org.sponsor_tier_labels)
 
     # Determine the current (most recent) season name
     seasons_result = await db.execute(
@@ -210,14 +256,22 @@ async def get_club_sponsors(slug: str, request: Request, db: AsyncSession = Depe
     return {
         "club_name": org.short_name or org.name,
         "current_season": current_season,
+        "tier_labels": labels,
+        # The club's own section names, each with its linked sponsor's logo.
+        "section_names": section_names.resolve(org.section_names, sponsors),
+        # Every sponsor, logo or not: the full sponsor list names them all, while
+        # the bottom bar and the dashboard slot only draw the ones with a logo
+        # and a matching entry in `placements`. Tier first, then the club's order.
         "sponsors": [
             {
                 "id": str(s.id),
                 "name": s.name,
                 "website_url": s.website_url,
                 "logo_url": s.logo_url,
+                "tier": s.tier or sponsor_tiers.DEFAULT_TIER,
+                "tier_label": labels.get(s.tier or sponsor_tiers.DEFAULT_TIER),
+                "placements": sponsor_tiers.resolve_placements(s.tier, s.placements),
             }
             for s in sponsors
-            if s.logo_url  # only show sponsors that have a logo
         ],
     }

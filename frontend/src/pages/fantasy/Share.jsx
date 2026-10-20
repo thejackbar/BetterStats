@@ -3,7 +3,7 @@
 // web-share / download (the same exporter the admin social posts use).
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
-import { Aurora, DISP, GREEN, pts, Btn, useFantasy } from './ui'
+import { Aurora, DISP, GREEN, pts, Btn, useFantasy, fantasyName } from './ui'
 import { ScreenTitle } from './shell'
 
 const ordSuffix = (n) => (n % 100 >= 11 && n % 100 <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th')
@@ -78,7 +78,7 @@ export default function Share({ token, squad, nav }) {
                 {logoUrl
                   ? <img src={logoUrl} alt="" style={{ width: 34, height: 34, borderRadius: 10, objectFit: 'contain', background: '#fff', padding: 4 }} />
                   : <div style={{ width: 34, height: 34, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: '#0a0d14', font: `800 12px ${DISP}` }}>{crest}</div>}
-                <div style={{ font: `800 15px ${DISP}`, letterSpacing: '.04em', textTransform: 'uppercase', color: '#fff' }}>{club?.name || 'Club'} Fantasy</div>
+                <div style={{ font: `800 15px ${DISP}`, letterSpacing: '.04em', textTransform: 'uppercase', color: '#fff' }}>{fantasyName(club) || `${club?.name || 'Club'} Fantasy`}</div>
                 <div style={{ marginLeft: 'auto', font: `700 10px 'Hanken Grotesk'`, letterSpacing: '.16em', textTransform: 'uppercase', color: 'rgba(255,255,255,.6)' }}>{gwNum ? `Gameweek ${gwNum}` : 'Fantasy'}</div>
               </div>
               <div style={{ marginTop: 'auto' }}>
@@ -132,7 +132,7 @@ export default function Share({ token, squad, nav }) {
               {logoUrl
                 ? <img src={logoUrl} alt="" style={{ width: 48, height: 48, borderRadius: 14, objectFit: 'contain', background: '#fff', padding: 6 }} />
                 : <div style={{ width: 48, height: 48, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: '#0a0d14', font: `800 16px ${DISP}` }}>{crest}</div>}
-              <div style={{ font: `600 10px 'Hanken Grotesk'`, letterSpacing: '.24em', textTransform: 'uppercase', color: 'rgba(255,255,255,.7)', marginTop: 16 }}>{club?.name || 'Club'} Fantasy</div>
+              <div style={{ font: `600 10px 'Hanken Grotesk'`, letterSpacing: '.24em', textTransform: 'uppercase', color: 'rgba(255,255,255,.7)', marginTop: 16 }}>{fantasyName(club) || `${club?.name || 'Club'} Fantasy`}</div>
               <div style={{ font: `800 40px/0.95 ${DISP}`, textTransform: 'uppercase', color: '#fff', marginTop: 14 }}>Think you<br />know cricket?</div>
               <div style={{ font: `500 13px 'Hanken Grotesk'`, color: 'rgba(255,255,255,.78)', marginTop: 12, lineHeight: 1.5 }}>Pick 12, captain a gun, and take on the clubhouse every round.</div>
               <div style={{ marginTop: 'auto', width: '100%', background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.16)', borderRadius: 14, padding: 14 }}>
@@ -165,7 +165,7 @@ export default function Share({ token, squad, nav }) {
                 {logoUrl
                   ? <img src={logoUrl} alt="" style={{ width: 48, height: 48, borderRadius: 14, objectFit: 'contain', background: '#fff', padding: 6 }} />
                   : <div style={{ width: 48, height: 48, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: '#0a0d14', font: `800 16px ${DISP}` }}>{crest}</div>}
-                <div style={{ font: `600 10px 'Hanken Grotesk'`, letterSpacing: '.24em', textTransform: 'uppercase', color: 'rgba(255,255,255,.7)', marginTop: 16 }}>{club?.name || 'Club'} Fantasy · Draft</div>
+                <div style={{ font: `600 10px 'Hanken Grotesk'`, letterSpacing: '.24em', textTransform: 'uppercase', color: 'rgba(255,255,255,.7)', marginTop: 16 }}>{fantasyName(club) || `${club?.name || 'Club'} Fantasy`} · Draft</div>
                 <div style={{ font: `800 40px/0.95 ${DISP}`, textTransform: 'uppercase', color: '#fff', marginTop: 14 }}>Draft your<br />own squad</div>
                 <div style={{ font: `500 13px 'Hanken Grotesk'`, color: 'rgba(255,255,255,.78)', marginTop: 12, lineHeight: 1.5 }}>{draftLg.scoring_type === 'h2h' ? 'Go head to head every round, all season long.' : 'Own your players and rack up points all season.'}</div>
                 <div style={{ marginTop: 'auto', width: '100%', background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.16)', borderRadius: 14, padding: 14 }}>

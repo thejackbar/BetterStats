@@ -282,8 +282,11 @@ const run = async () => {
     return { page: document.documentElement.scrollWidth - docW, board: Math.round(worst) }
   })
   check('the squad board itself does not overflow at 390px', widths.board <= 0, `${widths.board}px`)
-  check('the page total is unchanged from the pre-existing header overflow',
-    widths.page === 319, `${widths.page}px (was 319px before this change)`)
+  // The header's action cluster used to push the page 319px past a 390px screen
+  // (a known follow-up). Phones now get the buttons as a wrapping row at the top
+  // of the page instead, so the whole page fits.
+  check('the whole page fits a 390px screen (the header overflow is fixed)',
+    widths.page <= 0, `${widths.page}px (was 319px before the phone layout)`)
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
 
   await browser.close()

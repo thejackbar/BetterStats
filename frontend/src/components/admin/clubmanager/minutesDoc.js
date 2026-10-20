@@ -203,7 +203,7 @@ function actionLine(t, { nameOf, objectiveOf }) {
 // could not be turned into something a document can carry (see
 // textDocs.clubLogoJpeg). A missing crest costs the header nothing; a broken
 // image in its place would cost it everything.
-function letterhead(club, logo) {
+export function letterhead(club, logo) {
   const accent = club?.accent || '#16c784'
   const accent2 = club?.accent2 || accent
   // Two rules rather than one split in half: the club's PRIMARY colour is the

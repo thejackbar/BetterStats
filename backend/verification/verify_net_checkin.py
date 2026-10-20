@@ -71,11 +71,17 @@ async def build_schema():
         await conn.execute(text("DROP SCHEMA public CASCADE"))
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # create_all doesn't add the server defaults some raw-SQL migrations
         # set (the local-dev quirk this repo's notes call out).
         await conn.execute(text(
             "ALTER TABLE net_checkin_registrations ALTER COLUMN id SET DEFAULT gen_random_uuid()"
         ))
+        # Lifespan DDL the squad readers use (migration 336).
+        from app.services.team_sides_ddl import STATEMENTS as SIDES_DDL
+        for stmt in SIDES_DDL:
+            await conn.execute(text(stmt))
 
 
 async def seed():

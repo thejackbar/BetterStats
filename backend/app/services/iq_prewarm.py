@@ -22,7 +22,7 @@ from sqlalchemy import bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import OppositionDossier, async_session_maker
-from app.services import iq_opponent
+from app.services import grade_scope, iq_filters, iq_opponent
 
 logger = logging.getLogger(__name__)
 
@@ -149,9 +149,18 @@ async def _run(org_id: str, opponents: list[dict]) -> None:
             outcome = "error"
             try:
                 async with async_session_maker() as session:
-                    res = await iq_opponent.get_or_start_dossier(
-                        session, org_id, opp["opp_key"], opp_name=opp["name"]
-                    )
+                    # Build under the club's DEFAULT Grade Type scope, the one a
+                    # request with no filter picked runs under. The scope is part
+                    # of the dossier's cache key, so a warm-up built under none
+                    # would never be the row the first visit reads.
+                    token = iq_filters.set_scope(await grade_scope.resolve_scope(session, org_id, None))
+                    try:
+                        cache_key = iq_opponent._cache_key(opp["opp_key"], None, None)
+                        res = await iq_opponent.get_or_start_dossier(
+                            session, org_id, opp["opp_key"], opp_name=opp["name"]
+                        )
+                    finally:
+                        iq_filters.reset_scope(token)
                 if res.get("status") == "ready":
                     outcome = "ready"
                 else:
@@ -160,7 +169,7 @@ async def _run(org_id: str, opponents: list[dict]) -> None:
                     while waited < BUILD_TIMEOUT_SEC:
                         await asyncio.sleep(POLL_INTERVAL_SEC)
                         waited += POLL_INTERVAL_SEC
-                        dstatus = await _dossier_status(org_id, opp["opp_key"])
+                        dstatus = await _dossier_status(org_id, cache_key)
                         if dstatus in ("ready", "error"):
                             outcome = dstatus
                             break

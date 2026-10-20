@@ -25,6 +25,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import LoadingSpinner from './components/LoadingSpinner'
 import Navbar from './components/Navbar'
 import SponsorFooter from './components/SponsorFooter'
+import SectionBanner from './components/SectionBanner'
 import ScrollToTop from './components/ScrollToTop'
 import FaviconManager from './components/FaviconManager'
 import ClubCTABar from './components/ClubCTABar'
@@ -111,6 +112,12 @@ const AdminGrades = lazy(() => import('./pages/admin/AdminGrades'))
 const AdminSync = lazy(() => import('./pages/admin/AdminSync'))
 const AdminPartnershipRecords = lazy(() => import('./pages/admin/AdminPartnershipRecords'))
 const AdminManualEntries = lazy(() => import('./pages/admin/AdminManualEntries'))
+const AdminCardReview = lazy(() => import('./pages/admin/AdminCardReview'))
+const AdminCardReviewList = lazy(() => import('./pages/admin/AdminCardReviewList'))
+const AdminCardReviewMatch = lazy(() => import('./pages/admin/AdminCardReviewMatch'))
+const AdminCardReviewDoubles = lazy(() => import('./pages/admin/AdminCardReviewDoubles'))
+const AdminCardReviewFind = lazy(() => import('./pages/admin/AdminCardReviewFind'))
+const AdminCardReviewHistory = lazy(() => import('./pages/admin/AdminCardReviewHistory'))
 const AdminScorecardUpload = lazy(() => import('./pages/admin/AdminScorecardUpload'))
 const AdminImport = lazy(() => import('./pages/admin/AdminImport'))
 const AdminPlayerImport = lazy(() => import('./pages/admin/AdminPlayerImport'))
@@ -170,6 +177,8 @@ const SuperOverview = lazy(() => import('./pages/admin/SuperOverview'))
 const SuperHub = lazy(() => import('./pages/admin/SuperHub'))
 const SuperClubs = lazy(() => import('./pages/admin/SuperClubs'))
 const SuperClubMerge = lazy(() => import('./pages/admin/SuperClubMerge'))
+const SuperClubLinks = lazy(() => import('./pages/admin/SuperClubLinks'))
+const SuperPrivacyRequests = lazy(() => import('./pages/admin/SuperPrivacyRequests'))
 const SuperUsers = lazy(() => import('./pages/admin/SuperUsers'))
 const SuperOnboarding = lazy(() => import('./pages/admin/SuperOnboarding'))
 const SuperUnpauseRequests = lazy(() => import('./pages/admin/SuperUnpauseRequests'))
@@ -179,6 +188,7 @@ const SuperDiscountReport = lazy(() => import('./pages/admin/SuperDiscountReport
 const SuperWizardAnalytics = lazy(() => import('./pages/admin/SuperWizardAnalytics'))
 const SuperSelfServeTrial = lazy(() => import('./pages/admin/SuperSelfServeTrial'))
 const SuperMetaAds = lazy(() => import('./pages/admin/SuperMetaAds'))
+const SuperFantasyCompetitions = lazy(() => import('./pages/admin/SuperFantasyCompetitions'))
 const SuperLoginAttempts = lazy(() => import('./pages/admin/SuperLoginAttempts'))
 const SuperModuleRequests = lazy(() => import('./pages/admin/SuperModuleRequests'))
 const SuperCommsLimits = lazy(() => import('./pages/admin/SuperCommsLimits'))
@@ -193,11 +203,15 @@ const BsTeams = lazy(() => import('./pages/admin/betterselect/AdminTeams'))
 const BsAvailability = lazy(() => import('./pages/admin/betterselect/AdminAvailability'))
 const BsSelection = lazy(() => import('./pages/admin/betterselect/AdminSelection'))
 const BsSelectionOverview = lazy(() => import('./pages/admin/betterselect/AdminSelectionOverview'))
+const BsSelectionDraftTable = lazy(() => import('./pages/admin/betterselect/AdminSelectionDraftTable'))
+const BsAuditHistory = lazy(() => import('./pages/admin/betterselect/AuditHistory'))
 const BsLadders = lazy(() => import('./pages/admin/betterselect/AdminLadders'))
 const BsNets = lazy(() => import('./pages/admin/betterselect/Nets'))
 const BsNetSession = lazy(() => import('./pages/admin/betterselect/NetSession'))
 const BsVotes = lazy(() => import('./pages/admin/betterselect/AdminVotes'))
 const BsRules = lazy(() => import('./pages/admin/betterselect/AdminSelectionRules'))
+const BsSettings = lazy(() => import('./pages/admin/betterselect/AdminSelectSettings'))
+const BsFines = lazy(() => import('./pages/admin/betterselect/AdminFines'))
 const BetterIQHome = lazy(() => import('./pages/admin/betteriq/BetterIQHome'))
 const IqOpposition = lazy(() => import('./pages/admin/betteriq/OppositionScout'))
 const IqOppositionPlayer = lazy(() => import('./pages/admin/betteriq/OppositionPlayer'))
@@ -215,6 +229,7 @@ const FantasyHome = lazy(() => import('./pages/admin/fantasy/FantasyHome'))
 const FantasySettings = lazy(() => import('./pages/admin/fantasy/FantasySettings'))
 const FantasyScoring = lazy(() => import('./pages/admin/fantasy/FantasyScoring'))
 const FantasyPool = lazy(() => import('./pages/admin/fantasy/FantasyPool'))
+const FantasyPrices = lazy(() => import('./pages/admin/fantasy/FantasyPrices'))
 const FantasyPlayers = lazy(() => import('./pages/admin/fantasy/FantasyPlayers'))
 const FantasyLeagues = lazy(() => import('./pages/admin/fantasy/FantasyLeagues'))
 
@@ -276,6 +291,12 @@ const PublicMemberPortal = lazy(() => import('./pages/PublicMemberPortal'))
 // Public, login-free merch storefront
 const PublicMerchStore = lazy(() => import('./pages/PublicMerchStore'))
 
+// A redirect that keeps the query string, so an old link with ?date= still lands on that day.
+function RedirectKeepingSearch({ to }) {
+  const { search } = useLocation()
+  return <Navigate to={`${to}${search}`} replace />
+}
+
 const PageLoader = () => (
   <div className="flex justify-center py-24">
     <LoadingSpinner size="lg" />
@@ -315,6 +336,7 @@ export default function App() {
         <ClubCTABar />
         <FaviconManager />
         <ConditionalNavbar />
+        <SectionBanner />
         <Suspense fallback={<PageLoader />}>
         <Routes>
           {/* Marketing site */}
@@ -465,6 +487,12 @@ export default function App() {
           <Route path="/admin/sync" element={<ProtectedRoute requireCore><AdminSync /></ProtectedRoute>} />
           <Route path="/admin/partnerships" element={<ProtectedRoute requireCore><AdminPartnershipRecords /></ProtectedRoute>} />
           <Route path="/admin/manual-entries" element={<ProtectedRoute requireCore><AdminManualEntries /></ProtectedRoute>} />
+          <Route path="/admin/card-review" element={<ProtectedRoute requireCore><AdminCardReview /></ProtectedRoute>} />
+          <Route path="/admin/card-review/match/:matchId" element={<ProtectedRoute requireCore><AdminCardReviewMatch /></ProtectedRoute>} />
+          <Route path="/admin/card-review/doubles" element={<ProtectedRoute requireCore><AdminCardReviewDoubles /></ProtectedRoute>} />
+          <Route path="/admin/card-review/history" element={<ProtectedRoute requireCore><AdminCardReviewHistory /></ProtectedRoute>} />
+          <Route path="/admin/card-review/find" element={<ProtectedRoute requireCore><AdminCardReviewFind /></ProtectedRoute>} />
+          <Route path="/admin/card-review/:group" element={<ProtectedRoute requireCore><AdminCardReviewList /></ProtectedRoute>} />
           <Route path="/admin/upload-scorecard" element={<ProtectedRoute requireCore><AdminScorecardUpload /></ProtectedRoute>} />
           <Route path="/admin/import" element={<ProtectedRoute requireCore><AdminImport /></ProtectedRoute>} />
           <Route path="/admin/milestones" element={<ProtectedRoute requireCore><AdminMilestones /></ProtectedRoute>} />
@@ -513,6 +541,7 @@ export default function App() {
           <Route path="/admin/fantasy/settings" element={<ProtectedRoute requireModule="fantasy"><FantasySettings /></ProtectedRoute>} />
           <Route path="/admin/fantasy/scoring" element={<ProtectedRoute requireModule="fantasy"><FantasyScoring /></ProtectedRoute>} />
           <Route path="/admin/fantasy/pool" element={<ProtectedRoute requireModule="fantasy"><FantasyPool /></ProtectedRoute>} />
+          <Route path="/admin/fantasy/prices" element={<ProtectedRoute requireModule="fantasy"><FantasyPrices /></ProtectedRoute>} />
           <Route path="/admin/fantasy/players" element={<ProtectedRoute requireModule="fantasy"><FantasyPlayers /></ProtectedRoute>} />
           <Route path="/admin/fantasy/leagues" element={<ProtectedRoute requireModule="fantasy"><FantasyLeagues /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute requireActivePlan><AdminSettings /></ProtectedRoute>} />
@@ -535,6 +564,8 @@ export default function App() {
           <Route path="/admin/super" element={<ProtectedRoute requireRole="super_admin"><SuperOverview /></ProtectedRoute>} />
           <Route path="/admin/super/hub/:sectionKey" element={<ProtectedRoute requireRole="super_admin"><SuperHub /></ProtectedRoute>} />
           <Route path="/admin/super/clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubs /></ProtectedRoute>} />
+          <Route path="/admin/super/club-links" element={<ProtectedRoute requireRole="super_admin"><SuperClubLinks /></ProtectedRoute>} />
+          <Route path="/admin/super/privacy-requests" element={<ProtectedRoute requireRole="super_admin"><SuperPrivacyRequests /></ProtectedRoute>} />
           <Route path="/admin/super/merge-clubs" element={<ProtectedRoute requireRole="super_admin"><SuperClubMerge /></ProtectedRoute>} />
           <Route path="/admin/super/users" element={<ProtectedRoute requireRole="super_admin"><SuperUsers /></ProtectedRoute>} />
           <Route path="/admin/super/onboarding" element={<ProtectedRoute requireRole="super_admin"><SuperOnboarding /></ProtectedRoute>} />
@@ -545,6 +576,7 @@ export default function App() {
           <Route path="/admin/super/wizard-analytics" element={<ProtectedRoute requireRole="super_admin"><SuperWizardAnalytics /></ProtectedRoute>} />
           <Route path="/admin/super/self-serve" element={<ProtectedRoute requireRole="super_admin"><SuperSelfServeTrial /></ProtectedRoute>} />
           <Route path="/admin/super/meta-ads" element={<ProtectedRoute requireRole="super_admin"><SuperMetaAds /></ProtectedRoute>} />
+          <Route path="/admin/super/fantasy" element={<ProtectedRoute requireRole="super_admin"><SuperFantasyCompetitions /></ProtectedRoute>} />
           <Route path="/admin/super/login-attempts" element={<ProtectedRoute requireRole="super_admin"><SuperLoginAttempts /></ProtectedRoute>} />
           <Route path="/admin/super/module-requests" element={<ProtectedRoute requireRole="super_admin"><SuperModuleRequests /></ProtectedRoute>} />
           <Route path="/admin/super/comms-limits" element={<ProtectedRoute requireRole="super_admin"><SuperCommsLimits /></ProtectedRoute>} />
@@ -568,11 +600,17 @@ export default function App() {
           <Route path="/admin/betterselect/teams" element={<ProtectedRoute requireModule="select"><BsTeams /></ProtectedRoute>} />
           <Route path="/admin/betterselect/availability" element={<ProtectedRoute requireModule="select"><BsAvailability /></ProtectedRoute>} />
           <Route path="/admin/betterselect/selection" element={<ProtectedRoute requireModule="select"><BsSelectionOverview /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/whiteboard" element={<ProtectedRoute requireModule="select"><BsSelectionDraftTable /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/audit" element={<ProtectedRoute requireModule="select"><BsAuditHistory /></ProtectedRoute>} />
+          {/* Its old address, from before it had its own place in the menu. */}
+          <Route path="/admin/betterselect/selection/draft-table" element={<RedirectKeepingSearch to="/admin/betterselect/whiteboard" />} />
           <Route path="/admin/betterselect/select/:fixtureId" element={<ProtectedRoute requireModule="select"><BsSelection /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets" element={<ProtectedRoute requireModule="select"><BsNets /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets/:id" element={<ProtectedRoute requireModule="select"><BsNetSession /></ProtectedRoute>} />
           <Route path="/admin/betterselect/ladders" element={<ProtectedRoute requireModule="select"><BsLadders /></ProtectedRoute>} />
           <Route path="/admin/betterselect/votes" element={<ProtectedRoute requireModule="select"><BsVotes /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/settings" element={<ProtectedRoute requireModule="select"><BsSettings /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/fines" element={<ProtectedRoute requireModule="select"><BsFines /></ProtectedRoute>} />
           <Route path="/admin/betterselect/rules" element={<ProtectedRoute requireModule="select"><BsRules /></ProtectedRoute>} />
 
           {/* BetterIQ module */}

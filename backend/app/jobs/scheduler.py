@@ -8,7 +8,6 @@ from sqlalchemy import select, text
 
 from app.models.db import async_session_maker
 from app.services.sync import sync_organisation
-from app.services.fees import recompute_fee_match_days
 from app.services.square_sync import sync_all_square
 from app.config.settings import settings
 
@@ -210,14 +209,12 @@ async def sync_all_organisations():
         if org_id in _org_sync_running or org_id in _hard_refresh_running:
             logger.info(f"Scheduled sync: {org.name} already has a sync in flight, skipping")
             continue
-        synced = False
         try:
             async with async_session_maker() as session:
                 plan = await auto_sync.plan_run(session, org.id)
             if plan["mode"] == "full":
                 logger.info(f"Syncing org (full — {plan['reason']}): {org.name} ({org.id})")
                 await sync_organisation(org_id, kind="org_full")
-                synced = True
             else:
                 # Did anything get played in this period? An empty period is
                 # ordinary — the off-season, the Christmas break, a bye, a
@@ -233,17 +230,10 @@ async def sync_all_organisations():
                 logger.info(f"Syncing org ({probe['fixtures']} fixture(s) since {plan['since']}): "
                             f"{org.name} ({org.id})")
                 await sync_organisation(org_id, kind=auto_sync.RECENT_KIND, since=plan["since"])
-                synced = True
         except Exception as e:
             logger.error(f"Sync failed for org {org.id}: {e}")
-        if not synced:
-            continue
-        # Refresh auto-derived fee match-days off the freshly synced games.
-        # Isolated from the sync above so a fee error never fails the sync.
-        try:
-            await recompute_fee_match_days(org_id)
-        except Exception as e:
-            logger.error(f"Fee recompute failed for org {org.id}: {e}")
+        # Fee match days are refreshed inside sync_organisation itself, so a
+        # scheduled run and a manual one are followed by the same rebuild.
 
 
 async def _record_idle_run(org_id, since, reason: str) -> None:
@@ -314,13 +304,14 @@ async def settle_all_fantasy():
 
     Runs daily after the weekly sync, so a weekend's scorecards turn into fantasy
     points (and ladders) without an admin pressing a button. Idempotent — a round
-    already scored is skipped, and re-running over a corrected scorecard
-    recomputes in place. Each season is isolated so one failure can't stop the
+    already scored is not settled twice, as is one an admin unsettled (it waits for
+    their Settle button); a round scored in the last fortnight is checked against its
+    scorecards and settled again if they have changed since. Each season is isolated so one failure can't stop the
     rest. Imports are local to keep the fantasy engine off the startup path.
     """
     from datetime import date
     from app.models.db import FantasySeason, FantasyRound
-    from app.services import fantasy_engine
+    from app.services import fantasy_engine, fantasy_pricing
 
     logger.info("Starting scheduled fantasy settlement")
     async with async_session_maker() as session:
@@ -329,15 +320,43 @@ async def settle_all_fantasy():
         async with async_session_maker() as session:
             try:
                 fs = await session.get(FantasySeason, fs.id)
+                # Keep the round calendar in step with the Play-Cricket draw, so
+                # a fixture published or moved after setup needs no button press.
+                await fantasy_engine.generate_rounds(session, fs)
+                await session.commit()
                 rounds = (await session.execute(
                     select(FantasyRound).where(
                         FantasyRound.fantasy_season_id == fs.id,
-                        FantasyRound.status != "scored",
+                        FantasyRound.status.notin_(fantasy_engine.AUTO_SETTLE_SKIP),
                         FantasyRound.end_date <= date.today(),
                     ).order_by(FantasyRound.round_number)
                 )).scalars().all()
                 for rnd in rounds:
                     await fantasy_engine.settle_round(session, fs, rnd)
+                # A round still running gets provisional points, so a two-week
+                # round shows its points as the games sync, not at the end.
+                running = (await session.execute(
+                    select(FantasyRound).where(
+                        FantasyRound.fantasy_season_id == fs.id,
+                        FantasyRound.status.notin_(fantasy_engine.AUTO_SETTLE_SKIP),
+                        FantasyRound.start_date <= date.today(),
+                        FantasyRound.end_date > date.today(),
+                    ).order_by(FantasyRound.round_number)
+                )).scalars().all()
+                for rnd in running:
+                    await fantasy_engine.refresh_live_round(session, fs, rnd)
+                # A scorecard finished or corrected after its round was settled (or a
+                # game that synced late) would otherwise leave a player who played on
+                # 0 for good: settle again any recent round that has drifted.
+                late = await fantasy_engine.refresh_recent_rounds(session, fs)
+                if late:
+                    logger.info(f"Fantasy: refreshed {late} recent round(s) for season {fs.id} after late scorecards")
+                # Prices are replayed from the scored rounds, so a season whose
+                # rounds were scored before price movement existed (or by a path
+                # that did not move them) catches up here.
+                moved = await fantasy_pricing.recompute_prices(session, fs)
+                if moved["changed"]:
+                    logger.info(f"Fantasy: moved {moved['changed']} price(s) for season {fs.id}")
                 await session.commit()
             except Exception as e:
                 await session.rollback()
@@ -1087,14 +1106,17 @@ def start_scheduler():
         id="webinar_reminders",
         replace_existing=True,
     )
-    # BetterComms daily maintenance — 00:15 UTC, just after AWS's daily send
-    # quota resets at midnight UTC: trip the bounce/complaint breaker, then resume
-    # any campaigns whose overflow was deferred to today's fresh allowance.
+    # BetterComms daily maintenance — 00:15 UTC, just after each club's daily
+    # send window rolls over at midnight UTC: trip the bounce/complaint breaker,
+    # then resume any campaigns whose overflow was deferred to today's fresh
+    # allowance. The time lives in comms_limits so the "rest goes out at" the
+    # club is shown is the time this fires.
+    from app.services import comms_limits as _comms_limits
     scheduler.add_job(
         comms_daily_maintenance,
         trigger="cron",
-        hour=0,
-        minute=15,
+        hour=_comms_limits.RESUME_HOUR_UTC,
+        minute=_comms_limits.RESUME_MINUTE_UTC,
         timezone="UTC",
         id="comms_daily_maintenance",
         replace_existing=True,

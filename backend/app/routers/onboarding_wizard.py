@@ -40,6 +40,9 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.auth.capabilities import (
+    require_full_admin,
+)  # route gates added by the access audit
 from app.auth.modules import org_entitled_modules
 from app.models.db import (
     ClubMembership,
@@ -604,7 +607,7 @@ async def get_state(club: Organisation = Depends(get_current_club), db: AsyncSes
     }
 
 
-@router.post("/opened")
+@router.post("/opened", dependencies=[Depends(require_full_admin())])
 async def mark_opened(club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     """Call the moment the wizard page opens (auto- or manually-navigated).
     Stamps ``sync_steps_shown_at`` the first time this happens while the
@@ -623,7 +626,7 @@ async def mark_opened(club: Organisation = Depends(get_current_club), db: AsyncS
     return {"ok": True}
 
 
-@router.post("/dismiss")
+@router.post("/dismiss", dependencies=[Depends(require_full_admin())])
 async def dismiss(club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     state = await _get_or_create_state(db, club.id)
     state.dismissed_at = datetime.now(timezone.utc)
@@ -631,7 +634,7 @@ async def dismiss(club: Organisation = Depends(get_current_club), db: AsyncSessi
     return {"ok": True}
 
 
-@router.post("/steps/{step_key}")
+@router.post("/steps/{step_key}", dependencies=[Depends(require_full_admin())])
 async def set_step(step_key: str, data: StepUpdate, club: Organisation = Depends(get_current_club),
                    db: AsyncSession = Depends(get_db),
                    current_user: User = Depends(get_current_user)):

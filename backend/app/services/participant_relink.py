@@ -1,0 +1,559 @@
+"""Attach the games sync dropped for a player whose participant id it did not know.
+
+Sync stores a game's rows by Cricket Australia's participant id. A player whose id on
+the team sheet is not the one the club holds for them (a new registration id, or a
+player new to the club this season who only exists hand-added) had their batting,
+bowling and appearance dropped, and a game already stored is never re-read for them.
+``services/participant_names`` now lets sync recognise them by full name from here on;
+this finds the games already stored without them and adds just their rows.
+
+Adds rows only. Nothing is deleted, no other player's row is touched, and a row that
+is already there is left as it is, so running it twice changes nothing the second time.
+Partnerships, fall of wickets and the wicket-by-wicket list are not rebuilt (they hold
+other players' rows too); a Full Rebuild rewrites those. Batting, bowling, fielding
+and the appearance are what Fantasy, the profile and the career figures read.
+"""
+from __future__ import annotations
+
+import logging
+import uuid
+from datetime import date
+from typing import Awaitable, Callable, Optional
+
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.db import (
+    BattingInnings, BowlingSpell, FallOfWicket, FieldingStat, GameAppearance, Partnership,
+)
+from app.services import dismissal, participant_names
+from app.services.boundary_counts import clean as _bounds
+from app.services.club_grades import club_game_sql
+from app.services.sync import (
+    _GR_DISMISSAL_SHORT, _caught_by_keeper, _derive_partnerships_grassroots,
+    _innings_keeper_names, _parse_uuid,
+)
+
+logger = logging.getLogger(__name__)
+
+Fetch = Callable[[str], Awaitable[Optional[dict]]]
+
+
+async def _org_maps(db: AsyncSession, org_id) -> tuple[dict, dict, dict]:
+    """(guid -> player id, merged-away redirect, unique full names) for a club, built the
+    way sync builds them so the two cannot disagree about who is "known"."""
+    players = (await db.execute(text("""
+        SELECT id, grassroots_id, name, display_name_override, is_player
+        FROM players WHERE organisation_id = CAST(:o AS UUID)"""), {"o": str(org_id)})).all()
+    by_guid: dict[str, uuid.UUID] = {}
+    pairs = []
+    for pid, gid, name, over, is_player in players:
+        g = _parse_uuid(gid) if gid else None
+        if g is not None:
+            by_guid[str(g)] = pid
+        if is_player is not False:
+            pairs.append((pid, over or name))
+    raw = {r[0]: r[1] for r in (await db.execute(text("""
+        SELECT removed_player_id, keep_player_id FROM merge_logs
+        WHERE org_id = CAST(:o AS UUID) AND undone_at IS NULL"""), {"o": str(org_id)})).all()}
+    merged: dict = {}
+    for removed, target in raw.items():
+        seen = {removed}
+        while target in raw and target not in seen:
+            seen.add(target)
+            target = raw[target]
+        merged[removed] = target
+    return by_guid, merged, participant_names.unique_by_full_name(pairs)
+
+
+def _known(guid: str, by_guid: dict, merged: dict):
+    """sync's ``_team_pid``: the raw id, then a merge redirect, then the redirect's own."""
+    g = _parse_uuid(guid)
+    if g is None or participant_names.is_placeholder_id(str(g)):
+        return None
+    p = by_guid.get(str(g))
+    if p is None:
+        p = merged.get(g)
+        if p is None:
+            return None
+    return merged.get(p, p)
+
+
+def _our_team(scorecard: dict, org_id) -> Optional[dict]:
+    return next((t for t in (scorecard.get("teams") or [])
+                 if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == str(org_id).lower()), None)
+
+
+async def plan(db: AsyncSession, org_id, year: int, fetch: Fetch, today: Optional[date] = None) -> dict:
+    """Games of this club in ``year`` whose stored rows lack a rostered player sync can
+    now recognise (by full name, or by an id that a later merge now resolves). Reads the live team sheet of each synced game (one
+    request per game, cached by the client)."""
+    today = today or date.today()
+    by_guid, merged, unique = await _org_maps(db, org_id)
+    games = (await db.execute(text(f"""
+        SELECT g.id, g.played_at, g.home_team, g.away_team, gr.name AS grade
+        FROM v_effective_games g
+        JOIN grades gr ON gr.id = g.grade_id JOIN seasons s ON s.id = gr.season_id
+        WHERE {club_game_sql("g", "org")} AND s.year = :y AND g.source = 'api' AND g.played_at <= :today
+        ORDER BY g.played_at"""), {"org": str(org_id), "y": year, "today": today})).mappings().all()
+    out, deferred, no_data = [], [], 0
+    for g in games:
+        sc = await fetch(str(g["id"]))
+        if not sc:
+            no_data += 1
+            continue
+        team = _our_team(sc, org_id)
+        if not team:
+            continue
+        sheet = team.get("players") or []
+        known = {}
+        for p in sheet:
+            guid = p.get("participantId") or ""
+            kp = _known(guid, by_guid, merged) if guid else None
+            if kp is not None:
+                known[guid] = kp
+        found = participant_names.resolve_roster_by_name(sheet, known, unique)
+        if not found and not known:
+            continue
+        have = {r[0] for r in (await db.execute(text(
+            "SELECT player_id FROM game_appearances WHERE game_id = :g"), {"g": g["id"]})).all()}
+        names = {p.get("participantId"): (p.get("playerShortName") or p.get("displayName") or p.get("name")) for p in sheet}
+        # Two kinds: an id we do not know but whose full name matches one player, and an
+        # id we DO know (directly, or through a merge made after the game was stored)
+        # whose player has no appearance in the stored game.
+        # Sync stores a game's rows in one go and skips the game once any of our
+        # players has an appearance in it. Where none has, sync has not finished our
+        # side and will add every row itself on its next run; rows added here first
+        # would collide with its inserts and fail the game for good. Leave those to it.
+        if not (have & (set(known.values()) | set(found.values()))):
+            deferred.append({"game_id": str(g["id"]), "date": g["played_at"], "match": f"{g['home_team']} v {g['away_team']}",
+                             "grade": g["grade"], "players": len(sheet)})
+            continue
+        wanted, taken = {}, set()
+        for guid, pid in {**known, **found}.items():
+            if pid not in have and pid not in taken:
+                wanted[guid] = pid
+                taken.add(pid)
+        missing = wanted
+        if not missing:
+            continue
+        pname = {r[0]: r[1] for r in (await db.execute(text(
+            "SELECT id, COALESCE(display_name_override, name) FROM players WHERE id = ANY(CAST(:i AS uuid[]))"),
+            {"i": [str(p) for p in missing.values()]})).all()}
+        out.append({
+            "game_id": str(g["id"]), "date": g["played_at"], "match": f"{g['home_team']} v {g['away_team']}", "grade": g["grade"],
+            "missing": [{"guid": guid, "sheet_name": names.get(guid), "player_id": str(pid), "player": pname.get(pid)}
+                        for guid, pid in missing.items()],
+            "scorecard": sc,
+        })
+    return {"games": out, "deferred": deferred, "games_checked": len(games), "no_data": no_data}
+
+
+async def attach(db: AsyncSession, org_id, game_id, scorecard: dict, wanted: dict) -> dict:
+    """Add the appearance, batting, bowling and fielding rows for ``wanted``
+    (``{participant guid: player id}``) to an already stored game. Mirrors what
+    ``sync_grassroots_game_level_data`` writes for one of our players; skips any row
+    already there."""
+    team = _our_team(scorecard, org_id)
+    if not team or not wanted:
+        return {"appearances": 0, "batting": 0, "bowling": 0, "fielding": 0}
+    gid = game_id if isinstance(game_id, uuid.UUID) else uuid.UUID(str(game_id))
+    team_name = team.get("displayName") or team.get("name") or ""
+    n = {"appearances": 0, "batting": 0, "bowling": 0, "fielding": 0}
+
+    for p in team.get("players") or []:
+        pid = wanted.get(p.get("participantId") or "")
+        if pid is None:
+            continue
+        roles = p.get("roles") or []
+        if (await db.get(GameAppearance, (gid, pid))) is None:
+            db.add(GameAppearance(
+                game_id=gid, player_id=pid, team_name=team_name,
+                is_captain=any((r or "").lower() == "captain" for r in roles),
+                is_wicket_keeper=any("wicket" in (r or "").lower() for r in roles)))
+            n["appearances"] += 1
+
+    for inn in scorecard.get("innings") or []:
+        inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+        keeper_names = _innings_keeper_names(inn.get("fielding") or [])
+
+        for row in inn.get("batting") or []:
+            pid = wanted.get(row.get("participantId") or "")
+            if pid is None:
+                continue
+            dt_id = row.get("dismissalTypeId") or 0
+            if dt_id == 0:
+                continue
+            if (await db.execute(select(BattingInnings.id).where(
+                    BattingInnings.game_id == gid, BattingInnings.player_id == pid,
+                    BattingInnings.innings_number == inn_num))).first():
+                continue
+            dt_long = row.get("dismissalType") or ""
+            if dt_long.lower() in ("absent", "did not bat", "dnb"):
+                db.add(BattingInnings(game_id=gid, player_id=pid, innings_number=inn_num,
+                                      batting_position=row.get("batOrder"), runs=None, balls=None,
+                                      fours=None, sixes=None, not_out=False, dismissal_type=None,
+                                      did_not_bat=True))
+            else:
+                bounds = _bounds(row.get("runsScored") or 0, row.get("foursScored"), row.get("sixesScored"))
+                db.add(BattingInnings(
+                    game_id=gid, player_id=pid, innings_number=inn_num, batting_position=row.get("batOrder"),
+                    runs=row.get("runsScored") or 0, balls=row.get("ballsFaced"),
+                    fours=bounds[0], sixes=bounds[1], not_out=dismissal.is_not_out(dt_id, dt_long),
+                    dismissal_type=(_GR_DISMISSAL_SHORT.get(dt_long, dt_long.lower()) or None),
+                    caught_behind=(dt_long == "Caught"
+                                   and _caught_by_keeper(row.get("dismissalText") or "", keeper_names)),
+                    did_not_bat=False))
+            n["batting"] += 1
+
+        for row in inn.get("bowling") or []:
+            pid = wanted.get(row.get("participantId") or "")
+            if pid is None:
+                continue
+            if (await db.execute(select(BowlingSpell.id).where(
+                    BowlingSpell.game_id == gid, BowlingSpell.player_id == pid,
+                    BowlingSpell.innings_number == inn_num))).first():
+                continue
+            try:
+                econ = float(row["economy"]) if row.get("economy") is not None else None
+            except (TypeError, ValueError):
+                econ = None
+            db.add(BowlingSpell(
+                game_id=gid, player_id=pid, innings_number=inn_num, overs=row.get("oversBowled"),
+                maidens=row.get("maidensBowled"), runs=row.get("runsConceded"),
+                wickets=row.get("wicketsTaken"), wides=row.get("wideBalls"),
+                no_balls=row.get("noBalls"), economy=econ))
+            n["bowling"] += 1
+
+        for row in inn.get("fielding") or []:
+            pid = wanted.get(row.get("participantId") or "")
+            if pid is None:
+                continue
+            short = row.get("playerShortName")
+            # Sync kept an unregistered fielder's catches under their name with no id:
+            # give that row its player rather than writing a second one.
+            orphan = (await db.execute(select(FieldingStat).where(
+                FieldingStat.game_id == gid, FieldingStat.player_id.is_(None),
+                FieldingStat.player_name == short))).scalars().first() if short else None
+            if orphan is not None:
+                orphan.player_id, orphan.player_name = pid, None
+                n["fielding"] += 1
+                continue
+            if (await db.execute(select(FieldingStat.id).where(
+                    FieldingStat.game_id == gid, FieldingStat.player_id == pid))).first():
+                continue
+            catches_wk = row.get("wicketKeeperCatches") or 0
+            total = row.get("totalCatches")
+            if total is None:
+                total = (row.get("catches") or 0) + catches_wk
+            db.add(FieldingStat(game_id=gid, player_id=pid, player_name=None, catches=total or 0,
+                                catches_wk=catches_wk, run_outs=row.get("runOuts") or 0,
+                                stumpings=row.get("stumpings") or 0))
+            n["fielding"] += 1
+    await db.flush()
+    return n
+
+
+async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> dict:
+    """Add the fall of wickets and partnerships a stored game lacks, one innings at a time.
+
+    The scorecard route draws batting from live Cricket Australia data but reads fall of wickets and
+    partnerships from OUR rows, so a game stored without them shows an empty partnerships panel and
+    feeds no partnership record. Mirrors what `sync_grassroots_game_level_data` writes (same
+    `_derive_partnerships_grassroots`, same club-innings test), for the innings the scorecard has.
+
+    Per innings and per table, rows are written only when the game has NONE for that innings: a
+    shared fixture's other club may have written them already (they cover both innings), and a
+    partial set is never mixed with a second one. Nothing is overwritten or deleted.
+    """
+    team = _our_team(scorecard, org_id)
+    n = {"fow": 0, "partnerships": 0}
+    if not team:
+        return n
+    gid = game_id if isinstance(game_id, uuid.UUID) else uuid.UUID(str(game_id))
+    our_pids: set = set()
+    roster_guids: set = set()
+    for p in team.get("players") or []:
+        guid = p.get("participantId") or ""
+        if not guid:
+            continue
+        roster_guids.add(guid)
+        pid = resolve(guid)
+        if pid is not None:
+            our_pids.add(pid)
+    have_fow = {r[0] for r in (await db.execute(text(
+        "SELECT DISTINCT innings_number FROM fall_of_wickets WHERE game_id = :g"), {"g": gid})).all()}
+    have_part = {r[0] for r in (await db.execute(text(
+        "SELECT DISTINCT innings_number FROM partnerships WHERE game_id = :g"), {"g": gid})).all()}
+
+    for inn in scorecard.get("innings") or []:
+        inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+        batting_rows = inn.get("batting") or []
+        fow_rows = inn.get("fallOfWickets") or []
+
+        if inn_num not in have_fow:
+            for row in fow_rows:
+                wkt = row.get("order")
+                if wkt is None:
+                    continue
+                pid = resolve(row.get("participantId") or "") if row.get("participantId") else None
+                if pid is not None and pid not in our_pids:
+                    pid = None  # an opposition batter who is also in our players table
+                db.add(FallOfWicket(
+                    game_id=gid, innings_number=inn_num, wicket_number=wkt,
+                    score_at_fall=row.get("runs"), player_id=pid,
+                    batter_name=row.get("playerShortName")))
+                n["fow"] += 1
+
+        if inn_num in have_part:
+            continue
+        inn_team_id = None
+        for key in ("battingTeamId", "teamId"):
+            if inn.get(key):
+                inn_team_id = str(inn[key]).lower()
+                break
+        if inn_team_id is None:
+            for key in ("battingTeam", "team"):
+                o = inn.get(key)
+                if isinstance(o, dict) and o.get("id"):
+                    inn_team_id = str(o["id"]).lower()
+                    break
+        if inn_team_id is not None and team.get("id"):
+            is_club_innings = inn_team_id == str(team["id"]).lower()
+        else:
+            club_n = total_n = 0
+            for br in batting_rows:
+                bp = br.get("participantId")
+                if not bp:
+                    continue
+                total_n += 1
+                c = resolve(bp)
+                if c is not None and c in our_pids:
+                    club_n += 1
+            is_club_innings = total_n > 0 and club_n * 2 > total_n
+
+        for p in _derive_partnerships_grassroots(batting_rows, fow_rows):
+            b1_id = b2_id = b1_name = b2_name = None
+            for src_key, name_key, dst in (("batter1_id", "batter1_name", 1), ("batter2_id", "batter2_name", 2)):
+                v = p.get(src_key)
+                if not v:
+                    continue
+                cand = resolve(v)
+                if cand is not None and cand in our_pids:
+                    if dst == 1:
+                        b1_id = cand
+                    else:
+                        b2_id = cand
+                elif v in roster_guids:
+                    # On our roster but not a player we hold: a fill-in or a redacted junior.
+                    if dst == 1:
+                        b1_name = p.get(name_key)
+                    else:
+                        b2_name = p.get(name_key)
+            if not b1_id and not b2_id and not b1_name and not b2_name:
+                continue
+            db.add(Partnership(
+                game_id=gid, innings_number=inn_num, wicket_number=p["wicket_number"],
+                batter1_id=b1_id, batter2_id=b2_id, batter1_name=b1_name, batter2_name=b2_name,
+                runs=p.get("runs") or 0, batter1_runs=p.get("batter1_runs"),
+                batter2_runs=p.get("batter2_runs"), is_club_innings=is_club_innings))
+            n["partnerships"] += 1
+    await db.flush()
+    return n
+
+
+async def repair_stored_game(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> Optional[dict]:
+    """Attach the rows a stored game is missing for players its team sheet names.
+
+    Called from sync for a game it has already stored, with the scorecard it has
+    just fetched anyway, so repairing costs no extra request to Cricket Australia.
+    A player who was unknown when the game was first synced (new to the club, or
+    only hand-added) had their appearance, batting, bowling and fielding dropped,
+    and sync never reads a finished game for them again. By the time the game
+    comes round again they usually exist, and the team sheet still names them.
+
+    ``resolve`` is sync's own ``_team_pid`` applied to a participant id string, so
+    "who is known" is decided in exactly one place, merge redirects and the
+    full-name match included. Only a player the club already holds is attached;
+    nothing is created, nothing is deleted, and a row already there is left alone.
+
+    Returns the counts added, or None when the game is complete. Commits its own
+    work. The caller catches anything it raises: a repair must never fail a sync.
+    """
+    team = _our_team(scorecard, org_id)
+    if not team:
+        return None
+    gid = game_id if isinstance(game_id, uuid.UUID) else uuid.UUID(str(game_id))
+    have = {r[0] for r in (await db.execute(text(
+        "SELECT player_id FROM game_appearances WHERE game_id = :g"), {"g": gid})).all()}
+    wanted: dict = {}
+    taken: set = set()
+    for p in team.get("players") or []:
+        guid = p.get("participantId") or ""
+        pid = resolve(guid) if guid else None
+        if pid is None or pid in have or pid in taken:
+            continue
+        wanted[guid] = pid
+        taken.add(pid)
+    if not wanted:
+        return None
+    n = await attach(db, org_id, gid, scorecard, wanted)
+    await db.commit()
+    logger.info("GR-sync: repaired %s: %s", gid, n)
+    return n
+
+
+# A game played this recently is checked for missing rows on every sync that
+# reads it, not just for missing PLAYERS. CA fills a scorecard in over a few days
+# (a scorer finishing the second innings, a batter's line added late), and a
+# game stored at the first pull stays as it was: once any of the club's players
+# has an appearance on it, sync called it done. That left one innings of a
+# two-match weekend out of a player's totals while its game page was complete.
+REREAD_DAYS = 14
+# At most this many games a run reads again outside its window (newest first), so a club whose
+# scorers never enter fall of wickets cannot turn every run into a re-read of a fortnight of games.
+MAX_REREAD = 40
+
+
+def played_within(scorecard: dict, days: int = REREAD_DAYS, today: Optional[date] = None) -> bool:
+    """True when the scorecard's start date is within `days` of today (never for an unknown date)."""
+    for sched in (scorecard.get("matchSchedule") or []):
+        iso = (sched.get("startDateTime") or "")[:10]
+        if iso:
+            try:
+                d = date.fromisoformat(iso)
+            except ValueError:
+                continue
+            return 0 <= ((today or date.today()) - d).days <= days
+    return False
+
+
+async def reread_stored_game(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> Optional[dict]:
+    """Add any batting, bowling, fielding or appearance row a RECENT stored game lacks, for every
+    club player its team sheet names (not only ones with no appearance, as `repair_stored_game`).
+
+    Same rules as `attach`: rows only, a row already there is left alone (so a figure is never
+    overwritten, only filled in), nothing is deleted, and no extra request is made because the
+    scorecard is already in hand. Returns the counts added, or None when nothing was missing.
+    Commits its own work; the caller catches anything it raises.
+    """
+    team = _our_team(scorecard, org_id)
+    if not team:
+        return None
+    gid = game_id if isinstance(game_id, uuid.UUID) else uuid.UUID(str(game_id))
+    wanted: dict = {}
+    taken: set = set()
+    for p in team.get("players") or []:
+        guid = p.get("participantId") or ""
+        pid = resolve(guid) if guid else None
+        if pid is None or pid in taken:
+            continue
+        wanted[guid] = pid
+        taken.add(pid)
+    if not wanted:
+        return None
+    n = await attach(db, org_id, gid, scorecard, wanted)
+    n.update(await attach_innings_detail(db, org_id, gid, scorecard, resolve))
+    if not sum(n.values()):
+        await db.rollback()
+        return None
+    await db.commit()
+    logger.info("GR-sync: re-read %s: added %s", gid, n)
+    return n
+
+
+async def recent_games_without_detail(db: AsyncSession, org_id, days: int = REREAD_DAYS) -> set:
+    """Match ids of recent games we hold a `games` row for but little or no stored detail: no batting or
+    bowling row of the CLUB'S OWN players, or no fall of wickets and no partnerships at all.
+
+    An incremental run only reads fixtures newer than the club's last sync (less an
+    overlap), so a game stored while CA had its result but not yet its scorecard
+    detail is outside every later run's window and stays empty. Handing these ids
+    back lets the run read them again; `attach` then fills them in. Only games the
+    club played in (a side, or its own season) and only the last `days` days, so a
+    run never reads further back than it does for a game that is complete.
+
+    "Of the club's own players" matters for a fixture between two synced clubs: the
+    other club's sync may have stored ITS players' rows and none of ours.
+    """
+    res = await db.execute(text("""
+        SELECT g.id::text
+          FROM games g
+          LEFT JOIN grades gr ON gr.id = g.grade_id
+          LEFT JOIN seasons s ON s.id = gr.season_id
+         WHERE g.played_at >= CURRENT_DATE - CAST(:days AS INTEGER)
+           AND g.played_at <= CURRENT_DATE
+           AND (g.home_org_id = CAST(:org AS UUID) OR g.away_org_id = CAST(:org AS UUID)
+                OR s.organisation_id = CAST(:org AS UUID))
+           AND (
+                (NOT EXISTS (SELECT 1 FROM batting_innings bi JOIN players p ON p.id = bi.player_id
+                              WHERE bi.game_id = g.id AND p.organisation_id = CAST(:org AS UUID))
+                 AND NOT EXISTS (SELECT 1 FROM bowling_spells bs JOIN players p ON p.id = bs.player_id
+                                  WHERE bs.game_id = g.id AND p.organisation_id = CAST(:org AS UUID)))
+                OR (NOT EXISTS (SELECT 1 FROM fall_of_wickets f WHERE f.game_id = g.id)
+                    AND NOT EXISTS (SELECT 1 FROM partnerships pt WHERE pt.game_id = g.id))
+           )
+         ORDER BY g.played_at DESC
+         LIMIT :cap
+    """), {"org": str(org_id), "days": days, "cap": MAX_REREAD})
+    return {r[0] for r in res.all()}
+
+
+async def recent_unfinished_games(db: AsyncSession, org_id, days: int = REREAD_DAYS) -> set:
+    """Match ids of recent games we stored while CA did not call them COMPLETED (in play, or still
+    listed as to come), which the run reads again so their figures can be put right.
+
+    A game stored in play keeps the figures it was stored with (`card_figures_refresh`), and a two-day
+    game dated on its first Saturday is outside every run's window by the next weekend, so nothing else
+    would ever ask for its card again. `games.status` is CA's word at the last read: once a run reads the
+    game and CA says COMPLETED the status moves on and the game drops out of this list. A game with no
+    stored status (a row from before the column) and one CA called off are left out. Same fortnight and
+    same cap as `recent_games_without_detail`.
+    """
+    res = await db.execute(text("""
+        SELECT g.id::text
+          FROM games g
+          LEFT JOIN grades gr ON gr.id = g.grade_id
+          LEFT JOIN seasons s ON s.id = gr.season_id
+         WHERE g.played_at >= CURRENT_DATE - CAST(:days AS INTEGER)
+           AND g.played_at <= CURRENT_DATE
+           AND (g.home_org_id = CAST(:org AS UUID) OR g.away_org_id = CAST(:org AS UUID)
+                OR s.organisation_id = CAST(:org AS UUID))
+           AND g.status IS NOT NULL
+           AND UPPER(g.status) NOT IN ('COMPLETED', 'ABANDONED', 'CANCELLED')
+           AND EXISTS (SELECT 1 FROM game_appearances ga JOIN players p ON p.id = ga.player_id
+                        WHERE ga.game_id = g.id AND p.organisation_id = CAST(:org AS UUID))
+         ORDER BY g.played_at DESC
+         LIMIT :cap
+    """), {"org": str(org_id), "days": days, "cap": MAX_REREAD})
+    return {r[0] for r in res.all()}
+
+
+async def adopt_identity(db: AsyncSession, org_id, adopt: dict) -> int:
+    """Give a hand-added player the Cricket Australia id sync just matched them to.
+
+    ``adopt`` is ``{participant guid: player id}`` from a team sheet read by full
+    name. A record the club typed in has no Cricket Australia id, so the season
+    totals feed, which keys on that id, would mint a second record for the same
+    person and the two would have to be merged by hand later. Stamping the id on
+    the record the club already holds means the feed finds it instead.
+
+    Only a record with no CA id, no PlayHQ id and no import behind it takes one
+    (an imported career is a person with a history, left to the merge screen), and
+    only an id nobody in this club already holds. Returns how many were stamped.
+    """
+    n = 0
+    for guid, pid in adopt.items():
+        res = await db.execute(text("""
+            UPDATE players SET grassroots_id = :g
+             WHERE id = :p AND organisation_id = CAST(:o AS UUID)
+               AND grassroots_id IS NULL AND playhq_id IS NULL
+               AND cricketstatz_player_id IS NULL AND import_batch_id IS NULL
+               AND NOT EXISTS (SELECT 1 FROM players x
+                                WHERE x.organisation_id = CAST(:o AS UUID) AND x.grassroots_id = :g)
+        """), {"g": str(guid), "p": pid, "o": str(org_id)})
+        n += res.rowcount or 0
+    if n:
+        await db.commit()
+    return n
+

@@ -21,6 +21,7 @@ from app.services import grade_scope
 from app.services import iq as iq_service
 from app.services import iq_ask
 from app.services import iq_filters
+from app.services import iq_lineup
 from app.services import iq_opponent
 from app.services import iq_phases
 from app.services import iq_players
@@ -178,6 +179,28 @@ async def opposition_dossier(
     return await iq_opponent.get_or_start_dossier(
         db, str(club.id), key, opp_name=name, grade_id=grade_id, team_grade_id=team,
         grade_filter=grade,
+    )
+
+
+@router.get("/opposition/lineup")
+async def opposition_lineup(
+    fixture_id: str | None = Query(None, description="the fixture whose match record carries the opposition's named XI"),
+    opponent: str | None = Query(None, description="opp_key, when the fixture was linked to a club by hand"),
+    team: str | None = Query(None, description="same as the dossier route"),
+    grade: str | None = Query(None, description="same as the dossier route (the filter bar's grade names)"),
+    name: str | None = Query(None, description="display name for a club outside our history"),
+    refresh: bool = Query(False, description="bypass the five minute match-record cache"),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """The opposition's NAMED XI for one fixture, read live from the match record
+    and matched to the players their dossier has already scouted. Pass the same
+    ``team``/``grade`` the dossier was asked with so it matches against the same
+    squad. ``status`` says why there is no list: ``not_named`` is a normal state
+    early in the week; ``pending`` means a second pool is still building, poll."""
+    return await iq_lineup.opponent_lineup(
+        db, club, fixture_id=fixture_id, opponent=opponent, team=team, grade=grade,
+        name=name, refresh=refresh,
     )
 
 

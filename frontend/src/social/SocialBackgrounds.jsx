@@ -61,6 +61,11 @@ export const SOCIAL_BACKGROUNDS = [
   { key: 'clean-lines',      label: 'Clean Lines',       group: 'Clean & Minimal' },
   { key: 'clean-shard',      label: 'Clean Shard',       group: 'Clean & Minimal' },
   { key: 'clean-frame',      label: 'Clean Frame',       group: 'Clean & Minimal' },
+  // A pale panel beside a dark one, with soft diagonal bands and a dot texture
+  // fading into a shade at the foot. Primary is the dark panel and the shade at
+  // the foot, Secondary the pale panel, Paper the bands and dots. Built from a club's own
+  // Starting XI story; the Split Poster lineup uses it when it is picked.
+  { key: 'split-panels',     label: 'Split Panels',      group: 'Clean & Minimal' },
   // Gradient — two club colours blending in a chosen direction, with an
   // optional low-opacity crest watermark (see the `logoUrl` prop below).
   { key: 'gradient-custom',  label: 'Gradient',          group: 'Gradient' },
@@ -332,6 +337,22 @@ const VARIANTS = {
       <div style={abs({ inset: 34, border: `4px solid ${p.tertiary}`, opacity: 0.55 })} />
       <div style={abs({ left: 0, top: 0, width: '100%', height: 14, background: p.tertiary, opacity: 0.9 })} />
       <Grain fill="#fff" opacity={0.15} />
+    </React.Fragment>
+  ),
+  'split-panels': (p) => (
+    <React.Fragment>
+      <div style={{ ...full, background: p.secondary }} />
+      <svg width={1080} height={1080} viewBox="0 0 1080 1080" style={{ ...full, pointerEvents: 'none' }}>
+        <line x1={-40} y1={110} x2={565} y2={430} stroke={p.paper} strokeWidth={118} opacity={0.34} />
+        <line x1={-40} y1={270} x2={501} y2={568} stroke={p.paper} strokeWidth={84} strokeLinecap="round" opacity={0.4} />
+      </svg>
+      <div style={abs({
+        left: 0, top: 600, width: 545, height: 300, opacity: 0.5,
+        backgroundImage: `radial-gradient(${p.paper} 1.2px, transparent 1.6px)`, backgroundSize: '9px 9px',
+        WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, #000 70%)', maskImage: 'linear-gradient(180deg, transparent 0%, #000 70%)',
+      })} />
+      <div style={abs({ left: 545, top: 0, bottom: 0, width: 495, background: p.primary })} />
+      <div style={abs({ left: 0, bottom: 0, width: 545, height: 330, background: `linear-gradient(180deg, transparent 0%, ${p.primary}cc 55%, ${p.primary} 100%)` })} />
     </React.Fragment>
   ),
   // Free-direction two-colour gradient (angle/from/to read straight off the

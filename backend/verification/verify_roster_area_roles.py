@@ -140,6 +140,8 @@ async def build_schema():
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # A raw-SQL column (migration 208), not on the ORM model, so create_all
         # doesn't build it; the roster candidates query reads it.
         await conn.execute(text("ALTER TABLE volunteer_profiles ADD COLUMN IF NOT EXISTS max_shifts_per_week INTEGER"))

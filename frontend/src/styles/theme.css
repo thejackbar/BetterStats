@@ -48,6 +48,10 @@
   --pb-chart-wickets:   #3b82f6;
   --pb-chart-milestone: #f5b542;
   --pb-amber:           #f5b542;
+  /* "Half available": free for one weekend of a two-day game, away for the other.
+     The club can change both in BetterSelect Settings (lib/useAvailabilityConfig). */
+  --pb-half-w1:         #a855f7;
+  --pb-half-w2:         #06b6d4;
   --pb-chart-1: #16c784;
   --pb-chart-2: #3b82f6;
   --pb-chart-3: #f5b542;

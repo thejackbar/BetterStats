@@ -26,6 +26,13 @@ engine = create_async_engine(
     pool_timeout=settings.db_pool_timeout,
     pool_recycle=settings.db_pool_recycle,
     pool_pre_ping=True,
+    # JIT OFF FOR EVERY CONNECTION. The `v_effective_*` views plan at a cost of
+    # millions, past Postgres's JIT thresholds, so every read of one compiled a
+    # plan first: 6 to 7s of compiling in front of a read that runs in well
+    # under a second. Only the record book had turned it off, for itself. This
+    # is OLTP-sized work against a 370 MB database; there is nothing here JIT
+    # can win back. A startup parameter, so no pooled connection can lack it.
+    connect_args={"server_settings": {"jit": "off"}},
 )
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -327,6 +334,33 @@ class Organisation(Base):
     # means the sum of every competition listed rather than Cricket Australia's
     # own lifetime totals (frontend: useGradeFilters).
     show_competition_filters = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Hide the club's junior programme from its PUBLIC Stats (migration 315):
+    # junior-only players drop off the roster, search and leaderboards, and
+    # games in competitions tagged junior drop off every public list. Off by
+    # default. Signed-in club admins still see everything. Read through
+    # services/junior_hiding.py, never directly.
+    hide_juniors = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Count a club's winter and summer seasons of one year as ONE season
+    # (migration 331). Off by default: "Winter 2026" and "Summer 2026/27" are two
+    # seasons. Read through services/season_kind.py's callers, never directly.
+    amalgamate_seasons = Column(Boolean, nullable=False, server_default="false", default=False)
+    # The club's own names for the four sponsor tiers (migration 318), e.g.
+    # {"major": "Naming Partner"}. NULL means the stock names. Read through
+    # services/sponsor_tiers.resolve_labels, never directly.
+    sponsor_tier_labels = Column(JSONB, nullable=True)
+    # The club's own names for its public sections, optionally linked to a
+    # sponsor (migration 319), e.g. {"fantasy": {"name": "Froth Fantasy
+    # Cricket", "sponsor_id": "..."}}. NULL means standard names everywhere.
+    # Read through services/section_names.py, never directly.
+    section_names = Column(JSONB, nullable=True)
+    # The club's own Honour Board order (migration 324): group order, role order
+    # inside a group, and how the people under a role are sorted. NULL means the
+    # standard order. Read through services/honour_layout.py, never directly.
+    honour_board_layout = Column(JSONB, nullable=True)
+    # Sponsors pinned to a team or a grade so every post for it starts with them
+    # (migration 320). NULL means none pinned. Read through
+    # services/post_sponsors.py, never directly.
+    post_sponsor_defaults = Column(JSONB, nullable=True)
     # Which grade categories count towards this club's stats by default — a
     # JSONB list of grade_labels.GRADE_CATEGORIES keys (migration 228). NULL
     # means no club preference, and the platform default applies: everything
@@ -347,6 +381,14 @@ class Organisation(Base):
     # services/stats_display.py, never directly.
     stats_min_rate_innings = Column(Integer, nullable=True)
     stats_min_rate_spells = Column(Integer, nullable=True)
+    # A club's own run and wicket milestone increments (migration 321). NULL is
+    # the default scheme. Read through services/milestone_rules.load_scheme.
+    milestone_runs_step = Column(Integer, nullable=True)
+    milestone_wickets_step = Column(Integer, nullable=True)
+    # Matches and catches steps (migration 330), and the per-grade table that
+    # sits beside them (services/grade_milestone_schemes).
+    milestone_matches_step = Column(Integer, nullable=True)
+    milestone_catches_step = Column(Integer, nullable=True)
     # ─── AFL — optional public leaderboard categories (migration 217) ────────
     # Games and Goals are always shown; a club decides whether Best on Ground
     # and its two vote-tally leaderboards (Club/Competition Best & Fairest —
@@ -498,6 +540,14 @@ class Organisation(Base):
     cricketstatz_club_id = Column(Text, nullable=True)
     availability_self_service_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
     availability_require_pin = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Whether the self-service page tells a player which squad is theirs (migration
+    # 325). Off by default: some clubs do not want squads known to the players.
+    availability_show_squad = Column(Boolean, nullable=False, server_default="false", default=False)
+    # False = the club records only Available / Unavailable (migration 340).
+    availability_allow_maybe = Column(Boolean, nullable=False, server_default="true", default=True)
+    # The ordered module keys shown on a player's own page (migration 341).
+    # NULL = never chosen, which reads as services/player_dashboard.DEFAULT_MODULES.
+    player_dashboard_modules = Column(JSONB, nullable=True)
     # ─── BetterFantasyCricket: public fantasy link (migration 087) ────────────
     # The per-club magic link members and supporters use to register and play
     # (mirrors availability_link_token). Rotatable; resolves to the club's
@@ -635,6 +685,11 @@ class Sponsor(Base):
     contact_name = Column(Text, nullable=True)
     email = Column(Text, nullable=True)
     klubpro_sponsor_id = Column(Text, nullable=True)
+    # Tier and hand-set placement switches (migration 318). Where a sponsor
+    # shows is derived on read through services/sponsor_tiers.py: the tier's
+    # defaults with `placements` applied on top (NULL = follow the tier).
+    tier = Column(Text, nullable=False, server_default="silver", default="silver")
+    placements = Column(JSONB, nullable=True)
 
 
 # ─── BetterSocials media library (migration 191) ─────────────────────────────
@@ -786,6 +841,8 @@ class ClubHonourBoard(Base):
     # category (optionally narrowed by subcategory) instead of manual entries.
     source_category = Column(Text, nullable=True)
     source_subcategory = Column(Text, nullable=True)
+    # Optional exact award name inside the category ("A Grade Cap Number"); NULL = all.
+    source_achievement = Column(Text, nullable=True)
     # How many columns to lay the entries out in on the public site (1–4).
     columns = Column(Integer, nullable=False, server_default="1", default=1)
     display_order = Column(Integer, nullable=False, server_default="0", default=0)
@@ -874,6 +931,10 @@ class ClubMembership(Base):
     # role". For super_admin/club_admin the list is ignored (those roles
     # imply all caps). For club_member, this is the explicit allowlist.
     capabilities = Column(JSONB, default=list, nullable=False, server_default="[]")
+    # The subset of `capabilities` held at VIEW level only (services/access.py, migration
+    # 344): a route gated on one of them answers a read and refuses a write. Always []
+    # for club_admin and super_admin.
+    view_only_caps = Column(JSONB, default=list, nullable=False, server_default="[]")
     # The club's primary / owner admin (migration 118). The first club_admin
     # created for a club is primary; it's reassignable to another club_admin (by
     # the current primary or a super admin). Only the primary may request a paid
@@ -1248,6 +1309,10 @@ class ClubCompetition(Base):
     # True on a row this app seeded, cleared the moment a person edits it, so a
     # later re-seed can never overwrite a club's own naming.
     is_seeded = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Junior or senior cricket (migration 315). NULL = nobody has said, and the
+    # reader guesses from the name (services/junior_hiding.py). A person's
+    # TRUE/FALSE is never overwritten by sync or a re-seed.
+    is_junior = Column(Boolean, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
@@ -1407,6 +1472,16 @@ class Player(Base):
     # grades.is_public, and read through the same user_can_view_org_private
     # escape so a signed-in club admin still sees their own club whole.
     is_public = Column(Boolean, default=True, nullable=False, server_default="true")
+    # Set when the PERSON asked to be removed from the public site (migration
+    # 316). `is_public` still does the hiding; this says why, and while it is
+    # set no admin edit or bulk import may switch it back on, and no photo may
+    # be uploaded. See services/player_privacy.py.
+    privacy_hidden_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    privacy_hidden_by = Column(Text, nullable=True)
+    privacy_hidden_reason = Column(Text, nullable=True)
+    # An admin confirmed a row held because its NAME matched a removed person is
+    # a different person; the name match then skips this row.
+    privacy_name_cleared_at = Column(TIMESTAMP(timezone=True), nullable=True)
     # BetterSelect "non-financial" filter (migration 265). NULL = no override,
     # so the answer comes from BetterFees' own balance; True/False is a club
     # saying so by hand, which is also the only answer a club not running
@@ -1430,6 +1505,9 @@ class Player(Base):
     # a different question and sit on fee_members, where a non-playing member
     # can hold one too.
     shirt_number = Column(Text, nullable=True)
+    # The day a club marked a dormant player "no longer dormant" (migration 348).
+    # Counts as a last-active date for the dormancy test only; see services/dormancy.py.
+    dormancy_cleared_on = Column(Date, nullable=True)
 
     organisation = relationship("Organisation", back_populates="players")
     batting_innings = relationship("BattingInnings", back_populates="player")
@@ -1441,7 +1519,9 @@ class Player(Base):
 
     @property
     def display_name(self) -> str:
-        return self.display_name_override or self.name
+        # A free-text "First Last" override is shown as "Last, First" like synced names.
+        from app.services.name_format import canonical_player_name
+        return canonical_player_name(self.display_name_override) or self.name
 
 
 class PlayerNameAlias(Base):
@@ -1499,6 +1579,10 @@ class Game(Base):
     # player's matches-played count; `result` cannot answer that question,
     # since a NULL result also covers an upcoming or in-progress fixture.
     status = Column(Text, nullable=True)
+    # CA called the fixture off but left `status` COMPLETED: both teams' resultType on the card
+    # read ABANDONED (services/game_status.card_called_off). NULL = not read yet, FALSE = read and
+    # not called off. Read like an ABANDONED status by the matches-played rules.
+    ca_called_off = Column(Boolean, nullable=True)
 
     grade = relationship("Grade", back_populates="games")
     batting_innings = relationship("BattingInnings", back_populates="game")
@@ -1543,6 +1627,14 @@ class Fixture(Base):
     # names its finals something the heuristic can't read.
     is_final = Column(Boolean, nullable=True)
     notes = Column(Text, nullable=True)
+    # Which of the squad's teams plays this fixture, as a grade key (migration 337).
+    # NULL = work it out from grade_id. Sync never writes it.
+    side_key = Column(Text, nullable=True)
+    # The squad on a synced fixture was picked by hand (migration 338): sync leaves it.
+    team_pinned = Column(Boolean, nullable=False, server_default="false")
+    # Set when the confirmed side is locked (migration 334); NULL = open to edit.
+    locked_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    locked_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
@@ -1568,6 +1660,8 @@ class Team(Base):
     sequence = Column(Integer, default=0, nullable=False, server_default="0")  # hierarchy rank (1 = top team)
     grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
     default_formation = Column(Text, nullable=True)
+    default_team_size = Column(Integer, nullable=True)  # NULL = follow the club; 0 = no limit
+    min_team_size = Column(Integer, nullable=True)  # fewest players the side may field; NULL = must be full
     is_active = Column(Boolean, default=True, nullable=False, server_default="true")
     source = Column(Text, nullable=False, server_default="manual")  # 'auto' | 'manual'
     playhq_id = Column(Text, nullable=True)
@@ -1703,6 +1797,16 @@ class VoteMedal(Base):
     # has thought about grades. No FK on purpose: a grade merged away or
     # deleted just stops matching rather than blocking the delete.
     grade_ids = Column(JSONB, nullable=False, default=list, server_default="[]")
+    # Per-team override of ``voter_mode`` (migration 345): grade NAME ->
+    # 'players' | 'captain'. A team with no entry follows ``voter_mode``.
+    grade_voter_modes = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    # Who counts a captain-only team's votes when the captain hands that job to
+    # someone else (migration 347): grade NAME -> player id (uuid string). The
+    # person need not be in the side. A team with no entry is the captain's.
+    grade_vote_counters = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    # How the medal weights its grades (migration 346): {"mode": 'off' | 'auto'
+    # | 'manual', "manual": {grade NAME: multiplier}}. Empty = unweighted.
+    grade_weighting = Column(JSONB, nullable=False, default=dict, server_default="{}")
     position = Column(Integer, nullable=False, default=0, server_default="0")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
@@ -1726,7 +1830,7 @@ class VoteSettings(Base):
     voter_mode = Column(Text, nullable=False, default="players", server_default="players")  # 'players' | 'captain'
     ballot_values = Column(JSONB, nullable=False, default=[3, 2, 1])  # descending, position 1 first
     counting_method = Column(Text, nullable=False, default="rank", server_default="rank")  # 'rank' | 'tally'
-    tie_policy = Column(Text, nullable=False, default="share", server_default="share")  # 'share' | 'countback'
+    tie_policy = Column(Text, nullable=False, default="countback", server_default="countback")  # 'share' | 'countback'
     allow_self_vote = Column(Boolean, nullable=False, default=False, server_default="false")
     allow_non_participants = Column(Boolean, nullable=False, default=False, server_default="false")
     auto_close_days = Column(Integer, nullable=False, default=7, server_default="7")
@@ -1843,6 +1947,13 @@ class NetSession(Base):
     # carries no net column — the default lives in the most recent session).
     settings = Column(JSONB, nullable=True)
     status = Column(Text, nullable=False, server_default="active")  # active | done
+    # This session's own check-in link (migration 335): a QR code printed for it
+    # checks people into it alone, where the club-wide link joins every live
+    # session. NULL until first asked for.
+    checkin_token = Column(Text, nullable=True)
+    # Squads this session is for; NULL/empty = everyone. Narrows the self check-in
+    # list reached by this session's own link.
+    squad_team_ids = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
     # Bumped by every write that changes what the live screen shows, so a
     # second device polling with the version it last saw is told "nothing has
     # changed" in two fields instead of re-reading the whole session. Always
@@ -2057,6 +2168,10 @@ class GameAppearance(Base):
     team_name = Column(Text, nullable=True)
     is_captain = Column(Boolean, default=False, nullable=False, server_default='false')
     is_wicket_keeper = Column(Boolean, default=False, nullable=False, server_default='false')
+    # A 12th man or substitute fielder who did not play (services/reserve_players.py). NULL = not
+    # judged, read as played. Added in raw SQL by superseded_ddl.STATEMENTS, so it is mapped here.
+    is_reserve = Column(Boolean, nullable=True)
+    sheet_slot = Column(Integer, nullable=True)
 
     game = relationship("Game", back_populates="appearances")
     player = relationship("Player", back_populates="appearances")
@@ -2268,6 +2383,16 @@ class ManualGame(Base):
     # Migration 311: FALSE when the source recorded both innings but not which
     # was batted first (a CSFW scorebook import). NULL means known.
     innings_order_known = Column(Boolean, nullable=True)
+    # Migration 349 (services/card_review_ddl): which stored version a person chose for a
+    # paired match. NULL until somebody does. Mapped here as well as in the DDL so a read
+    # through the ORM does not fail at request time.
+    review_choice = Column(Text, nullable=True)
+    review_source = Column(Text, nullable=True)
+    review_decided_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_decided_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    review_note = Column(Text, nullable=True)
+    review_pair_ok = Column(Boolean, nullable=False, server_default="false")
+    review_detail = Column(JSONB, nullable=True)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -2573,6 +2698,11 @@ class ImportBatch(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     committed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     undone_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # A historical summary that stops at a season (migration 328): the START year
+    # of the last season the sheet covers, and the club's wording for it. NULL =
+    # an ordinary import that claims the whole career.
+    through_year = Column(Integer, nullable=True)
+    through_label = Column(Text, nullable=True)
 
     organisation = relationship("Organisation")
 
@@ -5520,6 +5650,9 @@ class FantasySquad(Base):
     chips_used = Column(JSONB, nullable=False, server_default="{}")
     total_points = Column(Numeric(8, 2), nullable=False, server_default="0")
     joined_round = Column(Integer, nullable=True)
+    # Points a mid-season joiner starts on (level with the lowest team when they
+    # joined). Added back by fantasy_squad.recompute_squad_totals.
+    catchup_points = Column(Numeric(8, 2), nullable=False, server_default="0")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -5585,7 +5718,9 @@ class FantasyPoolPlayer(Base):
     total_points = Column(Numeric(8, 2), nullable=False, server_default="0")
     last_round_points = Column(Numeric(8, 2), nullable=False, server_default="0")
     owned_count = Column(Integer, nullable=False, server_default="0")
-    price_change = Column(Numeric(6, 1), nullable=False, server_default="0")
+    price_change = Column(Numeric(6, 1), nullable=False, server_default="0")   # the latest scored round's move
+    # A price an admin typed in by hand: the round-by-round movement leaves it alone.
+    price_locked = Column(Boolean, nullable=False, server_default="false")
     is_available = Column(Boolean, nullable=False, server_default="true")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -5612,8 +5747,39 @@ class FantasyRound(Base):
     end_date = Column(Date, nullable=True)
     status = Column(Text, nullable=False, server_default="upcoming")   # upcoming | locked | scored
     scored_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # An admin set `lock_at` by hand: the nightly round refresh keeps it.
+    lock_manual = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FantasyQueuedTransfer(Base):
+    """A transfer made after the round locked. It waits on `after_round_id` and is
+    carried out when that round is scored, at the prices after settlement, so the
+    locked round is scored with the XI that was locked. `status`: pending | applied |
+    cancelled (`reason` says why). The sell/buy figures and what the swap used are
+    kept so unsettling the round can put it back."""
+    __tablename__ = "fantasy_queued_transfers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fantasy_season_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_seasons.id", ondelete="CASCADE"), nullable=False)
+    squad_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_squads.id", ondelete="CASCADE"), nullable=False)
+    after_round_id = Column(UUID(as_uuid=True), ForeignKey("fantasy_rounds.id", ondelete="CASCADE"), nullable=False)
+    out_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    in_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    status = Column(Text, nullable=False, server_default="pending")
+    reason = Column(Text, nullable=True)
+    sell_value = Column(Numeric(8, 1), nullable=True)
+    buy_price = Column(Numeric(8, 1), nullable=True)
+    hit = Column(Integer, nullable=False, server_default="0")
+    free_used = Column(Boolean, nullable=False, server_default="false")
+    out_purchase_price = Column(Numeric(8, 1), nullable=True)
+    out_added_round = Column(Integer, nullable=True)
+    out_was_captain = Column(Boolean, nullable=False, server_default="false")
+    out_was_vice = Column(Boolean, nullable=False, server_default="false")
+    applied_round_number = Column(Integer, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    applied_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
 
 class FantasyPlayerRoundScore(Base):

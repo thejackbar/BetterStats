@@ -1,16 +1,18 @@
 import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import false, select, text
+from sqlalchemy import false, or_, select, text
 from typing import Optional
 import logging
 import uuid
 
 logger = logging.getLogger(__name__)
 
-from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, ManualInnings, get_db
-from app.services import dismissal, grade_scope
+from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, ManualInnings, User, get_db
+from app.routers.auth import get_optional_user, public_junior_hiding
+from app.services import dismissal, grade_scope, participant_names
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
+from app.services.club_match import fixture_side
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
 from app.services import rate_coverage as rc
 
@@ -49,6 +51,17 @@ async def _fetch_manual_games_as_list(
             # Competitions were asked for and none of them are this club's.
             # Nothing matches — never everything.
             q = q.where(false())
+    if scope is not None and getattr(scope, "grade_active", False):
+        # A picked grade is an INCLUSION too, so a grade-less hand-typed game
+        # drops out for the same reason it does under a competition.
+        q = q.where(ManualGame.grade_id.in_(
+            [uuid.UUID(str(g)) for g in scope.grade_pick_ids]) if scope.grade_pick_ids
+            else false())
+    if scope is not None and getattr(scope, "hidden_grade_ids", None):
+        # Junior grades a club hides from its public Stats apply to a hand-typed
+        # game too. A grade-less one is kept: it is not known to be junior.
+        q = q.where(or_(ManualGame.grade_id.is_(None),
+                        ManualGame.grade_id.not_in(list(scope.hidden_grade_ids))))
     if season_id:
         q = q.where(ManualGame.season_id == uuid.UUID(season_id))
     if grade_id:
@@ -120,14 +133,17 @@ async def list_games(
         ),
     ),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     # Grade-type / match-type / competition scope. An explicitly picked grade
     # beats the category half, the same rule the leaderboards follow. Resolved
     # BEFORE the manual games are fetched because they need the competition
     # half of it — see _fetch_manual_games_as_list for why that one axis
     # reaches a grade-less manual game when the other two deliberately don't.
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
     scope = await grade_scope.resolve_scope(
-        db, org_id, categories, formats=formats, competitions=competitions)
+        db, org_id, categories, formats=formats, competitions=competitions,
+        hidden_grade_ids=hiding.grade_ids)
     if grade_id:
         # A picked grade beats the CATEGORY half only — a grade plays more than
         # one format, so Match Type still has to bite inside it.
@@ -672,11 +688,74 @@ _GENERIC_SIDE_WORDS = {
 }
 
 
+async def _viewing_club(db: AsyncSession, game, hint: str) -> Optional[Organisation]:
+    """The club named by ``hint`` (organisation id or slug) when it played in
+    this synced game, else None.
+
+    Played in it means the game names the club as its home or away organisation,
+    or, for a row written before those columns were filled, the club's name is on
+    a side AND one of the club's own players has an appearance in it. A club that
+    merely shares a word with a team ("North" for "North Beach") never qualifies.
+    """
+    club = None
+    try:
+        club = await db.get(Organisation, uuid.UUID(hint))
+    except (ValueError, TypeError):
+        club = (await db.execute(
+            select(Organisation).where(Organisation.slug == hint.lower())
+        )).scalar_one_or_none()
+    if club is None:
+        return None
+    if club.id in (game.home_org_id, game.away_org_id):
+        return club
+    side = fixture_side(club, game.home_team, game.away_team, game.home_org_id, game.away_org_id)
+    if side is None:
+        return None
+    played = await db.scalar(text(
+        "SELECT 1 FROM game_appearances ga JOIN players p ON p.id = ga.player_id "
+        "WHERE ga.game_id = :gid AND p.organisation_id = :org LIMIT 1"
+    ), {"gid": game.id, "org": club.id})
+    return club if played else None
+
+
+def _result_for_club(game, club: Organisation) -> Optional[str]:
+    """WIN / LOSS / DRAW as ``club`` saw it. ``games.result`` is the verdict of
+    whichever club synced the fixture first, so the other club reads it
+    backwards. The winning team's name is neutral and is judged against this
+    club's own side; the stored result is flipped only when that is not enough."""
+    side = fixture_side(club, game.home_team, game.away_team, game.home_org_id, game.away_org_id)
+    won = (game.winning_team or "").strip()
+    if won and side:
+        ours = game.home_team if side == "home" else game.away_team
+        theirs = game.away_team if side == "home" else game.home_team
+        if won == (ours or "").strip():
+            return "WIN"
+        if won == (theirs or "").strip():
+            return "LOSS"
+    if game.result in ("WIN", "LOSS") and club.id not in (game.home_org_id, game.away_org_id) \
+            and (game.home_org_id or game.away_org_id):
+        return "LOSS" if game.result == "WIN" else "WIN"
+    return game.result
+
+
 @router.get("/{game_id}/scorecard")
 async def get_scorecard(
     game_id: str,
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+    org_param: Optional[str] = Query(
+        None, alias="org",
+        description=(
+            "The club the visitor is browsing from (organisation id or slug). A "
+            "fixture between two synced clubs is one row filed under whichever "
+            "club synced it first, so without this the page is always read from "
+            "that club's side. Honoured only for a club that played in the game."
+        ),
+    ),
 ):
+    # A route body called directly (the verification suites do) is handed the
+    # Query default object, not a value.
+    org_hint = org_param.strip() if isinstance(org_param, str) and org_param.strip() else None
     game = await db.get(Game, uuid.UUID(game_id))
     is_manual = False
     if not game:
@@ -705,6 +784,26 @@ async def get_scorecard(
     # toggle). Whether their name also shows in the lower-stakes partnerships
     # and fielding cards is the club's own call (migration 147) — default on.
     include_fillins_stats = bool(org.include_fill_ins_in_stats) if org else True
+
+    # A club that hides its juniors also hides their scorecards from the public:
+    # a junior match reads as absent, the way a hidden player's profile does.
+    if org is not None and game.grade_id:
+        hiding = await public_junior_hiding(db, viewer, org.id, with_players=False)
+        if hiding.active and game.grade_id in hiding.grade_ids:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+    # Read the card from the side of the club the visitor came from. The owning
+    # club (above) is only whoever synced a shared fixture first; the junior
+    # hiding check ran against it on purpose, so the other club cannot be used
+    # to look at a match the owner hides.
+    viewing_org = None
+    if org_hint and not is_manual:
+        viewing_org = await _viewing_club(db, game, org_hint)
+        if viewing_org is not None and (org is None or viewing_org.id != org.id):
+            org = viewing_org
+            include_fillins_stats = bool(org.include_fill_ins_in_stats)
+        else:
+            viewing_org = None
 
     # Manual and synced child models share the same field names, so we just
     # pick which model to query against based on the game's provenance.
@@ -806,13 +905,15 @@ async def get_scorecard(
 
     fielding_flat = []
     for fs, p in fielding_rows:
-        if (fs.catches or 0) + (fs.run_outs or 0) + (fs.stumpings or 0) <= 0:
+        if ((fs.catches or 0) + (fs.catches_wk or 0)
+                + (fs.run_outs or 0) + (fs.stumpings or 0)) <= 0:
             continue
         if fs.player_id:
             fielding_flat.append({
                 "player_id": str(fs.player_id),
                 "player_name": p.display_name if p else None,
                 "catches": fs.catches,
+                "catches_wk": fs.catches_wk,
                 "run_outs": fs.run_outs,
                 "stumpings": fs.stumpings,
             })
@@ -822,6 +923,7 @@ async def get_scorecard(
                 "player_id": None,
                 "player_name": _disp_name,
                 "catches": fs.catches,
+                "catches_wk": fs.catches_wk,
                 "run_outs": fs.run_outs,
                 "stumpings": fs.stumpings,
                 "is_fill_in": _is_fi,
@@ -944,11 +1046,19 @@ async def get_scorecard(
             guid_to_pid: dict[str, uuid.UUID] = {r[1]: r[0] for r in player_rows if r[1]}
             id_to_display: dict[uuid.UUID, str] = {r[0]: (r[2] or r[3]) for r in player_rows}
             id_by_str: dict[str, uuid.UUID] = {str(r[0]): r[0] for r in player_rows}
-            nk_to_pid: dict[tuple, uuid.UUID] = {}
+            # (surname, first initial) is ambiguous at any club with two "A Taylor"s:
+            # keep every holder of the key and only link when exactly one has it,
+            # rather than silently picking whichever row came first.
+            nk_holders: dict[tuple, set] = {}
             for _pid, _guid, _override, _name in player_rows:
                 _dname = _override or _name
                 if _dname and not _looks_redacted(_dname):
-                    nk_to_pid.setdefault(_name_key(_dname), _pid)
+                    nk_holders.setdefault(_name_key(_dname), set()).add(_pid)
+            nk_to_pid: dict[tuple, uuid.UUID] = {k: next(iter(v)) for k, v in nk_holders.items() if len(v) == 1}
+            # The team sheet carries the full name even where the batting row only has
+            # an initial, and a full name held by one player beats an initial.
+            full_to_pid = participant_names.unique_by_full_name(
+                [(r[0], r[2] or r[3]) for r in player_rows])
 
             def _resolve_linked_id(pid_str: str, name: str) -> Optional[uuid.UUID]:
                 """Which of our own players (if any) this GR participant is —
@@ -969,8 +1079,20 @@ async def get_scorecard(
                     alias_pid = alias_map.get(normalise_name_key(name))
                     if alias_pid:
                         return id_by_str.get(alias_pid)
+                roster_name = pid_to_name.get(pid_str)
+                if roster_name and participant_names.looks_full(roster_name):
+                    full_pid = full_to_pid.get(participant_names.full_name_key(roster_name))
+                    if full_pid is not None:
+                        return full_pid
                 if name and not _looks_redacted(name):
-                    return nk_to_pid.get(_name_key(name))
+                    cand = nk_to_pid.get(_name_key(name))
+                    # The team sheet gave a full name that matched nobody. A player who
+                    # shares only the surname and initial (Angus for Ashton Taylor) is a
+                    # different person, so the loose match needs a compatible given name.
+                    if cand is not None and roster_name and participant_names.looks_full(roster_name) \
+                            and not participant_names.first_names_compatible(roster_name, id_to_display.get(cand)):
+                        return None
+                    return cand
                 return None
 
             # Org name first word — the PRIMARY signal for which GR team is
@@ -1050,8 +1172,20 @@ async def get_scorecard(
                 _our_logo = org.logo_url or (f"/images/organisations/{org.id}/logo" if org.logo_data else None)
 
             # Pass 2: decide which team id is ours, org name first.
+            # The team's owning organisation id is the exact answer (our
+            # organisations.id is the CA org GUID); the first word of the club
+            # name is not ("north" is in "North Beach" as well as "North
+            # Perth"), so it only decides when no team names an owner.
             _our_tid = None
-            if org_word:
+            if org:
+                _our_tid = next(
+                    (str(_t.get("id") or "").lower() for _t in _teams_raw
+                     if str(((_t.get("owningOrganisation") or {}).get("id")) or "").lower() == str(org.id).lower()
+                     and _t.get("id")),
+                    None,
+                )
+            _owners_named = any(((_t.get("owningOrganisation") or {}).get("id")) for _t in _teams_raw)
+            if _our_tid is None and org_word and not _owners_named:
                 _our_tid = next(
                     (tid for tid, nm in gr_team_name_by_id.items() if org_word in nm.lower()),
                     None,
@@ -1079,7 +1213,11 @@ async def get_scorecard(
             summary_teams = (gr_data.get("matchSummary") or {}).get("teams") or []
             home_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is True), "") or game.home_team or ""
             away_name = next((t.get("displayName", "") for t in summary_teams if t.get("isHome") is False), "") or game.away_team or ""
-            we_are_home = bool(org_word and game.home_team and org_word in game.home_team.lower())
+            _home_tid_gr = next((str(_t.get("id") or "").lower() for _t in _teams_raw if _t.get("isHome") is True), None)
+            if _our_tid is not None and _home_tid_gr is not None:
+                we_are_home = _our_tid == _home_tid_gr
+            else:
+                we_are_home = bool(org_word and game.home_team and org_word in game.home_team.lower())
             our_display_name = home_name if we_are_home else away_name
             opp_display_name = away_name if we_are_home else home_name
 
@@ -1290,6 +1428,25 @@ async def get_scorecard(
     if is_manual and getattr(game, "extracted_payload", None):
         opp_batting, opp_bowling = _manual_opp_from_payload(game.extracted_payload, innings_totals)
 
+    # A club card a person chose to show WITH Cricket Australia's detail (card review,
+    # services/card_review_hybrid): the opposition's cards and the bowler/fielder text on our
+    # dismissals, copied once from the synced card and kept on `review_detail`. Never read for a
+    # photo upload (that carries its own `extracted_payload`) and written by nothing else.
+    # The club's own `manual_innings` totals are merged AFTER this, so they win.
+    if is_manual and getattr(game, "review_detail", None) and not getattr(game, "extracted_payload", None):
+        _rd = game.review_detail
+        opp_batting = [dict(r) for r in _rd.get("opp_batting") or []]
+        opp_bowling = [dict(r) for r in _rd.get("opp_bowling") or []]
+        for _n, _t in (_rd.get("innings_totals") or {}).items():
+            _meta = innings_totals.setdefault(int(_n), {"runs": 0, "wickets": 0, "extras": 0})
+            _meta.update({k: v for k, v in _t.items() if v is not None})
+        _text_by = {(d.get("innings_number"), str(d.get("player_id"))): d.get("text")
+                    for d in _rd.get("our_dismissals") or []}
+        for _row in batting_flat:
+            _txt = _text_by.get((_row.get("innings_number"), str(_row.get("player_id"))))
+            if _txt:
+                _row["dismissal_type"] = _txt
+
     # A hand-entered game records its innings side / extras / opposition totals
     # in manual_innings instead (a photo upload has none, so these never clash).
     if is_manual and manual_innings_rows:
@@ -1336,7 +1493,7 @@ async def get_scorecard(
         # a margin in wickets depends on who batted last.
         "innings_order_known": getattr(game, "innings_order_known", None) is not False,
         "played_at": game.played_at.isoformat() if game.played_at else None,
-        "result": game.result,
+        "result": _result_for_club(game, viewing_org) if viewing_org is not None else game.result,
         "winning_team": game.winning_team,
         # Lets the scorecard page fetch the owning club and wear its theme
         # (colours + fonts) without needing an ?org= query param on the link.

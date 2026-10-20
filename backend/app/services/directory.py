@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # module keeps only the Directory-specific reads/writes (the people list with
 # segments, and role assignment).
 from app.services.members import MEMBER_CATEGORIES  # noqa: F401  (re-exported for the router)
-from app.services.squad_membership import recompute_primary_squad
+from app.services.squad_membership import move_squad_membership, recompute_primary_squad
 
 # A membership type contributes a segment prefixed `type:`, so the club naming a
 # type "Volunteer" (every club that adopted the pre-248 starter set has one) can
@@ -581,17 +581,7 @@ async def set_squad(db: AsyncSession, org_id, player_id, team_id) -> None:
     # left. Other squads (added on the board) are untouched. Raw SQL keeps this
     # module out of the ORM graph; recompute_primary_squad is text()-only too.
     if old_team_id != team_id:
-        if old_team_id:
-            await db.execute(text(
-                "DELETE FROM team_members WHERE team_id = :t AND player_id = :pid "
-                "AND organisation_id = :org"
-            ), {"t": old_team_id, "pid": player_id, "org": org_id})
-        if team_id:
-            await db.execute(text(
-                "INSERT INTO team_members (team_id, player_id, organisation_id) "
-                "VALUES (:t, :pid, :org) ON CONFLICT DO NOTHING"
-            ), {"t": team_id, "pid": player_id, "org": org_id})
-        await recompute_primary_squad(db, org_id, player_id)
+        await move_squad_membership(db, org_id, player_id, old_team_id, team_id)
 
 
 async def set_fee_tier(db: AsyncSession, org_id, member_id, season_id, fee_schedule_id) -> None:

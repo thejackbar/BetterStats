@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import Dropdown from '../../components/Dropdown'
@@ -17,36 +17,61 @@ import TextPanel from '../../components/admin/socialpost/panels/TextPanel'
 import ShapesPanel from '../../components/admin/socialpost/panels/ShapesPanel'
 import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPanel'
 import LayersPanel from '../../components/admin/socialpost/panels/LayersPanel'
-import { api } from '../../lib/api'
+import SponsorsPanel from '../../components/admin/socialpost/panels/SponsorsPanel'
+import { api, setPublishingContext } from '../../lib/api'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
   T5_Brutalist, T6_Diagonal, T7_CaptainSpotlight, T8_Mosaic, T9_Flyer, T10_TeamSheet,
   C1_CaptainAnnounce, C2_TossWon, C3_ManOfMatch, C4_FinalScore,
   SC1_Broadcast, SC2_Brutalist, SC3_Dashboard,
-  PALETTES, orgAccent, orgAccent2, orgToPalette, featuredOf, DEFAULT_HERO_FOCUS,
+  PALETTES, orgAccent, orgAccent2, orgToPalette, featuredOf, DEFAULT_HERO_FOCUS, LINEUP_MAX,
 } from '../../social/cricket-templates'
 import {
   FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
   ResultMarginHero, ResultBroadcast, ResultVersusColumns, ResultStar, ResultInningsBars, ResultTicket,
   ResultsList, ResultsListLeaders, ResultsScoreboard, ResultsRecord, ResultsHeadline, ResultsBoard, ResultsSplit,
-  DEFAULT_FIXTURES, DEFAULT_RESULTS,
+  DEFAULT_FIXTURES, DEFAULT_RESULTS, perfKeys,
 } from '../../social/round-templates'
+import { SplitPoster, autoPanelColor } from '../../social/split-template'
+import { LineupCard, LINEUP_CARD_DEFAULTS, cardWashDefault } from '../../social/lineup-card-template'
+import { ResultGlass, GLASS_DEFAULTS, GLASS_FOCUS, GLASS_POSITIONS } from '../../social/result-glass-template'
+import { RoundCover } from '../../social/round-cover-template'
+import { ResultHighlights, HIGHLIGHTS_FOCUS } from '../../social/highlights-cover-template'
+import { GiantType } from '../../social/giant-type-template'
+import { MilestoneCards, MilestoneBoard, MILESTONE_MAX } from '../../social/milestone-templates'
+import {
+  DEFAULT_MILESTONE_WINDOW, achievedMilestones, defaultPicks, milestoneUnit, milestoneValueText, formatMilestoneDate,
+} from '../../social/milestoneItems'
+import MilestonePicker from '../../components/admin/socialpost/MilestonePicker'
+import { TeamOfWeekGrid, TeamOfWeekBoard, TOTW_MIN, TOTW_MAX, TOTW_DEFAULT } from '../../social/totw-templates'
+import { MAKEUP_KINDS, MAKEUP_LABELS, FANTASY_MAKEUP, makeupSize, poolKinds, pickMakeup, shortfallText } from '../../social/totwMakeup'
 import { exportNodeToPng } from '../../social/exportImage'
 import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
-import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
+import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor, prepareEventList, defaultEventList } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
-import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
+import { BlankCanvas, newBlankItem, defaultBlankItems, withDesign } from '../../social/blank-template'
+import { parseTemplateFile, itemsFromTemplate, templateWarnings, boundSlotCount } from '../../social/boundFields'
+import { CustomLayout, CUSTOM_LAYOUT_ID, CUSTOM_LAYOUTS, CUSTOM_LAYOUT_IDS, CUSTOM_PANEL_ALIAS, isCustomLayout } from '../../social/custom-layout'
+import { fixtureRows, resultRows, finalBundle, motmBundle, announceBundle, tossBundle, totwBundle, milestoneBundle, eventBundle } from '../../social/postBundle'
+import CanvaImportBox from '../../components/admin/socialpost/CanvaImportBox'
+import { sponsorSlotFor } from '../../social/sponsorSlots'
 import { useBlankLayer } from '../../social/useBlankLayer'
 import { useTemplateLayers } from '../../social/useTemplateLayers'
 import { PostLayerProvider } from '../../social/postLayers'
+import { PostLookContext, alphaHex, DEFAULT_VEIL } from '../../social/postLook'
+import { partsFor, partsKey, cleanParts } from '../../social/layoutParts'
 import { useEditHistory } from '../../social/useEditHistory'
 import { usePages } from '../../social/usePages'
 import PageStrip from '../../components/admin/socialpost/PageStrip'
 import PostPreviewModal from '../../components/admin/socialpost/PostPreviewModal'
+import ClubGamesPicker from '../../components/admin/socialpost/ClubGamesPicker'
+import ManualPlayerForm from '../../components/admin/socialpost/ManualPlayerForm'
 import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
 import { POST_SIZES, DEFAULT_POST_SIZE, postSizeOf, PostFrame } from '../../social/postSizes'
 import { resolveClubFonts, fontWeightFor, buildFontFaceCss } from '../../lib/theme'
 import { IS_AFL } from '../../lib/sport'
+import { socialRole } from '../../lib/playerAttributes'
+import { sortByFirstName } from '../../lib/nameFormat'
 
 // Stable initial value for the (empty) Custom Edit overlay layer.
 const EMPTY_LAYER = () => []
@@ -54,21 +79,29 @@ const EMPTY_LAYER = () => []
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE REGISTRY
 // ─────────────────────────────────────────────────────────────────────────────
+// Split Poster (T11) leads the lineup family and is what a new lineup opens on;
+// the ids stay as they were so saved posts and templates keep working.
+// Football has no Split Poster, so its lineups still open on T1.
+const LINEUP_DEFAULT = IS_AFL ? 'T1' : 'T11'
 const ALL_TEMPLATES = [
-  { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: 13 },
-  { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: 12 },
-  { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: IS_AFL ? 'Side photo + numbered team' : 'Side photo + numbered XI',        maxPlayers: 11 },
-  { id: 'T4', name: 'Batting Order',   component: T4_BattingOrder,    desc: 'Tactical batting order',          maxPlayers: 13 },
-  { id: 'T5', name: 'Brutalist',       component: T5_Brutalist,       desc: IS_AFL ? 'Typography-forward team list' : 'Typography-forward XI',           maxPlayers: 11 },
-  { id: 'T6', name: 'Diagonal Poster', component: T6_Diagonal,        desc: 'Diagonal poster, match-day hype', maxPlayers: 11 },
-  { id: 'T7', name: 'Milestone',       component: T7_CaptainSpotlight, desc: 'Milestone achievement showcase',  maxPlayers: 13 },
-  { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: 11 },
-  { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: 11 },
-  { id: 'T10', name: 'Team Sheet',     component: T10_TeamSheet,      desc: 'Full-bleed photo + torn strip',   maxPlayers: 13 },
+  { id: 'T11', name: 'Split Poster',    component: SplitPoster,        desc: 'Pale panel + dark XI, debut tags', maxPlayers: LINEUP_MAX },
+  { id: 'T12', name: 'Match Day Card', component: LineupCard,         desc: 'Photo + colour wash, role icons, sponsor bar', maxPlayers: LINEUP_MAX },
+  { id: 'T13', name: 'Round Cover',    component: RoundCover,         desc: 'Hero photo, giant side word, round number', maxPlayers: 0 },
+  { id: 'T1', name: 'Hero List',       component: T1_HeroList,        desc: 'Big player + name list',          maxPlayers: LINEUP_MAX },
+  { id: 'T2', name: 'Card Grid',       component: T2_CardGrid,        desc: '4×3 trading card grid',           maxPlayers: LINEUP_MAX },
+  { id: 'T3', name: 'Side Numbered',   component: T3_SideNumbered,    desc: IS_AFL ? 'Side photo + numbered team' : 'Side photo + numbered XI',        maxPlayers: LINEUP_MAX },
+  { id: 'T4', name: 'Batting Order',   component: T4_BattingOrder,    desc: 'Tactical batting order',          maxPlayers: LINEUP_MAX },
+  { id: 'T5', name: 'Brutalist',       component: T5_Brutalist,       desc: IS_AFL ? 'Typography-forward team list' : 'Typography-forward XI',           maxPlayers: LINEUP_MAX },
+  { id: 'T6', name: 'Diagonal Poster', component: T6_Diagonal,        desc: 'Diagonal poster, match-day hype', maxPlayers: LINEUP_MAX },
+  { id: 'T7', name: 'Milestone',       component: T7_CaptainSpotlight, desc: 'Milestone achievement showcase',  maxPlayers: LINEUP_MAX },
+  { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: LINEUP_MAX },
+  { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: LINEUP_MAX },
+  { id: 'T10', name: 'Team Sheet',     component: T10_TeamSheet,      desc: 'Full-bleed photo + torn strip',   maxPlayers: LINEUP_MAX },
   { id: 'C1', name: 'Announcement',    component: C1_CaptainAnnounce, desc: 'Captain / debut / award',         maxPlayers: 1 },
+  { id: 'C5', name: 'Giant Type',      component: GiantType,          desc: 'FIRST XI / 100 / 5FA behind the player', maxPlayers: 1 },
   { id: 'C2', name: 'Toss',            component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
   { id: 'C3', name: 'Player Spotlight',component: C3_ManOfMatch,      desc: 'Man of match / player stats',     maxPlayers: 1 },
-  { id: 'C4', name: 'Result · Classic', component: C4_FinalScore,     desc: 'Full time result + top performers', maxPlayers: 0 },
+  { id: 'C4', name: 'Result · Classic', component: C4_FinalScore,     desc: 'Result + top performers', maxPlayers: 0 },
   // Single-match result layouts (fold into the Final Score tab alongside C4).
   { id: 'RS1', name: 'Margin Hero',    component: ResultMarginHero,   desc: 'Big WIN headline + margin',       maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS2', name: 'Broadcast',      component: ResultBroadcast,    desc: 'Team rows + top performers',      maxPlayers: 0, kind: 'singleresult' },
@@ -76,6 +109,8 @@ const ALL_TEMPLATES = [
   { id: 'RS4', name: 'Star of the Day', component: ResultStar,        desc: 'Player-of-the-match hero',        maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS5', name: 'Innings Bars',   component: ResultInningsBars,  desc: 'Proportional score bars',         maxPlayers: 0, kind: 'singleresult' },
   { id: 'RS6', name: 'Match Ticket',   component: ResultTicket,       desc: 'Ticket-stub aesthetic',           maxPlayers: 0, kind: 'singleresult' },
+  { id: 'RS7', name: 'Glass Card',     component: ResultGlass,        desc: 'Your photo, glass scorecards, six positions', maxPlayers: 0, kind: 'singleresult' },
+  { id: 'RS8', name: 'Highlights Cover', component: ResultHighlights, desc: 'Full-bleed photo, title and one score card', maxPlayers: 0, kind: 'singleresult' },
   // Fixtures roundup — one post, all grades.
   { id: 'FX1', name: 'List',           component: FixtureList,        desc: 'Clean factual rows',              maxPlayers: 0, kind: 'fixtures' },
   { id: 'FX2', name: 'Match-day Hype', component: FixtureHype,        desc: 'Diagonal poster',                 maxPlayers: 0, kind: 'fixtures' },
@@ -91,41 +126,68 @@ const ALL_TEMPLATES = [
   { id: 'RR4', name: 'Headline',       component: ResultsHeadline,    desc: 'Feature result + others',         maxPlayers: 0, kind: 'results' },
   { id: 'RR5', name: 'Board',          component: ResultsBoard,       desc: 'Results table',                   maxPlayers: 0, kind: 'results' },
   { id: 'RR6', name: 'Win/Loss Split', component: ResultsSplit,       desc: 'Wins vs losses columns',          maxPlayers: 0, kind: 'results' },
+  // Team of the week — the round's best performers across every grade, 6 to 14 of them.
+  { id: 'TW1', name: 'Team Sheet',     component: TeamOfWeekGrid,     desc: 'Photo cards, any team size',      maxPlayers: TOTW_MAX, kind: 'totw' },
+  { id: 'TW2', name: 'Ranked Board',   component: TeamOfWeekBoard,    desc: 'One row per player, best first',  maxPlayers: TOTW_MAX, kind: 'totw' },
+  // Player milestones — the club ticks which recorded milestones to feature.
+  { id: 'MS1', name: 'Milestone Cards', component: MilestoneCards,    desc: 'Photo cards with the big number', maxPlayers: 0, kind: 'milestones' },
+  { id: 'MS2', name: 'Milestone Board', component: MilestoneBoard,    desc: 'One row per milestone',           maxPlayers: 0, kind: 'milestones' },
   { id: 'SC1', name: 'Broadcast',      component: SC1_Broadcast,      desc: 'TV-style full scorecard',         maxPlayers: 0, isScorecard: true },
   { id: 'SC2', name: 'Brutalist',      component: SC2_Brutalist,      desc: 'Bold type, heavy rules',          maxPlayers: 0, isScorecard: true },
   { id: 'SC3', name: 'Dashboard',      component: SC3_Dashboard,      desc: 'Soft cards, app-style',           maxPlayers: 0, isScorecard: true },
   // Club-event / announcement posters — own "Events" tab, surface + photo flags
   // come from the event registry.
-  ...EVENT_TEMPLATES.map((t) => ({ id: t.id, name: t.name, component: t.component, desc: t.desc, maxPlayers: 0, kind: 'event', surface: t.surface, photo: t.photo })),
+  ...EVENT_TEMPLATES.map((t) => ({ id: t.id, name: t.name, component: t.component, desc: t.desc, maxPlayers: 0, kind: 'event', surface: t.surface, photo: t.photo, list: !!t.list })),
+  // A layout imported from the BetterCricket Canva app, one per post type. It sits on its type's own tab so
+  // the Data tab, Players, Opponent, Match Info and the type's Content panel all link up; the template's own
+  // blocks are the overlay on it.
+  ...Object.entries(CUSTOM_LAYOUTS).map(([type, id]) => ({
+    id, name: 'Your template', component: CustomLayout, desc: 'Imported from the Canva app',
+    maxPlayers: { lineup: LINEUP_MAX, totw: TOTW_MAX, motm: 1, announcement: 1 }[type] || 0,
+    ...(type === 'result' ? { kind: 'singleresult' } : null),
+  })),
   // Freeform WYSIWYG canvas — add/move/resize your own text & images.
   { id: 'BL1', name: 'Blank Canvas', component: BlankCanvas, desc: 'Freeform — add your own text & images', maxPlayers: 0, kind: 'blank' },
 ]
 // The football build drops the layouts that only mean anything with cricket
 // data: the batting order, the results wrap's batting/bowling leaders, and
 // every layout of the three hidden post types (toss, scorecard, final score).
-const AFL_HIDDEN_TEMPLATES = new Set(['T4', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'SC1', 'SC2', 'SC3'])
+const AFL_HIDDEN_TEMPLATES = new Set([...CUSTOM_LAYOUT_IDS, 'T4', 'T11', 'T12', 'T13', 'C5', 'RR7', 'C2', 'C4', 'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6', 'RS7', 'RS8', 'SC1', 'SC2', 'SC3', 'TW1', 'TW2', 'MS1', 'MS2'])
 const TEMPLATES = IS_AFL ? ALL_TEMPLATES.filter(t => !AFL_HIDDEN_TEMPLATES.has(t.id)) : ALL_TEMPLATES
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
 // of that box — the framing control previews the same crop the post will make.
 // T6 and T7 size the element to a free-standing cutout instead, so there is no
 // crop window to reposition and they are deliberately absent.
-const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080 }
+const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080, T13: 0.8 }
 const HERO_FOCUS_TEMPLATES = Object.keys(HERO_CROP_ASPECT)
 // The layouts drawn around a hero photo. Derived from the same id list the Hero
 // Image panel is gated on, so the two can't drift apart.
-const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'C1', 'C3']
+const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', CUSTOM_LAYOUTS.lineup, CUSTOM_LAYOUTS.result, CUSTOM_LAYOUTS.motm, CUSTOM_LAYOUTS.announcement]
+// The lineups that can mark which listed player is the one in the photo, and
+// the ones whose Hero Player picker names that player. T7 and the announcement
+// layouts have a single player, so there is no list to mark.
+const HERO_MARK_TEMPLATES = ['T1', 'T3', 'T10', 'T11']
+const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', CUSTOM_LAYOUT_ID]
+// The lineups that draw a DEBUT tag beside a flagged player. The flag is kept
+// on the player either way, so switching layout never loses it.
+const DEBUT_TEMPLATES = ['T1', 'T3', 'T10', 'T11', 'T12']
+const DEBUT_TEMPLATE_NAMES = { T1: 'Hero List', T3: 'Side Numbered', T10: 'Team Sheet', T11: 'Split Poster', T12: 'Match Day Card' }
 
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
-  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup',
+  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup', T11: 'lineup', T12: 'lineup', T13: 'lineup',
+  ...Object.fromEntries(Object.entries(CUSTOM_LAYOUTS).map(([type, id]) => [id, type])),
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
-  C1: 'announcement', C2: 'toss', C3: 'motm',
-  C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result',
+  C1: 'announcement', C5: 'announcement', C2: 'toss', C3: 'motm',
+  C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result', RS7: 'result', RS8: 'result',
   RR1: 'results', RR2: 'results', RR3: 'results', RR4: 'results', RR5: 'results', RR6: 'results', RR7: 'results',
+  TW1: 'totw', TW2: 'totw',
+  MS1: 'milestones', MS2: 'milestones',
   SC1: 'scorecard', SC2: 'scorecard', SC3: 'scorecard',
   EV1: 'events', EV2: 'events', EV3: 'events', EV4: 'events', EV5: 'events', EV6: 'events',
   EV7: 'events', EV8: 'events', EV9: 'events', EV10: 'events', EV11: 'events',
+  EL1: 'events', EL2: 'events', EL3: 'events',
   BL1: 'blank',
 }
 // The football build (lib/sport.js) leaves out the three post types that are
@@ -133,13 +195,15 @@ const TAB_MAP = {
 // Final Score layouts (overs, run rates, batting and bowling columns). Every
 // other type takes football data as it is; fixtures, results, lineups and the
 // player spotlight are fed from the football backend's own /admin/social/*.
-const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result'])
+const AFL_HIDDEN_TABS = new Set(['toss', 'scorecard', 'result', 'totw', 'milestones'])
 const TABS = [
   { key: 'lineup',       label: 'Lineup' },
   { key: 'fixtures',     label: 'Fixtures' },
   { key: 'result',       label: 'Final Score' },
   { key: 'results',      label: 'Results' },
   { key: 'motm',         label: IS_AFL ? 'Best on Ground' : 'Player of Match' },
+  { key: 'totw',         label: 'Team of the Week' },
+  { key: 'milestones',   label: 'Milestones' },
   { key: 'announcement', label: 'Announcement' },
   { key: 'toss',         label: 'Toss' },
   { key: 'scorecard',    label: 'Scorecard' },
@@ -147,26 +211,41 @@ const TABS = [
   { key: 'blank',        label: 'Blank' },
 ].filter(t => !IS_AFL || !AFL_HIDDEN_TABS.has(t.key))
 const TAB_FIRST = {
-  lineup: 'T1', fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3',
+  lineup: LINEUP_DEFAULT, fixtures: 'FX1', announcement: 'C1', toss: 'C2', motm: 'C3', totw: 'TW1', milestones: 'MS1',
   result: 'C4', results: 'RR1', scorecard: 'SC1', events: 'EV1', blank: 'BL1',
 }
 // Icon per post type (from the app's own kit) for the post-type bar and the
 // Start-screen cards.
 const TAB_ICON = {
   lineup: 'teams', fixtures: 'fixtures', result: 'ladders', results: 'list',
-  motm: 'player', announcement: 'share', toss: 'bolt', scorecard: 'sheet',
+  motm: 'player', totw: 'teams', milestones: 'selection', announcement: 'share', toss: 'bolt', scorecard: 'sheet',
   events: 'availability', blank: 'plus',
 }
 // Post types that pull from external data (BetterSelect / a match link / a round
 // import). These open on the "Get your data" step so the source is collected first.
-const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm']
+// What to do next, per post type, once a template has landed on its own layout.
+const IMPORT_NEXT_STEP = {
+  lineup: 'Now pull the XI in Data (BetterSelect or Play-Cricket), or add players in Content.',
+  fixtures: 'Now pull the round in Data, or edit the fixtures in Content.',
+  results: 'Now pull the round in Data, or edit the results in Content.',
+  result: 'Now paste the match link in Data, or type the scores in Content.',
+  motm: 'Now choose the player and their stats in Data or Content.',
+  totw: 'Now pull the round in Data, then adjust the team in Content.',
+  milestones: 'Now tick the milestones to feature in Data.',
+  announcement: 'Now choose the player and the words in Content.',
+  toss: 'Now choose who won the toss and what they chose in Content.',
+  events: 'Now fill in the event in Content.',
+}
+const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm', 'totw', 'milestones']
 const SOURCE_HELP = {
   lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
-  result: 'Paste the match link and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
+  result: 'Pick a game from your Games page, or paste the match link, and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
   scorecard: 'Paste the match link and we\'ll pull the full scorecard for both teams.',
   fixtures: 'Pull this round\'s fixtures for every grade straight from the fixtures feed.',
   results: 'Pull the latest round\'s results for every grade straight from the results feed.',
   motm: 'Paste the match link and we\'ll work out the player of the match from the scorecard. You choose which of their batting, bowling and fielding stats go on the post.',
+  milestones: 'Pick the milestones your club has recorded: a 100th game, 1,000 career runs, a 50th wicket. Choose a window, then tick or untick the ones to feature. Up to 12 go on the post.',
+  totw: 'Pull the latest round, or paste any match link from the round you want. Every grade\'s scorecard is scored the same way as the player of the match, and the best performers become the team. Choose 6 to 14 players.',
 }
 if (IS_AFL) {
   SOURCE_HELP.lineup = 'Pick a recent game below to pull the side your club named on PlayHQ, with the captain and the match details. Or add players yourself in Content.'
@@ -202,6 +281,16 @@ const DISPLAY_FONTS = [
   { key: 'abril',        name: 'Abril Fatface',    family: "'Abril Fatface', serif",         weight: 400 },
   { key: 'bungee',       name: 'Bungee',           family: "'Bungee', sans-serif",           weight: 400 },
 ]
+
+// The club's own picks for the four colour roles, over whichever palette is open.
+// Only a real #rrggbb counts; anything else leaves the palette's own colour.
+const ROLE_KEYS = ['primary', 'secondary', 'accent', 'ink']
+function applyRoleTweaks(palette, tweaks) {
+  if (!palette || !tweaks) return palette
+  const out = { ...palette }
+  ROLE_KEYS.forEach((k) => { if (/^#[0-9a-fA-F]{6}$/.test(tweaks[k] || '')) out[k] = tweaks[k] })
+  return out
+}
 
 function applyTheme(palette, isDark) {
   if (isDark || !palette) return palette
@@ -243,6 +332,22 @@ const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'ap
 // A sponsor's logo, or null when it has none: asking the images endpoint for a
 // sponsor nobody uploaded a logo for is a 404 and a broken image on the post.
 const sponsorLogoUrl = (s) => (s?.logo_url ? `${BASE_URL}/images/sponsors/${s.id}/logo` : null)
+
+// A sponsor grid the editor placed by default (`auto`) follows the post's team and
+// size until somebody takes it over. Moving it, resizing it or changing its
+// sponsors is taking it over; changing its backing panel is not.
+const SPONSOR_TAKEOVER_KEYS = ['x', 'y', 'w', 'h', 'sponsorIds']
+function releaseSponsorAuto(items, patchMap) {
+  const out = {}
+  Object.entries(patchMap).forEach(([id, patch]) => {
+    const it = items.find((x) => x.id === id)
+    const takesOver = it && it.type === 'sponsors' && it.auto && SPONSOR_TAKEOVER_KEYS.some((k) => k in patch)
+    // A template's sponsors box follows the post's sponsors until somebody picks their own.
+    const picks = it && it.type === 'sponsors' && it.followDefault && 'sponsorIds' in patch
+    out[id] = takesOver ? { ...patch, auto: false } : picks ? { followDefault: false, ...patch } : patch
+  })
+  return out
+}
 const footballAsset = (u) => {
   if (!u || /^(https?:|data:|\/\/)/.test(u)) return u
   if (u.startsWith('/api/')) return `${BASE_URL}${u.slice(4)}`
@@ -283,12 +388,32 @@ function deriveShort(name) {
 }
 
 // A football side is named by position, not as batters and bowlers.
+// The event poster being worked on (its wording, motif and photo) is kept in this
+// browser as it is typed, so leaving the page and coming back finds the Halloween
+// post where it was left instead of the Curry Night the editor starts with. Only
+// the wording is the post; the layout, palette and font persist on their own.
+const EVENT_DRAFT_KEY = 'bs_social_event_draft'
+function readEventDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(EVENT_DRAFT_KEY) || 'null')
+    return d && typeof d === 'object' && d.facts && typeof d.facts === 'object' ? d : null
+  } catch { return null }
+}
+
+// The layouts that print the Headline typed in Match Info (the side: "1st XI",
+// "A Grade"). Proved by `verification/probe_match_info_fields.mjs`, which renders
+// every layout with marker text. T4, T6 and T7 have no title to put it in, and
+// the round-ups, results and toss posts are not named by a side. Every layout
+// prints the Competition except Round Cover and Giant Type (a round number and a
+// figure are their headlines). A field the open layout ignores says so on screen.
+const HEADLINE_TEMPLATES = ['T1', 'T2', 'T3', 'T5', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', ...CUSTOM_LAYOUT_IDS]
+const NO_COMPETITION_TEMPLATES = ['T13', 'C5']
 const ROLE_OPTIONS = IS_AFL ? ['', 'FB', 'HB', 'C', 'W', 'MID', 'RUCK', 'HF', 'FF', 'UTIL'] : ['BAT', 'BOWL', 'AR', 'WK']
 const ROLE_LONG = IS_AFL
   ? { FB: 'Full Back', HB: 'Half Back', C: 'Centre', W: 'Wing', MID: 'Midfield', RUCK: 'Ruck', HF: 'Half Forward', FF: 'Full Forward', UTIL: 'Utility' }
   : { BAT: 'Batter', BOWL: 'Bowler', AR: 'All-Rounder', WK: 'Wicket-Keeper' }
 
-function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, role = IS_AFL ? '' : 'BAT' } = {}, nameFormat = 'last_first', swap = false) {
+function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, debut = false, role = IS_AFL ? '' : 'BAT', totw = null } = {}, nameFormat = 'last_first', swap = false) {
   const raw = splitName(p.display_name || p.name, nameFormat)
   const first = swap ? raw.last : raw.first
   const last  = swap ? raw.first.toUpperCase() : raw.last
@@ -296,6 +421,8 @@ function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keepe
     first, last, role,
     roleLong: ROLE_LONG[role] || role,
     captain, viceCaptain, keeper,
+    // First game for the club. Tagged on the lineup layouts that draw it.
+    debut: !!debut,
     headshot: p.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null,
     // The action shot, when the club has one. Only the big hero slot reaches
     // for it — grids and card fronts stay on the headshot, which is the photo
@@ -303,7 +430,29 @@ function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keepe
     hero: p.hero_photo_url ? `${BASE_URL}/images/players/${p.id}/hero-photo` : null,
     _id: p.id,
     _name: p.display_name || p.name,
+    // Team of the week only: what this player did in the round (stat line,
+    // grade, opponent, points). Every other post leaves it null.
+    totw,
   }
+}
+
+// The one-line performance under a name on a team-of-the-week post. Only what
+// happened: a batter's 0 next to a five-for is noise, so a zero block is left
+// out. A player whose only contribution WAS a duck or a wicketless spell gets
+// that line rather than a blank one.
+function totwLine(pl) {
+  const { batting: bat, bowling: bowl, fielding: fld } = pl || {}
+  const parts = []
+  if (bat && bat.r > 0) parts.push(`${bat.r}${bat.notOut ? '*' : ''} (${bat.b})`)
+  if (bowl && bowl.w > 0) parts.push(`${bowl.w}/${bowl.r}`)
+  if (fld) {
+    if (fld.catches > 0) parts.push(`${fld.catches} ct`)
+    if (fld.stumpings > 0) parts.push(`${fld.stumpings} st`)
+    if (fld.run_outs > 0) parts.push(`${fld.run_outs} ro`)
+  }
+  if (!parts.length && bat) parts.push(`${bat.r}${bat.notOut ? '*' : ''} (${bat.b})`)
+  if (!parts.length && bowl) parts.push(`${bowl.w}/${bowl.r}`)
+  return parts.join(' · ')
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -373,6 +522,119 @@ function withAlpha(hex, alphaHex) {
 // ─────────────────────────────────────────────────────────────────────────────
 // UI COMPONENTS
 // ─────────────────────────────────────────────────────────────────────────────
+// A #rrggbb for a colour input; anything else (a translucent #rrggbb99, a name)
+// is cut back to the opaque colour or a neutral so the picker always has a value.
+function hex6(c, fallback = '#000000') {
+  return typeof c === 'string' && /^#[0-9a-fA-F]{6}/.test(c) ? c.slice(0, 7) : fallback
+}
+
+// One colour the club can set: a swatch that opens the picker, a word saying
+// whether it is the layout's own ("Auto") or a pick, and a way back.
+function ColourField({ label, value, auto, autoLabel, onChange, onClear, testId }) {
+  const picked = typeof value === 'string' && value !== ''
+  return (
+    <div className="flex items-center justify-between gap-2 min-h-8" data-testid={testId}>
+      <span className="text-[11px] text-pb-dim font-mono truncate">{label}</span>
+      <span className="flex items-center gap-1.5 shrink-0">
+        {picked
+          ? <button type="button" onClick={onClear} className="text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Auto</button>
+          : <span className="text-[10px] font-mono text-pb-faintest">{autoLabel || 'Auto'}</span>}
+        <input type="color" aria-label={label} value={hex6(picked ? value : auto, '#808080')}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent p-0" />
+      </span>
+    </div>
+  )
+}
+
+// How the layout sits on the picked background: the veil its own fill puts over
+// it, and the dots, stripes and grain it draws on top. Both default to what the
+// layout always did on a built-in texture and to "none" on the club's own photo.
+function BackgroundFinish({ ownPhoto, tint, tintAuto, onTint, texture, textureAuto, onTexture, onReset, touched }) {
+  return (
+    <div className="mt-2 pt-2 border-t pb-hairline flex flex-col gap-2" data-testid="bg-finish">
+      <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Over the background</span>
+      <label className="flex items-center gap-2 text-[11px] text-pb-faint font-mono">
+        <span className="w-24 shrink-0">Layout tint</span>
+        <input type="range" min={0} max={100} step={5} value={Math.round(tint * 100)} data-testid="bg-tint"
+          onChange={(e) => onTint(Number(e.target.value) / 100)} className="flex-1 min-w-0" />
+        <span className="w-9 text-right text-pb-faintest">{Math.round(tint * 100)}%</span>
+      </label>
+      <label className="flex items-center gap-2 text-[11px] text-pb-faint font-mono">
+        <input type="checkbox" checked={texture} data-testid="bg-texture" onChange={(e) => onTexture(e.target.checked)} />
+        Layout dots, stripes and grain
+      </label>
+      <p className="text-[10px] leading-relaxed text-pb-faintest">
+        {ownPhoto
+          ? 'Your photo shows as it is: no tint and no pattern. Raise the tint if the text is hard to read on it.'
+          : 'The layout lays its own colour (60% by default) and a fine pattern over the background. Lower the tint to see more of it.'}
+      </p>
+      {touched && (
+        <button type="button" onClick={onReset} data-testid="bg-finish-reset"
+          className="self-start text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Back to automatic</button>
+      )}
+    </div>
+  )
+}
+
+// The four colour roles every layout is drawn from, set over whichever palette
+// is open. This is the one place a club changes the text colour or the panel
+// colour of a post without making a whole new custom palette.
+const ROLE_FIELDS = [
+  { key: 'primary', label: 'Background' },
+  { key: 'secondary', label: 'Panels and shapes' },
+  { key: 'accent', label: 'Accent' },
+  { key: 'ink', label: 'Text' },
+]
+function ColourRoles({ base, tweaks, onChange, onClear, onReset }) {
+  const any = ROLE_FIELDS.some((f) => tweaks[f.key])
+  return (
+    <section className="pb-card p-4" data-testid="colour-roles">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Colours</h2>
+        {any && <button type="button" onClick={onReset} className="text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Reset all</button>}
+      </div>
+      <p className="text-pb-faintest text-[10px] mb-2">These four colours run every layout. Change one here and the whole post follows; use the elements below to colour one thing on its own.</p>
+      <div className="flex flex-col">
+        {ROLE_FIELDS.map((f) => (
+          <ColourField key={f.key} label={f.label} value={tweaks[f.key]} auto={base?.[f.key]}
+            onChange={(v) => onChange(f.key, v)} onClear={() => onClear(f.key)} testId={`role-${f.key}`} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// Per-element colours and words for the open layout (social/layoutParts.js).
+function LayoutElements({ name, spec, palette, parts, onChange, onClear, onReset }) {
+  const groups = [...new Set(spec.map((p) => p.group))]
+  const any = spec.some((p) => parts[p.key] !== undefined)
+  return (
+    <section className="pb-card p-4" data-testid="layout-elements">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{name} elements</h2>
+        {any && <button type="button" onClick={onReset} className="text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Reset all</button>}
+      </div>
+      <p className="text-pb-faintest text-[10px] mb-2">Set any part on its own: the title words, the name text, the backdrop behind each photo. Anything you leave on Auto follows the colours above.</p>
+      {groups.map((g) => (
+        <div key={g} className="mb-2 last:mb-0">
+          <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mt-1 mb-0.5">{g}</div>
+          {spec.filter((p) => p.group === g).map((p) => p.kind === 'text' ? (
+            <label key={p.key} className="flex items-center justify-between gap-2 min-h-8" data-testid={`part-${p.key}`}>
+              <span className="text-[11px] text-pb-dim font-mono truncate">{p.label}</span>
+              <input value={parts[p.key] ?? ''} placeholder={p.auto(palette)} maxLength={24}
+                onChange={(e) => onChange(p.key, e.target.value)}
+                className="w-32 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-xs text-pb-text placeholder:text-pb-faintest font-mono" />
+            </label>
+          ) : (
+            <ColourField key={p.key} label={p.label} value={parts[p.key]} auto={p.auto ? p.auto(palette) : palette.secondary}
+              autoLabel={p.autoLabel} onChange={(v) => onChange(p.key, v)} onClear={() => onClear(p.key)} testId={`part-${p.key}`} />
+          ))}
+        </div>
+      ))}
+    </section>
+  )
+}
 function PaletteSwatch({ pal, selected, onClick }) {
   return (
     <button
@@ -434,36 +696,45 @@ function DesignSwatch({ design, selected, onClick }) {
 
 function SelectedPlayerRow({ sp, idx, onUpdate, onRemove, onMoveUp, onMoveDown, isFirst, isLast }) {
   const { player } = sp
+  // Two lines so the tag buttons stay inside the panel: the name and remove
+  // button on top, the position and C / VC / WK / DEBUT tags below, wrapping
+  // rather than running out over the design.
   return (
-    <div className="flex items-center gap-2 p-2 rounded bg-pb-surface border pb-hairline">
-      <div className="flex flex-col gap-0.5 mr-1">
+    <div data-testid="selected-player-row" className="flex items-start gap-2 p-2 rounded bg-pb-surface border pb-hairline min-w-0">
+      <div className="flex flex-col gap-0.5 mt-0.5">
         <button onClick={onMoveUp} disabled={isFirst} className="text-pb-faintest hover:text-pb-text disabled:opacity-20 text-xs leading-none">▲</button>
         <button onClick={onMoveDown} disabled={isLast} className="text-pb-faintest hover:text-pb-text disabled:opacity-20 text-xs leading-none">▼</button>
       </div>
-      <span className="font-mono text-[10px] text-pb-faintest w-4 shrink-0">{idx + 1}</span>
-      <span className="text-sm text-pb-text flex-1 truncate">{player.display_name || player.name}</span>
-      <select
-        value={sp.role}
-        onChange={e => onUpdate({ role: e.target.value })}
-        className="font-mono text-[10px] bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-pb-text"
-      >
-        {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r || 'Position'}</option>)}
-      </select>
-      {(IS_AFL ? ['captain', 'viceCaptain'] : ['captain', 'viceCaptain', 'keeper']).map(field => {
-        const labels = { captain: 'C', viceCaptain: 'VC', keeper: 'WK' }
-        const active = sp[field]
-        return (
-          <button
-            key={field}
-            onClick={() => onUpdate({ [field]: !active })}
-            style={active ? { background: 'var(--pb-accent)', color: 'var(--pb-bg)' } : {}}
-            className={`font-mono text-[10px] px-1.5 py-0.5 rounded border pb-hairline transition-colors ${active ? '' : 'text-pb-faint hover:text-pb-text'}`}
+      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-mono text-[10px] text-pb-faintest shrink-0">{idx + 1}</span>
+          <span className="text-sm text-pb-text flex-1 min-w-0 truncate">{player.display_name || player.name}</span>
+          <button onClick={onRemove} aria-label="Remove player" className="text-pb-faintest hover:text-red-400 text-xs shrink-0">✕</button>
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <select
+            value={sp.role}
+            onChange={e => onUpdate({ role: e.target.value })}
+            className="font-mono text-[10px] bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 text-pb-text"
           >
-            {labels[field]}
-          </button>
-        )
-      })}
-      <button onClick={onRemove} className="text-pb-faintest hover:text-red-400 text-xs ml-1">✕</button>
+            {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r || 'Position'}</option>)}
+          </select>
+          {(IS_AFL ? ['captain', 'viceCaptain', 'debut'] : ['captain', 'viceCaptain', 'keeper', 'debut']).map(field => {
+            const labels = { captain: 'C', viceCaptain: 'VC', keeper: 'WK', debut: 'DEBUT' }
+            const active = sp[field]
+            return (
+              <button
+                key={field}
+                onClick={() => onUpdate({ [field]: !active })}
+                style={active ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))' } : {}}
+                className={`font-mono text-[10px] px-1.5 py-0.5 rounded border pb-hairline transition-colors ${active ? '' : 'text-pb-faint hover:text-pb-text'}`}
+              >
+                {labels[field]}
+              </button>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
@@ -483,7 +754,7 @@ function StatRow({ stat, onChange, onRemove }) {
 function PerformerRow({ p, onChange, onRemove }) {
   return (
     <div className="flex gap-2 items-center">
-      <input value={p.last} onChange={e => onChange({ ...p, last: e.target.value })} placeholder="Name"
+      <input value={p.last} onChange={e => onChange({ ...p, last: e.target.value, surname: '' })} placeholder="Name"
         className="flex-1 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
       <input value={p.line} onChange={e => onChange({ ...p, line: e.target.value })} placeholder="87 (54) or 3-22 (4)"
         className="w-36 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest font-mono" />
@@ -576,6 +847,7 @@ function topBatters(t) {
       line: `${b.r}${b.notOut ? '*' : ''} (${b.b})`,
       pid: b.pid || null,
       first: b.first || '',
+      surname: b.last || '',
     }))
 }
 
@@ -611,6 +883,17 @@ function sortByGrade(rows) {
   })
 }
 
+// Round import category toggles (Men's / Juniors / Women's ...). A row carries
+// the grade's categories, a list, since "Girls Under 14" is junior AND women's;
+// it stays while ANY of them is on. A row with none (football, an older pull)
+// is never hidden.
+const ROUND_CAT_ORDER = ['senior', 'junior', 'womens', 'masters', 'mixed']
+const ROUND_CAT_LABELS = { senior: "Men's", junior: 'Juniors', womens: "Women's", masters: 'Masters', mixed: 'Mixed / Other' }
+function filterByCats(rows, off) {
+  if (!off || !off.length) return rows
+  return rows.filter(r => !(r.categories && r.categories.length) || r.categories.some(c => !off.includes(c)))
+}
+
 // Top 3 bowlers (most wickets, then fewest runs / best economy).
 function topBowlers(t) {
   const overs = (o) => parseFloat(String(o || '0').replace(/[^0-9.]/g, '')) || 0
@@ -623,6 +906,8 @@ function topBowlers(t) {
       line: `${b.w}/${b.r}`,
       pid: b.pid || null,
       first: b.first || '',
+      surname: b.last || '',
+      overs: b.o != null ? String(b.o) : '',
     }))
 }
 
@@ -687,22 +972,25 @@ function OppLogoChip({ logo, loading, onClear }) {
 // live feed with no link, or a pasted match link resolves that link's own round
 // (onFetchLink). A pasted playhq.com link comes back as a `notice` — a different
 // id namespace, so the correction renders as its own amber box.
-function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice }) {
+function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice, off = [], onToggleCat }) {
   const [link, setLink] = useState('')
   const rowsOf = (d) => (d ? d[rowsKey] || [] : [])
+  // Which categories the pull holds, counted on the day being shown.
+  const present = ROUND_CAT_ORDER.filter(k => dates.some(d => rowsOf(d).some(r => (r.categories || []).includes(k))))
+  const countOn = (k) => rowsOf(dates[idx]).filter(r => (r.categories || []).includes(k)).length
   const fetchLink = () => { const q = link.trim(); if (q) onFetchLink(q) }
   return (
     <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
       <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
-      <div className="flex gap-2 items-center">
+      <div className="flex flex-col gap-2">
         <button onClick={onPull} disabled={status === 'loading'}
           className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
           style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
           {status === 'loading' ? 'Loading…' : 'Pull latest round'}
         </button>
         {dates.length > 1 && (
-          <select value={idx} onChange={e => onPick(+e.target.value)}
-            className="flex-1 min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono">
+          <select value={idx} onChange={e => onPick(+e.target.value)} aria-label="Match-day"
+            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono">
             {dates.map((d, i) => (
               <option key={d.date || i} value={i}>{d.label}{d.round ? ` · ${d.round}` : ''} ({rowsOf(d).length})</option>
             ))}
@@ -725,8 +1013,32 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
           <p className="font-mono text-[9px] text-amber-400/80 mt-1 leading-relaxed">Open your match on play.cricket.com.au and copy the address from there.</p>
         </div>
       )}
+      {status === 'ok' && dates.length > 0 && present.length > 0 && onToggleCat && (
+        <div className="mt-3" data-testid="round-cat-toggles">
+          <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-1.5">Include</p>
+          <div className="flex flex-wrap gap-1.5">
+            {present.map(k => {
+              const on = !off.includes(k)
+              return (
+                <button key={k} type="button" onClick={() => onToggleCat(k)} aria-pressed={on}
+                  className="px-2.5 py-1 rounded border font-mono text-[10px] tracking-wide2 transition-colors"
+                  style={on
+                    ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+                    : { background: 'transparent', color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' }}>
+                  {ROUND_CAT_LABELS[k]} ({countOn(k)})
+                </button>
+              )
+            })}
+          </div>
+          {present.length === 1 && (
+            <p className="font-mono text-[9px] mt-1.5 text-pb-faintest leading-relaxed">
+              Only {ROUND_CAT_LABELS[present[0]]} grades came back for this pull. Other grades show up here once the competition has published their {hint}.
+            </p>
+          )}
+        </div>
+      )}
       {status === 'ok' && dates.length > 0 && (
-        <p className="font-mono text-[9px] mt-1.5 text-green-400">✓ {rowsOf(dates[idx]).length} loaded · {dates[idx]?.label}</p>
+        <p className="font-mono text-[9px] mt-1.5 text-green-400">✓ {filterByCats(rowsOf(dates[idx]), off).length} loaded · {dates[idx]?.label}</p>
       )}
       {status && status !== 'loading' && status !== 'ok' && (
         <p className="font-mono text-[9px] mt-1.5 text-pb-faint">
@@ -734,6 +1046,219 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
         </p>
       )}
     </div>
+  )
+}
+
+// Team of the week — pull the round (the club's latest, the days it was played
+// on, or the one a pasted match link names) and set how many of its best
+// performers go on the post.
+const TOTW_SCOPE_OPTS = [['all', 'All teams'], ['junior', 'Juniors'], ['senior', 'Seniors']]
+const TOTW_RANGE_KEY = 'bs_social_totw_range'
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+function lastSevenDays() {
+  const to = new Date(), from = new Date()
+  from.setDate(from.getDate() - 6)
+  return { from: isoDay(from), to: isoDay(to) }
+}
+// The period a club last pulled, so a round that always runs Tuesday to Sunday
+// is not typed in again each week. Per browser, and only a convenience.
+function readTotwRange() {
+  try {
+    const r = JSON.parse(localStorage.getItem(TOTW_RANGE_KEY) || 'null')
+    if (r && typeof r.from === 'string' && typeof r.to === 'string') return { from: r.from, to: r.to }
+  } catch { /* storage blocked or not JSON: start empty */ }
+  return { from: '', to: '' }
+}
+function writeTotwRange(r) {
+  try { localStorage.setItem(TOTW_RANGE_KEY, JSON.stringify(r)) } catch { /* private window */ }
+}
+
+function TotwImportBox({ status, notice, data, onPull, onFetchLink, range, onRange, onPullRange }) {
+  const [link, setLink] = useState('')
+  const fetchLink = () => { const q = link.trim(); if (q) onFetchLink(q) }
+  const dateCls = 'w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono'
+  const btnCls = 'px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50'
+  return (
+    <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from a round</p>
+      <button onClick={onPull} disabled={status === 'loading'}
+        className={btnCls}
+        style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+        {status === 'loading' ? 'Loading…' : 'Pull latest round'}
+      </button>
+      {onPullRange && range && (
+        <div data-testid="totw-range">
+          <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mt-3 mb-1.5">…or pick the days the round was played</p>
+          <div className="flex flex-wrap gap-2">
+            <label className="flex-1 min-w-[9rem] flex flex-col gap-1">
+              <span className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2">From</span>
+              <input type="date" value={range.from} max={range.to || undefined}
+                onChange={e => onRange({ ...range, from: e.target.value })} className={dateCls} />
+            </label>
+            <label className="flex-1 min-w-[9rem] flex flex-col gap-1">
+              <span className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2">To</span>
+              <input type="date" value={range.to} min={range.from || undefined}
+                onChange={e => onRange({ ...range, to: e.target.value })} className={dateCls} />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            <button onClick={onPullRange} disabled={status === 'loading' || !range.from || !range.to}
+              className={btnCls} style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>Pull this period</button>
+            <button type="button" onClick={() => onRange(lastSevenDays())}
+              className="px-3 py-1.5 rounded border pb-hairline text-xs font-mono tracking-wide2 text-pb-text">Last 7 days</button>
+          </div>
+          <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">Every completed match your club played in this period counts, whatever day it was on.</p>
+        </div>
+      )}
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mt-3 mb-1.5">…or paste any match link from that round</p>
+      <div className="flex gap-2">
+        <input value={link} onChange={e => setLink(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && fetchLink()}
+          placeholder="Match link from play.cricket.com.au"
+          className="flex-1 min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+        <button onClick={fetchLink} disabled={status === 'loading'}
+          className={btnCls}
+          style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>Fetch</button>
+      </div>
+      {notice?.kind === 'playhq' && (
+        <div className="mt-2 p-2.5 rounded border border-amber-400/50 bg-amber-400/10">
+          <p className="font-mono text-[9px] text-amber-400 leading-relaxed">{notice.message}</p>
+          <p className="font-mono text-[9px] text-amber-400/80 mt-1 leading-relaxed">Open your match on play.cricket.com.au and copy the address from there.</p>
+        </div>
+      )}
+      {status === 'ok' && data && (
+        <p className="font-mono text-[9px] mt-1.5 text-green-400">
+          ✓ {data.players.length} performers from {data.matches} {data.matches === 1 ? 'match' : 'matches'} · {[data.scope && data.scope !== 'all' ? (data.scope === 'junior' ? 'Juniors' : 'Seniors') : '', data.round, data.label].filter(Boolean).join(' · ')}
+        </p>
+      )}
+      {status && status !== 'loading' && status !== 'ok' && (
+        <p className="font-mono text-[9px] mt-1.5 text-pb-faint">✗ {status}</p>
+      )}
+      <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">
+        Points are the same as the player of the match: 1 a run, 20 a wicket, 2 a maiden, 8 an outfield catch, stumping or run out, 4 a keeper catch. A player who played in two grades counts once, on their better day.
+      </p>
+    </div>
+  )
+}
+
+// Which of the club's teams the team of the week is drawn from. Changing it
+// pulls the same round again, since a player's better day is decided among the
+// matches in scope.
+function TotwScopePicker({ scope, onChange, data, busy }) {
+  const counts = data?.scopeMatches
+  return (
+    <div className="mb-4" data-testid="totw-scope">
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-1.5">Teams</p>
+      <div className="flex flex-wrap gap-1.5">
+        {TOTW_SCOPE_OPTS.map(([k, label]) => {
+          const on = scope === k
+          return (
+            <button key={k} type="button" onClick={() => onChange(k)} aria-pressed={on} disabled={busy}
+              className="px-3 min-h-8 rounded border font-mono text-[10px] tracking-wide2 transition-colors disabled:opacity-60"
+              style={on
+                ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+                : { background: 'transparent', color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' }}>
+              {label}{counts && k !== 'all' ? ` (${counts[k]})` : ''}
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">
+        Juniors are the grades marked Juniors on the Grades screen (under-age teams and girls' age groups). Seniors are every other grade, men's and women's. Fix a grade there if it lands on the wrong side.
+      </p>
+    </div>
+  )
+}
+
+// How many players the team has, 6 to 14. Reads and writes the selected list
+// itself, so a player added or removed by hand moves the number too.
+function TotwSizeStepper({ count, poolSize, onChange }) {
+  const canGrow = count < TOTW_MAX && (poolSize == null || count < poolSize)
+  const btn = 'w-8 h-8 rounded border pb-hairline font-mono text-base text-pb-text disabled:opacity-30'
+  return (
+    <div data-testid="totw-size">
+      <div className="flex items-center gap-3">
+        <button className={btn} disabled={count <= TOTW_MIN} onClick={() => onChange(count - 1)} aria-label="Fewer players">−</button>
+        <span className="font-mono text-sm text-pb-text w-8 text-center" data-testid="totw-count">{count}</span>
+        <button className={btn} disabled={!canGrow} onClick={() => onChange(count + 1)} aria-label="More players">+</button>
+        <span className="font-mono text-[10px] text-pb-faint">of {TOTW_MIN} to {TOTW_MAX}{poolSize != null ? ` · ${poolSize} ranked` : ''}</span>
+      </div>
+      {count < TOTW_MIN && (
+        <p className="font-mono text-[9px] mt-1.5 text-amber-400">A team of the week is at least {TOTW_MIN} players.{poolSize != null && poolSize < TOTW_MIN ? ` Only ${poolSize} played that round.` : ''}</p>
+      )}
+    </div>
+  )
+}
+
+// Best performers (a size) or a set make-up (so many of each seat). In the
+// make-up the size is the sum of the seats, so there is no separate stepper.
+function TotwTeamShape({ mode, onMode, makeup, onMakeup, data, count, onSize }) {
+  const pool = data?.players || null
+  const have = pool ? poolKinds(pool) : null
+  const total = makeupSize(makeup)
+  const result = pool && mode === 'makeup' ? pickMakeup(pool, makeup) : null
+  const warn = result ? shortfallText(result.short, result.picks.length, result.wanted) : ''
+  const btn = 'w-8 h-8 rounded border pb-hairline font-mono text-base text-pb-text disabled:opacity-30'
+  const tab = (on) => (on
+    ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+    : { background: 'transparent', color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' })
+  const seats = [...MAKEUP_KINDS, 'ANY']
+  return (
+    <div data-testid="totw-shape">
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {[['best', 'Best performers'], ['makeup', 'Set the make-up']].map(([k, label]) => (
+          <button key={k} type="button" aria-pressed={mode === k} onClick={() => onMode(k)}
+            className="px-3 min-h-8 rounded border font-mono text-[10px] tracking-wide2 transition-colors" style={tab(mode === k)}>{label}</button>
+        ))}
+      </div>
+      {mode === 'best' ? (
+        <TotwSizeStepper count={count} poolSize={pool ? pool.length : null} onChange={onSize} />
+      ) : (
+        <div data-testid="totw-makeup">
+          <div className="flex flex-col gap-1.5">
+            {seats.map(k => {
+              const n = Number(makeup[k]) || 0
+              return (
+                <div key={k} className="flex items-center gap-2" data-testid={`totw-seat-${k}`}>
+                  <span className="text-xs text-pb-text w-32 shrink-0">{MAKEUP_LABELS[k]}</span>
+                  <button className={btn} disabled={n <= 0} onClick={() => onMakeup({ ...makeup, [k]: n - 1 })} aria-label={`Fewer ${MAKEUP_LABELS[k].toLowerCase()}`}>−</button>
+                  <span className="font-mono text-sm text-pb-text w-6 text-center" data-testid={`totw-seat-${k}-count`}>{n}</span>
+                  <button className={btn} disabled={total >= TOTW_MAX} onClick={() => onMakeup({ ...makeup, [k]: n + 1 })} aria-label={`More ${MAKEUP_LABELS[k].toLowerCase()}`}>+</button>
+                  {have && k !== 'ANY' && <span className="font-mono text-[9px] text-pb-faintest">{have[k]} played</span>}
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
+            <span className="font-mono text-[10px] text-pb-faint" data-testid="totw-makeup-total">Team of {total} · {TOTW_MIN} to {TOTW_MAX}</span>
+            <button type="button" onClick={() => onMakeup({ ...FANTASY_MAKEUP })}
+              className="px-3 min-h-8 rounded border pb-hairline font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">Fantasy mix 4 · 1 · 3 · 3</button>
+          </div>
+          {total < TOTW_MIN && (
+            <p className="font-mono text-[9px] mt-1.5 text-amber-400">A team of the week is at least {TOTW_MIN} players.</p>
+          )}
+          {warn && <p className="font-mono text-[9px] mt-1.5 text-amber-400 leading-relaxed" data-testid="totw-makeup-warn">{warn}</p>}
+          <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">
+            Each place goes to the best performer of that kind. A keeper is whoever the scorecard lists as one (or took a keeper catch or stumping), an all-rounder scored 20 or more and took a wicket, and the rest are batters or bowlers by what earned them more points. Best of the rest takes the next best performer of any kind.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// The whole Team of the Week pull panel: which teams, which round, what shape.
+// One component so the full editor and the phone quick-post cannot drift apart.
+function TotwControls({ t }) {
+  return (
+    <>
+      <TotwScopePicker scope={t.plan.scope} onChange={t.onScope} data={t.import.data} busy={t.import.status === 'loading'} />
+      <TotwImportBox status={t.import.status} notice={t.import.notice} data={t.import.data}
+        onPull={t.onPull} onFetchLink={t.onFetchLink}
+        range={t.plan.range} onRange={t.onRange} onPullRange={t.onPullRange} />
+      <TotwTeamShape mode={t.plan.mode} onMode={t.onMode} makeup={t.plan.makeup} onMakeup={t.onMakeup}
+        data={t.import.data} count={t.count} onSize={t.onSize} />
+    </>
   )
 }
 
@@ -784,6 +1309,15 @@ function useRowDrag(setRows) {
   }
   const onDragEnd = () => { dragIdx.current = null; setOverIdx(null) }
   return { overIdx, onDragStart, onDragOver, onDrop, onDragEnd }
+}
+
+// A ranked POTM player as the scorecard's MOTM block: name and the one-line
+// figures ("64* (34) · 2/22"). `prev.team` is kept; the scorecard owns it.
+function scMotmOf(pl, prev = {}) {
+  const bits = []
+  if (pl.batting) bits.push(`${pl.batting.r}${pl.batting.notOut ? '*' : ''} (${pl.batting.b})`)
+  if (pl.bowling) bits.push(`${pl.bowling.w}/${pl.bowling.r}`)
+  return { ...prev, first: pl.first || '', last: pl.last || '', line: bits.join(' · ') }
 }
 
 // Ranked-player label for the POTM import's player select — name plus whichever
@@ -858,7 +1392,7 @@ function MatchPickList({ picks, onPick, onDismiss }) {
 // before any style has ever been stored server-side.
 const DEFAULT_STYLE_JSON = JSON.stringify({
   palette: 'club', dark: true, font: 'barlow', bg: 'none',
-  bg_colors: {}, palettes: [], designs: [],
+  bg_colors: {}, palettes: [], designs: [], lineup_card: LINEUP_CARD_DEFAULTS,
 })
 
 // Saved templates live in their own table now (one row each), not in the Style
@@ -886,6 +1420,14 @@ const stable = (v) => {
 const blocksSig = (items) => stable((items || []).map(({ id, ...rest }) => rest))
 
 export default function AdminSocialPost() {
+  // This screen builds posts that get published. Tell the server so anyone who
+  // asked to be removed from the public site is left out of everything it reads
+  // (roster, selection, scorecards), even for a signed-in admin. A layout effect
+  // runs before any child's fetch effect, so the very first request carries it.
+  useLayoutEffect(() => {
+    setPublishingContext(true)
+    return () => setPublishingContext(false)
+  }, [])
   const location = useLocation()
   const navigate = useNavigate()
   // Which rail tool's panel is showing. A data-driven post type opens on the
@@ -913,6 +1455,12 @@ export default function AdminSocialPost() {
   // block to fill.
   const blankImgInputRef = useRef(null)
   const pendingImgItem = useRef(null)
+  // The club's own design (a Canva export) for the blank canvas.
+  const designInputRef = useRef(null)
+  const [designBusy, setDesignBusy] = useState(false)
+  const [clubStyle, setClubStyle] = useState(true)
+  // (C), (VC), (WK) and DEBUT after the names on "Your template", from the flags set in Content.
+  const [templateMarks, setTemplateMarks] = useState(true)
   // Club media library (persisted via the social-media API).
   const [mediaAssets, setMediaAssets] = useState([])
   // Below md the editor drops its drag canvas for a guided phone quick-post
@@ -926,6 +1474,7 @@ export default function AdminSocialPost() {
   }, [])
   const [settings, setSettings] = useState(null)
   const [allPlayers, setAllPlayers] = useState([])
+  const [manualPlayerOpen, setManualPlayerOpen] = useState(false)
   const [adminSponsors, setAdminSponsors] = useState([])
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
@@ -948,7 +1497,9 @@ export default function AdminSocialPost() {
     if (one && TEMPLATES.some((t) => t.id === one)) return one
     const t = p.get('type')
     if (t && TAB_FIRST[t]) return TAB_FIRST[t]
-    return localStorage.getItem('bs_social_template') || 'T1'
+    // An imported layout is its blocks, which are not kept across a reload: open its tab on a built-in layout instead.
+    const last = localStorage.getItem('bs_social_template') || LINEUP_DEFAULT
+    return isCustomLayout(last) ? (TAB_FIRST[TAB_MAP[last]] || LINEUP_DEFAULT) : last
   })
   const [paletteKey, setPaletteKey] = useState(() =>
     localStorage.getItem('bs_social_palette') || 'club'
@@ -1021,7 +1572,33 @@ export default function AdminSocialPost() {
   // picked per post. bgStyle is set to the sentinel 'custom-image' while one
   // is active; bgCustomUrl carries which.
   const [bgAssets, setBgAssets] = useState([])
-  const [bgCustomUrl, setBgCustomUrl] = useState(null)
+  const [bgCustomUrl, setBgCustomUrl] = useState(() => {
+    try { return localStorage.getItem('bs_social_bg_url') || null } catch { return null }
+  })
+  // How a layout sits on that background. Both are null until the club touches
+  // them, which means "automatic": the built-in textures keep the layout's own
+  // 60% fill and its dots, stripes and grain (as they always have), and the
+  // club's own photo gets neither, because a veil and a dot pattern over a
+  // photo somebody uploaded is the opposite of what uploading it was for.
+  const [bgTint, setBgTint] = useState(() => {
+    const v = localStorage.getItem('bs_social_bg_tint')
+    return v === null || v === '' || isNaN(Number(v)) ? null : Math.max(0, Math.min(1, Number(v)))
+  })
+  const [bgTexture, setBgTexture] = useState(() => {
+    const v = localStorage.getItem('bs_social_bg_texture')
+    return v === '1' ? true : v === '0' ? false : null
+  })
+  // Colour roles the club has set over whichever palette is open: the same four
+  // roles every layout is drawn from (background, panel, accent, text), so one
+  // change reaches all of them. Only the keys somebody touched are stored.
+  const [roleTweaks, setRoleTweaks] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('bs_social_roles') || '{}') || {} } catch { return {} }
+  })
+  // Per-element colours and words for the open layout, keyed by post type
+  // (layoutParts.js `partsKey`). A part that is absent is what the layout always drew.
+  const [layoutParts, setLayoutParts] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('bs_social_parts') || '{}') || {} } catch { return {} }
+  })
 
   const [match, setMatch] = useState({ competition: '', round: '', venue: '', date: '', time: '', season: '' })
   const patchMatch = patch => setMatch(m => ({ ...m, ...patch }))
@@ -1091,6 +1668,63 @@ export default function AdminSocialPost() {
   // Which selected player's photo fills the hero slot on lineup templates
   // (T1 / T3 / T6). '' = auto (captain, else first in the order).
   const [heroPlayerId, setHeroPlayerId] = useState('')
+  // Shade the row of the player who is in the photo, so the post says whose
+  // picture it is. Off until asked for: a post made before this existed, or one
+  // whose photo is not of anyone on the list, must not suddenly mark a row.
+  const [markHero, setMarkHero] = useState(false)
+  // The split poster's pale panel. '' = derive it from the club accent.
+  const [splitPanel, setSplitPanel] = useState('')
+  // The Match Day Card's look: background photo, wash, corner and panel colours,
+  // logo. A club sets these once, so they ride in the club's saved Style
+  // (socials_style.lineup_card) and every new lineup opens with them. The browser
+  // keeps a copy for a signed-in user who cannot save settings.
+  const [lineupCard, setLineupCard] = useState(() => {
+    try { return { ...LINEUP_CARD_DEFAULTS, ...JSON.parse(localStorage.getItem('bs_social_lineup_card') || '{}') } } catch { return { ...LINEUP_CARD_DEFAULTS } }
+  })
+  const patchLineupCard = (patch) => setLineupCard((c) => ({ ...c, ...patch }))
+  useEffect(() => { try { localStorage.setItem('bs_social_lineup_card', JSON.stringify(lineupCard)) } catch { /* private window */ } }, [lineupCard])
+  // Width over height of the logo the card shows, measured so a 6:1 wordmark and
+  // a square crest each get the box that suits them.
+  const [lineupLogoRatio, setLineupLogoRatio] = useState(1)
+  const [cardUploadError, setCardUploadError] = useState('')
+  // The Glass Card's own choices: where the scorecards sit on the photo, how dark
+  // the tint behind them is and which performers each side shows. The photo is
+  // the post's hero image (it changes every match); the rest is the club's habit,
+  // so this browser keeps it.
+  const [glassLook, setGlassLook] = useState(() => {
+    try { return { ...GLASS_DEFAULTS, ...JSON.parse(localStorage.getItem('bs_social_result_glass') || '{}') } } catch { return { ...GLASS_DEFAULTS } }
+  })
+  const patchGlassLook = (patch) => setGlassLook((c) => ({ ...c, ...patch }))
+  useEffect(() => { try { localStorage.setItem('bs_social_result_glass', JSON.stringify(glassLook)) } catch { /* private window */ } }, [glassLook])
+  const [glassFocus, setGlassFocus] = useState(GLASS_FOCUS)
+  // The Highlights Cover frames its photo the same way, with its own default (the player sits high).
+  const [highlightsFocus, setHighlightsFocus] = useState(HIGHLIGHTS_FOCUS)
+
+  // Tag the players who have nothing on record before the match date as
+  // debutants. Runs on its own after a lineup lands (the lineup is already on
+  // screen, the tags arrive a moment later) and on request from the Players
+  // card. It only sets tags for players the club's records could answer for: a
+  // fill-in with no record keeps whatever it had, and an admin's own switch
+  // stays until the next time they ask for a check.
+  const [debutCheck, setDebutCheck] = useState(null)
+  const checkDebuts = useCallback(async (list, isoDate) => {
+    if (IS_AFL) return
+    const ids = (list || []).map((sp) => sp?.player?.id).filter(Boolean)
+    if (!ids.length) { setDebutCheck({ status: 'none' }); return }
+    setDebutCheck({ status: 'loading' })
+    try {
+      const d = await api.getSocialDebuts(ids, isoDate)
+      const debuts = new Set((d.debuts || []).map(String))
+      const known = new Set((d.known || []).map(String))
+      setSelectedPlayers((prev) => prev.map((sp) => {
+        const id = String(sp.player.id)
+        return known.has(id) ? { ...sp, debut: debuts.has(id) } : sp
+      }))
+      setDebutCheck({ status: 'ok', debuts: debuts.size, unknown: ids.filter((id) => !known.has(String(id))).length })
+    } catch (e) {
+      setDebutCheck({ status: 'err', message: e?.message || 'Could not check debuts' })
+    }
+  }, [])
 
   const [scorecardMatch, setScorecardMatch] = useState(DEFAULT_SCORECARD)
   const [scUrlInput, setScUrlInput] = useState('')
@@ -1141,6 +1775,26 @@ export default function AdminSocialPost() {
   const [potmUrlStatus, setPotmUrlStatus] = useState(null)
   const [potmPicks, setPotmPicks] = useState(null)
   const [potmImport, setPotmImport] = useState({ status: null, data: null, playerIdx: 0, include: { bat: true, bowl: true, field: true } })
+  // Team of the week: the round's ranked pool (data) behind the players on the
+  // post. The team itself lives in selectedPlayers, so add/remove/reorder work
+  // exactly as they do on a lineup.
+  const [totwImport, setTotwImport] = useState({ status: null, data: null, notice: null })
+  const [totwOpts, setTotwOpts] = useState({ showPoints: false })
+  // How the pool is pulled and shaped: which teams (all, juniors, seniors), the
+  // period for a round that is not a weekend, and best performers or a set make-up.
+  const [totwPlan, setTotwPlan] = useState(() => ({ scope: 'all', range: readTotwRange(), mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
+  // Milestones: the club's recorded list, which are ticked (in post order), the
+  // window and search that narrow the picker, and what the post says about them.
+  const [msImport, setMsImport] = useState({ status: null, report: null })
+  const [msPicks, setMsPicks] = useState([])
+  const [msWindow, setMsWindow] = useState(DEFAULT_MILESTONE_WINDOW)
+  const [msSearch, setMsSearch] = useState('')
+  const [msOpts, setMsOpts] = useState({ title: '', showDates: true })
+  const msRows = useMemo(() => achievedMilestones(msImport.report), [msImport.report])
+  // How far down the ranking the team has reached (a pool index). Growing the
+  // team continues from here, so a player taken off by hand is not fetched
+  // straight back on by the next +.
+  const totwCursor = useRef(-1)
   // Fixtures / results roundups — one post, all grades. Seeded with sample rows
   // so a fresh tab previews well; users edit/add/remove.
   const [fixtures, setFixtures] = useState(() => DEFAULT_FIXTURES.map((f) => ({ ...f })))
@@ -1148,6 +1802,12 @@ export default function AdminSocialPost() {
   // Play.cricket round import (the multi-match analogue of the scorecard import).
   const [fxImport, setFxImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
   const [rrImport, setRrImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
+  // Categories switched OFF on each import (empty = everything the pull found).
+  const [fxOff, setFxOff] = useState([])
+  const [rrOff, setRrOff] = useState([])
+  // Whose top performers the Wrap + Leaders roundup lists: our club's ('us') or the
+  // opposition's ('them'). One choice for the whole post.
+  const [rrPerfSide, setRrPerfSide] = useState('us')
   // Fixtures / results roundups spread across a carousel: rows are split evenly
   // across `count` derived pages, `idx` is the page being previewed.
   const [roundPages, setRoundPages] = useState({ fixtures: { count: 1, idx: 0 }, results: { count: 1, idx: 0 } })
@@ -1162,14 +1822,24 @@ export default function AdminSocialPost() {
   // chasing team), no page-count picker needed.
   const [scSplit, setScSplit] = useState(false)
   const [scSplitIdx, setScSplitIdx] = useState(0)
+  // Player of the match on the scorecard: our side ranked by the same points the
+  // Player of Match tab uses, so the import picks the top one and the select
+  // below lets somebody choose another. `idx` -1 means it was typed by hand.
+  const [scPotm, setScPotm] = useState({ players: [], idx: -1, note: null })
 
   // Club-event / announcement posters (Events tab). One editable facts object +
   // a chosen layout, motif glyph and optional background photo.
-  const [event, setEvent] = useState(DEFAULT_EVENT)
-  const [eventPreset, setEventPreset] = useState('curry')
-  const [eventMotifKey, setEventMotifKey] = useState('star')
-  const [eventBg, setEventBg] = useState(null)        // object URL or null
-  const [eventBgOpacity, setEventBgOpacity] = useState(0.85)
+  const eventDraft0 = useRef(undefined)
+  if (eventDraft0.current === undefined) eventDraft0.current = readEventDraft()
+  const [event, setEvent] = useState(() => (eventDraft0.current ? { ...DEFAULT_EVENT, ...eventDraft0.current.facts } : DEFAULT_EVENT))
+  const [eventPreset, setEventPreset] = useState(() => (eventDraft0.current ? (eventDraft0.current.preset ?? '') : 'curry'))
+  const [eventMotifKey, setEventMotifKey] = useState(() => eventDraft0.current?.motif || 'star')
+  const [eventBg, setEventBg] = useState(() => eventDraft0.current?.bg || null)        // object URL, library URL or null
+  const [eventBgOpacity, setEventBgOpacity] = useState(() => (typeof eventDraft0.current?.bgOpacity === 'number' ? eventDraft0.current.bgOpacity : 0.85))
+  // An icon the club searched for, kept as a data URI, used when the motif is 'custom'.
+  const [eventMotifIcon, setEventMotifIcon] = useState(() => eventDraft0.current?.motifIcon || '')
+  // The run of events the list layouts (Agenda, Calendar, Icon Cards) draw.
+  const [eventList, setEventList] = useState(() => (Array.isArray(eventDraft0.current?.list?.items) ? eventDraft0.current.list : defaultEventList()))
 
   // Two freeform layers of blocks: `canvas` is the standalone Blank Canvas
   // template; `overlay` is the "Custom Edit" layer that sits on top of any real
@@ -1206,6 +1876,8 @@ export default function AdminSocialPost() {
   // Custom Edit mode: overlay freeform blocks on top of the current (non-blank)
   // template so it can be tweaked and saved as a custom template.
   const [customEdit, setCustomEdit] = useState(false)
+  // The imported-template layout is its blocks, so the freeform layer is always on for it.
+  const customOn = customEdit || isCustomLayout(templateId)
   // Career stats for players referenced by "player" data blocks, fetched on
   // demand and cached by id (keeps saved templates live — config only).
   const [playerStatsCache, setPlayerStatsCache] = useState({})
@@ -1263,6 +1935,22 @@ export default function AdminSocialPost() {
     return { items: out, lost }
   }
 
+  // Keep the event draft as it is typed. A photo added from disk is a blob: URL
+  // that dies with the tab, so it goes into the club's media library once (the
+  // same cache a saved template uses) and the draft holds the library address.
+  useEffect(() => {
+    const id = setTimeout(async () => {
+      try {
+        let bg = eventBg
+        if (typeof bg === 'string' && bg.startsWith('blob:')) bg = await persistBlobUrl(bg)
+        localStorage.setItem(EVENT_DRAFT_KEY, JSON.stringify({ facts: event, preset: eventPreset, motif: eventMotifKey, motifIcon: eventMotifIcon, list: eventList, bg: bg || null, bgOpacity: eventBgOpacity }))
+      } catch { /* quota, private window or a failed upload: the draft is a convenience */ }
+    }, 500)
+    return () => clearTimeout(id)
+  // persistBlobUrl is stable in effect (it only reads a ref and the API).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event, eventPreset, eventMotifKey, eventMotifIcon, eventList, eventBg, eventBgOpacity])
+
   // Save the current post as a reusable Template (works on every tab). Captures
   // the base template + Style; on the Blank Canvas / Custom Edit it also
   // captures the block layout. `updateKey` overwrites that template in place.
@@ -1275,7 +1963,7 @@ export default function AdminSocialPost() {
       const key = existing ? existing.key : `tpl_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
       const finalName = (name || '').trim() || existing?.name || `Template ${templatesRef.current.length + 1}`
       const blankTab = templateId === 'BL1'
-      const usingOverlay = customEdit && !blankTab
+      const usingOverlay = customOn && !blankTab
       const srcItems = blankTab ? canvas.items : usingOverlay ? overlay.items : null
       const { items, lost: blocksLost } = srcItems ? await persistBlobImages(srcItems) : { items: null, lost: 0 }
       // An event poster IS its content: the title, date, details, motif and
@@ -1287,11 +1975,11 @@ export default function AdminSocialPost() {
       if (activeTab === 'events') {
         const bg = await persistBlobUrl(eventBg)
         if (eventBg && !bg) lost += 1
-        eventContent = { facts: event, preset: eventPreset, motif: eventMotifKey, bg, bgOpacity: eventBgOpacity }
+        eventContent = { facts: event, preset: eventPreset, motif: eventMotifKey, motifIcon: eventMotifIcon, list: eventList, bg, bgOpacity: eventBgOpacity }
       }
       const tpl = {
         key, name: finalName, templateId, custom: usingOverlay,
-        style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent },
+        style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent, bgTint, bgTexture, roles: roleTweaks, parts: layoutParts[partsKey(templateId)] || null, bgUrl: bgStyle === 'custom-image' ? bgCustomUrl : null },
         blank: items,
         event: eventContent,
         // The stacking order goes with the design. Without it a template saved
@@ -1363,12 +2051,36 @@ export default function AdminSocialPost() {
     if (st.bgColors) setBgColors(st.bgColors)
     if (st.customBg) setCustomBg(st.customBg)
     if (st.customAccent) setCustomAccent(st.customAccent)
+    // Absent means a template saved before these existed: leave the editor's own
+    // choice alone for the veil and texture, and start the colours untouched.
+    setBgTint(typeof st.bgTint === 'number' ? st.bgTint : null)
+    setBgTexture(typeof st.bgTexture === 'boolean' ? st.bgTexture : null)
+    setRoleTweaks(st.roles && typeof st.roles === 'object' ? st.roles : {})
+    setLayoutParts((all) => ({ ...all, [partsKey(tpl.templateId)]: cleanParts(tpl.templateId, st.parts) }))
+    if (st.bg === 'custom-image' && typeof st.bgUrl === 'string' && st.bgUrl) setBgCustomUrl(st.bgUrl)
     if (tpl.event && typeof tpl.event === 'object') {
       if (tpl.event.facts && typeof tpl.event.facts === 'object') setEvent({ ...DEFAULT_EVENT, ...tpl.event.facts })
       if (tpl.event.preset) setEventPreset(tpl.event.preset)
       if (tpl.event.motif) setEventMotifKey(tpl.event.motif)
+      setEventMotifIcon(tpl.event.motifIcon || '')
+      // A template saved before event lists existed has no list: keep the one
+      // the editor holds rather than blanking it.
+      if (tpl.event.list && Array.isArray(tpl.event.list.items)) setEventList(tpl.event.list)
       setEventBg(tpl.event.bg || null)
       if (typeof tpl.event.bgOpacity === 'number') setEventBgOpacity(tpl.event.bgOpacity)
+    } else {
+      // An event poster saved before templates kept their wording holds only the
+      // layout. The editor's own wording starts as Curry Night and is not stored,
+      // so without this a saved Season Launch opened as a Curry Night poster
+      // (with its motif and photo). Start it from the preset that owns the layout.
+      const base = EVENT_PRESETS.find((p) => p.template === tpl.templateId)
+      if (base) {
+        setEvent({ ...DEFAULT_EVENT, ...base.event })
+        setEventPreset(base.key)
+        setEventMotifKey(base.motif)
+        setEventBg(null)
+        setEventBgOpacity(0.85)
+      }
     }
     const clone = (list) => (list || []).map((it) => ({ ...it }))
     if (tpl.custom) {
@@ -1487,6 +2199,17 @@ export default function AdminSocialPost() {
   useEffect(() => { localStorage.setItem('bs_social_dark', JSON.stringify(darkMode)) }, [darkMode])
   useEffect(() => { localStorage.setItem('bs_social_font', fontKey) }, [fontKey])
   useEffect(() => { localStorage.setItem('bs_social_bg', bgStyle) }, [bgStyle])
+  // A blob: URL dies with the page, so only a stored one is kept across a reload.
+  useEffect(() => {
+    try {
+      if (bgCustomUrl && !String(bgCustomUrl).startsWith('blob:')) localStorage.setItem('bs_social_bg_url', bgCustomUrl)
+      else if (!bgCustomUrl) localStorage.removeItem('bs_social_bg_url')
+    } catch { /* private mode: the choice just does not survive a reload */ }
+  }, [bgCustomUrl])
+  useEffect(() => { localStorage.setItem('bs_social_bg_tint', bgTint == null ? '' : String(bgTint)) }, [bgTint])
+  useEffect(() => { localStorage.setItem('bs_social_bg_texture', bgTexture == null ? '' : bgTexture ? '1' : '0') }, [bgTexture])
+  useEffect(() => { localStorage.setItem('bs_social_roles', JSON.stringify(roleTweaks)) }, [roleTweaks])
+  useEffect(() => { localStorage.setItem('bs_social_parts', JSON.stringify(layoutParts)) }, [layoutParts])
   useEffect(() => { localStorage.setItem('bs_social_bg_colors', JSON.stringify(bgColors)) }, [bgColors])
   useEffect(() => { localStorage.setItem('bs_social_bg_text', bgBigText) }, [bgBigText])
   useEffect(() => { localStorage.setItem('bs_social_bg_text_op', String(bgBigTextOpacity)) }, [bgBigTextOpacity])
@@ -1513,7 +2236,7 @@ export default function AdminSocialPost() {
   const styleSaveTimer = useRef(null)
   const styleSnapshot = JSON.stringify({
     palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle,
-    bg_colors: bgColors, palettes: savedPalettes, designs: savedDesigns,
+    bg_colors: bgColors, palettes: savedPalettes, designs: savedDesigns, lineup_card: lineupCard,
   })
   useEffect(() => {
     if (!settings) return undefined
@@ -1547,6 +2270,7 @@ export default function AdminSocialPost() {
             bg_colors: st.bg_colors && typeof st.bg_colors === 'object' ? st.bg_colors : {},
             palettes: Array.isArray(st.palettes) ? st.palettes : [],
             designs: Array.isArray(st.designs) ? st.designs : [],
+            lineup_card: { ...LINEUP_CARD_DEFAULTS, ...(st.lineup_card && typeof st.lineup_card === 'object' ? st.lineup_card : {}) },
           }
           setPaletteKey(applied.palette)
           setDarkMode(applied.dark)
@@ -1555,6 +2279,7 @@ export default function AdminSocialPost() {
           setBgColors(applied.bg_colors)
           setSavedPalettes(applied.palettes)
           setSavedDesigns(applied.designs)
+          if (st.lineup_card && typeof st.lineup_card === 'object') setLineupCard(applied.lineup_card)
           styleServerRef.current = JSON.stringify(applied)
         }
         setAllPlayers(p)
@@ -1618,7 +2343,7 @@ export default function AdminSocialPost() {
     }
     if (sheet.opponent?.name) setOpponent(o => ({ ...o, name: sheet.opponent.name }))
     if (sheet.teamName) setHeadline(sheet.teamName)
-    setTemplateId('T1') // a lineup template
+    setTemplateId(LINEUP_DEFAULT) // a lineup template
     // Clear router state so a refresh doesn't re-apply.
     window.history.replaceState({}, document.title)
   }, [location.state, allPlayers])
@@ -1645,7 +2370,28 @@ export default function AdminSocialPost() {
       setScUrlStatus('ok')
     } catch (e) {
       setScUrlStatus(e?.message || 'Failed to load scorecard')
+      return
     }
+    // Player of the match, the same way the Player of Match tab works it out.
+    // Best effort: the scorecard is already on screen and the fields stay typeable.
+    if (IS_AFL) return
+    try {
+      const ranked = await api.getSocialPotm(matchId)
+      const players = ranked?.players || []
+      setScPotm({ players, idx: players.length ? 0 : -1, note: players.length ? null : 'No player of the match could be worked out. Type one below.' })
+      if (players.length) setScorecardMatch(prev => ({ ...prev, meta: { ...prev.meta, motm: scMotmOf(players[0], prev.meta.motm) } }))
+    } catch {
+      setScPotm({ players: [], idx: -1, note: 'No player of the match could be worked out. Type one below.' })
+    }
+  }
+
+  const patchScMotm = (motm) => { setScPotm(s => ({ ...s, idx: -1 })); patchScMeta({ motm }) }
+
+  const pickScPotm = (idx) => {
+    const pl = scPotm.players[idx]
+    if (!pl) return
+    setScPotm(s => ({ ...s, idx }))
+    setScorecardMatch(prev => ({ ...prev, meta: { ...prev.meta, motm: scMotmOf(pl, prev.meta.motm) } }))
   }
 
   const handleScUrlImport = async () => {
@@ -1702,13 +2448,18 @@ export default function AdminSocialPost() {
     const margin = marginMatch ? `BY ${marginMatch[1].trim()}` : ''
 
     // POTM = top run-scorer on the winning side (falls back to ours on a tie).
+    // A side's `bowling` is the bowling in the innings that side BATTED, so it
+    // lists the OTHER side's bowlers (the server builds it that way for the
+    // scorecard layouts). That player's own spell is therefore in the other
+    // side's list.
     const winTeam = winner === 'OPPONENT' ? them : us
+    const loseTeam = winner === 'OPPONENT' ? us : them
     const topBat = [...(winTeam.batting || [])]
       .filter((b) => !b.didNotBat)
       .sort((a, b) => Number(b.r) - Number(a.r))[0]
     const motmPlayer = topBat ? playerForPid(topBat.pid) : null
     const sameBowl = topBat
-      ? (winTeam.bowling || []).find((bw) => (bw.pid && topBat.pid && String(bw.pid).toLowerCase() === String(topBat.pid).toLowerCase()) || (bw.last && topBat.last && bw.last === topBat.last))
+      ? (loseTeam.bowling || []).find((bw) => (bw.pid && topBat.pid && String(bw.pid).toLowerCase() === String(topBat.pid).toLowerCase()) || (bw.last && topBat.last && bw.last === topBat.last))
       : null
 
     setResult((r) => ({
@@ -1726,7 +2477,10 @@ export default function AdminSocialPost() {
       motmBowl: sameBowl ? `${sameBowl.w}/${sameBowl.r}` : '',
       motmPlayerId: motmPlayer?.id || '',
       topBatters: { team: topBatters(us), opponent: topBatters(them) },
-      topBowlers: { team: topBowlers(us), opponent: topBowlers(them) },
+      // Each side's bowlers are in the OTHER side's list (see above): ours bowled
+      // while they batted. `topBowlers(us)` here put the opposition's figures in
+      // the "Our Bowlers" box, next to our batters.
+      topBowlers: { team: topBowlers(them), opponent: topBowlers(us) },
     }))
     setMatch((m) => ({
       ...m,
@@ -1818,7 +2572,7 @@ export default function AdminSocialPost() {
     const player = rosterPlayer || { id: pl.pid || `potm_${playerIdx}`, display_name: fallbackName }
     setSelectedPlayers([{
       player,
-      role: !IS_AFL && rosterPlayer?.player_role && ['BAT', 'BOWL', 'AR', 'WK'].includes(rosterPlayer.player_role) ? rosterPlayer.player_role : role,
+      role: !IS_AFL && rosterPlayer ? socialRole(rosterPlayer, role) : role,
       captain: false, viceCaptain: false, keeper: false,
     }])
 
@@ -1879,10 +2633,158 @@ export default function AdminSocialPost() {
     applyPotm(potmImport.data, potmImport.playerIdx, include)
   }
 
+  // ── Team of the week import ─────────────────────────────────────────────────
+  // One ranked performer from the round's pool -> a slot in the selected list:
+  // the roster record when the scorecard participant resolves to one (so the
+  // photo comes with it), else a minimal live-name entry, the same shape the
+  // player-of-the-match import builds. The stat line rides along on the slot.
+  const totwSelection = useCallback((pl, i) => {
+    const rosterPlayer = pl.pid ? playerForPid(pl.pid) : null
+    const fallbackName = pl.first && pl.last ? `${pl.last}, ${pl.first}` : (pl.last || pl.first || pl.short || 'Player')
+    const player = rosterPlayer || { id: pl.pid || `totw_${pl.guid || i}`, display_name: fallbackName }
+    const derived = pl.batting && pl.bowling ? 'AR' : pl.bowling ? 'BOWL' : 'BAT'
+    const role = rosterPlayer ? socialRole(rosterPlayer, derived) : derived
+    return {
+      player, role, captain: false, viceCaptain: false, keeper: false,
+      totw: { line: totwLine(pl), grade: pl.grade || '', opp: pl.opp || '', points: pl.points },
+    }
+  }, [playerForPid])
+
+  // The team off the pool: the top `size`, or (with a make-up) the best of each
+  // seat. `cursor` is how far down the ranking the team reaches, so the stepper
+  // carries on from there.
+  const applyTotw = useCallback((data, size, makeup) => {
+    const pool = data?.players || []
+    let chosen
+    if (makeup) {
+      chosen = pickMakeup(pool, makeup).picks
+      totwCursor.current = chosen.reduce((c, pl) => Math.max(c, pool.indexOf(pl)), -1)
+    } else {
+      const n = Math.max(TOTW_MIN, Math.min(TOTW_MAX, size))
+      chosen = pool.slice(0, n)
+      totwCursor.current = Math.min(n, pool.length) - 1
+    }
+    setSelectedPlayers(chosen.map(pl => totwSelection(pl, pool.indexOf(pl))))
+    setMatch(m => ({ ...m, round: data.round || m.round, date: data.label || m.date, season: data.season || m.season }))
+  }, [totwSelection])
+
+  // A period names the round by the days it was played; a pasted link names it
+  // by one of its matches; none means the club's latest match-day. A playhq.com
+  // link cannot (different id namespace) and comes back kind 'playhq' for the
+  // amber correction, same as the roundups. `source` is remembered so changing
+  // the teams re-pulls the same round.
+  const loadTotw = useCallback(async (q, over = {}) => {
+    const scope = over.scope ?? totwPlan.scope
+    const dateFrom = over.dateFrom || ''
+    const dateTo = over.dateTo || ''
+    setTotwImport(s => ({ ...s, status: 'loading', notice: null }))
+    try {
+      const data = await api.getSocialTotw(q || '', { dateFrom, dateTo, scope })
+      if (data.kind === 'round' && data.players?.length) {
+        setTotwImport({ status: 'ok', data, notice: null, source: { q: q || '', dateFrom, dateTo } })
+        applyTotw(data, TOTW_DEFAULT, totwPlan.mode === 'makeup' ? totwPlan.makeup : null)
+        return
+      }
+      if (data.kind === 'playhq') {
+        setTotwImport(s => ({ ...s, status: null, notice: { kind: 'playhq', message: data.message } }))
+        return
+      }
+      setTotwImport(s => ({ ...s, status: data.message || 'Could not read that link', notice: null }))
+    } catch (e) {
+      setTotwImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
+    }
+  }, [applyTotw, totwPlan])
+
+  const pullTotwRange = () => {
+    const { from, to } = totwPlan.range
+    if (!from || !to) { setTotwImport(s => ({ ...s, status: 'Pick a start date and an end date.' })); return }
+    writeTotwRange(totwPlan.range)
+    loadTotw('', { dateFrom: from, dateTo: to })
+  }
+  const changeTotwScope = (scope) => {
+    if (scope === totwPlan.scope) return
+    setTotwPlan(pl => ({ ...pl, scope }))
+    const src = totwImport.source
+    if (src && totwImport.data) loadTotw(src.q, { dateFrom: src.dateFrom, dateTo: src.dateTo, scope })
+  }
+  const changeTotwMode = (mode) => {
+    if (mode === totwPlan.mode) return
+    setTotwPlan(pl => ({ ...pl, mode }))
+    if (totwImport.data) applyTotw(totwImport.data, selectedPlayers.length || TOTW_DEFAULT, mode === 'makeup' ? totwPlan.makeup : null)
+  }
+  const changeTotwMakeup = (makeup) => {
+    setTotwPlan(pl => ({ ...pl, makeup }))
+    if (totwImport.data && totwPlan.mode === 'makeup') applyTotw(totwImport.data, TOTW_DEFAULT, makeup)
+  }
+
+  // The club's recorded milestones (the same report as Admin > Milestones). The
+  // first load ticks the newest in the window so a post exists straight away; a
+  // reload keeps whatever is ticked.
+  const loadMilestones = useCallback(async () => {
+    setMsImport(s => ({ ...s, status: 'loading' }))
+    try {
+      const report = await api.adminGetMilestones()
+      const rows = achievedMilestones(report)
+      setMsImport({ status: 'ok', report })
+      setMsPicks(prev => (prev.length ? prev : defaultPicks(rows, msWindow, MILESTONE_MAX)))
+    } catch (e) {
+      setMsImport(s => ({ ...s, status: e?.message || 'failed' }))
+    }
+  }, [msWindow])
+  const toggleMilestone = (key) => setMsPicks(prev => (
+    prev.includes(key) ? prev.filter(k => k !== key) : prev.length >= MILESTONE_MAX ? prev : [...prev, key]
+  ))
+  const tickShownMilestones = (shown) => setMsPicks(prev => {
+    const next = [...prev]
+    for (const r of shown) { if (next.length >= MILESTONE_MAX) break; if (!next.includes(r.key)) next.push(r.key) }
+    return next
+  })
+  // Load once, the first time the Milestones post type is opened.
+  useEffect(() => {
+    if (!IS_AFL && TAB_MAP[templateId] === 'milestones' && msImport.status === null) loadMilestones()
+  }, [templateId, msImport.status, loadMilestones])
+
+  // Resize the team. Growing continues down the ranking from where the team
+  // reached; shrinking drops from the bottom of the order and pulls that point
+  // back up. Either way a player swapped in by hand stays, and one taken off by
+  // hand is not re-added, which a rebuild from the ranking would do.
+  const changeTotwSize = (size) => {
+    const n = Math.max(TOTW_MIN, Math.min(TOTW_MAX, size))
+    const pool = totwImport.data?.players || []
+    const prev = selectedPlayers
+    if (n <= prev.length) {
+      const next = prev.slice(0, n)
+      const keep = new Set(next.map(sp => String(sp.player.id)))
+      let cursor = -1
+      pool.forEach((pl, i) => { if (keep.has(String(totwSelection(pl, i).player.id))) cursor = i })
+      totwCursor.current = cursor
+      setSelectedPlayers(next)
+      return
+    }
+    const have = new Set(prev.map(sp => String(sp.player.id)))
+    const add = []
+    let cursor = totwCursor.current
+    for (let i = cursor + 1; i < pool.length && prev.length + add.length < n; i++) {
+      cursor = i
+      const sp = totwSelection(pool[i], i)
+      if (!have.has(String(sp.player.id))) { add.push(sp); have.add(String(sp.player.id)) }
+    }
+    totwCursor.current = cursor
+    setSelectedPlayers([...prev, ...add])
+  }
+
+  // Everything the Team of the Week panel needs, in one prop for TotwControls.
+  const totwControls = {
+    plan: totwPlan, import: totwImport, count: selectedPlayers.length,
+    onScope: changeTotwScope, onMode: changeTotwMode, onMakeup: changeTotwMakeup, onSize: changeTotwSize,
+    onRange: (range) => setTotwPlan(pl => ({ ...pl, range })),
+    onPull: () => loadTotw(''), onFetchLink: (q) => loadTotw(q), onPullRange: pullTotwRange,
+  }
+
   // ── Play.cricket fixtures / results round import ────────────────────────────
-  const applyFxDate = useCallback((d, season) => {
+  const applyFxDate = useCallback((d, season, off) => {
     if (!d) return
-    setFixtures(sortByGrade((d.fixtures || []).map(f => ({ ...f }))))
+    setFixtures(sortByGrade(filterByCats(d.fixtures || [], off).map(f => ({ ...f }))))
     setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
   }, [])
   const importFixtures = useCallback(async () => {
@@ -1892,13 +2794,13 @@ export default function AdminSocialPost() {
       const dates = data.dates || []
       if (!dates.length) { setFxImport({ status: 'empty', dates: [], idx: 0, season: data.season }); return }
       setFxImport({ status: 'ok', dates, idx: 0, season: data.season })
-      applyFxDate(dates[0], data.season)
+      applyFxDate(dates[0], data.season, fxOff)
     } catch (e) { setFxImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
-  }, [applyFxDate])
+  }, [applyFxDate, fxOff])
 
-  const applyRrDate = useCallback((d, season) => {
+  const applyRrDate = useCallback((d, season, off) => {
     if (!d) return
-    setResults(sortByGrade((d.results || []).map(r => ({ ...r }))))
+    setResults(sortByGrade(filterByCats(d.results || [], off).map(r => ({ ...r }))))
     setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
   }, [])
   const importResults = useCallback(async () => {
@@ -1908,9 +2810,9 @@ export default function AdminSocialPost() {
       const dates = data.dates || []
       if (!dates.length) { setRrImport({ status: 'empty', dates: [], idx: 0, season: data.season }); return }
       setRrImport({ status: 'ok', dates, idx: 0, season: data.season })
-      applyRrDate(dates[0], data.season)
+      applyRrDate(dates[0], data.season, rrOff)
     } catch (e) { setRrImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
-  }, [applyRrDate])
+  }, [applyRrDate, rrOff])
 
   // Same round pull, resolved from a pasted match link instead of the live
   // feed's latest — any one match link from a round names the whole round.
@@ -1924,7 +2826,7 @@ export default function AdminSocialPost() {
         const dates = data.dates || []
         if (!dates.length) { setFxImport(s => ({ ...s, status: 'empty', notice: null })); return }
         setFxImport({ status: 'ok', dates, idx: 0, season: data.season, notice: null })
-        applyFxDate(dates[0], data.season)
+        applyFxDate(dates[0], data.season, fxOff)
         return
       }
       if (data.kind === 'playhq') {
@@ -1935,7 +2837,7 @@ export default function AdminSocialPost() {
     } catch (e) {
       setFxImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
     }
-  }, [applyFxDate])
+  }, [applyFxDate, fxOff])
 
   const importResultsFromLink = useCallback(async (q) => {
     setRrImport(s => ({ ...s, status: 'loading', notice: null }))
@@ -1945,7 +2847,7 @@ export default function AdminSocialPost() {
         const dates = data.dates || []
         if (!dates.length) { setRrImport(s => ({ ...s, status: 'empty', notice: null })); return }
         setRrImport({ status: 'ok', dates, idx: 0, season: data.season, notice: null })
-        applyRrDate(dates[0], data.season)
+        applyRrDate(dates[0], data.season, rrOff)
         return
       }
       if (data.kind === 'playhq') {
@@ -1956,7 +2858,19 @@ export default function AdminSocialPost() {
     } catch (e) {
       setRrImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
     }
-  }, [applyRrDate])
+  }, [applyRrDate, rrOff])
+
+  // Switch a category on or off and re-fill from the day being shown.
+  const toggleFxCat = (k) => {
+    const next = fxOff.includes(k) ? fxOff.filter(x => x !== k) : [...fxOff, k]
+    setFxOff(next)
+    applyFxDate(fxImport.dates[fxImport.idx], fxImport.season, next)
+  }
+  const toggleRrCat = (k) => {
+    const next = rrOff.includes(k) ? rrOff.filter(x => x !== k) : [...rrOff, k]
+    setRrOff(next)
+    applyRrDate(rrImport.dates[rrImport.idx], rrImport.season, next)
+  }
 
   // Drag-and-drop reorder for the roundup row cards (▲▼ and ✕ keep working).
   const fxDrag = useRowDrag(setFixtures)
@@ -2084,9 +2998,19 @@ export default function AdminSocialPost() {
     if (selectedPlayers.find(sp => sp.player.id === p.id)) return
     const role = IS_AFL
       ? ((p.skill_positions || [])[0] || '')
-      : p.player_role && ['BAT','BOWL','AR','WK'].includes(p.player_role) ? p.player_role : 'BAT'
+      : socialRole(p)
     setSelectedPlayers(prev => [...prev, { player: p, role, captain: false, viceCaptain: false, keeper: false }])
   }, [selectedPlayers])
+
+  // A player typed in by hand is a real record now: it joins the roster the
+  // designer searches and goes into the lineup in the same step.
+  const onManualPlayer = (p, note, { existing } = {}) => {
+    if (!existing) setAllPlayers((prev) => [...prev, p])
+    else if (p.photo_url) setAllPlayers((prev) => prev.map((x) => (String(x.id) === String(p.id) ? { ...x, photo_url: p.photo_url } : x)))
+    addPlayer(p)
+    setManualPlayerOpen(false)
+    flashNote({ text: note, tool: 'content' })
+  }
 
   const removePlayer = useCallback(idx => setSelectedPlayers(prev => prev.filter((_, i) => i !== idx)), [])
 
@@ -2100,6 +3024,25 @@ export default function AdminSocialPost() {
       return next
     })
   }, [])
+
+  // A to Z by first name for a team announcement, with a way back. The order
+  // the lineup was in is kept (ids only) until it is restored, so the sort is
+  // never a one-way trip. Players added or removed in between are handled: the
+  // restore orders whoever is still listed by the saved order, new ones last.
+  const [alphaFrom, setAlphaFrom] = useState(null)
+  const sortPlayersAlpha = () => {
+    setAlphaFrom(selectedPlayers.map(sp => String(sp.player.id)))
+    setSelectedPlayers(sortByFirstName(selectedPlayers, sp => sp.player.display_name || sp.player.name))
+  }
+  const restorePlayerOrder = useCallback(() => {
+    setSelectedPlayers(prev => {
+      const rank = new Map((alphaFrom || []).map((id, i) => [id, i]))
+      const at = sp => (rank.has(String(sp.player.id)) ? rank.get(String(sp.player.id)) : Infinity)
+      return prev.map((sp, i) => ({ sp, i })).sort((a, b) => (at(a.sp) - at(b.sp)) || (a.i - b.i) || 0).map(x => x.sp)
+    })
+    setAlphaFrom(null)
+  }, [alphaFrom])
+  useEffect(() => { if (selectedPlayers.length === 0) setAlphaFrom(null) }, [selectedPlayers.length])
 
   const movePlayer = useCallback((idx, dir) => {
     setSelectedPlayers(prev => {
@@ -2186,7 +3129,7 @@ export default function AdminSocialPost() {
 
   const activeTab = TAB_MAP[templateId] || 'lineup'
   const switchTab = (tabKey) => {
-    setTemplateId(TAB_FIRST[tabKey] || 'T1'); setCustomEdit(false)
+    setTemplateId(TAB_FIRST[tabKey] || LINEUP_DEFAULT); setCustomEdit(false)
     // Open the data step the first time you land on a data-driven type; leave it
     // if you move to a type that has nothing to import.
     if (DATA_TABS.includes(tabKey)) {
@@ -2219,7 +3162,8 @@ export default function AdminSocialPost() {
       setLineupSourceKind('playcricket')
     }
   }, [sourceFixtures, pcFixtures])
-  const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab)
+  // The imported-template layout is offered only once there is one (it is its blocks, so an empty one is a blank post).
+  const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab && (!isCustomLayout(t.id) || templateId === t.id))
   const displayFont = (fontKey === 'club_font' && clubFont)
     ? clubFont
     : (DISPLAY_FONTS.find(f => f.key === fontKey) || DISPLAY_FONTS[0])
@@ -2258,10 +3202,12 @@ export default function AdminSocialPost() {
          || PALETTES[paletteKey]
          || orgToPalette(settings))
 
-  const themedPalette = applyTheme(activePalette, darkMode)
+  const themedPalette = applyRoleTweaks(applyTheme(activePalette, darkMode), roleTweaks)
 
   const nameFormat = settings?.player_name_format || 'last_first'
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
+  // The Content panel the open layout shares with its type's built-in layouts (an imported toss uses the toss panel).
+  const panelId = CUSTOM_PANEL_ALIAS[templateId] || templateId
   const isScorecard = !!(tmpl.isScorecard)
   const TemplateComponent = tmpl.component
   // Scorecard split into 2 square Instagram posts (batted-first team, then
@@ -2271,7 +3217,7 @@ export default function AdminSocialPost() {
   // Which freeform layer is being edited, and whether the freeform tools show.
   // Blank tab → the standalone canvas; Custom Edit on a real template → overlay.
   const isBlankTab = tmpl.kind === 'blank'
-  const showBlankTools = isBlankTab || customEdit
+  const showBlankTools = isBlankTab || customOn
   // Fixtures/results roundups can spread across derived carousel pages: same
   // template, each page rendering its even slice of the rows (chunkEven).
   const isRoundTab = tmpl.kind === 'fixtures' || tmpl.kind === 'results'
@@ -2292,9 +3238,18 @@ export default function AdminSocialPost() {
     history.commit(label)
   }
   // History-aware wrappers around the layer mutators the inspector/panels drive.
-  const hUpdate = (id, patch) => { record('Edit block'); layer.update(id, patch) }
+  const hUpdate = (id, patch) => { record('Edit block'); layer.patchMany(releaseSponsorAuto(layer.items, { [id]: patch })) }
   const hDuplicate = (id) => { record('Duplicate'); layer.duplicate(id) }
-  const hRemove = (id) => { record('Delete'); layer.remove(id) }
+  const hRemove = (id) => {
+    // Every post carries a sponsor, so taking the last sponsor grid off one asks
+    // first. Saying yes also stops the editor putting it back on this post.
+    const it = layer.items.find((x) => x.id === id)
+    if (it && it.type === 'sponsors' && layer.items.filter((x) => x.type === 'sponsors').length === 1) {
+      if (!window.confirm('Every post carries a sponsor. Take the sponsors off this one anyway?')) return
+      sponsorDismissed.current[sponsorKey] = true
+    }
+    record('Delete'); layer.remove(id)
+  }
   const hAlign = (mode) => { record('Align'); layer.align(mode) }
 
   // Added blocks are drawn INSIDE the layout root, interleaved among the
@@ -2305,8 +3260,10 @@ export default function AdminSocialPost() {
   // Declared up here with the rest of the layer state, not down beside the
   // render — `layerStack` reads it, and a const declared below its own reader
   // is a temporal-dead-zone crash the first time the panel draws.
-  const overlayOn = customEdit && !isBlankTab
-  const overlayItems = overlayOn ? overlay.items : []
+  const overlayOn = customOn && !isBlankTab
+  // The post's sponsor grid is part of the post, not of Custom Edit, so it draws
+  // (and exports) with Custom Edit off. Every other block waits for Custom Edit.
+  const overlayItems = overlayOn ? overlay.items : overlay.items.filter((it) => it.type === 'sponsors')
 
   // ONE STACK, whichever surface is being edited. On a built-in layout it holds
   // the layout's own elements and the added blocks together, ordered by
@@ -2346,8 +3303,7 @@ export default function AdminSocialPost() {
         if (e.shiftKey) history.redo(); else history.undo()
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && layer.selIds.length) {
         e.preventDefault()
-        record('Delete')
-        layer.selIds.forEach((id) => layer.remove(id))
+        layer.selIds.slice().forEach((id) => hRemove(id))
       }
     }
     window.addEventListener('keydown', onKey)
@@ -2397,7 +3353,13 @@ export default function AdminSocialPost() {
   // DOM) shows through — the templates' hardcoded `background: palette.primary`
   // fills can't be touched individually (~40 of them), so this is done by
   // feeding them a translucent palette instead.
-  const templatePalette = bgActive ? { ...renderPalette, primary: withAlpha(renderPalette.primary, '99') } : renderPalette
+  const templatePalette = bgActive ? { ...renderPalette, primary: withAlpha(renderPalette.primary, DEFAULT_VEIL) } : renderPalette
+  // The veil and the layout's own texture over the background (postLook.js).
+  const ownPhotoBg = bgStyle === 'custom-image'
+  const bgTintEff = bgTint ?? (ownPhotoBg ? 0 : 0.6)
+  const bgTextureEff = bgTexture ?? !ownPhotoBg
+  const postLook = { veil: bgActive ? alphaHex(bgTintEff) : null, texture: bgActive ? bgTextureEff : true }
+  const openParts = partsFor(templateId) ? cleanParts(templateId, layoutParts[partsKey(templateId)]) : null
 
   const filteredPlayers = allPlayers.filter(p => {
     if (!playerSearch) return true
@@ -2417,7 +3379,7 @@ export default function AdminSocialPost() {
       player: milestonePlayer ? playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat, swapNames) : undefined,
     }
   }
-  if (templateId === 'C1') {
+  if (templateId === 'C1' || templateId === 'C5') {
     const annPlayer = selectedPlayers[announcement.playerIdx]
     let annTemplatePlayer = annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat, swapNames) : undefined
     if (annTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
@@ -2441,7 +3403,7 @@ export default function AdminSocialPost() {
       summary: motm.summary,
     }
   }
-  if (['T1', 'T3', 'T6', 'T7', 'T10'].includes(templateId) && heroImage.blobUrl) {
+  if (['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13'].includes(templateId) && heroImage.blobUrl) {
     extraProps.heroImage = heroImage.blobUrl
   }
   // Only the templates that crop a photo into a box can act on a focal point;
@@ -2449,13 +3411,38 @@ export default function AdminSocialPost() {
   if (HERO_FOCUS_TEMPLATES.includes(templateId)) {
     extraProps.heroFocus = heroFocus
   }
-  if (['T1', 'T3', 'T6', 'T10'].includes(templateId) && heroPlayerId) {
+  if (HERO_PLAYER_TEMPLATES.includes(templateId) && heroPlayerId) {
     extraProps.featuredId = heroPlayerId
   }
+  if (HERO_MARK_TEMPLATES.includes(templateId)) {
+    extraProps.markHero = markHero
+  }
+  if (templateId === 'T11') {
+    extraProps.panelColor = splitPanel || undefined
+    extraProps.background = bgActive ? bgStyle : null
+  }
+  // How many logos the post's sponsor grid holds, for the layouts whose room for
+  // it depends on the count (T12's bar) or that label it (the Glass Card).
+  const gridLogoCount = (() => {
+    const usable = new Set(adminSponsors.filter(sponsorLogoUrl).map((x) => x.id))
+    const grid = overlay.items.find((it) => it.type === 'sponsors')
+    return grid ? (grid.sponsorIds || []).filter((id) => usable.has(id)).length : 0
+  })()
+  if (templateId === 'T12') {
+    extraProps.card = lineupCard
+    extraProps.logoRatio = lineupLogoRatio
+    // None means the layout draws no bar at all.
+    extraProps.sponsorCount = gridLogoCount
+    // The Backing buttons in the Sponsors tool colour the layout's whole bar.
+    extraProps.sponsorPanel = overlay.items.find((it) => it.type === 'sponsors')?.panel || 'light'
+  }
+  // The three card layouts keep a slot for the sponsor grid and ask how many logos it holds.
+  if (templateId === 'T13' || templateId === 'C5') extraProps.sponsorCount = gridLogoCount
   if (templateId === 'C4') {
     extraProps.result = {
       winner: result.winner, margin: result.margin, grade: result.grade, teamScore: result.teamScore,
       oppScore: result.oppScore, motmLast: result.motmLast,
+      motmFirst: result.motmFirst, motmBat: result.motmBat, motmBowl: result.motmBowl,
       topBatters: result.topBatters, topBowlers: result.topBowlers,
     }
   }
@@ -2478,6 +3465,54 @@ export default function AdminSocialPost() {
     season: match.season || '2025–26',
   }
 
+  // The milestone cards the post prints, in post order. Built once: the built-in layouts and a template's
+  // {{milestone N ...}} words both read them.
+  const milestoneCards = activeTab !== 'milestones' ? [] : (() => {
+    const byKey = new Map(msRows.map(r => [r.key, r]))
+    const profiles = new Map(allPlayers.map(pl => [String(pl.id), pl]))
+    return msPicks.map(k => byKey.get(k)).filter(Boolean).map(r => {
+      const pl = profiles.get(String(r.player_id)) || {}
+      const tp = playerToTemplatePlayer({ id: r.player_id, display_name: r.player_name, photo_url: pl.photo_url, hero_photo_url: pl.hero_photo_url }, {}, nameFormat, swapNames)
+      return {
+        key: r.key, _id: r.player_id, first: tp.first, last: tp.last, headshot: tp.headshot,
+        value: milestoneValueText(r), unit: milestoneUnit(r),
+        dateLabel: msOpts.showDates ? formatMilestoneDate(r.achieved_at) : '',
+      }
+    })
+  })()
+
+  // What a template's post-type words ({{fixture 2 venue}}, {{our score}}, {{potm photo}}) read: the editor's
+  // own state for the open tab, shaped by social/postBundle.js. Only the open tab's is built.
+  const tossNames = { teamName: team.name, oppName: oppData.name }
+  const postBundle = (() => {
+    switch (activeTab) {
+      case 'fixtures': return { fixtures: fixtureRows(fixtures) }
+      case 'results': return { results: resultRows(results) }
+      case 'result': {
+        const b = finalBundle(result, tossNames)
+        const profile = playerForPid(result.motmPlayerId)
+        const photo = heroImage.blobUrl || (profile?.photo_url ? `${BASE_URL}/images/players/${profile.id}/photo` : '')
+        if (b.potm) b.potm.photo = photo
+        return b
+      }
+      case 'motm': {
+        const sp = selectedPlayers[motm.playerIdx]
+        const player = sp ? playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames) : undefined
+        return motmBundle(motm, player, (heroMode === 'hero' && heroImage.blobUrl) || player?.headshot || '')
+      }
+      case 'totw': return totwBundle(templatePlayers, { junior: 'JUNIOR', senior: 'SENIOR' }[totwImport.data?.scope] || '')
+      case 'milestones': return milestoneBundle(milestoneCards, msOpts.title)
+      case 'announcement': {
+        const sp = selectedPlayers[announcement.playerIdx]
+        const player = sp ? playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames) : undefined
+        return announceBundle(announcement, player, (heroMode === 'hero' && heroImage.blobUrl) || player?.headshot || '')
+      }
+      case 'toss': return tossBundle(toss, tossNames)
+      case 'events': return eventBundle(event, prepareEventList(eventList), eventBg || '')
+      default: return undefined
+    }
+  })()
+
   // Live data bundle for the Blank Canvas "data blocks" (fixtures / results /
   // record / scorecard / player). Built from the state the designer already
   // holds, so blocks show current info with no extra fetch (bar player stats).
@@ -2490,7 +3525,22 @@ export default function AdminSocialPost() {
   const blankData = {
     team, match: matchData, fixtures, results, record: blankRecord,
     scorecard: scorecardMatch, players: allPlayers, playerStats: playerStatsCache,
+    // What bound text fields print (an imported template's player slots, opponent
+    // and so on). null means the editor holds nothing for it yet.
+    lineup: templatePlayers.map((p) => ({ name: [p.first, p.last].filter(Boolean).join(' '), first: p.first, last: p.last, role: p.roleLong || p.role || '', captain: p.captain, keeper: p.keeper, viceCaptain: p.viceCaptain, debut: p.debut, photo: p.headshot })),
+    opponent: opponent.name ? oppData.name : null, headline: headline || null,
+    post: postBundle,
+    // The photo a template's featured-photo area shows: the Hero Image panel's upload, else the chosen
+    // (or captain's) headshot. '' once players are held but none has a photo; null before any.
+    featuredPhoto: templatePlayers.length ? (heroImage.blobUrl || featuredOf(templatePlayers, heroPlayerId)?.headshot || '') : (heroImage.blobUrl || null),
+    marksOn: templateMarks,
+    // Crests a template's logo areas show: the club's own, and the opposition's when the fixture gave one.
+    teamLogo: team.logo || '', opponentLogo: opponent.logo || null,
+    // Sponsor grids resolve their ids against the club's live list, so a saved
+    // template always draws current logos.
+    sponsors: adminSponsors.filter(sponsorLogoUrl).map((s) => ({ id: s.id, name: s.name, url: sponsorLogoUrl(s) })),
   }
+
 
   // Fetch career stats for any player referenced by a player data block.
   useEffect(() => {
@@ -2548,11 +3598,29 @@ export default function AdminSocialPost() {
   if (tmpl.kind === 'results') {
     extraProps.meta = roundMeta
     extraProps.results = roundPagesOn ? chunkEven(results, roundPage.count)[roundPage.idx] || [] : results
+    if (tmpl.hasLeaders) extraProps.perfSide = rrPerfSide
     extraProps.club = clubMark
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
+  if (openParts) extraProps.parts = openParts
+  if (tmpl.kind === 'totw') {
+    // The competition stays as typed: a team of the week spans grades, so the
+    // 'COMPETITION' placeholder the other posts fall back to would print on it.
+    extraProps.totw = {
+      round: matchData.round, date: matchData.date, comp: match.competition, showPoints: totwOpts.showPoints,
+      // JUNIOR or SENIOR above the round on a scoped team, nothing on the club's whole week.
+      heading: { junior: 'JUNIOR', senior: 'SENIOR' }[totwImport.data?.scope] || undefined,
+    }
+    extraProps.sponsors = scorecardMatch.meta.sponsors
+  }
+  if (tmpl.kind === 'milestones') {
+    extraProps.milestones = milestoneCards
+    // Typed as it is: no 'ROUND 1' placeholder on a post that is not about a round.
+    extraProps.milestoneMeta = { title: msOpts.title, round: match.round, date: match.date, comp: match.competition }
+    extraProps.sponsors = scorecardMatch.meta.sponsors
+  }
   if (tmpl.kind === 'singleresult') {
-    const mapPerf = (arr) => (arr || []).map((p) => ({ n: p.last, l: p.line })).filter((p) => p.n || p.l)
+    const mapPerf = (arr) => (arr || []).map((p) => ({ n: p.last, l: p.line, first: p.first || '', sn: p.surname || '', o: p.overs || '' })).filter((p) => p.n || p.l)
     // POTM photo: an uploaded hero image wins, else the matched player's profile
     // photo (RS4 "Star of the Day" shows it in place of the initials).
     const motmProfile = playerForPid(result.motmPlayerId)
@@ -2575,6 +3643,17 @@ export default function AdminSocialPost() {
       topBowl: { us: mapPerf(result.topBowlers.team), them: mapPerf(result.topBowlers.opponent) },
     }
     extraProps.sponsors = scorecardMatch.meta.sponsors
+    if (templateId === 'RS7') {
+      extraProps.look = glassLook
+      extraProps.photo = heroImage.blobUrl || null
+      extraProps.focus = glassFocus
+      extraProps.sponsorCount = gridLogoCount
+    }
+    if (templateId === 'RS8') {
+      extraProps.photo = heroImage.blobUrl || null
+      extraProps.focus = highlightsFocus
+      extraProps.sponsorCount = gridLogoCount
+    }
   }
   if (tmpl.kind === 'blank') {
     extraProps.items = canvas.items
@@ -2587,10 +3666,12 @@ export default function AdminSocialPost() {
     extraProps.event = event
     extraProps.motif = resolveMotif({
       motifKey: eventMotifKey,
+      customIcon: eventMotifIcon,
       imageUrl: eventBg,
       opacity: eventBgOpacity,
       label: (EVENT_PRESETS.find((p) => p.key === eventPreset)?.photoLabel) || 'Add a photo',
     })
+    if (tmpl.list) extraProps.list = prepareEventList(eventList)
   }
 
   const fontStyle = {
@@ -2601,7 +3682,7 @@ export default function AdminSocialPost() {
 
   // Reset all state to defaults
   const handleReset = () => {
-    const tid = TAB_FIRST[activeTab] || 'T1'
+    const tid = TAB_FIRST[activeTab] || LINEUP_DEFAULT
     setTemplateId(tid)
     setMatch({ competition: '', round: '', venue: '', date: '', time: '', season: '' })
     setHeadline('')
@@ -2611,6 +3692,8 @@ export default function AdminSocialPost() {
     setHeroFocus(DEFAULT_HERO_FOCUS)
     setHeroMode('player')
     setHeroPlayerId('')
+    setMarkHero(false)
+    setSplitPanel('')
     setMilestone({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
     setAnnouncement({ kind: 'APPOINTMENT', headline: 'NAMED CAPTAIN', subheadline: 'FOR THE 2025-26 SEASON', playerIdx: 0 })
     setToss({ winner: 'TEAM', decision: 'BAT' })
@@ -2628,8 +3711,18 @@ export default function AdminSocialPost() {
     setPotmUrlStatus(null)
     setPotmPicks(null)
     setPotmImport({ status: null, data: null, playerIdx: 0, include: { bat: true, bowl: true, field: true } })
+    setTotwImport({ status: null, data: null, notice: null })
+    setTotwOpts({ showPoints: false })
+    setTotwPlan(pl => ({ scope: 'all', range: pl.range, mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
+    totwCursor.current = -1
+    setMsImport({ status: null, report: null })
+    setMsPicks([])
+    setMsWindow(DEFAULT_MILESTONE_WINDOW)
+    setMsSearch('')
+    setMsOpts({ title: '', showDates: true })
     setFixtures(DEFAULT_FIXTURES.map((f) => ({ ...f })))
     setResults(DEFAULT_RESULTS.map((r) => ({ ...r })))
+    setRrPerfSide('us')
     setRoundPages({ fixtures: { count: 1, idx: 0 }, results: { count: 1, idx: 0 } })
     setScorecardMatch(DEFAULT_SCORECARD)
     setScUrlInput('')
@@ -2639,13 +3732,121 @@ export default function AdminSocialPost() {
     setEvent(DEFAULT_EVENT)
     setEventPreset('curry')
     setEventMotifKey('star')
-    if (eventBg) URL.revokeObjectURL(eventBg)
+    setEventMotifIcon('')
+    setEventList(defaultEventList())
+    try { localStorage.removeItem(EVENT_DRAFT_KEY) } catch { /* fine */ }
+    if (eventBg && eventBg.startsWith('blob:')) URL.revokeObjectURL(eventBg)
     setEventBg(null)
     setEventBgOpacity(0.85)
     canvas.reset(defaultBlankItems())
     overlay.reset([])
     setCustomEdit(false)
   }
+
+  // ── Post sponsors ────────────────────────────────────────────────────────
+  // Every post carries at least one sponsor. The server says which ones a post
+  // like this starts with (the team's pin, the grade's pin, the club default, or
+  // its top sponsor); the editor puts that grid on the post and keeps it
+  // following the team and the canvas size until somebody takes it over.
+  // Hooks, so they sit above the loading return.
+  const [sponsorDefault, setSponsorDefault] = useState({ ids: [], source: 'none', loaded: false })
+  const [sponsorPin, setSponsorPin] = useState(null)
+  // Posts (template + page) whose sponsors somebody took off on purpose.
+  const sponsorDismissed = useRef({})
+  const metaSponsorsAuto = useRef(null)
+  const sponsorTarget = isBlankTab ? canvas : overlay
+  const sponsorKey = `${templateId}|${isBlankTab ? pages.index : 0}`
+  // Only the scorecards still draw sponsor slots of their own (a 1920 landscape
+  // sheet with a footer strip). Every other layout reserves a slot for the grid.
+  const nativeSponsors = isScorecard
+  // A layout whose sponsor slot moves with an editor choice (the Glass Card's position).
+  // The Split Poster's grid sits under its XI, which is as long as the side is.
+  const slotOpts = templateId === 'RS7' ? { position: glassLook.position }
+    : templateId === 'T11' ? { players: selectedPlayers.length }
+    : undefined
+  const sponsorCanvas = (() => {
+    if (isScorecard) return { w: 1920, h: 1080 }
+    const sz = postSizeOf(postSize)
+    return { w: sz.w, h: sz.h }
+  })()
+  const usableSponsors = adminSponsors.filter(sponsorLogoUrl)
+  const usableSponsorKey = usableSponsors.map((x) => x.id).join(',')
+  useEffect(() => {
+    let cancelled = false
+    if (loading) return undefined
+    if (!usableSponsors.length) { setSponsorDefault({ ids: [], source: 'none', loaded: true }); return undefined }
+    const usable = new Set(usableSponsors.map((x) => x.id))
+    const timer = setTimeout(() => {
+      api.adminPostSponsorDefault({ team: headline, grade: match.competition })
+        .then((r) => {
+          if (cancelled) return
+          const ids = (r?.sponsor_ids || []).filter((id) => usable.has(id))
+          setSponsorDefault({ ids: ids.length ? ids : [usableSponsors[0].id], source: ids.length ? r.source : 'top', loaded: true })
+        })
+        // The football silo has no such route, and an older server neither: the
+        // club's first sponsor with a logo is still better than none.
+        .catch(() => { if (!cancelled) setSponsorDefault({ ids: [usableSponsors[0].id], source: 'top', loaded: true }) })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, usableSponsorKey, headline, match.competition])
+  useEffect(() => {
+    if (loading || !sponsorDefault.loaded || !sponsorDefault.ids.length || nativeSponsors) return
+    const existing = sponsorTarget.items.find((it) => it.type === 'sponsors')
+    const geo = sponsorSlotFor(templateId, sponsorCanvas.w, sponsorCanvas.h, sponsorDefault.ids.length, slotOpts)
+    if (!existing) {
+      if (sponsorDismissed.current[sponsorKey]) return
+      // "Your template" has no sponsor band unless the template drew a sponsors box.
+      if (isCustomLayout(templateId)) return
+      const fresh = newBlankItem('sponsors', { ...geo, sponsorIds: sponsorDefault.ids, auto: true })
+      // Functional, so two runs of this effect before React re-renders cannot
+      // put two grids on the post.
+      sponsorTarget.setItems((its) => (its.some((it) => it.type === 'sponsors') ? its : [...its, fresh]))
+      return
+    }
+    if (existing.auto) {
+      const same = existing.sponsorIds.join(',') === sponsorDefault.ids.join(',')
+        && existing.x === geo.x && existing.y === geo.y && existing.w === geo.w && existing.h === geo.h
+      // A layout's own padding and backing come with its slot, but only when the
+      // slot itself moves: a backing somebody picked is theirs until then.
+      if (!same) sponsorTarget.patchMany({ [existing.id]: { sponsorIds: sponsorDefault.ids, ...geo } })
+    } else if (existing.followDefault && existing.sponsorIds.join(',') !== sponsorDefault.ids.join(',')) {
+      sponsorTarget.patchMany({ [existing.id]: { sponsorIds: sponsorDefault.ids, followDefault: true } })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, sponsorDefault, sponsorTarget.items, sponsorKey, sponsorCanvas.w, sponsorCanvas.h, nativeSponsors, templateId, slotOpts?.position, slotOpts?.players])
+  // A layout with sponsor slots of its own (fixtures, results, scorecards) fills
+  // them from the same default, until somebody picks their own logos there.
+  useEffect(() => {
+    if (loading || !sponsorDefault.loaded || !nativeSponsors || !sponsorDefault.ids.length) return
+    const want = [0, 1].map((i) => {
+      const sp = usableSponsors.find((x) => x.id === sponsorDefault.ids[i])
+      return sp ? { url: sponsorLogoUrl(sp), name: sp.name } : { url: null, name: '' }
+    })
+    const wantKey = want.map((x) => x.url || '').join('|')
+    setScorecardMatch((m) => {
+      const curKey = m.meta.sponsors.map((x) => x.url || '').join('|')
+      // Somebody has changed a slot since the last time this filled them: theirs.
+      if (metaSponsorsAuto.current !== null && curKey !== metaSponsorsAuto.current) return m
+      if (curKey === wantKey) { metaSponsorsAuto.current = wantKey; return m }
+      metaSponsorsAuto.current = wantKey
+      return { ...m, meta: { ...m.meta, sponsors: want } }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, sponsorDefault, nativeSponsors, usableSponsorKey])
+
+  // Measure the Match Day Card's logo so the layout can give a 6:1 wordmark and
+  // a square crest each the box that suits them. An image that will not load
+  // keeps the last ratio; the layout then draws nothing for it anyway.
+  const lineupLogoSrc = lineupCard.logoUrl || team.logo || ''
+  useEffect(() => {
+    if (!lineupLogoSrc) return undefined
+    let cancelled = false
+    const im = new Image()
+    im.onload = () => { if (!cancelled && im.naturalWidth && im.naturalHeight) setLineupLogoRatio(im.naturalWidth / im.naturalHeight) }
+    im.src = lineupLogoSrc
+    return () => { cancelled = true }
+  }, [lineupLogoSrc])
 
   if (loading) return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-pb-bg">
@@ -2671,7 +3872,10 @@ export default function AdminSocialPost() {
   // A layout that genuinely cannot reflow says so in the registry and is placed
   // into the canvas instead, which is the only thing the letterbox path below is
   // still for.
-  const nativeSize = !tmpl.fixed && !isScorecard
+  // The Instagram-squares split draws each square at 1080x1080 itself (the
+  // `square` prop on SC1-SC3), so it is native to its canvas. Framing it would
+  // scale a 1080 square by 1080/1920 into the middle of the post.
+  const nativeSize = (!tmpl.fixed && !isScorecard) || scSplitOn
   const framed = !isBlankTab && !nativeSize && (W !== nativeW || H !== nativeH)
   // Wraps a layout that cannot reflow for the canvas it's being posted on. Used
   // by the live preview AND the off-screen export node, so the two cannot
@@ -2728,7 +3932,7 @@ export default function AdminSocialPost() {
         passThrough
         {...(interactive ? {
           interactive: true, scale, selectedIds: overlay.selIds,
-          onSelect: overlay.select, onDeselect: overlay.deselect, onPatchMany: overlay.patchMany,
+          onSelect: overlay.select, onDeselect: overlay.deselect, onPatchMany: (map) => overlay.patchMany(releaseSponsorAuto(overlay.items, map)),
           onGestureStart: () => record('Move block'), onDuplicate: hDuplicate, onRemove: hRemove,
         } : null)}
         style={{ position: 'absolute', inset: 0, zIndex: z }} />
@@ -2739,7 +3943,7 @@ export default function AdminSocialPost() {
       <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers}
         palette={templatePalette} headline={headline} width={W} height={H} {...extraProps} {...props} />
     )
-    return <PostLayerProvider value={templateLayerValue(interactive, scale)}>{node}</PostLayerProvider>
+    return <PostLookContext.Provider value={postLook}><PostLayerProvider value={templateLayerValue(interactive, scale)}>{node}</PostLayerProvider></PostLookContext.Provider>
   }
   const postPages = (() => {
     if (isBlankTab && pages.count > 1) {
@@ -2776,9 +3980,16 @@ export default function AdminSocialPost() {
   })()
 
   // ─── Controls ────────────────────────────────────────────────────────────────
-  const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab)
-  const showOpponent  = !['scorecard', 'fixtures', 'results', 'events', 'blank'].includes(activeTab)
-  const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
+  // An imported template (bound text fields) is a Blank canvas that still needs
+  // the lineup, the opponent and the match details those fields print.
+  const boundItems = isBlankTab ? canvas.items : isCustomLayout(templateId) ? overlay.items : []
+  const boundSlots = boundSlotCount(boundItems)
+  const hasBound = boundItems.some((it) => it.bind)
+  // A template with eleven places holds eleven players; a built-in lineup holds its own ceiling.
+  const playerCap = (templateId === CUSTOM_LAYOUT_ID || tmpl.maxPlayers === 0) && boundSlots > 0 ? boundSlots : tmpl.maxPlayers
+  const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab) || hasBound
+  const showOpponent  = !['scorecard', 'fixtures', 'results', 'totw', 'milestones', 'events', 'blank'].includes(activeTab) || hasBound
+  const showPlayers   = (activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0) || boundSlots > 0
   const showHeroImage = HERO_SLOT_TEMPLATES.includes(templateId)
   const HERO_SLOT_LAYOUT_NAMES = HERO_SLOT_TEMPLATES
     .map((id) => TEMPLATES.find((t) => t.id === id)?.name)
@@ -2810,7 +4021,12 @@ export default function AdminSocialPost() {
       { label: 'Headline', value: announcement.headline, onChange: (v) => setAnnouncement((a) => ({ ...a, headline: v })) },
       { label: 'Subheadline', value: announcement.subheadline, onChange: (v) => setAnnouncement((a) => ({ ...a, subheadline: v })) },
     ]
-    else if (activeTab === 'fixtures' || activeTab === 'results') mFields = [
+    else if (activeTab === 'milestones') mFields = [
+      { label: 'Heading (optional)', value: msOpts.title, onChange: (v) => setMsOpts((o) => ({ ...o, title: v })), placeholder: 'MILESTONES' },
+      { label: 'Round', value: match.round, onChange: (v) => patchMatch({ round: v }), placeholder: 'ROUND 7' },
+      { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
+    ]
+    else if (activeTab === 'fixtures' || activeTab === 'results' || activeTab === 'totw') mFields = [
       { label: 'Round', value: match.round, onChange: (v) => patchMatch({ round: v }), placeholder: 'ROUND 7' },
       { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
     ]
@@ -2820,6 +4036,29 @@ export default function AdminSocialPost() {
       { label: 'Opponent', value: opponent.name, onChange: (v) => patchOpp({ name: v }), placeholder: 'Opponent CC' },
       { label: 'Date', value: match.date, onChange: (v) => patchMatch({ date: v }), placeholder: 'SAT 30 MAY' },
     ]
+    // Milestones: which ones to feature, and the layout. The picker is the same one
+    // the full editor uses, so a tick made on a phone is the same tick.
+    const mExtra = activeTab === 'milestones' ? {
+      label: 'Which milestones',
+      node: (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2" role="group" aria-label="Milestone layout">
+            {TEMPLATES.filter((t) => t.kind === 'milestones').map((t) => (
+              <button key={t.id} type="button" onClick={() => selectTemplate(t.id)} aria-pressed={templateId === t.id}
+                className={`flex-1 min-h-11 px-3 rounded-lg border font-mono text-[10px] tracking-wide2 uppercase ${templateId === t.id ? 'text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}
+                style={templateId === t.id ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>{t.name}</button>
+            ))}
+          </div>
+          <label className="flex items-center gap-2 min-h-11 text-[13px] text-pb-text cursor-pointer">
+            <input type="checkbox" className="w-5 h-5" checked={msOpts.showDates} onChange={(e) => setMsOpts((o) => ({ ...o, showDates: e.target.checked }))} />
+            Show the date each was reached
+          </label>
+          <MilestonePicker status={msImport.status} rows={msRows} picks={msPicks} windowKey={msWindow} search={msSearch}
+            onWindow={setMsWindow} onSearch={setMsSearch} onToggle={toggleMilestone} onTickShown={tickShownMilestones}
+            onClear={() => setMsPicks([])} onLoad={loadMilestones} />
+        </div>
+      ),
+    } : null
     const mPalettes = [
       { key: 'club', label: 'Club', color: orgAccent(settings) },
       ...Object.entries(PALETTES).map(([key, pal]) => ({ key, label: pal.name, color: pal.accent })),
@@ -2831,7 +4070,7 @@ export default function AdminSocialPost() {
           moduleLogo={moduleBrand('socials').logo} clubName={settings?.name}
           W={W} H={H} content={previewContent} fontStyle={fontStyle} fill={canvasFill}
           types={TABS.map((t) => ({ key: t.key, label: t.label }))} activeType={activeTab} onPickType={switchTab}
-          fields={mFields} palettes={mPalettes} paletteKey={paletteKey} onPickPalette={setPaletteKey}
+          fields={mFields} extra={mExtra} palettes={mPalettes} paletteKey={paletteKey} onPickPalette={setPaletteKey}
           onExport={handleExport} exporting={exporting} onSaveDraft={saveCurrentTemplate}
           onFullEditor={() => setForceFullEditor(true)}
         />
@@ -2875,7 +4114,7 @@ export default function AdminSocialPost() {
   // Blank tab, else the overlay on top of a real template (turning on Custom
   // Edit so it shows).
   const addBlock = (type, opts = {}) => {
-    if (!isBlankTab && !customEdit) setCustomEdit(true)
+    if (!isBlankTab && !customOn) setCustomEdit(true)
     const target = isBlankTab ? canvas : overlay
     record(`Add ${type}`)
     return target.add(type, opts)
@@ -2895,16 +4134,17 @@ export default function AdminSocialPost() {
         const player = byId[l.player_id]
         if (!player) return null
         const pp = poolById[l.player_id]
-        return { player, role: (pp?.skill_positions?.[0]) || pp?.player_role || player.player_role || 'BAT', captain: !!l.is_captain, viceCaptain: false, keeper: !!l.is_wicket_keeper }
+        return { player, role: IS_AFL ? ((pp?.skill_positions?.[0]) || '') : socialRole({ ...player, ...(pp || {}) }), captain: !!l.is_captain, viceCaptain: false, keeper: !!l.is_wicket_keeper }
       }).filter(Boolean)
       setSelectedPlayers(picked)
+      checkDebuts(picked, d.fixture?.played_on || null)
       const fx = d.fixture
       if (fx) {
-        setMatch((m) => ({ ...m, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.played_on || m.date, time: fx.start_time || m.time }))
+        setMatch((m) => ({ ...m, competition: fx.grade_name || fx.grade || m.competition, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.played_on || m.date, time: fx.start_time || m.time }))
         if (fx.opponent_name) setOpponent((o) => ({ ...o, name: fx.opponent_name }))
         const tn = teamHeadline(
           (fx.home_away === 'AWAY' ? fx.away_team : fx.home_team) || '',
-          settings?.name, fx.grade || match.competition)
+          settings?.name, fx.grade_name || fx.grade || match.competition)
         if (tn) setHeadline(tn)
       }
       setLineupLoad(`ok:${picked.length}`)
@@ -2927,16 +4167,17 @@ export default function AdminSocialPost() {
       const fallback = { id: p.participant_id, display_name: p.name }
       return {
         player: player || fallback,
-        role: IS_AFL ? '' : p.is_wicket_keeper ? 'WK' : (player?.player_role || 'BAT'),
+        role: IS_AFL ? '' : p.is_wicket_keeper ? 'WK' : socialRole(player),
         captain: !!p.is_captain,
         viceCaptain: false,
         keeper: !!p.is_wicket_keeper,
       }
     })
     setSelectedPlayers(picked)
-    setMatch((m) => ({ ...m, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
+    checkDebuts(picked, fx.date || null)
+    setMatch((m) => ({ ...m, competition: fx.grade || m.competition, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
     if (oppTeam?.club || oppTeam?.name) setOpponent((o) => ({ ...o, name: oppTeam.club || oppTeam.name || o.name, logo: oppTeam.logo_url || o.logo }))
-    const tn = teamHeadline(ourTeam.name || ourTeam.club || '', settings?.name, fx.grade || match.competition)
+    const tn = teamHeadline(ourTeam.name || ourTeam.club || '', settings?.name, fx.grade_name || fx.grade || match.competition)
     if (tn) setHeadline(tn)
     setLineupLoad(`ok:${picked.length}`)
   }
@@ -2988,12 +4229,155 @@ export default function AdminSocialPost() {
     }
   }
   const useBgAsset = (asset) => { setBgStyle('custom-image'); setBgCustomUrl(asset.url) }
+  // Match Day Card: a photo or logo uploaded here is stored in the club's library
+  // and becomes the card's default straight away, so the next lineup opens with it.
+  const uploadCardImage = async (file, field) => {
+    if (!file) return
+    setCardUploadError('')
+    try {
+      const saved = await api.uploadSocialMedia(file, field === 'bgUrl' ? 'background' : undefined)
+      if (field === 'bgUrl') setBgAssets((a) => [saved, ...a])
+      else setMediaAssets((a) => [saved, ...a])
+      patchLineupCard({ [field]: saved.url })
+    } catch (e) {
+      setCardUploadError(e?.message || 'That upload did not go through. Try again.')
+    }
+  }
   const deleteBgAsset = async (asset) => {
     setBgAssets((a) => a.filter((x) => x.id !== asset.id))
     if (bgCustomUrl === asset.url) { setBgStyle('none'); setBgCustomUrl(null) }
     try { await api.deleteSocialMedia(asset.id) } catch { /* asset stays removed locally */ }
   }
   const pickImageForItem = (itemId) => { pendingImgItem.current = itemId; blankImgInputRef.current?.click() }
+  // Bring the club's own design (a PNG or JPG exported from Canva) in as the
+  // bottom layer of the blank canvas. It is stored in the club's library, never
+  // kept as a blob: a blob would die with the tab and the saved template would
+  // come back without its picture. A failed upload says so and changes nothing.
+  const uploadDesign = async (file) => {
+    if (!file) return
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
+      flashNote({ warn: true, text: `“${file.name}” is not a PNG, JPG or WebP. In Canva, choose Share, Download, then PNG or JPG.`, tool: 'content' }, 12000)
+      return
+    }
+    setDesignBusy(true)
+    try {
+      const dims = await new Promise((resolve) => {
+        const url = URL.createObjectURL(file)
+        const img = new Image()
+        img.onload = () => { resolve({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(url) }
+        img.onerror = () => { resolve(null); URL.revokeObjectURL(url) }
+        img.src = url
+      })
+      const saved = await api.uploadSocialMedia(file)
+      setMediaAssets((a) => [saved, ...a])
+      record('Add your design')
+      canvas.setItems((its) => withDesign(its, saved.url, file.name, W, H))
+      // The picture fills the post edge to edge, so a different shape is cropped.
+      // Say so, with the size that would not be.
+      const off = dims && Math.abs(dims.w / dims.h - W / H) > 0.02
+      flashNote(off
+        ? { warn: true, text: `Your design is ${dims.w}×${dims.h}, this post is ${W}×${H}, so the edges are cropped. In Canva, resize to ${W}×${H} and upload it again to keep everything.`, tool: 'content' }
+        : { text: 'Your design is the bottom layer, locked. Add Club data, text or sponsors on top, then Save as template.', tool: 'content' }, 12000)
+    } catch (e) {
+      flashNote({ warn: true, text: `Your design did not upload (${e?.message || 'no answer from the server'}). Images over 5 MB are refused: export from Canva as JPG, or at a smaller size, and try again.`, tool: 'content' }, 14000)
+    } finally {
+      setDesignBusy(false)
+    }
+  }
+  // A template file from the BetterCricket Canva app: the design with the field
+  // words taken out, plus where each field sits and how it is styled. It becomes
+  // the locked design and one bound text block per field, ready for the players.
+  // Nothing changes if the file or its picture cannot be used.
+  // Stores a picture that arrived inside a template (a data URL) in the club's library.
+  // Returns its address, or null if it could not be kept (the caller says so and carries on).
+  const keepTemplatePicture = async (dataUrl, name) => {
+    if (typeof dataUrl !== 'string' || !/^data:image\/(png|jpeg|webp);base64,/.test(dataUrl)) return null
+    try {
+      const blob = await (await fetch(dataUrl)).blob()
+      const ext = blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png'
+      const saved = await api.uploadSocialMedia(new File([blob], `${name}.${ext}`, { type: blob.type }))
+      setMediaAssets((a) => [saved, ...a])
+      return saved.url
+    } catch { return null }
+  }
+  // A template from the BetterCricket Canva app, as pasted text. The file says where it goes:
+  // a line up becomes the "Your template" layout on the Lineup tab (so the Data tab, the players
+  // and the match details all link up), anything else the Blank canvas. Nothing changes if the
+  // text cannot be used. Resolves true when the import went ahead.
+  const importTemplateText = async (text) => {
+    if (!text || !String(text).trim()) {
+      flashNote({ warn: true, text: 'There is no template text to import. Copy it from the BetterCricket Canva app first.', tool: 'content' }, 10000)
+      return false
+    }
+    setDesignBusy(true)
+    try {
+      const parsed = parseTemplateFile(text)
+      if (parsed.error) { flashNote({ warn: true, text: parsed.error, tool: 'content' }, 14000); return false }
+      const warnings = templateWarnings(parsed, { clubStyle })
+      // The pictures the designer used (the background, a picture panel) are kept as real pictures.
+      let designUrl = null
+      if (parsed.background) {
+        designUrl = await keepTemplatePicture(parsed.background, `${parsed.name} background`)
+        if (!designUrl) warnings.push('The background picture could not be saved (it may be over 5 MB or not a PNG, JPG or WebP), so the post uses your own background.')
+      }
+      for (const [i, p] of parsed.panels.entries()) {
+        if (!p.image) continue
+        p.imageUrl = await keepTemplatePicture(p.image, `${parsed.name} panel ${i + 1}`)
+        if (!p.imageUrl) warnings.push(`The picture for panel ${i + 1} could not be saved, so it is drawn as a plain panel in your accent colour.`)
+      }
+      for (const [i, p] of parsed.pictures.entries()) {
+        p.imageUrl = await keepTemplatePicture(p.image, `${parsed.name} picture ${i + 1}`)
+        if (!p.imageUrl) warnings.push(`The picture ${i + 1} on the design could not be saved (it may be over 5 MB), so it is left out.`)
+      }
+      // The post takes the template's shape when it is one BetterPosts makes.
+      const shape = POST_SIZES.find((z) => z.w === parsed.canvas.w && z.h === parsed.canvas.h)
+      if (shape) setPostSize(shape.key)
+      else warnings.push(`The template is ${parsed.canvas.w}×${parsed.canvas.h}, which is not a BetterPosts size, so it stays on ${W}×${H} and the design is cropped to fit.`)
+      const target = shape || { w: W, h: H }
+      // Every cricket post type has a layout of its own; a general template (or any, in the football build) is a Blank canvas.
+      const customId = IS_AFL ? null : CUSTOM_LAYOUTS[parsed.postType] || null
+      const toCustom = !!customId
+      const build = (keep) => itemsFromTemplate(parsed, { designUrl, designName: `${parsed.name} background`, width: target.w, height: target.h, keep, clubStyle })
+      if (toCustom) {
+        overlayHistory.commit('Import template')
+        // Importing again into the same layout updates it; coming from another layout starts clean
+        // (the post's own sponsor grid is kept either way).
+        // A template starts with the post's own extras off (crest watermark, texture, background word):
+        // the Canva design is the look, and the club turns anything back on under Design.
+        if (templateId !== customId) { setBgLogoOn(false); setBgStyle('none'); setBgBigText('') }
+        overlay.setItems(build(templateId === customId ? overlay.items : overlay.items.filter((it) => it.type === 'sponsors')))
+        overlay.setSelIds([])
+        setTemplateId(customId)
+        setCustomEdit(false)
+        setTool(DATA_TABS.includes(parsed.postType) ? 'source' : 'content')
+      } else {
+        canvasHistory.commit('Import template')
+        canvas.setItems(build(templateId === 'BL1' ? canvas.items : []))
+        canvas.setSelIds([])
+        if (templateId !== 'BL1') { setTemplateId('BL1'); setCustomEdit(false) }
+      }
+      const slots = boundSlotCount([...parsed.fields.filter((f) => f.bind)])
+      const bound = parsed.fields.filter((f) => f.bind).length
+      const parts = [
+        `${bound} field${bound === 1 ? '' : 's'}`,
+        ...(slots ? [`${slots} player place${slots === 1 ? '' : 's'}`] : []),
+        ...(parsed.texts.length ? [`${parsed.texts.length} fixed word${parsed.texts.length === 1 ? '' : 's'}`] : []),
+        ...(parsed.pictures.some((p) => p.imageUrl) ? [`${parsed.pictures.filter((p) => p.imageUrl).length} picture${parsed.pictures.filter((p) => p.imageUrl).length === 1 ? '' : 's'}`] : []),
+        ...(parsed.panels.length ? [`${parsed.panels.length} panel${parsed.panels.length === 1 ? '' : 's'}${parsed.panels.some((p) => !p.imageUrl) ? ' (recolour a plain panel with its colour swatches)' : ''}`] : []),
+      ]
+      flashNote({
+        warn: warnings.length > 0,
+        text: `Imported “${parsed.name}” as ${toCustom ? `a ${TABS.find((t) => t.key === parsed.postType)?.label || 'post'} layout called “Your template”` : 'a Blank canvas post'}: ${parts.join(', ')}. ${clubStyle ? 'Colours and fonts come from your club, so changing your palette or font restyles it. ' : ''}${toCustom ? (IMPORT_NEXT_STEP[parsed.postType] || '') : 'Add the players, opponent and match details in the panels on the left.'}${warnings.length ? ` ${warnings.join(' ')}` : ''}`,
+        tool: toCustom && DATA_TABS.includes(parsed.postType) ? 'source' : 'content',
+      }, 18000)
+      return true
+    } catch (e) {
+      flashNote({ warn: true, text: `That template did not import (${e?.message || 'it could not be read'}). Nothing was changed.`, tool: 'content' }, 14000)
+      return false
+    } finally {
+      setDesignBusy(false)
+    }
+  }
   // Crop / remove the background on the image ALREADY in a block. The hero
   // photo and sponsor logos have had this since they were built; an image block
   // only ever got the editor on the way in (replace), so an uploaded PNG that
@@ -3120,7 +4504,13 @@ export default function AdminSocialPost() {
           // team — so nothing to add or remove, just switch between them.
           <PageStrip count={2} index={scSplitIdx} onGoTo={setScSplitIdx} fixed />
         )}
-        <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
+        {/* A press that reaches this box was not on a block: blocks, their
+            handles and the quick toolbar all stop propagation. So it is a
+            click on the empty canvas or the layout, and clears the selection.
+            It has to live here, not on BlankCanvas: a layout's blocks layer is
+            pass-through, so its own root never sees the click. */}
+        <div onPointerDown={() => { if (layer.selIds.length) layer.deselect() }}
+          style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
           <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative', background: canvasFill }}>
             {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
             {/* On a built-in layout the blocks are drawn inside it, in among
@@ -3128,7 +4518,7 @@ export default function AdminSocialPost() {
             {isBlankTab ? (
               <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
                 interactive scale={scale} selectedIds={canvas.selIds}
-                onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={canvas.patchMany}
+                onSelect={canvas.select} onDeselect={canvas.deselect} onPatchMany={(map) => canvas.patchMany(releaseSponsorAuto(canvas.items, map))}
                 onGestureStart={() => record('Move block')} onDuplicate={hDuplicate} onRemove={hRemove} />
             ) : templateNode({ interactive: true, scale })}
           </div>
@@ -3148,6 +4538,93 @@ export default function AdminSocialPost() {
       onDuplicate={hDuplicate} onRemove={hRemove} onAlign={hAlign}
       palette={themedPalette} players={allPlayers} onPickImage={pickImageForItem} onEditImage={editImageForItem}
       onSendTo={hSendTo} layoutName={!isBlankTab ? tmpl.name : null}
+      onOpenSponsors={() => setTool('sponsors')}
+    />
+  )
+
+  // ── Sponsors panel ─────────────────────────────────────────────────────────
+  const sponsorBlock = sponsorTarget.items.find((it) => it.type === 'sponsors') || null
+  const sponsorsForPanel = adminSponsors.map((sp) => ({
+    id: sp.id, name: sp.name, url: sponsorLogoUrl(sp),
+    tierLabel: sp.tier ? String(sp.tier).toUpperCase() : null,
+  }))
+  const pickSponsors = (ids) => {
+    if (sponsorBlock) {
+      // Taking the last sponsor off goes through the same confirm as deleting the block.
+      if (!ids.length) { hRemove(sponsorBlock.id); return }
+      record('Change sponsors')
+      // The Match Day Card's bar is as tall as its logos need, so a grid still
+      // sitting where the layout put it follows the bar. One somebody moved stays.
+      let follow = null
+      // The Glass Card's slot is wider for more logos, the same way.
+      if (['T12', 'RS7', 'T13', 'C5', 'RS8'].includes(templateId)) {
+        const was = sponsorSlotFor(templateId, W, H, (sponsorBlock.sponsorIds || []).length || 1, slotOpts)
+        if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) {
+          const { x, y, w, h } = sponsorSlotFor(templateId, W, H, ids.length, slotOpts)
+          follow = { x, y, w, h }
+        }
+      }
+      sponsorTarget.patchMany(releaseSponsorAuto(sponsorTarget.items, { [sponsorBlock.id]: { sponsorIds: ids, ...follow } }))
+      return
+    }
+    if (!ids.length) return
+    delete sponsorDismissed.current[sponsorKey]
+    const geo = sponsorSlotFor(templateId, W, H, ids.length, slotOpts)
+    record('Add sponsors')
+    sponsorTarget.setItems((its) => [...its, newBlankItem('sponsors', { ...geo, sponsorIds: ids })])
+  }
+  // Moving the Glass Card moves the free end of the photo, so a sponsor grid still
+  // sitting where the layout put it goes with it. One somebody moved stays.
+  const changeGlassPosition = (position) => {
+    if (position === glassLook.position) return
+    if (sponsorBlock) {
+      const n = (sponsorBlock.sponsorIds || []).length || 1
+      const was = sponsorSlotFor('RS7', W, H, n, { position: glassLook.position })
+      if (['x', 'y', 'w', 'h'].every((k) => sponsorBlock[k] === was[k])) {
+        record('Move scorecard')
+        sponsorTarget.patchMany({ [sponsorBlock.id]: sponsorSlotFor('RS7', W, H, n, { position }) })
+      }
+    }
+    patchGlassLook({ position })
+  }
+  const useDefaultSponsors = () => {
+    if (!sponsorBlock || !sponsorDefault.ids.length) return
+    record('Default sponsors')
+    sponsorTarget.patchMany({ [sponsorBlock.id]: { sponsorIds: sponsorDefault.ids, ...sponsorSlotFor(templateId, W, H, sponsorDefault.ids.length, slotOpts), auto: true } })
+  }
+  const setSponsorPanel = (panel) => {
+    if (!sponsorBlock) return
+    record('Sponsor backing')
+    sponsorTarget.patchMany({ [sponsorBlock.id]: { panel } })
+  }
+  const editSponsorsOnPost = () => {
+    if (!sponsorBlock) return
+    if (!isBlankTab) setCustomEdit(true)
+    sponsorTarget.select(sponsorBlock.id)
+  }
+  // Pin the sponsors on this post to its team or grade, so every later post for
+  // it starts with them. The server re-checks the permission.
+  const pinSponsors = async (kind) => {
+    const name = ((kind === 'teams' ? headline : match.competition) || '').trim()
+    if (!name || !sponsorBlock) return
+    setSponsorPin('saving')
+    try {
+      const cur = await api.adminGetPostDefaults()
+      const next = { teams: { ...(cur.assignments?.teams || {}) }, grades: { ...(cur.assignments?.grades || {}) } }
+      next[kind][name] = sponsorBlock.sponsorIds
+      await api.adminPutPostDefaults(next)
+      setSponsorPin(`saved:${kind}`)
+    } catch (e) {
+      setSponsorPin(`err:${e?.message || 'Could not save that'}`)
+    }
+  }
+  const sponsorsPanel = (
+    <SponsorsPanel
+      sponsors={sponsorsForPanel} block={sponsorBlock} defaultInfo={sponsorDefault}
+      context={{ team: headline, grade: match.competition }} native={nativeSponsors}
+      onPick={pickSponsors} onPanel={setSponsorPanel} onUseDefault={useDefaultSponsors}
+      onEditOnPost={editSponsorsOnPost} onRemove={() => sponsorBlock && hRemove(sponsorBlock.id)}
+      onPin={pinSponsors} pinState={sponsorPin}
     />
   )
 
@@ -3158,6 +4635,8 @@ export default function AdminSocialPost() {
       onAddBrandLockup={() => addBlock('brand')}
       sponsors={adminSponsors.map((s) => ({ name: s.name, url: sponsorLogoUrl(s) }))}
       onAddSponsor={(sp) => addBlock('image', { src: sp.url, srcName: sp.name, fit: 'contain' })}
+      onAddIcon={(ic) => addBlock('image', { src: ic.dataUri, srcName: ic.name, fit: 'contain', w: 260, h: 260 })}
+      accent={activePalette.accent} dark={darkMode}
       club={{ name: settings?.name, logo_url: team.logo }}
     />
   )
@@ -3212,7 +4691,7 @@ export default function AdminSocialPost() {
   return (
     <>
       <SocialBackgroundDefs />
-      <SaveTemplateDialog open={saveDialogOpen} defaultName={`Template ${savedTemplates.length + 1}`}
+      <SaveTemplateDialog open={saveDialogOpen} defaultName={activeTab === 'events' && (event.title || '').trim() ? event.title.trim() : `Template ${savedTemplates.length + 1}`}
         activeName={activeTemplate?.name} saving={savingTemplate} error={templateError}
         onSave={onSaveDialog} onClose={() => setSaveDialogOpen(false)} />
       <input ref={blankImgInputRef} type="file" accept="image/png,image/webp,image/jpeg" className="sr-only"
@@ -3345,6 +4824,9 @@ export default function AdminSocialPost() {
                     <MatchPickList picks={activeTab === 'result' ? resPicks : scPicks}
                       onPick={(id) => (activeTab === 'result' ? loadResultMatch(id) : loadScorecardMatch(id))}
                       onDismiss={() => (activeTab === 'result' ? setResPicks(null) : setScPicks(null))} />
+                    {activeTab === 'result' && (
+                      <ClubGamesPicker orgId={settings?.id} onPick={loadResultMatch} busy={resUrlStatus === 'loading'} />
+                    )}
                     <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">Pulls the scores, top performers and matched player photos. You can still edit everything after.</p>
                   </div>
                 )}
@@ -3354,7 +4836,8 @@ export default function AdminSocialPost() {
                     <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
                       status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
                       onPull={importFixtures} onFetchLink={importFixturesFromLink} notice={fxImport.notice}
-                      onPick={(i) => { setFxImport((s) => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season) }} />
+                      onPick={(i) => { setFxImport((s) => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season, fxOff) }}
+                      off={fxOff} onToggleCat={toggleFxCat} />
                   </div>
                 )}
                 {activeTab === 'results' && (
@@ -3362,7 +4845,8 @@ export default function AdminSocialPost() {
                     <RoundImportBox hint="recent results" rowsKey="results"
                       status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
                       onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
-                      onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season) }} />
+                      onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
+                      off={rrOff} onToggleCat={toggleRrCat} />
                   </div>
                 )}
 
@@ -3371,6 +4855,20 @@ export default function AdminSocialPost() {
                     <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-2">Paste the match link</div>
                     {potmImportControls}
                     <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">You can still edit the player and every stat after.</p>
+                  </div>
+                )}
+
+                {activeTab === 'totw' && (
+                  <div className="pb-card p-4">
+                    <TotwControls t={totwControls} />
+                  </div>
+                )}
+
+                {activeTab === 'milestones' && (
+                  <div className="pb-card p-4">
+                    <MilestonePicker status={msImport.status} rows={msRows} picks={msPicks} windowKey={msWindow} search={msSearch}
+                      onWindow={setMsWindow} onSearch={setMsSearch} onToggle={toggleMilestone} onTickShown={tickShownMilestones}
+                      onClear={() => setMsPicks([])} onLoad={loadMilestones} />
                   </div>
                 )}
 
@@ -3385,6 +4883,7 @@ export default function AdminSocialPost() {
             {tool === 'elements' && <ShapesPanel onAdd={addBlock} />}
             {tool === 'data' && <ClubDataPanel onAdd={addBlock} />}
             {tool === 'photos' && photosPanel}
+            {tool === 'sponsors' && sponsorsPanel}
             {tool === 'layers' && (
               <LayersPanel
                 stack={layerStack} selIds={layer.selIds} hidden={tlayers.hidden}
@@ -3583,6 +5082,13 @@ export default function AdminSocialPost() {
                   </label>
                 </div>
               </div>
+              {bgActive && (
+                <BackgroundFinish
+                  ownPhoto={ownPhotoBg} tint={bgTintEff} texture={bgTextureEff}
+                  onTint={setBgTint} onTexture={setBgTexture}
+                  touched={bgTint != null || bgTexture != null}
+                  onReset={() => { setBgTint(null); setBgTexture(null) }} />
+              )}
               {bgStyle === 'gradient-custom' && (
                 <div className="flex gap-1.5 flex-wrap items-center mt-2">
                   <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 w-full">Direction</span>
@@ -3726,6 +5232,20 @@ export default function AdminSocialPost() {
               )}
             </section>
 
+            <ColourRoles
+              base={applyTheme(activePalette, darkMode)} tweaks={roleTweaks}
+              onChange={(k, v) => setRoleTweaks((t) => ({ ...t, [k]: v }))}
+              onClear={(k) => setRoleTweaks((t) => { const n = { ...t }; delete n[k]; return n })}
+              onReset={() => setRoleTweaks({})} />
+
+            {partsFor(templateId) && (
+              <LayoutElements
+                name={tmpl.name} spec={partsFor(templateId)} palette={renderPalette} parts={openParts || {}}
+                onChange={(k, v) => setLayoutParts((all) => ({ ...all, [partsKey(templateId)]: { ...(all[partsKey(templateId)] || {}), [k]: v } }))}
+                onClear={(k) => setLayoutParts((all) => { const n = { ...(all[partsKey(templateId)] || {}) }; delete n[k]; return { ...all, [partsKey(templateId)]: n } })}
+                onReset={() => setLayoutParts((all) => ({ ...all, [partsKey(templateId)]: {} }))} />
+            )}
+
             </>)}
 
             {tool === 'design' && (<>
@@ -3820,7 +5340,22 @@ export default function AdminSocialPost() {
                       </button>
                     )}
                   </div>
-                  {!isBlankTab && (
+                  {!IS_AFL && activeTab !== 'scorecard' && activeTab !== 'blank' && (
+                    <div className="pt-2 border-t pb-hairline" data-testid="design-canva-import">
+                      <CanvaImportBox clubStyle={clubStyle} onClubStyle={setClubStyle} onImport={importTemplateText} busy={designBusy}
+                        hint={`Choose ${TABS.find((t) => t.key === activeTab)?.label || 'the post type'} in the Canva app, and the template becomes a layout on this tab, with the Data tab, players and match details linked up.`} />
+                    </div>
+                  )}
+                  {templateId === CUSTOM_LAYOUT_ID && (
+                    <label className="flex items-start gap-2 cursor-pointer self-start" data-testid="template-marks">
+                      <input type="checkbox" checked={templateMarks} onChange={(e) => setTemplateMarks(e.target.checked)} className="mt-0.5" />
+                      <span className="text-[11px] text-pb-dim leading-relaxed">
+                        Show (C), (VC), (WK) and DEBUT after the names
+                        <span className="block text-pb-faintest">Set them per player in Content. Your template needs no boxes for them.</span>
+                      </span>
+                    </label>
+                  )}
+                  {!isBlankTab && !isCustomLayout(templateId) && (
                     <div className="flex flex-col gap-1 self-start">
                       <button
                         onClick={customEdit ? stopCustomEdit : beginCustomEdit}
@@ -3873,6 +5408,29 @@ export default function AdminSocialPost() {
                 <p className="text-[11px] text-pb-dim leading-relaxed">
                   A blank canvas — use the tools on the left (<span className="text-pb-text">Text</span>, <span className="text-pb-text">Shapes</span>, <span className="text-pb-text">Photos</span>, <span className="text-pb-text">Club data</span>) to add blocks, then drag them on the canvas. Or pick a starting layout under <span className="text-pb-text">Design</span>.
                 </p>
+                <div className="mt-3 pt-3 border-t pb-hairline flex flex-col gap-2" data-testid="own-design">
+                  <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Your own design (Canva)</div>
+                  <p className="text-[11px] text-pb-dim leading-relaxed">
+                    Make the look in Canva at <span className="text-pb-text">{W} × {H}</span>, download it as PNG or JPG (leave out the fixtures, scores and names), and upload it here. It becomes the locked bottom layer. Put live Club data, text and sponsors on top, then Save as template.
+                  </p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button onClick={() => designInputRef.current?.click()} disabled={designBusy} data-testid="own-design-upload"
+                      className="px-3 py-1.5 rounded text-[11px] font-mono border pb-hairline text-pb-text hover:border-pb-text transition-colors disabled:opacity-50">
+                      {designBusy ? 'Uploading…' : (canvas.items.some((it) => it.design) ? 'Replace your design' : 'Upload your design')}
+                    </button>
+                    {canvas.items.some((it) => it.design) && (
+                      <button onClick={() => { record('Remove your design'); canvas.setItems((its) => its.filter((it) => !it.design)) }}
+                        className="px-3 py-1.5 rounded text-[11px] font-mono border pb-hairline text-pb-dim hover:text-pb-text transition-colors">
+                        Remove it
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-2 pt-3 border-t pb-hairline">
+                    <CanvaImportBox clubStyle={clubStyle} onClubStyle={setClubStyle} onImport={importTemplateText} busy={designBusy} hint="A template made for a post type goes to that post type, with its data linked up; anything else stays on this canvas." />
+                  </div>
+                  <input ref={designInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" data-testid="own-design-input"
+                    onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadDesign(f) }} />
+                </div>
               </div>
             )}
             {/* Match Info */}
@@ -3880,8 +5438,25 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Match Info</h2>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2"><Field label="Headline (lineup posts)"><TextInput value={headline} onChange={setHeadline} placeholder={IS_AFL ? 'SQUAD · e.g. Reserves' : 'SQUAD · e.g. Applecross 6th XI'} /></Field></div>
-                  <Field label="Competition"><TextInput value={match.competition} onChange={v => patchMatch({ competition: v })} placeholder={IS_AFL ? 'PREMIER C' : 'PREMIER T20'} /></Field>
+                  <div className="col-span-2">
+                    <Field label="Headline (the side, on lineup posts)">
+                      <TextInput value={headline} onChange={setHeadline} placeholder={IS_AFL ? 'SQUAD · e.g. Reserves' : 'SQUAD · e.g. Applecross 6th XI'} />
+                    </Field>
+                    {!HEADLINE_TEMPLATES.includes(templateId) && (
+                      <p className="mt-1.5 text-[11px] text-pb-faint leading-relaxed" data-testid="headline-unsupported">
+                        {tmpl.name} does not print a headline{headline ? ', so this text is kept for when you switch layout' : ''}. Layouts that do:{' '}
+                        <span className="text-pb-dim">{HEADLINE_TEMPLATES.map((id) => TEMPLATES.find((t) => t.id === id)).filter(Boolean).map((t) => t.name).join(', ')}</span>.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Field label="Competition"><TextInput value={match.competition} onChange={v => patchMatch({ competition: v })} placeholder={IS_AFL ? 'PREMIER C' : 'PREMIER T20'} /></Field>
+                    {NO_COMPETITION_TEMPLATES.includes(templateId) && (
+                      <p className="mt-1.5 text-[11px] text-pb-faint leading-relaxed" data-testid="competition-unsupported">
+                        {tmpl.name} does not print the competition.
+                      </p>
+                    )}
+                  </div>
                   <Field label="Round"><TextInput value={match.round} onChange={v => patchMatch({ round: v })} placeholder="ROUND 7" /></Field>
                   <Field label="Venue"><TextInput value={match.venue} onChange={v => patchMatch({ venue: v })} placeholder="Heathcote Reserve" /></Field>
                   <Field label="Date"><TextInput value={match.date} onChange={v => patchMatch({ date: v })} placeholder="SAT 30 MAY" /></Field>
@@ -3943,13 +5518,21 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
-                    Players <span className="ml-1 text-pb-faintest">{selectedPlayers.length}/{tmpl.maxPlayers}</span>
+                    Players <span className="ml-1 text-pb-faintest">{selectedPlayers.length}/{playerCap}</span>
                   </h2>
-                  <button
-                    onClick={() => setSwapNames(s => !s)}
-                    className={`font-mono text-[9px] tracking-wide2 px-2 py-1 rounded border pb-hairline transition-colors ${swapNames ? 'text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}
-                    style={swapNames ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
-                  >↕ SWAP</button>
+                  <div className="flex items-center gap-1.5">
+                    {selectedPlayers.length > 1 && (alphaFrom
+                      ? <button onClick={restorePlayerOrder} data-testid="order-restore" title="Put the players back in the order they were in before the A to Z sort"
+                          className="font-mono text-[9px] tracking-wide2 px-2 py-1 rounded border pb-hairline transition-colors"
+                          style={{ borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' }}>↺ BATTING ORDER</button>
+                      : <button onClick={sortPlayersAlpha} data-testid="order-alpha" title="List the players A to Z by first name"
+                          className="font-mono text-[9px] tracking-wide2 px-2 py-1 rounded border pb-hairline transition-colors text-pb-faint hover:text-pb-text">A TO Z BY FIRST NAME</button>)}
+                    <button
+                      onClick={() => setSwapNames(s => !s)}
+                      className={`font-mono text-[9px] tracking-wide2 px-2 py-1 rounded border pb-hairline transition-colors ${swapNames ? 'text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}
+                      style={swapNames ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' } : {}}
+                    >↕ SWAP</button>
+                  </div>
                 </div>
                 {selectedPlayers.length > 0 && (
                   <div className="flex flex-col gap-1.5 mb-3">
@@ -3964,7 +5547,37 @@ export default function AdminSocialPost() {
                     ))}
                   </div>
                 )}
-                {selectedPlayers.length < tmpl.maxPlayers && (
+                {selectedPlayers.some(sp => sp.debut) && !DEBUT_TEMPLATES.includes(templateId) && (
+                  <p className="mb-3 text-[11px] text-pb-faint leading-relaxed" data-testid="debut-unsupported">
+                    {tmpl.name} does not draw a debut tag. Layouts that do: <span className="text-pb-dim">{DEBUT_TEMPLATES.map(id => DEBUT_TEMPLATE_NAMES[id]).join(', ')}</span>.
+                  </p>
+                )}
+                {!IS_AFL && selectedPlayers.length > 0 && (
+                  <div className="mb-3 flex flex-col gap-1" data-testid="debut-check">
+                    <button
+                      onClick={() => checkDebuts(selectedPlayers, null)}
+                      disabled={debutCheck?.status === 'loading'}
+                      className="self-start font-mono text-[10px] tracking-wide2 px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text disabled:opacity-50"
+                    >{debutCheck?.status === 'loading' ? 'CHECKING…' : 'FIND DEBUTS'}</button>
+                    <p className="text-[11px] text-pb-faintest leading-relaxed">
+                      {debutCheck?.status === 'ok'
+                        ? (debutCheck.debuts
+                            ? `${debutCheck.debuts} marked as a debut: no earlier game on the club's record.`
+                            : 'No debuts: every player has an earlier game on the club\'s record.')
+                          + (debutCheck.unknown ? ` ${debutCheck.unknown} not in the club's player list, so left as they were.` : '')
+                        : debutCheck?.status === 'err'
+                          ? debutCheck.message
+                          : 'Marks a player DEBUT when the club holds no earlier game for them. Switch any tag by hand with the DEBUT button on their row.'}
+                    </p>
+                  </div>
+                )}
+                {!IS_AFL && selectedPlayers.length < playerCap && (
+                  manualPlayerOpen
+                    ? <ManualPlayerForm roster={allPlayers} onAdd={onManualPlayer} onClose={() => setManualPlayerOpen(false)} />
+                    : <button onClick={() => setManualPlayerOpen(true)} data-testid="add-manual-player"
+                        className="mb-3 font-mono text-[10px] tracking-wide2 px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text">+ ADD A PLAYER BY HAND</button>
+                )}
+                {selectedPlayers.length < playerCap && (
                   <>
                     <input value={playerSearch} onChange={e => setPlayerSearch(e.target.value)} placeholder="Search players..."
                       className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text placeholder:text-pb-faintest mb-2" />
@@ -3981,6 +5594,83 @@ export default function AdminSocialPost() {
                     </div>
                   </>
                 )}
+              </section>
+            )}
+
+            {templateId === 'T12' && (
+              <section className="pb-card p-4" data-testid="lineup-card-style">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Card look</h2>
+                <p className="text-[11px] text-pb-faint leading-relaxed mb-3">These are saved for your club, so every new lineup card opens with them.</p>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Background photo</label>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <label className="px-2.5 py-1.5 rounded border pb-hairline2 text-xs font-mono text-pb-dim hover:text-pb-text hover:border-pb-accent cursor-pointer">
+                    Upload photo
+                    <input type="file" accept="image/*" className="hidden" data-testid="lineup-card-bg-input"
+                      onChange={(e) => { uploadCardImage(e.target.files?.[0], 'bgUrl'); e.target.value = '' }} />
+                  </label>
+                  {lineupCard.bgUrl && <button onClick={() => patchLineupCard({ bgUrl: '' })} className="text-xs font-mono text-pb-faint hover:text-pb-text">Remove</button>}
+                </div>
+                {bgAssets.length > 0 && (
+                  <div className="grid grid-cols-4 gap-1.5 mb-3">
+                    {bgAssets.filter((a) => !a._tmp).slice(0, 8).map((a) => (
+                      <button key={a.id} onClick={() => patchLineupCard({ bgUrl: a.url })} title={a.name}
+                        className={`aspect-square rounded overflow-hidden border ${lineupCard.bgUrl === a.url ? 'border-pb-accent' : 'pb-hairline'}`}>
+                        <img src={a.url} alt={a.name} className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!lineupCard.bgUrl && <p className="text-[11px] text-pb-faintest mb-3">No photo yet, so the card shows the wash colour on its own.</p>}
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Colour wash over the photo</label>
+                <div className="flex items-center gap-3 mb-1">
+                  <input type="color" data-testid="lineup-card-wash" value={lineupCard.wash || cardWashDefault(activePalette.accent)} onChange={(e) => patchLineupCard({ wash: e.target.value })}
+                    className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                  <input type="range" min="0" max="1" step="0.05" value={lineupCard.washOpacity} onChange={(e) => patchLineupCard({ washOpacity: Number(e.target.value) })}
+                    className="flex-1" aria-label="Wash strength" />
+                  <span className="font-mono text-[10px] text-pb-faint w-9 text-right">{Math.round(lineupCard.washOpacity * 100)}%</span>
+                  {lineupCard.wash && <button onClick={() => patchLineupCard({ wash: '' })} className="text-xs font-mono text-pb-faint hover:text-pb-text">Auto</button>}
+                </div>
+                <p className="text-[11px] text-pb-faintest mb-3">{lineupCard.wash ? 'Your colour' : 'Auto: a deep shade of the palette accent'}</p>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Corner design</label>
+                <div className="flex items-center gap-3 mb-3">
+                  <input type="color" data-testid="lineup-card-corner" value={lineupCard.corner || activePalette.accent} onChange={(e) => patchLineupCard({ corner: e.target.value })}
+                    className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                  <span className="text-[11px] text-pb-faint flex-1">{lineupCard.corner ? 'Your colour' : 'Auto: the palette accent'}</span>
+                  {lineupCard.corner && <button onClick={() => patchLineupCard({ corner: '' })} className="text-xs font-mono text-pb-faint hover:text-pb-text">Auto</button>}
+                </div>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Player list colour</label>
+                <div className="flex items-center gap-3 mb-3">
+                  <input type="color" data-testid="lineup-card-panel" value={lineupCard.panel || activePalette.accent} onChange={(e) => patchLineupCard({ panel: e.target.value })}
+                    className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                  <span className="text-[11px] text-pb-faint flex-1">{lineupCard.panel ? 'Your colour' : 'Auto: the palette accent'}</span>
+                  {lineupCard.panel && <button onClick={() => patchLineupCard({ panel: '' })} className="text-xs font-mono text-pb-faint hover:text-pb-text">Auto</button>}
+                </div>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Logo</label>
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <label className="px-2.5 py-1.5 rounded border pb-hairline2 text-xs font-mono text-pb-dim hover:text-pb-text hover:border-pb-accent cursor-pointer">
+                    Upload logo
+                    <input type="file" accept="image/*" className="hidden" data-testid="lineup-card-logo-input"
+                      onChange={(e) => { uploadCardImage(e.target.files?.[0], 'logoUrl'); e.target.value = '' }} />
+                  </label>
+                  {lineupCard.logoUrl && <button onClick={() => patchLineupCard({ logoUrl: '' })} className="text-xs font-mono text-pb-faint hover:text-pb-text">Use club logo</button>}
+                </div>
+                <p className="text-[11px] text-pb-faintest mb-2">
+                  {lineupLogoSrc
+                    ? `${lineupCard.logoUrl ? 'Your uploaded logo' : 'Your club logo'}, ${lineupLogoRatio >= 1.2 ? `wide (${lineupLogoRatio.toFixed(1)} to 1)` : lineupLogoRatio <= 0.85 ? 'tall' : 'square-ish'}. The card sizes its box to fit.`
+                    : 'No club logo yet. Upload one here or add it in Settings.'}
+                </p>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-[10px] text-pb-faint uppercase">Size</span>
+                  <input type="range" min="0.5" max="1.3" step="0.05" value={lineupCard.logoScale} onChange={(e) => patchLineupCard({ logoScale: Number(e.target.value) })}
+                    className="flex-1" aria-label="Logo size" />
+                  <span className="font-mono text-[10px] text-pb-faint w-9 text-right">{Math.round(lineupCard.logoScale * 100)}%</span>
+                </div>
+                {cardUploadError && <p className="text-[11px] text-red-400 mt-2" role="alert">{cardUploadError}</p>}
               </section>
             )}
 
@@ -4007,7 +5697,7 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Hero Image</h2>
                 <p className="text-[11px] text-pb-faint mb-3">Transparent PNG recommended for best results. Any image with a solid background can be cut out with Edit.</p>
-                {['T1', 'T3', 'T6', 'T10'].includes(templateId) && selectedPlayers.length > 0 && (
+                {HERO_PLAYER_TEMPLATES.includes(templateId) && selectedPlayers.length > 0 && (
                   <div className="mb-3">
                     <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Hero Player</label>
                     <select
@@ -4025,9 +5715,29 @@ export default function AdminSocialPost() {
                     <p className="text-[11px] text-pb-faintest mt-1">
                       {heroImage.blobUrl ? 'Uploaded Hero Image below overrides this.' : 'Pick whose photo fills the hero slot. Upload below to override.'}
                     </p>
+                    {HERO_MARK_TEMPLATES.includes(templateId) && (
+                      <label className="flex items-start gap-2 mt-2 cursor-pointer" data-testid="mark-hero">
+                        <input type="checkbox" checked={markHero} onChange={e => setMarkHero(e.target.checked)} className="mt-0.5" />
+                        <span className="text-[11px] text-pb-dim leading-relaxed">
+                          Mark the player in the photo
+                          <span className="block text-pb-faintest">Shades their row in the list, so the post shows whose picture it is.</span>
+                        </span>
+                      </label>
+                    )}
                   </div>
                 )}
-                {['C1', 'C3'].includes(templateId) && (
+                {templateId === 'T11' && (
+                  <div className="mb-3" data-testid="split-panel">
+                    <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Panel colour</label>
+                    <div className="flex items-center gap-3">
+                      <input type="color" value={splitPanel || autoPanelColor(activePalette.accent)} onChange={e => setSplitPanel(e.target.value)}
+                        className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent p-0" />
+                      <span className="text-[11px] text-pb-faint flex-1">{splitPanel ? 'Your colour' : 'Auto: a light tint of the palette accent'}</span>
+                      {splitPanel && <button onClick={() => setSplitPanel('')} className="text-xs font-mono text-pb-faint hover:text-pb-text">Auto</button>}
+                    </div>
+                  </div>
+                )}
+                {['C1', 'C3', 'C5'].includes(panelId) && (
                   <div className="flex gap-2 mb-3">
                     <button
                       onClick={() => setHeroMode('player')}
@@ -4041,12 +5751,12 @@ export default function AdminSocialPost() {
                     >Hero Image</button>
                   </div>
                 )}
-                {(!['C1', 'C3'].includes(templateId) || heroMode === 'hero') && (
+                {(!['C1', 'C3', 'C5'].includes(panelId) || heroMode === 'hero') && (
                   <div className="flex flex-col gap-3">
                     <label className="flex items-center gap-3 cursor-pointer group">
                       <span className="px-3 py-2 rounded border pb-hairline text-xs font-mono text-pb-faint group-hover:bg-pb-surface2 transition-colors">Choose File</span>
                       <span className="text-[11px] text-pb-faint truncate">{heroImage.blobUrl ? 'Image selected' : 'No file chosen'}</span>
-                      <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" />
+                      <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" data-testid="hero-photo-input" />
                     </label>
                     {heroImage.blobUrl && (
                       <div className="flex items-start gap-3">
@@ -4104,7 +5814,7 @@ export default function AdminSocialPost() {
             )}
 
             {/* C1 Announcement */}
-            {templateId === 'C1' && (
+            {(panelId === 'C1' || panelId === 'C5') && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Announcement</h2>
                 <div className="grid grid-cols-1 gap-3">
@@ -4124,7 +5834,7 @@ export default function AdminSocialPost() {
             )}
 
             {/* C2 Toss */}
-            {templateId === 'C2' && (
+            {panelId === 'C2' && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Toss Result</h2>
                 <div className="grid grid-cols-2 gap-3">
@@ -4146,8 +5856,54 @@ export default function AdminSocialPost() {
               </section>
             )}
 
+            {/* Team of the week */}
+            {activeTab === 'totw' && (
+              <section className="pb-card p-4" data-testid="totw-section">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Team of the Week</h2>
+                <TotwControls t={totwControls} />
+                <label className="flex items-center gap-2 mt-3 text-xs font-mono text-pb-text cursor-pointer">
+                  <input type="checkbox" checked={totwOpts.showPoints} onChange={(e) => setTotwOpts(o => ({ ...o, showPoints: e.target.checked }))} />
+                  Show points on the post
+                </label>
+                {selectedPlayers.length > 0 && (
+                  <div className="mt-4">
+                    <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Stat lines</label>
+                    <div className="flex flex-col gap-1.5">
+                      {selectedPlayers.map((sp, i) => (
+                        <div key={sp.player.id} className="flex items-center gap-2">
+                          <span className="font-mono text-[10px] text-pb-faintest w-5 shrink-0">{String(i + 1).padStart(2, '0')}</span>
+                          <span className="text-xs text-pb-dim w-24 shrink-0 truncate">{sp.player._name || sp.player.display_name || sp.player.name}</span>
+                          <input value={sp.totw?.line || ''} placeholder="87 (54) · 2/22"
+                            onChange={(e) => updatePlayer(i, { totw: { ...(sp.totw || {}), line: e.target.value } })}
+                            className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Milestones */}
+            {activeTab === 'milestones' && (
+              <section className="pb-card p-4" data-testid="milestones-section">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Milestones</h2>
+                <MilestonePicker status={msImport.status} rows={msRows} picks={msPicks} windowKey={msWindow} search={msSearch}
+                      onWindow={setMsWindow} onSearch={setMsSearch} onToggle={toggleMilestone} onTickShown={tickShownMilestones}
+                      onClear={() => setMsPicks([])} onLoad={loadMilestones} />
+                <div className="mt-4 flex flex-col gap-3">
+                  <Field label="Heading (optional)"><TextInput value={msOpts.title} onChange={v => setMsOpts(o => ({ ...o, title: v }))} placeholder="MILESTONES" /></Field>
+                  <label className="flex items-center gap-2 text-xs font-mono text-pb-text cursor-pointer">
+                    <input type="checkbox" checked={msOpts.showDates} onChange={(e) => setMsOpts(o => ({ ...o, showDates: e.target.checked }))} />
+                    Show the date each was reached
+                  </label>
+                  <p className="text-[11px] text-pb-faintest leading-relaxed">The Round and Date in Match Info print under the heading. Cards run in the order they were ticked.</p>
+                </div>
+              </section>
+            )}
+
             {/* C3 Player Spotlight */}
-            {templateId === 'C3' && (
+            {panelId === 'C3' && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Player Spotlight</h2>
 
@@ -4218,6 +5974,7 @@ export default function AdminSocialPost() {
                     </p>
                   )}
                   <MatchPickList picks={resPicks} onPick={loadResultMatch} onDismiss={() => setResPicks(null)} />
+                  <ClubGamesPicker orgId={settings?.id} onPick={loadResultMatch} busy={resUrlStatus === 'loading'} />
                   <p className="font-mono text-[9px] mt-1.5 text-pb-faintest">Pulls the top 3 batters & bowlers for both sides and matches your players for photos.</p>
                 </div>
 
@@ -4251,6 +6008,7 @@ export default function AdminSocialPost() {
 
                 {/* POTM image — Star of the Day shows a player profile photo or an
                     uploaded hero image in place of the initials (RS4 feedback). */}
+                {templateId !== 'RS7' && templateId !== 'RS8' && (
                 <div className="mb-4 pt-3 border-t pb-hairline">
                   <div className="flex items-center justify-between mb-2">
                     <label className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase">POTM Photo</label>
@@ -4310,6 +6068,7 @@ export default function AdminSocialPost() {
                     </div>
                   )}
                 </div>
+                )}
 
                 {[
                   { side: 'team', label: `Our Batters`, type: 'topBatters' },
@@ -4343,6 +6102,109 @@ export default function AdminSocialPost() {
               </section>
             )}
 
+            {/* Highlights Cover (RS8): the one photo the whole post is built on */}
+            {activeTab === 'result' && templateId === 'RS8' && (
+              <section className="pb-card p-4" data-testid="highlights-cover-look">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Highlights Cover</h2>
+                <p className="text-[11px] text-pb-faint mb-3">Your photo fills the post. The title and one score card for both teams sit over the foot of it. The top row is the winner unless you know who batted first.</p>
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Cover photo</label>
+                <div className="flex flex-col gap-3">
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <span className="px-3 py-2 rounded border pb-hairline text-xs font-mono text-pb-faint group-hover:bg-pb-surface2 transition-colors">Choose File</span>
+                    <span className="text-[11px] text-pb-faint truncate">{heroImage.blobUrl ? 'Photo selected' : 'No file chosen'}</span>
+                    <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" data-testid="highlights-photo-input" />
+                  </label>
+                  {heroImage.blobUrl && (
+                    <div className="flex items-start gap-3">
+                      <img src={heroImage.blobUrl} alt="Cover preview" className="w-16 h-16 object-cover rounded bg-pb-surface2" />
+                      <div className="flex flex-col gap-2 flex-1">
+                        <button onClick={() => setEditor({ key: 'hero', source: heroImage.blobUrl })}
+                          className="text-xs font-mono text-pb-faint hover:text-pb-text text-left">✎ Edit (crop)</button>
+                        <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null }); setHighlightsFocus(HIGHLIGHTS_FOCUS) }}
+                          className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left">Remove photo</button>
+                      </div>
+                    </div>
+                  )}
+                  {!heroImage.blobUrl && <p className="text-[11px] text-pb-faintest">Without a photo the cover sits on a dark ground. Add the match photo the whole carousel opens with.</p>}
+                  <HeroFocusControl src={heroImage.blobUrl || null} value={highlightsFocus} onChange={setHighlightsFocus} defaults={HIGHLIGHTS_FOCUS} aspect={W / H} />
+                </div>
+              </section>
+            )}
+
+            {/* Glass Card (RS7): the photo, where the scorecards sit, how dark the tint is */}
+            {activeTab === 'result' && templateId === 'RS7' && (
+              <section className="pb-card p-4" data-testid="glass-card-look">
+                <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Glass Card</h2>
+                <p className="text-[11px] text-pb-faint mb-3">Your photo fills the post. The scorecards sit on glass over a blurred, darkened part of it.</p>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Background photo</label>
+                <div className="flex flex-col gap-3 mb-4">
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <span className="px-3 py-2 rounded border pb-hairline text-xs font-mono text-pb-faint group-hover:bg-pb-surface2 transition-colors">Choose File</span>
+                    <span className="text-[11px] text-pb-faint truncate">{heroImage.blobUrl ? 'Photo selected' : 'No file chosen'}</span>
+                    <input type="file" accept="image/png,image/webp,image/jpeg" onChange={handleHeroFile} className="sr-only" data-testid="glass-photo-input" />
+                  </label>
+                  {heroImage.blobUrl && (
+                    <div className="flex items-start gap-3">
+                      <img src={heroImage.blobUrl} alt="Background preview" className="w-16 h-16 object-cover rounded bg-pb-surface2" />
+                      <div className="flex flex-col gap-2 flex-1">
+                        <button onClick={() => setEditor({ key: 'hero', source: heroImage.blobUrl })}
+                          className="text-xs font-mono text-pb-faint hover:text-pb-text text-left">✎ Edit (crop)</button>
+                        <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null }); setGlassFocus(GLASS_FOCUS) }}
+                          className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left">Remove photo</button>
+                      </div>
+                    </div>
+                  )}
+                  {!heroImage.blobUrl && <p className="text-[11px] text-pb-faintest">Without a photo the card sits on your palette colour.</p>}
+                  <HeroFocusControl src={heroImage.blobUrl || null} value={glassFocus} onChange={setGlassFocus} defaults={GLASS_FOCUS} aspect={W / H} />
+                </div>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Scorecard position</label>
+                <div className="grid grid-cols-3 gap-2 mb-1" role="radiogroup" aria-label="Scorecard position">
+                  {GLASS_POSITIONS.map((o) => {
+                    const on = glassLook.position === o.key
+                    const [v, h] = o.key.split('-')
+                    const wide = h === 'center'
+                    return (
+                      <button key={o.key} role="radio" aria-checked={on} aria-label={o.label} data-testid={`glass-pos-${o.key}`}
+                        onClick={() => changeGlassPosition(o.key)} title={o.label}
+                        className={`relative h-14 rounded border transition-colors ${on ? '' : 'pb-hairline hover:bg-pb-surface2'}`}
+                        style={on ? { borderColor: 'var(--pb-accent)' } : undefined}>
+                        <span className="absolute rounded-sm" style={{
+                          background: on ? 'var(--pb-accent)' : 'rgba(150,160,175,0.55)',
+                          width: wide ? '76%' : '44%', height: '38%',
+                          left: wide ? '12%' : h === 'left' ? '8%' : 'auto', right: h === 'right' ? '8%' : 'auto',
+                          top: v === 'top' ? '10%' : 'auto', bottom: v === 'bottom' ? '10%' : 'auto',
+                        }} />
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-pb-faintest mb-4">{GLASS_POSITIONS.find((o) => o.key === glassLook.position)?.label}. Your sponsors and the BetterCricket logo take the free end of the photo.</p>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Tint behind the card</label>
+                <div className="flex items-center gap-3 mb-4">
+                  <input type="range" min="0.1" max="0.9" step="0.05" value={glassLook.tint} data-testid="glass-tint"
+                    onChange={(e) => patchGlassLook({ tint: Number(e.target.value) })} className="flex-1" />
+                  <span className="font-mono text-[11px] text-pb-faint w-10 text-right">{Math.round(glassLook.tint * 100)}%</span>
+                </div>
+
+                <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Players shown</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {[{ k: 'perfUs', label: `${team.name || 'Our'} panel` }, { k: 'perfThem', label: `${oppData.name || 'Their'} panel` }].map(({ k, label }) => (
+                    <div key={k}>
+                      <span className="block text-[10px] text-pb-faintest mb-1 truncate">{label}</span>
+                      <select value={glassLook[k]} data-testid={`glass-${k}`} onChange={(e) => patchGlassLook({ [k]: e.target.value })}
+                        className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-sm text-pb-text">
+                        <option value="bat">Top batters</option>
+                        <option value="bowl">Top bowlers</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Fixtures roundup data */}
             {activeTab === 'fixtures' && (
               <section className="pb-card p-4">
@@ -4367,7 +6229,8 @@ export default function AdminSocialPost() {
                 <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
                   status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
                   onPull={importFixtures} onFetchLink={importFixturesFromLink} notice={fxImport.notice}
-                  onPick={(i) => { setFxImport(s => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season) }} />
+                  onPick={(i) => { setFxImport(s => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season, fxOff) }}
+                  off={fxOff} onToggleCat={toggleFxCat} />
                 <div className="flex flex-col gap-2">
                   {fixtures.map((f, i) => {
                     const set = (patch) => setFixtures(rows => rows.map((r, j) => j === i ? { ...r, ...patch } : r))
@@ -4375,30 +6238,30 @@ export default function AdminSocialPost() {
                       <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5"
                         onDragOver={fxDrag.onDragOver(i)} onDrop={fxDrag.onDrop(i)}
                         style={fxDrag.overIdx === i ? { borderColor: 'var(--pb-accent)' } : undefined}>
-                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px 1fr 58px 20px' }}>
+                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px minmax(0,1fr) 58px 20px' }}>
                           <span draggable onDragStart={fxDrag.onDragStart(i)} onDragEnd={fxDrag.onDragEnd} title="Drag to reorder"
                             className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setFixtures, i, -1)} onDown={() => moveRow(setFixtures, i, 1)} isFirst={i === 0} isLast={i === fixtures.length - 1} />
                           <input value={f.grade} onChange={e => set({ grade: e.target.value })} placeholder={IS_AFL ? 'Grade · SENIORS' : 'Grade · 1ST XI'}
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={f.ha} onChange={e => set({ ha: e.target.value })}
-                            className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
                             <option value="H">Home</option><option value="A">Away</option>
                           </select>
                           <button onClick={() => setFixtures(rows => rows.filter((_, j) => j !== i))}
-                            className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                            title="Remove this row" aria-label="Remove this row" className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
                         </div>
-                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 64px' }}>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'minmax(0,1fr) 64px' }}>
                           <OppRowSearch value={f.opp} onType={v => set({ opp: v })} onPick={org => pickRowOpp('fx', i, org)} />
                           <input value={f.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
                         </div>
                         <OppLogoChip logo={f.oppLogo} loading={f.oppLogoLoading} onClear={() => set({ oppLogo: null })} />
                         <div className="grid grid-cols-2 gap-1.5">
                           <input value={f.time} onChange={e => set({ time: e.target.value })} placeholder="12:30 PM"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <input value={f.venue} onChange={e => set({ venue: e.target.value })} placeholder="Venue"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text placeholder:text-pb-faintest" />
                         </div>
                       </div>
                     )
@@ -4433,7 +6296,26 @@ export default function AdminSocialPost() {
                 <RoundImportBox hint="recent results" rowsKey="results"
                   status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
                   onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
-                  onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season) }} />
+                  onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
+                  off={rrOff} onToggleCat={toggleRrCat} />
+                {tmpl.hasLeaders && (
+                  <div className="mb-3" data-testid="rr-perf-side">
+                    <span className="block font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-1">Players shown</span>
+                    <div className="inline-flex rounded border pb-hairline overflow-hidden" role="radiogroup" aria-label="Whose players to show">
+                      {[{ k: 'us', label: `Our club` }, { k: 'them', label: 'Opposition' }].map((o) => {
+                        const on = rrPerfSide === o.k
+                        return (
+                          <button key={o.k} type="button" role="radio" aria-checked={on} data-testid={`rr-perf-${o.k}`}
+                            onClick={() => setRrPerfSide(o.k)}
+                            className={`px-3 py-1 text-xs font-mono ${on ? 'bg-pb-accent text-[var(--pb-on-accent)]' : 'text-pb-faint hover:text-pb-text'}`}>
+                            {o.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="text-[11px] text-pb-faintest mt-1">Top scorers and wicket takers from {rrPerfSide === 'them' ? 'the opposition' : 'your club'} in each match.</p>
+                  </div>
+                )}
                 <div className="flex flex-col gap-2">
                   {results.map((r, i) => {
                     const set = (patch) => setResults(rows => rows.map((x, j) => j === i ? { ...x, ...patch } : x))
@@ -4441,38 +6323,38 @@ export default function AdminSocialPost() {
                       <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5"
                         onDragOver={rrDrag.onDragOver(i)} onDrop={rrDrag.onDrop(i)}
                         style={rrDrag.overIdx === i ? { borderColor: 'var(--pb-accent)' } : undefined}>
-                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px 1fr 72px 20px' }}>
+                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px minmax(0,1fr) 72px 20px' }}>
                           <span draggable onDragStart={rrDrag.onDragStart(i)} onDragEnd={rrDrag.onDragEnd} title="Drag to reorder"
                             className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setResults, i, -1)} onDown={() => moveRow(setResults, i, 1)} isFirst={i === 0} isLast={i === results.length - 1} />
                           <input value={r.grade} onChange={e => set({ grade: e.target.value })} placeholder={IS_AFL ? 'Grade · SENIORS' : 'Grade · 1ST XI'}
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <select value={r.outcome} onChange={e => set({ outcome: e.target.value })}
-                            className="bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
                             <option value="W">Won</option><option value="L">Lost</option><option value="T">Tie/NR</option>
                           </select>
                           <button onClick={() => setResults(rows => rows.filter((_, j) => j !== i))}
-                            className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
+                            title="Remove this row" aria-label="Remove this row" className="text-pb-faintest hover:text-red-400 text-xs">✕</button>
                         </div>
-                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 64px' }}>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'minmax(0,1fr) 64px' }}>
                           <OppRowSearch value={r.opp} onType={v => set({ opp: v })} onPick={org => pickRowOpp('rr', i, org)} />
                           <input value={r.oppMono} onChange={e => set({ oppMono: e.target.value.toUpperCase().slice(0, 3) })} placeholder="SUB"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono text-center placeholder:text-pb-faintest" />
                         </div>
                         <OppLogoChip logo={r.oppLogo} loading={r.oppLogoLoading} onClear={() => set({ oppLogo: null })} />
-                        <div className="grid gap-1.5" style={{ gridTemplateColumns: '1fr 1fr 1.2fr' }}>
+                        <div className="grid gap-1.5" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr)' }}>
                           <input value={r.us} onChange={e => set({ us: e.target.value })} placeholder="Us 6/188"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <input value={r.them} onChange={e => set({ them: e.target.value })} placeholder="Them 184"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                           <input value={r.margin} onChange={e => set({ margin: e.target.value })} placeholder="BY 4 WICKETS"
-                            className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
+                            className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
                         </div>
                         {tmpl.hasLeaders && (
-                          <div className="grid gap-2 pt-1 mt-0.5 border-t pb-hairline" style={{ gridTemplateColumns: '1fr 1fr' }}>
-                            {['topBat', 'topBowl'].map((key) => (
+                          <div className="grid gap-2 pt-1 mt-0.5 border-t pb-hairline" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)' }}>
+                            {[['bat', perfKeys(rrPerfSide).bat], ['bowl', perfKeys(rrPerfSide).bowl]].map(([kind, key]) => (
                               <div key={key} className="flex flex-col gap-1">
-                                <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">{key === 'topBat' ? 'Our top scorers' : 'Our top wickets'}</span>
+                                <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase">{rrPerfSide === 'them' ? 'Their' : 'Our'} {kind === 'bat' ? 'top scorers' : 'top wickets'}</span>
                                 {[0, 1].map((slot) => {
                                   const entry = (r[key] || [])[slot] || { name: '', line: '' }
                                   const setSlot = (patch) => setResults(rows => rows.map((x, j) => {
@@ -4482,13 +6364,13 @@ export default function AdminSocialPost() {
                                     return { ...x, [key]: arr }
                                   }))
                                   return (
-                                    <div key={slot} className="grid gap-1" style={{ gridTemplateColumns: '1fr 76px' }}>
+                                    <div key={slot} className="grid gap-1" style={{ gridTemplateColumns: 'minmax(0,1fr) 76px' }}>
                                       <input value={entry.name || ''} onChange={e => setSlot({ name: e.target.value.toUpperCase() })}
-                                        placeholder={key === 'topBat' ? 'J. BARENDSE' : 'A. ALLISON'}
-                                        className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                                        placeholder={kind === 'bat' ? 'J. BARENDSE' : 'A. ALLISON'}
+                                        className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
                                       <input value={entry.line || ''} onChange={e => setSlot({ line: e.target.value })}
-                                        placeholder={key === 'topBat' ? '64 (71)' : '4/29 (9.4)'}
-                                        className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+                                        placeholder={kind === 'bat' ? '64 (71)' : '4/29 (9.4)'}
+                                        className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
                                     </div>
                                   )
                                 })}
@@ -4561,9 +6443,22 @@ export default function AdminSocialPost() {
                   <div className="col-span-2"><Field label="Venue"><TextInput value={scorecardMatch.meta.venue} onChange={v => patchScMeta({ venue: v })} placeholder="Home Ground" /></Field></div>
                   <div className="col-span-2"><Field label="Toss"><TextInput value={scorecardMatch.meta.toss} onChange={v => patchScMeta({ toss: v })} placeholder="HOME WON THE TOSS · ELECTED TO BAT" /></Field></div>
                   <div className="col-span-2"><Field label="Series"><TextInput value={scorecardMatch.meta.series} onChange={v => patchScMeta({ series: v })} placeholder="SEASON 2025/26" /></Field></div>
-                  <Field label="MOTM First"><TextInput value={scorecardMatch.meta.motm.first} onChange={v => patchScMeta({ motm: { ...scorecardMatch.meta.motm, first: v } })} placeholder="Player" /></Field>
-                  <Field label="MOTM Last"><TextInput value={scorecardMatch.meta.motm.last} onChange={v => patchScMeta({ motm: { ...scorecardMatch.meta.motm, last: v } })} placeholder="NAME" /></Field>
-                  <div className="col-span-2"><Field label="MOTM Line"><TextInput value={scorecardMatch.meta.motm.line} onChange={v => patchScMeta({ motm: { ...scorecardMatch.meta.motm, line: v } })} placeholder="87 (54) · 2/22" /></Field></div>
+                  {(scPotm.players.length > 0 || scPotm.note) && (
+                    <div className="col-span-2">
+                      {scPotm.players.length > 0 ? (
+                        <Field label="Player of the match">
+                          <select value={scPotm.idx} onChange={e => pickScPotm(+e.target.value)}
+                            className="w-full bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono">
+                            {scPotm.idx < 0 && <option value={-1}>Typed by hand</option>}
+                            {scPotm.players.map((p, i) => <option key={i} value={i}>{potmPlayerLabel(p)}</option>)}
+                          </select>
+                        </Field>
+                      ) : <p className="text-pb-faintest text-[10px] leading-relaxed">{scPotm.note}</p>}
+                    </div>
+                  )}
+                  <Field label="MOTM First"><TextInput value={scorecardMatch.meta.motm.first} onChange={v => patchScMotm({ ...scorecardMatch.meta.motm, first: v })} placeholder="Player" /></Field>
+                  <Field label="MOTM Last"><TextInput value={scorecardMatch.meta.motm.last} onChange={v => patchScMotm({ ...scorecardMatch.meta.motm, last: v })} placeholder="NAME" /></Field>
+                  <div className="col-span-2"><Field label="MOTM Line"><TextInput value={scorecardMatch.meta.motm.line} onChange={v => patchScMotm({ ...scorecardMatch.meta.motm, line: v })} placeholder="87 (54) · 2/22" /></Field></div>
                   <div className="col-span-2">
                     <p className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mb-1">Sponsor Logos</p>
                     {adminSponsors.length > 0 && (
@@ -4752,6 +6647,14 @@ export default function AdminSocialPost() {
                   motifKey={eventMotifKey} setMotifKey={setEventMotifKey}
                   bgImage={eventBg} setBgImage={setEventBg}
                   bgOpacity={eventBgOpacity} setBgOpacity={setEventBgOpacity}
+                  savedEvents={savedTemplates.filter((t) => t.event?.facts && TEMPLATES.find((x) => x.id === t.templateId)?.kind === 'event')
+                    .map((t) => ({ key: t.key, name: t.name, title: t.event.facts.title || '', layout: layoutLabel(t) }))}
+                  motifIcon={eventMotifIcon} setMotifIcon={setEventMotifIcon}
+                  eventList={eventList} setEventList={setEventList}
+                  uploadPhoto={async (file) => (await api.uploadSocialMedia(file))?.url || null}
+                  accent={activePalette.accent} dark={darkMode}
+                  activeSavedKey={activeTemplate?.key}
+                  onPickSaved={(key) => applyTemplate(savedTemplates.find((t) => t.key === key))}
                 />
               </section>
             )}

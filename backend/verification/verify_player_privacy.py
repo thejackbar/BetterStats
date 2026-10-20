@@ -1,0 +1,793 @@
+"""Verification for hiding a player at their own request (migration 316),
+against a real Postgres.
+
+Runs the SHIPPED `services/player_privacy.py`, `scripts/hide_player_at_request.py`
+and the shipped routers (`players` through FastAPI itself, `seo`, `og_preview`,
+`club_admin`) over a club with three players:
+
+  * TRENT    asked to be removed. Has a photo, an action photo and a BetterIQ
+             scouting copy of the photo, plus a row against him in another table.
+  * PLAIN    the control: never asked, same photos, must stay fully visible.
+  * CLUBHID  a player the CLUB hid with the older `is_public` switch alone
+             (no request marker): the gap the new work closes.
+
+Every "X is gone" check is paired with a check that X is there before, for the
+control player, and for a club admin (rule 21).
+
+CONTROL MODE. The same suite runs against the commit BEFORE this change, where
+`services/player_privacy.py` does not exist. "Asking to be removed" is then
+reproduced the only way the old code allowed, `players.is_public = false`, so
+the control reports the reported behaviour (stats still served, still in the
+sitemap and share card, photo still stored) as failed checks rather than
+crashing on an import.
+
+Run:  DATABASE_URL=postgresql+asyncpg://root@/privacy_test?host=/var/run/postgresql \
+      python verification/verify_player_privacy.py
+"""
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+import os
+import sys
+import uuid
+from pathlib import Path
+from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+os.environ.setdefault("SECRET_KEY", "verify-secret-key-for-tests-only")
+
+from fastapi import HTTPException, UploadFile
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from _view_ddl import view_statements
+from app.models.db import Base, Organisation, Player, User
+import app.models.scout  # noqa: F401  (registers scouted_players on Base)
+
+HAVE = importlib.util.find_spec("app.services.player_privacy") is not None
+if HAVE:
+    from app.services import player_privacy
+    from app.services.player_privacy_ddl import STATEMENTS as PRIVACY_DDL
+    from app.scripts import hide_player_at_request as script
+else:
+    player_privacy = script = None
+    PRIVACY_DDL = []
+
+from app.routers import club_admin as club_admin_router
+from app.routers import og_preview as og_router
+from app.routers import players as players_router
+from app.routers import seo as seo_router
+
+DB = os.environ["DATABASE_URL"]
+engine = create_async_engine(DB, echo=False)
+Session = async_sessionmaker(engine, expire_on_commit=False)
+
+PASS = FAIL = 0
+FAILURES: list[str] = []
+
+
+def check(label: str, ok: bool, detail: str = "") -> None:
+    global PASS, FAIL
+    if ok:
+        PASS += 1
+        print(f"  ok   {label}")
+    else:
+        FAIL += 1
+        FAILURES.append(label)
+        print(f"  FAIL {label}{('  — ' + detail) if detail else ''}")
+
+
+# The merge's own raw-SQL tables, in the shape verify_merge_carry.py builds them.
+EXTRA_DDL = (
+    """
+    CREATE TABLE IF NOT EXISTS merge_logs (
+        id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(), org_id UUID,
+        keep_player_id UUID, keep_player_name TEXT,
+        removed_player_id UUID, removed_player_name TEXT,
+        removed_player_playhq_id TEXT, keep_original_playhq_id TEXT,
+        moved_season_stat_ids JSONB DEFAULT '[]', batting_innings_ids JSONB DEFAULT '[]',
+        bowling_spell_ids JSONB DEFAULT '[]', fielding_stat_ids JSONB DEFAULT '[]',
+        fall_of_wicket_ids JSONB DEFAULT '[]', batter1_partnership_ids JSONB DEFAULT '[]',
+        batter2_partnership_ids JSONB DEFAULT '[]', milestone_ids JSONB DEFAULT '[]',
+        bowler_wicket_ids JSONB DEFAULT '[]', fielder_wicket_ids JSONB DEFAULT '[]',
+        grade_stat_ids JSONB DEFAULT '[]', appearance_game_ids JSONB DEFAULT '[]',
+        imported_stat_ids JSONB DEFAULT '[]',
+        carried_row_ids JSONB DEFAULT '{}', removed_cricketstatz_player_id TEXT,
+        undone_at TIMESTAMPTZ
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS player_achievements (
+        id SERIAL PRIMARY KEY, org_id UUID NOT NULL, player_id UUID,
+        player_name TEXT NOT NULL, season TEXT, season_end TEXT,
+        category TEXT NOT NULL, subcategory TEXT, achievement TEXT NOT NULL,
+        detail TEXT, import_batch_id UUID, created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id SERIAL PRIMARY KEY, org_id UUID, user_id UUID, action TEXT,
+        target_type TEXT, target_id TEXT, details JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS player_name_aliases (
+        id SERIAL PRIMARY KEY, organisation_id UUID NOT NULL,
+        player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        alias_key TEXT NOT NULL, alias_name TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (organisation_id, alias_key)
+    )
+    """,
+)
+
+
+def uid() -> uuid.UUID:
+    return uuid.uuid4()
+
+
+OURS, SEASON, ADMIN = uid(), uid(), uid()
+TRENT, PLAIN, CLUBHID = uid(), uid(), uid()
+OTHER, NEWORG, SIB = uid(), uid(), uid()   # Trent's row at ANOTHER club, and a club that joins later
+PHOTO = b"\x89PNG-fake-headshot"
+HERO = b"\x89PNG-fake-action"
+
+
+async def build_schema() -> None:
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        json_cols = (await conn.execute(text(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND data_type = 'json'"))).all()
+        for tbl, col in json_cols:
+            await conn.execute(text(
+                f'ALTER TABLE "{tbl}" ALTER COLUMN "{col}" TYPE jsonb USING "{col}"::text::jsonb'))
+        for ddl in (
+            """CREATE TABLE IF NOT EXISTS season_aliases (
+                id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                alias_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                undone_at TIMESTAMPTZ)""",
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_season_aliases_alias_active
+                ON season_aliases(alias_season_id) WHERE undone_at IS NULL""",
+            """CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL, canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL, undone_at TIMESTAMPTZ)""",
+            """CREATE TABLE IF NOT EXISTS org_merge_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                source_org_id UUID, source_org_name TEXT NOT NULL,
+                target_org_id UUID NOT NULL,
+                performed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), undone_at TIMESTAMPTZ)""",
+            """CREATE TABLE IF NOT EXISTS import_effective_deltas (
+                id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id uuid, player_id uuid, season_id uuid,
+                scope text, grade_label text, matches int, batting_innings int, runs int,
+                not_outs int, balls_faced int, fifties int, hundreds int,
+                ducks int, high_score int, is_hs_not_out boolean,
+                fours int, sixes int, batting_minutes int,
+                bowling_innings int, wickets int, overs numeric,
+                bowling_balls int, runs_conceded int, maidens int,
+                best_bowling_wickets int, best_bowling_figures text,
+                five_wicket_innings int, wides int, no_balls int,
+                catches int, catches_wk int, catches_non_wk int,
+                run_outs int, assisted_run_outs int, unassisted_run_outs int,
+                stumpings int)""",
+        ):
+            await conn.execute(text(ddl))
+        from app.services.competition_ddl import STATEMENTS as COMP_DDL
+        for stmt in COMP_DDL:
+            await conn.execute(text(stmt))
+        from app.services.junior_hiding_ddl import STATEMENTS as JUNIOR_DDL
+        for stmt in JUNIOR_DDL:
+            await conn.execute(text(stmt))
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
+        json_cols = (await conn.execute(text(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND data_type = 'json'"))).all()
+        for tbl, col in json_cols:
+            await conn.execute(text(
+                f'ALTER TABLE "{tbl}" ALTER COLUMN "{col}" TYPE jsonb '
+                f'USING "{col}"::text::jsonb'))
+        stmts = view_statements()
+        for _ in range(2):
+            for name, sql in stmts:
+                await conn.execute(text(f"DROP VIEW IF EXISTS {name} CASCADE"))
+                await conn.execute(text(sql.replace("OR REPLACE ", "")))
+        # The sitemap lists the video library, a raw-SQL lifespan table.
+        try:
+            from app.services.instructional_video_ddl import STATEMENTS as VIDEO_DDL
+            for stmt in VIDEO_DDL:
+                await conn.execute(text(stmt))
+        except Exception as exc:  # pragma: no cover - harness detail
+            print("  (video DDL not applied:", exc, ")")
+        for stmt in EXTRA_DDL:
+            await conn.execute(text(stmt))
+        # The SHIPPED DDL for migration 316 (the suppression table is raw SQL, so
+        # create_all never makes it), not a retyped copy.
+        for stmt in PRIVACY_DDL:
+            await conn.execute(text(stmt))
+        # The ORM maps instructional_videos without the later raw-SQL columns the
+        # sitemap's video listing reads; the shipped DDL above adds them only
+        # when the table is absent, so add the one it selects.
+        await conn.execute(text("ALTER TABLE instructional_videos ADD COLUMN IF NOT EXISTS duration_seconds INT"))
+        # A fixture is one row; the sitemap reads hide_juniors from organisations.
+        # create_all already has it (ORM-mapped). Nothing else to add.
+
+
+async def seed(session) -> None:
+    session.add(Organisation(id=OURS, name="Applecross", is_active=True))
+    await session.flush()
+    for pid, name in ((TRENT, "Trent Steenholdt"), (PLAIN, "Pat Plain"), (CLUBHID, "Cass Clubhid")):
+        session.add(Player(
+            id=pid, name=name, organisation_id=OURS, grassroots_id=str(pid),
+            photo_data=PHOTO, photo_mime="image/png",
+            photo_url=f"/api/images/players/{pid}/photo?v=1",
+            hero_photo_data=HERO, hero_photo_mime="image/png",
+            hero_photo_url=f"/api/images/players/{pid}/hero-photo?v=1",
+        ))
+    # The same person at another club: a per-club row (uuid5 id) carrying the
+    # SAME Cricket Australia participant id, with its own photo.
+    session.add(Organisation(id=OTHER, name="Rival Club", is_active=True))
+    session.add(Organisation(id=NEWORG, name="Joins Later", is_active=True))
+    await session.flush()
+    session.add(Player(
+        id=SIB, name="Trent Steenholdt", organisation_id=OTHER, grassroots_id=str(TRENT),
+        photo_data=PHOTO, photo_mime="image/png", photo_url=f"/api/images/players/{SIB}/photo?v=1",
+    ))
+    await session.flush()
+    await session.execute(text(
+        "INSERT INTO users (id, username, email, failed_login_count) VALUES (:i,'admin1','a@x.test',0)"), {"i": ADMIN})
+    await session.execute(text(
+        "INSERT INTO club_memberships (id, club_id, user_id, role) "
+        "VALUES (gen_random_uuid(), :c, :u, 'club_admin')"), {"c": OURS, "u": ADMIN})
+    # BetterIQ scouting copies: one keyed on his Cricket Australia participant
+    # id, one on the control player. Both hold a photograph.
+    for guid, name in ((str(TRENT), "Trent Steenholdt"), (str(PLAIN), "Pat Plain")):
+        await session.execute(text(
+            "INSERT INTO scouted_players (id, source, grassroots_participant_id, name, photo_data, photo_mime, photo_url) "
+            "VALUES (gen_random_uuid(), 'au_grassroots', :g, :n, :b, 'image/png', '/api/images/scouted-players/x/photo')"),
+            {"g": guid, "n": name, "b": PHOTO})
+    await session.commit()
+
+
+def make_app(who: dict):
+    import httpx  # noqa: F401
+    from fastapi import FastAPI
+    from app.models.db import get_db
+    from app.routers.auth import get_optional_user
+
+    app = FastAPI()
+    app.include_router(players_router.router)
+    app.include_router(seo_router.router)
+
+    async def _db():
+        async with Session() as s:
+            yield s
+
+    async def _viewer():
+        return who["user"]
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_optional_user] = _viewer
+    return app
+
+
+async def public_view(c, pid, label_prefix, expect_visible: bool, note: str = "") -> None:
+    """The profile and the tabs behind it, as the public, against one expectation."""
+    p = await c.get(f"/players/{pid}")
+    s = await c.get(f"/players/{pid}/stats")
+    a = await c.get(f"/players/{pid}/activity")
+    if expect_visible:
+        check(f"{label_prefix}: profile 200{note}", p.status_code == 200, str(p.status_code))
+        check(f"{label_prefix}: stats tab 200{note}", s.status_code == 200, str(s.status_code))
+        check(f"{label_prefix}: activity tab 200{note}", a.status_code == 200, str(a.status_code))
+    else:
+        check(f"{label_prefix}: profile 404{note}", p.status_code == 404, str(p.status_code))
+        check(f"{label_prefix}: stats tab 404 (not one direct request away){note}", s.status_code == 404, str(s.status_code))
+        check(f"{label_prefix}: activity tab 404{note}", a.status_code == 404, str(a.status_code))
+
+
+async def sitemap_ids(c) -> set[str]:
+    r = await c.get("/sitemap.xml")
+    check("sitemap serves", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+    return {pid for pid in map(str, (TRENT, PLAIN, CLUBHID)) if f"/players/{pid}<" in r.text}
+
+
+async def og_present(pid) -> bool:
+    async with Session() as db:
+        html = await og_router._player_html(str(pid), f"https://betterat.cricket/players/{pid}", "https://betterat.cricket", db)
+    return html is not None and "Steenholdt" in html if str(pid) == str(TRENT) else html is not None
+
+
+async def col(sql: str, **kw):
+    async with Session() as db:
+        return (await db.execute(text(sql), kw)).scalar()
+
+
+async def main() -> None:
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP SCHEMA public CASCADE"))
+        await conn.execute(text("CREATE SCHEMA public"))
+    await build_schema()
+    async with Session() as s:
+        await seed(s)
+
+    import httpx
+    who: dict = {"user": None}
+    app = make_app(who)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        # ------------------------------------------------------------ BEFORE
+        print("before: everybody is visible")
+        await public_view(c, TRENT, "Trent", True)
+        await public_view(c, PLAIN, "control", True)
+        await public_view(c, SIB, "Trent at another club", True)
+        listed = await sitemap_ids(c)
+        check("sitemap lists all three before", listed == {str(TRENT), str(PLAIN), str(CLUBHID)}, str(listed))
+        check("share card exists for Trent before", await og_present(TRENT))
+
+        # ---------------------------------------------------------- HIDE HIM
+        print("asking to be removed")
+        if HAVE:
+            # Dry run first: writes nothing.
+            args = SimpleNamespace(player_id=str(TRENT), reason="asked by email", by="Jack", report=False,
+                                   restore=False, keep_photos=False, apply=False)
+            import contextlib, io
+            buf = io.StringIO()
+            # The script opens its own session on the app's engine; point it at ours.
+            script.async_session_maker = Session
+            with contextlib.redirect_stdout(buf):
+                rc = await script.run(args)
+            check("dry run exits cleanly", rc == 0, str(rc))
+            check("dry run wrote nothing (still public, photo kept)",
+                  await col("SELECT is_public AND photo_data IS NOT NULL FROM players WHERE id=:i", i=TRENT) is True)
+            check("dry run report names what is held (scouting copy)", "scouting_copies" in buf.getvalue() and "has_photo" in buf.getvalue())
+
+            args.apply = True
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = await script.run(args)
+            check("--apply exits cleanly", rc == 0, str(rc))
+        else:
+            print("  CONTROL RUN: services/player_privacy.py does not exist at this commit; "
+                  "hiding is is_public=false alone")
+            async with Session() as db:
+                await db.execute(text("UPDATE players SET is_public = false WHERE id = :i"), {"i": TRENT})
+                await db.commit()
+
+        async with Session() as db:
+            await db.execute(text("UPDATE players SET is_public = false WHERE id = :i"), {"i": CLUBHID})
+            await db.commit()
+
+        # ------------------------------------------------------------- AFTER
+        print("after: public viewer")
+        await public_view(c, TRENT, "Trent", False)
+        await public_view(c, CLUBHID, "club-hidden player", False, " (older switch, no marker)")
+        await public_view(c, PLAIN, "control", True, " (stays visible)")
+        await public_view(c, SIB, "Trent's row at ANOTHER club", False, " (same person, same participant id)")
+        check("his photo at the other club is gone too",
+              await col("SELECT photo_data IS NULL AND photo_url IS NULL FROM players WHERE id=:i", i=SIB) is True)
+        listed = await sitemap_ids(c)
+        check("sitemap no longer lists Trent", str(TRENT) not in listed, str(listed))
+        check("sitemap no longer lists the club-hidden player", str(CLUBHID) not in listed, str(listed))
+        check("sitemap still lists the control player", str(PLAIN) in listed, str(listed))
+        check("no share card for Trent (crawlers get no name or photo)", not await og_present(TRENT))
+        check("share card still built for the control player", await og_present(PLAIN))
+
+        print("after: what is stored")
+        check("Trent's headshot is gone",
+              await col("SELECT photo_data IS NULL AND photo_url IS NULL FROM players WHERE id=:i", i=TRENT) is True)
+        check("Trent's action photo is gone",
+              await col("SELECT hero_photo_data IS NULL AND hero_photo_url IS NULL FROM players WHERE id=:i", i=TRENT) is True)
+        check("the BetterIQ scouting copy of his photo is gone",
+              await col("SELECT photo_data IS NULL AND photo_url IS NULL FROM scouted_players "
+                        "WHERE grassroots_participant_id=:g", g=str(TRENT)) is True)
+        check("the control player's headshot is untouched",
+              await col("SELECT photo_data IS NOT NULL FROM players WHERE id=:i", i=PLAIN) is True)
+        check("the control player's scouting copy is untouched",
+              await col("SELECT photo_data IS NOT NULL FROM scouted_players WHERE grassroots_participant_id=:g",
+                        g=str(PLAIN)) is True)
+        check("the player ROW is kept (his match records hang off it)",
+              await col("SELECT COUNT(*) FROM players WHERE id=:i", i=TRENT) == 1)
+
+        if HAVE:
+            check("marker is set on the row",
+                  await col("SELECT privacy_hidden_at IS NOT NULL AND privacy_hidden_by='Jack' "
+                            "AND privacy_hidden_reason='asked by email' FROM players WHERE id=:i", i=TRENT) is True)
+            check("an audit entry was written for the club",
+                  await col("SELECT COUNT(*) FROM manual_edit_logs WHERE action='privacy_hide' "
+                            "AND target_id=:t AND organisation_id=:o", t=str(TRENT), o=OURS) == 1)
+            check("the audit entry holds no photo bytes",
+                  await col("SELECT NOT (before_json::text ILIKE '%PNG%' OR after_json::text ILIKE '%PNG%') "
+                            "FROM manual_edit_logs WHERE action='privacy_hide' AND target_id=:t", t=str(TRENT)) is True)
+            check("the control player carries no marker",
+                  await col("SELECT privacy_hidden_at IS NULL FROM players WHERE id=:i", i=PLAIN) is True)
+
+            # ---- idempotent
+            first = await col("SELECT privacy_hidden_at FROM players WHERE id=:i", i=TRENT)
+            async with Session() as db:
+                pl = await db.get(Player, TRENT)
+                out = await player_privacy.hide_at_request(db, pl, by="Jack", reason="asked by email")
+                await db.commit()
+            check("hiding twice reports it was already hidden", out["already_hidden"] is True)
+            check("hiding twice keeps the original timestamp",
+                  await col("SELECT privacy_hidden_at FROM players WHERE id=:i", i=TRENT) == first)
+
+            # ---- the club cannot put him back
+            print("the club cannot undo it")
+            async with Session() as db:
+                pl = await db.get(Player, TRENT)
+                admin = await db.get(User, ADMIN)
+                body = players_router.PlayerProfileUpdate(is_public=True)
+                try:
+                    await players_router.update_player_profile(str(TRENT), body, db, admin, club=await db.get(Organisation, OURS))
+                    refused = None
+                except HTTPException as e:
+                    refused = e.status_code
+            check("profile edit switching him public is refused (409)", refused == 409, str(refused))
+            check("...and he is still hidden",
+                  await col("SELECT is_public FROM players WHERE id=:i", i=TRENT) is False)
+            async with Session() as db:
+                admin = await db.get(User, ADMIN)
+                try:
+                    await players_router.update_player_profile(
+                        str(TRENT), players_router.PlayerProfileUpdate(shirt_number="7"), db, admin,
+                        club=await db.get(Organisation, OURS))
+                    ok = True
+                except HTTPException as e:
+                    ok = False
+            check("an unrelated profile edit still works for him (not a lock on the record)", ok)
+            async with Session() as db:
+                pl = await db.get(Player, TRENT)
+                up = UploadFile(filename="x.png", file=__import__("io").BytesIO(PHOTO))
+                try:
+                    await club_admin_router._store_player_photo(db, pl, up, "photo")
+                    st = None
+                except HTTPException as e:
+                    st = e.status_code
+            check("a photo upload for him is refused (409)", st == 409, str(st))
+            async with Session() as db:
+                pl = await db.get(Player, PLAIN)
+                up = UploadFile(filename="x.png", file=__import__("io").BytesIO(PHOTO))
+                try:
+                    await club_admin_router._store_player_photo(db, pl, up, "photo")
+                    st = None
+                except HTTPException as e:
+                    st = e.status_code
+            check("...while the control player's upload still works", st is None, str(st))
+
+            # ---- the sync does not resurrect or alter him
+            print("the sync")
+            from app.services import sync as sync_mod
+            async with Session() as db:
+                rows = (await db.execute(text(
+                    "SELECT COALESCE(grassroots_id, id::text), id FROM players WHERE organisation_id=:o"), {"o": OURS})).all()
+                pmap = {g: i for g, i in rows}
+                got = await sync_mod._resolve_org_player(db, OURS, pmap, str(TRENT), "Trent Steenholdt", {})
+                await db.flush()
+                await db.rollback()
+            check("sync resolves him to the SAME row, creating no duplicate", got == TRENT, str(got))
+            # A club that joins later, or a fixture another club syncs, mints a NEW row
+            # for the same person. It must be born hidden.
+            async with Session() as db:
+                got2 = await sync_mod._resolve_org_player(db, NEWORG, {}, str(TRENT), "Trent Steenholdt", {})
+                await db.flush()
+                other_guid = str(uid())
+                got3 = await sync_mod._resolve_org_player(db, NEWORG, {}, other_guid, "Someone Else", {})
+                await db.commit()
+            check("a NEW row minted for him at a club that joins later is born hidden",
+                  await col("SELECT is_public IS FALSE AND privacy_hidden_at IS NOT NULL FROM players WHERE id=:i",
+                            i=got2) is True)
+            await public_view(c, got2, "the new row", False)
+            check("...while a new player nobody asked about is created public (the guard is not blanket)",
+                  await col("SELECT is_public IS TRUE AND privacy_hidden_at IS NULL FROM players WHERE id=:i",
+                            i=got3) is True)
+            check("his row still carries the marker after a sync-style resolve",
+                  await col("SELECT privacy_hidden_at IS NOT NULL AND is_public IS FALSE FROM players WHERE id=:i", i=TRENT) is True)
+
+            # ---- a merge must not put him back
+            print("merging a duplicate")
+            from app.routers.admin import _merge_players_core
+            DUP_HIDDEN, DUP_KEEP = uid(), uid()
+            async with Session() as db:
+                db.add(Player(id=DUP_HIDDEN, name="Trent S (dup)", organisation_id=OURS, grassroots_id=str(DUP_HIDDEN),
+                              photo_data=PHOTO, photo_mime="image/png"))
+                db.add(Player(id=DUP_KEEP, name="Trent Steenholdt (keeper)", organisation_id=OURS,
+                              grassroots_id=str(DUP_KEEP), photo_data=PHOTO, photo_mime="image/png"))
+                await db.commit()
+            async with Session() as db:
+                dup = await db.get(Player, DUP_HIDDEN)
+                await player_privacy.hide_at_request(db, dup, by="Jack", reason="asked by email")
+                await db.commit()
+            try:
+                async with Session() as db:
+                    admin = await db.get(User, ADMIN)
+                    await _merge_players_core(db, DUP_KEEP, DUP_HIDDEN, OURS, admin)
+                merged = True
+            except Exception as exc:  # pragma: no cover - harness detail
+                merged = False
+                print("  merge raised:", repr(exc)[:200])
+            check("the merge ran", merged)
+            check("the removed duplicate row is gone",
+                  await col("SELECT COUNT(*) FROM players WHERE id=:i", i=DUP_HIDDEN) == 0)
+            check("the keeper inherited the request: hidden, marker set",
+                  await col("SELECT is_public IS FALSE AND privacy_hidden_at IS NOT NULL FROM players WHERE id=:i",
+                            i=DUP_KEEP) is True)
+            check("the keeper's photo was removed too",
+                  await col("SELECT photo_data IS NULL FROM players WHERE id=:i", i=DUP_KEEP) is True)
+            await public_view(c, DUP_KEEP, "merged keeper", False)
+
+            # ---- the report
+            async with Session() as db:
+                pl = await db.get(Player, TRENT)
+                rep = await player_privacy.holdings(db, pl)
+            check("the access report lists his rows at the other clubs (the first club and the one that joined later)", len(rep["other_club_rows"]) == 2, str(rep["other_club_rows"]))
+            check("the access report says a suppression is in place", rep["suppressed"] is True)
+            check("the access report lists the scouting copy", len(rep["scouting_copies"]) == 1, str(rep["scouting_copies"]))
+            check("the access report says the photo is gone", rep["player"]["has_photo"] is False)
+
+        # -------------------------------------------------------- CLUB ADMIN
+        if HAVE:
+            print("the response filter (every public response, not just his profile)")
+            from app.services import privacy_scrub
+            from fastapi import FastAPI as _FastAPI
+            from fastapi.responses import JSONResponse as _J, PlainTextResponse as _T, Response as _R
+
+            check("name_variants covers the forms a scorecard writes",
+                  {"Trent Steenholdt", "Steenholdt, Trent", "T Steenholdt", "T. Steenholdt",
+                   "Steenholdt T"} <= privacy_scrub.name_variants("Steenholdt, Trent"))
+
+            privacy_scrub.forget()
+            mini = _FastAPI()
+            mini.add_middleware(privacy_scrub.PrivacyScrubMiddleware)
+            TXT = ("Trent Steenholdt, Steenholdt, Trent, T Steenholdt, T. Steenholdt and c Steenholdt b Smith "
+                   f"id {TRENT} {str(TRENT).upper()}")
+            PLAIN_TXT = "Pat Plain scored 50, id " + str(PLAIN)
+
+            @mini.get("/leaky")
+            async def _leaky():
+                return _J({"a": TXT, "ok": PLAIN_TXT, "nested": [{"player_name": "Trent Steenholdt", "player_id": str(TRENT)}]})
+
+            @mini.get("/club-admin/people")
+            async def _admin():
+                return _J({"a": TXT})
+
+            @mini.get("/photo")
+            async def _photo():
+                return _R(b"\x89PNG Trent Steenholdt", media_type="image/png")
+
+            @mini.get("/csv")
+            async def _csv():
+                return _T("name\nTrent Steenholdt\n", media_type="text/csv")
+
+            @mini.get("/lots")
+            async def _lots():
+                return _J({"rows": [{"player_name": f"Somebody {i}"} for i in range(400)] + [{"player_name": "Trent Steenholdt"}]})
+
+            tr = httpx.ASGITransport(app=mini)
+            async with httpx.AsyncClient(transport=tr, base_url="http://m") as mc:
+                r = await mc.get("/leaky")
+                body = r.text
+                check("every written form of his name is replaced",
+                      "Steenholdt" not in body and "Trent" not in body.replace("Trent S", "") and "********" in body, body[:200])
+                check("his id is replaced, upper and lower case", str(TRENT) not in body and str(TRENT).upper() not in body)
+                check("the response is still valid JSON", r.json()["ok"] == PLAIN_TXT)
+                check("other people's names and ids are left alone", "Pat Plain" in body and str(PLAIN) in body)
+                check("content-length matches the rewritten body", int(r.headers["content-length"]) == len(r.content))
+                r = await mc.get("/club-admin/people")
+                check("a request with NO token to a management route is still scrubbed",
+                      "Steenholdt" not in r.text, r.text[:120])
+                from jose import jwt as _jwt
+                from app.config.settings import settings as _settings
+                from app.routers.auth import COOKIE_NAME as _COOKIE
+                _tok = _jwt.encode({"sub": str(ADMIN)}, _settings.secret_key, algorithm=_settings.algorithm)
+                session = {"Cookie": f"{_COOKIE}={_tok}"}
+                r = await mc.get("/club-admin/people", headers={"Cookie": f"{_COOKIE}=not-a-real-token"})
+                check("a junk session cookie does NOT unscrub a management route", "Steenholdt" not in r.text)
+                r = await mc.get("/club-admin/people", headers={"Authorization": "Bearer x"})
+                check("an Authorization header alone does NOT unscrub (sign-in is by session cookie)", "Steenholdt" not in r.text)
+                r = await mc.get("/club-admin/people", headers=session)
+                check("a request with a valid session cookie to a management route is NOT scrubbed (the club runs its own record)",
+                      "Steenholdt" in r.text)
+                r = await mc.get("/leaky", headers=session)
+                check("a valid session alone does not unscrub a PUBLIC route", "Steenholdt" not in r.text)
+                r = await mc.get("/photo")
+                check("a binary response is passed through untouched", r.content == b"\x89PNG Trent Steenholdt")
+                r = await mc.get("/csv")
+                check("a CSV is scrubbed", "Steenholdt" not in r.text and "********" in r.text)
+                r = await mc.get("/lots")
+                check("a large response is scrubbed and complete", len(r.json()["rows"]) == 401 and "Steenholdt" not in r.text)
+
+            # The way a scorecard writes a fielder or bowler: Cricket Australia's own
+            # dismissal strings (see sync._parse_bowler_and_fielder), which is where a
+            # removed player's name hides on OTHER players' lines.
+            print("scorecard dismissal strings")
+            DISMISSALS = [
+                "c: T Steenholdt b: J Birbeck", "c T Steenholdt b J Birbeck", "b T Steenholdt",
+                "c & b: T Steenholdt", "c&b T Steenholdt", "lbw b: T Steenholdt",
+                "st \u2020T Steenholdt b: J Birbeck", "st \u2020Steenholdt b: J Birbeck",
+                "c Steenholdt b J Birbeck", "run out (T Steenholdt)", "run out (Steenholdt/Smith)",
+                "c: Steenholdt, T b: J Birbeck",
+            ]
+            privacy_scrub.forget()
+            sc = await privacy_scrub.get_scrubber()
+            check("a scrubber exists while somebody is removed", sc is not None)
+            if sc is not None:
+                for line in DISMISSALS:
+                    out = sc.scrub(line)
+                    check(f"dismissal {line!r} reads {out!r} with his name gone",
+                          "Steenholdt" not in out and "********" in out)
+                check("the bowler's and the fielder's OTHER names are left alone",
+                      sc.scrub("c: T Steenholdt b: J Birbeck") == "c: ******** b: J Birbeck")
+                check("someone with a different surname is left alone",
+                      sc.scrub("c: A Dillon b: J Birbeck") == "c: A Dillon b: J Birbeck")
+
+            # A bare surname is only removed when nobody else holds it.
+            async with Session() as db:
+                db.add(Player(id=uid(), name="Sam Steenholdt", organisation_id=OURS, grassroots_id=str(uid())))
+                await db.commit()
+            privacy_scrub.forget()
+            tr = httpx.ASGITransport(app=mini)
+            async with httpx.AsyncClient(transport=tr, base_url="http://m") as mc:
+                r = await mc.get("/leaky")
+                check("a surname somebody else shares is NOT scrubbed bare (their data is not damaged)",
+                      "c Steenholdt b Smith" in r.text, r.text[:160])
+                check("...but his full name and initials still are",
+                      "Trent Steenholdt" not in r.text and "T Steenholdt" not in r.text and "T. Steenholdt" not in r.text)
+            async with Session() as db:
+                await db.execute(text("DELETE FROM players WHERE name = 'Sam Steenholdt'"))
+                await db.commit()
+            privacy_scrub.forget()
+
+        print("a signed-in club admin")
+        async with Session() as db:
+            who["user"] = await db.get(User, ADMIN)
+        # The club's own switch keeps its admin escape: a club sees its hidden players.
+        await public_view(c, CLUBHID, "club admin sees a club-hidden player", True, " (the club's own switch keeps its escape)")
+        if HAVE:
+            # A person who asked to be removed has NO public profile for anyone,
+            # a signed-in club admin included.
+            await public_view(c, TRENT, "club admin, person who asked to be removed", False, " (no public profile for anyone)")
+            await public_view(c, SIB, "club admin, his row at another club", False, " (no public profile for anyone)")
+        who["user"] = None
+
+        if HAVE:
+            # The management routes an admin screen needs stay reachable. Driven
+            # through the shipped gate with a matched-route scope, because the
+            # routes themselves sit behind capability checks.
+            from types import SimpleNamespace as NS
+            from starlette.requests import Request
+
+            def gate_request(method, template):
+                return Request({"type": "http", "method": method, "headers": [], "query_string": b"",
+                                "path_params": {"player_id": str(TRENT)},
+                                "route": NS(path="/players" + template)})
+
+            async def gate(method, template):
+                async with Session() as db:
+                    admin = await db.get(User, ADMIN)
+                    try:
+                        await players_router._gate_junior_hidden_player(gate_request(method, template), db, admin)
+                        return 200
+                    except HTTPException as e:
+                        return e.status_code
+
+            for method, tmpl in (("GET", "/{player_id}/profile"), ("PATCH", "/{player_id}/profile"),
+                                 ("GET", "/{player_id}/aliases"), ("POST", "/{player_id}/request-sync")):
+                got = await gate(method, tmpl)
+                check(f"an admin can still reach the management route {method} {tmpl}", got == 200, str(got))
+            for method, tmpl in (("GET", "/{player_id}"), ("GET", "/{player_id}/stats"),
+                                 ("GET", "/{player_id}/share"), ("GET", "/{player_id}/teammates")):
+                got = await gate(method, tmpl)
+                check(f"...and cannot reach the public-data route {method} {tmpl}", got == 404, str(got))
+
+        # ------------------------------------------- a namesake held by NAME
+        if HAVE:
+            print("a hand-typed player with his name")
+            NAMESAKE = uid()
+            async with Session() as db:
+                db.add(Player(id=NAMESAKE, name="Trent Steenholdt", organisation_id=OURS))
+                await db.commit()
+            check("a hand-typed 'Trent Steenholdt' is held hidden, as a name hold",
+                  await col("SELECT is_public IS FALSE AND privacy_hidden_by = 'name-match' FROM players WHERE id=:i", i=NAMESAKE) is True)
+            async with Session() as db:
+                admin = await db.get(User, ADMIN)
+                prof = await players_router.get_player_profile(str(NAMESAKE), db, await db.get(Organisation, OURS), admin)
+                his = await players_router.get_player_profile(str(TRENT), db, await db.get(Organisation, OURS), admin)
+            check("the profile says it is a name match the club can release", prof.get("privacy_name_match") is True)
+            check("his own removal is NOT flagged as releasable", his.get("privacy_name_match") is False)
+            check("and the namesake's profile does not reveal his reason or who he is",
+                  "asked by email" not in str(prof) and "Jack" not in str(prof.get("privacy_hidden_reason")))
+            async with Session() as db:
+                admin = await db.get(User, ADMIN)
+                try:
+                    await players_router.update_player_profile(
+                        str(NAMESAKE), players_router.PlayerProfileUpdate(is_public=True), db, admin,
+                        club=await db.get(Organisation, OURS))
+                    refused = None
+                except HTTPException as e:
+                    refused = (e.status_code, str(e.detail))
+            check("the switch is refused, with a message that points at the release",
+                  refused and refused[0] == 409 and "different person" in refused[1], str(refused))
+            async with Session() as db:
+                admin = await db.get(User, ADMIN)
+                try:
+                    await players_router.release_privacy_name_hold(str(TRENT), db, admin, await db.get(Organisation, OURS))
+                    res = None
+                except HTTPException as e:
+                    res = e.status_code
+            check("his OWN request cannot be released through the endpoint (409)", res == 409, str(res))
+            async with Session() as db:
+                admin = await db.get(User, ADMIN)
+                try:
+                    await players_router.release_privacy_name_hold(str(NAMESAKE), db, admin, await db.get(Organisation, OTHER))
+                    res = None
+                except HTTPException as e:
+                    res = e.status_code
+            check("another club's admin cannot release it (404)", res == 404, str(res))
+            async with Session() as db:
+                admin = await db.get(User, ADMIN)
+                out = await players_router.release_privacy_name_hold(str(NAMESAKE), db, admin, await db.get(Organisation, OURS))
+            check("the club confirming a different person puts them back",
+                  out.get("is_public") is True and out.get("privacy_name_match") is False and out.get("privacy_hidden_at") is None)
+            check("with an audit entry the club can see",
+                  await col("SELECT COUNT(*) FROM manual_edit_logs WHERE action='privacy_restore' AND target_id=:t", t=str(NAMESAKE)) == 1)
+            check("and the real person is untouched",
+                  await col("SELECT is_public IS FALSE AND privacy_hidden_at IS NOT NULL FROM players WHERE id=:i", i=TRENT) is True)
+
+        # ----------------------------------------------------------- RESTORE
+        if HAVE:
+            print("restore")
+            args = SimpleNamespace(player_id=str(TRENT), reason=None, by="Jack", report=False,
+                                   restore=True, keep_photos=False, apply=True)
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = await script.run(args)
+            check("restore exits cleanly", rc == 0)
+            await public_view(c, TRENT, "after restore", True)
+            check("restore does NOT bring the photo back",
+                  await col("SELECT photo_data IS NULL FROM players WHERE id=:i", i=TRENT) is True)
+            check("restore lifts the other club's row and the suppression too",
+                  await col("SELECT is_public IS TRUE AND privacy_hidden_at IS NULL FROM players WHERE id=:i", i=SIB) is True
+                  and await col("SELECT COUNT(*) FROM player_privacy_suppressions WHERE grassroots_id=:g", g=str(TRENT)) == 0)
+            check("marker cleared",
+                  await col("SELECT privacy_hidden_at IS NULL FROM players WHERE id=:i", i=TRENT) is True)
+
+            # ---- DDL: idempotent, and really adds the columns
+            print("migration 316 DDL")
+            from app.services.player_privacy_ddl import DOWNGRADE as _DOWN
+            async with engine.begin() as conn:
+                # The shipped downgrade, so the triggers go before the columns
+                # they watch (a bare DROP COLUMN is refused while they exist).
+                for stmt in _DOWN:
+                    await conn.execute(text(stmt))
+                for _ in range(2):  # the lifespan re-runs it on every boot
+                    for stmt in PRIVACY_DDL:
+                        await conn.execute(text(stmt))
+            cols = (await col("SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns "
+                              "WHERE table_name='players' AND column_name LIKE 'privacy_hidden_%'")) or ""
+            check("STATEMENTS add the three columns, and re-running them is harmless",
+                  cols == "privacy_hidden_at,privacy_hidden_by,privacy_hidden_reason", cols)
+            from app.services.player_privacy_ddl import DOWNGRADE
+            async with engine.begin() as conn:
+                for stmt in DOWNGRADE:
+                    await conn.execute(text(stmt))
+                for stmt in PRIVACY_DDL:
+                    await conn.execute(text(stmt))
+            check("the suppression table exists after the re-run",
+                  await col("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='player_privacy_suppressions'") == 1)
+            check("DOWNGRADE drops only what it added",
+                  await col("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='players'") == 1)
+
+    print(f"\n{PASS} passed, {FAIL} failed")
+    if FAILURES:
+        print("FAILED:", *FAILURES, sep="\n  ")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

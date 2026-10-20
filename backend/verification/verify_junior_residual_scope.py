@@ -87,6 +87,8 @@ async def build_schema() -> None:
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grade_merge_logs (
                 id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),
@@ -237,11 +239,13 @@ async def main() -> int:
         check("dropped by the junior-excluding club default (0 / 0)",
               (g, r) == (0, 0), f"{g}/{r}")
 
-        print("\n── a label-less career lump stays unclassifiable and is kept")
-        for lbl, sc in (("Juniors", jnr), ("Men's", men), ("Women's", wom)):
+        print("\n── a label-less career lump: kept by the default and by Men's, never claimed by a pick that leaves senior out")
+        for lbl, sc, want in (("Juniors", jnr, (0, 0)), ("Men's", men, (9, 250)),
+                              ("Women's", wom, (0, 0)), ("Masters", mas, (0, 0)),
+                              ("the club default", default, (9, 250))):
             g, r = await resid(s, LUMP, sc)
-            check(f"the career lump is kept under {lbl} (9 / 250)",
-                  (g, r) == (9, 250), f"{g}/{r}")
+            check(f"the career lump reads {want[0]} / {want[1]} under {lbl}",
+                  (g, r) == want, f"{g}/{r}")
 
         print("\n── a residual with a REAL senior grade_id (unchanged branch)")
         g, r = await resid(s, GID_SEN, jnr)
@@ -261,7 +265,9 @@ async def main() -> int:
 
         print("\n── the leaderboard residual CTE agrees")
         for lbl, sc, want in (("Juniors", jnr, 0), ("Men's", men, 18)):
-            params: dict = {}
+            from app.services.aggregations import _club_player_ids
+            params: dict = {"org_id": str(ORG),
+                            "club_player_ids": await _club_player_ids(s, ORG)}
             cte = _residual_totals_cte(sc, None, params)
             params["pid"] = str(SEN_IMP)
             got = (await s.execute(text(

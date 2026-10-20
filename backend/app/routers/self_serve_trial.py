@@ -120,6 +120,25 @@ async def _reclaimable_existing(db: AsyncSession, existing):
     return None
 
 
+async def _paused_org(db: AsyncSession, existing):
+    """The registered club loaded WITH its subscription rows when its public page
+    shows "Club page paused" (the test the public club routes apply, see
+    ``clubs._public_blocked``: inactive, or BetterStats/Core not live, which is
+    what an ended trial does), else None. ``org_core_live`` fails open unless the
+    subscription rows are loaded, so the club is re-read with them here."""
+    from sqlalchemy.orm import selectinload
+    from app.routers.clubs import _public_blocked
+    org = (await db.execute(
+        select(Organisation).where(Organisation.id == existing.id)
+        .options(selectinload(Organisation.module_subscriptions))
+    )).scalar_one_or_none()
+    return org if org is not None and _public_blocked(org) else None
+
+
+async def _public_page_paused(db: AsyncSession, existing) -> bool:
+    return (await _paused_org(db, existing)) is not None
+
+
 async def _primary_admin_label(db: AsyncSession, club_id) -> str | None:
     """First name + last-initial for the club's Primary Club Admin (falling
     back to the longest-standing club admin if no primary is set), so the
@@ -171,7 +190,9 @@ async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
     last initial only (e.g. "Jack B…") — so the duplicate message can point at
     a real person without exposing a full name, its length, or any contact
     details — and ``already_registered_slug``, the existing club's public page
-    slug, so the frontend can link straight to it."""
+    slug, so the frontend can link straight to it. ``already_registered_paused``
+    is true when that page would show "Club page paused" (an ended trial), so
+    the /trial page can offer a trial extension request instead of a dead end."""
     if not q or len(q.strip()) < 2:
         return []
     results = await playhq_client.search_organisations(q.strip())
@@ -186,6 +207,7 @@ async def search_clubs(q: str = "", db: AsyncSession = Depends(get_db)):
             "already_registered": existing is not None,
             "already_registered_by": admin_label,
             "already_registered_slug": existing.slug if existing else None,
+            "already_registered_paused": (await _public_page_paused(db, existing)) if existing else False,
         })
     return out
 

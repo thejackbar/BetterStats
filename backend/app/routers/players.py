@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
+from contextvars import ContextVar
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text, func
 from sqlalchemy.exc import IntegrityError
@@ -12,7 +15,10 @@ from app.models.db import (
     BattingInnings, BowlingSpell, FieldingStat, Game, Grade, Season,
     Fixture, FixtureLineup, PlayerAvailability, get_db,
 )
-from app.routers.auth import get_current_user, get_optional_user, user_can_view_org_private, get_current_club
+from app.routers.auth import (
+    get_current_user, get_optional_user, user_can_view_org_private, get_current_club,
+    public_junior_hiding,
+)
 from app.auth.capabilities import require_cap, MANAGE_PLAYERS
 from app.services.squad_membership import (
     clear_all_squad_memberships,
@@ -27,7 +33,7 @@ from app.services.aggregations import (
     get_career_batting_from_innings, get_career_bowling_from_spells, get_career_fielding_from_stats,
     get_player_batting_innings, get_player_bowling_spells,
     get_dismissal_breakdown, get_batting_by_position, get_batting_by_grade,
-    get_bowling_by_grade, get_player_team_breakdown,
+    get_bowling_by_grade, get_player_team_breakdown, raise_games_to_grid_total,
     get_bowling_dismissal_breakdown, get_bowling_by_batter_position,
     get_season_by_season, get_player_milestones, get_player_partnerships,
     get_player_activity, get_upcoming_milestones_for_org,
@@ -37,20 +43,131 @@ from app.services.aggregations import (
 from app.services.milestone_rules import (
     crossed_thresholds, is_displayable, next_threshold, reach_window,
 )
+from app.services.grade_milestone_schemes import load_book
 from app.services import iq_teammates
+from app.services import player_form
+from app.services.session_safety import rollback_keeping
 from app.services import milestone_totals
-from app.services import grade_scope
+from app.services import grade_scope, junior_hiding, player_privacy
 from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
 from app.services.player_age import age_on, dob_error, visible_age
 from app.services.player_kit import clean_shirt_number
 from app.services.player_formats import player_format_splits
 
-router = APIRouter(prefix="/players", tags=["players"])
+# What this request's viewer may not see of the club's junior programme
+# (services/junior_hiding). Set once by `_gate_junior_hidden_player`, which runs
+# ahead of every route that names a player, and read by the scope resolvers
+# below. A ContextVar rather than a parameter on twenty endpoints: a route that
+# forgot to pass it would quietly show a club's juniors, and this way none can
+# forget.
+_PUBLIC_HIDING: ContextVar = ContextVar("public_junior_hiding", default=junior_hiding.OFF)
+
+
+def _hidden_grades() -> tuple:
+    return _PUBLIC_HIDING.get().grade_ids
+
+
+async def _hidden_only_scope(db: AsyncSession, player: Player):
+    """A scope that leaves out ONLY the hidden junior grades, or None.
+
+    For the endpoints that take no category/format/competition scope today: a
+    club that hides nothing must get byte-identical answers, so they only ever
+    receive a scope when there is something hidden to leave out.
+    """
+    ids = _hidden_grades()
+    if not ids or not player.organisation_id:
+        return None
+    return await grade_scope.resolve_scope(
+        db, player.organisation_id, list(grade_scope.GRADE_CATEGORIES),
+        hidden_grade_ids=ids,
+    )
+
+
+# The routes under /players/{id} a club admin still needs for someone who asked
+# to be removed: edit the record, its aliases and the sync request.
+# Every one is capability-gated itself. Everything else under /players/{id} is a
+# public-profile data route and 404s for a person who asked to be removed.
+_PRIVACY_MANAGEMENT_ROUTES = frozenset({
+    ("GET", "/{player_id}/profile"),
+    ("PATCH", "/{player_id}/profile"),
+    ("GET", "/{player_id}/aliases"),
+    ("POST", "/{player_id}/aliases"),
+    ("DELETE", "/{player_id}/aliases/{alias_id}"),
+    ("POST", "/{player_id}/request-sync"),
+    ("POST", "/{player_id}/privacy-release"),
+})
+
+
+def _route_template(request: Request) -> str:
+    """The matched route's path template, without the router prefix."""
+    route = request.scope.get("route")
+    path = getattr(route, "path", "") or ""
+    return path[len("/players"):] if path.startswith("/players") else path
+
+
+async def _gate_junior_hidden_player(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
+    """A hidden player reads as absent to the public, on every route naming them.
+
+    Two reasons: the club (or the person) switched `players.is_public` off, or
+    the club hides its juniors and this is a junior-only player. Applies to
+    every `/players/{player_id}/...` route, so the profile and each tab behind
+    it agree. Also records which junior grades to leave out of a
+    senior player's figures. A club admin or Better staff is never gated.
+    """
+    # Always start from "nothing hidden". A server gives each request its own
+    # context, but a test client (or any code that reuses one) does not, and a
+    # value left by an earlier public request must never reach a club admin's.
+    _PUBLIC_HIDING.set(junior_hiding.OFF)
+    raw = request.path_params.get("player_id")
+    if not raw:
+        return
+    try:
+        pid = uuid.UUID(str(raw))
+    except (ValueError, TypeError):
+        return
+    row = (await db.execute(
+        select(Player.organisation_id, Player.is_public, Player.privacy_hidden_at)
+        .where(Player.id == pid)
+    )).first()
+    if not row or not row[0]:
+        return
+    org_id = row[0]
+    # A person who asked to be removed (migration 316) has NO public profile for
+    # anyone: not the public, not a signed-in club admin, not Better staff. The
+    # admin escape below exists so a club can see its own hidden players, but
+    # this person's public page is meant to be gone, and a signed-in admin who
+    # can still open it cannot tell that it is. Only the management routes an
+    # admin screen needs stay reachable (each is capability-gated on its own).
+    if row[2] is not None and (request.method, _route_template(request)) not in _PRIVACY_MANAGEMENT_ROUTES:
+        raise HTTPException(status_code=404, detail="Player not found")
+    # A player the club (or the person) has hidden reads as absent on EVERY
+    # route under /players/{id}, not just the profile: the page only shows
+    # what these endpoints answer, so a hidden player's stats must not be one
+    # direct request away. 404 rather than 403, which would confirm the
+    # person exists. A club admin or Better staff is never gated.
+    if row[1] is False and not await user_can_view_org_private(db, viewer, str(org_id)):
+        raise HTTPException(status_code=404, detail="Player not found")
+    hiding = await public_junior_hiding(db, viewer, org_id)
+    if not hiding.active:
+        return
+    if str(pid).lower() in hiding.player_ids:
+        raise HTTPException(status_code=404, detail="Player not found")
+    _PUBLIC_HIDING.set(hiding)
+
+
+router = APIRouter(
+    prefix="/players", tags=["players"], dependencies=[Depends(_gate_junior_hidden_player)]
+)
 
 
 async def _resolve_player_scope(
     db: AsyncSession, player: Player, categories: Optional[str],
     formats: Optional[str] = None, competitions: Optional[str] = None,
+    grades: Optional[list[str]] = None,
 ):
     """Same grade-type and match-type scope the career/grade breakdowns use, for
     the rest of the Analysis-tab sub-endpoints (dismissals, by-position,
@@ -61,8 +178,9 @@ async def _resolve_player_scope(
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
     scope, _ = await grade_scope.resolve_scope_for_player(
         db, player.organisation_id, str(player.id), categories, formats=formats,
-        competitions=competitions,
+        competitions=competitions, grades=grades,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
+        hidden_grade_ids=_hidden_grades(),
     )
     return scope
 
@@ -125,6 +243,11 @@ async def list_players(
     conditions = [Player.organisation_id == uuid.UUID(org_id)]
     if public_only:
         conditions.append(Player.is_public.is_not(False))
+        # A club that hides its juniors also drops the players whose only
+        # cricket is in them. Empty (and free) for every other club.
+        hiding = await public_junior_hiding(db, viewer, org_id)
+        if hiding.active and hiding.player_ids:
+            conditions.append(Player.id.not_in([uuid.UUID(p) for p in hiding.player_ids]))
     result = await db.execute(select(Player).where(*conditions))
     # Sort by surname for everyone — a display_name_override is free text (often
     # "First Last", no comma) which an alphabetical DB sort would order by first
@@ -208,6 +331,15 @@ async def get_player_stats(
             "cannot otherwise answer. Omitted applies no competition filter."
         ),
     ),
+    grades: Optional[list[str]] = Query(
+        None,
+        description=(
+            "Grade names to count, as the public Grade picker lists them "
+            "(Manage Grades' rename, else the merge's canonical name). Repeat the "
+            "parameter for several. A picked grade beats the default grade-type "
+            "exclusion. Omitted applies no grade filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
@@ -217,8 +349,9 @@ async def get_player_stats(
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
     scope, auto_shown = await grade_scope.resolve_scope_for_player(
         db, player.organisation_id, player_id, categories, formats=formats,
-        competitions=competitions,
+        competitions=competitions, grades=grades,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
+        hidden_grade_ids=_hidden_grades(),
     )
     use_game_filter = last_n_games or start_date or end_date
     if use_game_filter:
@@ -232,6 +365,18 @@ async def get_player_stats(
         batting = await get_career_batting(db, player_id, season_id, scope=scope)
         bowling = await get_career_bowling(db, player_id, season_id, scope=scope)
         fielding = await get_career_fielding(db, player_id, season_id, scope=scope)
+        # The header must not read below the Analysis grid's own total (95 beside
+        # 96 for a player CA undercounted by a game). Raise-only; see
+        # raise_games_to_grid_total. A failure here leaves the figures as they were.
+        if player.organisation_id:
+            try:
+                await raise_games_to_grid_total(
+                    db, player_id, str(player.organisation_id), season_id, scope,
+                    batting, bowling, fielding)
+            except Exception:
+                await rollback_keeping(db, player, org)
+                logging.getLogger(__name__).exception(
+                    "grid match total failed for player %s", player_id)
     batting_innings = await get_player_batting_innings(db, player_id, season_id, grade_id, scope=scope)
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id, scope=scope)
 
@@ -252,7 +397,6 @@ async def get_player_stats(
         except Exception:
             # A note about the figures must never take the figures down.
             await db.rollback()
-            import logging
             logging.getLogger(__name__).exception(
                 "match coverage failed for player %s", player_id)
 
@@ -316,8 +460,11 @@ async def get_player_competitions(
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     from app.services import competition_stats
-    return await competition_stats.player_competition_breakdown(
-        db, player_id, player.organisation_id, season_id
+    return competition_stats.without_competitions(
+        await competition_stats.player_competition_breakdown(
+            db, player_id, player.organisation_id, season_id
+        ),
+        _PUBLIC_HIDING.get().competition_ids,
     )
 
 
@@ -341,7 +488,7 @@ async def get_player_formats(
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    data = await player_format_splits(db, player_id, season_id)
+    data = await player_format_splits(db, player_id, season_id, hidden_grade_ids=_hidden_grades())
     return {
         "player": {"id": str(player.id), "name": player.display_name},
         **data,
@@ -352,12 +499,13 @@ async def get_player_formats(
 async def get_player_dismissals(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_dismissal_breakdown(db, player_id, scope=scope)
 
 
@@ -365,12 +513,13 @@ async def get_player_dismissals(
 async def get_player_by_position(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_batting_by_position(db, player_id, scope=scope)
 
 
@@ -380,6 +529,7 @@ async def get_player_by_grade(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
@@ -388,7 +538,7 @@ async def get_player_by_grade(
         raise HTTPException(status_code=404, detail="Player not found")
     org_id = str(player.organisation_id)
     public_only = not await user_can_view_org_private(db, viewer, org_id)
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_batting_by_grade(db, player_id, org_id, public_only=public_only, scope=scope)
 
 
@@ -398,6 +548,7 @@ async def get_player_bowling_by_grade(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
@@ -406,7 +557,7 @@ async def get_player_bowling_by_grade(
         raise HTTPException(status_code=404, detail="Player not found")
     org_id = str(player.organisation_id)
     public_only = not await user_can_view_org_private(db, viewer, org_id)
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_bowling_by_grade(db, player_id, org_id, public_only=public_only, scope=scope)
 
 
@@ -414,12 +565,13 @@ async def get_player_bowling_by_grade(
 async def get_player_bowling_dismissals(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_bowling_dismissal_breakdown(db, player_id, scope=scope)
 
 
@@ -427,12 +579,13 @@ async def get_player_bowling_dismissals(
 async def get_player_bowling_by_batter_position(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_bowling_by_batter_position(db, player_id, scope=scope)
 
 
@@ -440,12 +593,13 @@ async def get_player_bowling_by_batter_position(
 async def get_player_by_venue_endpoint(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_player_by_venue(db, player_id, scope=scope)
 
 
@@ -453,12 +607,13 @@ async def get_player_by_venue_endpoint(
 async def get_player_by_opposition_endpoint(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_player_by_opposition(db, player_id, scope=scope)
 
 
@@ -468,6 +623,7 @@ async def get_player_teammates(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Every player this player has shared a side with, most games together first,
@@ -476,7 +632,7 @@ async def get_player_teammates(
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     result = await iq_teammates.teammates(db, str(player.organisation_id), player_id, scope=scope)
     return result or {"player": {"player_id": player_id, "name": player.name}, "teammates": []}
 
@@ -488,6 +644,7 @@ async def get_player_teammate_split(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """This player's batting, bowling and the team's record split by whether the
@@ -495,7 +652,7 @@ async def get_player_teammate_split(
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     result = await iq_teammates.with_split(
         db, str(player.organisation_id), player_id, teammate_id, scope=scope)
     if result is None:
@@ -510,6 +667,7 @@ async def get_player_team_breakdown_endpoint(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
@@ -518,7 +676,7 @@ async def get_player_team_breakdown_endpoint(
     # The filter bar sits above every tab, so this grid answers to it like the
     # rest of the Analysis panels. Without it a club filtering to Men's on the
     # Batting tab found the women's grades back on Team, one click away.
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     return await get_player_team_breakdown(
         db, player_id, str(player.organisation_id), season_id, scope=scope
     )
@@ -542,6 +700,7 @@ async def get_player_seasons(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
@@ -550,8 +709,9 @@ async def get_player_seasons(
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
     scope, _ = await grade_scope.resolve_scope_for_player(
         db, player.organisation_id, player_id, categories, formats=formats,
-        competitions=competitions,
+        competitions=competitions, grades=grades,
         auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
+        hidden_grade_ids=_hidden_grades(),
     )
     return await get_season_by_season(db, player_id, include_prior=True, scope=scope)
 
@@ -562,22 +722,25 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     rows = await get_player_milestones(db, player_id)
-    # Filter out pre-existing rows that don't match the current threshold scheme
+    # Filter out pre-existing rows that don't match the club's threshold scheme
     # (10/25 matches, 100/250 runs, etc.) — they stay in the DB, just hidden.
+    book = await load_book(db, player.organisation_id)
     milestones = [
         _str_keys(r) for r in rows
-        if is_displayable(r["milestone_type"], r["milestone_value"])
+        if is_displayable(r["milestone_type"], r["milestone_value"], book.club)
     ]
 
     # Append computed per-grade match milestones (not stored in DB).
-    breakdown = await get_player_team_breakdown(db, player_id, str(player.organisation_id))
+    breakdown = await get_player_team_breakdown(
+        db, player_id, str(player.organisation_id), scope=await _hidden_only_scope(db, player))
     grade_rows = sorted(breakdown.get("rows", []), key=lambda r: r.get("grade_name") or "")
     for row in grade_rows:
         matches_in_grade = int(row.get("matches") or 0)
         grade_name = row.get("grade_name")
         if not grade_name:
             continue
-        for threshold in crossed_thresholds("grade_matches", matches_in_grade):
+        for threshold in crossed_thresholds("grade_matches", matches_in_grade,
+                                            book.for_grade(grade_name)):
             milestones.append({
                 "id": None,
                 "milestone_type": "grade_matches",
@@ -594,12 +757,13 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
 async def get_player_partnerships_endpoint(
     player_id: str, categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
-    competitions: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+    competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None), db: AsyncSession = Depends(get_db)
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+    scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
     rows = await get_player_partnerships(db, player_id, scope=scope)
     return [_str_keys(r) for r in rows]
 
@@ -609,7 +773,8 @@ async def get_player_activity_endpoint(player_id: str, db: AsyncSession = Depend
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_player_activity(db, player_id)
+    scope = await _hidden_only_scope(db, player)
+    return await get_player_activity(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/upcoming-milestones")
@@ -624,9 +789,11 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     # hand-entered match — a milestone card reading 197 wickets on a profile
     # whose header says 478. See services/milestone_totals.py.
     from app.services import milestone_scan
+    book = await load_book(db, player.organisation_id)
     upcoming = []
     if player.organisation_id:
-        got = await milestone_totals.profile_totals(db, player.organisation_id, [str(player.id)])
+        got = await milestone_totals.profile_totals(db, player.organisation_id, [str(player.id)],
+                                                    hidden_grade_ids=_hidden_grades())
         t = got.get(str(player.id)) or {}
         row = {
             "player_id": str(player.id), "player_name": player.display_name,
@@ -634,24 +801,26 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
         }
         for stat, _cat, col in milestone_scan.STAT_DEFS:
             row[col] = int((t.get("totals") or {}).get(stat) or 0)
-        for m in milestone_scan.upcoming_from_totals([row]):
+        for m in milestone_scan.upcoming_from_totals([row], book.club):
             upcoming.append({k: m[k] for k in (
                 "type", "current", "target", "needed", "junior_split", "counts", "variant",
             ) if k in m})
 
     # Per-grade match milestones — uses the same merge-aware breakdown the
     # Team tab does so canonical/merged grade names line up.
-    breakdown = await get_player_team_breakdown(db, player_id, str(player.organisation_id))
+    breakdown = await get_player_team_breakdown(
+        db, player_id, str(player.organisation_id), scope=await _hidden_only_scope(db, player))
     for row in breakdown.get("rows", []):
         matches_in_grade = int(row.get("matches") or 0)
         grade_name = row.get("grade_name")
         if not grade_name or matches_in_grade <= 0:
             continue
-        target = next_threshold("grade_matches", matches_in_grade)
+        grade_scheme = book.for_grade(grade_name)
+        target = next_threshold("grade_matches", matches_in_grade, grade_scheme)
         if target is None:
             continue
         needed = target - matches_in_grade
-        if needed > reach_window("grade_matches", target):
+        if needed > reach_window("grade_matches", target, grade_scheme):
             continue
         upcoming.append({
             "type": "matches",
@@ -672,6 +841,7 @@ async def get_player_captain_stats(
     categories: Optional[str] = Query(None),
     formats: Optional[str] = Query(None),
     competitions: Optional[str] = Query(None),
+    grades: Optional[list[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     pid = uuid.UUID(player_id)
@@ -687,7 +857,7 @@ async def get_player_captain_stats(
     # that one string rather than being pasted into six places.
     player = await db.get(Player, pid)
     if player:
-        scope = await _resolve_player_scope(db, player, categories, formats, competitions)
+        scope = await _resolve_player_scope(db, player, categories, formats, competitions, grades)
         if scope.active:
             scope.bind(params)
             club = club + scope.clause("g.grade_id")
@@ -881,37 +1051,6 @@ async def request_player_sync(
     return {"status": "requested"}
 
 
-class PlayerRename(BaseModel):
-    name: str
-
-
-@router.patch("/{player_id}")
-async def rename_player(
-    player_id: str,
-    body: PlayerRename,
-    db: AsyncSession = Depends(get_db),
-):
-    name = body.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Name cannot be empty")
-    player = await db.get(Player, uuid.UUID(player_id))
-    if not player:
-        raise HTTPException(status_code=404, detail="Player not found")
-    old_name = player.name
-    player.name = name
-    # Keep player_achievements rows in sync for unlinked records
-    await db.execute(
-        text("UPDATE player_achievements SET player_name = :new WHERE player_id = :pid"),
-        {"new": name, "pid": player_id},
-    )
-    # Record the old name as an alias so a live feed (Play.Cricket, a
-    # Grassroots scorecard) still using it keeps resolving to this player —
-    # see services/player_aliases.py.
-    await seed_alias_on_rename(db, player.organisation_id, player.id, old_name)
-    await db.commit()
-    return {"status": "renamed", "old_name": old_name, "new_name": name}
-
-
 class PlayerProfileUpdate(BaseModel):
     # All editable management fields. Callers (the legacy modal and the new
     # BetterSelect Players screen) send a subset — only provided fields update.
@@ -988,6 +1127,10 @@ def _profile_fields(player: Player) -> dict:
         "is_overseas": player.is_overseas,
         "overseas_country": player.overseas_country,
         "is_public": player.is_public is not False,
+        # Set when the person asked to be removed; the club cannot switch it back.
+        "privacy_hidden_at": player.privacy_hidden_at.isoformat() if player.privacy_hidden_at else None,
+        # True when the hold is only a NAME match, which the club can release.
+        "privacy_name_match": player_privacy.is_name_match_hold(player),
         "is_financial_override": player.is_financial_override,
         "trained_override": player.trained_override,
         "shirt_number": player.shirt_number,
@@ -1083,65 +1226,25 @@ async def _snapshot(db: AsyncSession, player: Player) -> dict:
     except Exception:
         snap["availability_next"] = []
 
-    # recent_batting — last 5 scores, most-recent-first (by game date).
-    try:
-        b_res = await db.execute(
-            select(BattingInnings.runs)
-            .join(Game, Game.id == BattingInnings.game_id)
-            .where(BattingInnings.player_id == player.id)
-            .order_by(Game.played_at.desc().nullslast(), BattingInnings.id.desc())
-            .limit(5)
-        )
-        snap["recent_batting"] = [int(r or 0) for (r,) in b_res.all()]
-    except Exception:
-        snap["recent_batting"] = []
-
-    # recent_bowling — last 5 {wickets, runs}, most-recent-first.
-    try:
-        bw_res = await db.execute(
-            select(BowlingSpell.wickets, BowlingSpell.runs)
-            .join(Game, Game.id == BowlingSpell.game_id)
-            .where(BowlingSpell.player_id == player.id)
-            .order_by(Game.played_at.desc().nullslast(), BowlingSpell.id.desc())
-            .limit(5)
-        )
-        snap["recent_bowling"] = [
-            {"wickets": int(w or 0), "runs": int(r or 0)} for (w, r) in bw_res.all()
-        ]
-    except Exception:
-        snap["recent_bowling"] = []
-
-    # season_catches — catches in the club's latest season only (the profile
-    # labels this "this season"; an unfiltered sum would be career catches).
-    try:
-        latest_season = (await db.execute(
-            select(Season.id)
-            .where(Season.organisation_id == player.organisation_id)
-            .order_by(Season.year.desc().nullslast(), Season.name.desc())
-            .limit(1)
-        )).scalar()
-        catches = catches_wk = 0
-        if latest_season:
-            c_res = await db.execute(
-                select(
-                    func.coalesce(func.sum(FieldingStat.catches), 0),
-                    func.coalesce(func.sum(FieldingStat.catches_wk), 0),
-                )
-                .join(Game, Game.id == FieldingStat.game_id)
-                .join(Grade, Grade.id == Game.grade_id)
-                .where(
-                    FieldingStat.player_id == player.id,
-                    Grade.season_id == latest_season,
-                )
-            )
-            row = c_res.first()
-            catches = int((row and row[0]) or 0)
-            catches_wk = int((row and row[1]) or 0)
-        snap["season_catches"] = catches
-        snap["season_catches_wk"] = catches_wk
-    except Exception:
-        snap["season_catches"] = 0
-        snap["season_catches_wk"] = 0
+    # Recent form: last 5 batting innings, last 5 bowling spells, and the club's
+    # current season of fielding. Read from the effective views and the club's
+    # own games, like the public profile (services/player_form.py). `recent_batting`
+    # stays a plain list of runs for older clients; `recent_batting_detail` carries
+    # the not-out flag and the date.
+    form = await player_form.recent_form(db, str(player.id), player)
+    snap["recent_batting_detail"] = form["batting"]
+    snap["recent_batting"] = [b["runs"] for b in form["batting"]]
+    snap["recent_bowling"] = [
+        {"wickets": b["wickets"], "runs": b["runs"], "overs": b["overs"]}
+        for b in form["bowling"]
+    ]
+    fielding = form["fielding"] or {}
+    snap["season_fielding"] = fielding or None
+    snap["season_name"] = fielding.get("season_name")
+    snap["season_catches"] = int(fielding.get("catches") or 0)
+    snap["season_catches_wk"] = int(fielding.get("catches_wk") or 0)
+    snap["season_run_outs"] = int(fielding.get("run_outs") or 0)
+    snap["season_stumpings"] = int(fielding.get("stumpings") or 0)
 
     # last_picked — most recent fixture this player was named in.
     try:
@@ -1193,11 +1296,14 @@ async def _full_profile(db: AsyncSession, player: Player) -> dict:
 async def get_player_profile(
     player_id: str,
     db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
     _user: User = Depends(require_cap(MANAGE_PLAYERS)),
 ):
     """All editable management fields + assigned squad + selection snapshot."""
     player = await db.get(Player, uuid.UUID(player_id))
-    if not player:
+    # A club admin sees their OWN club's players only. Without this check any
+    # admin of any club could read another club's contact details by id.
+    if not player or player.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Player not found")
     return await _full_profile(db, player)
 
@@ -1208,12 +1314,23 @@ async def update_player_profile(
     body: PlayerProfileUpdate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_cap(MANAGE_PLAYERS)),
+    club: Organisation = Depends(get_current_club),
 ):
     """Update admin-managed player attributes; returns the same shape as GET."""
     player = await db.get(Player, uuid.UUID(player_id))
-    if not player:
+    # Same club only, as on the read: otherwise any admin could overwrite another
+    # club's player's email, phone or date of birth.
+    if not player or player.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Player not found")
     data = body.model_dump(exclude_unset=True)
+    # A player who asked to be removed is not the club's to put back (migration
+    # 316). Only an explicit attempt to switch them on is refused; every other
+    # edit to their record goes through.
+    if player_privacy.is_privacy_hidden(player) and data.get("is_public") is True:
+        raise HTTPException(
+            status_code=409,
+            detail=player_privacy.NAME_MATCH_HOLD_MESSAGE if player_privacy.is_name_match_hold(player)
+            else player_privacy.HOLD_MESSAGE)
     if "status" in data and data["status"] not in (None, "active", "inactive"):
         raise HTTPException(status_code=400, detail="status must be 'active' or 'inactive'")
     if "date_of_birth" in data:
@@ -1226,7 +1343,7 @@ async def update_player_profile(
         data["shirt_number"] = clean_shirt_number(data["shirt_number"])
     # Capture the effective display name before display_name_override changes,
     # so a rename via this route also gets remembered as an alias — same as
-    # the plain-name rename_player endpoint above.
+    # the club's rename path (club_admin PATCH /players/{id}).
     old_display_name = player.display_name if "display_name_override" in data else None
     # Squad membership (team_members is authoritative; squad_team_id is the
     # derived primary). Two ways in: squad_team_ids = the whole set (the profile
@@ -1262,6 +1379,30 @@ async def update_player_profile(
             db, player.organisation_id, player.id, player.squad_team_id, new_id, user.id)
     if old_display_name and old_display_name != player.display_name:
         await seed_alias_on_rename(db, player.organisation_id, player.id, old_display_name)
+    await db.commit()
+    await db.refresh(player)
+    return await _full_profile(db, player)
+
+
+@router.post("/{player_id}/privacy-release")
+async def release_privacy_name_hold(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_cap(MANAGE_PLAYERS)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Confirm that a player held only because their NAME matches a person who
+    asked to be removed is somebody else. Same club only. A person's own
+    request is never released here (409): BetterSports lifts those."""
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+    if not player_privacy.is_name_match_hold(player):
+        raise HTTPException(
+            status_code=409,
+            detail="Only a player held because of a name match can be released here.")
+    await player_privacy.release_name_match(
+        db, player, by=getattr(user, "username", None) or str(user.id), user_id=user.id)
     await db.commit()
     await db.refresh(player)
     return await _full_profile(db, player)
@@ -1437,6 +1578,7 @@ async def claim_fill_in(
         clash = await db.get(Player, guid_uuid)
         new_id = uuid.uuid5(club.id, guid) if clash is not None else guid_uuid
         player = Player(id=new_id, name=name, organisation_id=club.id, grassroots_id=guid)
+        await player_privacy.protect_new_player(db, player, guid)
         db.add(player)
         try:
             await db.flush()

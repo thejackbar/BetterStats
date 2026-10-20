@@ -829,3 +829,161 @@ cross-club rows across 38 clubs** were being read as the viewing club's own.
 **Anti-pattern reminder**: don't reintroduce a global `session.get(Grade, raw_guid)` create/skip in sync — use `_resolve_org_grade`. `grades.id` is no longer guaranteed to equal the CA GUID (it's `uuid5(org, guid)` for per-club rows); the raw GUID lives in `grassroots_id`, which is what `/scores/grades/{id}/matches`, the ladder API, and the per-grade stats `gradeId` are keyed on.
 
 <!-- END original CLAUDE.md L12866-12881 -->
+
+## Oct 2026: a merge keeps the person, not only their cricket (v9.106.2)
+
+**Reported at Applecross.** Four new players were added. Two (Pasindu Acharige, Travis Morgan) came up in Merge Players; merging them "wiped their data and photos". The merge screen defaults to keeping the record with a `playhq_id`, which is the synced one with the games. The record it removes is the freshly added roster one, and that is where the headshot, contact details, date of birth, squad and availability live.
+
+**Root cause.** `_merge_players_core` moved the cricket tables and then deleted the `players` row. Nothing copied the row's own columns (`photo_*`, `hero_photo_*`, `email`, `phone`, `date_of_birth`, `shirt_number`, `squad_team_id`, style fields, `skill_positions`, the two override flags), and the tables that point at a player and are `ON DELETE CASCADE` (`team_members`, `fixture_lineups`, `player_availability`, `player_availability_periods`, `net_attendance`, `family_members`, `player_name_aliases`) or `SET NULL` (`fee_members`, `comms_contacts`, `crm_people`, `net_checkin_registrations`) went with it or were left unlinked.
+
+**Fix.**
+- `services/merge_profile.carry_profile(keep, remove)` fills a column on the keeper only where the keeper has nothing (None, blank text, empty list or bytes; `False` and `0` count as answers). A photo, its bytes and its mime type move as one, and only if the keeper has no picture of that kind. The audit entry lists the columns filled (`profile_filled`).
+- Those link tables are on `merge_carry.CARRIED`. `fixture_lineups` and `team_members` have no `id`, so `_ROW_KEY` names the column that identifies the row (`fixture_id`, `team_id`), and `restore_rows` takes `keep_id` to find them again on undo. `fee_members`, `comms_contacts` and `crm_people` are in `_NEVER_DELETE`: if the keeper already holds the matching row, the removed side's is not moved and is not deleted (rule 7: keep it, unlinked).
+- Club-to-club merges (`org_merge`) re-home the source club's players first, and their link rows still carry the source club's id. `carry_rows(..., org_id)` only moves a club-owned link row when it belongs to the keeper's club (`_OWN_CLUB_TABLES`, `_OWN_CLUB`), and `squad_team_id` is skipped when that team is another club's. `fee_members` has a composite FK to `(organisation_id, id)` that would otherwise reject the row and turn the player into a skipped conflict.
+- `carry_rows` now uses `UPDATE ... RETURNING`, so the ids logged are the rows that actually moved.
+- Undo does not take a copied photo or detail back off the keeper (the same call the vote rows already make: nothing is lost, and the same person still has it). The restored player has the cricket and the link rows, not the photo.
+
+**Not recoverable.** The two merges done before this change deleted their rows. There is no copy in the database; the photos and details need re-entering, or a restore from backup.
+
+**Still not carried** (known, listed so nobody assumes otherwise): `fantasy_*`, `vote_nudges`, `phq_id_suggestions`, `player_sync_requests`, `sync_runs`. None is the club's own typed data about the person.
+
+**Proof.** `backend/verification/verify_merge_profile_carry.py` runs the shipped `_merge_players_core` and `undo_merge` against Postgres on its own database. Control run on the previous commit: 21 of 30 checks fail (photo, email, date of birth, squad, availability, lineup, nets, member link, contact, alias all gone). `verify_merge_carry.py` still passes 31 of 31.
+
+
+## v9.106.22: Two holes in the player routes (Oct 2026)
+
+Found while reading the player router for the privacy work and then confirmed by running them against a seeded database, not assumed:
+
+- `PATCH /players/{player_id}` (`rename_player`) had no login dependency and the router is mounted with none, so an anonymous request renamed any player at any club (it also rewrote `player_achievements` names and added an alias). Nothing in `frontend/src` called it. Deleted.
+- `GET` and `PATCH /players/{player_id}/profile` had `require_cap(MANAGE_PLAYERS)` and no same-club check: an admin of club A read club B's player's email and phone and set the phone to "0000 CHANGED". The aliases routes beside them were already scoped (404), which is how the gap showed. Both now take `get_current_club` and 404 on a mismatch.
+- `POST /players/{id}/claim` was on the privacy allowlist (`_PRIVACY_MANAGEMENT_ROUTES`), so a person who asked to be removed could still have their profile claimed. Off the list, so it 404s.
+
+Existing suites that called `update_player_profile` directly (`verify_player_privacy`, `verify_multi_squad`, `verify_player_kit`) now pass the club, and the kit suite's Stats-only club passes its own.
+
+I have not looked at the production logs for earlier use of either hole; a PATCH `/players/` request from a client that is not the site would show it.
+
+**Verified against a real Postgres** (`verify_player_route_access.py`, 11 checks: anonymous and signed-in rename refused, the club's own rename path still works, another club's profile unreadable and unwritable, an admin's own club's player still readable and editable, no login is 401, a removed person cannot be claimed while an ordinary profile still can) **with a control run** against the unfixed code: 5 fail on exactly those behaviours. Privacy 128, multi-squad 44, player kit 68, hide-juniors 67.
+
+## Linked clubs: a Club Admin can switch between clubs a Super Admin has linked (v9.106.33, migration 322)
+
+**Asked for.** A Super Admin links two clubs. Their Club Admins then choose which club to work in from the dashboard. A club with no link sees nothing of it. Each club's own trials and subscription must bind a switched admin.
+
+**Design.** Memberships stay one per user (017). `club_links(organisation_id PK, group_id, linked_by_user_id, created_at)` holds the groups; DDL once in `services/club_link_ddl.py` (Alembic 322, the cricket lifespan, and the football `SHARED_DDL_MODULES`, because the shared `/auth/me` reads it). A switch reuses `users.active_club_id`. `auth.effective_club_id(db, membership, user)` replaced the sync `_effective_club_id`; for `club_admin` it returns the stored club only if `club_links.can_switch_to` passes (same group, target active, not archived). Linking two clubs in different groups is refused (409) rather than merging groups; unlinking a group down to one club dissolves it; `clear_stale_switches` resets non-super `active_club_id` values that no longer match a link.
+
+**Gaps closed.** `require_module` read `membership.club_id`, so a switched admin's data came from the linked club but module gating from the home club. It now gates on the effective club. `committee.is_club_admin` and StatLab's `_user_can_manage_reports` looked a membership up by the request's club id and found none for a switched admin; they use `club_links.covers_club`. StatLab's version also read `user.role`, which does not exist, so it raised `AttributeError` for anyone outside their home club (a Super Admin acting as another club included); now fixed.
+
+**Per-club plan.** Checked against five clubs in one group: live trial, ended trial (stale `module_overrides` cache), paused, Core trial ended, subscribed. A switched admin gets exactly that club's modules and `core_live`, and the home club's module closes. Start trial, module requests, payment methods and billing method stay home-club-only; a switched admin is refused (403). Found along the way: `_build_me` loaded the home club without its subscription rows, so a later eager-load `db.get` returned the cached copy and the club's own admin saw an ended trial's module listed until the nightly sweep, while a linked admin in that club saw the stricter, correct list. The home club is now loaded with the rows.
+
+**Screens.** Super Admin: `/admin/super/club-links` (Better HQ, Clubs & Data), `routers/club_links.py` (`/club-admin/super/club-links`, all `require_super_admin`, audit rows per club). Club Admin: `components/admin/LinkedClubSwitcher.jsx` (`bar` in the header and mobile drawer, `card` on the dashboard) and a banner in `AdminLayout` while working in a club other than home. A switch hard-reloads into `/admin`, like the Super Admin switcher. Nothing renders when `linked_clubs` has fewer than two clubs.
+
+**Verified.** `verification/verify_club_links.py`, 81 checks against a real Postgres through the shipped route bodies. Control run against the previous commit (final suite, no crash): 43 of 79 checks fail on exactly the new behaviour (switch refused 403, scoping stayed on the home club, module gate read the home club, StatLab raised `AttributeError`) and none crashed. `frontend/verification/verify_club_links_browser.mjs`, 89 checks in Chromium with the API stubbed: the exact switch, link and unlink requests, no switcher for an unlinked admin or a club member, refusal path, 1440/768/390 widths. Existing suites re-run clean: admin broadcasts 56, comms recipients 22, net check-in 149.
+
+**Left on purpose.** Billing and plan writes are home-club-only, so a linked admin who clicks Subscribe in the linked club gets the existing "Only a club admin..." 403 (the wording does not mention the link). The acted-as club is per user, not per tab (rule 52). Merging a club that is linked does not repoint the link: the archived source drops out of the switcher and the target is not linked automatically.
+
+
+## v9.108.5: hidden person survives undo-merge (2026-10-08)
+
+Audit of every path that writes or creates `players` rows. Sync never writes `is_public`; hard refresh wipes games only; a re-pulled row is born hidden from `player_privacy_suppressions`. The one hole was `undo_merge`, whose raw INSERT skipped the guard. Fixed with `player_privacy.protect_restored_player`. Verified by `verify_privacy_survives_sync.py` (control run fails only the undo-merge check).
+
+## v9.108.6: removal enforced by database triggers (2026-10-08)
+
+The suppression is global (keyed on the participant id), but enforcement had depended on each creator calling `protect_new_player`. Added `player_privacy_enforce` as BEFORE INSERT and BEFORE UPDATE OF (is_public, privacy_hidden_at, grassroots_id) triggers plus a boot-time backfill, all in the shared DDL list (the football mirror runs it whole; the function reads `grassroots_id` through `to_jsonb(NEW)`). `restore_public` now lifts the suppression first. `verify_privacy_survives_sync.py` (30 checks; the control on a fresh database fails exactly the six new ones). `verify_player_privacy.py` now runs the shipped DOWNGRADE instead of a bare DROP COLUMN.
+
+## v9.108.7: name matching for hand-typed players (2026-10-08)
+
+The trigger enforced the suppression by participant id only. A hand-typed or imported row has none, so `player_privacy_suppressions` now keeps `names` and the trigger holds a no-id row whose canonical name key matches (`name-match`, releasable by the club, audited). Rejected: matching on surname plus initial, or on any one-word name (false positives on relatives). Rule: hiding wrongly is recoverable, showing a person who asked not to be shown is not. `verify_privacy_survives_sync.py` (52 checks; the control fails the 11 new ones), `verify_player_privacy.py` (+10 route checks), `verify_player_privacy_browser.mjs` (+ the namesake, 36 checks).
+
+## v9.108.8: data access PDF (2026-10-08)
+
+`player_data_report.py` gathers across every club row for the person (the participant id is shared) and renders an A4 PDF with fpdf2. Decisions: the person sees their own values; other people never appear; free-text notes are stated, not printed; fee and payment records are a count (table names matched by `_MONEY_TABLE`); the sources of the data are not described. `verify_player_data_report.py` (46 checks, each absence check paired with a presence check) and `verify_privacy_requests_browser.mjs` (28 checks). Rejected: a generic dump of every column (cannot be reviewed), and a Hide button on the Super Admin screen (destructive, not asked for).
+
+## v9.113.7.1: photos survive a merge (2026-10-15)
+
+Applecross reported new players whose photos had been wiped. The merge carry from v9.106.2 moved `photo_data` and `photo_mime` to the keeper but copied `photo_url` verbatim. That address is `/api/images/players/<id>/photo?v=..` and names the row it was uploaded to, so after the merge it named the player who had just been deleted. `images.get_player_photo` looks the row up by the id in the address and returned 404; the bytes were safe on the keeper and invisible. It surfaced in the last two weeks because the sync-driven auto-merge of hand-added players (v9.106.x) turns "add the player, give them a photo, they play" into a merge for every new player. The old verifier seeded a made-up `/api/players/photo` and compared the string, so it passed against the broken code.
+
+Fix: `merge_profile.carry_profile` rebuilds the address for the keeper's id whenever bytes are carried (headshot and action shot). `_has_picture` treats one of our own image addresses with no bytes behind it as a dead link, so a broken keeper no longer blocks the real photo. Repair for rows already hit: `python -m app.scripts.repair_player_photo_urls <org|all> [--apply]` points an address that names another player back at the row that holds the bytes; a row with no bytes is listed and left alone (the picture is gone). One audit entry per club.
+
+Check: `verify_merge_profile_carry.py` (44 checks, own database) now seeds the real address shape and follows the stored address through the shipped `get_player_photo` and `get_player_hero_photo`. Control against the previous `merge_profile.py`: 4 fail on exactly the address and the 404, the other 40 pass.
+
+## Module-locked club users: a Primary Admin limits a colleague to one module (v9.121.0, migration 344)
+
+**Asked for.** A matrix of club admin roles. The agreed first slice: everyone starts with access to everything; the Primary Admin (the person who signed up the club) or a Super Admin can lock a colleague to a single module. Per menu item switches, role templates (Captain), View levels, per-club roles at a linked club and a certification gate on junior data were agreed in principle and are NOT in this release. The owner also asked that the first person to sign up be the club's "super admin"; that is the Primary Admin (`is_primary_admin`), not the platform `super_admin` role, which reaches every club and must never be handed to a club user.
+
+**What was found first.** The capability engine (32 capabilities, `club_member` allowlists) already existed but nothing fed it: `club_member` had been retired, every invite was a full `club_admin`, and the update route ignored role and capabilities. About 146 signed-in routes checked no capability, 80 of them mutations or private reads. A switched-in admin could invite users into a linked club. Any admin could remove the Primary Admin or reset their password. Any signed-in club user could delete any of the club's saved StatLab reports.
+
+**Design.** `user_access(user_id, club_id, mode, module_key)` (DDL once in `services/access_ddl.py`: alembic 344, the cricket lifespan, the football `SHARED_DDL_MODULES`) is the source of truth. A locked person's membership becomes role `club_member` and its `capabilities` list is a cache derived from `MODULE_ACCESS` in `services/access.py`, rewritten on lock and by `resync_module_caps` on every boot (in its own savepoint, so a failure logs and does not abort the boot DDL). That reuses the existing engine: every reader of the list (the route gates, `/auth/me`, notification routing) works unchanged, and `effective_club_id` already lets only a `club_admin` switch clubs, so a locked person cannot leave their club. The cost of the cache is that it can be stale between a map change and the next boot, which the resync closes. Locking is refused for the Primary Admin and Super Admins.
+
+**Routes.** `require_cap` and `require_any_cap` tag their dependency with `required_caps`; the new `require_full_admin` (Plan & Billing reads, the setup wizard writes) tags `full_admin_only`. 82 routes gained a gate. 64 signed-in routes stay open on purpose and are listed one by one, with a reason, in `verification/audit_route_access.py`, which fails on an undeclared route and on a stale entry. Plan and money routes were already guarded inside the handler (Primary Admin, `role == "club_admin"`), which a `club_member` fails.
+
+**Users API.** `access` on invite and edit, Primary Admin or Super Admin only, read through `model_fields_set`. `_users_actor` also refuses a switched-in admin on every users route and protects the Primary Admin's account. `GET /club-admin/users/capabilities` also returns the module list.
+
+**Screens.** Users: an access picker (Everything, or One module only with a module select), a Limited access label and an access badge, read-only text for an ordinary admin. Sidebar: `fullAdmin: true` hides Plan & Billing and the Setup Wizard. Dashboard: a locked person sees their module's tile and the quick links their permissions allow, with no plan, trial or setup panels, and the plan, setup-flow and sync-log fetches are skipped for them.
+
+**Verified.** `verify_user_access.py`, 60 checks against a real Postgres through the shipped route bodies and the real route table. Control against the commit before (final suite, no crash): 21 pass, 39 fail on exactly the new behaviour. The Primary Admin guard fails in the control because the old code let another admin delete the account first. `verify_club_links.py` (81) needed the new table in its own DDL list. Existing suites re-run clean: notifications 146, net check-in 149, net session link 26, net batting order 46, AFL admin extras 28, AFL settings 41, manual games import 194, section names 30, post sponsors 35, sponsor tiers 57, StatLab player filter 17, Club Room StatLab scope 10. Browser: `verify_user_access_browser.mjs`, 43 checks in Chromium with the API stubbed (the exact PATCH and POST bodies, no `access` key on a name edit, the dashboard and sidebar for a Primary Admin and a locked person, 390px overflow); control against the previous build 10 pass, 14 fail.
+
+**Left on purpose.** A locked person keeps open reads of data the public site already shows, the player register picker, their own inbox and settings. A legacy `club_member` with an explicit allowlist and no `user_access` row is never touched by the resync or by unlock, but their open reads are now gated like everyone else's. The acted-as club is still per user (rule 52). Linked-club roles, per-item switches and templates are the next phases.
+
+## Per menu item access: each item at View or Manage (v9.122.0, migration 344)
+
+**Asked for.** After the module lock: "per menu item switches", so a person can have BetterSelect but not Votes, or Accounts at View. Agreed with the owner before building: View and Manage on every item; simple mode stays one module and all its items; a limit never needs the person to hold more than they were given; switching an item on also switches on what it needs. Role templates (Captain) stay for later. Migration 344 had not shipped, so the new `user_access.grants` and `club_memberships.view_only_caps` columns were folded into it instead of adding a 345; the ALTERs are idempotent for any database that already ran the first version.
+
+**Design.** The item catalogue `ITEMS` in `services/access.py` maps a menu item to the capabilities Manage grants. `set_item_access` resolves prerequisites, derives the capability list and the view-only subset, stores `{item: level}` in `user_access.grants` (mode `items`) and writes both lists to the membership. View is one rule in one place: `require_cap` and `require_any_cap` refuse a non-GET when every capability that satisfied them is in `view_only_caps`, and a call with no request counts as a write. That gave View on all 858 gated routes with no per-router change. A capability that is a read in its own right (`view_vote_results`) is held at View without being marked view only.
+
+**BetterSelect split.** Ten menu items shared `manage_selections`. Seven new capabilities (`select_squads`, `select_availability`, `select_selection`, `select_nets`, `select_fines`, `select_rules`, `select_audit`) now gate 95 routes in `teams`, `availability`, `selection`, `net_manager`, `fines`, `audit` and `selection_rules`, each as `require_any_cap(SELECT_<ITEM>, MANAGE_SELECTIONS)` so full admins, a whole-module lock and old allowlists keep working. The reads every BetterSelect screen leans on gate on `SELECT_ANY` (GET only), so switching one item on needs no other. A screen-to-routes map built from `api.js` showed each BetterSelect screen calls only its own router plus those shared reads, which is why only Selection needs Availability.
+
+**Other modules.** Items that share one capability are one switch that names every screen it opens (Fees opens Accounts, Payments and Membership tiers). Splitting those is later work.
+
+**Screens.** Users: a third choice, Choose items, with Off, View and Manage per item grouped by module, a module's All off, All view and All manage buttons, a count, and a notice saying what was switched on because something needs it (and that a needed item stays on). Moving a whole-module person to Choose items starts with that module on Manage. Save is blocked until something is chosen. BetterSelect: each menu item opens for its own capability or the umbrella, and every screen's `canEdit` became `canEditCap(...)`, so a View holder gets it read only (Settings disables its controls). The dashboard shows a tile for each module a person can open anything in.
+
+**Bug caught by the browser suite.** Rewriting the helper block in `AdminUsers.jsx` also deleted the email, mobile and password validation helpers above `PasswordChecklist`; `vite build` does not flag an undefined name, the page threw on render, and the app's error boundary swallowed it so no page error fired. The suite now logs console and page errors.
+
+**Verified.** `verify_user_access.py`, 124 checks against a real Postgres: item grants stored and derived, View and Manage on the real gates, the shared read gate only on GET routes, a request-less call failing closed, an umbrella holder and a legacy allowlist unaffected, prerequisites (and not lowering a Manage), refusals, moving between modes, the boot resync including an item the catalogue no longer has, a person with items unable to switch clubs or open Users, StatLab approvals respecting View, the catalogue covering every capability, and the BetterSelect route table. The control against the commit before reports the missing mode and column as failures and does not crash. Existing suites re-run clean (club links 81, notifications 146, net check-in 149, net session link 26, net batting order 46, AFL admin extras 28, AFL settings 41, manual games import 194, section names 30, post sponsors 35, sponsor tiers 57, StatLab player filter 17, Club Room StatLab scope 10). Browser: 76 checks in Chromium with the API stubbed (the exact PATCH body, prerequisites, a module's quick buttons, an items person's dashboard and BetterSelect menu, Settings editable versus read only, 390px overflow); control against the previous build 10 pass, 10 fail.
+
+**Left on purpose.** POSTs that only read (import and email previews, Ask BetterIQ) are refused at View. Only BetterSelect screens draw read only; elsewhere the server refuses a write with a plain message. Sponsors and Milestones have no reads under their capability, and Audit history no writes, so View and Manage are the same there. Templates, per-club roles at a linked club and the junior-data certification gate are the next phases.
+
+
+
+## Undoing a player merge from the server (v9.123.1)
+
+Gisborne (Oct 2026): club users merged several CA-redacted junior rows (names read `********`) into one player on 14 Oct, deliberately and in sequence, and one of those merges needed checking and possibly reversing. The merge screen's Undo needs a signed-in user with merge permission, so `app/scripts/undo_player_merge.py` was added for the server.
+- It calls the shipped `routers/admin.undo_merge` (no copy of the restore logic) and adds a read-only report of what the merge logged, how many games still sit on the kept player, and any newer live merge on the same players.
+- A merge undo restores only the rows logged at merge time. A game that synced after the merge sits on the kept player and is not moved back; the next sync recreates it on the restored row.
+- Undo order is not enforced by `undo_merge` itself. The script skips a log that has a newer live merge on the same players and says so.
+- Proof: `verify_undo_player_merge_script.py` (real Postgres, 18 checks; control with the apply branch disabled fails the 8 restore, undone and audit checks).
+
+
+## Merging one named pair from the server (Oct 2026)
+
+Gisborne: one player held under several Cricket Australia profiles. Redacted junior rows read `********`, so Admin Manual Merge cannot find them by name, and its keep-or-remove default is a guess (playhq id, then seasons). `app/scripts/merge_player_pair.py` takes the club and the two ids and says which stays.
+- It runs the shipped `_merge_players_core`; it adds only the report (games, span, live merges already into each, squad and availability rows, games both rows are in) and the refusals.
+- Both rows in the SAME game is the evidence of two people: refused unless `--allow-shared-games`.
+- After a merge the removed id is a sync redirect. Chains resolve transitively (`sync.merged_away`), so earlier merges into the removed row follow it to the keeper.
+- Proof: `verify_merge_player_pair_script.py` (real Postgres, 16 checks; control with the apply branch disabled fails the merge, merge-log and audit checks).
+
+
+## Gisborne: one player, two profiles, merged into the wrong people (Oct 2026)
+
+A player returned after a gap of years under a new Cricket Australia profile. On 14 Oct club users merged five redacted (`********`) junior profiles into the new one, and that one into an unrelated player whose own career ran 2018 to 2023. Ages and grades gave it away: Under 11 games and Under 17 games in the same season, and 13 games the audit matched to another named player (`audit_player_games`, "NOT ON SHEET").
+- `ops/gisborne-brook-fix.sh` (one-off, ids built in) undoes the seven merges newest first (`undo_player_merge`), refuses to merge unless the new profile then holds only a few games, all from this season and none in common with the old profile, then merges it into the old profile (`merge_player_pair`). `preview`, `undo`, `merge [--apply]`, `verify`.
+- A game synced after a merge is credited to the kept player through the redirect and is not in the merge log, so an undo leaves it there. `verify` lists them. A re-sync does not delete game rows, so it is not tidied by sync.
+- The audit follows only one level of merge: ids merged into a profile that was itself merged show as NOT ON SHEET. Read those against `merge_logs`.
+- Lesson for the merge screen: a redacted name proves nothing about identity. The suggestions flag redacted pairs; a human merge of one is still allowed.
+- Proof: `verification/verify_gisborne_brook_fix_script.py` (real Postgres and the shipped scripts, 20 checks; control with the gate removed fails 6).
+
+## v9.123.3.1: Merge Duplicates stops same-name namesakes being bulk merged
+
+- Why: Mulgrave's two Luke Bennetts (a junior and an adult) matched the "exact name" tier and went through Bulk Approve. The pair looks identical on name alone, so the screen could not tell them from a real duplicate.
+- Rule: one person is not in two different games on one date. `services/merge_safety.same_day_clash_dates(db, a, b)` returns the dates on which record A and record B each have a game, in different games. A non-empty list means the pair is probably two people.
+- `GET /admin/merge-candidates` adds `same_day_clash` (count) and `same_day_clash_message` to each exact pair. The screen shows a "Probably two people" chip and leaves the pair out of Bulk Approve.
+- `POST /admin/merge-players` refuses with 409 `{code: "same_day_clash", dates, message}` unless the body carries `confirm_same_day_clash: true`. `MergeTools.mergeConfirming` asks, then retries with the flag. Bulk Approve never sends it, so a flagged pair that slipped into a bulk batch fails closed.
+- `merge_player_pair.py` prints the clash count and refuses without `--allow-shared-games`.
+- Not gated: the fantasy merge route (`routers/fantasy.py`), `hand_added_merge` and the org merge call the merge core directly.
+- Proof: `backend/verification/verify_merge_same_day_safeguard.py` (real Postgres, 11 checks; control against the previous `admin.py` fails 8). `frontend/verification/verify_merge_same_day_browser.mjs` (Chromium, API stubbed, 16 checks; control against the previous build fails 10).
+
+
+## Moving a game's rows to the right player (Oct 2026)
+
+After the Gisborne merges were undone, a game that synced after the merge (17 Oct) was still credited to the player the id used to be merged into. `repair_misattributed_games` deletes such rows and sync does not recreate them, so it would have lost the innings. `app/scripts/move_game_rows.py` moves them instead.
+- Named games only; ten places (appearances, batting, bowling, fielding, fall of wicket, bowler wickets as bowler and fielder, partnerships both sides, milestones). Refuses a game where the receiver already holds a row. The ids moved go in one `audit_logs` entry; `--restore AUDIT_ID` puts them back, once.
+- Season and grade stats are not touched: sync deletes and rewrites a season's `player_season_stats` and grade stats (`sync.py`), so the next sync of the season corrects them. Check the season afterwards.
+- Proof: `verification/verify_move_game_rows_script.py` (real Postgres, 17 checks; control with the move disabled fails the moved and restored checks).

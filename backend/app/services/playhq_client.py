@@ -232,18 +232,32 @@ async def get_fielding_stats(org_id: str, season_id: str, grade_id: Optional[str
 
 
 async def lookup_playhq_id(org_guid: str, org_name: str) -> Optional[str]:
-    """Search the grassroots API to find the PlayHQ native ID for an org GUID."""
-    first_word = (org_name or "").split()[0] if org_name else ""
-    if not first_word:
+    """Search the grassroots API to find the PlayHQ native ID for an org GUID.
+
+    The search is by name and returns a limited page, so it has to be narrow
+    enough for the club to be in it. The first word alone ("North") matches
+    dozens of clubs and the one we want is rarely in the page; the full name
+    and the name without "Cricket Club" are tried first, the first word last.
+    The match is always on the organisation GUID, never on the name.
+    """
+    name = (org_name or "").strip()
+    if not name:
         return None
-    try:
-        orgs = await search_organisations(first_word)
+    core = " ".join(w for w in name.split() if w.lower().strip(".,") not in {"cricket", "club", "cc", "inc", "incorporated"})
+    queries = []
+    for q in (name, core, name.split()[0]):
+        if q and q not in queries:
+            queries.append(q)
+    for q in queries:
+        try:
+            orgs = await search_organisations(q)
+        except Exception as e:
+            logger.warning(f"lookup_playhq_id failed for {org_guid} ({q!r}): {e}")
+            continue
         for o in orgs:
             guid = str(o.get("organisationGuid") or o.get("id") or "")
-            if guid.lower() == org_guid.lower():
+            if guid.lower() == org_guid.lower() and o.get("playHQId"):
                 return o.get("playHQId")
-    except Exception as e:
-        logger.warning(f"lookup_playhq_id failed for {org_guid}: {e}")
     return None
 
 

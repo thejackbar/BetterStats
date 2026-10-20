@@ -987,6 +987,7 @@ export default function AdminGrades() {
         </p>
 
         <CompetitionManager
+          showJuniorTag
           renderGrouping={reload => <GroupingPanel clubId={orgId} onDone={reload} />}
         />
 

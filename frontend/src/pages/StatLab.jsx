@@ -14,6 +14,7 @@ import { fmt2, fmtCount, fmtOvers, formatSeason } from '../lib/cricketFormat'
 import {
   GRADE_CATEGORIES, CATEGORY_LABELS, MATCH_FORMATS, FORMAT_LABELS, scopeNote,
 } from '../lib/gradeCategories'
+import { useSectionNames } from '../lib/sectionNames'
 
 // ─── Static config ────────────────────────────────────────────────────────────
 
@@ -1459,6 +1460,7 @@ function SaveReportModal({ open, onClose, onSave, defaultTitle, initial }) {
 
 export default function StatLab() {
   const { clubSlug, reportSlug } = useParams()
+  const sec = useSectionNames(clubSlug)
   const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club) // every other club-slug page wears the club's colours + fonts; StatLab was the one that didn't
   const { org, seasons, loading: clubLoading } = useClubData(orgId)
@@ -1748,7 +1750,7 @@ export default function StatLab() {
     const header = [...dimCols.map(c => c.label), ...cols.map(c => c.label || c.key)]
     const lines = [header.join(',')]
     sortedRows.forEach(row => {
-      const left = dimCols.map(c => csvEscape(row[c.key] ?? ''))
+      const left = dimCols.map(c => csvEscape(dimText(c.key, row)))
       const right = cols.map(c => csvEscape(row[c.key] ?? ''))
       lines.push([...left, ...right].join(','))
     })
@@ -1807,7 +1809,7 @@ export default function StatLab() {
         <PageHeader
           eyebrow={openReport
             ? 'SAVED REPORT'
-            : (activeDerived || activePreset ? 'STAT LAB · REPORT' : 'STAT LAB · CUSTOM QUERY')}
+            : (activeDerived || activePreset ? `${sec.name('statlab', 'STAT LAB').toUpperCase()} · REPORT` : `${sec.name('statlab', 'STAT LAB').toUpperCase()} · CUSTOM QUERY`)}
           title={openReport
             ? openReport.title
             : (activeDerived && schema?.derived?.[activeDerived]?.label
@@ -2384,6 +2386,19 @@ function formatCell(v, col) {
     return fmtCount(v)
   }
   return v
+}
+
+// Plain-text value of a dimension cell, for the CSV export. Mirrors the
+// fallbacks in renderDimCell: the pair column is built from the two batter
+// names, there is no `pair` field on the row itself.
+function dimText(key, row) {
+  if (key === 'pair') {
+    const a = row.player_a_name || row.batter1_name
+    const b = row.player_b_name || row.batter2_name
+    return [a, b].filter(Boolean).join(' & ')
+  }
+  if (key === 'player_name') return row.player_name || row.name || ''
+  return row[key] ?? ''
 }
 
 function renderDimCell(key, row, clubSlug) {

@@ -15,13 +15,14 @@
 // standing near a screen should hear them.
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import SessionLinkModal from './SessionLinkModal'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
-import { Icon, Btn, Avatar, RoleChips, Search, Empty, NumText, usePref } from './ui'
+import { Icon, Btn, Avatar, RoleChips, Search, Empty, NumText, usePref, Chip } from './ui'
 import { useDragOrder } from './dragOrder'
 
 const POLL_MS = 2500
@@ -33,11 +34,13 @@ export default function NetSession() {
   const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
-  const { hasCapability } = useAuth()
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const { hasCapability, canEditCap } = useAuth()
+  const canEdit = canEditCap(CAP.SELECT_NETS, CAP.MANAGE_SELECTIONS)
 
   const [live, setLive] = useState(null)       // null = loading, false = not found
   const [roster, setRoster] = useState([])
+  const [squads, setSquads] = useState([])    // the club's squads, for limiting a session and for squad-by-squad check-in
+  const [linkOpen, setLinkOpen] = useState(false)
   // The club's check-in link, if they've turned it on, so the coach can put it
   // on the second device without going hunting for it. Taking the check-in and
   // running the timer on one screen is what a club reported back.
@@ -92,11 +95,12 @@ export default function NetSession() {
     let alive = true
     Promise.all([
       api.nmGetSession(id),
-      api.nmRoster().then((r) => r.players || []).catch(() => []),
+      api.nmRoster().catch(() => ({ players: [], squads: [] })),
       api.nmGetCheckInLink().catch(() => null),
     ]).then(([s, rs, link]) => {
       if (!alive) return
-      setRoster(rs)
+      setRoster(rs.players || [])
+      setSquads(rs.squads || [])
       // `path` comes back from the server rather than being built here, so this
       // shortcut and the QR on the Check-in tab can never point at different
       // URLs for the same club.
@@ -481,9 +485,18 @@ export default function NetSession() {
                 find it in Settings is the whole point — it's needed at 6pm.
                 Pointless once the session is over: the link would land on
                 "no nets on right now". */}
+            {/* This session's own link, and the squads it is for. The club-wide
+                link joins everyone to every session that is on; this one joins
+                people to this session only. */}
             {checkinUrl && !ended && (
-              <Btn variant="ghost" sm icon="teams" href={checkinUrl} target="_blank"
-                title="Open the self check-in screen — put this on a spare phone or iPad by the door">Check-in screen</Btn>
+              <Btn variant="ghost" sm icon="teams" href={live.checkin_path ? window.location.origin + live.checkin_path : checkinUrl} target="_blank"
+                title="Open the self check-in screen for this session — put it on a spare phone or iPad by the door">Check-in screen</Btn>
+            )}
+            {(checkinUrl || canEdit) && (
+              <Btn variant="ghost" sm icon="teams" onClick={() => setLinkOpen(true)} data-session-link-btn
+                title="This session's own check-in link, QR code and squads">
+                Link{live.squad_team_ids?.length ? ` · ${live.squad_team_ids.length} squad${live.squad_team_ids.length === 1 ? '' : 's'}` : ''}
+              </Btn>
             )}
             <Btn variant="ghost" sm icon="download" href={api.nmSessionCsvUrl(id)} title="Download the attendance list for this session">List</Btn>
             {canEdit && !ended && (
@@ -704,7 +717,12 @@ export default function NetSession() {
       </div>
 
       {checkInOpen && (
-        <CheckInModal roster={roster} inSession={inSession} onAdd={addPlayer} onGuest={addGuest} onClose={() => setCheckInOpen(false)} />
+        <CheckInModal roster={roster} squads={squads} sessionSquads={live.squad_team_ids || []} inSession={inSession} onAdd={addPlayer} onGuest={addGuest} onClose={() => setCheckInOpen(false)} />
+      )}
+
+      {linkOpen && (
+        <SessionLinkModal sessionId={id} squads={squads} squadIds={live.squad_team_ids || []} canEdit={canEdit} ended={ended}
+          onSquadsChanged={(r) => adopt(r)} onClose={() => setLinkOpen(false)} />
       )}
 
       {priorityFor && (
@@ -959,8 +977,14 @@ function LiveDot({ ended = false }) {
  * The current squad still comes first, because that's who turns up week to
  * week. Everyone else sits under their own heading, and searching reaches the
  * whole club — so the answer to "why can't I find him" is never "you can't". */
-function CheckInModal({ roster, inSession, onAdd, onGuest, onClose }) {
+function CheckInModal({ roster, squads = [], sessionSquads = [], inSession, onAdd, onGuest, onClose }) {
   const [q, setQ] = useState('')
+  // Check in squad by squad: starts on the squads this session is for (if it has
+  // any), and a coach can tick others or clear the lot. Searching always reaches
+  // everyone, so a fill-in turning up is one search away.
+  const [squadPick, setSquadPick] = useState(() => new Set(sessionSquads))
+  const inPicked = (p) => squadPick.size === 0 || (p.squad_team_ids || []).some((t) => squadPick.has(t))
+  const toggleSquadPick = (sid) => setSquadPick((cur) => { const n = new Set(cur); n.has(sid) ? n.delete(sid) : n.add(sid); return n })
   const [guest, setGuest] = useState('')
   const [showAll, setShowAll] = useState(false)
 
@@ -968,11 +992,13 @@ function CheckInModal({ roster, inSession, onAdd, onGuest, onClose }) {
     const t = q.trim().toLowerCase()
     const hit = (p) => !t || (p.name || '').toLowerCase().includes(t)
     const inSquad = (p) => !p.dormant && !p.inactive
+    // A squad pick narrows the browse list; a search always reaches everyone.
+    const shown = (p) => hit(p) && (t ? true : inPicked(p))
     return {
-      squad: roster.filter((p) => hit(p) && inSquad(p)),
-      others: roster.filter((p) => hit(p) && !inSquad(p)),
+      squad: roster.filter((p) => shown(p) && inSquad(p)),
+      others: roster.filter((p) => shown(p) && !inSquad(p)),
     }
-  }, [roster, q])
+  }, [roster, q, squadPick])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // A search is someone looking for a specific person, so it always reaches
   // past the squad; with no search, the rest are one tap away.
@@ -991,6 +1017,14 @@ function CheckInModal({ roster, inSession, onAdd, onGuest, onClose }) {
         </div>
         <div className="px-4 py-3 border-b pb-hairline">
           <Search value={q} onChange={setQ} placeholder="Search every player at the club…" />
+          {squads.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-2.5" data-checkin-squads>
+              <Chip label="Everyone" active={squadPick.size === 0} onClick={() => setSquadPick(new Set())} />
+              {squads.map((sq) => (
+                <Chip key={sq.id} label={sq.label} active={squadPick.has(sq.id)} onClick={() => toggleSquadPick(sq.id)} />
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-1">
           {squad.length === 0 && (!showOthers || others.length === 0) ? (

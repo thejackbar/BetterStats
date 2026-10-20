@@ -94,6 +94,8 @@ async def build_schema() -> None:
         await conn.execute(text("DROP SCHEMA public CASCADE"))
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grade_merge_logs (
                 id SERIAL PRIMARY KEY,
@@ -251,6 +253,11 @@ async def seed(session) -> None:
         i=dnb, g=G_OURS_F, d=date(2026, 1, 11), h=OURS, a=THEIRS)
     await ex("INSERT INTO game_appearances (game_id, player_id) VALUES (:g, :p)",
              g=dnb, p=US_PLAYER)
+    # The opposition scored, so the scorecard is not empty and the game was
+    # played. (A COMPLETED game with NOTHING on it is not a match played; see
+    # services/game_status.looks_unplayed_sql.)
+    await ex("UPDATE games SET innings_totals = CAST(:t AS JSONB) WHERE id = :g",
+             t='[{"innings_number": 1, "runs_scored": 150, "wickets": 5, "extras": 3}]', g=dnb)
     # A match in their grade that we were NOT in: never ours, on any reading.
     await game(G_THEIRS_F, day=8, players=[(THEIR_PLAYER, 77)])
     # A T20 in their grade that we played, for the format axis.

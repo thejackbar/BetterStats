@@ -32,7 +32,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import MODULE_SELECT, org_has_module
@@ -56,6 +56,9 @@ WRITE_WINDOW = 60
 # How far back the public page lists fixtures — voting windows are days, not
 # months, so a bounded scan keeps the landing cheap.
 LOOKBACK_DAYS = 90
+# Games whose votable list can only come from a live Play.Cricket fetch, checked
+# per page load when narrowing a verified player's list to games they played.
+LIVE_EXAMINED = 10
 
 
 class VerifyBody(BaseModel):
@@ -141,6 +144,18 @@ def _club_branding(club: Organisation) -> dict:
     }
 
 
+def _me_payload(club: Organisation, player: Player) -> dict:
+    """The verified voter as the vote pages see them. `my_page` is the way back to
+    their own dashboard (the My page tab of the availability link), and is only
+    sent to a verified player and only while the club's self-service link is on.
+    The availability token is never sent to anyone who has not proved who they
+    are here: a club that lets supporters vote must not hand them the player link."""
+    out = {"id": str(player.id), "display_name": player.display_name}
+    if club.availability_self_service_enabled and club.availability_link_token:
+        out["my_page"] = f"/avail/{club.availability_link_token}?tab=mine&player={player.id}"
+    return out
+
+
 async def _verified_player(db: AsyncSession, request: Request, club: Organisation) -> Optional[Player]:
     pid = _read_session(request, club.id)
     if not pid:
@@ -151,9 +166,67 @@ async def _verified_player(db: AsyncSession, request: Request, club: Organisatio
     return player
 
 
+async def own_local_fixture_ids(db: AsyncSession, player: Player, fixtures: list[Fixture]) -> set[uuid.UUID]:
+    """Fixtures (by ``Fixture.id``) this player is on in data we already hold: a
+    saved XI, or a synced scorecard through ``match_ref_id`` (never ``fixture.id``,
+    which is not the game id for a synced fixture). Two batched lookups, so a
+    club with a dozen open games per round does not pay a full eligibility check
+    per game. A game whose list only exists as a live Play.Cricket fetch is not
+    found here; the callers check those directly, a few at a time."""
+    if not fixtures:
+        return set()
+    in_lineup = {r[0] for r in (await db.execute(
+        text("SELECT fixture_id FROM fixture_lineups WHERE player_id = :p AND fixture_id = ANY(CAST(:ids AS uuid[]))"),
+        {"p": player.id, "ids": [f.id for f in fixtures]},
+    )).fetchall()}
+    refs = {f.id: vote_svc.match_ref_id(f) for f in fixtures}
+    on_scorecard = {r[0] for r in (await db.execute(
+        text(
+            "SELECT game_id FROM game_appearances WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
+            "UNION SELECT game_id FROM batting_innings WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
+            "UNION SELECT game_id FROM bowling_spells WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[])) "
+            "UNION SELECT game_id FROM fielding_stats WHERE player_id = :p AND game_id = ANY(CAST(:g AS uuid[]))"
+        ),
+        {"p": player.id, "g": list(refs.values())},
+    )).fetchall()}
+    return {f.id for f in fixtures if f.id in in_lineup or refs[f.id] in on_scorecard}
+
+
+async def _fixtures_player_is_on(
+    db: AsyncSession, club: Organisation, cfg: dict, medal: VoteMedal, player: Player, fixtures: list[Fixture],
+) -> list[Fixture]:
+    """``fixtures`` cut down to the games this player is on the votable list of:
+    the ballot page's own list (``resolve_eligibility``), so the games offered to
+    a verified player are exactly the ones they could open a ballot on. Nobody
+    is shown a game they did not play, except the person a captain-only team
+    nominated to count its votes."""
+    local = await own_local_fixture_ids(db, player, fixtures)
+    # A team's nominated vote counter is not on its team list, and is still
+    # offered that team's games.
+    counts_for = await vote_svc.counter_fixture_ids(db, cfg, player.id, fixtures)
+    overrides = await vote_svc.overrides_by_fixture(db, medal.id, [f.id for f in fixtures])
+    live_left = LIVE_EXAMINED
+    keep: list[Fixture] = []
+    for f in fixtures:
+        if f.id in counts_for:
+            keep.append(f)
+            continue
+        ov = overrides.get(str(f.id))
+        override_source = ov.eligibility_source if ov else None
+        if f.id not in local:
+            if vote_svc.effective_source(cfg, override_source) != "playhq" or live_left <= 0:
+                continue
+            live_left -= 1
+        elig = await vote_svc.resolve_eligibility(db, club, f, cfg, override_source)
+        if str(player.id) in {p["id"] for p in elig["players"]}:
+            keep.append(f)
+    return keep
+
+
 async def _open_fixtures(
     db: AsyncSession, club: Organisation, cfg: dict, medal: VoteMedal,
     grade_id: Optional[str] = None, round_key: Optional[str] = None, q: Optional[str] = None,
+    only_for: Optional[Player] = None,
 ) -> tuple[list[tuple[Fixture, str]], dict]:
     """Recent played fixtures THIS MEDAL counts, with their voting state,
     newest first, plus the filter option lists (``grades``/``rounds``).
@@ -168,6 +241,10 @@ async def _open_fixtures(
     fixtures to find their own. The option lists are always built from the
     WHOLE lookback window regardless of the other filters, so they don't
     collapse to the current selection.
+
+    ``only_for`` (a verified player) keeps only the games that player is on the
+    votable list of, and the option lists are built from those games too, so
+    the dropdowns never offer a team or round they have nothing in.
     """
     today = date.today()
     res = await db.execute(
@@ -194,6 +271,8 @@ async def _open_fixtures(
         f for f in every_fixture
         if vote_svc.medal_covers(medal_grades, grade_by_fixture.get(str(f.id)))
     ]
+    if only_for is not None:
+        all_fixtures = await _fixtures_player_is_on(db, club, cfg, medal, only_for, all_fixtures)
     if not all_fixtures:
         return [], {"grades": [], "rounds": []}
     grade_names: dict[str, str] = {}
@@ -278,7 +357,20 @@ async def get_landing(
     cfg = vote_svc.effective_config(s)
     players = await active_self_service_players(db, club)
     me = await _verified_player(db, request, club)
-    fixtures, filter_opts = await _open_fixtures(db, club, cfg, s, grade_id=team, round_key=round_key, q=q)
+    # A verified player is only offered the games they played. Someone who has not
+    # said who they are (a coach or supporter, where the club allows them) gets
+    # the club's list, since there is no player to narrow it by.
+    fixtures, filter_opts = await _open_fixtures(
+        db, club, cfg, s, grade_id=team, round_key=round_key, q=q, only_for=me,
+    )
+    voted: set[uuid.UUID] = set()
+    if me and fixtures:
+        voted = {r[0] for r in (await db.execute(
+            select(VoteBallot.fixture_id).where(
+                VoteBallot.medal_id == s.id, VoteBallot.voter_player_id == me.id,
+                VoteBallot.fixture_id.in_([f.id for f, _ in fixtures]),
+            )
+        )).fetchall()}
     return {
         "club": _club_branding(club),
         # Named so a player following one of several club links knows which
@@ -289,7 +381,7 @@ async def get_landing(
         "allow_non_participants": cfg["allow_non_participants"],
         "allow_self_vote": cfg["allow_self_vote"],
         "ballot_values": cfg["ballot_values"],
-        "me": {"id": str(me.id), "display_name": me.display_name} if me else None,
+        "me": _me_payload(club, me) if me else None,
         "players": [
             {"id": str(p.id), "display_name": p.display_name,
              "has_phone": phone_last4(p.phone) is not None}
@@ -309,6 +401,7 @@ async def get_landing(
                 "date": f.played_on.isoformat() if f.played_on else None,
                 "home_away": f.home_away,
                 "state": state,
+                "voted": f.id in voted,
             }
             for f, state in fixtures
             if state in ("open", "awaiting_team", "closed", "locked")
@@ -358,7 +451,7 @@ async def verify(token: str, body: VerifyBody, request: Request, response: Respo
 
     rate_limit.clear_failures(lock_key)
     _issue_cookie(response, club.id, player.id)
-    return {"status": "ok", "player": {"id": str(player.id), "display_name": player.display_name}}
+    return {"status": "ok", "player": _me_payload(club, player)}
 
 
 @router.post("/{token}/switch")
@@ -372,12 +465,22 @@ def _voter_role(cfg: dict, me: Optional[Player], eligible: list[dict]) -> tuple[
 
     Returns (role, reason): role is 'player' (a counted participant ballot),
     'non_player' (allowed as a non-participant), or 'none' (can't vote —
-    reason says why, for the UI)."""
+    reason says why, for the UI).
+
+    ``cfg`` comes through ``cfg_for_fixture``. When it carries a ``vote_counter``
+    (a captain-only team whose captain handed the counting to someone), that
+    person votes whether or not they were in the side, and nobody else on the
+    team does, the captain included: two ballots from one team would count twice."""
     eligible_ids = {p["id"] for p in eligible}
     captain_ids = {p["id"] for p in eligible if p["is_captain"]}
+    counter = cfg.get("vote_counter") if cfg["voter_mode"] == "captain" else None
     if me:
         mid = str(me.id)
+        if counter and mid == counter:
+            return ("player", None)
         if mid in eligible_ids:
+            if counter:
+                return ("none", "counter_only")
             if cfg["voter_mode"] == "captain" and mid not in captain_ids:
                 return ("none", "captain_only")
             return ("player", None)
@@ -410,6 +513,7 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         db, club, fx, cfg, ov.eligibility_source if ov else None,
     )
     eligible = elig["players"]
+    cfg = await vote_svc.cfg_for_fixture(db, cfg, fx)
     state = vote_svc.fixture_vote_state(fx, cfg, ov.status if ov else None, bool(eligible))
     me = await _verified_player(db, request, club)
     role, reason = _voter_role(cfg, me, eligible)
@@ -425,6 +529,20 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         if b:
             my_ballot = [str(p.player_id) for p in sorted(b.picks, key=lambda p: p.position)]
 
+    # Their photos, for the list. Only for a player who is public: someone hidden
+    # from the public pages (their own request, or the club's) stays a name here
+    # and does not get their face put on a page with no sign-in.
+    photos: dict[str, str] = {}
+    ids = [uuid.UUID(p["id"]) for p in eligible]
+    if ids:
+        rows = (await db.execute(
+            text("SELECT id, photo_url FROM players WHERE organisation_id = :org "
+                 "AND id = ANY(CAST(:ids AS uuid[])) AND photo_url IS NOT NULL AND photo_url <> '' "
+                 "AND COALESCE(is_public, true) AND privacy_hidden_at IS NULL"),
+            {"org": club.id, "ids": ids},
+        )).fetchall()
+        photos = {str(i): u for i, u in rows}
+
     return {
         "club": _club_branding(club),
         "fixture": {
@@ -437,10 +555,19 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         "ballot_values": cfg["ballot_values"],
         "allow_self_vote": cfg["allow_self_vote"],
         "voter_mode": cfg["voter_mode"],
-        "me": {"id": str(me.id), "display_name": me.display_name} if me else None,
+        "me": _me_payload(club, me) if me else None,
         "role": role,
         "reason": reason,
-        "players": [{"id": p["id"], "name": p["name"]} for p in eligible],
+        # True for the person a captain nominated to submit this team's votes, so the
+        # page can say why a player who was not in the side is being asked.
+        "is_counter": bool(
+            me and cfg["voter_mode"] == "captain" and cfg.get("vote_counter") == str(me.id)
+        ),
+        # Someone who cannot vote on this game (did not play it, or the club needs a
+        # name first) is not handed its team list.
+        "players": [] if role == "none" else [
+            {"id": p["id"], "name": p["name"], "photo_url": photos.get(str(p["id"]))} for p in eligible
+        ],
         "my_ballot": my_ballot,
     }
 
@@ -468,6 +595,7 @@ async def submit_ballot(token: str, fixture_id: str, body: BallotBody, request: 
         db, club, fx, cfg, ov.eligibility_source if ov else None,
     )
     eligible = elig["players"]
+    cfg = await vote_svc.cfg_for_fixture(db, cfg, fx)
     state = vote_svc.fixture_vote_state(fx, cfg, ov.status if ov else None, bool(eligible))
     if state != "open":
         detail = {
@@ -481,6 +609,7 @@ async def submit_ballot(token: str, fixture_id: str, body: BallotBody, request: 
     if role == "none":
         detail = {
             "captain_only": "Only the captain submits votes for this club.",
+            "counter_only": "The captain has nominated someone to submit the votes for this team.",
             "did_not_play": "Only players who played in this game can vote.",
             "verify_required": "Find your name and verify with your PIN first.",
         }.get(reason, "You can't vote on this game.")

@@ -21,6 +21,8 @@ Two more builds sit alongside them:
                       case where the default pulls come back empty.
   - social_potm     : our side's performances in one match ranked into a
                       player-of-the-match shortlist.
+  - social_totw     : the same ranking run over every completed club match in
+                      one round and pooled into a team-of-the-week shortlist.
 """
 from __future__ import annotations
 
@@ -33,8 +35,9 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import grassroots_scores_client as gr
-from app.services.club_match import club_match_keys
-from app.services.fixtures_source import _current_grade_rows, org_grassroots_fixtures
+from app.services.club_match import club_match_keys, fixture_side, fixture_involves_club, team_is_club
+from app.services.fixtures_source import current_grade_rows_with_live, org_grassroots_fixtures
+from app.services.grade_labels import GRADE_CATEGORIES, categories_for_name, org_grade_category_sets
 from app.services.social_match_lookup import parse_reference
 from app.services.sync import strip_team_suffix
 
@@ -48,6 +51,11 @@ _RESULT_MAX_MATCHES = 24
 # Sunday junior game are one weekend), on top of an exact round-name match
 # (which catches the second day of a two-day round).
 _ROUND_WINDOW_DAYS = 3
+
+# The no-link fixtures pull treats match-days this close to the first one as one
+# weekend: seniors on a Saturday and juniors on a Sunday are one round, and the
+# editor only ever loads the first bucket, so splitting them hid the juniors.
+_WEEKEND_SPAN_DAYS = 2
 
 # Player-of-the-match points, from the scorecard's own counting stats. Keeper
 # catches score lower than outfield dismissals on purpose (chances come to the
@@ -169,7 +177,7 @@ def _perf_name(raw: str | None) -> str:
 
 
 def _top_batters(bat_rows: list) -> list[dict]:
-    """Our club's top 2 run scorers from one innings (most runs, fewer balls breaks ties)."""
+    """The top 2 run scorers in one innings's batting (most runs, fewer balls breaks ties)."""
     cands = [
         b for b in (bat_rows or [])
         if (b.get("dismissalType") or "").lower() not in _DNB_TYPES
@@ -191,7 +199,11 @@ def _top_batters(bat_rows: list) -> list[dict]:
 
 
 def _top_bowlers(bowl_rows: list) -> list[dict]:
-    """Our club's top 2 wicket takers from one innings (most wickets, fewest runs breaks ties)."""
+    """The top 2 wicket takers in one innings's bowling (most wickets, fewest runs breaks ties).
+
+    An innings's ``bowling`` lists whoever BOWLED in it, which is the side that
+    was fielding. A side's own bowlers are therefore in the OTHER side's
+    innings; see ``_result_row``."""
     def overs_val(o):
         try:
             return float(str(o or 0).replace(",", "."))
@@ -215,6 +227,42 @@ def _club_dict(org) -> dict:
     name = (org.name or "CLUB")
     logo = org.logo_url or (f"/api/images/organisations/{org.id}/logo" if getattr(org, "logo_data", None) else None)
     return {"name": name.upper(), "full": name.upper(), "mono": _mono(name), "logo": logo}
+
+
+async def _category_lookup(db: AsyncSession, org_id):
+    """``grade name -> ['senior', 'junior', ...]`` for the club's own grades, in
+    canonical order. A grade can carry two ("Girls Under 14" is junior AND
+    women's), so a row gets a list, and the editor's toggle keeps the row when
+    ANY of its categories is switched on."""
+    sets = await org_grade_category_sets(db, org_id)
+
+    def lookup(name: str | None) -> list[str]:
+        got = categories_for_name(sets, name or "")
+        return [c for c in GRADE_CATEGORIES if c in got]
+
+    return lookup
+
+
+def _merge_weekend_days(dates: list[dict], rows_key: str) -> list[dict]:
+    """Fold match-days that fall within ``_WEEKEND_SPAN_DAYS`` of the first one
+    in a cluster into that first day's bucket. ``dates`` is sorted ascending."""
+    merged: list[dict] = []
+    start: date | None = None
+    for d in dates:
+        try:
+            day = date.fromisoformat(d["date"])
+        except (ValueError, TypeError):
+            merged.append(d)
+            start = None
+            continue
+        if merged and start is not None and (day - start).days <= _WEEKEND_SPAN_DAYS:
+            merged[-1][rows_key].extend(d[rows_key])
+            if not merged[-1]["round"]:
+                merged[-1]["round"] = d["round"]
+            continue
+        merged.append(d)
+        start = day
+    return merged
 
 
 async def _grade_display_orders(db: AsyncSession, org_id) -> dict[str, int]:
@@ -298,13 +346,9 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
     summary_teams = ms.get("teams") or []
     teams_raw = sc.get("teams") or []
     innings = sc.get("innings") or []
-    org_id = str(org.id).lower()
 
     def is_ours(t: dict) -> bool:
-        if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id:
-            return True
-        dn = (t.get("displayName") or "").lower()
-        return any(k in dn for k in keys)
+        return team_is_club(org, t)
 
     our_team = next((t for t in teams_raw if is_ours(t)), None)
     if not our_team:
@@ -324,8 +368,16 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
         return None
 
     our_inn = inn_by_team.get(our_id) or {}
+    opp_inn = inn_by_team.get(opp_id) or {}
+    # An innings's batting is the side that batted it; its bowling is the side
+    # that FIELDED it. Our bowlers are in the innings the opposition batted, and
+    # the opposition's in ours. Reading `our_inn["bowling"]` for "our wicket
+    # takers" put the opposition's figures next to our batters (North Perth,
+    # October 2026).
     top_bat = _top_batters(our_inn.get("batting") or [])
-    top_bowl = _top_bowlers(our_inn.get("bowling") or [])
+    top_bowl = _top_bowlers(opp_inn.get("bowling") or [])
+    opp_top_bat = _top_batters(opp_inn.get("batting") or [])
+    opp_top_bowl = _top_bowlers(our_inn.get("bowling") or [])
 
     outcome = "T"
     for st in summary_teams:
@@ -353,6 +405,9 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
         "margin": _margin_from_text(ms.get("result") or ms.get("statusText")),
         "topBat": top_bat,
         "topBowl": top_bowl,
+        # The same two lists for the other side, for a post that shows them.
+        "oppTopBat": opp_top_bat,
+        "oppTopBowl": opp_top_bowl,
         # Transient — resolved into "oppLogo" (and dropped) by the caller,
         # once every row's crest is known, via one batched org lookup.
         "_oppOrgId": opp_org.get("id"),
@@ -363,16 +418,15 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
 async def social_fixtures(db: AsyncSession, org) -> dict:
     """Upcoming/live fixtures for the org, grouped by match-day, shaped for the
     Fixtures roundup posts."""
-    fixtures = await org_grassroots_fixtures(db, org)
-    keys = club_match_keys(org)
+    fixtures = await org_grassroots_fixtures(db, org, discover_live=True)
     grade_orders = await _grade_display_orders(db, org.id)
+    cats_of = await _category_lookup(db, org.id)
     season = next((fx.get("season_name") for fx in fixtures if fx.get("season_name")), None)
     by_date: dict[str, dict] = {}
     for fx in fixtures:
         home = fx.get("home_team") or ""
         away = fx.get("away_team") or ""
-        hl, al = home.lower(), away.lower()
-        if any(k in al for k in keys) and not any(k in hl for k in keys):
+        if fixture_side(org, home, away, fx.get("home_org_id"), fx.get("away_org_id")) == "away":
             ha, opp = "A", home
         else:
             ha, opp = "H", away
@@ -385,6 +439,7 @@ async def social_fixtures(db: AsyncSession, org) -> dict:
         bucket["fixtures"].append({
             "grade": (fx.get("grade_name") or "").upper(),
             "gradeOrder": grade_orders.get(fx.get("grade_id")),
+            "categories": cats_of(fx.get("grade_name")),
             "opp": strip_team_suffix(opp).upper(),
             "oppMono": _mono(opp),
             "ha": ha,
@@ -393,18 +448,22 @@ async def social_fixtures(db: AsyncSession, org) -> dict:
             "_oppOrgId": opp_org_id,
             "_oppLogoRaw": opp_logo_raw,
         })
-    dates = sorted(by_date.values(), key=lambda d: d["date"])
+    dates = _merge_weekend_days(sorted(by_date.values(), key=lambda d: d["date"]), "fixtures")
     await asyncio.gather(*[_finalize_opp_logos(db, d["fixtures"]) for d in dates])
     return {"season": season, "club": _club_dict(org), "dates": dates}
 
 
-async def social_results(db: AsyncSession, org) -> dict:
-    """Recent completed results for the org, grouped by match-day (most-recent
-    first), shaped for the Results roundup posts. Scores/result come from each
-    match's scorecard — the same source as the single-scorecard import."""
-    rows = await _current_grade_rows(db, org.id)
+async def _recent_club_matches(db: AsyncSession, org) -> dict | None:
+    """The org's completed club matches from the last few match-days of its
+    current season, newest first and bounded (a few match-days, a couple of
+    dozen matches) so the scorecard fan-out behind them stays small. ``None``
+    when the org has no current-season grades at all.
+
+    Shared by the Results roundup and the team of the week, so the two agree on
+    which matches "the latest round" means."""
+    rows = await current_grade_rows_with_live(db, org.id)
     if not rows:
-        return {"season": None, "club": _club_dict(org), "dates": []}
+        return None
     keys = club_match_keys(org)
     # Keyed on the raw CA grade guid, which is what a discovered match carries,
     # NOT our own grades.id (the second column). See _current_grade_rows.
@@ -422,9 +481,7 @@ async def social_results(db: AsyncSession, org) -> dict:
         if not isinstance(lst, list):
             continue
         for m in lst:
-            home = (m.get("home_team") or "").lower()
-            away = (m.get("away_team") or "").lower()
-            if any(k in home or k in away for k in keys):
+            if fixture_involves_club(org, m):
                 club_matches.append(m)
 
     # De-dup by match id, newest first, then keep only the most-recent few
@@ -448,7 +505,26 @@ async def social_results(db: AsyncSession, org) -> dict:
         kept.append(m)
         if len(kept) >= _RESULT_MAX_MATCHES:
             break
+    return {
+        "keys": keys, "grade_name_by_guid": grade_name_by_guid,
+        "grade_orders": grade_orders, "season": season, "kept": kept,
+    }
 
+
+async def social_results(db: AsyncSession, org) -> dict:
+    """Recent completed results for the org, grouped by match-day (most-recent
+    first), shaped for the Results roundup posts. Scores/result come from each
+    match's scorecard — the same source as the single-scorecard import."""
+    recent = await _recent_club_matches(db, org)
+    if recent is None:
+        return {"season": None, "club": _club_dict(org), "dates": []}
+    keys = recent["keys"]
+    grade_name_by_guid = recent["grade_name_by_guid"]
+    grade_orders = recent["grade_orders"]
+    season = recent["season"]
+    kept = recent["kept"]
+
+    cats_of = await _category_lookup(db, org.id)
     cards = await asyncio.gather(*[gr.get_match_scorecard(m["id"]) for m in kept], return_exceptions=True)
     by_date: dict[str, dict] = {}
     for m, sc in zip(kept, cards):
@@ -458,12 +534,15 @@ async def social_results(db: AsyncSession, org) -> dict:
         row = _result_row(sc, org, keys, grade_name_by_guid.get(gid) or "", grade_orders.get(gid))
         if not row:
             continue
+        row["categories"] = cats_of(grade_name_by_guid.get(gid))
         day = m.get("played_at") or ""
         bucket = by_date.setdefault(day, {"date": day, "label": _label(day), "round": "", "results": []})
         if not bucket["round"]:
             bucket["round"] = _round_label(m.get("round"))
         bucket["results"].append(row)
-    dates = sorted(by_date.values(), key=lambda d: d["date"], reverse=True)
+    # A Saturday and a Sunday are one weekend's round, and the editor loads only
+    # the first bucket, so fold them like the fixtures pull does, then newest first.
+    dates = _merge_weekend_days(sorted(by_date.values(), key=lambda d: d["date"]), "results")[::-1]
     await asyncio.gather(*[_finalize_opp_logos(db, d["results"]) for d in dates])
     return {"season": season, "club": _club_dict(org), "dates": dates}
 
@@ -593,7 +672,8 @@ async def _reference_round(db: AsyncSession, org, raw: str):
 
     keys = club_match_keys(org)
     anchor_home, anchor_away = _match_home_away(anchor)
-    if not any(k in anchor_home.lower() or k in anchor_away.lower() for k in keys):
+    _a_home_oid, _, _a_away_oid, _ = _match_logos(anchor)
+    if fixture_side(org, anchor_home, anchor_away, _a_home_oid, _a_away_oid) is None:
         # A real match, in one of our grades, but not one of our sides — a
         # grade is a whole competition, not club-exclusive.
         return {"kind": "not_found", "message": _NOT_FOUND_MESSAGE}, None
@@ -628,7 +708,8 @@ async def _reference_round(db: AsyncSession, org, raw: str):
     seen: set = set()
     for guid, m in all_matches:
         home, away = _match_home_away(m)
-        if not any(k in home.lower() or k in away.lower() for k in keys):
+        _h_oid, _, _a_oid, _ = _match_logos(m)
+        if fixture_side(org, home, away, _h_oid, _a_oid) is None:
             continue
         day, _tm = _match_day_time(m)
         in_window = False
@@ -681,21 +762,21 @@ async def social_fixtures_for_reference(db: AsyncSession, org, raw: str) -> dict
     err, ctx = await _reference_round(db, org, raw)
     if err is not None:
         return err
+    cats_of = await _category_lookup(db, org.id)
     rows = []
     for guid, m in ctx["matches"]:
         home, away = _match_home_away(m)
-        hl, al = home.lower(), away.lower()
-        keys = ctx["keys"]
-        if any(k in al for k in keys) and not any(k in hl for k in keys):
+        home_org_id, home_logo, away_org_id, away_logo = _match_logos(m)
+        if fixture_side(org, home, away, home_org_id, away_org_id) == "away":
             ha, opp = "A", home
         else:
             ha, opp = "H", away
-        home_org_id, home_logo, away_org_id, away_logo = _match_logos(m)
         opp_org_id, opp_logo_raw = (away_org_id, away_logo) if ha == "H" else (home_org_id, home_logo)
         day, tm = _match_day_time(m)
         rows.append((day, tm, {
             "grade": (ctx["grade_name_by_guid"].get(guid) or "").upper(),
             "gradeOrder": ctx["grade_orders"].get(guid),
+            "categories": cats_of(ctx["grade_name_by_guid"].get(guid)),
             "opp": strip_team_suffix(opp).upper(),
             "oppMono": _mono(opp),
             "ha": ha,
@@ -737,11 +818,13 @@ async def social_results_for_reference(db: AsyncSession, org, raw: str) -> dict:
         return_exceptions=True,
     )
     results = []
+    cats_of = await _category_lookup(db, org.id)
     for (guid, m), sc in zip(completed, cards):
         if not isinstance(sc, dict):
             continue
         row = _result_row(sc, org, ctx["keys"], ctx["grade_name_by_guid"].get(guid) or "", ctx["grade_orders"].get(guid))
         if row:
+            row["categories"] = cats_of(ctx["grade_name_by_guid"].get(guid))
             results.append(row)
     if not results:
         return {"kind": "no_results", "message": "No completed matches found for that round yet."}
@@ -786,28 +869,29 @@ def _overs_to_balls(o) -> int:
 
 async def social_potm(db: AsyncSession, org, match_id: str) -> dict:
     """Rank our own side's performances in one match into a player-of-the-match
-    shortlist, from the Grassroots scorecard.
+    shortlist, from the Grassroots scorecard."""
+    raw = await gr.get_match_scorecard(match_id)
+    if raw is None:
+        raise HTTPException(404, "Scorecard not found — the match may not be completed yet")
+    return await _rank_our_side(db, org, raw)
+
+
+async def _rank_our_side(db: AsyncSession, org, raw: dict) -> dict:
+    """The player-of-the-match ranking for ONE raw Grassroots scorecard. Shared
+    by the single-match shortlist and the team-of-the-week pool, so both score a
+    performance by exactly the same points.
 
     Our batting rows live in our innings' batting; our bowling and fielding
     rows live in the OPPOSITION's batting innings (we bowl and field while
     they bat) — the same semantics sync.py's per-game inserts follow."""
-    raw = await gr.get_match_scorecard(match_id)
-    if raw is None:
-        raise HTTPException(404, "Scorecard not found — the match may not be completed yet")
-
     ms = raw.get("matchSummary") or {}
     teams_raw = raw.get("teams") or []
     innings = raw.get("innings") or []
-    keys = club_match_keys(org)
-    org_id = str(org.id).lower()
 
     # Identify our team exactly like _result_row: owning org id first, then the
     # club-name keys.
     def is_ours(t: dict) -> bool:
-        if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id:
-            return True
-        dn = (t.get("displayName") or "").lower()
-        return any(k in dn for k in keys)
+        return team_is_club(org, t)
 
     our_team = next((t for t in teams_raw if is_ours(t)), None)
     if not our_team:
@@ -970,6 +1054,7 @@ async def social_potm(db: AsyncSession, org, match_id: str) -> dict:
             "last": last,
             "short": _perf_name(roster_short.get(pid) or p["name"]),
             "pid": db_id_by_guid.get(pid),
+            "guid": pid,
             "points": points,
             "batting": batting,
             "bowling": bowling,
@@ -1028,3 +1113,314 @@ async def social_potm(db: AsyncSession, org, match_id: str) -> dict:
         "margin": _margin_from_text(ms.get("result") or ms.get("statusText")),
     }
     return {"match": match, "players": players}
+
+
+# ── Team of the week ─────────────────────────────────────────────────────────
+# Every completed club match in one round, each scored with the same points as
+# the player of the match, pooled and ranked. The frontend takes the top N (6 to
+# 14, starting at 11) off the front of the pool, so the pool carries a few more
+# than the biggest team and the operator can swap a name without a second pull.
+
+_TOTW_POOL = 150
+_NO_ROUND_MESSAGE = "No completed matches found for that round yet."
+
+# A date range is one club "round" that does not line up with a weekend (a
+# Tuesday under-17s game through to the Sunday women's final). Bounded so the
+# scorecard fan-out stays small: a month at most, and no more than this many
+# matches (the semaphore in the client paces the fetches).
+_TOTW_MAX_RANGE_DAYS = 31
+_TOTW_RANGE_MAX_MATCHES = 80
+
+# Which grades a team of the week draws from. Junior is any grade the club
+# classes as junior (a "Girls Under 15" is junior AND women's, so it counts
+# here). Senior is everything else: men's, women's, masters and mixed.
+TOTW_SCOPES = ("all", "junior", "senior")
+
+# A player is an all-rounder for the week when they made both a real score and
+# took a wicket in the same performance. Anything less is a batter or a bowler
+# by whichever side earned them more points.
+_TOTW_AR_MIN_RUNS = 20
+_TOTW_AR_MIN_WICKETS = 1
+
+
+def _totw_sort_key(p: dict) -> tuple:
+    """Points first; a tie goes to the bigger wicket haul, then the bigger
+    score, then the name, so the order never depends on scorecard order."""
+    w = ((p.get("bowling") or {}).get("w") or 0)
+    r = ((p.get("batting") or {}).get("r") or 0)
+    return (-p["points"], -w, -r, p.get("last") or "", p.get("first") or "")
+
+
+def _pool_round(scored: list[tuple[dict, dict]]) -> list[dict]:
+    """``[(match_block, ranked_players)]`` -> one ranked list, a player once.
+
+    A player who turned out in two grades over the weekend appears once, with
+    the better of the two performances. Adding the two would hand the pick to
+    whoever played most, and a team of the week is about the best day a player
+    had. A player is one person by the club's own player id when the scorecard
+    participant resolves to one, else by the scorecard participant id."""
+    best: dict[str, dict] = {}
+    for match, players in scored:
+        for p in players:
+            key = p.get("pid") or p.get("guid")
+            if not key:
+                continue
+            entry = {
+                **p,
+                "grade": match.get("grade") or "",
+                "opp": match.get("opponent") or "",
+                "oppMono": match.get("oppMono") or "",
+                "outcome": match.get("outcome") or "",
+                "categories": list(match.get("categories") or []),
+            }
+            held = best.get(key)
+            if held is None or _totw_sort_key(entry) < _totw_sort_key(held):
+                best[key] = entry
+    return sorted(best.values(), key=_totw_sort_key)
+
+
+def _scope_matches(scope: str, categories) -> bool:
+    """Is a grade with these categories part of this team-of-the-week scope?"""
+    junior = "junior" in (categories or ())
+    if scope == "junior":
+        return junior
+    if scope == "senior":
+        return not junior
+    return True
+
+
+def _our_keeper_guids(org, raw: dict) -> set[str]:
+    """Scorecard participants our side lists as the wicketkeeper."""
+    our_team = next((t for t in (raw.get("teams") or []) if team_is_club(org, t)), None)
+    out: set[str] = set()
+    for rp in (our_team or {}).get("players") or []:
+        roles = [str(r).lower() for r in (rp.get("roles") or [])]
+        if any("keeper" in r or "wicket" in r for r in roles):
+            pid = (rp.get("participantId") or "").lower()
+            if pid:
+                out.add(pid)
+    return out
+
+
+def _totw_kind(p: dict, keeper: bool) -> str:
+    """Which seat a performance fills in a picked make-up: ``WK``, ``AR``,
+    ``BAT`` or ``BOWL``.
+
+    The keeper is whoever the scorecard lists as one, or whoever took a keeper
+    catch or a stumping. Otherwise it is read off what they did that day, not a
+    roster label: a score of 20 or more and a wicket is an all-rounder, and the
+    rest are a bowler when their bowling earned more points than their runs.
+    A player who only fielded reads as a batter."""
+    if keeper:
+        return "WK"
+    bat, bowl = p.get("batting"), p.get("bowling")
+    runs = (bat or {}).get("r") or 0
+    wkts = (bowl or {}).get("w") or 0
+    if runs >= _TOTW_AR_MIN_RUNS and wkts >= _TOTW_AR_MIN_WICKETS:
+        return "AR"
+    bowl_pts = _POTM_WICKET * wkts + _POTM_MAIDEN * ((bowl or {}).get("m") or 0)
+    if bowl and (not bat or bowl_pts > runs):
+        return "BOWL"
+    return "BAT"
+
+
+def _range_label(start: str, end: str) -> str:
+    """'TUE 13 OCT TO SUN 18 OCT', or 'TUE 13 TO SUN 18 OCT' in one month."""
+    try:
+        a, b = date.fromisoformat(start), date.fromisoformat(end)
+    except (ValueError, TypeError):
+        return f"{start} TO {end}".upper()
+    if a == b:
+        return _label(start)
+    left = f"{a.strftime('%a').upper()} {a.day}"
+    if (a.year, a.month) != (b.year, b.month):
+        left += f" {a.strftime('%b').upper()}"
+    return f"{left} TO {_label(end)}"
+
+
+async def _totw_range_matches(db: AsyncSession, org, date_from: str, date_to: str) -> dict | None:
+    """The club's completed matches played from ``date_from`` to ``date_to``
+    (inclusive), across the current season's grades, newest first. ``None`` when
+    the club has no current-season grades."""
+    rows = await current_grade_rows_with_live(db, org.id)
+    if not rows:
+        return None
+    grade_name_by_guid = {guid: gname for guid, _, gname, _ in rows}
+    season = next((sname for *_, sname in rows if sname), None)
+    discovered = await asyncio.gather(
+        *[gr.get_grade_results(guid, since=date_from) for guid, *_ in rows],
+        return_exceptions=True,
+    )
+    seen: set = set()
+    kept: list[dict] = []
+    for lst in discovered:
+        if not isinstance(lst, list):
+            continue
+        for m in lst:
+            mid = m.get("id")
+            if not mid or mid in seen or (m.get("played_at") or "") > date_to:
+                continue
+            if not fixture_involves_club(org, m):
+                continue
+            seen.add(mid)
+            kept.append(m)
+    kept.sort(key=lambda x: x.get("played_at") or "", reverse=True)
+    return {"grade_name_by_guid": grade_name_by_guid, "season": season, "kept": kept[:_TOTW_RANGE_MAX_MATCHES]}
+
+
+def _parse_range(date_from: str, date_to: str) -> tuple[str, str] | dict:
+    """``(from, to)`` as ISO days, or an ``{kind, message}`` to hand back."""
+    try:
+        a, b = date.fromisoformat(date_from.strip()), date.fromisoformat(date_to.strip())
+    except (ValueError, TypeError, AttributeError):
+        return {"kind": "invalid", "message": "Pick a start date and an end date."}
+    if b < a:
+        return {"kind": "invalid", "message": "The end date is before the start date."}
+    if (b - a).days > _TOTW_MAX_RANGE_DAYS:
+        return {"kind": "invalid", "message": f"Pick a period of {_TOTW_MAX_RANGE_DAYS} days or fewer."}
+    return a.isoformat(), b.isoformat()
+
+
+async def social_totw(
+    db: AsyncSession, org, q: str = "",
+    date_from: str = "", date_to: str = "", scope: str = "all",
+) -> dict:
+    """The round's best performers across the grades the club played.
+
+    The round is, in order of priority:
+
+    - ``date_from`` / ``date_to`` (ISO days): every completed match played in
+      that period, whatever the club's round calendar says;
+    - ``q``, a pasted match link/ID naming the round, exactly as the Results
+      roundup takes it;
+    - with neither, the club's most recent match-day and the games within a
+      weekend of it.
+
+    ``scope`` is ``all``, ``junior`` or ``senior``. It is applied to the
+    matches BEFORE the pool is built, so a junior who also played up appears
+    on the junior team for their junior game rather than being pooled away by
+    a better senior one.
+
+    Returns ``{kind: 'round', season, club, round, date, label, matches, scope,
+    scopeMatches, players: [...]}`` with ``players`` ranked best first, each
+    carrying the ``kind`` seat it fills (WK, BAT, AR, BOWL); or a
+    ``{kind, message}`` for a link or period that cannot name a round."""
+    scope = (scope or "all").strip().lower()
+    if scope not in TOTW_SCOPES:
+        scope = "all"
+    cats_of = await _category_lookup(db, org.id)
+    date_range = None
+    if (date_from or "").strip() or (date_to or "").strip():
+        parsed = _parse_range(date_from, date_to)
+        if isinstance(parsed, dict):
+            return parsed
+        date_range = parsed
+
+    if date_range:
+        recent = await _totw_range_matches(db, org, *date_range)
+        kept = (recent or {}).get("kept") or []
+        if not kept:
+            return {"kind": "no_results", "message": "No completed matches found in that period."}
+        grade_name_by_guid = recent["grade_name_by_guid"]
+        season = recent["season"]
+        day = date_range[1]
+        rounds = [_round_label(m.get("round")) for m in kept if m.get("round")]
+        round_label = max(set(rounds), key=rounds.count) if rounds else ""
+        label = _range_label(*date_range)
+        pairs = [(m.get("id"), grade_name_by_guid.get(m.get("grade_id")) or "") for m in kept]
+    elif q.strip():
+        err, ctx = await _reference_round(db, org, q)
+        if err is not None:
+            return err
+        completed = [
+            (guid, m) for guid, m in ctx["matches"]
+            if str(m.get("statusId")) == "3"
+        ][:_RESULT_MAX_MATCHES]
+        grade_name_by_guid = ctx["grade_name_by_guid"]
+        season = ctx["season"]
+        day = ctx["anchor_day"]
+        round_label = _round_label(ctx["anchor_round"])
+        label = _label(day)
+        pairs = [(m.get("id"), grade_name_by_guid.get(guid) or "") for guid, m in completed]
+    else:
+        recent = await _recent_club_matches(db, org)
+        kept = (recent or {}).get("kept") or []
+        if not kept:
+            return {"kind": "no_results", "message": _NO_ROUND_MESSAGE}
+        grade_name_by_guid = recent["grade_name_by_guid"]
+        season = recent["season"]
+        # `kept` is newest first. The round is the newest match-day plus any
+        # game within a weekend of it (a Saturday one-dayer and a Sunday junior
+        # game are one round), the same window a pasted link uses.
+        day = kept[0].get("played_at") or ""
+        try:
+            newest = date.fromisoformat(day)
+        except (ValueError, TypeError):
+            newest = None
+        round_matches = []
+        for m in kept:
+            d = m.get("played_at") or ""
+            try:
+                near = newest is not None and (newest - date.fromisoformat(d)).days <= _ROUND_WINDOW_DAYS
+            except (ValueError, TypeError):
+                near = False
+            if near or d == day:
+                round_matches.append(m)
+        round_label = _round_label(round_matches[0].get("round") if round_matches else "")
+        label = _label(day)
+        pairs = [(m.get("id"), grade_name_by_guid.get(m.get("grade_id")) or "") for m in round_matches]
+
+    pairs = [(mid, g) for mid, g in pairs if mid]
+    if not pairs:
+        return {"kind": "no_results", "message": _NO_ROUND_MESSAGE}
+
+    cards = await asyncio.gather(*[gr.get_match_scorecard(mid) for mid, _ in pairs], return_exceptions=True)
+    scored: list[tuple[dict, dict]] = []
+    # How many matches each scope holds, counted before the scope is applied, so
+    # an empty junior team can say whether any junior match was played at all.
+    scope_matches = {"junior": 0, "senior": 0}
+    for (mid, grade_name), sc in zip(pairs, cards):
+        if not isinstance(sc, dict):
+            continue
+        try:
+            ranked = await _rank_our_side(db, org, sc)
+        except HTTPException:
+            # A match none of whose teams is ours (a shared grade fixture the
+            # discovery let through) contributes nobody.
+            continue
+        match = ranked["match"]
+        if grade_name:
+            match["grade"] = grade_name.upper()
+        cats = cats_of(grade_name or match["grade"])
+        match["categories"] = cats
+        scope_matches["junior" if "junior" in cats else "senior"] += 1
+        if not _scope_matches(scope, cats):
+            continue
+        keepers = _our_keeper_guids(org, sc)
+        for p in ranked["players"]:
+            fld = p.get("fielding") or {}
+            keeper = p["guid"] in keepers or bool(fld.get("catches_wk") or fld.get("stumpings"))
+            p["keeper"] = keeper
+            p["kind"] = _totw_kind(p, keeper)
+        scored.append((match, ranked["players"]))
+    pool = _pool_round(scored)
+    if not pool:
+        if scope != "all" and scope_matches[scope] == 0:
+            return {
+                "kind": "no_results",
+                "message": f"No completed {scope} matches found for that round yet.",
+                "scopeMatches": scope_matches,
+            }
+        return {"kind": "no_results", "message": _NO_ROUND_MESSAGE}
+    return {
+        "kind": "round",
+        "season": season,
+        "club": _club_dict(org),
+        "round": round_label,
+        "date": day,
+        "label": label,
+        "matches": len(scored),
+        "scope": scope,
+        "scopeMatches": scope_matches,
+        "players": pool[:_TOTW_POOL],
+    }

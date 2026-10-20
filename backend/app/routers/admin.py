@@ -9,6 +9,9 @@ import json
 import logging
 from difflib import SequenceMatcher
 
+from app.auth.capabilities import (
+    MANAGE_MERGES, MANAGE_SOCIAL, require_cap,
+)  # route gates added by the access audit
 from app.services.session_safety import rollback_keeping
 
 log = logging.getLogger(__name__)
@@ -31,7 +34,10 @@ from app.services.grade_labels import (
 # Reused rather than copied so the two never disagree about what a name is.
 from app.services.import_ingest import _name_parts, _middles_compatible, is_short_form
 from app.services.player_aliases import seed_alias_on_rename
+from app.services import junior_hiding
 from app.services import merge_carry
+from app.services import merge_profile
+from app.services import merge_safety
 from app.services import grade_duplicates
 from app.services.import_reconcile import reconcile_imported_totals
 from app.auth.modules import require_module
@@ -84,7 +90,7 @@ async def _enrich_player(db: AsyncSession, p: Player) -> dict:
     }
 
 
-@router.get("/player-info")
+@router.get("/player-info", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def get_player_info(player_id: str, org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Return enriched stats for a single player (used by manual merge UI)."""
     p = await db.get(Player, uuid.UUID(player_id))
@@ -228,7 +234,7 @@ def _name_variant_pairs(players: list, ignored: set, already: set) -> list:
     return scored[:MAX_VARIANT_PAIRS]
 
 
-@router.get("/merge-candidates")
+@router.get("/merge-candidates", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Return pairs of players within an org that look like duplicates.
 
@@ -282,10 +288,15 @@ async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), 
                     continue
                 emitted.add(pair_key)
                 a, b = await enrich(p1), await enrich(p2)
+                # Both records have a game on the same date, in different games: two people who
+                # share a name, not one person twice (services/merge_safety). Never Bulk Approve.
+                clash = await merge_safety.same_day_clash_dates(db, p1.id, p2.id)
                 candidate_pairs.append({
                     "kind": "exact",
                     "normalised_name": key,
                     "redacted": _is_redacted_name(p1.name) or _is_redacted_name(p2.name),
+                    "same_day_clash": len(clash),
+                    "same_day_clash_message": merge_safety.clash_message(clash) if clash else None,
                     "player_a": a,
                     "player_b": b,
                 })
@@ -344,7 +355,7 @@ async def ignore_pair(req: IgnorePairRequest, db: AsyncSession = Depends(get_db)
     return {"status": "ignored"}
 
 
-@router.get("/merge-history")
+@router.get("/merge-history", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def get_merge_history(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     """Return recent merges for an org that can be undone."""
     rows = await db.execute(
@@ -376,6 +387,8 @@ class MergeRequest(BaseModel):
     keep_player_id: str
     remove_player_id: str
     org_id: str
+    # Set by the screen after the admin has read the same-day warning (services/merge_safety).
+    confirm_same_day_clash: bool = False
 
 
 async def _merge_players_core(
@@ -392,6 +405,18 @@ async def _merge_players_core(
         raise HTTPException(status_code=400, detail="Players must belong to the specified organisation")
     if keep_id == remove_id:
         raise HTTPException(status_code=400, detail="Cannot merge a player with itself")
+
+    # A person's request to be removed from the public site (migration 316) is
+    # on the row that is about to be deleted. Carry it to the keeper first, or
+    # merging a duplicate quietly puts them back on the site. The keeper's own
+    # photos go too: they may be the same person's.
+    from app.services import player_privacy
+    if player_privacy.is_privacy_hidden(remove) and not player_privacy.is_privacy_hidden(keep):
+        await player_privacy.hide_at_request(
+            db, keep,
+            by=remove.privacy_hidden_by or "merge",
+            reason=(remove.privacy_hidden_reason or "") + " (carried over from a merged duplicate)",
+        )
 
     # --- Collect IDs before making changes (for undo log) ---
     def _ids(rows) -> list:
@@ -585,7 +610,18 @@ async def _merge_players_core(
         # board. All but the honour board are ON DELETE CASCADE, so before this
         # the removal below DELETED them outright — a merge silently destroyed
         # the removed record's whole imported career. See services/merge_carry.
-        carried = await merge_carry.carry_rows(db, keep_id, remove_id)
+        carried = await merge_carry.carry_rows(db, keep_id, remove_id, org_id)
+
+        # The person's own profile (photos, contact details, date of birth,
+        # squad) is on the row about to be deleted. Fill what the keeper lacks.
+        # A squad is a team of one club; after a club-to-club merge the removed
+        # player's can be the other club's, which must not be pointed at.
+        squad_is_ours = remove.squad_team_id is None or bool((await db.execute(
+            text("SELECT 1 FROM teams WHERE id = :t AND organisation_id = :o"),
+            {"t": str(remove.squad_team_id), "o": str(org_id)},
+        )).scalar())
+        profile_filled = merge_profile.carry_profile(
+            keep, remove, skip=() if squad_is_ours else ("squad_team_id",))
 
         # Save data needed for undo log before player is deleted
         keep_original_playhq_id = keep.playhq_id
@@ -682,6 +718,7 @@ async def _merge_players_core(
                     "imported_stats": len(moved_imported_ids),
                     **merge_carry.carried_summary(carried),
                 },
+                "profile_filled": profile_filled,
             },
         )
 
@@ -716,6 +753,11 @@ async def _merge_players_core(
 
 @router.post("/merge-players")
 async def merge_players(req: MergeRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_cap(MANAGE_MERGES))):
+    if not req.confirm_same_day_clash:
+        dates = await merge_safety.same_day_clash_dates(db, req.keep_player_id, req.remove_player_id)
+        if dates:
+            raise HTTPException(status_code=409, detail={
+                "code": "same_day_clash", "dates": len(dates), "message": merge_safety.clash_message(dates)})
     return await _merge_players_core(
         db, uuid.UUID(req.keep_player_id), uuid.UUID(req.remove_player_id), uuid.UUID(req.org_id), current_user,
     )
@@ -894,7 +936,7 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
     return out
 
 
-@router.get("/grade-merge-candidates")
+@router.get("/grade-merge-candidates", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def get_grade_merge_candidates(
     org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)
 ):
@@ -1454,6 +1496,7 @@ async def delete_club_competition(
         target_id=competition_id, details={},
     )
     await db.commit()
+    junior_hiding.forget(club.id)
     return {"status": "deleted"}
 
 
@@ -1472,6 +1515,7 @@ async def assign_grade_to_competition(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
+    junior_hiding.forget(club.id)
     return {"status": "assigned", "season_rows": moved}
 
 
@@ -1486,6 +1530,78 @@ async def reorder_club_competitions(
     await comp_svc.reorder_competitions(db, club.id, req.competition_ids)
     await db.commit()
     return {"status": "reordered"}
+
+
+class CompetitionJunior(BaseModel):
+    # True = junior cricket, False = senior, null = back to the name-based guess.
+    # Read through `model_fields_set` so an absent key is not a reset.
+    is_junior: bool | None = None
+
+
+@router.patch("/competitions/{competition_id}/junior")
+async def tag_competition_junior(
+    competition_id: str,
+    req: CompetitionJunior,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Tag a competition as junior or senior cricket (migration 315).
+
+    Only ever changes what a club that has switched "hide juniors" on shows its
+    public. A person's tag is never overwritten by sync.
+    """
+    if "is_junior" not in req.model_fields_set:
+        raise HTTPException(status_code=422, detail="is_junior is required (true, false or null)")
+    from app.services import competitions as comp_svc
+    try:
+        await comp_svc.set_competition_junior(db, club.id, competition_id, req.is_junior)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    from app.services.audit_log import log_activity
+    await log_activity(
+        db, org_id=str(club.id), user_id=current_user.id,
+        action="tag_competition_junior", target_type="competition",
+        target_id=competition_id, details={"is_junior": req.is_junior},
+    )
+    await db.commit()
+    junior_hiding.forget(club.id)
+    return {"status": "tagged", "is_junior_tag": req.is_junior}
+
+
+@router.get("/juniors/preview")
+async def hide_juniors_preview(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    """What "hide juniors" would hide, whether or not the switch is on.
+
+    So a club can check the tags before it turns the switch on: which
+    competitions count as junior, how many grades that takes with it, and every
+    player who would disappear from the public site (with how many games sit in
+    junior grades). A club admin always sees the club whole regardless.
+    """
+    comps = await junior_hiding.competition_tags(db, club.id)
+    grade_ids = await junior_hiding.junior_grade_ids(db, club.id)
+    hidden = await junior_hiding.junior_only_player_ids(db, club.id, grade_ids)
+    names = []
+    if hidden:
+        rows = await db.execute(
+            select(Player.id, Player.name, Player.display_name_override)
+            .where(Player.id.in_([uuid.UUID(h) for h in hidden]))
+        )
+        names = sorted(
+            ({"id": str(pid), "name": override or name} for pid, name, override in rows.all()),
+            key=lambda r: (r["name"] or "").lower(),
+        )
+    return {
+        "enabled": await junior_hiding.org_hides_juniors(db, club.id),
+        "junior_competitions": [c for c in comps if c["is_junior"]],
+        "junior_grade_count": len(grade_ids),
+        "hidden_player_count": len(names),
+        "hidden_players": names[:300],
+    }
 
 
 @router.get("/competitions/grouping")
@@ -1557,10 +1673,11 @@ async def seed_club_competitions(
     from app.services import competitions as comp_svc
     result = await comp_svc.seed_competitions_for_org(db, club.id)
     await db.commit()
+    junior_hiding.forget(club.id)
     return result
 
 
-@router.get("/grade-merge-history")
+@router.get("/grade-merge-history", dependencies=[Depends(require_cap(MANAGE_MERGES))])
 async def grade_merge_history(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     rows = await db.execute(
         text("""
@@ -1658,6 +1775,12 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
             "grassroots_id": str(remove_id),
         },
     )
+    # The raw INSERT above skips the create-time guard. A person who asked to be
+    # removed must not come back visible because somebody undid a merge.
+    from app.services import player_privacy
+    restored = await db.get(Player, remove_id)
+    if restored is not None:
+        await player_privacy.protect_restored_player(db, restored, keep)
 
     # asyncpg returns JSONB columns as Python lists already; guard against
     # legacy string-encoded rows just in case.
@@ -1757,7 +1880,7 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
     carried = log.get("carried_row_ids")
     if isinstance(carried, str):
         carried = json.loads(carried or "{}")
-    await merge_carry.restore_rows(db, remove_id, carried or {})
+    await merge_carry.restore_rows(db, remove_id, carried or {}, keep_id=keep_id)
     if log.get("removed_cricketstatz_player_id"):
         # The keeper only took it because it had none of its own, so handing it
         # back cannot collide with one it already held.
@@ -1939,7 +2062,7 @@ def _team_id_from_inn(inn: dict) -> str | None:
     return None
 
 
-@router.get("/social/scorecard/{match_id}", dependencies=[Depends(require_module("socials"))])
+@router.get("/social/scorecard/{match_id}", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db),
                                _user=Depends(get_current_user), club=Depends(get_current_club)):
     """Fetch a Grassroots scorecard and return it in the social template format.
@@ -1955,7 +2078,7 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
         raise HTTPException(500, f"Scorecard parse error: {exc}") from exc
 
 
-@router.get("/social/match-lookup", dependencies=[Depends(require_module("socials"))])
+@router.get("/social/match-lookup", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def social_match_lookup(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
     """Work out which match an admin means from whatever they pasted.
 
@@ -1977,7 +2100,7 @@ async def social_match_lookup(q: str = "", db: AsyncSession = Depends(get_db), c
         raise HTTPException(500, f"Match lookup error: {exc}") from exc
 
 
-@router.get("/social/fixtures", dependencies=[Depends(require_module("socials"))])
+@router.get("/social/fixtures", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_fixtures(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
     """Upcoming/live fixtures across the club's grades, grouped by match-day, for
     the BetterSocials Fixtures roundup posts (the multi-match analogue of the
@@ -1998,7 +2121,7 @@ async def get_social_fixtures(q: str = "", db: AsyncSession = Depends(get_db), c
         raise HTTPException(500, f"Fixtures import error: {exc}") from exc
 
 
-@router.get("/social/results", dependencies=[Depends(require_module("socials"))])
+@router.get("/social/results", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_results(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
     """Recent completed results across the club's grades, grouped by match-day,
     for the BetterSocials Results roundup posts. Scores come from each match's
@@ -2019,7 +2142,7 @@ async def get_social_results(q: str = "", db: AsyncSession = Depends(get_db), cl
         raise HTTPException(500, f"Results import error: {exc}") from exc
 
 
-@router.get("/social/potm/{match_id}", dependencies=[Depends(require_module("socials"))])
+@router.get("/social/potm/{match_id}", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
     """Player-of-the-match shortlist for one match — our side's batting, bowling
     and fielding lines from the Grassroots scorecard, ranked by a simple points
@@ -2032,6 +2155,56 @@ async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), clu
     except Exception as exc:
         log.exception("social potm %s failed for %s", match_id, getattr(club, "id", "?"))
         raise HTTPException(500, f"Player of the match error: {exc}") from exc
+
+
+@router.get("/social/totw", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
+async def get_social_totw(
+    q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
+    date_from: str = "", date_to: str = "", scope: str = "all",
+):
+    """Team-of-the-week pool for the BetterSocials post: every completed club
+    match in one round, each performance scored with the same points as the
+    player of the match, pooled across grades and ranked best first.
+
+    ``date_from`` and ``date_to`` (ISO days) name the round as a period, for a
+    club whose round runs Tuesday to Sunday. Otherwise ``q`` (optional) is a
+    pasted match link/ID naming the round, and with none it is the club's latest
+    match-day and the games within a weekend of it. ``scope`` is ``all``,
+    ``junior`` or ``senior``. The post takes its team off the front of the list."""
+    from app.services.social_rounds import social_totw
+    try:
+        return await social_totw(db, club, q, date_from, date_to, scope)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("social totw failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Team of the week error: {exc}") from exc
+
+
+@router.get("/social/debuts", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
+async def get_social_debuts(
+    player_ids: str = "", before: str = "",
+    db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
+):
+    """Which of a lineup's players have nothing on record before the match date,
+    so the BetterSocials lineup posts can tag them as debutants.
+
+    ``player_ids`` is a comma separated list of this club's player ids and
+    ``before`` an optional ISO date (the match day; today when absent). The
+    answer is a suggestion: the editor lets the admin flip any tag by hand."""
+    from datetime import date as _date
+    from app.services.social_debuts import parse_ids, social_debuts
+    on = None
+    if before.strip():
+        try:
+            on = _date.fromisoformat(before.strip()[:10])
+        except ValueError:
+            raise HTTPException(400, "before must be an ISO date (YYYY-MM-DD)")
+    try:
+        return await social_debuts(db, club, parse_ids(player_ids), on)
+    except Exception as exc:
+        log.exception("social debuts failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Debut check error: {exc}") from exc
 
 
 async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None):

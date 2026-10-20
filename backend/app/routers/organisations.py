@@ -1,4 +1,5 @@
 import logging
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,13 +12,14 @@ from app.models.db import Organisation, Season, Grade, User, ClubMembership, Mar
 from app.services import playhq_client
 from app.services import fonts as font_service
 from app.services import grade_scope
+from app.services.season_kind import season_kind
 from app.services import game_sides
 from app.services import player_visibility
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
 from app.services.fixtures_source import org_grassroots_fixtures
 from app.services.season_aliases import resolve_season_filter
-from app.routers.auth import get_current_user, get_optional_user, user_can_view_org_private
+from app.routers.auth import get_current_user, get_optional_user, public_junior_hiding, user_can_view_org_private
 from app.auth.capabilities import require_cap, RUN_SYNC
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
@@ -233,7 +235,23 @@ async def get_org_seasons(org_id: str, db: AsyncSession = Depends(get_db)):
 
     # Hide rows that are currently merged into another season.
     canonical_seasons = [s for s in all_seasons if str(s.id) not in reverse_map]
-    canonical_seasons.sort(key=lambda s: (-_year_from_name(s.name), s.name or ''))
+    # Newest first. Within one year the summer season (which starts in October)
+    # comes before the winter one (which ended that September), as the dropdown
+    # reads best newest to oldest.
+    canonical_seasons.sort(key=lambda s: (
+        -_year_from_name(s.name), season_kind(s.name) != "", s.name or ''))
+    # A club that counts winter and summer as one season lists one row per year:
+    # picking either returns the whole year (resolve_season_filter), so two
+    # entries would be the same answer twice. The summer row stands for the year,
+    # the same row the season table folds onto (aggregations._SEASON_FOLD_CTE).
+    org_row = await db.get(Organisation, uuid.UUID(org_id))
+    if org_row is not None and org_row.amalgamate_seasons:
+        picked: dict = {}
+        for s in sorted(canonical_seasons, key=lambda x: (season_kind(x.name) != "", str(x.id))):
+            if s.year is not None and s.year not in picked:
+                picked[s.year] = s.id
+        canonical_seasons = [s for s in canonical_seasons
+                             if s.year is None or picked.get(s.year) == s.id]
 
     out = []
     for s in canonical_seasons:
@@ -273,6 +291,11 @@ async def get_org_grades(
     public_clause = ""
     if not await user_can_view_org_private(db, viewer, org_id):
         public_clause = "AND g.is_public IS NOT FALSE"
+    # A club that hides its juniors also drops their grades from the picker.
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
+    if hiding.active:
+        public_clause += " AND NOT (g.id = ANY(CAST(:jh_grades AS uuid[])))"
+        params["jh_grades"] = [str(x) for x in hiding.grade_ids]
     result = await db.execute(
         text(f"""
             SELECT display_name FROM (
@@ -311,11 +334,21 @@ async def get_org_grades(
         """),
         params,
     )
-    return [{"name": row.display_name} for row in result]
+    # The club's own reading order (Manage Grades -> Order) rides along so a
+    # picker can follow it. Additive: `name` and the row order are exactly what
+    # they were, and a grade the club has not placed carries null.
+    from app.services.aggregations import _org_grade_display_orders
+    orders = await _org_grade_display_orders(db, org_id)
+    return [{"name": row.display_name, "display_order": orders.get(row.display_name)}
+            for row in result]
 
 
 @router.get("/{org_id}/grade-categories")
-async def get_org_grade_categories(org_id: str, db: AsyncSession = Depends(get_db)):
+async def get_org_grade_categories(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
     """Which grade categories and formats this club runs, and what counts by default.
 
     Public and cheap: every stats page needs it to decide which toggles to draw
@@ -326,15 +359,25 @@ async def get_org_grade_categories(org_id: str, db: AsyncSession = Depends(get_d
     whose games predate `games.match_format` being recorded and whose grade
     names say nothing about format.
     """
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
+    available = await grade_scope.org_available_categories(db, org_id)
+    competitions = await grade_scope.org_available_competitions(db, org_id)
+    if hiding.active:
+        # The Juniors toggle and the junior competitions are for a club that
+        # shows its juniors. A pill that can only ever answer "nothing" is
+        # worse than no pill.
+        available = [c for c in available if c != "junior"]
+        competitions = [c for c in competitions if c["id"] not in hiding.competition_ids]
     return {
-        "available": await grade_scope.org_available_categories(db, org_id),
+        "juniors_hidden": bool(hiding.active),
+        "available": available,
         "default": list(await grade_scope.club_default_categories(db, org_id)),
         "available_formats": await grade_scope.org_available_formats(db, org_id),
         # The club's competitions, so a page can draw the third filter row from
         # the request it already makes. A club with fewer than two has nothing
         # to choose between and the row doesn't render — the same rule the
         # empty `available` above follows.
-        "available_competitions": await grade_scope.org_available_competitions(db, org_id),
+        "available_competitions": competitions,
         # Whether the club has opted its public Competition surfaces in. Off by
         # default; it gates the filter pill row and decides what "All" means
         # (the club's own competitions summed, vs Cricket Australia's lifetime
@@ -348,6 +391,7 @@ async def get_org_competitions(
     org_id: str,
     season_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     """The club's record in each competition it has played, and its grades.
 
@@ -361,20 +405,34 @@ async def get_org_competitions(
     which competition a run was scored in.
     """
     from app.services import competition_stats
-    club = await competition_stats.club_competition_breakdown(db, org_id, season_id)
+    # A club that hides its juniors drops their competitions from every list here.
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
+    drop = hiding.competition_ids if hiding.active else ()
+    club = competition_stats.without_competitions(
+        await competition_stats.club_competition_breakdown(db, org_id, season_id), drop)
     return {
         **club,
-        "grades": await competition_stats.competition_grade_breakdown(db, org_id, season_id),
-        "available": await grade_scope.org_available_competitions(db, org_id),
+        "grades": competition_stats.without_competitions(
+            await competition_stats.competition_grade_breakdown(db, org_id, season_id), drop),
+        "available": [
+            c for c in await grade_scope.org_available_competitions(db, org_id)
+            if c["id"] not in set(drop)
+        ],
     }
 
 
 @router.get("/{org_id}/seasons/{season_id}/grades")
-async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depends(get_db)):
+async def get_season_grades(
+    org_id: str, season_id: str,
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
+    q = select(Grade).where(Grade.season_id == uuid.UUID(season_id))
+    if hiding.active:
+        q = q.where(Grade.id.not_in(list(hiding.grade_ids)))
     result = await db.execute(
-        select(Grade)
-        .where(Grade.season_id == uuid.UUID(season_id))
-        .order_by(text("NULLIF(regexp_replace(grades.name, '[^0-9].*', ''), '')::int NULLS LAST"), Grade.name)
+        q.order_by(text("NULLIF(regexp_replace(grades.name, '[^0-9].*', ''), '')::int NULLS LAST"), Grade.name)
     )
     grades = result.scalars().all()
     if grades:
@@ -453,7 +511,11 @@ async def get_org_summary(
 ):
     # W/L/D/total_games/win_rate are computed from our own synced games inside
     # get_club_summary (DB-first) — the old PlayHQ Partner override is retired.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
+    scope = await grade_scope.resolve_scope(
+        db, org_id, categories, formats=formats, competitions=competitions,
+        hidden_grade_ids=hiding.grade_ids,
+    )
     summary = await get_club_summary(db, org_id, season_id, grade_id, scope=scope)
     summary["scope"] = scope.as_meta()
     # The club-level totals stay whole (a hidden player's runs still happened
@@ -463,13 +525,18 @@ async def get_org_summary(
 
 
 @router.get("/{org_id}/fixtures")
-async def get_org_fixtures(org_id: str, db: AsyncSession = Depends(get_db)):
+async def get_org_fixtures(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
     """Fetch upcoming fixtures from the Grassroots /scores API (DB grades → live
     per-grade match list). Replaces the retired PlayHQ Partner path."""
     org = await db.get(Organisation, uuid.UUID(org_id))
     if not org:
         return []
-    fixtures = await org_grassroots_fixtures(db, org)
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
+    fixtures = await org_grassroots_fixtures(db, org, hidden_grade_ids=hiding.grade_ids)
     upcoming = [
         {
             "id": fx["id"],
@@ -498,6 +565,7 @@ async def get_org_lineups(
     offset: int = Query(0, ge=0),
     limit: int = Query(6, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     """Published team lists, live from the Grassroots feed (public).
 
@@ -534,12 +602,14 @@ async def get_org_lineups(
         raise HTTPException(status_code=400, detail="Invalid category")
 
     categories = await org_grade_categories(db, org.id)
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
     # Which categories actually occur among the org's grades — so the frontend
-    # only ever offers a filter option that could return something.
+    # only ever offers a filter option that could return something. A club that
+    # hides its juniors is not offered the Juniors tab.
     available_categories = [
         {"key": c, "label": category_label(c)}
         for c in ("senior", "junior", "womens", "masters", "mixed")
-        if c in categories.values()
+        if c in categories.values() and not (hiding.active and c == "junior")
     ]
 
     # Grade rows whose effective category matches the request — resolved once
@@ -578,6 +648,9 @@ async def get_org_lineups(
             params["category_grade_ids"] = category_grade_ids
         if finals_only:
             where.append("g.is_final = TRUE")
+        if hiding.active:
+            where.append("(g.grade_id IS NULL OR NOT (g.grade_id = ANY(:jh_grades)))")
+            params["jh_grades"] = list(hiding.grade_ids)
         res = await db.execute(
             text(
                 f"SELECT g.id::text FROM v_effective_games g WHERE {' AND '.join(where)} "
@@ -593,7 +666,7 @@ async def get_org_lineups(
         has_more = len(ids) > limit
         match_ids, source = ids[:limit], "past"
     else:
-        fixtures = await org_grassroots_fixtures(db, org)
+        fixtures = await org_grassroots_fixtures(db, org, hidden_grade_ids=hiding.grade_ids)
         if category:
             fixtures = [fx for fx in fixtures if fx.get("category") == category]
         if finals_only:
@@ -644,7 +717,11 @@ async def get_org_lineups(
 
 
 @router.get("/{org_id}/lineups/{match_id}")
-async def get_org_lineup_one(org_id: str, match_id: str, db: AsyncSession = Depends(get_db)):
+async def get_org_lineup_one(
+    org_id: str, match_id: str,
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
     """One match's published lineup — for deep-linking straight from a
     Fixtures-page row instead of making a supporter hunt through the Lineups
     list for it. Same payload shape as one entry of the list endpoint's
@@ -652,6 +729,15 @@ async def get_org_lineup_one(org_id: str, match_id: str, db: AsyncSession = Depe
     org = await db.get(Organisation, uuid.UUID(org_id))
     if not org:
         raise HTTPException(status_code=404, detail="Organisation not found")
+    # A junior game's lineup reads as absent to the public of a club that hides
+    # its juniors. Only a game we hold can be placed; an upcoming fixture that
+    # is not in our database yet carries no grade of ours to judge it by.
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
+    if hiding.active:
+        gid = await db.scalar(
+            text("SELECT grade_id FROM v_effective_games WHERE id::text = :m"), {"m": match_id})
+        if gid is not None and gid in hiding.grade_ids:
+            raise HTTPException(status_code=404, detail="No lineup found for that match")
     from app.services.lineups import match_lineups
     data = await match_lineups(db, org, match_id)
     if not data:
@@ -659,11 +745,12 @@ async def get_org_lineup_one(org_id: str, match_id: str, db: AsyncSession = Depe
     return data
 
 
-async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full", auto_yearbooks: bool = False):
+async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full", auto_yearbooks: bool = False,
+                     since: date | None = None):
     from app.services.sync import finish_sync_run, pause_sync_run, cancel_sync_run, SyncControlSignal
     import logging
     try:
-        stats = await sync_organisation(org_id, run_id=run_id, kind=kind)
+        stats = await sync_organisation(org_id, run_id=run_id, kind=kind, since=since)
         await finish_sync_run(run_id, stats if isinstance(stats, dict) else {})
 
         # Self-serve registration's first full sync: build, narrate and publish
@@ -748,6 +835,28 @@ async def trigger_sync(org_id: str, background_tasks: BackgroundTasks, _user: Us
     return {"status": "sync_started", "org_id": org_id, "run_id": str(run_id)}
 
 
+@router.post("/{org_id}/sync/quick", status_code=202)
+async def trigger_quick_sync(org_id: str, background_tasks: BackgroundTasks, _user: User = Depends(require_cap(RUN_SYNC))):
+    """Quick Sync: pull only the last QUICK_LOOKBACK_DAYS of fixtures.
+
+    The same incremental code path the scheduled sync uses (``since=``), so it
+    is a full sync with a smaller input set and never a different one. Run
+    under its own kind, ``org_quick``, which is NOT a watermark kind: a quick
+    sync after a month of silence must not make the next scheduled run think
+    the club is up to date and skip the weeks in between."""
+    from app.services import auto_sync
+    from app.services.sync import start_sync_run
+    if org_id in _org_sync_running:
+        return {"status": "already_running", "org_id": org_id}
+    org_uuid = uuid.UUID(org_id)
+    since = auto_sync.quick_sync_since()
+    run_id = await start_sync_run(org_uuid, auto_sync.QUICK_KIND, triggered_by_user_id=_user.id)
+    _org_sync_running.add(org_id)
+    background_tasks.add_task(_sync_safe, org_id, run_id, auto_sync.QUICK_KIND, False, since)
+    return {"status": "sync_started", "org_id": org_id, "run_id": str(run_id),
+            "since": since.isoformat()}
+
+
 @router.get("/{org_id}/results")
 async def get_org_results(
     org_id: str,
@@ -780,6 +889,7 @@ async def get_org_results(
         ),
     ),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     """Return all synced game results for the org from the DB, grouped-friendly flat list."""
     # A game is 'ours' if any of: (a) we're recorded as home_org_id/away_org_id
@@ -889,7 +999,11 @@ async def get_org_results(
         query += " AND g.is_final = TRUE"
     # Grade-type / match-type scope. An explicitly picked grade beats it, the
     # same rule the leaderboards follow.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    hiding = await public_junior_hiding(db, viewer, org_id, with_players=False)
+    scope = await grade_scope.resolve_scope(
+        db, org_id, categories, formats=formats, competitions=competitions,
+        hidden_grade_ids=hiding.grade_ids,
+    )
     if grade_id:
         scope = scope.formats_only()
     if scope.active:

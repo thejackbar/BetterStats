@@ -42,19 +42,9 @@ const NAV = [
 // from Better HQ → All Clubs). Each opens its own module surface, with its own
 // sidebar, exactly as it does in cricket.
 const MODULE_NAV = [
+  { to: '/admin/betterselect', label: 'BetterSelect', modules: ['select'], external: true },
   { to: '/admin/clubhouse', label: 'BetterAdmin', modules: ['fees', 'comms', 'merch', 'crm'], external: true },
   { to: '/admin/bettersocials', label: 'BetterSocials', modules: ['socials'], external: true },
-]
-
-// BetterSelect lives inside the football admin rather than on a surface of its
-// own: it is football's own screens, not the shared cricket module chrome.
-const SELECT_NAV = [
-  { heading: 'BetterSelect' },
-  { to: '/admin/select/selection', label: 'Selection' },
-  { to: '/admin/select/fixtures', label: 'Fixtures' },
-  { to: '/admin/select/availability', label: 'Availability' },
-  { to: '/admin/select/squads', label: 'Squads' },
-  { to: '/admin/select/rules', label: 'Selection rules' },
 ]
 
 const SUPER_NAV = [
@@ -88,7 +78,6 @@ export default function AflAdminLayout() {
   const isSuper = user.role === 'super_admin'
   const modules = MODULE_NAV.filter(m => m.modules.some(k => hasModule(k)))
   const items = [
-    ...(hasModule('select') ? SELECT_NAV : []),
     ...NAV,
     ...(modules.length ? [{ heading: 'Modules' }, ...modules] : []),
     ...(isSuper ? SUPER_NAV : []),

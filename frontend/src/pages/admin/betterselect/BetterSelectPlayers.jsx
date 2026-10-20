@@ -11,6 +11,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { nameMatchesSearch, nameSortKey } from '../../../lib/nameFormat'
+import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { ALPHABET, RANGES, letterOfName, rangeOfName, groupByLetter } from '../../../lib/playerAlphabet'
 import { PbSpinner } from '../../../lib/presskit'
 import { bowls, bowlingLabel } from '../../../lib/playerAttributes'
@@ -18,10 +19,11 @@ import { Profile, draftFromProfile, patchFromDraft } from '../../../components/p
 import UnrosteredGuests from '../../../components/player/UnrosteredGuests'
 import {
   Icon, Avatar, AvailDot, RoleChips, Btn, Empty,
-  QuickAvailModal, RecencySelect, playedWithinYears,
+  QuickAvailModal, RecencySelect, playedWithinYears, recencyOf,
   AVAIL_ORDER, AVAILABILITY, RuleTags,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
+import usePersistedState from '../../../lib/usePersistedState'
 import '../../../styles/players-list.css'
 
 function normGender(g) { const s = (g || '').toLowerCase(); return s.startsWith('f') ? 'female' : s.startsWith('m') ? 'male' : '' }
@@ -32,6 +34,7 @@ function statusOfMatrixRow(row) {
 
 /* ── List row ─────────────────────────────────────────────────────────────── */
 function PlayerRow({ p, rules, active, selected, status, squadName, onSelect, onOpenProfile, onToggleSel, onEditAvail, canEditAvail }) {
+  const fmt = useAdminNameFormat()
   const inactive = p.status === 'inactive'
   const hasContact = !!(p.email || p.phone)
   return (
@@ -47,7 +50,7 @@ function PlayerRow({ p, rules, active, selected, status, squadName, onSelect, on
       </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium truncate">{p.display_name || p.name}</span>
+          <span className="text-sm font-medium truncate">{fmt(p.display_name || p.name)}</span>
           <RuleTags player={rules} />
           {p.is_overseas && (
             <span title={`Overseas${p.overseas_country ? ` — ${p.overseas_country}` : ''}`}
@@ -109,7 +112,7 @@ function PlayerList({ players, rulesById, statusOf, squadNameOf, selectedIds, se
     { key: 'nophoto', label: 'Missing photo', type: 'bool' },
     { key: 'newbie', label: 'Never played', type: 'bool' },
   ], [squadOptions])
-  const filters = useFilters(facets)
+  const filters = useFilters(facets, { persist: 'players' })
   const { values, search } = filters
   const searching = search.trim().length > 0
 
@@ -129,7 +132,7 @@ function PlayerList({ players, rulesById, statusOf, squadNameOf, selectedIds, se
     if (values.overseas && !p.is_overseas) return false
     if (values.nophoto && p.photo_url) return false
     if (values.newbie && p.last_played) return false
-    if (!playedWithinYears(p.last_played, years)) return false
+    if (!playedWithinYears(recencyOf(p), years)) return false
     return true
   }).sort((a, b) => nameSortKey(nameOf(a)).localeCompare(nameSortKey(nameOf(b)))),
   [players, values, search, years, statusOf, selectedIds])
@@ -256,6 +259,13 @@ export default function BetterSelectPlayers() {
   // BetterSelect. Selecting a player keeps the URL in sync so it's shareable
   // and the back button works.
   const [selId, setSelId] = useState(() => searchParams.get('player') || null)
+  // Phone only: the list and a profile do not fit side by side, and stacked
+  // they put the profile a long scroll below the list. So a phone shows ONE of
+  // them. `phoneOpen` is true only once someone has actually chosen a player (or
+  // arrived on a ?player= link): selId alone is not enough, because it defaults
+  // to the first player in the roster.
+  const [phoneOpen, setPhoneOpen] = useState(() => !!searchParams.get('player'))
+  const openPlayer = useCallback((id) => { setSelId(id); setPhoneOpen(true); window.scrollTo({ top: 0 }) }, [])
   const [profile, setProfile] = useState(null)   // full profile of selId
   const [draft, setDraft] = useState(null)
   const [savedTick, setSavedTick] = useState(false)
@@ -284,7 +294,7 @@ export default function BetterSelectPlayers() {
   // avatar elsewhere routes here with a new id).
   useEffect(() => {
     const pid = searchParams.get('player')
-    if (pid && pid !== selId) setSelId(pid)
+    if (pid && pid !== selId) { setSelId(pid); setPhoneOpen(true) }
   }, [searchParams])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep the URL's ?player= in sync with the active selection (replace, so we
@@ -297,8 +307,9 @@ export default function BetterSelectPlayers() {
     setSearchParams(next, { replace: true })
   }, [selId])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
   const loadMatrix = useCallback(() => {
-    api.bsAvailabilityMatrix()
+    api.bsAvailabilityMatrix({ juniors: showJuniors })
       .then((d) => {
         setAvailability(d?.availability || {})
         setFirstDate((d?.dates || [])[0]?.date || null)
@@ -307,7 +318,7 @@ export default function BetterSelectPlayers() {
         setRulesById(Object.fromEntries((d?.players || []).map((p) => [p.id, p])))
       })
       .catch(() => { setAvailability({}); setFirstDate(null); setRulesById({}) })
-  }, [])
+  }, [showJuniors])
 
   useEffect(() => {
     api.bsListTeams().then((t) => setTeams(t || [])).catch(() => setTeams([]))
@@ -451,12 +462,22 @@ export default function BetterSelectPlayers() {
           master/detail grid below keeps its full height almost always. */}
       <UnrosteredGuests onPromoted={loadRoster} />
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(380px,1fr)_1.35fr] lg:h-[calc(100vh-140px)]">
-        <PlayerList
-          players={players} rulesById={rulesById} statusOf={statusOf} squadNameOf={squadNameOf} selectedIds={selectedIds}
-          selectedId={selId} onSelect={setSelId} onOpenProfile={setSelId}
-          canEdit={canEdit} teams={teams} onBulkSquad={onBulkSquad} onBulkInactive={onBulkInactive}
-          onEditAvail={canEdit ? (p) => openAvail(p, null) : undefined} />
-        <div className="pb-card bg-pb-surface min-h-0 h-[80vh] lg:h-full overflow-hidden">
+        {/* Hidden, not unmounted, while a phone shows the profile, so the
+            search, filters and scroll position are all still there on Back. */}
+        <div className={`min-w-0 min-h-0 lg:h-full ${phoneOpen ? 'max-lg:hidden' : ''}`} data-players-list>
+          <PlayerList
+            players={players} rulesById={rulesById} statusOf={statusOf} squadNameOf={squadNameOf} selectedIds={selectedIds}
+            selectedId={selId} onSelect={openPlayer} onOpenProfile={openPlayer}
+            canEdit={canEdit} teams={teams} onBulkSquad={onBulkSquad} onBulkInactive={onBulkInactive}
+            onEditAvail={canEdit ? (p) => openAvail(p, null) : undefined} />
+        </div>
+        {phoneOpen && (
+          <button type="button" onClick={() => setPhoneOpen(false)} data-players-back
+            className="lg:hidden -mb-1 self-start inline-flex items-center gap-2 min-h-[44px] pr-3 font-display font-semibold text-[14px] text-pb-accent">
+            <Icon name="chevron" size={16} style={{ transform: 'rotate(180deg)' }} /> All players
+          </button>
+        )}
+        <div className={`pb-card bg-pb-surface min-h-0 h-[80dvh] lg:h-full overflow-hidden ${phoneOpen ? '' : 'max-lg:hidden'}`} data-players-profile>
           {!selId
             ? <div className="p-6"><Empty>Select a player</Empty></div>
             : (!profileForView || !draft)
@@ -464,7 +485,8 @@ export default function BetterSelectPlayers() {
               : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
                   dirty={dirty} saved={savedTick} onSave={onSave} canEdit={canEdit}
                   onEditAvail={openAvail} canEditAvail={canEdit}
-                  onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange} />}
+                  onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange}
+                  onPrivacyReleased={(updated) => { setProfile(updated); setDraft(draftFromProfile(updated)) }} />}
         </div>
       </div>
 

@@ -26,8 +26,13 @@ function BallotEntryForm({ detail, medalId, onSaved }) {
   const values = detail.settings?.ballot_values || [3, 2, 1]
   const captainOnly = detail.settings?.voter_mode === 'captain'
   const captains = eligible.filter((p) => p.is_captain)
+  // The person the captain handed this team's counting to. They may not be in
+  // the side, so they are not in `eligible`.
+  const counter = captainOnly ? detail.settings?.vote_counter : null
   const [showAllVoters, setShowAllVoters] = useState(!captainOnly)
-  const voterOptions = (captainOnly && !showAllVoters && captains.length > 0) ? captains : eligible
+  const voterOptions = (captainOnly && !showAllVoters && (counter || captains.length > 0))
+    ? (counter ? [{ id: counter.id, name: counter.name }] : captains)
+    : eligible
   const [voterId, setVoterId] = useState('')
   const [voterName, setVoterName] = useState('')
   const [picks, setPicks] = useState(values.map(() => ''))
@@ -58,7 +63,9 @@ function BallotEntryForm({ detail, medalId, onSaved }) {
       <div className="font-display font-bold text-[15px] mb-1">Enter a ballot</div>
       <p className="text-xs text-pb-faint mb-3">
         Paper votes, or the captain texting theirs in. Entering again for the same voter replaces their ballot.
-        {captainOnly && " This club only counts the captain's votes."}
+        {captainOnly && (counter
+          ? ` This team's votes are counted by ${counter.name}, in place of the captain.`
+          : " This club only counts the captain's votes.")}
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <div>
@@ -69,10 +76,10 @@ function BallotEntryForm({ detail, medalId, onSaved }) {
             {voterOptions.map((p) => <option key={p.id} value={p.id}>{p.name}{p.is_captain ? ' (c)' : ''}</option>)}
             <option value="__other__">Someone else (coach, supporter…)</option>
           </select>
-          {captainOnly && captains.length > 0 && (
+          {captainOnly && (counter || captains.length > 0) && (
             <button type="button" onClick={() => setShowAllVoters((v) => !v)}
               className="block mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text underline">
-              {showAllVoters ? 'Only show the captain' : 'Show all players'}
+              {showAllVoters ? (counter ? `Only show ${counter.name}` : 'Only show the captain') : 'Show all players'}
             </button>
           )}
         </div>
@@ -220,6 +227,12 @@ export default function FixtureDetail({ fixtureId, medalId, onBack }) {
 
           <div className="pb-card px-4 py-4">
             <div className="font-display font-bold text-[15px] mb-2.5">This week's count</div>
+            {detail.fixture.weight != null && detail.fixture.weight !== 1 && (
+              <div className="text-[12px] text-pb-faint mb-2.5">
+                This grade's votes are weighted ×{detail.fixture.weight}, so the season points below are the
+                normal points times {detail.fixture.weight}. Raw votes are the real count.
+              </div>
+            )}
             {detail.results.length === 0 ? (
               <div className="text-pb-faint text-sm">No votes yet.</div>
             ) : (

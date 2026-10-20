@@ -10,6 +10,8 @@ import {
 import { PbSpinner } from '../../lib/presskit'
 import { PersonSearch } from '../../components/admin/clubmanager/pickers'
 import { usePeopleFilters } from '../../components/admin/clubmanager/peopleFilters'
+import { downloadCsv } from './bettercomms/audience'
+import { OWING_LENSES, owesLens, owedUnder, lensCounts, accountsToCsv, accountsCsvName } from '../../lib/accountsOwing'
 
 function sortSeasons(seasons) {
   return seasons.filter(s => !s.alias_of).sort((a, b) => (b.year || 0) - (a.year || 0) || (b.name > a.name ? 1 : -1))
@@ -323,7 +325,10 @@ export default function AdminFeesMembers() {
   const [membershipTypes, setMembershipTypes] = useState([])
   const [q, setQ] = useState('')
   const [needsTierOnly, setNeedsTierOnly] = useState(false)
-  const [owesOnly, setOwesOnly] = useState(false)
+  // '' = everyone, else which kind of owing to look at. One value, not three
+  // toggles: "owes membership" and "owes match fees" are two views of the same
+  // question, and a person who owes both appears under each.
+  const [owing, setOwing] = useState('')
   const [playhqMissingOnly, setPlayhqMissingOnly] = useState(false)
   const [togglingPlayhq, setTogglingPlayhq] = useState(() => new Set())
   const [showAdd, setShowAdd] = useState(false)
@@ -406,6 +411,10 @@ export default function AdminFeesMembers() {
     }
   }
 
+  function exportShown() {
+    downloadCsv(accountsCsvName(currentSeason?.name, owing), accountsToCsv(filtered))
+  }
+
   async function removeSelected() {
     const ids = Array.from(selected)
     if (!ids.length) return
@@ -432,16 +441,21 @@ export default function AdminFeesMembers() {
     const needle = q.trim().toLowerCase()
     return data.members.filter(m =>
       (!needsTierOnly || m.needs_tier) &&
-      (!owesOnly || m.status === 'non_financial') &&
+      (!owing || owesLens(m, owing)) &&
       (!playhqMissingOnly || !m.playhq_registered) &&
       // The Directory's People filters, matched on the segments that service
       // already computes rather than re-derived here.
       people.matches(m.member_id) &&
       (!needle || m.full_name.toLowerCase().includes(needle) || (m.tier || '').toLowerCase().includes(needle))
     )
-  }, [data, q, needsTierOnly, owesOnly, playhqMissingOnly, people.anyOn, people.matches])
+  }, [data, q, needsTierOnly, owing, playhqMissingOnly, people.anyOn, people.matches])
 
   const s = data?.summary || {}
+  const counts = useMemo(() => lensCounts(data?.members), [data])
+  const lensLabel = owing ? OWING_LENSES[owing].owed : 'OWED'
+  const listedOwing = useMemo(
+    () => (owing ? Math.round(filtered.reduce((t, m) => t + owedUnder(m, owing), 0) * 100) / 100 : 0),
+    [filtered, owing])
   const currentSeason = seasons.find(se => se.id === seasonId)
 
   // Header slots: the title, its live count, the filters and the primary action
@@ -461,13 +475,16 @@ export default function AdminFeesMembers() {
             section buttons do. They are NOT one value though: a person can be
             looking at who owes money AND who is missing from PlayHQ at once, so
             each keeps its own on/off rather than becoming a tab. */}
-        <SegItem active={!needsTierOnly && !owesOnly && !playhqMissingOnly}
-          onClick={() => { setNeedsTierOnly(false); setOwesOnly(false); setPlayhqMissingOnly(false) }}>
+        <SegItem active={!needsTierOnly && !owing && !playhqMissingOnly}
+          onClick={() => { setNeedsTierOnly(false); setOwing(''); setPlayhqMissingOnly(false) }}>
           Everyone
         </SegItem>
-        <SegItem warn active={owesOnly} onClick={() => setOwesOnly(v => !v)} count={s.non_financial}>
-          Owes money
-        </SegItem>
+        {/* Combined first, then the two halves of it. */}
+        {Object.entries(OWING_LENSES).map(([key, l]) => (
+          <SegItem key={key} warn active={owing === key} onClick={() => setOwing(v => (v === key ? '' : key))} count={counts[key]}>
+            {l.label}
+          </SegItem>
+        ))}
         <SegItem active={needsTierOnly} onClick={() => setNeedsTierOnly(v => !v)} count={s.needs_tier}>
           Needs tier
         </SegItem>
@@ -494,6 +511,7 @@ export default function AdminFeesMembers() {
       <>
         <StatReadout value={money(s.total_outstanding)} label="Outstanding"
           ink={(s.total_outstanding ?? 0) > 0 ? '#f5b542' : undefined} />
+        {owing && <StatReadout value={money(listedOwing)} label={`Listed · ${OWING_LENSES[owing].label.toLowerCase()}`} ink="#f5b542" />}
         <StatReadout value={s.total_members ?? 0} label="People" />
       </>
     ),
@@ -521,20 +539,39 @@ export default function AdminFeesMembers() {
           <PbSpinner message="Loading accounts…" />
         ) : (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-5">
               <StatCard label="People" value={s.total_members ?? 0} ink="var(--pb-text)" />
-              <StatCard label="Owe money" value={s.non_financial ?? 0}
-                ink={(s.non_financial ?? 0) > 0 ? '#f5b542' : 'var(--pb-text)'} />
               <StatCard label="Billed" value={money(s.total_payable)} ink="var(--pb-text)" />
               <StatCard label="Taken" value={money(s.total_paid)} ink="var(--pb-text)" />
-              <StatCard label="Outstanding" value={money(s.total_outstanding)} accent />
+              <StatCard label="Membership owing" value={money(s.membership_outstanding)}
+                detail={`${counts.membership} ${counts.membership === 1 ? 'person' : 'people'}`}
+                ink={(s.membership_outstanding ?? 0) > 0 ? '#f5b542' : 'var(--pb-text)'}
+                onClick={() => setOwing(v => (v === 'membership' ? '' : 'membership'))} />
+              <StatCard label="Match fees owing" value={money(s.match_fee_outstanding)}
+                detail={`${counts.match} ${counts.match === 1 ? 'person' : 'people'}`}
+                ink={(s.match_fee_outstanding ?? 0) > 0 ? '#f5b542' : 'var(--pb-text)'}
+                onClick={() => setOwing(v => (v === 'match' ? '' : 'match'))} />
+              <StatCard label="Outstanding" value={money(s.total_outstanding)}
+                detail={`${counts.any} ${counts.any === 1 ? 'person' : 'people'} owe`}
+                accent onClick={() => setOwing(v => (v === 'any' ? '' : 'any'))} />
             </div>
 
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <Button size="sm" onClick={recompute} disabled={recomputing}>
                 {recomputing ? 'Syncing…' : 'Sync match days'}
               </Button>
+              <Button size="sm" onClick={exportShown} disabled={filtered.length === 0}
+                title="Download the people currently listed, with the membership and match fee split">
+                Export {filtered.length} as CSV
+              </Button>
             </div>
+            {owing && (
+              <Note className="mb-3">
+                {owing === 'membership' && 'Showing people who still owe membership fees. Some also owe match fees; the Owed column shows the membership part and the line under it shows both.'}
+                {owing === 'match' && 'Showing people who still owe match fees (match day charges), even if their membership is paid. Match credit never offsets membership owing, so the two are counted apart.'}
+                {owing === 'any' && 'Showing everyone who owes anything, membership and match fees combined. Use Owes membership or Owes match fees to split them.'}
+              </Note>
+            )}
 
             {filtered.length === 0 ? (
               data.members.length === 0 && previousSeason ? (
@@ -572,7 +609,11 @@ export default function AdminFeesMembers() {
                 <p className="font-mono text-[10px] tracking-wide2 text-pb-faint mb-2">
                   Tip: tick rows to bulk-assign a tier (e.g. promote graduating students to Senior in one go).
                 </p>
-                <div className="pb-card overflow-hidden">
+                {/* A phone gets one card per person (below). Eleven columns do not
+                    fit 390px, and the old `overflow-hidden` box simply cut the
+                    last six off: PlayHQ, payable, paid, owed and status, which
+                    are the whole point of this screen. */}
+                <div className="pb-card overflow-hidden hidden md:block">
                   <table className="w-full">
                     <thead>
                       <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left bg-pb-surface2/40">
@@ -592,7 +633,7 @@ export default function AdminFeesMembers() {
                         <th className="font-medium py-2.5 pr-3 w-16 text-right">DAYS</th>
                         <th className="font-medium py-2.5 pr-3 w-24 text-right">PAYABLE</th>
                         <th className="font-medium py-2.5 pr-3 w-24 text-right">PAID</th>
-                        <th className="font-medium py-2.5 pr-3 w-24 text-right">OWED</th>
+                        <th className="font-medium py-2.5 pr-3 w-32 text-right">{lensLabel}</th>
                         <th className="font-medium py-2.5 pr-3 w-28 text-right">STATUS</th>
                         <th className="font-medium py-2.5 pr-5 w-8"></th>
                       </tr>
@@ -641,8 +682,14 @@ export default function AdminFeesMembers() {
                             <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{m.match_days || 0}</td>
                             <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{money(m.total_payable)}</td>
                             <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{money(m.total_paid)}</td>
-                            <td className={`py-2.5 pr-3 text-right font-mono text-[11px] tabular-nums ${m.total_outstanding > 0 ? 'text-pb-text' : 'text-pb-faintest'}`}>
-                              {money(m.total_outstanding)}
+                            <td className={`py-2.5 pr-3 text-right font-mono text-[11px] tabular-nums ${owedUnder(m, owing) > 0 ? 'text-pb-text' : 'text-pb-faintest'}`}>
+                              {money(owedUnder(m, owing))}
+                              {m.total_outstanding > 0 && (
+                                <div className="text-[9.5px] text-pb-faint whitespace-nowrap"
+                                  title="Membership fees owing · match fees owing">
+                                  Memb {money(m.membership_outstanding)} · Match {money(m.match_fee_outstanding)}
+                                </div>
+                              )}
                             </td>
                             <td className="py-2.5 pr-3 text-right whitespace-nowrap">
                               {m.in_credit && (
@@ -664,6 +711,81 @@ export default function AdminFeesMembers() {
                       })}
                     </tbody>
                   </table>
+                </div>
+
+                <div className="md:hidden flex flex-col gap-2" data-testid="accounts-cards">
+                  <label className="pb-card px-3.5 py-2.5 flex items-center gap-3 text-[12.5px] text-pb-dim cursor-pointer">
+                    <input type="checkbox"
+                      checked={filtered.length > 0 && filtered.every(m => selected.has(m.member_id))}
+                      onChange={e => setSelected(e.target.checked ? new Set(filtered.map(m => m.member_id)) : new Set())}
+                      className="w-[18px] h-[18px] cursor-pointer accent-pb-accent" />
+                    Select everyone shown
+                  </label>
+                  {filtered.map(m => {
+                    const isSelected = selected.has(m.member_id)
+                    const typeName = membershipTypes.find(t => t.id === m.membership_type_id)?.name
+                    return (
+                      <div key={m.member_season_id}
+                        className={`pb-card px-3.5 py-3 ${isSelected ? 'bg-pb-surface2/60' : ''}`}
+                        style={isSelected ? { borderColor: 'var(--pb-accent)' } : undefined}>
+                        <div className="flex items-start gap-3">
+                          <input type="checkbox" checked={isSelected} aria-label={`Select ${m.full_name}`}
+                            onChange={e => setSelected(sel => {
+                              const n = new Set(sel)
+                              if (e.target.checked) n.add(m.member_id); else n.delete(m.member_id)
+                              return n
+                            })}
+                            className="mt-0.5 w-[18px] h-[18px] shrink-0 cursor-pointer accent-pb-accent" />
+                          <div className="min-w-0 flex-1">
+                            <Link to={`/admin/fees/member/${m.member_id}?season=${seasonId}`}
+                              className="text-pb-text text-[14.5px] font-medium inline-flex flex-wrap items-center gap-x-1.5 break-words">
+                              {m.full_name}
+                              {!m.is_linked && <Badge>Manual</Badge>}
+                            </Link>
+                            <div className="text-[12px] text-pb-dim mt-0.5 break-words">
+                              {m.needs_tier
+                                ? <span className="font-mono text-[10px] text-pb-amber">⚠ needs tier</span>
+                                : m.tier}
+                              {typeName && <span className="text-pb-faint"> · {typeName}</span>}
+                              {m.is_life_member && <Badge toneKey="accent" className="ml-1.5">Life</Badge>}
+                              {m.is_honorary && <Badge className="ml-1.5">Honorary</Badge>}
+                            </div>
+                          </div>
+                          <div className="shrink-0 text-right whitespace-nowrap">
+                            {m.in_credit && <span className="mr-1 inline-block"><Badge toneKey="ok">+{money(m.credit)}</Badge></span>}
+                            <StatusPill status={m.status} />
+                          </div>
+                        </div>
+                        <div className="mt-2.5 grid grid-cols-3 gap-2 font-mono tabular-nums">
+                          {[['Payable', m.total_payable, false], ['Paid', m.total_paid, false], [owing ? OWING_LENSES[owing].owed.replace(' OWED', '') : 'Owed', owedUnder(m, owing), true]].map(([label, v, owed]) => (
+                            <div key={label}>
+                              <div className="text-[9.5px] tracking-wide2 text-pb-faint uppercase">{label}</div>
+                              <div className={`text-[13px] ${owed ? (v > 0 ? 'text-pb-text font-semibold' : 'text-pb-faintest') : 'text-pb-dim'}`}>{money(v)}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {m.total_outstanding > 0 && (
+                          <div className="mt-1.5 font-mono text-[11px] text-pb-faint">
+                            Membership {money(m.membership_outstanding)} · Match fees {money(m.match_fee_outstanding)}
+                          </div>
+                        )}
+                        <div className="mt-2.5 pt-2.5 border-t pb-hairline flex items-center gap-3 text-[12px] text-pb-dim">
+                          <label className="inline-flex items-center gap-2 cursor-pointer min-h-[32px]">
+                            <input type="checkbox" checked={!!m.playhq_registered}
+                              disabled={togglingPlayhq.has(m.member_id)}
+                              onChange={e => togglePlayhq(m.member_id, e.target.checked)}
+                              className="w-[18px] h-[18px] cursor-pointer accent-pb-accent" />
+                            PlayHQ
+                          </label>
+                          <span className="text-pb-faint">{m.match_days || 0} match day{(m.match_days || 0) === 1 ? '' : 's'}</span>
+                          <button type="button" onClick={() => removeMember(m.member_id, m.full_name)}
+                            className="ml-auto min-h-[32px] px-2 text-pb-faint hover:text-pb-red text-[12px]">
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </>
             )}

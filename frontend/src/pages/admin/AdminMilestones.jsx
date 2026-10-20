@@ -5,6 +5,8 @@ import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { useClub } from '../../hooks/useClub'
 import { normalizeGender } from '../../lib/playerAttributes'
 import MilestoneSplitNote from '../../components/MilestoneSplitNote'
+import { useAuth } from '../../contexts/AuthContext'
+import { CAP } from '../../lib/capabilities'
 
 const CAT_LABELS = {
   batting: 'BATTING',
@@ -44,6 +46,231 @@ function CatBadge({ cat }) {
   )
 }
 
+const STATS = [
+  { stat: 'runs', label: 'Runs' },
+  { stat: 'wickets', label: 'Wickets' },
+  { stat: 'matches', label: 'Matches' },
+  { stat: 'catches', label: 'Catches' },
+]
+
+// What a step looks like in play, for the line under each picker. The default
+// runs and wickets steps carry an extra first rung (500 runs, 50 wickets);
+// every other step is a plain multiple of itself.
+function ladderText(stat, step) {
+  const extra = (stat === 'runs' && step === 1000) ? 500 : (stat === 'wickets' && step === 100) ? 50 : null
+  const rungs = extra ? [extra, step, step * 2, step * 3] : [step, step * 2, step * 3, step * 4]
+  return `${rungs.map(n => n.toLocaleString()).join(', ')}…`
+}
+
+// The same rule the server enforces (services/milestone_rules.step_problem),
+// so a typed step is turned back before it is sent. The server still decides.
+function stepProblem(stat, raw, limits) {
+  const n = Number(raw)
+  const { min, max, multiple } = limits
+  const name = stat.charAt(0).toUpperCase() + stat.slice(1)
+  if (String(raw).trim() === '' || !Number.isInteger(n)) return `${name} must be a whole number`
+  if (n < min || n > max) return `${name} must be between ${min.toLocaleString()} and ${max.toLocaleString()}`
+  if (n % multiple) return `${name} must be a multiple of ${multiple}`
+  return null
+}
+
+// A typed step and its Set button. Enter sets it too.
+function CustomStepInput({ stat, scope, initial, limits, onSet, disabled }) {
+  const [draft, setDraft] = useState(initial == null ? '' : String(initial))
+  const [problem, setProblem] = useState(null)
+  useEffect(() => { setDraft(initial == null ? '' : String(initial)) }, [initial])
+  const submit = () => {
+    const err = stepProblem(stat, draft, limits)
+    setProblem(err)
+    if (!err) onSet(Number(draft))
+  }
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          inputMode="numeric"
+          value={draft}
+          min={limits.min}
+          max={limits.max}
+          step={limits.multiple}
+          disabled={disabled}
+          aria-label={`${scope ? `${scope} ` : ''}custom ${stat} step`}
+          onChange={e => { setDraft(e.target.value); setProblem(null) }}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
+          className="w-24 px-2 py-1.5 text-sm bg-pb-surface2 border pb-hairline rounded text-pb-text focus:outline-none focus:border-pb-accent/50 disabled:opacity-50"
+        />
+        <button
+          type="button"
+          disabled={disabled || String(draft) === String(initial ?? '')}
+          onClick={submit}
+          className="px-3 py-1.5 font-mono text-[10px] tracking-wide2 border pb-hairline rounded text-pb-faint hover:text-pb-text transition-colors disabled:opacity-40"
+        >
+          SET
+        </button>
+      </div>
+      <p className={`text-xs mt-1 ${problem ? 'text-red-400' : 'text-pb-faintest'}`}>
+        {problem || `${limits.min.toLocaleString()} to ${limits.max.toLocaleString()}, in multiples of ${limits.multiple}`}
+      </p>
+    </div>
+  )
+}
+
+// The club's own increment for one stat: the presets, or a step typed in.
+function StepPicker({ label, stat, value, options, limits, onChange, disabled }) {
+  const isPreset = options.includes(value)
+  const [custom, setCustom] = useState(false)
+  const showCustom = custom || !isPreset
+  // A typed step that lands on a preset is that preset from then on.
+  useEffect(() => { if (isPreset) setCustom(false) }, [value, isPreset])
+  return (
+    <div>
+      <p className="font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase mb-1.5">{label}</p>
+      <div className="flex border pb-hairline rounded overflow-hidden w-fit max-w-full flex-wrap">
+        {options.map(opt => {
+          const on = !showCustom && value === opt
+          return (
+            <button
+              key={opt}
+              type="button"
+              disabled={disabled}
+              onClick={() => { setCustom(false); if (value !== opt) onChange(opt) }}
+              aria-pressed={on}
+              className={`px-3 py-1.5 font-mono text-[10px] tracking-wide2 transition-colors disabled:opacity-50 ${
+                on ? 'bg-pb-surface2' : 'text-pb-faint hover:text-pb-text'
+              }`}
+              style={on ? { color: 'var(--pb-accent)' } : {}}
+            >
+              {opt.toLocaleString()}
+            </button>
+          )
+        })}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setCustom(true)}
+          aria-pressed={showCustom}
+          className={`px-3 py-1.5 font-mono text-[10px] tracking-wide2 transition-colors disabled:opacity-50 ${
+            showCustom ? 'bg-pb-surface2' : 'text-pb-faint hover:text-pb-text'
+          }`}
+          style={showCustom ? { color: 'var(--pb-accent)' } : {}}
+        >
+          CUSTOM
+        </button>
+      </div>
+      {showCustom && (
+        <CustomStepInput
+          stat={stat}
+          initial={isPreset ? null : value}
+          limits={limits}
+          onSet={onChange}
+          disabled={disabled}
+        />
+      )}
+      <p className="text-pb-faintest text-xs mt-1.5">{ladderText(stat, value)}</p>
+    </div>
+  )
+}
+
+// One grade's increment for one stat. A null value follows the club's setting.
+function GradeStepSelect({ stat, label, grade, value, clubValue, options, limits, onChange, disabled }) {
+  const isPreset = value != null && options.includes(value)
+  const [custom, setCustom] = useState(false)
+  const showCustom = custom || (value != null && !isPreset)
+  useEffect(() => { if (isPreset) setCustom(false) }, [value, isPreset])
+  const selectValue = showCustom ? 'custom' : value == null ? '' : String(value)
+  const pick = e => {
+    const v = e.target.value
+    if (v === 'custom') { setCustom(true); return }
+    setCustom(false)
+    onChange(v === '' ? null : Number(v))
+  }
+  return (
+    <div className="min-w-0">
+      <label className="block font-mono text-[9px] tracking-wide2 text-pb-faintest uppercase mb-1">
+        {label}
+        <select
+          value={selectValue}
+          onChange={pick}
+          disabled={disabled}
+          aria-label={`${grade} ${stat} increment`}
+          className="mt-1 block w-full min-w-0 px-2 py-1.5 text-sm normal-case tracking-normal font-sans bg-pb-surface2 border pb-hairline rounded text-pb-text focus:outline-none focus:border-pb-accent/50 disabled:opacity-50"
+        >
+          <option value="">Club ({clubValue.toLocaleString()})</option>
+          {options.map(opt => <option key={opt} value={opt}>Every {opt.toLocaleString()}</option>)}
+          <option value="custom">Custom…</option>
+        </select>
+      </label>
+      {showCustom && (
+        <CustomStepInput
+          stat={stat}
+          scope={grade}
+          initial={value != null && !isPreset ? value : null}
+          limits={limits}
+          onSet={onChange}
+          disabled={disabled}
+        />
+      )}
+    </div>
+  )
+}
+
+function GradeSchemeCard({ data, canEdit, saving, onChange, error }) {
+  const [showOlder, setShowOlder] = useState(false)
+  const grades = data.grade_schemes || []
+  const hasSteps = g => STATS.some(({ stat }) => g.steps?.[stat] != null)
+  const shown = grades.filter(g => g.active || hasSteps(g) || showOlder)
+  const hiddenCount = grades.length - grades.filter(g => g.active || hasSteps(g)).length
+  if (grades.length === 0) return null
+  return (
+    <div className="pb-card px-4 py-4 mb-6">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Milestones by grade</p>
+      <p className="text-pb-faint text-sm mb-1">
+        Give a grade its own increments, for example every 25 games in A Grade while the rest of the club stays on 50.
+        These apply to milestones inside that grade (such as 1,000 runs in A Grade) on the Records page and in grade milestone emails.
+        Career milestones keep the club setting above.
+      </p>
+      <p className="text-pb-faintest text-xs mb-4">Leave a box on Club to follow the club setting above.</p>
+      <div className="space-y-4">
+        {shown.map(g => (
+          <div key={g.key} className="border-t pb-hairline pt-3 first:border-t-0 first:pt-0">
+            <p className="text-pb-text text-sm font-medium mb-2 truncate" title={g.name}>{g.name}</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {STATS.map(({ stat, label }) => (
+                <GradeStepSelect
+                  key={stat}
+                  stat={stat}
+                  label={label}
+                  grade={g.name}
+                  value={g.steps?.[stat] ?? null}
+                  clubValue={data.scheme[`${stat}_step`]}
+                  options={data.scheme_options[`${stat}_steps`]}
+                  limits={data.step_limits[stat]}
+                  onChange={v => onChange(g, stat, v)}
+                  disabled={!canEdit || saving}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowOlder(v => !v)}
+          className="mt-4 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors"
+        >
+          {showOlder ? 'HIDE OLDER GRADES' : `SHOW ${hiddenCount} OLDER GRADE${hiddenCount === 1 ? '' : 'S'}`}
+        </button>
+      )}
+      {!canEdit && (
+        <p className="text-pb-faintest text-xs mt-3">You need the Milestones permission to change these.</p>
+      )}
+      {error && <p className="text-red-400 text-sm mt-3">{error}</p>}
+    </div>
+  )
+}
+
 function ProgressBar({ current, target }) {
   const pct = Math.min(100, Math.round((current / target) * 100))
   return (
@@ -69,6 +296,11 @@ export default function AdminMilestones() {
 
   const { club } = useClub()
   const slug = club?.slug
+  const { hasCapability } = useAuth()
+  const canPickSteps = hasCapability(CAP.MANAGE_MILESTONES)
+  const [savingStep, setSavingStep] = useState(false)
+  const [stepError, setStepError] = useState(null)
+  const [gradeError, setGradeError] = useState(null)
 
   useEffect(() => {
     setLoading(true)
@@ -76,6 +308,41 @@ export default function AdminMilestones() {
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
   }, [])
+
+  const loadReport = () => api.adminGetMilestones().then(d => { setData(d); return d })
+
+  // Saving fills in the rungs the new step adds on the server, in the
+  // background, so the list is read again straight away and once more shortly
+  // after. A club on a large history may see the first read without the new
+  // rungs; the second picks them up.
+  const changeStep = async (key, value) => {
+    setSavingStep(true)
+    setStepError(null)
+    try {
+      await api.adminSetMilestoneScheme({ [key]: value })
+      await loadReport()
+      setTimeout(() => { loadReport().catch(() => {}) }, 4000)
+    } catch (e) {
+      setStepError(e.message)
+    } finally {
+      setSavingStep(false)
+    }
+  }
+
+  // A grade's increments are read when a screen asks, nothing is rebuilt, so
+  // one reload of the report is enough.
+  const changeGradeStep = async (grade, stat, value) => {
+    setSavingStep(true)
+    setGradeError(null)
+    try {
+      await api.adminSetMilestoneGradeScheme({ grade: grade.name, [`${stat}_step`]: value })
+      await loadReport()
+    } catch (e) {
+      setGradeError(e.message)
+    } finally {
+      setSavingStep(false)
+    }
+  }
 
   const { upcomingFiltered, achievedFiltered } = useMemo(() => {
     if (!data) return { upcomingFiltered: [], achievedFiltered: [] }
@@ -109,6 +376,46 @@ export default function AdminMilestones() {
           <h1 className="font-display font-bold text-2xl text-pb-text mb-1">Milestones</h1>
           <p className="text-pb-faint text-sm">Upcoming and achieved milestones across all club members.</p>
         </div>
+
+        {/* Which milestones the club tracks. Applies to the Milestones page the
+            public sees, the dashboard, player profiles and the milestone emails. */}
+        {data?.scheme && (
+          <div className="pb-card px-4 py-4 mb-6">
+            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Milestones tracked</p>
+            <p className="text-pb-faint text-sm mb-3">
+              Choose how often a milestone is marked across a player's whole career at the club.
+              Pick a preset or type your own.
+            </p>
+            <div className="flex flex-wrap gap-x-8 gap-y-4">
+              {STATS.map(({ stat, label }) => (
+                <StepPicker
+                  key={stat}
+                  label={`${label}, every`}
+                  stat={stat}
+                  value={data.scheme[`${stat}_step`]}
+                  options={data.scheme_options[`${stat}_steps`]}
+                  limits={data.step_limits[stat]}
+                  onChange={v => changeStep(`${stat}_step`, v)}
+                  disabled={!canPickSteps || savingStep}
+                />
+              ))}
+            </div>
+            {!canPickSteps && (
+              <p className="text-pb-faintest text-xs mt-3">You need the Milestones permission to change these.</p>
+            )}
+            {stepError && <p className="text-red-400 text-sm mt-3">{stepError}</p>}
+          </div>
+        )}
+
+        {data?.scheme && data.grade_schemes && (
+          <GradeSchemeCard
+            data={data}
+            canEdit={canPickSteps}
+            saving={savingStep}
+            onChange={changeGradeStep}
+            error={gradeError}
+          />
+        )}
 
         {/* Filter bar */}
         <div className="flex flex-wrap items-center gap-3 mb-6">

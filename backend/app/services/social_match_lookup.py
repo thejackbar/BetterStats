@@ -31,7 +31,7 @@ from datetime import date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import grassroots_scores_client as gr
-from app.services.club_match import club_match_keys
+from app.services.club_match import fixture_involves_club, fixture_side
 from app.services.fixtures_source import _current_grade_rows
 from app.services.sync import strip_team_suffix
 
@@ -91,7 +91,6 @@ async def _club_results(db: AsyncSession, org) -> tuple[list[dict], dict[str, st
     if not rows:
         return [], {}
     grade_name_by_guid = {guid: gname for guid, _, gname, _ in rows}
-    keys = club_match_keys(org)
     since = (date.today() - timedelta(days=_LOOKBACK_DAYS)).isoformat()
 
     discovered = await asyncio.gather(
@@ -104,10 +103,8 @@ async def _club_results(db: AsyncSession, org) -> tuple[list[dict], dict[str, st
         if not isinstance(lst, list):
             continue
         for m in lst:
-            home = (m.get("home_team") or "").lower()
-            away = (m.get("away_team") or "").lower()
             # Same rule the Results roundup uses: one side has to be us.
-            if not any(k in home or k in away for k in keys):
+            if not fixture_involves_club(org, m):
                 continue
             mid = m.get("id")
             if not mid or mid in seen:
@@ -118,11 +115,10 @@ async def _club_results(db: AsyncSession, org) -> tuple[list[dict], dict[str, st
     return out, grade_name_by_guid
 
 
-def _card(m: dict, grade_name: str, keys: list[str]) -> dict:
+def _card(m: dict, grade_name: str, org) -> dict:
     home = m.get("home_team") or ""
     away = m.get("away_team") or ""
-    hl, al = home.lower(), away.lower()
-    if any(k in al for k in keys) and not any(k in hl for k in keys):
+    if fixture_side(org, home, away, m.get("home_org_id"), m.get("away_org_id")) == "away":
         ours, opponent, ha = away, home, "A"
     else:
         ours, opponent, ha = home, away, "H"
@@ -161,9 +157,8 @@ async def resolve_match_reference(db: AsyncSession, org, raw: str) -> dict:
         return {"kind": "match", "source": "playcricket", "match_id": ref["match_id"]}
 
     matches, grade_name_by_guid = await _club_results(db, org)
-    keys = club_match_keys(org)
     cards = [
-        _card(m, grade_name_by_guid.get(m.get("grade_id")) or "", keys) for m in matches
+        _card(m, grade_name_by_guid.get(m.get("grade_id")) or "", org) for m in matches
     ]
 
     grade_slug = ref.get("grade_slug") or ""

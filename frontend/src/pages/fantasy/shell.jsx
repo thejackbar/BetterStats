@@ -3,7 +3,7 @@
 // row, and the message banner.
 import {
   Aurora, GradientRule, Crest, Avatar, ThemeToggle, DISP, cardSx, tintBg, mix,
-  RED, GREEN, AMBER, useFantasy, cx,
+  RED, GREEN, AMBER, useFantasy, cx, fantasyName,
 } from './ui'
 
 // A simple outline bell for the notifications button.
@@ -32,9 +32,13 @@ export function AppHeader({ season, manager, onSearch, onBell, onProfile, unread
         <div style={{ display: 'flex', alignItems: 'center', gap: desktop ? 14 : 11 }}>
           <Crest size={38} />
           <div style={{ lineHeight: 1 }}>
-            <div style={{ font: `800 ${desktop ? 18 : 17}px ${DISP}`, letterSpacing: '.02em', textTransform: 'uppercase', color: 'var(--text)' }}>{club?.name || 'Fantasy Cricket'}</div>
-            <div style={{ font: `600 ${desktop ? 8.5 : 9}px 'Hanken Grotesk'`, letterSpacing: '.2em', textTransform: 'uppercase', color: 'var(--faint)', marginTop: desktop ? 4 : 3 }}>{seasonName}</div>
+            <div style={{ font: `800 ${desktop ? 18 : 17}px ${DISP}`, letterSpacing: '.02em', textTransform: 'uppercase', color: 'var(--text)' }}>{fantasyName(club) || club?.name || 'Fantasy Cricket'}</div>
+            <div style={{ font: `600 ${desktop ? 8.5 : 9}px 'Hanken Grotesk'`, letterSpacing: '.2em', textTransform: 'uppercase', color: 'var(--faint)', marginTop: desktop ? 4 : 3 }}>{fantasyName(club) && club?.name ? `${club.name} · ${seasonName}` : seasonName}</div>
           </div>
+          {club?.fantasy_sponsor?.logo_url ? (
+            <img src={club.fantasy_sponsor.logo_url} alt={club.fantasy_sponsor.name} title={`Presented by ${club.fantasy_sponsor.name}`}
+              style={{ maxHeight: desktop ? 26 : 22, maxWidth: desktop ? 110 : 80, objectFit: 'contain' }} />
+          ) : null}
           {desktop && inlineNav ? <div style={{ marginLeft: 16 }}>{inlineNav}</div> : null}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 9 }}>
             <ThemeToggle theme={theme} onToggle={onToggleTheme} />

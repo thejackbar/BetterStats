@@ -5,8 +5,8 @@ spreadsheets BetterCricket can import. Written from the Shoalwater Bay Cricket
 Club conversion (15 seasons, 1992/93 to 2006/07, 914 matches), and meant to be
 followed for any other club that arrives with the same files.
 
-The working code is `tools/convert_shoalwater_av.py`. This document is the
-reasoning behind it: the byte layout, the rules, the exceptions that cost
+The working code is `tools/csfw_extract.py`, the ONE extractor for every club
+(see "One extractor" below). This document is the reasoning behind it: the byte layout, the rules, the exceptions that cost
 real matches when they were got wrong, and the checks that catch it.
 
 ---
@@ -21,7 +21,7 @@ anything else.
 |---|---|---|
 | What you receive | A folder of `DATA<year>.AV` binaries | A URL like `www2.cricketstatz.com/ss/w?mode=104&club=93931` |
 | Era | MS-DOS / early Delphi, 1990s to mid 2000s | Current, subscription hosted |
-| Reader | `tools/convert_shoalwater_av.py` | `backend/app/services/cricketstatz_*` |
+| Reader | `tools/csfw_extract.py` | `backend/app/services/cricketstatz_*` |
 | Output | Spreadsheets, imported by hand | In-app import wizard |
 | Covered by | Part 1 below | Part 2 below |
 
@@ -30,20 +30,184 @@ CricketStatz case. Part 1 is the bulk of this document because the binary
 format had to be reverse engineered and nothing else in this repository reads
 it.
 
-### Payneham Cricket Club
+### One extractor, not one per club
 
-**There is no Payneham CSFW data in this repository.** No `.AV` file, no
-CricketStatz club id, no conversion output. The only mention of Payneham
-anywhere in the codebase is a Cricket Australia sync fix (the retired-not-out
-work in v9.66.0, which is about a live PlayHQ feed and has nothing to do with
-CSFW).
+There is exactly one CSFW tool, `tools/csfw_extract.py`. A second script for a
+second club would drift, and the first sign of it was Payneham's first CSV: it
+came from a different, older extractor (33 columns, no opposition or innings
+figures) and carried no team at all. What differs between clubs is data, so it
+is data:
 
-So either Payneham's files have not been supplied yet, or a different club was
-meant. When they arrive, run the checklist in section 10: nothing in the
-converter is specific to Shoalwater Bay beyond the club name it reads out of
-the file header.
+| What differs | Where it lives | How a club supplies it |
+|---|---|---|
+| **The record layout** of the files (table positions, record sizes, field offsets) | `Layout`; one is registered, `csfw-av-v1` (549,871 bytes), and Payneham's 206 files are all it | Detected by file size and checked against the contents (a year that is not a year, fixture dates that are not dates, and the file is refused). A new one is a JSON file of only the fields that differ: `--layout v2.json` |
+| **The team names and match-type names**, which are in NO data file | `Profile`: Shoalwater Bay's is built in; any other is `tools/csfw_profiles/<club>.json`, picked by the header's club name, or `--profile` | A JSON profile, or just `--team-names "1=1st XI,2=2nd XI"`. With neither, teams read `Grade #N (unmapped)` and match types `type N`, loudly, never another club's names |
+| **Databases.** A file holds at most 160 matches, so a club keeps several (`DATA`, `DAT1`, `DAT2`...) and a team number means something only inside one | The club-name field in the file HEADER: `Payneham`, `Payneham W`, `Payneham G`, `Payneham S J 12`... NOT the file name | `databases` in the profile: team names per header label. The file name is not stable (2024's `DAT4` is the women's, 2025's holds sub-junior 12s) |
+| **Fixtures that are not matches** ("Bye") | `byes` in the profile | Dropped only where nothing was played and nobody was named, and counted. `--analyse` hints at them for a club with no profile |
+| **How a competition scores code 29** | `--absent` | Asked of the club, never assumed |
 
----
+**Everything goes out as ONE set of files for the folder.** The databases are
+overflow files of one club, so cutting the output by file name would split a
+season's games across several CSVs. Where more than one file-name stem is in
+the folder the game keys carry the stem (`data2025-001`, `dat12025-001`) so they
+cannot collide; with one stem they are as they always were.
+
+**Start with `--analyse`.** `python3 tools/csfw_extract.py <folder> --analyse`
+writes nothing. It reports each file's layout, then per DATABASE every team
+number with its match count and the years it appears in, then every match-type
+code, the result-code counts to compare with the club's CSFW summary screen, and
+any dismissal code with no name. That is the list of questions to put to the
+club. For a file NO layout describes it says so, then probes it: it finds the
+fixture table (the only table that repeats at a fixed stride with a date in each
+record), reports the record size, where the date and the opponent text sit, and
+which columns take only a few values (the team and match-type candidates). Run
+against a real Shoalwater file it recovers the documented 54-byte record with the
+date at 123,313. Those are candidates to check against the club's CSFW screens,
+then describe with `--layout`; they are never used unchecked.
+
+**Ask the club with a sheet, not a document.** `--questions answers.csv` writes
+the club's fill-in sheet from the files (columns `Section, Ref, Item, Database,
+Number, Matches, Years, Example match, What we have, How to answer, Your answer`):
+one row per team number per database (A), per match type (B), and the questions
+only the club can answer (C): a format for each named type, what an unnamed
+result code means, absent out or did not bat, byes, printed reports. Each row
+carries its matches, years and a recent match so a club member can recognise it.
+`--answers answers.csv` reads the filled copy onto the profile (a blank answer
+changes nothing; a type whose answer says "Final" is a final; what no profile
+field can hold, such as the meaning of a result code, is printed for a person and
+never guessed). The covering letter for Payneham (`Payneham_CSFW_questions.docx`)
+names those columns, and its counts are read from the sheet, so the two cannot
+disagree.
+
+**Never add one club's tables to another.** The first converter read Shoalwater's
+match-type codes 1 and 4 straight out of the code. `season_format_context` now
+reads the active profile's format table, and a final's format is measured only
+where the profile names BOTH a one-day and a two-day type (Payneham names only
+Limited Over, so its finals stay blank: an ATCA Final is a turf final).
+
+Verification: `tools/verify_csfw_extract.py` (70 checks) builds archives in a
+layout the extractor was never written against (every table moved and resized,
+every field shifted), with two databases, a bye, an unprofiled club and two
+layouts in one folder, and runs the shipped code over them.
+`tools/verify_shoalwater_conversion.py` (30 checks) holds the Shoalwater profile
+to the real files. Run both with a control: `--module <old converter>` makes the
+first report what is missing (19 fail, the two-space "Reynella  1" among them).
+
+### Payneham Cricket Club (raw files received Oct 2026)
+
+206 `.AV` files, 1928 to 2025, all `csfw-av-v1`; 14 database labels; plus 37 `.csv`
+printed CSFW reports for old seasons with no `.AV` (the same shape as Shoalwater's
+C2 text reports: season totals, never matches) and four `.mcr` report macros that
+name each database (`Payneham` = `DATA`, `Payneham.` = `DAT2`, `Payneham..` =
+`DAT3`, `Payneham...` = `DAT4`). The raw files are club data and are NOT in this
+repository. The profile is `tools/csfw_profiles/payneham.json`.
+
+**Their feedback: the team is missing.** The first CSV (7,834 games, from the old
+extractor) had `grade_name`, `match_format`, `home_team` and `away_team` blank
+on every row, and three 2025 results contradicting CSFW. Its `game_key` prefix
+was the file name, which is not the team.
+
+**What the real files proved.** For the 2025 senior men's file (`DATA2025.AV`)
+the extractor gives exactly CSFW's own 75 matches, and **38 of 38** rows
+transcribed from the club's screenshots agree on team, match type and result:
+team 1 to 5 are 1st to 5th XI, match type 4 is Limited Over (4th and 5th XI) and
+6 is Adelaide Turf (1st to 3rd XI), and the 25-Oct Marion and Golden Grove games
+are Abandoned (result 4) and Goodwood is Won. So the first CSV's three bad rows
+were the old extractor's fault, not the files'. The match-type list is ZERO
+based (Friendly 0, League 1, Brock Cup 2, Brock Cup Final 3, Limited Over 4,
+Internal 5, Adelaide Turf 6, ATCA Final 7, NE Jnr CA 8, ATCA T20 Final 9, Ltd
+Overs Final 10, NEJCA Final 11), read from the club's User Preferences screen and
+corroborated by 4, 6, 7, 10 in this file and 8 and 11 in the junior databases.
+
+**Things this archive does that Shoalwater's did not:**
+
+- **A match is two records even when it is one day.** Limited Over matches have
+  a blank second record (358 of 358 have no second-innings figures); Adelaide
+  Turf matches have second-innings figures in 687 of 1,623 (ATCA Final 9 of 81).
+  `group_legs` already counts one match per date, team and opponent.
+- **Opponent names carry two spaces** (`Reynella  1`, `Reynella  2`), which
+  `split_leg` read as two opponents. It now compares with runs of spaces
+  collapsed.
+- **Byes are fixtures**: 128 records (69 matches) against "Bye", result 255 or 5,
+  nobody named. Dropped by the profile's `byes`.
+- **Team numbers are per database.** Team 1 is the senior men's 1st XI in
+  `Payneham` and the women's side in `Payneham W` (2024 on); naming both
+  "1st XI" would file the women's games under the men's grade on import.
+- **Result codes 5, 6, 7 and 255** are unnamed. 255 is "no result entered"
+  (83 of 85 have no figures; most are byes). 6 is mostly level scores (34 of 43).
+  They import with a blank result until the club says what they are.
+- **1,646 batters carry runs and no recorded dismissal** (older cards), which is
+  why "batters dismissed equal the innings wickets" is 94.5% here against
+  Shoalwater's 100%. The ±1 residuals are the usual scorebook slips.
+- **Dismissal codes 5, 6, 8, 9, 16, 24 and 30** appear 1 to 6 times each and are
+  unnamed; they import blank.
+
+**Payneham's answers (Oct 2026, a workbook: the sheet plus CSFW's own Teams and
+Match Types tabs).** Applied in `tools/csfw_profiles/payneham.json`:
+
+- **The team number is CSFW's own list ID, the same in every database** (1 = 1st
+  XI ... 9 = 9th XI, 10 = Under 11 ... 56 = U12 White; 46 = 1st IX and 50 = 2nd
+  IX are the women's nine-a-side sides). The first design, per-database names,
+  was wrong about that; the profile now holds one `team_names` list and
+  `databases` only for exceptions. The match-type list is likewise CSFW's, 0 to
+  29. `--answers` reads the workbook directly; its Teams tab wins over the sheet's
+  per-row answers (a different spelling of the same name is reported).
+- **Two names collide across competitions**, and a team's database says which
+  competition it is: `Payneham W` team 1 is the WOMEN'S side but CSFW names it
+  "1st XI", the men's name. Loaded as is, women's games would go into the men's
+  1st XI grade. Profile `databases` renames it `Women's 1st XI` and the five
+  `Payneham G` (girls) teams get " (Girls)". These names are ours, not the
+  club's: confirm them.
+- **Result codes**: 5 = Cancelled (loads with no result), 6 = Tied on first
+  innings and 7 = Winning draw (both load as DRAW; our reading of the club's
+  words, to confirm). `result_labels` and `import_results` hold them.
+- **Code 29 absent batter = did not bat** (`absent` in the profile).
+- **Byes left out; the 37 printed `.csv` reports ignored.**
+- **Formats**: the club said C1 to C9 are all two-day. The data supports that for
+  Adelaide Turf (second innings in 54% of matches) and the ATCA Final (24%), which
+  are applied. It does NOT for the ATCA T20 Final, Ltd Overs Final, Brock Cup (0%)
+  or NE Jnr CA (8%), so those and 14 later types (21 rows) go back to the club
+  on a follow-up sheet (`--questions --open-only`). Until answered ~3,000 games
+  carry no format. Never apply a blanket answer the data contradicts.
+
+**Formats, second round (Oct 2026).** Payneham answered the 21 follow-up rows:
+One Day for everything except East Torrens CA, YMCA CA, SACA Junior U16 and ATCA
+Junior U15 (Two Day), and marked those four plus NE Jnr CA "could be a mix".
+`mixed_format_types` in the profile handles that per game: a scorecard with a
+second innings recorded is proof of a multi-innings game, so it is Two Day
+whatever the type's default. Nothing proves One Day (a two-day game can end on
+first innings), so a mixed type with no second innings keeps the club's answer if
+that was One Day and is left BLANK if it was Two Day. That moved 130 NE Jnr CA
+games to Two Day and left 65 games with no format (old two-day competitions with
+no second innings recorded, and six types too small to ask about). Everything
+except the format column is unchanged, and the three seasons the club
+spot-checked (2016/17, 2019/20, 2022/23) still give 156, 226 and 193.
+
+**Games left with no format are listed for the club.** Every extraction writes
+`games_without_format.csv` when any game has none (one row per game: key, date,
+season, team, opposition, venue, match type, result, score, whether the card
+shows a second innings, and why it is blank), so the club reviews 62 rows instead
+of filtering a 123,000-row file. An abandoned game with no score and no match type
+is left out: it has nothing to be a format of. The club types Two Day or One Day in
+`Your answer`; `--answers` (CSV or workbook) stores each as `game_formats` keyed by
+game key and the next run applies it, and the sheet is not written once every game
+is answered. A game key is year (or file stem) plus the game's order in its season,
+so the answers hold only while the files do not change.
+
+**Final Payneham build (Oct 2026).** The club answered all 62 games (47 Two Day, 15
+One Day; they typed them over the "How to answer" column, so the reader accepts a
+bare Two Day or One Day there and says so). The answers live in the profile's
+`game_formats`. Only the `match_format` column of those 62 games changed: every
+other column on all 122,976 rows is identical to the previous build. 8,852 games
+(Two Day 5,600, One Day 3,249, 3 blank: abandoned, scoreless, untyped games), all
+53 columns known to the importer, the club's spot-checked seasons unchanged
+(2016/17 156, 2019/20 226, 2022/23 193). Two notes from the sheet are not
+applied because nothing in the load file carries them: game `data1954-020`'s
+opposition was changed from "Paradise" to "-", and `dat22004-018` is marked
+"should be Limited Over" (its format One Day agrees).
+
+Result for the whole archive: 8,852 games, 1928/29 to 2025/26, 55 grades, 75
+games for `DATA2025` as CSFW shows. One game (1932) has team 0, no team recorded.
 
 # Part 1: the `.AV` binary format
 
@@ -607,6 +771,24 @@ player-dates. Squads for different grades on one day do not overlap at all, and
 a player spends a median 93% of a season in one grade, so the grade split can
 be trusted.
 
+### One person listed twice in one innings
+
+CSFW can hold the same player id in two player-block slots of a single match
+leg: a batting entry and a bowling entry, or two batting positions. A scorecard
+cannot, and the Manual Games importer enforces one row per player per innings
+(`uq_manual_batting_game_inns_player`), so it drops the WHOLE match when a sheet
+carries two. Payneham's first load lost 17 matches this way ("17 row(s) could
+not be read and their matches were left out"); Shoalwater has none.
+
+`merge_duplicate_blocks()` folds them at parse time into one row: figures added,
+first batting position kept, out if either entry was out, bowling and fielding
+added. Adding is deliberate. In the 29 cases the second entry usually carries
+runs the team total needs, so dropping it would break the innings'
+reconciliation; and nothing here can say whether it is one person entered twice
+or two people sharing an id. Every fold is listed in `players_listed_twice.csv`
+for the club to check against its book. The second entry's fall-of-wicket row is
+not carried (the wicket is keyed on the surviving position).
+
 ## 7. Verification
 
 `verify()` checks the decode against the data's own arithmetic, never against
@@ -849,14 +1031,16 @@ under the CricketStatz headings.
 ## Appendix: running the converter
 
 ```bash
-python3 tools/convert_shoalwater_av.py <folder of .AV files> -o <output folder>
+python3 tools/csfw_extract.py <folder of .AV files> --analyse          # report only
+python3 tools/csfw_extract.py <folder of .AV files> -o <output folder> \
+    [--profile club.json] [--team-names "1=1st XI,2=2nd XI"] [--layout v2.json]
 ```
 
 It prints a row count per sheet and the seven checks. No network access, no
 database, no configuration.
 
-Despite the file name it is not Shoalwater specific. The club name comes out of
-the file header.
+The club name comes out of the file header. Shoalwater Bay's profile is built in
+and chosen by it; any other club needs its own (see "One extractor").
 
 ---
 

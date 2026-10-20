@@ -49,8 +49,45 @@ window scores toward that round.
 
 - Rounds are generated from the real fixture and game calendar: games are grouped
   by weekend (default the Saturday plus Sunday window, configurable).
-- A round locks at the start time of its first game. Transfers confirmed after
-  the lock apply to the next round.
+- The calendar is read from Play-Cricket itself, merged with stored games
+  (`fantasy_engine.generate_rounds`). It never depends on the BetterSelect
+  `fixtures` table or on a sync, because a new season has no stored games and
+  upcoming fixtures are not persisted in `games`. Grades are the DB's for
+  `seasons.year = season_year` MERGED with those Play-Cricket lists for the year
+  (season list, then each season's teams, as `sync.py` seeds them), never one or
+  the other: a club with only some grades synced (Leederville had its women's
+  but not its men's) silently got one program's weekends. One club-wide season
+  covers every grade, men's and women's, with one pool and one ladder; rounds are
+  the union of weekends either program plays, so the count is usually higher than
+  any single program's round count. Runs on season create, on
+  the admin button (cache bypassed) and in the daily settlement job (cached).
+  A match is a SPAN of days: a two-day game has one
+  `matchSchedule` entry per day (a week apart, in no reliable order), and the weeks
+  it touches join into ONE round (`_group_rounds`), so its scorecard stays in one
+  round and a stored game dated either day sits inside the window. Leederville's
+  14 men's rounds became 13 fantasy rounds: only two one-day rounds on the same
+  weekend merged. A scored round is never rewritten; surplus unscored rounds with
+  nothing hanging off them are removed when a regenerate merges weeks. A zero result returns a plain `detail`
+  sentence saying whether the draw is unpublished or the season does not exist.
+  Proof: `backend/verification/verify_fantasy_rounds.py` (real Postgres, with a
+  `--control` run against the previous commit).
+- **The lock.** One deadline for the whole round, set per round. After it, every
+  manager's XI, captain and chips are frozen until the round is scored. The time
+  is 09:00 (Melbourne time) on the round's first game day unless an admin sets it
+  (Overview > Rounds > Locks > Change); a time set by hand is kept when rounds are
+  refreshed from the draw (`fantasy_rounds.lock_manual`). The default can be moved
+  with the season rules `lock_time` ("HH:MM") and `lock_timezone` (an IANA name).
+  We hold match dates, not kick-off times, so the default is early on purpose.
+- **Transfers after the lock are queued, not refused.** They wait on the locked
+  round (`fantasy_queued_transfers`; the team is not touched, so the locked round
+  is scored with the XI that was locked) and are carried out when it is scored, at
+  the prices after that round's price movement, counting as transfers for the next
+  round (a free one if the squad has one, else the points hit). If the bank can't
+  cover the swap at those prices, or a player is gone, the transfer is cancelled
+  with a reason the manager sees (notifications and the Transfers screen). The
+  armband passes with the player: a captain or vice who is transferred out hands it
+  to the player coming in. A manager can cancel a queued transfer until it happens.
+  Unsettling a round puts its carried-out transfers back in the queue.
 - A player who turns out in more than one game in a round has those points summed
   before the best-11 selection.
 - A two-day game counts in the round where the match finishes, so a full scorecard
@@ -149,12 +186,39 @@ Each player carries a price for the season. Draft mode ignores price.
   map it onto a price band. A player with no usable history gets a role baseline.
 - **Budget.** A fixed salary cap (default 100.0 credits) sized so a balanced 12
   is affordable but a manager cannot field every premium player.
-- **Live movement.** After each scored round prices drift on a blend of form
-  (recent points vs price) and net ownership change. Movement is capped per round
-  so prices move gradually.
-- **Sell-on.** When a manager sells a player they realise the purchase price plus
-  part of any profit (FPL convention: half the rise, rounded), so the budget
-  reflects good early buys without making trading free money.
+- **Live movement.** After each scored round, every player who played moves by how
+  they did against the OTHER players who played that round, for their price. The
+  round's own scoring gives a line through everyone's (price, points per game), steadied
+  towards the scale the starting prices use when few played. A player's surprise is
+  their points less what the line gives for their price, so across a round it nets out
+  to nothing and prices cannot all drift up or down whatever the club's scoring runs at
+  (a flat track, a low-scoring grade). The move is the surprise over 200, rounded to
+  0.1: a century is the full **$0.5** (the cap), an 80 from a cheap player about 0.2, an
+  ordinary good day 0.1, and double the score is about double the move. A player who did
+  not play does not move, nobody goes below $4.0, and a round with fewer than 6 players
+  moves nobody. Ownership is not used (there is no per-round ownership history).
+  The first version measured a score against what the STARTING price implies, which for a
+  player on the floor price is about nothing, so 41, 82 and 150 points all hit the cap and
+  nearly everyone rose; it was replaced for that reason.
+  Prices are derived: `fantasy_pricing.recompute_prices` replays every scored round
+  onto each player's `base_price`, so settling a round again, unsettling it or a
+  late scorecard gives the same prices as if it had been scored once. The nightly
+  job also runs it, so a season scored before this existed catches up by itself
+  (`python -m app.scripts.fantasy_recompute_prices <org|all> [--apply]` does it
+  now, dry run by default). `price_change` is the latest scored round's move.
+- **Hand-set prices.** A price an admin types in on the Player pool page is locked
+  (`price_locked`) and never moves; "set · auto" hands it back, and "Recalculate
+  prices" (reset) clears every lock.
+- **Sale.** When a manager sells a player the bank gets the player's price that
+  day. A rise while owned adds to the bank, a fall takes from it, so squad value
+  and the bank always agree. (This replaced the FPL half-the-rise rule.)
+- **Arrows.** A green ▲ or red ▼ with the amount sits beside a price on My Team,
+  Pick Squad, Transfers, the Players list and profile, and the admin pool table.
+- **Movers.** The Players list, Pick Squad and Transfers each have All / ▲ Risers /
+  ▼ Fallers chips (biggest move first) and Biggest rise / Biggest fall sorts. The admin
+  Price movements page (BetterFantasyCricket > Price movements) lists every player's
+  start, current, last-round and season move and their last six rounds, filtered by
+  risers, fallers, role and last round or season.
 
 ## Salary-cap engine
 

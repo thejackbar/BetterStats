@@ -98,6 +98,8 @@ EVERYONE = [P_HETEL, P_GODFREY, P_RITCHIE, P_HIND, P_JUNIOR, P_GIRL, P_DORMANT]
 async def build_schema() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         json_cols = (await conn.execute(text(
             "SELECT table_name, column_name FROM information_schema.columns "
             "WHERE table_schema = 'public' AND data_type = 'json'"))).all()
@@ -111,6 +113,16 @@ async def build_schema() -> None:
                 org_id UUID NOT NULL, canonical_name TEXT NOT NULL,
                 alias_name TEXT NOT NULL, undone_at TIMESTAMPTZ)
         """))
+        # Read by the by-grade grid the milestone matches now follow (lifespan DDL, main.py).
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS season_aliases (
+                id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(), org_id UUID NOT NULL,
+                canonical_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                alias_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                undone_at TIMESTAMPTZ)
+        """))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS amalgamate_seasons BOOLEAN NOT NULL DEFAULT false"))
         for name, sql in view_statements():
             await conn.execute(text(f"DROP VIEW IF EXISTS {name} CASCADE"))
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
@@ -240,6 +252,11 @@ async def profile_figures(s, pid, scope):
     b = await aggregations.get_career_batting(s, str(pid), scope=scope) or {}
     w = await aggregations.get_career_bowling(s, str(pid), scope=scope) or {}
     f = await aggregations.get_career_fielding(s, str(pid), scope=scope) or {}
+    # The profile ROUTE raises the header's matches to the by-grade grid (routers/players.py), so the
+    # figure a person reads is that one, and the milestone figures follow it (v9.113.13).
+    raise_to_grid = getattr(aggregations, "raise_games_to_grid_total", None)
+    if raise_to_grid is not None:
+        await raise_to_grid(s, str(pid), str(ORG), None, scope, b, w, f)
     return {"runs": int(b.get("total_runs") or 0), "wickets": int(w.get("total_wickets") or 0),
             "matches": int(b.get("games") or 0), "catches": int(f.get("total_catches") or 0)}
 

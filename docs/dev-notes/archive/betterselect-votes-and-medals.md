@@ -430,3 +430,106 @@ handoff. Every existing endpoint/field keeps its shape — this is additive.
   presentation mode. No tallies anywhere on the public page.
 
 <!-- END original CLAUDE.md L13422-13500 -->
+
+## Medal voting-link switch (v9.119.0.1, Oct 2026)
+
+A new `vote_medals` row starts with `enabled = false`. After migration 267 the Settings tab had no control that sent `enabled`, so the "Turn it on under Settings" notice in `ShareVotePanel` pointed at nothing and a new medal could never be switched on from the UI. `VotesSettings.jsx` now has a "Voting link" Off/On row (PATCH `enabled` through `votesSetSettings`), and `ShareVotePanel` takes an `onEnable` prop so the Settings tab's off notice carries a "Turn on voting link" button. Other screens keep the notice that points at Settings. Frontend only; the backend already handled `enabled` and minted `link_token` on first enable.
+
+## Public vote page asks who you are (v9.119.0.2, Oct 2026)
+
+`GET /public/votes/{token}/fixtures/{id}` returns `role: 'none', reason: 'verify_required'` for a caller with no `bs_vote` cookie when the medal has `allow_non_participants` off. `PublicVoting.jsx::openFixture` sent every `role === 'none'` to the ballot step, where `REASON` had no entry for `verify_required`, so a first-time visitor read the generic "You can't vote on this game." and was never offered the name picker. `openFixture` now sends an open fixture with `verify_required` to the `pick` step; the other reasons (`captain_only`, `did_not_play`) still land on the ballot step's message. Proved in Chromium with the API stubbed (a control run on the previous file fails both the "not the dead end" and "asked to find their name" checks).
+
+## v9.120.0.1: voting page links back to the player's own page
+
+Asked for: a link from the voting page back to the player's profile dashboard section.
+
+- `public_votes._me_payload(club, player)` builds the verified voter for the landing, the fixture page and the verify reply, and adds `my_page` = `/avail/<availability_link_token>?tab=mine&player=<id>`. It is sent only for a verified player and only while `availability_self_service_enabled` and a token exist. The availability token never goes to an unidentified visitor: a club that lets supporters vote would otherwise hand them the player link (which lists the whole roster).
+- No sign-in is passed across: the vote cookie (`bs_vote`) and the availability cookie (`bs_avail`) stay separate, and the vote PIN can be switched off while the availability PIN is on, so the player types their PIN on the availability page. `PublicAvailability.jsx` reads `?tab=mine` (opens My page) and `?player=<id>` (picks that player once on the name step, so only the PIN is asked; "Not you?" does not re-pick).
+- Cricket only. The football voting page (`AflPublicVoting.jsx`) is unchanged.
+- Proof: `verify_vote_my_page_link.py` (real Postgres, 9; control on the previous code fails the 3 positive checks), `verify_vote_my_page_link_browser.mjs` (13).
+
+## v9.120.0.2: player photos on the public ballot
+
+Asked for: the pictures should pull through on the voting page (it showed initials only).
+
+- `public_votes.fixture_state` adds `photo_url` to each eligible player, read in one query (`= ANY(CAST(:ids AS uuid[]))`). A photo is sent only when the player is public (`is_public` and `privacy_hidden_at IS NULL`): a hidden player stays on the ballot by name, but their face is not put on a page with no sign-in. The eligibility service is untouched (the admin enriches photos its own way).
+- `PublicVoting.jsx` `Face`: the photo as a 40px round image, initials when there is none or it fails to load (`onError`).
+- Proof: `verify_vote_my_page_link.py` (13, control on the previous route fails the photo check), `verify_vote_my_page_link_browser.mjs` (18, a good photo, a 404 photo and no photo).
+
+## v9.120.2: vote reminders on the player's own page
+
+Asked for: on the player page, remind a player who is due to vote in a game they played that is still open.
+
+- `public_availability._votes_due(db, club, player)`: for each enabled medal with a link, `public_votes._open_fixtures` (state `open`), minus games the player has a ballot for, then `vote_svc.resolve_eligibility` and `public_votes._voter_role` per game (the ballot page's own rules, so a reminder never points at a game they cannot vote on; captain-only mode reminds only the captain). At most 10 games examined per page load. Sorted by when voting closes. Each item carries `link` = `/vote/<medal token>?fixture=<id>&player=<id>`, built only for the verified player; the vote page still asks for the PIN (`bs_vote` and `bs_avail` stay separate).
+- A `votes` module in `services/player_dashboard` (catalogue entry, in `DEFAULT_MODULES` after availability). It drops itself from `modules` when nothing is due, so a club with no voting sees no trace of it. Failure is caught and logged like the other newer modules.
+- Frontend: `VotesBanner` above the tiles, a "Votes due" tile, `VotesModule`. `PublicVoting.jsx` reads `?player=<id>` and picks that player once on the name step.
+- Proof: `verify_player_votes_reminder.py` (own database, 20; control on the previous code fails the positive checks without crashing), `verify_player_dashboard_fines_browser.mjs` (113), `verify_vote_my_page_link_browser.mjs` (21).
+
+## v9.120.2.1: vote reminders missing for players at a big club
+
+Reported: Votes not showing on the player page, with Jack Barendse and the Dunslow Medal given as an example. Two causes, both reproduced before fixing (the new checks failed 5 of 26 on the previous code).
+
+- `_votes_due` examined only the 10 newest unvoted open games. A club has an open game per grade per round (Applecross: a dozen or more teams), so a player's own game was often past the cutoff and never looked at. Now two batched local lookups find the player's games first (`fixture_lineups`, and `game_appearances`/`batting_innings`/`bowling_spells`/`fielding_stats` through `match_ref_id`), and only those get `resolve_eligibility` and `_voter_role`. A game whose list can only come from a live Play.Cricket fetch cannot be found that way, so those are checked directly, capped at 10 per page load (`VOTES_LIVE_EXAMINED`).
+- A club that had saved its own module list (the picker, v9.120.0) had no `votes` in it, so the module was never drawn. `organisations.player_dashboard_modules` is now either the old bare list or `store()`'s `{"on": [...], "known": [...]}`. `known` is every module on offer when the list was saved; a module in `AUTO_ON_WHEN_NEW` (votes) that is not in `known` is added beside Availability. A bare list counts as having known everything except votes. JSONB, no migration.
+- Proof: `verify_player_votes_reminder.py` (own database, 29: 14 newer games for other players, the synced-scorecard path, a legacy list, a list saved now with Votes off, an empty list).
+
+## v9.120.2.2: cast votes shown on the player's page
+
+Asked for: if the player has already voted, show their 3-2-1 votes too, for reference.
+
+- `public_availability._votes_for_player` (was `_votes_due`) returns `(due, cast)`. `cast` is the player's own `VoteBallot` rows on games the medal counts in its 90-day window (open or closed), newest first, at most `VOTES_CAST_SHOWN` (6). Each carries `picks` as `{points, name}` where `points` = `ballot_values[position - 1]` (so a medal counting 5-3-1 shows 5-3-1), `open`, and, only while open, `closes_on` and the `link` to change it. Only their own ballot is read; other players' ballots are never touched.
+- The profile adds `votes_cast`. The `votes` module now stays when there are cast votes even if nothing is due, and drops only when both are empty. The banner and tile count `votes` (to cast) only.
+- Frontend: `VotesModule` is "Votes to cast" then "Already cast", or "Your votes" alone when nothing is due.
+- Proof: `verify_player_votes_reminder.py` (own database, 37; control on the previous route fails the 6 new checks without crashing), `verify_player_dashboard_fines_browser.mjs` (120).
+
+## v9.120.6.1: the voting page only lists the games the voter played
+
+Reported: the player page said a vote was due when it had already been cast, and "Back to games" on the voting page listed every other game in the club.
+
+- Cause of the second: `public_votes.get_landing` never looked at who was asking, and the page read it once, before the PIN step, so even a verified voter got the whole club's list (and kept it after verifying).
+- `get_landing` passes the verified player to `_open_fixtures(only_for=...)`. `_fixtures_player_is_on` keeps a game only when the player is on its `resolve_eligibility` list (the ballot page's own list), found local-first through `own_local_fixture_ids` (saved XI, then synced scorecard through `match_ref_id`) with at most `LIVE_EXAMINED` (10) live Play.Cricket checks per load. The `grades`/`rounds` option lists are built after the cut. A visitor who has not said who they are, including a coach or supporter where the club allows them, still gets the club's list.
+- Each landing fixture carries `voted` (the caller's own ballot on this medal). `fixture_state` returns `players: []` when `role == 'none'`.
+- `public_availability._votes_for_player` now calls the same `own_local_fixture_ids`, so the reminder and the voting page share one definition of "games this player is on".
+- `PublicVoting.jsx` re-reads the landing after a successful verify and after "Not you?" (`landingKey`), shows `VOTED · CHANGE →` on a voted game, and says "None of your games are open" for a verified voter with an empty list.
+- The first symptom did not reproduce with one medal (a ballot always removes its game from `votes`; `verify_player_votes_reminder.py` 37/37 on a real Postgres). Two things can still show a due vote after voting and are handled: a club with two enabled medals counts one ballot per medal (rule 9), so the banner now names the medal and game; and the browser's Back button restores the player page from its cache, so `MyPage` reloads on `pageshow` when `persisted`. If it recurs with one medal and a fresh load, check for two `fixtures` rows for one match.
+- Proof: `backend/verification/verify_vote_landing_own_games.py` (own database, 16; control on the previous route bodies fails 9), `frontend/verification/verify_vote_landing_own_games_browser.mjs` (6, control on the previous page fails 3, 390px no overflow), `verify_player_votes_reminder.py` (37) and `scripts/verify_vote_medals.py` (59) unchanged.
+
+## v9.122.1: active grades only, and a voter mode per team (migration 345)
+
+- Vote settings grade picker (`club_grade_options`) now offers only the grades of the club's newest season year that has any grades. A club with a winter and a summer season in one year gets both. It falls back a year at a time when the newest season has no grades yet, so the picker is never empty for a club that has grades.
+- A medal can still hold a ticked grade that is no longer played. The payload carries `inactive_grades` (`{id, name}`) so the screen shows it apart with a remove button, and the medal keeps counting it until it is removed. Removing the last ticked grade means "every grade", so the screen asks first.
+- `vote_medals.grade_voter_modes` (JSONB, grade NAME to `players` or `captain`, default `{}`) overrides `voter_mode` for one team. Keyed by name for the same reason as `medal_grade_ids`. DDL is `VOTE_GRADE_MODE_STATEMENTS` in `services/vote_medal_ddl.py`, run by migration 345 and the lifespan.
+- `MedalUpdate.grade_voter_modes` is sent whole: a name left out reverts to the medal default, `{}` clears, not sent leaves it alone. An unknown mode is a 400.
+- Read through `services.votes.cfg_for_fixture(db, cfg, fixture)`, which returns a copy of the config with `voter_mode` resolved for the fixture's team (grade via `effective_grade_ids`, then name). Used by the public ballot page and submit, the player page's votes due, and the admin game detail (`settings.voter_mode`).
+- Checked with `backend/scripts/verify_vote_grade_voter_modes.py` (25 checks against Postgres; the previous commit fails 16 of them) and `backend/scripts/drive_vote_grade_voter_modes.py` (14 checks in Chromium, including 390px).
+
+## v9.122.4: weight grades by season length (migration 346)
+
+- `vote_medals.grade_weighting` (JSONB `{"mode": "off"|"auto"|"manual", "manual": {grade NAME: multiplier}}`, default `{}` = off). DDL is `VOTE_GRADE_WEIGHT_STATEMENTS` in `services/vote_medal_ddl.py`, run by migration 346 and the lifespan. Sent whole on PATCH: an unknown mode or a weight outside 0.01 to 10 is a 400, `{}` turns it off, not sent leaves it alone.
+- The weight multiplies each GAME's awarded points (`weighted_points`), after the weekly rank conversion and before the season sum. Raw votes and the 3s/2s/1s counts are never weighted. Points are rounded to 2 places at each step; with weight exactly 1 they stay whole numbers.
+- Auto: weight = top grade's games / the grade's games (a vote in a shorter season counts for more, chosen by the club over the other reading). The top grade is the first in the club's own team order (`grades.display_order`), else the grade with the most games, among the grades the medal counts that have games (`pick_top_grade`, `auto_weights`). A grade with no games counts at 1.
+- Games are fixtures per grade NAME in the vote season (Jul to Jun), the whole schedule not only games played, excluding `BYE` and `CANCELLED` (`count_games_by_grade_name`). Grade comes from `effective_grade_ids`, so a synced fixture with no `grade_id` still counts.
+- 'off' costs nothing (no fixture read). The leaderboard reuses the fixtures it already loaded (`resolve_grade_weights`). Fixture detail uses `fixture_weight`. The Settings table comes from `GET /votes/medals/{id}/weighting` (rows with games, the weight auto would give, the weight in force, top vote), so the hub and leaderboard fetches stay cheap.
+- The board payload carries `weighting` (mode, top grade, weights) and each board fixture and the game detail carry `weight`, so screens can say which lens the points are under.
+- Not weighted: the player's own page ("votes cast", which shows positional points) and the football twin, which has its own leaderboard code.
+- Checked with `backend/scripts/verify_vote_grade_weights.py` (33 checks against Postgres; the previous commit fails 28) and `backend/scripts/drive_vote_grade_weights.py` (14 checks in Chromium, including 390px).
+
+## v9.123.3: a captain can hand vote counting to someone else (migration 347)
+
+Reported: a captain sometimes outsources vote counting to another person, who is not necessarily in the side. Captain only mode could not name them.
+
+- `vote_medals.grade_vote_counters` (JSONB, grade NAME to player id, default `{}`). DDL is `VOTE_GRADE_COUNTER_STATEMENTS` in `services/vote_medal_ddl.py`, run by migration 347 and the lifespan. Keyed by name for the same reason as `grade_voter_modes`. `MedalUpdate.grade_vote_counters` is sent whole: null or a missing name goes back to the captain, `{}` clears, not sent leaves it alone. The nominee has to be an `is_player` row of the same club (400 otherwise); they do not have to have played.
+- `cfg_for_fixture` sets `vote_counter` (a player id) only when the team resolves to `captain` mode. Read it with `cfg.get("vote_counter")`. `_voter_role`: the counter votes as a `player` whether or not they were in the side; with a counter named, everyone else on the list (the captain included) gets `('none', 'counter_only')`, because a second ballot from one team would count twice. A counter on a team that is not captain only does nothing.
+- The nominee is not on any team list, so the two "games this player is on" lookups would never find them. `services.votes.counter_fixture_ids` (one grade read, nothing when the player is nobody's nominee) feeds `_fixtures_player_is_on` (the landing list) and `public_availability._votes_for_player` (the Votes due reminder). A new consumer of "games this player may vote on" has to add the same set.
+- `GET /votes/counter-options` lists the active players the voting page's name list offers, since the nominee picks their name there. `_medal_payloads` adds `vote_counter_names`. The admin game detail `settings.vote_counter` is `{id, name}` for the game's team, and `admin_enter_ballot` records the counter as a `player` ballot. The public ballot payload carries `is_counter`.
+- Settings: a "Votes counted by" select under each team whose effective mode is Captain only. Ballot entry on the game page defaults to the counter instead of the captain.
+- Not changed: the football twin (it has no per-team voter mode), and a nominee who is not a player of the club cannot be picked, since they could not verify on the voting link.
+- Checked with `backend/scripts/verify_vote_counters.py` (41 checks against Postgres; the previous commit fails 28) and `backend/scripts/drive_vote_counters.py` (13 checks in Chromium on the production build, including 390px). `verify_vote_grade_voter_modes.py` (25), `verify_vote_medals.py` (59, its table setup now also runs the 347 statement), `verify_vote_grade_weights.py` (33), `verification/verify_vote_landing_own_games.py` (16) and `verify_player_votes_reminder.py` (37) unchanged.
+
+## v9.124.1.1: a level week is settled on countback by default (migration 352)
+
+Reported: Round 1 vs Hola Health WSCC 1st XI, a 3-2-1 medal. Dagg and Roach both had 17 raw votes (Dagg 4 threes, 1 two, 3 ones; Roach 1 three, 6 twos, 2 ones). With `tie_policy` 'share' both took 2, so the game handed out 7 points. The club wants Dagg 2 and Roach 1: countback on most 3s, and a maximum number of points per game unless it is a true dead heat.
+
+- `award_weekly_points` already did countback; the medal was on 'share', the default. `VoteMedal.tie_policy` model default, its `effective_config` fallback and the column default are now 'countback'. Migration 352 sets the column default and moves every existing 'share' medal to 'countback' once (not in the lifespan mirror, which would overwrite a later choice on every boot). The old `VoteSettings` model is history and unchanged.
+- The football twin (`afl_vote_medals`, `services/afl/votes.py`) is not changed.
+- Checked by running the shipped `award_weekly_points` on the reported tallies: 'share' gives Edwards 3, Dagg 2, Roach 2 (the control, reproducing the report); 'countback' gives Edwards 3, Dagg 2, Roach 1; an exact tie after countback still shares. Not run against Postgres or in the browser: no dependencies are installed in this sandbox.

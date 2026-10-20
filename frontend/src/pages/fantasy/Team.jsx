@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
 import {
   Aurora, StatTile, DISP, tintBg, mix, ROLE_ORDER, ROLE_GROUP, ROLE_LABEL,
-  money, pts, Btn, CapBadge, Avatar,
+  money, pts, Btn, CapBadge, Avatar, PriceTag,
 } from './ui'
 import { PlayerRow, RowPoints, SectionLabel } from './shell'
 
@@ -16,7 +16,7 @@ const ord = (n) => {
 }
 const teamInitials = (name) => (name || 'My XI').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
 
-export function Onboarding({ manager, season, onBuild }) {
+export function Onboarding({ manager, season, startPoints, onBuild }) {
   const steps = [
     ['Build your squad', 'Pick 12 within $100'],
     ['Name your captain', 'Doubles their points'],
@@ -33,6 +33,11 @@ export function Onboarding({ manager, season, onBuild }) {
           <div style={{ font: `500 13px 'Hanken Grotesk'`, color: 'var(--dim)', marginTop: 10, lineHeight: 1.5, maxWidth: 280, margin: '10px auto 0' }}>
             You're in for {season?.name || 'this season'}. Three quick steps and you're on the ladder.
           </div>
+          {startPoints != null && (
+            <div style={{ font: `600 12px 'Hanken Grotesk'`, color: 'var(--accent-strong)', marginTop: 10, lineHeight: 1.5, maxWidth: 300, margin: '10px auto 0' }}>
+              The season is already under way. You start on {pts(startPoints)} points, level with the bottom team.
+            </div>
+          )}
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -61,7 +66,7 @@ export function Onboarding({ manager, season, onBuild }) {
   )
 }
 
-export default function MyTeam({ token, manager, squad, season, round, onChange, flash, fail, nav, desktop }) {
+export default function MyTeam({ token, manager, squad, season, round, startPoints, onChange, flash, fail, nav, desktop }) {
   const [openId, setOpenId] = useState(null)
   const [gwPts, setGwPts] = useState(null)   // player_id -> last-round base points
   const [snapshot, setSnapshot] = useState(null)   // club-ladder snapshot for the desktop rail
@@ -87,9 +92,11 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
     return () => { on = false }
   }, [token, desktop, squad])
 
-  if (!squad) return <Onboarding manager={manager} season={season} onBuild={() => nav('pick')} />
+  if (!squad) return <Onboarding manager={manager} season={season} startPoints={startPoints} onBuild={() => nav('pick')} />
 
   const rank = squad.overall_rank
+  // A mid-season joiner who has not played their first round can still redo the squad.
+  const transfersOnly = active && !squad.can_rebuild
   const stats = [
     ['Total points', pts(squad.total_points)],
     [squad.last_round ? `GW${squad.last_round.number} pts` : 'GW pts', squad.last_round ? pts(squad.last_round.points) : '—'],
@@ -114,9 +121,10 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
     } catch (e) { fail(e) }
   }
 
+  const queuedN = (squad.queued_transfers || []).filter(q => q.status === 'pending').length
   const lockText = round && round.status !== 'scored'
     ? (locked
-      ? `Round ${round.number} is locked. You can change your team once it's scored.`
+      ? `Round ${round.number} is locked. Your XI and captain are frozen until it's scored. ${queuedN ? `${queuedN} transfer${queuedN === 1 ? '' : 's'} queued for the next round.` : 'Transfers you make now are queued for the next round.'}`
       : `Round ${round.number}${round.lock_at ? ` locks ${new Date(round.lock_at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}.`)
     : null
 
@@ -143,19 +151,20 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
     return (
       <div>
         {statRibbon}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20, paddingTop: 16, alignItems: 'start' }}>
-          <div>
+        {/* minmax(0, 1fr): a plain 1fr column cannot shrink below its widest content, which pushed the rail off the page. */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 20, paddingTop: 16, alignItems: 'start' }}>
+          <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div style={{ font: `700 12px ${DISP}`, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--dim)' }}>Your XI · team sheet</div>
-              <button onClick={() => nav('pick')} style={{ background: 'none', border: 'none', color: 'var(--accent-strong)', font: `600 11px 'Hanken Grotesk'`, cursor: 'pointer' }}>{active ? 'Captain ›' : 'Edit squad ›'}</button>
+              <button onClick={() => nav('pick')} style={{ background: 'none', border: 'none', color: 'var(--accent-strong)', font: `600 11px 'Hanken Grotesk'`, cursor: 'pointer' }}>{transfersOnly ? 'Captain ›' : 'Edit squad ›'}</button>
             </div>
             {groups.map(g => (
               <div key={g.role} style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '11px 0', borderTop: '1px solid var(--surface2)' }}>
-                <div style={{ width: 88, flex: 'none' }}>
+                <div style={{ width: 112, flex: 'none', overflowWrap: 'anywhere' }}>
                   <div style={{ font: `700 13px ${DISP}`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text)' }}>{ROLE_GROUP[g.role]}</div>
                   <div style={{ font: `600 10px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 2 }}>{g.rows.length} / {g.quota}</div>
                 </div>
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 12, flexWrap: 'nowrap', overflowX: 'auto' }}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   {g.rows.map(p => <PlayerCard key={p.player_id} p={p} gw={gwPts?.[p.player_id]} onClick={() => nav('player', { playerId: p.player_id })} />)}
                 </div>
               </div>
@@ -201,7 +210,7 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
                 <div key={p.player_id}>
                   <PlayerRow
                     name={p.name} photoUrl={p.photo_url}
-                    sub={`${ROLE_LABEL[p.role]} · ${money(p.purchase_price)}`}
+                    sub={<>{ROLE_LABEL[p.role]} · <PriceTag price={p.price ?? p.purchase_price} change={p.price_change} /></>}
                     badge={p.is_captain ? <CapBadge /> : p.is_vice_captain ? <CapBadge vice /> : null}
                     onClick={() => onPlayer(p.player_id)}
                     right={<RowPoints value={gwPts && gwPts[p.player_id] != null ? pts(gwPts[p.player_id]) : '—'} />}
@@ -215,7 +224,7 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
       </div>
 
       <div style={{ display: 'flex', gap: 8, paddingTop: 16 }}>
-        <Btn variant="ghost" full onClick={() => nav('pick')}>{active ? 'View / captain' : 'Edit squad'}</Btn>
+        <Btn variant="ghost" full onClick={() => nav('pick')}>{transfersOnly ? 'View / captain' : 'Edit squad'}</Btn>
         {active && <Btn variant="soft" full onClick={() => nav('transfers')}>Transfers</Btn>}
       </div>
     </div>
@@ -228,18 +237,18 @@ export default function MyTeam({ token, manager, squad, season, round, onChange,
 function PlayerCard({ p, gw, onClick }) {
   return (
     <button onClick={onClick} style={{
-      flex: '1 1 auto', minWidth: 230, display: 'flex', alignItems: 'center', gap: 12,
+      flex: '1 1 230px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 12,
       background: 'var(--surface)', border: '1px solid var(--hairline)', borderRadius: 14,
       padding: '13px 15px', cursor: 'pointer', textAlign: 'left',
     }}>
       <Avatar name={p.name} photoUrl={p.photo_url} size={46} />
-      <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ font: `700 14px 'Hanken Grotesk'`, color: 'var(--text)', whiteSpace: 'nowrap' }}>{p.name}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ font: `700 14px 'Hanken Grotesk'`, color: 'var(--text)', overflowWrap: 'anywhere' }}>{p.name}</span>
           {p.is_captain && <CapBadge />}
           {p.is_vice_captain && <CapBadge vice />}
         </div>
-        <div style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 3, whiteSpace: 'nowrap' }}>{ROLE_LABEL[p.role]} · {money(p.purchase_price)}</div>
+        <div style={{ font: `500 11px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 3 }}>{ROLE_LABEL[p.role]} · <PriceTag price={p.price ?? p.purchase_price} change={p.price_change} /></div>
       </div>
       <div style={{ textAlign: 'right', flex: 'none' }}>
         <div style={{ font: `700 22px ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{gw != null ? pts(gw) : '—'}</div>

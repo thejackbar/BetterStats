@@ -22,7 +22,12 @@ import { PbSpinner } from '../../lib/presskit'
 // cannot separate — Veterans Cricket Victoria runs the Border Cup, an Over
 // 60s competition and the Echuca divisions, and reading all three as one is
 // the reason this was built.
-export default function CompetitionManager({ renderGrouping = null, intro = null, emptyText = null }) {
+export default function CompetitionManager({
+  renderGrouping = null, intro = null, emptyText = null,
+  // Cricket only: the Junior/Senior tag behind "Hide juniors" in Club Settings.
+  // BetterFootball's backend has no such endpoint, so it stays off there.
+  showJuniorTag = false,
+}) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -176,6 +181,13 @@ export default function CompetitionManager({ renderGrouping = null, intro = null
                   {held.length} {held.length === 1 ? 'grade' : 'grades'}
                   {c.season_count ? ` · ${c.season_count} season${c.season_count === 1 ? '' : 's'}` : ''}
                 </p>
+                {showJuniorTag && (
+                  <JuniorTag
+                    competition={c}
+                    busy={busy}
+                    onChange={value => act(() => api.adminTagCompetitionJunior(c.id, value))}
+                  />
+                )}
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <button
@@ -270,6 +282,33 @@ export default function CompetitionManager({ renderGrouping = null, intro = null
         </button>
       </form>
     </div>
+  )
+}
+
+// Junior or senior cricket. Only matters to a club that has switched on "Hide
+// juniors" in Club Settings, but it is set here because a competition is what
+// tells one association's cricket from another's. "Auto" means nobody has said,
+// so the name decides; a person's choice is never overwritten by a sync.
+function JuniorTag({ competition, busy, onChange }) {
+  const tag = competition.is_junior_tag
+  const value = tag === true ? 'junior' : tag === false ? 'senior' : ''
+  return (
+    <label className="flex items-center gap-2 mt-2 text-xs text-pb-faint flex-wrap">
+      <span>Cricket type</span>
+      <select
+        value={value}
+        disabled={busy}
+        onChange={e => onChange(e.target.value === 'junior' ? true : e.target.value === 'senior' ? false : null)}
+        data-testid="competition-junior-tag"
+        className="bg-pb-surface2 border pb-hairline text-pb-text text-xs rounded px-2 py-1 focus:outline-none focus:border-pb-accent"
+      >
+        <option value="">
+          Auto ({competition.suggested_junior ? 'reads as junior' : 'reads as senior'})
+        </option>
+        <option value="junior">Junior</option>
+        <option value="senior">Senior</option>
+      </select>
+    </label>
   )
 }
 

@@ -8,6 +8,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { CAP } from '../lib/capabilities'
 import { api } from '../lib/api'
 import SeasonSelector from '../components/SeasonSelector'
+import MajorSponsorSlot from '../components/MajorSponsorSlot'
+import { useClubSponsors, forSpot } from '../lib/useClubSponsors'
 import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
 import { useNameFormat } from '../lib/nameFormat'
@@ -162,6 +164,12 @@ export default function Dashboard() {
   const { user, hasCapability } = useAuth()
   const canSync = hasCapability(CAP.RUN_SYNC) &&
     (user?.role === 'super_admin' || user?.club_id === orgId)
+  // The major-sponsor slot beside the club name. Hidden when the club has none;
+  // an admin who can manage sponsors for THIS club sees a prompt to add one.
+  const sponsorData = useClubSponsors(clubSlug)
+  const majorSponsors = forSpot(sponsorData, 'dashboard')
+  const canManageSponsors = hasCapability(CAP.MANAGE_SPONSORS) &&
+    (user?.role === 'super_admin' || user?.club_id === orgId)
 
   useEffect(() => {
     if (!orgId) return
@@ -216,6 +224,21 @@ export default function Dashboard() {
   const currentSeason = seasons?.find(s => s.id === selectedSeason)
   const seasonLabel = selectedSeason ? (currentSeason?.name || 'All Seasons') : 'All Seasons'
 
+  // Sync and Leaderboard. With a sponsor slot beside the club name they drop to
+  // the filter row below, so the slot and the name share the header's baseline
+  // and the buttons line up with the filters. Without one they stay in the header.
+  const hasSponsorSlot = majorSponsors.length > 0 || canManageSponsors
+  const headerActions = [
+    canSync && (
+      <Btn key="sync" onClick={handleSync} disabled={syncing}>
+        {syncing ? 'Syncing…' : syncDone ? '✓ Synced' : 'Sync ↻'}
+      </Btn>
+    ),
+    <Link key="lb" to={`/${clubSlug}/leaderboard`} className="font-mono text-[11px] tracking-wide2 px-3.5 py-2 rounded hover:opacity-90 transition" style={{ background: "var(--pb-accent)", color: "var(--pb-on-accent)" }}>
+      Leaderboard →
+    </Link>,
+  ].filter(Boolean)
+
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
@@ -225,26 +248,25 @@ export default function Dashboard() {
           title={org.name}
           logo={club?.public_header_logo ? club.logo_url : null}
           logoAlt={`${org.name} crest`}
+          aside={hasSponsorSlot ? (
+            <MajorSponsorSlot
+              sponsors={majorSponsors}
+              label={sponsorData?.tier_labels?.major}
+              canManage={canManageSponsors}
+            />
+          ) : null}
           meta={[
             summary && <span key="m">PLAYED <span className="text-pb-text">{fmtCount(summary.total_games)}</span></span>,
             summary && <span key="r"><span className="text-pb-text">{fmtCount(summary.total_runs)}</span> RUNS</span>,
             summary && <span key="w"><span className="text-pb-text">{fmtCount(summary.total_wickets)}</span> WICKETS</span>,
             summary && <span key="p"><span className="text-pb-text">{fmtCount(summary.total_players)}</span> PLAYERS</span>,
           ].filter(Boolean)}
-          actions={[
-            canSync && (
-              <Btn key="sync" onClick={handleSync} disabled={syncing}>
-                {syncing ? 'Syncing…' : syncDone ? '✓ Synced' : 'Sync ↻'}
-              </Btn>
-            ),
-            <Link key="lb" to={`/${clubSlug}/leaderboard`} className="font-mono text-[11px] tracking-wide2 px-3.5 py-2 rounded hover:opacity-90 transition" style={{ background: "var(--pb-accent)", color: "var(--pb-on-accent)" }}>
-              Leaderboard →
-            </Link>,
-          ].filter(Boolean)}
+          actions={hasSponsorSlot ? null : headerActions}
         />
 
         {/* Season / Grade filter */}
-        <div className="mb-6">
+        <div className={`mb-6 ${hasSponsorSlot ? 'flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between' : ''}`}>
+          <div className="min-w-0">
           <SeasonSelector
             seasons={seasons}
             grades={grades}
@@ -270,6 +292,8 @@ export default function Dashboard() {
             showGenderFilter={false}
             showCaptainFilter={false}
           />
+          </div>
+          {hasSponsorSlot && <div className="flex gap-2 flex-wrap sm:justify-end shrink-0">{headerActions}</div>}
         </div>
 
         {/* Summary KPIs */}

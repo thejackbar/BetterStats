@@ -17,7 +17,7 @@
 **Scorecard endpoint precedence (current behaviour)**
 1. When the live Grassroots fetch succeeds, BOTH teams' batting, bowling and innings totals are built entirely from it. Stored `batting_innings`/`bowling_spells` are only the fallback. Why: the DB never holds fill-ins, the opposition half or mid-edit corrections.
 2. Team membership is decided by Grassroots' roster for that match (`our_team_roster_pids` / `opp_roster_pids`), never by whether a GUID is a `players` row. A registered player who guested for the opposition belongs on the opposition card.
-3. `players` is consulted only via `_resolve_linked_id(pid_str, name)` to attach a hyperlink to an already classified row: literal id, `grassroots_id`, `player_name_aliases`, then `(surname, first_initial)`. It must never move a row between teams or change numbers.
+3. `players` is consulted only via `_resolve_linked_id(pid_str, name)` to attach a hyperlink to an already classified row: literal id, `grassroots_id`, `player_name_aliases`, the team sheet's FULL name when one player holds it (`participant_names`), then `(surname, first_initial)` only when one player fits and the first names agree (Ashton is not Angus). It must never move a row between teams or change numbers.
 4. `_our_tid` (which GR team is ours): org-name word (`org_word`) is PRIMARY; DB overlap is only the fallback when the org cannot be resolved. Why: a few contaminated stored rows swing an overlap count and swap crests and every fill-in flag.
 5. Bat-only `runs` is summed from rows and NEVER replaced by GR `runsScored` (batters plus extras; the frontend adds extras again). Wickets and extras prefer GR's `numberOfWicketsFallen` / `totalExtras` for both sides. Our innings totals are recomputed from the final `batting_flat` after fill-in injection.
 6. DB-built rows are swapped for GR-built ones only after the whole GR rebuild succeeds. That rebuild is inside a broad `try/except`, so any bug in it silently falls back to DB-only rendering. Null-check everything inside (`org` can be None).
@@ -35,6 +35,8 @@
 14. `organisations.include_fill_ins_in_stats` (migration 147, default on) controls only whether a fill-in's NAME shows in partnerships and fielding cards; batting and bowling always show. Storage: `partnerships.batter1_name/batter2_name`, `fielding_stats.player_name` (only when id is NULL), always-NULL twins on `manual_partnerships`/`manual_fielding_stats` so `v_effective_*` unions line up. `fielding_stats.player_id` FK is `ON DELETE SET NULL`.
 15. Sync uses `our_team_roster_guids` (raw GR strings) to tell "ours but unregistered" from "opposition", because `_team_pid` returning None cannot. A partnership is dropped only when NEITHER side has an id or a name.
 16. Records boards inner-join `players` scoped to the org, so name-only fill-in rows never reach them.
+    Match page shows a stand the records page omits? Run `python -m app.scripts.diagnose_partnership <org> <date> [--runs N]` (read-only): it names the filter that drops each stand (no player id, other club's player row, `is_club_innings` FALSE, no grade or season).
+    No stands before 2023 though the games hold fall of wickets? Sync only derives stands for a game it stores, and `repair_stored_game` (older than 14 days) does not rebuild them. `python -m app.scripts.backfill_partnerships <org> [--from --to --limit] [--apply]` adds them through `attach_innings_detail`: dry run by default, rows only, one paced Cricket Australia request per game, capped per run (default 100).
 
 **Manual cards, fall of wickets, partnerships**
 17. `get_scorecard` shares one row builder for synced and manual tables (`BI = ManualBattingInnings if is_manual else BattingInnings`). Any column read there must exist on BOTH tables or every manual card 500s. NULL `caught_behind` means the card does not say and reads as a plain catch (see Flag 1).
@@ -64,6 +66,7 @@
 
 **Other**
 35. On a Full Rebuild's true-success branch only, `hard_refresh_org._run` calls `auto_generate_and_publish_recent_yearbooks(s, org_id, count=3)` in its own try/except and fresh session (a yearbook failure must not look like a sync failure). Sync Now does not. Existing narrative is never overwritten; it publishes even if narrative generation fails. (Yearbooks guide owns this.)
+36. `get_scorecard` returns `fielding` (per player: `catches`, `catches_wk`, `run_outs`, `stumpings`) and `MatchScorecard.jsx` draws it as `FieldingSection`. A scorebook import records catches as a per-player tally, never which batter each got out, so its dismissal text is a bare `c`; this section is where those catches show. The CSFW converter stores keeper catches in `catches_wk` with `catches` blank, so the section shows `max(catches, catches_wk)`. Row dividers use `pb-hairline-t`, never `border-t pb-hairline` (no such colour class).
 
 ## Traps and failure signatures
 
@@ -133,3 +136,6 @@ none specific to this area. A Full Rebuild (`POST /club-admin/hard-refresh`) is 
 | - v8.79.1 crests and header; v8.79.2 winner and ordering | rules extracted | Rules 21 to 23 |
 | - v8.79.3 cross-club leak in team classification | rules extracted | Rules 4, 18; Open follow-ups |
 | - Yearbook auto-generation after Full Rebuild (misfiled) | rules extracted | Rule 35; Flag 9 |
+
+- Never decide "is this team ours" from a name fragment. `services/club_match.fixture_side` / `side_is_club` / `team_is_club`: owning organisation id first, name (whole words, fuller name wins) only for a side with no id. `club_match_keys` includes the club's FIRST WORD, so a substring test on it matched "North Beach" for "North Perth". The match page reads from the club in `?org=` when that club played in the game (`games._viewing_club`), never always from the club that synced it first. Check: `verify_north_perth_report.py`.
+- A stored synced fixture is cleared when CA lists it between two OTHER clubs (`fixtures_reconcile.find_foreign`, from `listing["others"]`; strict, both owning organisation ids required): removed, or CANCELLED when work sits on it. CA still lists the game, so staleness alone never catches it. Archive: grep `Other clubs' games kept on a club's stored Fixtures`. Check: `verify_foreign_fixtures_and_selection_templates.py`.

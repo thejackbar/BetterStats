@@ -272,18 +272,31 @@ export default function ModuleLayout({
             <button onClick={() => setMobileOpen(true)} className="text-pb-dim border border-pb-hairline2 rounded-lg px-2.5 py-[7px] leading-none" aria-label="Open menu">☰</button>
           </div>
         ) : (
-        <header className="sticky top-0 z-40 bg-pb-surface border-b pb-hairline px-5 py-3.5 flex flex-col gap-2.5">
+        <>
+        {/* Phone: a slim bar that stays put (menu + which screen this is). The
+            full header below it scrolls away from `md` down: with a title, tabs,
+            stats, filters and an action row it ran to half the screen on a
+            phone, sticky, and covered the very list it was there to control. */}
+        <div className="md:hidden sticky top-0 z-40 bg-pb-surface border-b pb-hairline px-4 py-2 flex items-center gap-3 min-w-0">
+          <button onClick={() => setMobileOpen(true)} className="shrink-0 text-pb-dim border border-pb-hairline2 rounded-lg px-2.5 py-[7px] leading-none" aria-label="Open menu">☰</button>
+          <span className="font-display font-bold text-[16px] tracking-[-0.01em] truncate min-w-0">
+            {title || <>Better<span style={{ color: 'var(--pb-accent-ink)' }}>{moduleName}</span></>}
+          </span>
+        </div>
+        <header className="md:sticky md:top-0 z-40 bg-pb-surface border-b pb-hairline px-4 md:px-5 py-3.5 flex flex-col gap-2.5">
           <div className="flex items-center gap-3.5 flex-wrap">
-            <button onClick={() => setMobileOpen(true)} className="lg:hidden text-pb-dim border border-pb-hairline2 rounded-lg px-2.5 py-[7px] leading-none" aria-label="Open menu">☰</button>
+            <button onClick={() => setMobileOpen(true)} className="hidden md:block lg:hidden text-pb-dim border border-pb-hairline2 rounded-lg px-2.5 py-[7px] leading-none" aria-label="Open menu">☰</button>
             {/* With `tabs` the title block and the right-hand group each take an
                 equal share, so the button row lands in the middle of the header
-                rather than wherever the title happens to end. */}
-            <div className={`flex items-center gap-2 min-w-0 ${tabs ? 'flex-1 basis-0' : ''}`}>
+                rather than wherever the title happens to end. On a phone the
+                title lives in the slim bar above, so this block is only the
+                caption (and the ? help), on a line of its own. */}
+            <div className={`flex items-center gap-2 min-w-0 max-md:basis-full ${tabs ? 'flex-1 basis-0' : ''} ${caption || onHelp ? '' : 'max-md:hidden'}`}>
               <div className="min-w-0">
                 {title
-                  ? <h1 className="font-display font-bold text-[19px] tracking-[-0.01em] truncate">{title}</h1>
-                  : <span className="font-mono text-[11px] tracking-wide2 text-pb-faint">Better<span style={{ color: 'var(--pb-accent-ink)' }}>{moduleName}</span></span>}
-                {caption && <Caption screen className="mt-0.5">{caption}</Caption>}
+                  ? <h1 className="hidden md:block font-display font-bold text-[19px] tracking-[-0.01em] truncate">{title}</h1>
+                  : <span className="hidden md:inline font-mono text-[11px] tracking-wide2 text-pb-faint">Better<span style={{ color: 'var(--pb-accent-ink)' }}>{moduleName}</span></span>}
+                {caption && <Caption screen className="md:mt-0.5">{caption}</Caption>}
               </div>
               {onHelp && <HelpDot onClick={onHelp} />}
             </div>
@@ -293,12 +306,12 @@ export default function ModuleLayout({
                 sides carry a zero basis, so they give way first and this only
                 narrows when there is nothing left — which is when the button
                 row should be wrapping anyway. */}
-            {tabs && <div className="flex items-center justify-center min-w-0">{tabs}</div>}
+            {tabs && <div className="flex items-center justify-center min-w-0 max-md:max-w-full">{tabs}</div>}
             {!twoRow && filters}
-            <div className={`ml-auto flex items-center gap-[26px] ${tabs ? 'flex-1 basis-0 justify-end' : ''}`}>
+            <div className={`ml-auto flex items-center gap-[26px] max-md:ml-0 max-md:basis-full max-md:flex-wrap max-md:gap-y-2.5 ${tabs ? 'flex-1 basis-0 justify-end' : ''}`}>
               {stats}
               {!twoRow && <Bookmark pageLabel={bookmarkLabel} variant="bar" />}
-              {!twoRow && actions && <div className="flex items-center gap-2">{actions}</div>}
+              {!twoRow && actions && <div className="flex items-center gap-2 max-md:flex-wrap">{actions}</div>}
             </div>
           </div>
           {twoRow && (
@@ -313,15 +326,22 @@ export default function ModuleLayout({
             // to it are the two things a person does with what is underneath,
             // and they belong on one line. A screen whose filters are a single
             // row is unaffected: both boxes are one line tall either way.
-            <div className="flex items-end gap-3.5">
-              <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">{filters}</div>
-              <div className="flex items-center gap-[26px] shrink-0">
+            //
+            // On a phone there is no "beside": the filters take the full width
+            // and the actions wrap on a line under them. The cluster used to be
+            // `shrink-0` at every width, so Accounts' five buttons were 318px
+            // wider than a 390px screen and the browser widened the whole page
+            // to fit (which is also why a fixed modal opened off to one side).
+            <div className="flex flex-col md:flex-row md:items-end gap-3.5">
+              <div className="flex items-center gap-2 flex-wrap min-w-0 md:flex-1">{filters}</div>
+              <div className="flex items-center gap-x-[26px] gap-y-2.5 max-md:flex-wrap md:shrink-0 min-w-0">
                 <Bookmark pageLabel={bookmarkLabel} variant="bar" />
-                {actions && <div className="flex items-center gap-2 flex-wrap justify-end">{actions}</div>}
+                {actions && <div className="flex items-center gap-2 flex-wrap md:justify-end">{actions}</div>}
               </div>
             </div>
           )}
         </header>
+        </>
         )}
         {/* Trial-conversion bar — directly under the module header, full width
             of the main column, so a trialling club can subscribe from any

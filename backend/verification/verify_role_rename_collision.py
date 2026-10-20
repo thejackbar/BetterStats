@@ -111,6 +111,8 @@ async def build_schema():
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
 
 
 async def seed(db):

@@ -24,6 +24,7 @@ requires MANAGE_CLUB_ROOM.
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
 from pathlib import Path
@@ -31,16 +32,25 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_CLUB_ROOM, MANAGE_SOCIAL, require_any_cap,
+)  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_CLUB_ROOM, MANAGE_SOCIAL, require_cap
 from app.auth.modules import org_has_module
 from app.models.db import (
-    ClubRoomMedia, ClubRoomSettings, ClubRoomSlide, Organisation, SavedReport, Sponsor, User, get_db,
+    ClubHonourBoard, ClubHonourEntry, ClubRoomMedia, ClubRoomSettings, ClubRoomSlide, Organisation,
+    SavedReport, Sponsor, User, get_db,
 )
-from app.routers.auth import get_current_club, get_current_user
-from app.services import club_lock
+from app.routers.auth import get_current_club, get_current_user, public_junior_hiding
+from app.services import club_lock, grade_scope
+from app.services.grade_labels import CATEGORY_LABELS
+from app.services.session_safety import rollback_keeping
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/club-admin/club-room", tags=["club-room"])
 
@@ -49,8 +59,9 @@ MEDIA_MAX_BYTES = 8 * 1024 * 1024
 MEDIA_MAX_PER_CLUB = 120
 SLIDE_TYPES = {
     "sponsors", "fixtures", "social_posts", "custom_images",
-    "leaderboard", "records", "statlab_report",
+    "leaderboard", "records", "statlab_report", "honours",
 }
+HONOUR_KINDS = {"boards", "premierships", "office_bearers", "awards"}
 STAT_TABLE_LIMIT = 12  # rows shown on a leaderboard/records/report slide
 
 # records.get_records() computes EVERY record category in one call (batting,
@@ -67,20 +78,25 @@ _RECORDS_CACHE_TTL = 90
 _records_cache: dict[tuple, tuple[float, dict]] = {}
 
 
-async def _get_records_cached(db, org_id: str, season_id: str | None) -> dict:
+async def _get_records_cached(db, org_id: str, season_id: str | None, categories: str | None = None) -> dict:
     import time as _time
-    key = (org_id, season_id)
+    key = (org_id, season_id, categories)
     hit = _records_cache.get(key)
     now = _time.time()
     if hit and now - hit[0] < _RECORDS_CACHE_TTL:
         return hit[1]
     from app.routers.records import get_records
     # get_records is a FastAPI path function whose unfilled params default to
-    # Query(...) sentinel objects, not real values — bypassing DI (as here)
-    # means every one of them must be passed explicitly.
+    # Query(...) / Depends(...) sentinel objects, not real values — bypassing DI
+    # (as here) means every one of them must be passed explicitly, and a
+    # parameter added to it later has to be added here too: a missed one reaches
+    # the query as a sentinel and 500s the whole /play. `viewer=None` is the
+    # public reading, so a junior grade the club hides from the public stays off
+    # the TV as well (the show also runs on the logged-out /room link).
     data = await get_records(
         org_id=org_id, season_id=season_id, grade_id=None, grade_name=None,
-        finals_only=False, captain_only=False, gender=None, db=db,
+        finals_only=False, captain_only=False, gender=None, categories=categories,
+        formats=None, competitions=None, debug_timing=False, db=db, viewer=None,
     )
     _records_cache[key] = (now, data)
     return data
@@ -99,11 +115,19 @@ async def _get_or_create_settings(db: AsyncSession, club: Organisation) -> ClubR
     row = await db.get(ClubRoomSettings, club.id)
     if row:
         return row
-    row = ClubRoomSettings(organisation_id=club.id)
-    db.add(row)
+    # The editor fires /settings and /public-link together, so on a club's first
+    # visit two requests both find no row. A plain insert lets the second one hit
+    # the primary key and 500 the page; ON CONFLICT DO NOTHING makes the loser a
+    # no-op and the re-read below returns whichever row won.
+    club_id = club.id
+    await db.execute(
+        pg_insert(ClubRoomSettings)
+        .values(organisation_id=club_id, enabled=False, rotation_seconds=15,
+                theme="dark", shuffle=False, public_link_enabled=False, require_pin=True)
+        .on_conflict_do_nothing(index_elements=[ClubRoomSettings.organisation_id])
+    )
     await db.commit()
-    await db.refresh(row)
-    return row
+    return await db.get(ClubRoomSettings, club_id)
 
 
 def _settings_dict(s: ClubRoomSettings) -> dict:
@@ -160,7 +184,7 @@ async def _save_media(db, club, current_user, data: bytes, mime: str, source: st
 
 # ─── Settings + playlist ──────────────────────────────────────────────────
 
-@router.get("/settings")
+@router.get("/settings", dependencies=[Depends(require_any_cap(MANAGE_CLUB_ROOM, MANAGE_SOCIAL))])
 async def get_settings(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -466,6 +490,86 @@ async def list_reports_for_picker(
     return [{"id": str(r.id), "title": r.title, "description": r.description} for r in rows.scalars().all()]
 
 
+@router.get("/grade-types")
+async def list_grade_types(
+    current_user: User = Depends(require_cap(MANAGE_CLUB_ROOM)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The grade types this club actually has, for the Leaderboard and Records
+    slides' "Grade type" picker, and which of them its default counts. A club
+    with no Masters grade is not offered Masters."""
+    available = await grade_scope.org_available_categories(db, club.id)
+    default = list(await grade_scope.club_default_categories(db, club.id))
+    return {
+        "available": [{"key": k, "label": CATEGORY_LABELS.get(k, k)} for k in available],
+        "default": default,
+    }
+
+
+@router.get("/honour-sources")
+async def list_honour_sources(
+    current_user: User = Depends(require_cap(MANAGE_CLUB_ROOM)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """What the "Honour Boards" slide can show, for its pickers: the club's own
+    boards, and the office-bearer groups. Read here rather than from the website
+    admin routes so a club-room admin needs no website permission to pick one."""
+    boards = (await db.execute(
+        select(ClubHonourBoard).where(ClubHonourBoard.organisation_id == club.id)
+        .order_by(ClubHonourBoard.display_order, ClubHonourBoard.title)
+    )).scalars().all()
+    groups = list(dict.fromkeys(b["group"] for b in await _office_bearer_boards(db, club)))
+    return {
+        "boards": [{"id": str(b.id), "title": b.title} for b in boards],
+        "groups": groups,
+        "award_categories": await _award_categories(db, club),
+    }
+
+
+async def _award_categories(db, club) -> list[dict]:
+    """The award categories (with counts) a club has recorded, for the "Awards
+    from your records" source. Read here, not from the website admin routes, so a
+    club-room admin needs no website permission to pick one."""
+    rows = (await db.execute(text("""
+        SELECT category, subcategory, COUNT(*) AS n
+        FROM player_achievements
+        WHERE org_id = :org AND category IS NOT NULL AND category <> ''
+        GROUP BY category, subcategory
+        ORDER BY category, subcategory NULLS FIRST
+    """), {"org": str(club.id)})).mappings().all()
+    return [{"category": r["category"], "subcategory": r["subcategory"], "count": r["n"]} for r in rows]
+
+
+@router.get("/award-names")
+async def list_award_names(
+    category: str,
+    subcategory: str | None = None,
+    current_user: User = Depends(require_cap(MANAGE_CLUB_ROOM)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The award names (with counts) inside one category, for the "Only awards
+    named" picker. Typing a name that is not listed still works. Grouped without
+    regard to case, because the board match ignores it."""
+    params = {"org": str(club.id), "cat": category}
+    sub_clause = ""
+    if subcategory:
+        sub_clause = " AND subcategory = :sub"
+        params["sub"] = subcategory
+    rows = (await db.execute(text("""
+        SELECT MODE() WITHIN GROUP (ORDER BY TRIM(achievement)) AS achievement, COUNT(*) AS n
+        FROM player_achievements
+        WHERE org_id = :org AND category = :cat AND COALESCE(TRIM(achievement), '') <> ''
+    """ + sub_clause + """
+        GROUP BY LOWER(TRIM(achievement))
+        ORDER BY n DESC, LOWER(TRIM(achievement))
+        LIMIT 200
+    """), params)).mappings().all()
+    return [{"achievement": r["achievement"], "count": r["n"]} for r in rows]
+
+
 # ─── Play — resolves the saved playlist into a flat, ready-to-render list ──
 
 def _sponsor_dict(s: Sponsor) -> dict:
@@ -663,6 +767,26 @@ async def _season_label(db, season_id: str | None) -> str:
     return s.name if s else "All-time"
 
 
+# A leaderboard or records slide can be narrowed to one grade type. The pick is
+# `config.categories`: one grade category key (senior reads as "Men's"), or
+# "all". Not set means the club's own default, which is what every other stats
+# screen uses. Anything else is treated as not set, never as "show everything".
+_GRADE_TYPE_KEYS = set(CATEGORY_LABELS) | {"all"}
+
+
+def _grade_type(cfg: dict) -> str | None:
+    value = str((cfg or {}).get("categories") or "").strip().lower()
+    return value if value in _GRADE_TYPE_KEYS else None
+
+
+def _grade_type_label(categories: str | None) -> str | None:
+    """What the slide says it is showing. None when the club default applies, so
+    a slide nobody narrowed looks exactly as it did."""
+    if not categories:
+        return None
+    return "All grades" if categories == "all" else CATEGORY_LABELS.get(categories)
+
+
 async def _expand_leaderboard(db, club, entry: ClubRoomSlide) -> list[dict]:
     from app.services.aggregations import (
         get_batting_leaderboard_extended, get_bowling_leaderboard_extended, get_fielding_leaderboard,
@@ -673,16 +797,24 @@ async def _expand_leaderboard(db, club, entry: ClubRoomSlide) -> list[dict]:
     limit = min(int(cfg.get("limit") or STAT_TABLE_LIMIT), 20)
     org_id = str(club.id)
 
+    # The same scope the public leaderboard builds for a logged-out viewer: the
+    # slide's grade type (or the club default), minus any junior grade the club
+    # hides from the public. The TV also runs on the logged-out /room link.
+    categories = _grade_type(cfg)
+    hiding = await public_junior_hiding(db, None, org_id, with_players=False)
+    scope = await grade_scope.resolve_scope(
+        db, org_id, categories, hidden_grade_ids=hiding.grade_ids)
+
     if stat_group == "bowling":
         sort_by = cfg.get("sort_by") if cfg.get("sort_by") in _BOWLING_SORTS else "total_wickets"
-        rows = await get_bowling_leaderboard_extended(db, org_id, season_id, None, sort_by, limit)
+        rows = await get_bowling_leaderboard_extended(db, org_id, season_id, None, sort_by, limit, scope=scope)
     elif stat_group == "fielding":
         sort_by = cfg.get("sort_by") if cfg.get("sort_by") in _FIELDING_SORTS else "total_catches_non_wk"
-        rows = await get_fielding_leaderboard(db, org_id, season_id, None, sort_by, limit)
+        rows = await get_fielding_leaderboard(db, org_id, season_id, None, sort_by, limit, scope=scope)
     else:
         stat_group = "batting"
         sort_by = cfg.get("sort_by") if cfg.get("sort_by") in _BATTING_SORTS else "total_runs"
-        rows = await get_batting_leaderboard_extended(db, org_id, season_id, None, sort_by, limit)
+        rows = await get_batting_leaderboard_extended(db, org_id, season_id, None, sort_by, limit, scope=scope)
 
     if not rows:
         return []
@@ -691,6 +823,7 @@ async def _expand_leaderboard(db, club, entry: ClubRoomSlide) -> list[dict]:
         "title": entry.title or f"{stat_group.title()} Leaderboard",
         "stat_group": stat_group, "sort_by": sort_by,
         "season_label": await _season_label(db, season_id),
+        "grade_type_label": _grade_type_label(categories),
         "rows": rows,
     }]
 
@@ -710,7 +843,8 @@ async def _expand_records(db, club, entry: ClubRoomSlide) -> list[dict]:
     season_id = cfg.get("season_id") or None
     limit = min(int(cfg.get("limit") or 8), 15)
 
-    data = await _get_records_cached(db, str(club.id), season_id)
+    categories = _grade_type(cfg)
+    data = await _get_records_cached(db, str(club.id), season_id, categories)
     rows = (_dig(data, category) or [])[:limit]
     if not rows:
         return []
@@ -719,6 +853,7 @@ async def _expand_records(db, club, entry: ClubRoomSlide) -> list[dict]:
         "type": "records", "id": f"rec-{entry.id}",
         "title": entry.title or label, "category": category,
         "season_label": await _season_label(db, season_id),
+        "grade_type_label": _grade_type_label(categories),
         "rows": rows,
     }]
 
@@ -741,17 +876,28 @@ async def _expand_statlab_report(db, club, entry: ClubRoomSlide) -> list[dict]:
     qj = report.query_json or {}
     limit = min(int(qj.get("limit") or STAT_TABLE_LIMIT), STAT_TABLE_LIMIT)
     try:
+        # Grade type / Match type ride in the saved context as `categories` and
+        # `formats`. The live StatLab routes turn them into a scope before the
+        # query runs; without that the slide counted only the club's default
+        # grade types, so a Women's report played as the men's figures.
+        context = _statlab_report_context(qj.get("context"))
+        scope = await grade_scope.resolve_scope(
+            db, str(club.id), _csv_or_none(qj.get("context"), "categories"),
+            formats=_csv_or_none(qj.get("context"), "formats"),
+            competitions=_csv_or_none(qj.get("context"), "competitions"),
+        )
+        context[svc._SCOPE_KEY] = scope
         if qj.get("derived"):
             result = await svc.run_derived(
                 db, name=qj["derived"], org_id=str(club.id), limit=limit, page=1,
-                context=qj.get("context") or {},
+                context=context,
             )
         else:
             result = await svc.run_query(
                 db, org_id=str(club.id), target=qj.get("target", "player_career"),
                 sort_by=qj.get("sortBy", "runs"), sort_dir=qj.get("sortDir", "desc"),
                 limit=limit, page=1, metric_filters=[], filter_tree=qj.get("filterTree"),
-                context=qj.get("context") or {},
+                context=context,
             )
     except Exception:  # noqa: BLE001 — a stale/invalid saved query must never break the show
         return []
@@ -764,6 +910,31 @@ async def _expand_statlab_report(db, club, entry: ClubRoomSlide) -> list[dict]:
         "title": entry.title or report.title, "rows": rows,
         "columns": _report_columns(rows[0], qj.get("sortBy")),
     }]
+
+
+_STATLAB_SCOPE_CONTEXT_KEYS = ("categories", "formats", "competitions")
+
+
+def _csv_or_none(context, key: str) -> str | None:
+    """A saved report's scope pick as the comma-joined string `resolve_scope`
+    reads, or None when the report never set one (so the club default applies,
+    exactly as on the live page)."""
+    value = (context or {}).get(key) if isinstance(context, dict) else None
+    if isinstance(value, (list, tuple)):
+        value = ",".join(str(v) for v in value if v)
+    value = str(value).strip() if value not in (None, "") else ""
+    return value or None
+
+
+def _statlab_report_context(context) -> dict:
+    """A saved report's context without the keys that become the scope, and
+    without any underscore key: `_scope` is ours to set, never a saved row's."""
+    if not isinstance(context, dict):
+        return {}
+    return {
+        k: v for k, v in context.items()
+        if not str(k).startswith("_") and k not in _STATLAB_SCOPE_CONTEXT_KEYS
+    }
 
 
 def _report_columns(first_row: dict, sort_by: str | None) -> list[str]:
@@ -782,39 +953,242 @@ def _report_columns(first_row: dict, sort_by: str | None) -> list[str]:
     return (priority + rest)[:6]
 
 
+# ─── Honour boards ─────────────────────────────────────────────────────────
+#
+# One slide shape for all three things a club calls an honour board, so the
+# stage has one renderer: {title, subtitle, eyebrow, columns, entries:[{label,
+# name, detail}]}. `label` is the left-hand column (a year, a span of years or
+# nothing). Every source is read by the same code the public pages use, so the
+# TV can never disagree with the website about who is on a board.
+
+def _honour_label(year) -> str | None:
+    return str(year) if year is not None else None
+
+
+async def _expand_honour_boards(db, club, cfg: dict) -> list[dict]:
+    """The club's own honour boards (Admin → Website → Honours): the hand-typed
+    entries first, then anything the board pulls from an award category, the
+    same merge the public Honours page makes. An empty board is skipped."""
+    from app.routers.website import _auto_entries
+
+    stmt = select(ClubHonourBoard).where(ClubHonourBoard.organisation_id == club.id)
+    board_id = cfg.get("board_id")
+    if board_id:
+        try:
+            stmt = stmt.where(ClubHonourBoard.id == uuid.UUID(str(board_id)))
+        except ValueError:
+            return []
+    boards = (await db.execute(stmt.order_by(ClubHonourBoard.display_order, ClubHonourBoard.title))).scalars().all()
+
+    out = []
+    for b in boards:
+        rows = (await db.execute(
+            select(ClubHonourEntry)
+            .where(ClubHonourEntry.board_id == b.id)
+            .order_by(ClubHonourEntry.display_order, ClubHonourEntry.year.desc().nullslast())
+        )).scalars().all()
+        entries = [{"label": _honour_label(e.year), "name": e.name, "detail": e.detail} for e in rows]
+        if b.source_category:
+            entries += [
+                {"label": _honour_label(a["year"]), "name": a["name"], "detail": a["detail"]}
+                for a in await _auto_entries(club.id, b.source_category, b.source_subcategory, db, b.source_achievement)
+            ]
+        if not entries:
+            continue
+        out.append({
+            "eyebrow": "Honour board", "title": b.title, "subtitle": b.description,
+            "columns": max(1, min(4, b.columns or 1)), "entries": entries,
+        })
+    return out
+
+
+async def _expand_honour_premierships(db, club) -> list[dict]:
+    """One slide per flag, newest first, with the squad that won it."""
+    from app.services import honours as honours_svc
+
+    out = []
+    for g in (await honours_svc.premiership_squads(db, club.id))["premierships"]:
+        entries = []
+        for p in g["players"]:
+            bits = list(dict.fromkeys([*p["roles"], *([p["detail"]] if p["detail"] else [])]))
+            entries.append({"label": None, "name": p["name"], "detail": " / ".join(bits) or None})
+        if not entries:
+            continue
+        title = " · ".join(x for x in (g["season"], g["team"]) if x) or g["competition"] or "Premiers"
+        out.append({
+            "eyebrow": "Premiers", "title": title,
+            "subtitle": g["competition"] if g["competition"] and g["competition"] != title else None,
+            "columns": 3 if len(entries) > 12 else 2, "entries": entries,
+        })
+    return out
+
+
+async def _office_bearer_boards(db, club) -> list[dict]:
+    """Every office-bearer and life-member board, in the club's saved order."""
+    from app.services import honour_layout, honours as honours_svc
+
+    stored = (await db.execute(
+        select(Organisation.honour_board_layout).where(Organisation.id == club.id)
+    )).scalar_one_or_none()
+    data = await honours_svc.office_bearer_boards(
+        db, club.id, include_life_members=True, layout=honour_layout.clean_layout(stored))
+    return [b for g in data["groups"] for b in g["boards"]]
+
+
+async def _expand_honour_office_bearers(db, club, cfg: dict) -> list[dict]:
+    """One slide per role (President, Secretary, Life Members ...), each listing
+    who held it and when. `config.group` narrows it to one group."""
+    group = (cfg.get("group") or "").strip().lower()
+    out = []
+    for b in await _office_bearer_boards(db, club):
+        if group and b["group"].lower() != group:
+            continue
+        entries = [{"label": h["years"], "name": h["name"], "detail": None} for h in b["holders"]]
+        if not entries:
+            continue
+        out.append({
+            "eyebrow": b["group"], "title": b["role"], "subtitle": None,
+            "columns": 2 if len(entries) > 14 else 1, "entries": entries,
+        })
+    return out
+
+
+async def _expand_honour_awards(db, club, cfg: dict, title: str | None) -> list[dict]:
+    """One slide listing the awards a club has recorded in a category, optionally
+    only the ones of one exact name ("A Grade Cap Number"). It reads them through
+    the same `website._auto_entries` an auto honour board uses, so a cap reads
+    "Cap 186" here too and the TV cannot disagree with the website's boards.
+    Nothing to list (or no category picked) is skipped, like an empty board."""
+    from app.routers.website import _auto_entries
+
+    category = str(cfg.get("category") or "").strip()
+    if not category:
+        return []
+    subcategory = str(cfg.get("subcategory") or "").strip() or None
+    achievement = str(cfg.get("achievement") or "").strip() or None
+    rows = await _auto_entries(club.id, category, subcategory, db, achievement)
+    entries = [{"label": _honour_label(r["year"]), "name": r["name"], "detail": r["detail"]} for r in rows]
+    if not entries:
+        return []
+    return [{
+        "eyebrow": "Honour board", "title": (title or "").strip() or achievement or category,
+        "subtitle": None,
+        # 270 names are a long scroll in one column: spread a long list.
+        "columns": 3 if len(entries) > 60 else 2 if len(entries) > 14 else 1,
+        "entries": entries,
+    }]
+
+
+async def _expand_honours(db, club, entry: ClubRoomSlide) -> list[dict]:
+    cfg = entry.config or {}
+    kind = cfg.get("kind") if cfg.get("kind") in HONOUR_KINDS else "boards"
+    if kind == "premierships":
+        slides = await _expand_honour_premierships(db, club)
+    elif kind == "awards":
+        slides = await _expand_honour_awards(db, club, cfg, entry.title)
+    elif kind == "office_bearers":
+        slides = await _expand_honour_office_bearers(db, club, cfg)
+    else:
+        slides = await _expand_honour_boards(db, club, cfg)
+    return [
+        {"type": "honours", "id": f"honours-{entry.id}-{i}", **s}
+        for i, s in enumerate(slides[:EXPAND_CAP])
+    ]
+
+
+_ENTRY_LABELS = {
+    "sponsors": "Sponsors", "fixtures": "Fixtures & Lineups", "leaderboard": "Leaderboard",
+    "records": "Club Records", "statlab_report": "Custom StatLab Report",
+    "social_posts": "Recent Social Posts", "custom_images": "Custom Images", "honours": "Honour Boards",
+}
+_SPONSOR_MODES = {"single": "one sponsor", "grid": "all on one screen"}
+_HONOUR_KINDS = {"premierships": "premiership squads", "office_bearers": "office bearers and life members"}
+
+
+def _entry_summary(entry: ClubRoomSlide) -> str:
+    """A playlist entry in words, the way the editor's row describes it, so a
+    note about it points at one row ("Club Records · Top Career Runs") and not
+    just a type. Plain strings only: nothing here can raise or touch the
+    database, because it runs while reporting that something else did."""
+    cfg = entry.config if isinstance(entry.config, dict) else {}
+    label = _ENTRY_LABELS.get(entry.slide_type, entry.slide_type)
+    detail = None
+    if entry.slide_type == "sponsors":
+        detail = _SPONSOR_MODES.get(cfg.get("mode"), "rotating")
+    elif entry.slide_type == "leaderboard":
+        detail = cfg.get("stat_group") or "batting"
+    elif entry.slide_type == "records":
+        cat = str(cfg.get("category") or "batting.top_career_runs")
+        detail = cat.split(".")[-1].replace("_", " ").title()
+    if entry.slide_type in ("leaderboard", "records") and _grade_type_label(_grade_type(cfg)):
+        detail = f"{detail} · {_grade_type_label(_grade_type(cfg))}"
+    elif entry.slide_type == "honours":
+        kind = cfg.get("kind")
+        if kind == "awards":
+            detail = str(cfg.get("achievement") or cfg.get("category") or "").strip() or "awards from your records"
+        else:
+            detail = _HONOUR_KINDS.get(kind) or ("one board" if cfg.get("board_id") else "all your boards")
+    return f"{label} · {detail}" if detail else label
+
+
+async def _expand_entry(db, club, entry: ClubRoomSlide) -> list[dict]:
+    """One saved playlist entry as the slides it expands into."""
+    if entry.slide_type == "sponsors":
+        return await _expand_sponsors(db, club, entry)
+    if entry.slide_type == "fixtures":
+        return await _expand_fixtures(db, club, entry)
+    if entry.slide_type == "social_posts":
+        if not org_has_module(club, "socials"):
+            return []
+        return await _expand_media(db, club, entry, "social_export", "social_post", 6)
+    if entry.slide_type == "custom_images":
+        return await _expand_media(db, club, entry, "upload", "custom_image", EXPAND_CAP)
+    if entry.slide_type == "leaderboard":
+        return await _expand_leaderboard(db, club, entry)
+    if entry.slide_type == "records":
+        return await _expand_records(db, club, entry)
+    if entry.slide_type == "statlab_report":
+        return await _expand_statlab_report(db, club, entry)
+    if entry.slide_type == "honours":
+        return await _expand_honours(db, club, entry)
+    return []
+
+
 async def build_play_payload(db: AsyncSession, club: Organisation) -> dict:
     """The whole resolved show for one club — shared by the authenticated
     `/play` endpoint and the public `/room/{token}` link, so there's exactly
     one place that expands the saved playlist into ready-to-render slides."""
     settings = await _get_or_create_settings(db, club)
+    # Every row, hidden ones included, so a row number here is the row number
+    # the editor shows; a hidden row is counted but not built.
     rows = await db.execute(
         select(ClubRoomSlide)
-        .where(ClubRoomSlide.organisation_id == club.id, ClubRoomSlide.enabled == True)  # noqa: E712
+        .where(ClubRoomSlide.organisation_id == club.id)
         .order_by(ClubRoomSlide.position)
     )
     entries = rows.scalars().all()
 
     slides: list[dict] = []
-    for entry in entries:
-        if entry.slide_type == "sponsors":
-            expanded = await _expand_sponsors(db, club, entry)
-        elif entry.slide_type == "fixtures":
-            expanded = await _expand_fixtures(db, club, entry)
-        elif entry.slide_type == "social_posts":
-            if not org_has_module(club, "socials"):
-                expanded = []
-            else:
-                expanded = await _expand_media(db, club, entry, "social_export", "social_post", 6)
-        elif entry.slide_type == "custom_images":
-            expanded = await _expand_media(db, club, entry, "upload", "custom_image", EXPAND_CAP)
-        elif entry.slide_type == "leaderboard":
-            expanded = await _expand_leaderboard(db, club, entry)
-        elif entry.slide_type == "records":
-            expanded = await _expand_records(db, club, entry)
-        elif entry.slide_type == "statlab_report":
-            expanded = await _expand_statlab_report(db, club, entry)
-        else:
-            expanded = []
+    skipped: list[dict] = []
+    for row_number, entry in enumerate(entries, start=1):
+        if not entry.enabled:
+            continue
+        # One entry that cannot be built (a stale saved query, an upstream
+        # hiccup, a bug in one expander) must not blank the whole TV: the rest
+        # of the playlist still plays. It is logged with its traceback and named
+        # in `skipped`, so it is neither silent nor lost. The rollback matters
+        # when the failure was a database error, which leaves the transaction
+        # aborted for every entry after it.
+        try:
+            expanded = await _expand_entry(db, club, entry)
+        except Exception:  # noqa: BLE001 - see above
+            logger.exception("club room: skipped %s slide %s for club %s", entry.slide_type, entry.id, club.id)
+            await rollback_keeping(db, club, settings, *entries)
+            skipped.append({
+                "id": str(entry.id), "slide_type": entry.slide_type, "title": entry.title,
+                "row": row_number, "summary": _entry_summary(entry),
+            })
+            continue
         duration = entry.duration_seconds or settings.rotation_seconds
         for item in expanded:
             item["duration_seconds"] = duration
@@ -831,10 +1205,11 @@ async def build_play_payload(db: AsyncSession, club: Organisation) -> dict:
         "logo_url": (f"/api/images/organisations/{club.id}/logo" if club.logo_data or club.logo_url else None),
         "theme_config": club.theme_config,
         "slides": slides,
+        "skipped": skipped,
     }
 
 
-@router.get("/play")
+@router.get("/play", dependencies=[Depends(require_any_cap(MANAGE_CLUB_ROOM, MANAGE_SOCIAL))])
 async def play(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),

@@ -11,6 +11,7 @@ import { CHANGELOG } from '../../data/changelog'
 import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
+import LinkedClubSwitcher from './LinkedClubSwitcher'
 import TrialBanner from './TrialBanner'
 import BrandLogo from '../BrandLogo'
 import { SUPER_OVERVIEW, SUPER_SECTIONS, SALES_MANAGEMENT_ITEMS, visibleSectionItems, sectionBadgeCount } from '../../lib/superNav'
@@ -28,6 +29,8 @@ function compareVersions(a, b) {
 
 // `cap: null` means everyone gets it (dashboard, read-only listing pages).
 // `cap: <CAP>` hides the link from users without that capability.
+// `fullAdmin: true` hides it from a person locked to one module (club-wide screens that
+// belong to no module, like Plan & Billing); the server refuses them either way.
 // BetterSelect / BetterSocials / BetterFees are NOT here — each is its own
 // module surface (own layout + nav), reached from the dashboard module tiles.
 // Items within each headed section are kept in ALPHABETICAL order (by label)
@@ -42,7 +45,7 @@ const NAV_SECTIONS = [
   {
     items: [
       { to: '/admin', label: 'Dashboard', exact: true, cap: null },
-      { to: '/admin/setup', label: 'Setup Wizard', cap: null, badge: 'setupLeft' },
+      { to: '/admin/setup', label: 'Setup Wizard', cap: null, fullAdmin: true, badge: 'setupLeft' },
     ],
   },
   {
@@ -52,7 +55,7 @@ const NAV_SECTIONS = [
       // No capability: every admin may choose what reaches their own inbox.
       // The club-wide half of that screen is gated inside it, and on the server.
       { to: '/admin/notifications', label: 'Notifications', cap: null },
-      { to: '/admin/account', label: 'Plan & Billing', cap: null },
+      { to: '/admin/account', label: 'Plan & Billing', cap: null, fullAdmin: true },
       { to: '/admin/settings', label: 'Settings', cap: CAP.MANAGE_SETTINGS },
       { to: '/admin/users', label: 'Users', cap: CAP.MANAGE_USERS },
     ],
@@ -148,10 +151,13 @@ export default function AdminLayout({ children }) {
   // Filter nav: drop links the user lacks the cap for. Empty sections are
   // dropped too so a heading never renders with nothing under it. (Club admins
   // hold every capability, so in practice they see the full set.)
+  // A person a Primary Admin locked to one module has the club_member role.
+  const isFullAdmin = user?.role === 'club_admin' || user?.role === 'super_admin'
   const visibleSections = NAV_SECTIONS.map(s => ({
     ...s,
     items: s.items.filter(i =>
       (i.cap == null || hasCapability(i.cap)) &&
+      (!i.fullAdmin || isFullAdmin) &&
       (i.flag !== 'memberPortal' || memberPortalVisible)),
   })).filter(s => s.items.length > 0)
 
@@ -279,7 +285,9 @@ export default function AdminLayout({ children }) {
   // acting-as club selected) just hides the header shortcut; the sidebar
   // Setup Wizard item is the unconditional entry point.
   useEffect(() => {
-    if (!user) { setWizardAvailable(false); return }
+    // A person locked to one module has no setup wizard (it is the Primary Admin's), so
+    // they are never sent into it on login either.
+    if (!user || (user.access?.mode && user.access.mode !== 'full')) { setWizardAvailable(false); return }
     let cancelled = false
     ;(async () => {
       try {
@@ -343,6 +351,13 @@ export default function AdminLayout({ children }) {
             <div className="hidden sm:block">
               <ClubSwitcher />
             </div>
+            {/* A Club Admin of linked clubs picks which one they work in. Absent
+                (renders nothing) for a club with no link. */}
+            {user?.can_switch_linked_clubs && (
+              <div className="hidden sm:block">
+                <LinkedClubSwitcher />
+              </div>
+            )}
             {user?.club_slug && (
               <Link
                 to={`/${user.club_slug}`}
@@ -426,6 +441,22 @@ export default function AdminLayout({ children }) {
         </div>
       )}
 
+      {/* Linked-club banner — a Club Admin working in a club other than their
+          own is told so on every page, with a way back, so a change never lands
+          on the wrong club unnoticed. */}
+      {user?.acting_as_linked_club && (
+        <div
+          className="text-center font-mono text-[10px] tracking-wide2 py-1.5 px-4"
+          style={{ background: 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: 'var(--pb-text)' }}
+          data-testid="linked-club-banner"
+        >
+          WORKING IN <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{(user.club_name || user.club_slug || '').toUpperCase()}</span> ·{' '}
+          <button onClick={() => switchClub(null)} className="underline hover:no-underline">
+            back to {user.home_club_name || 'your club'}
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-1 max-w-7xl mx-auto w-full">
         {/* Mobile drawer backdrop — dims the page and closes the menu on tap.
             Sits below the sidebar (z-40) and the header (z-50); mobile only. */}
@@ -455,6 +486,9 @@ export default function AdminLayout({ children }) {
             <div className="md:hidden mb-2 pb-2 border-b pb-hairline-b space-y-1.5">
               {user?.can_switch_clubs && (
                 <div className="px-2"><ClubSwitcher /></div>
+              )}
+              {user?.can_switch_linked_clubs && (
+                <div className="px-2"><LinkedClubSwitcher /></div>
               )}
               <div className="px-2 flex items-center justify-between gap-2 font-mono text-[11px] text-pb-faint">
                 <span className="truncate">

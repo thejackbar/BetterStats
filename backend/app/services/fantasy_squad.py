@@ -121,12 +121,67 @@ def score_squad_round(picks, score_by_player: dict[str, tuple[float, int]], best
     }
 
 
-async def score_squads_for_round(session: AsyncSession, fs, rnd) -> int:
+async def recompute_squad_totals(session: AsyncSession, fs) -> None:
+    """Roll each squad's season total up from its round scores, plus the points a
+    mid-season joiner started on (``catchup_points``, 0 for everyone else). A squad
+    with no round rows left goes to its catch-up figure (unsettling a round can
+    empty one)."""
+    await session.execute(
+        text("""
+            UPDATE fantasy_squads sq SET
+                total_points = sq.catchup_points + COALESCE((
+                    SELECT SUM(srs.points)
+                    FROM fantasy_squad_round_scores srs
+                    JOIN fantasy_rounds r ON r.id = srs.round_id
+                    WHERE srs.squad_id = sq.id AND r.fantasy_season_id = CAST(:fs AS UUID)
+                ), 0),
+                updated_at = NOW()
+            WHERE sq.fantasy_season_id = CAST(:fs AS UUID)
+        """),
+        {"fs": str(fs.id)},
+    )
+
+
+async def lowest_scored_total(session: AsyncSession, league_id, exclude_squad_id=None) -> float:
+    """The lowest season total on a league's ladder as of the last SCORED round
+    (a squad's catch-up points plus its scored rounds), over squads that hold
+    picks. This is what a manager who joins mid-season starts level with. It
+    ignores a round still in progress, so a provisional figure never sets it.
+    0 when nobody else is on the ladder yet."""
+    row = (await session.execute(
+        text("""
+            SELECT MIN(sq.catchup_points + COALESCE((
+                       SELECT SUM(srs.points) FROM fantasy_squad_round_scores srs
+                       JOIN fantasy_rounds r ON r.id = srs.round_id
+                       WHERE srs.squad_id = sq.id AND r.status = 'scored'), 0))
+            FROM fantasy_squads sq
+            WHERE sq.league_id = CAST(:lid AS UUID)
+              AND (CAST(:me AS UUID) IS NULL OR sq.id <> CAST(:me AS UUID))
+              AND EXISTS (SELECT 1 FROM fantasy_squad_players sp WHERE sp.squad_id = sq.id)
+        """),
+        {"lid": str(league_id), "me": str(exclude_squad_id) if exclude_squad_id else None},
+    )).scalar()
+    return round(float(row), 2) if row is not None else 0.0
+
+
+async def score_squads_for_round(session: AsyncSession, fs, rnd, rollover: bool = True,
+                                 from_snapshot: bool = False) -> int:
     """Score every squad in the season for a round and roll the ladder totals.
-    Idempotent on (squad, round). Returns the number of squads scored."""
+    Idempotent on (squad, round). Returns the number of squads scored.
+    ``rollover=False`` is the provisional pass for a round still in progress: it
+    must not bank the next round's free transfer, which only settlement grants.
+    ``from_snapshot`` scores a round that is already scored with the players each
+    squad had IN THAT ROUND (the lineup stored when it was settled), not the picks
+    it holds now: managers transfer between rounds, so scoring an old round with
+    today's picks would rewrite its history. A squad with no stored lineup for the
+    round (it joined later) is left out."""
     squads = (await session.execute(
         select(FantasySquad).where(FantasySquad.fantasy_season_id == fs.id)
     )).scalars().all()
+    # A manager who joined mid-season is only scored from the round they joined in:
+    # an admin re-score of earlier rounds (live picks) must not give them points
+    # for games that were played before they picked.
+    squads = [s for s in squads if s.joined_round is None or s.joined_round <= rnd.round_number]
     if not squads:
         return 0
     squad_ids = [s.id for s in squads]
@@ -137,6 +192,19 @@ async def score_squads_for_round(session: AsyncSession, fs, rnd) -> int:
     picks_by_squad: dict = defaultdict(list)
     for sp in sp_rows:
         picks_by_squad[sp.squad_id].append(sp)
+    if from_snapshot:
+        from types import SimpleNamespace
+        stored = {str(sid): lineup for sid, lineup in (await session.execute(
+            text("SELECT squad_id, lineup FROM fantasy_squad_round_scores WHERE round_id = CAST(:rid AS UUID)"),
+            {"rid": str(rnd.id)},
+        )).all()}
+        picks_by_squad = defaultdict(list)
+        for sq in squads:
+            for e in stored.get(str(sq.id)) or []:
+                picks_by_squad[sq.id].append(SimpleNamespace(
+                    player_id=e["player_id"], role=e.get("role"),
+                    is_captain=bool(e.get("is_captain")), is_vice_captain=bool(e.get("is_vice"))))
+        squads = [sq for sq in squads if picks_by_squad.get(sq.id)]
 
     score_rows = (await session.execute(
         select(
@@ -187,22 +255,10 @@ async def score_squads_for_round(session: AsyncSession, fs, rnd) -> int:
             },
         )
 
-    # Roll each squad's season total from its round scores.
-    await session.execute(
-        text("""
-            UPDATE fantasy_squads sq SET total_points = COALESCE(t.total, 0), updated_at = NOW()
-            FROM (
-                SELECT srs.squad_id, SUM(srs.points) AS total
-                FROM fantasy_squad_round_scores srs
-                JOIN fantasy_rounds r ON r.id = srs.round_id
-                WHERE r.fantasy_season_id = CAST(:fs AS UUID)
-                GROUP BY srs.squad_id
-            ) t
-            WHERE sq.id = t.squad_id AND sq.fantasy_season_id = CAST(:fs AS UUID)
-        """),
-        {"fs": str(fs.id)},
-    )
+    await recompute_squad_totals(session, fs)
 
+    if not rollover:
+        return len(squads)
     # Rollover: settling this round grants the next round's free transfer, banked
     # up to the cap. This also resets a wildcard's unlimited window to normal.
     per = int(rules.get("free_transfers_per_round", 1))
@@ -213,3 +269,45 @@ async def score_squads_for_round(session: AsyncSession, fs, rnd) -> int:
         {"per": per, "cap": cap, "fs": str(fs.id)},
     )
     return len(squads)
+
+
+async def record_round_transfer(session: AsyncSession, squad_id, rnd, hit: int) -> None:
+    """Tally a transfer (and any points hit) against a round's score row, which
+    settlement later reads when it computes points = raw - transfer_hit."""
+    if rnd is None:
+        return
+    await session.execute(
+        text("""
+            INSERT INTO fantasy_squad_round_scores (squad_id, round_id, transfer_hit, transfers_made, lineup)
+            VALUES (CAST(:sid AS UUID), CAST(:rid AS UUID), :hit, 1, '[]')
+            ON CONFLICT (squad_id, round_id) DO UPDATE SET
+                transfer_hit = fantasy_squad_round_scores.transfer_hit + :hit,
+                transfers_made = fantasy_squad_round_scores.transfers_made + 1
+        """),
+        {"sid": str(squad_id), "rid": str(rnd.id), "hit": hit},
+    )
+
+
+async def recount_ownership(session: AsyncSession, season_id) -> None:
+    """Refresh each pool player's owned_count from the global-league squads (drives
+    the 'X% picked' display). Reset to zero, then set the owned counts, so a player
+    nobody now holds drops back to zero. Does not commit."""
+    await session.execute(
+        text("UPDATE fantasy_pool_players SET owned_count = 0 WHERE fantasy_season_id = CAST(:fs AS UUID)"),
+        {"fs": str(season_id)},
+    )
+    await session.execute(
+        text("""
+            UPDATE fantasy_pool_players pp SET owned_count = c.n
+            FROM (
+                SELECT sp.player_id, COUNT(*) AS n
+                FROM fantasy_squad_players sp
+                JOIN fantasy_squads sq ON sq.id = sp.squad_id
+                JOIN fantasy_leagues l ON l.id = sq.league_id AND l.kind = 'global_salary_cap'
+                WHERE sq.fantasy_season_id = CAST(:fs AS UUID)
+                GROUP BY sp.player_id
+            ) c
+            WHERE pp.fantasy_season_id = CAST(:fs AS UUID) AND pp.player_id = c.player_id
+        """),
+        {"fs": str(season_id)},
+    )

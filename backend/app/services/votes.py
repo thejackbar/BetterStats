@@ -38,6 +38,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BALLOT = [3, 2, 1]
 VOTER_MODES = {"players", "captain"}
+# How a medal weights its grades: not at all, from fixture counts against the
+# top grade, or by hand. A multiplier outside this range is a typo, not a plan.
+WEIGHT_MODES = ("off", "auto", "manual")
+MIN_WEIGHT, MAX_WEIGHT = 0.01, 10.0
 COUNTING_METHODS = {"rank", "tally"}
 TIE_POLICIES = {"share", "countback"}
 MAX_POSITIONS = 10
@@ -207,30 +211,51 @@ def medal_covers(allowed: Optional[set[str]], grade_id) -> bool:
     return bool(grade_id) and str(grade_id) in allowed
 
 
+_ACTIVE_GRADES_SQL = """
+    SELECT gr.id, gr.name, s.year, gr.display_order
+    FROM grades gr
+    JOIN seasons s ON s.id = gr.season_id
+    WHERE s.organisation_id = :org
+      AND s.year = (
+          SELECT MAX(s2.year) FROM seasons s2
+          WHERE s2.organisation_id = :org
+            AND EXISTS (SELECT 1 FROM grades g2 WHERE g2.season_id = s2.id)
+      )
+"""
+
+
 async def club_grade_options(db: AsyncSession, org_id) -> list[dict]:
-    """The grades a medal can be scoped to: each distinct grade NAME once,
-    carrying its most recent season's id as the value to store. Offering the
-    same name once per season would make the picker unusable for a club with a
-    decade of history, and every one of those rows would mean the same thing."""
+    """The teams a medal can be scoped to: each ACTIVE grade name once.
+
+    Active means the grades of the club's most recent season year that has any
+    grades. A club that has played for a decade has a decade of per-season
+    "Colts" rows, and a grade that stopped being played years ago has no
+    business in a picker for this year's medal. Year rather than a single season
+    row, because a club with a winter and a summer competition has two seasons
+    in the same year and both are current. Falls back a year at a time when the
+    newest season has no grades yet (between a season starting and its first
+    sync), so the picker is never empty for a club that has grades at all.
+
+    Each name carries its newest row's id as the value to store, and the
+    server expands that through the name (``medal_grade_ids``)."""
     res = await db.execute(
         text(
-            """
-            SELECT DISTINCT ON (gr.name) gr.name, gr.id
-            FROM grades gr
-            JOIN seasons s ON s.id = gr.season_id
-            WHERE s.organisation_id = :org
-            ORDER BY gr.name, s.year DESC NULLS LAST
-            """
+            "SELECT DISTINCT ON (a.name) a.name, a.id, a.display_order FROM ("
+            + _ACTIVE_GRADES_SQL
+            + ") a ORDER BY a.name, a.year DESC NULLS LAST"
         ),
         {"org": org_id},
     )
-    return [{"id": str(gid), "name": name} for name, gid in res.fetchall()]
+    return [
+        {"id": str(gid), "name": name, "display_order": order}
+        for name, gid, order in res.fetchall()
+    ]
 
 
-async def medal_grade_names(db: AsyncSession, org_id, medals: list[VoteMedal]) -> dict[str, list[str]]:
-    """medal id → the grade NAMES it counts, so a screen can show and re-tick a
-    medal's selection even when the stored id belongs to an older season's
-    grade row than the one the picker offers."""
+async def medal_grade_pairs(db: AsyncSession, org_id, medals: list[VoteMedal]) -> dict[str, list[dict]]:
+    """medal id → the stored grades it counts as ``{id, name}``, de-duplicated by
+    name, so a screen can show and re-tick a medal's selection even when the
+    stored id belongs to an older season's grade row than the picker offers."""
     ids: set[str] = set()
     for m in medals:
         ids.update(clean_grade_ids(m.grade_ids))
@@ -245,16 +270,257 @@ async def medal_grade_names(db: AsyncSession, org_id, medals: list[VoteMedal]) -
         {"org": org_id, "ids": [uuid.UUID(g) for g in ids]},
     )
     name_by_id = {str(gid): name for gid, name in res.fetchall()}
-    out: dict[str, list[str]] = {}
+    out: dict[str, list[dict]] = {}
     for m in medals:
-        seen, names = set(), []
+        seen, rows = set(), []
         for gid in clean_grade_ids(m.grade_ids):
             nm = name_by_id.get(gid)
             if nm and nm not in seen:
                 seen.add(nm)
-                names.append(nm)
-        out[str(m.id)] = names
+                rows.append({"id": gid, "name": nm})
+        out[str(m.id)] = rows
     return out
+
+
+async def medal_grade_names(db: AsyncSession, org_id, medals: list[VoteMedal]) -> dict[str, list[str]]:
+    """medal id → the grade NAMES it counts."""
+    pairs = await medal_grade_pairs(db, org_id, medals)
+    return {mid: [r["name"] for r in rows] for mid, rows in pairs.items()}
+
+
+def clean_grade_voter_modes(raw) -> dict[str, str]:
+    """A per-team voter mode map, with anything unusable dropped: a non-string
+    or blank team name, and any value that is not a known mode. A dropped entry
+    falls back to the medal's own mode, which is the safe direction (the team
+    follows the club default) rather than guessing what was meant."""
+    out: dict[str, str] = {}
+    if not isinstance(raw, dict):
+        return out
+    for name, mode in raw.items():
+        if not isinstance(name, str):
+            continue
+        key = name.strip()[:120]
+        if key and mode in VOTER_MODES:
+            out[key] = mode
+    return out
+
+
+def clean_grade_vote_counters(raw) -> dict[str, str]:
+    """A per-team vote counter map (team name to player id), with anything
+    unusable dropped: a blank team name or an id that is not a uuid. A dropped
+    entry leaves the captain voting, the safe direction."""
+    out: dict[str, str] = {}
+    if not isinstance(raw, dict):
+        return out
+    for name, pid in raw.items():
+        if not isinstance(name, str) or not isinstance(pid, str):
+            continue
+        key = name.strip()[:120]
+        try:
+            pid = str(uuid.UUID(pid))
+        except ValueError:
+            continue
+        if key:
+            out[key] = pid
+    return out
+
+
+def voter_mode_for_grade(cfg: dict, grade_name: Optional[str]) -> str:
+    """Who votes on a game in this team: the team's own setting, else the medal's."""
+    if grade_name:
+        mode = (cfg.get("grade_voter_modes") or {}).get(grade_name)
+        if mode in VOTER_MODES:
+            return mode
+    return cfg["voter_mode"]
+
+
+async def cfg_for_fixture(db: AsyncSession, cfg: dict, fixture: Fixture) -> dict:
+    """``cfg`` with ``voter_mode`` resolved for this fixture's team, and
+    ``vote_counter`` (a player id) set when that team counts the captain only and
+    the captain has handed the counting to someone else. A copy, so the medal's
+    own config is untouched. Costs nothing when no team has its own setting,
+    which is every club until one is set. Read ``cfg.get("vote_counter")``: a
+    config that never went through here has no such key."""
+    if not cfg.get("grade_voter_modes") and not cfg.get("grade_vote_counters"):
+        return cfg
+    gid = (await effective_grade_ids(db, [fixture])).get(str(fixture.id))
+    name = None
+    if gid:
+        name = (await db.execute(
+            text("SELECT name FROM grades WHERE id = :id"), {"id": gid},
+        )).scalar_one_or_none()
+    voter_mode = voter_mode_for_grade(cfg, name)
+    counter = (cfg.get("grade_vote_counters") or {}).get(name) if name else None
+    return {**cfg, "voter_mode": voter_mode,
+            "vote_counter": counter if voter_mode == "captain" else None}
+
+
+async def counter_fixture_ids(db: AsyncSession, cfg: dict, player_id, fixtures: list[Fixture]) -> set[uuid.UUID]:
+    """``Fixture.id``s among ``fixtures`` whose team counts the captain only and
+    names this player to submit its votes. They need not be in the side, so the
+    player's own-games lookups never find these. One grade read for the lot, and
+    nothing at all when this player is nobody's nominee."""
+    names = {n for n, pid in (cfg.get("grade_vote_counters") or {}).items() if pid == str(player_id)}
+    if not names or not fixtures:
+        return set()
+    grade_by_fixture = await effective_grade_ids(db, fixtures)
+    gids = list(set(grade_by_fixture.values()))
+    if not gids:
+        return set()
+    rows = (await db.execute(
+        text("SELECT id, name FROM grades WHERE id = ANY(CAST(:ids AS uuid[]))"), {"ids": gids},
+    )).fetchall()
+    name_by_gid = {gid: nm for gid, nm in rows}
+    out: set[uuid.UUID] = set()
+    for f in fixtures:
+        nm = name_by_gid.get(grade_by_fixture.get(str(f.id)))
+        if nm in names and voter_mode_for_grade(cfg, nm) == "captain":
+            out.add(f.id)
+    return out
+
+
+def clean_grade_weighting(raw) -> dict:
+    """A medal's grade weighting with anything unusable dropped. Unknown mode
+    reads as 'off' (no weighting), the safe direction, and a manual multiplier
+    that is not a number in range is dropped so that grade counts at 1."""
+    raw = raw if isinstance(raw, dict) else {}
+    mode = raw.get("mode") if raw.get("mode") in WEIGHT_MODES else "off"
+    manual: dict[str, float] = {}
+    if isinstance(raw.get("manual"), dict):
+        for name, w in raw["manual"].items():
+            if not isinstance(name, str) or isinstance(w, bool):
+                continue
+            try:
+                w = float(w)
+            except (TypeError, ValueError):
+                continue
+            key = name.strip()[:120]
+            if key and MIN_WEIGHT <= w <= MAX_WEIGHT:
+                manual[key] = round(w, 2)
+    return {"mode": mode, "manual": manual}
+
+
+_NOT_A_GAME_STATUSES = ("BYE", "CANCELLED")
+
+
+async def count_games_by_grade_name(
+    db: AsyncSession, fixtures: list[Fixture], grade_by_fixture: dict,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """``(games, order)`` keyed by grade NAME for one set of fixtures.
+
+    ``games`` is how many fixtures each grade has, byes and cancelled games
+    left out, and it counts the whole schedule rather than only games already
+    played: a grade's season length is what it is in round 1, not by how far
+    through it is. ``order`` is the club's own team order (``display_order``),
+    for the grades that have one."""
+    gids = {g for g in grade_by_fixture.values() if g}
+    if not gids:
+        return {}, {}
+    res = await db.execute(
+        text("SELECT id, name, display_order FROM grades WHERE id = ANY(:ids)"),
+        {"ids": list(gids)},
+    )
+    name_of: dict[str, str] = {}
+    order: dict[str, int] = {}
+    for gid, name, disp in res.fetchall():
+        name_of[str(gid)] = name
+        if disp is not None:
+            order[name] = min(disp, order.get(name, disp))
+    games: dict[str, int] = {}
+    for f in fixtures:
+        if (f.status or "").upper() in _NOT_A_GAME_STATUSES or (f.home_away or "").upper() == "BYE":
+            continue
+        gid = grade_by_fixture.get(str(f.id))
+        name = name_of.get(str(gid)) if gid else None
+        if name:
+            games[name] = games.get(name, 0) + 1
+    return games, order
+
+
+def pick_top_grade(games: dict[str, int], order: dict[str, int], scope: Optional[set[str]]) -> Optional[str]:
+    """The grade auto-weighting measures everything against: first in the
+    club's own team order, else the grade with the most games, among the grades
+    this medal counts that have any games."""
+    candidates = [n for n, g in games.items() if g > 0 and (not scope or n in scope)]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda n: (order.get(n, 10 ** 9), -games[n], n))
+
+
+def auto_weights(games: dict[str, int], top: Optional[str]) -> dict[str, float]:
+    """Top grade's games over each grade's games, so a vote in a shorter season
+    is worth more and the grades come out level on points per game played. A
+    grade with no games has no season to correct for and counts at 1."""
+    if not top or games.get(top, 0) <= 0:
+        return {}
+    return {n: games[top] / g for n, g in games.items() if g > 0}
+
+
+async def resolve_grade_weights(
+    db: AsyncSession, org_id, cfg: dict, medal: Optional[VoteMedal], year: int,
+    fixtures: Optional[list[Fixture]] = None, grade_by_fixture: Optional[dict] = None,
+    want_games: bool = False,
+) -> dict:
+    """What each grade's votes are multiplied by under this medal.
+
+    ``{"mode", "weights" (grade name -> multiplier, absent = 1), "top_grade",
+    "games"}``. 'off' (every club until it opts in) costs nothing, and 'manual'
+    only reads the fixtures when the caller wants the game counts for display.
+    Pass ``fixtures``/``grade_by_fixture`` when the caller already loaded the
+    season's fixtures, as the leaderboard has."""
+    gw = cfg.get("grade_weighting") or {"mode": "off", "manual": {}}
+    mode = gw.get("mode", "off")
+    out = {"mode": mode, "weights": {}, "top_grade": None, "games": {}}
+    if mode == "off":
+        return out
+    if mode == "manual" and not want_games:
+        out["weights"] = dict(gw.get("manual") or {})
+        return out
+
+    if fixtures is None:
+        start, end = season_window(year)
+        fixtures = list((await db.execute(
+            select(Fixture).where(
+                Fixture.organisation_id == org_id,
+                Fixture.played_on.is_not(None),
+                Fixture.played_on >= start,
+                Fixture.played_on <= end,
+            )
+        )).scalars().all())
+    if grade_by_fixture is None:
+        grade_by_fixture = await effective_grade_ids(db, fixtures)
+    allowed = await medal_grade_ids(db, org_id, medal)
+    scoped = [f for f in fixtures if medal_covers(allowed, grade_by_fixture.get(str(f.id)))]
+    games, order = await count_games_by_grade_name(db, scoped, grade_by_fixture)
+    out["games"] = games
+    if mode == "manual":
+        out["weights"] = dict(gw.get("manual") or {})
+        return out
+    out["top_grade"] = pick_top_grade(games, order, None)
+    out["weights"] = auto_weights(games, out["top_grade"])
+    return out
+
+
+async def fixture_weight(db: AsyncSession, org_id, cfg: dict, medal: Optional[VoteMedal], fixture: Fixture) -> float:
+    """The multiplier on one fixture's points (1 when the medal is unweighted
+    or the fixture's grade cannot be placed)."""
+    if cfg["grade_weighting"]["mode"] == "off" or not fixture.played_on:
+        return 1.0
+    gid = (await effective_grade_ids(db, [fixture])).get(str(fixture.id))
+    if not gid:
+        return 1.0
+    name = (await db.execute(text("SELECT name FROM grades WHERE id = :id"), {"id": gid})).scalar_one_or_none()
+    info = await resolve_grade_weights(db, org_id, cfg, medal, season_year_for(fixture.played_on))
+    return info["weights"].get(name, 1.0)
+
+
+def weighted_points(awarded: dict, weight: float) -> dict:
+    """A fixture's awarded points times its grade's weight, to 2 places. A
+    weight of exactly 1 returns the points untouched, so an unweighted medal
+    keeps whole-number points."""
+    if weight == 1:
+        return awarded
+    return {pid: round(v * weight, 2) for pid, v in awarded.items()}
 
 
 def clean_ballot_values(raw) -> list[int]:
@@ -282,9 +548,12 @@ def effective_config(s: Optional[VoteMedal]) -> dict:
         "enabled": bool(s.enabled) if s else False,
         "require_pin": bool(s.require_pin) if s else True,
         "voter_mode": (s.voter_mode if s and s.voter_mode in VOTER_MODES else "players"),
+        "grade_voter_modes": clean_grade_voter_modes(getattr(s, "grade_voter_modes", None) if s else None),
+        "grade_vote_counters": clean_grade_vote_counters(getattr(s, "grade_vote_counters", None) if s else None),
+        "grade_weighting": clean_grade_weighting(getattr(s, "grade_weighting", None) if s else None),
         "ballot_values": clean_ballot_values(s.ballot_values if s else None),
         "counting_method": (s.counting_method if s and s.counting_method in COUNTING_METHODS else "rank"),
-        "tie_policy": (s.tie_policy if s and s.tie_policy in TIE_POLICIES else "share"),
+        "tie_policy": (s.tie_policy if s and s.tie_policy in TIE_POLICIES else "countback"),
         "allow_self_vote": bool(s.allow_self_vote) if s else False,
         "allow_non_participants": bool(s.allow_non_participants) if s else False,
         "auto_close_days": int(s.auto_close_days) if s and s.auto_close_days else 7,
@@ -976,6 +1245,11 @@ async def build_leaderboard(
         rd["fixtures"].append(f)
     rounds.sort(key=lambda r: round_sort_key(r["label"], r["date"]))
 
+    # Grades with a different season length are weighted so a vote means the
+    # same per game played. 'off' reads nothing; the fixtures are already loaded.
+    weighting = await resolve_grade_weights(
+        db, org_id, cfg, medal, year, fixtures=all_fixtures, grade_by_fixture=grade_by_fixture,
+    )
     values = cfg["ballot_values"]
     cumulative: dict[str, dict] = {}
     grade_by_pid: dict[str, Optional[str]] = {}
@@ -991,7 +1265,9 @@ async def build_leaderboard(
         fixtures_out = []
         for f in rd["fixtures"]:
             totals = tally_ballots(ballots_by_fx.get(str(f.id), []), values)
-            awarded = award_weekly_points(totals, cfg)
+            eff_gid = grade_by_fixture.get(str(f.id))
+            weight = weighting["weights"].get(grade_names.get(str(eff_gid)), 1.0) if eff_gid else 1.0
+            awarded = weighted_points(award_weekly_points(totals, cfg), weight)
             results = []
             for pid, t in totals.items():
                 results.append({
@@ -1002,12 +1278,12 @@ async def build_leaderboard(
                 })
                 all_pids.add(pid)
             results.sort(key=lambda r: (-r["points"], -r["raw"]))
-            eff_gid = grade_by_fixture.get(str(f.id))
             fixtures_out.append({
                 "id": str(f.id),
                 "opponent": f.opponent_name or f.label,
                 "grade_id": str(eff_gid) if eff_gid else None,
                 "grade": grade_names.get(str(eff_gid)) if eff_gid else None,
+                "weight": round(weight, 2),
                 "date": f.played_on.isoformat() if f.played_on else None,
                 "ballots": len(ballots_by_fx.get(str(f.id), [])),
                 "results": results,
@@ -1017,7 +1293,7 @@ async def build_leaderboard(
                     c = cumulative.setdefault(r["player_id"], {
                         "points": 0, "raw": 0, "counts": [0] * len(values), "rounds": 0,
                     })
-                    c["points"] += r["points"]
+                    c["points"] = round(c["points"] + r["points"], 2)
                     c["raw"] += r["raw"]
                     for i2, n in enumerate(r["counts"]):
                         if i2 < len(c["counts"]):
@@ -1068,7 +1344,7 @@ async def build_leaderboard(
         # Weekly deltas from the cumulative history — cumulative only ever
         # grows, so a plain diff recovers each round's own contribution
         # without a second pass over the fixtures.
-        weekly = [h[i] - (h[i - 1] if i > 0 else 0) for i in range(len(h))]
+        weekly = [round(h[i] - (h[i - 1] if i > 0 else 0), 2) for i in range(len(h))]
         gid = grade_by_pid.get(pid)
         standings.append({
             "player_id": pid,
@@ -1110,6 +1386,12 @@ async def build_leaderboard(
         "ballot_values": values,
         "counting_method": cfg["counting_method"],
         "tie_policy": cfg["tie_policy"],
+        # Which lens the points are under, so a screen can say so.
+        "weighting": {
+            "mode": weighting["mode"],
+            "top_grade": weighting["top_grade"],
+            "weights": {k: round(v, 2) for k, v in weighting["weights"].items()},
+        },
         "rounds": out_rounds,
         "standings": standings,
         "through_round": through_round if cutoff_hit else None,

@@ -55,3 +55,22 @@ def name_sort_key(name: str | None) -> tuple[str, str]:
         return (n.lower(), "")
     # "First [Middle] Last" → the last token is the surname.
     return (words[-1].lower(), " ".join(words[:-1]).lower())
+
+
+def canonical_player_name(name: str | None) -> str:
+    """Return a stored player name in the canonical ``"Last, First"`` shape.
+
+    A name that already has a comma, a single token (a nickname) or three or
+    more words is returned untouched: with three words we cannot tell a middle
+    name from a double-barrelled surname, so we do not guess. Only the
+    unambiguous free-text ``"First Last"`` override is flipped to
+    ``"Last, First"``, so it lists and sorts beside the synced names.
+    Derived on read: nothing is rewritten in the database.
+    """
+    n = (name or "").strip()
+    if not n or "," in n:
+        return name or ""
+    words = n.split()
+    if len(words) != 2:
+        return name or ""
+    return f"{words[1]}, {words[0]}"

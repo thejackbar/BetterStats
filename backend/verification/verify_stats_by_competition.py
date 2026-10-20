@@ -163,6 +163,8 @@ async def build_schema() -> None:
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # Roll the schema BACK to pre-283 so the migration has real work to do
         # against a populated table, which is the state production is in.
         for stmt in DOWNGRADE:
@@ -413,6 +415,12 @@ async def main() -> None:
         for _ in range(3):
             for stmt in STATEMENTS:
                 await conn.execute(text(stmt))
+        # Migration 315 adds club_competitions.is_junior, which
+        # `list_competitions` now reads. The lifespan runs it straight after
+        # 283, so the harness does too (the shipped list, not a retyped copy).
+        from app.services.junior_hiding_ddl import STATEMENTS as JUNIOR_DDL
+        for stmt in JUNIOR_DDL:
+            await conn.execute(text(stmt))
         cols = {r[0] for r in (await conn.execute(text(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name = 'grades'"))).all()}

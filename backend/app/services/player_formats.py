@@ -66,6 +66,7 @@ async def player_format_splits(
     session: AsyncSession,
     player_id: str,
     season_id: Optional[str] = None,
+    hidden_grade_ids=(),
 ) -> dict:
     """Batting, bowling and fielding per format, plus what could not be placed.
 
@@ -83,6 +84,13 @@ async def player_format_splits(
     if sids:
         params["sids"] = sids
         season_clause += " AND g.season_id = ANY(:sids)"
+    if hidden_grade_ids:
+        # Junior grades a club hides from its public Stats. A game with no
+        # grade is not known to be junior, so it stays.
+        params["jh_grades"] = [str(g) for g in hidden_grade_ids]
+        season_clause += (
+            " AND (g.grade_id IS NULL OR NOT (g.grade_id = ANY(CAST(:jh_grades AS uuid[]))))"
+        )
 
     # Matches played, from every source of "they were in this game" — a player
     # who only bowled, only fielded, or was named and never got a knock still

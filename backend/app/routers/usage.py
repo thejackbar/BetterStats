@@ -1576,6 +1576,7 @@ async def visitor_journey(
 _SYNC_KIND_LABEL = {
     "org_full": "Sync (Sync Now)",
     "org_recent": "Results sync (scheduled)",
+    "org_quick": "Quick Sync (last 7 days)",
     "org_hard_refresh": "Full Rebuild",
     "player_deep": "Player deep sync",
 }

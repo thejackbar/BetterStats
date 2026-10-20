@@ -91,6 +91,12 @@ P_MILES_AWAY = uuid.uuid4()  # 12 runs — nowhere near anything
 async def build_schema() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migration 330: the per-grade milestone increments the grade scan reads.
+        from app.services.milestone_grade_scheme_ddl import STATEMENTS as _MGS
+        for _stmt in _MGS:
+            await conn.execute(text(_stmt))
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grade_merge_logs (
                 id SERIAL PRIMARY KEY,

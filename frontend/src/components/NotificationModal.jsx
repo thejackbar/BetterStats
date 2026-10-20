@@ -6,6 +6,7 @@ import MilestoneSplitNote from './MilestoneSplitNote'
 
 const KIND_LABELS = {
   org_full: 'Sync Now',
+  org_quick: 'Quick Sync',
   org_hard_refresh: 'Full Rebuild',
   backfill_aggregates: 'Fix Missing Totals',
   player_deep: 'Player Deep Sync',

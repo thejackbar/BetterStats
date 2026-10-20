@@ -229,6 +229,9 @@ export default function ManualGamesImportWizard({ onDone }) {
   }
 
   const unresolved = review?.totals?.players_unresolved || 0
+  // Cells in number columns that are not numbers. The server refuses the
+  // commit while any remain, so the button says so up front.
+  const badCells = review?.bad_cell_count || 0
   const willCreate = review?.will_create || {}
   // The same rule the server uses for `players_unresolved` — a name already
   // answered as "create" or "leave out" is not still outstanding, and a button
@@ -453,12 +456,17 @@ export default function ManualGamesImportWizard({ onDone }) {
           />
 
           <div className="flex flex-wrap items-center gap-3">
-            <button className={BTN_PRIMARY} onClick={commit} disabled={!!busy || unresolved > 0}>
+            <button className={BTN_PRIMARY} onClick={commit} disabled={!!busy || unresolved > 0 || badCells > 0}>
               {busy === 'commit' ? 'Importing…' : `Import ${review.games} match${review.games === 1 ? '' : 'es'}`}
             </button>
             {unresolved > 0 && (
               <span className="text-xs text-amber-400">
                 {unresolved} name{unresolved === 1 ? '' : 's'} still need an answer.
+              </span>
+            )}
+            {badCells > 0 && (
+              <span className="text-xs text-amber-400">
+                Fix the {badCells} cell{badCells === 1 ? '' : 's'} listed above, then choose the file again.
               </span>
             )}
             {busy === 'resolve' && <span className="text-xs text-pb-dim">Checking…</span>}

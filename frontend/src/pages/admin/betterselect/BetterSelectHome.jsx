@@ -4,6 +4,7 @@
 // each a click into availability or selection. Built from the live API and
 // defensive about every shape so the landing page degrades rather than breaks.
 import { useState, useEffect, useMemo } from 'react'
+import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import BetterSelectLayout, { GROUPS } from '../../../components/admin/BetterSelectLayout'
 import ModuleHub from '../../../components/admin/ModuleHub'
@@ -15,6 +16,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY } from '../../../lib/availability'
 import { moduleBrand } from '../../../lib/moduleBrand'
 import { Icon, Btn, AvailSummary, Empty } from './ui'
+import usePersistedState from '../../../lib/usePersistedState'
 
 const BRAND = moduleBrand('select')
 
@@ -65,19 +67,22 @@ export default function BetterSelectHome() {
 // availability or selection. Built from the live API and defensive about
 // every shape so the landing page degrades rather than breaks.
 function BetterSelectOverview() {
-  const { hasCapability } = useAuth()
+  const fmt = useAdminNameFormat()
+  const { hasCapability, canEditCap } = useAuth()
   const navigate = useNavigate()
   const [fixtures, setFixtures] = useState(null)
   const [overview, setOverview] = useState([])
   const [matrix, setMatrix] = useState({ dates: [], players: [], availability: {} })
   const [roster, setRoster] = useState([])
+  // The same remembered Show juniors choice the other BetterSelect screens use.
+  const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
 
   useEffect(() => {
     let alive = true
     Promise.all([
-      api.bsListFixtures(true).then((r) => r).catch(() => []),
-      api.bsSelectionOverview().then((d) => d.fixtures || []).catch(() => []),
-      api.bsAvailabilityMatrix().then((d) => d).catch(() => ({ dates: [], players: [], availability: {} })),
+      api.bsListFixtures(true, { hideJuniors: !showJuniors }).then((r) => r).catch(() => []),
+      api.bsSelectionOverview({ hideJuniors: !showJuniors }).then((d) => d.fixtures || []).catch(() => []),
+      api.bsAvailabilityMatrix({ juniors: showJuniors }).then((d) => d).catch(() => ({ dates: [], players: [], availability: {} })),
       api.adminListPlayers().then((r) => r).catch(() => []),
     ]).then(([fx, ov, mx, rs]) => {
       if (!alive) return
@@ -87,7 +92,7 @@ function BetterSelectOverview() {
       setRoster(Array.isArray(rs) ? rs : [])
     })
     return () => { alive = false }
-  }, [])
+  }, [showJuniors])
 
   const playable = useMemo(
     () => (fixtures || []).filter((f) => f.home_away !== 'BYE' && f.played_on),
@@ -148,7 +153,7 @@ function BetterSelectOverview() {
     const items = []
     const keepersOut = squad.filter((p) => (p.skill_positions || []).includes('WKT') && (p.availability === 'NO_RESPONSE' || p.availability === 'MAYBE'))
     if (keepersOut.length) {
-      const names = keepersOut.map((p) => p.display_name).slice(0, 2).join(', ')
+      const names = keepersOut.map((p) => fmt(p.display_name)).slice(0, 2).join(', ')
       items.push({ tone: 'red', action: 'Review', to: '/admin/betterselect/availability',
         node: <>Your keeper{keepersOut.length > 1 ? 's' : ''} <b className="text-pb-text">{names}</b> {keepersOut.length > 1 ? "haven't" : "hasn't"} confirmed</> })
     }
@@ -163,10 +168,10 @@ function BetterSelectOverview() {
         node: <><b className="text-pb-text">{needXI} of {weekendFx.length}</b> weekend team{weekendFx.length === 1 ? '' : 's'} still need{needXI === 1 ? 's' : ''} an XI</> })
     }
     return items
-  }, [squad, tally, playable, heroDate, lineupLen, hero])
+  }, [squad, tally, playable, heroDate, lineupLen, hero, fmt])
 
   const heroTitle = hero ? `${hero.team_name || 'Our team'} vs ${hero.opponent_name || hero.label || 'TBC'}` : ''
-  const canSelect = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canSelect = hasCapability(CAP.SELECT_SELECTION) || hasCapability(CAP.MANAGE_SELECTIONS)
 
   if (fixtures === null) return <BetterSelectLayout title="Overview"><PbSpinner message="Loading…" /></BetterSelectLayout>
 

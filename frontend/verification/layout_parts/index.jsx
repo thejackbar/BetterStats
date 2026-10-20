@@ -1,0 +1,12 @@
+import { FIXTURES as a } from './fix_lineup_a.jsx'
+import { FIXTURES as b } from './fix_lineup_b.jsx'
+import { FIXTURES as c } from './fix_announce.jsx'
+import { FIXTURES as d } from './fix_scorecards.jsx'
+import { FIXTURES as e } from './fix_singles.jsx'
+import { FIXTURES as f } from './fix_fixtures.jsx'
+import { FIXTURES as g } from './fix_results.jsx'
+import { FIXTURES as h } from './fix_results_single.jsx'
+import { FIXTURES as i } from './fix_events_a.jsx'
+import { FIXTURES as j } from './fix_events_b.jsx'
+import { FIXTURES as k } from './fix_totw.jsx'
+export const FIXTURES = { ...k, ...a, ...b, ...c, ...d, ...e, ...f, ...g, ...h, ...i, ...j }

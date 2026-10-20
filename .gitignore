@@ -29,7 +29,7 @@ frontend/dist/
 sync_snapshots/
 
 # A club's own member records — converted from their .AV files in this
-# session. Never in a public repo: the converter (tools/convert_shoalwater_av.py)
+# session. Never in a public repo: the converter (tools/csfw_extract.py)
 # is the part worth keeping, the data is the club's.
 data/shoalwater-av/
 
@@ -37,3 +37,6 @@ data/shoalwater-av/
 # one-off probes a verification round writes to answer a single question.
 frontend/dist-*/
 frontend/verification/_*.mjs
+
+# Self-hosted background-removal model files, fetched by scripts/fetch-bg-removal-assets.mjs
+frontend/public/assets/bg-removal/

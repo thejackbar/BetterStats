@@ -38,8 +38,9 @@ from typing import Iterable, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.game_status import NOT_PLAYED_SQL_LIST
+from app.services.game_status import not_played_game_sql
 from app.services.grade_labels import GRADE_CATEGORIES, categories_for_name, org_grade_category_sets
+from app.services.summary_only_seasons import held_years_cte, summary_only_seasons_clause
 from app.services.grade_scope import DEFAULT_CATEGORIES, GradeScope, club_default_categories, resolve_scope
 
 STATS = ("runs", "wickets", "matches", "catches")
@@ -133,7 +134,7 @@ async def _scoped(session: AsyncSession, org_id, pids: list[str],
             SELECT ga.player_id, ga.game_id FROM game_appearances ga
             JOIN games ag ON ag.id = ga.game_id
              WHERE ga.player_id = ANY({_PIDS})
-               AND (ag.status IS NULL OR ag.status NOT IN ({NOT_PLAYED_SQL_LIST}))
+               AND NOT {not_played_game_sql('ag')}
         )
         SELECT ap.player_id::text AS pid, COUNT(DISTINCT g.id) AS v
         FROM ap JOIN v_effective_games g ON g.id = ap.game_id
@@ -143,7 +144,12 @@ async def _scoped(session: AsyncSession, org_id, pids: list[str],
 
     residual = scope.clause("pss.grade_id", "aggregate", label_column="pss.grade_label")
     params["sources"] = list(RESIDUAL_SOURCES)
+    # A season CA gave a total for and the club holds no scorecards for is added
+    # back, as the profile does (summary_only_seasons).
+    held = held_years_cte(
+        f"{_OURS}{game_scope}", lambda a: f"{a}.player_id = ANY({_PIDS})")
     rows = await session.execute(text(f"""
+        WITH {held}
         SELECT pss.player_id::text AS pid,
                COALESCE(SUM(pss.runs), 0)    AS runs,
                COALESCE(SUM(pss.wickets), 0) AS wickets,
@@ -151,7 +157,8 @@ async def _scoped(session: AsyncSession, org_id, pids: list[str],
                COALESCE(SUM(pss.catches), 0) AS catches
         FROM v_effective_player_season_stats pss
         WHERE pss.player_id = ANY({_PIDS})
-          AND pss.source = ANY(:sources){residual}
+          AND ((pss.source = ANY(:sources){residual})
+               OR {summary_only_seasons_clause(scope)})
         GROUP BY pss.player_id
     """), params)
     for r in rows.mappings():
@@ -171,7 +178,39 @@ async def totals_under(session: AsyncSession, org_id, pids: Iterable,
         got = await _scoped(session, org_id, ids, scope)
     else:
         got = await _unscoped(session, ids)
+    got = await _matches_like_profile(session, org_id, ids, scope, got)
     return {p: got.get(p) or _empty() for p in ids}
+
+
+_GRID_CHUNK = 300
+
+
+async def _matches_like_profile(session: AsyncSession, org_id, ids: list[str],
+                                scope: Optional[GradeScope], got: dict) -> dict:
+    """Raise each player's `matches` to what their profile's MATCHES reads, never lower.
+
+    The profile header is raised to the by-grade grid (matches Cricket Australia's per-grade
+    totals claim and the club holds no scorecard for), so a player on 99 there and 98 here
+    would be told they had not reached 100 matches while their own page said they had.
+    Same helper the leaderboards, Records and StatLab use; chunked because a whole club's
+    ids go through here at the end of every sync. A failure leaves the figures as they were.
+    """
+    from app.services.aggregations import grid_matches_for_players  # lazy: aggregations imports this module's callers
+    try:
+        # A savepoint, so a failed read rolls back only itself and leaves the caller's
+        # transaction, and the objects it has loaded, as they were.
+        async with session.begin_nested():
+            for i in range(0, len(ids), _GRID_CHUNK):
+                grid = await grid_matches_for_players(
+                    session, org_id, ids[i:i + _GRID_CHUNK], None, scope)
+                for pid, n in grid.items():
+                    row = got.setdefault(pid, _empty())
+                    if n > int(row.get("matches") or 0):
+                        row["matches"] = int(n)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("milestone matches vs profile failed for org %s", org_id)
+    return got
 
 
 async def played_grade_names(session: AsyncSession, org_id, pids: Iterable) -> dict[str, set]:
@@ -222,7 +261,7 @@ async def _auto_widen(session: AsyncSession, org_id) -> bool:
 
 
 async def profile_totals(session: AsyncSession, org_id, pids: Iterable, *,
-                         with_split: bool = True) -> dict[str, dict]:
+                         with_split: bool = True, hidden_grade_ids=()) -> dict[str, dict]:
     """``{pid: {"totals": {...}, "split": {...} | None, "counts": str | None}}``.
 
     ``totals`` is what the player's profile opens on. ``split`` is present only
@@ -234,7 +273,7 @@ async def profile_totals(session: AsyncSession, org_id, pids: Iterable, *,
     ids = _ids(pids)
     if not ids:
         return {}
-    default = await resolve_scope(session, org_id)
+    default = await resolve_scope(session, org_id, hidden_grade_ids=hidden_grade_ids)
     widen = default.category_active and await _auto_widen(session, org_id)
     need_played = widen or with_split
     played_names = await played_grade_names(session, org_id, ids) if need_played else {}
@@ -254,7 +293,8 @@ async def profile_totals(session: AsyncSession, org_id, pids: Iterable, *,
 
     primary: dict[str, dict] = {}
     for key, members in groups.items():
-        scope = default if not key else await resolve_scope(session, org_id, list(key))
+        scope = default if not key else await resolve_scope(
+            session, org_id, list(key), hidden_grade_ids=hidden_grade_ids)
         primary.update(await totals_under(session, org_id, members, scope))
 
     out = {pid: {"totals": primary.get(pid) or _empty(), "split": None, "counts": None}
@@ -271,10 +311,12 @@ async def profile_totals(session: AsyncSession, org_id, pids: Iterable, *,
         return out
     with_junior = await totals_under(
         session, org_id, split_ids,
-        await resolve_scope(session, org_id, list(GRADE_CATEGORIES)))
+        await resolve_scope(session, org_id, list(GRADE_CATEGORIES),
+                            hidden_grade_ids=hidden_grade_ids))
     without_junior = await totals_under(
         session, org_id, split_ids,
-        await resolve_scope(session, org_id, list(DEFAULT_CATEGORIES), judge_primary=True))
+        await resolve_scope(session, org_id, list(DEFAULT_CATEGORIES), judge_primary=True,
+                            hidden_grade_ids=hidden_grade_ids))
     for pid in split_ids:
         w, s, p = with_junior[pid], without_junior[pid], out[pid]["totals"]
         if w == s:

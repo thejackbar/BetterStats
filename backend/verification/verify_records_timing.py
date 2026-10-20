@@ -99,6 +99,8 @@ async def build_schema() -> None:
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         for stmt in COMP_DDL:
             await conn.execute(text(stmt))
         # Raw-SQL tables the lifespan creates, which `create_all` cannot know

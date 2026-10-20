@@ -1,13 +1,28 @@
 /**
+ * Put a stored name into the canonical "Last, First" shape. Only the
+ * unambiguous two-word free-text override ("Damian O'Hara") is flipped; a
+ * single token or three or more words are left alone, since a middle name and
+ * a double-barrelled surname look the same. Mirrors the backend
+ * canonical_player_name.
+ */
+export function canonicalPlayerName(name) {
+  if (!name || name.includes(',')) return name
+  const words = name.trim().split(/\s+/)
+  return words.length === 2 ? `${words[1]}, ${words[0]}` : name
+}
+
+/**
  * Format a player name stored as "Last, First" into the desired display format.
- * If the name doesn't contain a comma (e.g. a display_name_override), it's returned as-is.
+ * A two-word free-text override is treated as "First Last". Any other name
+ * without a comma is returned as-is.
  */
 export function formatPlayerName(name, format) {
   if (!name) return name
+  name = canonicalPlayerName(name)
   if (!format || format === 'last_first') return name
 
   const commaIdx = name.indexOf(',')
-  if (commaIdx === -1) return name  // custom override or unusual format — don't touch
+  if (commaIdx === -1) return name  // single token or unusual format — don't touch
 
   const last = name.slice(0, commaIdx).trim()
   const first = name.slice(commaIdx + 1).trim()
@@ -75,6 +90,21 @@ export function nameSortKey(name) {
   const surname = (last || first).trim()
   const given = (last ? first : '').trim()
   return `${surname} ${given}`.toLowerCase()
+}
+
+/**
+ * Order a list of players A to Z by FIRST name (surname breaks a tie), whatever
+ * shape the stored name is in. Returns a new array and keeps the incoming order
+ * between two identical names. `nameOf` reads the stored name off an item.
+ */
+export function sortByFirstName(items, nameOf = (x) => x) {
+  const key = (item) => {
+    const { first, last } = splitDisplayName(canonicalPlayerName(nameOf(item)))
+    return [first.toLowerCase(), last.toLowerCase()]
+  }
+  const keyed = items.map((item, i) => ({ item, i, k: key(item) }))
+  keyed.sort((a, b) => a.k[0].localeCompare(b.k[0]) || a.k[1].localeCompare(b.k[1]) || a.i - b.i)
+  return keyed.map((x) => x.item)
 }
 
 /**

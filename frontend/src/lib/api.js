@@ -1,7 +1,15 @@
 // BASE_URL is Vite's build base ('/' for cricket; '/afl/' for a silo built to
 // live under a path prefix — see docs/afl-betterstats-plan.md's domain
 // topology). '/' + 'api' keeps cricket byte-identical at '/api'.
+import { registerSeasons } from './cricketFormat'
+
 const BASE = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'api')
+
+// ?a=1&b=2 from an object, leaving out anything empty.
+const auditQuery = (p) => {
+  const q = Object.entries(p || {}).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
+  return q ? `?${q}` : ''
+}
 
 // Shown while the backend is briefly unavailable (e.g. during a deploy, when
 // nginx can't reach the backend and would otherwise surface a raw
@@ -17,6 +25,16 @@ export function rebaseApiUrl(url) {
   return `${BASE}${url.slice(4)}`
 }
 const rebaseAsset = a => (a && typeof a === 'object' ? { ...a, url: rebaseApiUrl(a.url) } : a)
+
+// Tell the season labels which seasons a club has (see cricketFormat.formatSeason)
+// as the list passes through, and hand it on unchanged. A row from the season
+// table names its season `season_name`, a season list says `name`.
+function noteSeasons(list) {
+  try {
+    registerSeasons(Array.isArray(list) ? list.map(s => (s && typeof s === 'object' ? { name: s.name ?? s.season_name, year: s.year } : s)) : list)
+  } catch { /* labels are cosmetic; never fail a request over them */ }
+  return list
+}
 
 const BACKEND_DOWN_MESSAGE = 'System refreshing. Please wait a moment…'
 
@@ -50,8 +68,20 @@ function iqScopeQuery(path) {
   return path + (path.includes('?') ? '&' : '?') + parts.join('&')
 }
 
+// True while a screen that builds PUBLISHED output (BetterSocials posts) is open.
+// Every request it makes then carries `X-Publishing: 1`, and the server removes
+// anyone who asked to be taken off the public site from what it answers, even
+// to a signed-in admin: the club is not the audience of a post. See
+// backend/app/services/privacy_scrub.py.
+let publishingContext = false
+export function setPublishingContext(on) { publishingContext = !!on }
+
 async function request(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...options.headers }
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(publishingContext ? { 'X-Publishing': '1' } : {}),
+    ...options.headers,
+  }
   const res = await fetch(`${BASE}${iqScopeQuery(path)}`, { ...options, headers, credentials: 'include' })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: statusMessage(res) }))
@@ -128,19 +158,22 @@ function _appendContext(params, context) {
   })
 }
 
-// Grade-type / match-type / competition scope as a query string. Takes
-// {categories, formats, competitions}, or a bare string meaning categories
+// Grade-type / match-type / competition / grade scope as a query string. Takes
+// {categories, formats, competitions, grades}, or a bare string meaning categories
 // alone (what the pre-format callers passed). Returns '' when nothing is
 // selected, so the URL is byte-identical to what it was before any of the
 // three filters existed.
 function scopeQuery(scope) {
   if (!scope) return ''
-  const { categories, formats, competitions } =
+  const { categories, formats, competitions, grades } =
     typeof scope === 'string' ? { categories: scope } : scope
   const params = new URLSearchParams()
   if (categories) params.set('categories', categories)
   if (formats) params.set('formats', formats)
   if (competitions) params.set('competitions', competitions)
+  // Grade NAMES, repeated rather than comma-joined: a grade can be called
+  // "Division 1, North". One name or a list; null and [] send nothing.
+  for (const g of [].concat(grades || [])) if (g) params.append('grades', g)
   const qs = params.toString()
   return qs ? `?${qs}` : ''
 }
@@ -163,6 +196,17 @@ async function videoUpload(path, method, fields = {}, video = null, poster = nul
     throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${res.status}`)
   }
   return res.json()
+}
+
+// The viewer's IANA timezone as a query string ("?tz=Australia/Perth"). The app
+// holds no per-club timezone, and fixtures carry a local start time, so the
+// availability reads send the browser's own to know which games have started.
+// Empty when the browser will not say, which leaves the server on date only.
+function tzQuery() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    return tz ? `?tz=${encodeURIComponent(tz)}` : ''
+  } catch { return '' }
 }
 
 export const api = {
@@ -191,12 +235,37 @@ export const api = {
   getSocialFixtures: (q) => request(`/admin/social/fixtures${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   getSocialResults: (q) => request(`/admin/social/results${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   getSocialPotm: (matchId) => request(`/admin/social/potm/${matchId}`),
+  getSocialTotw: (q, { dateFrom = '', dateTo = '', scope = 'all' } = {}) => {
+    const p = new URLSearchParams()
+    if (q) p.set('q', q)
+    if (dateFrom) p.set('date_from', dateFrom)
+    if (dateTo) p.set('date_to', dateTo)
+    if (scope && scope !== 'all') p.set('scope', scope)
+    const qs = p.toString()
+    return request(`/admin/social/totw${qs ? `?${qs}` : ''}`)
+  },
+  // Which of these players have no earlier game on the club's record (debuts).
+  // `before` is the match day as an ISO date; absent means today.
+  getSocialDebuts: (ids, before) => request(`/admin/social/debuts?player_ids=${encodeURIComponent((ids || []).join(','))}${before ? `&before=${encodeURIComponent(String(before).slice(0, 10))}` : ''}`),
 
   // BetterSocials — media library. `kind` is undefined for the ordinary Photos
   // pool, or 'background' for the small reusable post-background library —
   // same table, same upload endpoint, just tagged differently on the way in.
   listSocialMedia: (kind) => request(`/admin/social/media${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`)
     .then(rows => (Array.isArray(rows) ? rows.map(rebaseAsset) : rows)),
+  // Online icon library, searched and fetched through our own server (open
+  // licences only). The data URI is what a post stores, so it never depends on
+  // the library being up again and always exports.
+  searchIcons: (q) => request(`/admin/social/icons/search?q=${encodeURIComponent(q)}&limit=48`),
+  iconUrl: (id, color) => `${BASE}/admin/social/icons/svg?id=${encodeURIComponent(id)}${color ? `&color=${encodeURIComponent(color)}` : ''}`,
+  iconDataUri: async (id, color) => {
+    const r = await fetch(`${BASE}/admin/social/icons/svg?id=${encodeURIComponent(id)}${color ? `&color=${encodeURIComponent(color)}` : ''}`, { credentials: 'include' })
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}))
+      throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+    }
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(await r.text())}`
+  },
   uploadSocialMedia: (file, kind) => {
     const form = new FormData()
     form.append('file', file)
@@ -228,7 +297,7 @@ export const api = {
     request('/organisations/onboard', { method: 'POST', body: JSON.stringify({ org_id: orgId, org_name: orgName }) }),
   listOrgs: () => request('/organisations'),
   getOrg: (orgId) => request(`/organisations/${orgId}`),
-  getOrgSeasons: (orgId) => request(`/organisations/${orgId}/seasons`),
+  getOrgSeasons: (orgId) => request(`/organisations/${orgId}/seasons`).then(noteSeasons),
   orgGradeCategories: (orgId) => request(`/organisations/${orgId}/grade-categories`),
   // The club's record in each competition it has played, plus every grade
   // listed under its own competition. One request for both halves.
@@ -262,6 +331,14 @@ export const api = {
     }),
   adminSeedCompetitions: () =>
     request('/admin/competitions/seed', { method: 'POST' }),
+  // Junior or senior cricket, per competition (migration 315). true = junior,
+  // false = senior, null = back to the guess from the competition's name.
+  adminTagCompetitionJunior: (id, isJunior) =>
+    request(`/admin/competitions/${id}/junior`, {
+      method: 'PATCH', body: JSON.stringify({ is_junior: isJunior }),
+    }),
+  // What "hide juniors" would hide right now, whether or not it is switched on.
+  adminJuniorsPreview: () => request('/admin/juniors/preview'),
   // Is anything still outside the club's competitions, and is a job running.
   // Read on every visit to Manage Grades, so the prompt appears the moment an
   // admin finishes naming their competitions.
@@ -278,6 +355,7 @@ export const api = {
   },
   getSeasonGrades: (orgId, seasonId) => request(`/organisations/${orgId}/seasons/${seasonId}/grades`),
   triggerSync: (orgId) => request(`/organisations/${orgId}/sync`, { method: 'POST' }),
+  triggerQuickSync: (orgId) => request(`/organisations/${orgId}/sync/quick`, { method: 'POST' }),
   getSyncLogs: (orgId) => request(`/organisations/${orgId}/sync-logs`),
   getOrgSummary: (orgId, { seasonId, gradeId, categories, formats, competitions } = {}) => {
     const params = new URLSearchParams()
@@ -324,7 +402,7 @@ export const api = {
     const qs = params.toString()
     return request(`/players/${playerId}/formats${qs ? `?${qs}` : ''}`)
   },
-  getPlayerStats: (playerId, { seasonId, gradeId, lastNGames, startDate, endDate, categories, formats, competitions } = {}) => {
+  getPlayerStats: (playerId, { seasonId, gradeId, lastNGames, startDate, endDate, categories, formats, competitions, grades } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -334,6 +412,7 @@ export const api = {
     if (categories) params.set('categories', categories)
     if (formats) params.set('formats', formats)
     if (competitions) params.set('competitions', competitions)
+    for (const g of [].concat(grades || [])) if (g) params.append('grades', g)
     return request(`/players/${playerId}/stats?${params}`)
   },
   // `scope` is the same grade-type / match-type selection the career stats call
@@ -376,7 +455,7 @@ export const api = {
     return request(`/players/${playerId}/team-breakdown${qs ? `?${qs}` : ''}`)
   },
   getPlayerSeasons: (playerId, scope) =>
-    request(`/players/${playerId}/seasons${scopeQuery(scope)}`),
+    request(`/players/${playerId}/seasons${scopeQuery(scope)}`).then(noteSeasons),
   getPlayerMilestones: (playerId) => request(`/players/${playerId}/milestones`),
   getPlayerPartnerships: (playerId, scope) =>
     request(`/players/${playerId}/partnerships${scopeQuery(scope)}`),
@@ -412,16 +491,25 @@ export const api = {
     if (competitions) params.set('competitions', competitions)
     return request(`/organisations/${orgId}/results?${params}`)
   },
-  getScorecard: (gameId) => request(`/games/${gameId}/scorecard`),
+  // `org` is the club the visitor is browsing from (id or slug). A fixture between
+  // two synced clubs is one record filed under whichever synced first, so the
+  // page needs to be told whose side to read it from.
+  getScorecard: (gameId, org) =>
+    request(`/games/${gameId}/scorecard${org ? `?org=${encodeURIComponent(org)}` : ''}`),
 
   // Admin / merge tools
   getMergeCandidates: (orgId) => request(`/admin/merge-candidates?org_id=${orgId}`),
   getMergeHistory: (orgId) => request(`/admin/merge-history?org_id=${orgId}`),
   getPlayerMergeInfo: (playerId, orgId) => request(`/admin/player-info?player_id=${playerId}&org_id=${orgId}`),
-  mergePlayers: (keepPlayerId, removePlayerId, orgId) =>
+  // confirmSameDayClash: the admin has read the warning that both records have a game on the
+  // same date (usually two people who share a name) and still wants to merge them.
+  mergePlayers: (keepPlayerId, removePlayerId, orgId, confirmSameDayClash = false) =>
     request('/admin/merge-players', {
       method: 'POST',
-      body: JSON.stringify({ keep_player_id: keepPlayerId, remove_player_id: removePlayerId, org_id: orgId }),
+      body: JSON.stringify({
+        keep_player_id: keepPlayerId, remove_player_id: removePlayerId, org_id: orgId,
+        confirm_same_day_clash: confirmSameDayClash,
+      }),
     }),
   ignorePair: (playerAId, playerBId, orgId) =>
     request('/admin/ignore-pair', {
@@ -1577,11 +1665,14 @@ export const api = {
   adminListPlayers: () => request('/club-admin/players'),
   adminCreatePlayer: (data) =>
     request('/club-admin/players', { method: 'POST', body: JSON.stringify(data) }),
+  // Players the club already holds who might be the name just typed (read-only).
+  adminSimilarPlayers: (name) =>
+    request('/club-admin/players/similar', { method: 'POST', body: JSON.stringify({ name }) }),
   adminPatchPlayer: (playerId, data) =>
     request(`/club-admin/players/${playerId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   claimFillIn: (data) =>
     request('/players/claim-fill-in', { method: 'POST', body: JSON.stringify(data) }),
-  adminListSeasons: () => request('/club-admin/seasons'),
+  adminListSeasons: () => request('/club-admin/seasons').then(noteSeasons),
   adminReorderSeasons: (items) =>
     request('/club-admin/seasons/reorder', { method: 'PUT', body: JSON.stringify(items) }),
   // Season merges (aliases)
@@ -1905,6 +1996,15 @@ export const api = {
   adminClearResolvedSyncRequests: () =>
     request('/club-admin/sync-requests/resolved', { method: 'DELETE' }),
   adminGetMilestones: () => request('/club-admin/milestones'),
+  // Body keys are optional: a key left out leaves that increment alone, null
+  // puts it back to the default.
+  adminSetMilestoneScheme: (body) =>
+    request('/club-admin/milestones/scheme', { method: 'PUT', body: JSON.stringify(body) }),
+  // One grade's own increments. Body: { grade, runs_step?, wickets_step?,
+  // matches_step?, catches_step? }. Same rules: a key left out is untouched,
+  // null follows the club's setting again.
+  adminSetMilestoneGradeScheme: (body) =>
+    request('/club-admin/milestones/grade-schemes', { method: 'PUT', body: JSON.stringify(body) }),
   // Seasons where Cricket Australia's figures no longer match ours — written
   // by the monthly drift check, since the scheduled sync only pulls recent
   // fixtures and never revisits older seasons on its own.
@@ -1913,6 +2013,62 @@ export const api = {
     request('/club-admin/sync-drift/acknowledge', { method: 'POST' }),
 
   // Manual stat entries — historical backfill (v1.0.0.0 Beta)
+  // Card review: a match stored twice (Cricket Australia card + the club's own), compared,
+  // chosen between three ways, and undone. The long id lists ride in the URL as a GET and every
+  // change is a POST, because a capability held at View level answers reads and refuses writes.
+  cardReviewOverview: (fresh = false) => request(`/club-admin/card-review/overview${fresh ? '?fresh=true' : ''}`),
+  cardReviewMatches: (params = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v) })
+    return request(`/club-admin/card-review/matches?${q}`)
+  },
+  cardReviewMatch: (id) => request(`/club-admin/card-review/matches/${id}`),
+  cardReviewPreview: (id) => request(`/club-admin/card-review/matches/${id}/preview`),
+  cardReviewCandidates: (id) => request(`/club-admin/card-review/matches/${id}/candidates`),
+  cardReviewForGame: (gameId) => request(`/club-admin/card-review/game/${gameId}`),
+  cardReviewChoose: (id, choice, note) =>
+    request(`/club-admin/card-review/matches/${id}/choice`, { method: 'POST', body: JSON.stringify({ choice, note: note || null }) }),
+  cardReviewUndo: (id) => request(`/club-admin/card-review/matches/${id}/undo`, { method: 'POST' }),
+  cardReviewRefresh: (id) => request(`/club-admin/card-review/matches/${id}/refresh`, { method: 'POST' }),
+  cardReviewPairOk: (id) => request(`/club-admin/card-review/matches/${id}/pair-ok`, { method: 'POST' }),
+  cardReviewRelink: (id, gameId) =>
+    request(`/club-admin/card-review/matches/${id}/relink`, { method: 'POST', body: JSON.stringify({ game_id: gameId }) }),
+  cardReviewUnlink: (id) => request(`/club-admin/card-review/matches/${id}/unlink`, { method: 'POST' }),
+  cardReviewAccept: (ids) =>
+    request('/club-admin/card-review/accept', { method: 'POST', body: JSON.stringify({ match_ids: ids }) }),
+  cardReviewBulkPreview: () => request('/club-admin/card-review/bulk/preview'),
+  cardReviewBulkApply: (limit) =>
+    request('/club-admin/card-review/bulk/apply', { method: 'POST', body: JSON.stringify({ limit: limit || null }) }),
+  cardReviewBulkUndo: (batchId) =>
+    request('/club-admin/card-review/bulk/undo', { method: 'POST', body: JSON.stringify({ batch_id: batchId }) }),
+  cardReviewBatches: () => request('/club-admin/card-review/bulk/batches'),
+  // Possible doubles (the first step), Find a match, and the filters every list shares: q, player,
+  // grade, competition, date_from, date_to. Reads are GETs; every change is a POST.
+  cardReviewDoubles: (params = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v) })
+    return request(`/club-admin/card-review/doubles?${q}`)
+  },
+  cardReviewHistory: (params = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v) })
+    return request(`/club-admin/card-review/history?${q}`)
+  },
+  cardReviewDoublesBulkPreview: () => request('/club-admin/card-review/doubles/bulk/preview'),
+  cardReviewDoublesBulk: () => request('/club-admin/card-review/doubles/bulk', { method: 'POST' }),
+  cardReviewDoubleLink: (matchId, gameId) =>
+    request('/club-admin/card-review/doubles/link', { method: 'POST', body: JSON.stringify({ match_id: matchId, game_id: gameId }) }),
+  cardReviewDoubleDismiss: (matchId, otherId, kind) =>
+    request('/club-admin/card-review/doubles/dismiss', { method: 'POST', body: JSON.stringify({ match_id: matchId, other_id: otherId, kind }) }),
+  cardReviewDoubleRestore: (matchId, otherId, kind) =>
+    request('/club-admin/card-review/doubles/restore', { method: 'POST', body: JSON.stringify({ match_id: matchId, other_id: otherId, kind }) }),
+  cardReviewFind: (params = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v) })
+    return request(`/club-admin/card-review/find?${q}`)
+  },
+  cardReviewFindOptions: () => request('/club-admin/card-review/find/options'),
+  cardReviewExportUrl: () => `${BASE}/club-admin/card-review/export.csv`,
   adminListSeasonAdjustments: () => request('/club-admin/manual-entries/season-adjustments'),
   adminCreateSeasonAdjustment: (data) =>
     request('/club-admin/manual-entries/season-adjustments', { method: 'POST', body: JSON.stringify(data) }),
@@ -2122,10 +2278,31 @@ export const api = {
   metaAdsCountingSince: () => request('/club-admin/meta-ads/counting-since'),
   metaAdsSetCountingSince: (since) =>
     request('/club-admin/meta-ads/counting-since', { method: 'POST', body: JSON.stringify({ since }) }),
-  // Re-scope the admin app to another club (super admin only). Pass null to
-  // return to the staff member's home club. Returns the fresh /auth/me payload.
+  // Re-scope the admin app to another club. Pass null to return to the home
+  // club. A super admin may pick any club; a club admin only a club a Super
+  // Admin has linked to theirs. Returns the fresh /auth/me payload.
   switchClub: (clubId) =>
     request('/auth/switch-club', { method: 'POST', body: JSON.stringify({ club_id: clubId }) }),
+  // Linked clubs (migration 322): a Super Admin groups clubs so their Club
+  // Admins can switch between them.
+  // Privacy requests: find a person at any club, and download the PDF of what we
+  // hold about them. The PDF needs the session cookie, so it is fetched directly.
+  superFindPrivacyPlayers: (q) => request(`/club-admin/super/privacy/players?q=${encodeURIComponent(q)}`),
+  superPlayerDataReport: async (id) => {
+    const res = await fetch(`${BASE}/club-admin/super/privacy/players/${id}/data-report.pdf`, { credentials: 'include' })
+    if (!res.ok) {
+      let detail = ''
+      try { detail = (await res.json()).detail } catch { /* not JSON */ }
+      throw new Error(detail || `Could not create the report (${res.status})`)
+    }
+    const m = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')
+    return { blob: await res.blob(), filename: m ? m[1] : 'data-held.pdf' }
+  },
+  superListClubLinks: () => request('/club-admin/super/club-links'),
+  superLinkClubs: (clubAId, clubBId) =>
+    request('/club-admin/super/club-links', { method: 'POST', body: JSON.stringify({ club_a_id: clubAId, club_b_id: clubBId }) }),
+  superUnlinkClub: (clubId) =>
+    request(`/club-admin/super/club-links/${clubId}`, { method: 'DELETE' }),
   superListClubs: (includeArchived = false) =>
     request(`/club-admin/super/clubs${includeArchived ? '?include_archived=true' : ''}`),
   // CSV export: clubs with a module trial expiring within `days` (default 3),
@@ -2184,6 +2361,9 @@ export const api = {
   // wizard, no super-admin session. 404s while the platform flag is off.
   publicSelfServeStatus: () => request('/public/self-serve/status'),
   publicSelfServeSearch: (q) => request(`/public/self-serve/search?q=${encodeURIComponent(q)}`),
+  // /trial: a registered club whose trial has ended asks for more time. Emailed to staff.
+  publicRequestTrialExtension: (data) =>
+    request('/public/self-serve/request-trial-extension', { method: 'POST', body: JSON.stringify(data) }),
   publicSelfServePrepare: (data) =>
     request('/public/self-serve/prepare', { method: 'POST', body: JSON.stringify(data) }),
   publicSelfServeValidateAdmin: (data) =>
@@ -2559,6 +2739,8 @@ export const api = {
     request(`/club-admin/sales-workspace/events/${eventId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   salesWorkspaceDeleteEvent: (eventId) =>
     request(`/club-admin/sales-workspace/events/${eventId}`, { method: 'DELETE' }),
+  superSendPasswordReset: (userId) =>
+    request(`/club-admin/super/users/${userId}/send-password-reset`, { method: 'POST' }),
   superResetPassword: (userId, newPassword) =>
     request(`/club-admin/super/users/${userId}/reset-password`, {
       method: 'POST',
@@ -2587,7 +2769,15 @@ export const api = {
       method: 'POST',
       body: form,
       credentials: 'include',
-    }).then(r => r.json())
+    }).then(async r => {
+      const body = await r.text()
+      let data = null
+      try { data = JSON.parse(body) } catch { /* the server answered with plain text */ }
+      if (!r.ok || !data) {
+        throw new Error(data?.detail || (r.ok ? 'The server sent back something unexpected.' : `The import failed (error ${r.status}). Nothing was added.`))
+      }
+      return data
+    })
   },
   forceImportAchievements: (orgId, rows, { batchId = null, filename = null } = {}) =>
     request(`/achievements/import/force?org_id=${orgId}`, {
@@ -2824,6 +3014,29 @@ export const api = {
     request(`/club-admin/sponsors/${id}`, { method: 'DELETE' }),
   adminReorderSponsors: (items) =>
     request('/club-admin/sponsors/reorder', { method: 'PUT', body: JSON.stringify(items) }),
+  // The tier and spot definitions plus the club's own tier names.
+  adminGetSponsorSettings: () => request('/club-admin/sponsors/settings'),
+  adminPutSponsorSettings: (data) =>
+    request('/club-admin/sponsors/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  // The sponsors a post starts with, and the team/grade pins behind them.
+  adminGetPostDefaults: () => request('/club-admin/sponsors/post-defaults'),
+  adminPutPostDefaults: (data) =>
+    request('/club-admin/sponsors/post-defaults', { method: 'PUT', body: JSON.stringify(data) }),
+  adminPostSponsorDefault: ({ team, grade } = {}) => {
+    const params = new URLSearchParams()
+    if (team) params.set('team', team)
+    if (grade) params.set('grade', grade)
+    const qs = params.toString()
+    return request(`/club-admin/sponsors/post-default${qs ? `?${qs}` : ''}`)
+  },
+  // The club's own names for its public sections, each optionally linked to a sponsor.
+  // The order the club's public Honour Board lists groups, roles and people in.
+  adminGetHonourBoardLayout: () => request('/club-admin/honour-board-layout'),
+  adminPutHonourBoardLayout: (layout) =>
+    request('/club-admin/honour-board-layout', { method: 'PUT', body: JSON.stringify(layout) }),
+  adminGetSectionNames: () => request('/club-admin/sponsors/section-names'),
+  adminPutSectionNames: (sections) =>
+    request('/club-admin/sponsors/section-names', { method: 'PUT', body: JSON.stringify({ sections }) }),
 
   // ─── Club Room Mode ────────────────────────────────────────────────────────
   clubRoomGetSettings: () => request('/club-admin/club-room/settings'),
@@ -2868,6 +3081,13 @@ export const api = {
   clubRoomDeleteMedia: (id) =>
     request(`/club-admin/club-room/media/${id}`, { method: 'DELETE' }),
   clubRoomListReports: () => request('/club-admin/club-room/reports'),
+  clubRoomHonourSources: () => request('/club-admin/club-room/honour-sources'),
+  clubRoomGradeTypes: () => request('/club-admin/club-room/grade-types'),
+  clubRoomAwardNames: (category, subcategory) => {
+    const q = new URLSearchParams({ category })
+    if (subcategory) q.set('subcategory', subcategory)
+    return request(`/club-admin/club-room/award-names?${q}`)
+  },
   clubRoomPlay: () => request('/club-admin/club-room/play'),
   clubRoomGetPublicLink: () => request('/club-admin/club-room/public-link'),
   clubRoomSetPublicLink: (data) =>
@@ -2921,6 +3141,11 @@ export const api = {
   // Honours
   webAdminListHonours: () => request('/club-admin/website/honours'),
   webAdminHonourCategories: () => request('/club-admin/website/honour-categories'),
+  webAdminHonourAchievements: (category, subcategory) => {
+    const q = new URLSearchParams({ category })
+    if (subcategory) q.set('subcategory', subcategory)
+    return request(`/club-admin/website/honour-achievements?${q}`)
+  },
   webAdminCreateBoard: (data) =>
     request('/club-admin/website/honours/boards', { method: 'POST', body: JSON.stringify(data) }),
   webAdminUpdateBoard: (id, data) =>
@@ -3077,8 +3302,10 @@ export const api = {
   getPlayerCaptainStats: (playerId, scope) => request(`/players/${playerId}/captain-stats${scopeQuery(scope)}`),
 
   // ─── BetterSelect: Fixtures ─────────────────────────────
-  bsListFixtures: (upcomingOnly = false) =>
-    request(`/fixtures${upcomingOnly ? '?upcoming_only=true' : ''}`),
+  bsListFixtures: (upcomingOnly = false, { hideJuniors = false } = {}) => {
+    const q = [upcomingOnly && 'upcoming_only=true', hideJuniors && 'hide_juniors=true'].filter(Boolean).join('&')
+    return request(`/fixtures${q ? '?' + q : ''}`)
+  },
   bsCreateFixture: (data) =>
     request('/fixtures', { method: 'POST', body: JSON.stringify(data) }),
   bsUpdateFixture: (id, data) =>
@@ -3120,9 +3347,14 @@ export const api = {
     }) }),
 
   // ─── BetterSelect: Availability ─────────────────────────
-  bsAvailabilityMatrix: () => request('/availability/matrix'),
+  bsAvailabilityConfig: () => request('/availability/config'),
+  bsAvailabilityMatrix: ({ juniors = false } = {}) =>
+    request(`/availability/matrix${tzQuery()}${juniors ? (tzQuery() ? '&' : '?') + 'juniors=true' : ''}`),
   bsSetAvailability: (data) =>
     request('/availability', { method: 'POST', body: JSON.stringify(data) }),
+  // Mark a dormant player "no longer dormant" (active true), or dormant again (false).
+  bsSetDormancy: (playerId, active) =>
+    request(`/availability/players/${playerId}/dormancy`, { method: 'PUT', body: JSON.stringify({ active }) }),
   bsBulkAvailability: (items) =>
     request('/availability/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
   bsAvailabilityPeriods: (includePast = false) =>
@@ -3139,6 +3371,36 @@ export const api = {
   bsRegenerateSelfService: () =>
     request('/availability/self-service/regenerate', { method: 'POST' }),
 
+  // ─── BetterSelect: Fines (admin) ───
+  // A squad's fines tracker. Nothing is deleted: a wrong row is voided, a fine
+  // type that is no longer used is archived.
+  bsFinesSquads: () => request('/fines/squads'),
+  bsFinesSquad: (teamId) => request(`/fines/squads/${teamId}`),
+  bsFinesSettings: (teamId, data) =>
+    request(`/fines/squads/${teamId}/settings`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bsFinesAddType: (teamId, data) =>
+    request(`/fines/squads/${teamId}/types`, { method: 'POST', body: JSON.stringify(data) }),
+  bsFinesPatchType: (typeId, data) =>
+    request(`/fines/types/${typeId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bsFinesAddEntries: (teamId, data) =>
+    request(`/fines/squads/${teamId}/entries`, { method: 'POST', body: JSON.stringify(data) }),
+  bsFinesVoidEntry: (id) => request(`/fines/entries/${id}/void`, { method: 'POST' }),
+  bsFinesRestoreEntry: (id) => request(`/fines/entries/${id}/restore`, { method: 'POST' }),
+  bsFinesAddPayment: (teamId, data) =>
+    request(`/fines/squads/${teamId}/payments`, { method: 'POST', body: JSON.stringify(data) }),
+  bsFinesVoidPayment: (id) => request(`/fines/payments/${id}/void`, { method: 'POST' }),
+  bsFinesRestorePayment: (id) => request(`/fines/payments/${id}/restore`, { method: 'POST' }),
+  bsFinesLedger: (teamId, playerId) => request(`/fines/squads/${teamId}/players/${playerId}/ledger`),
+  // The side picked in the squad's week (who to fine), and the report behind the PDF.
+  bsFinesSession: (teamId, date) => request(`/fines/squads/${teamId}/session${date ? `?date=${date}` : ''}`),
+  bsFinesReport: (teamId, { from, to } = {}) => {
+    const q = new URLSearchParams()
+    if (from) q.set('date_from', from)
+    if (to) q.set('date_to', to)
+    const qs = q.toString()
+    return request(`/fines/squads/${teamId}/report${qs ? `?${qs}` : ''}`)
+  },
+
   // ─── Public: self-service availability (no admin auth; player cookie) ───
   // Outside the admin surface — players reach these via the magic link + PIN.
   availPublicLanding: (token) => request(`/public/availability/${token}`),
@@ -3146,7 +3408,11 @@ export const api = {
     request(`/public/availability/${token}/verify`, { method: 'POST', body: JSON.stringify({ player_id, pin }) }),
   availPublicSwitch: (token) =>
     request(`/public/availability/${token}/switch`, { method: 'POST' }),
-  availPublicMe: (token) => request(`/public/availability/${token}/me`),
+  availPublicMe: (token) => request(`/public/availability/${token}/me${tzQuery()}`),
+  // The verified player's own page: squads, locked selections, training.
+  availPublicProfile: (token) => request(`/public/availability/${token}/me/profile${tzQuery()}`),
+  // The competition ladder for the player's squads (the page's Ladder module).
+  availPublicLadder: (token) => request(`/public/availability/${token}/me/ladder`),
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
 
@@ -3176,6 +3442,8 @@ export const api = {
     request(`/votes/medals/${medalId}${confirm ? '?confirm=true' : ''}`, { method: 'DELETE' }),
   votesRegenerateLink: (medalId) =>
     request(`/votes/medals/${medalId}/regenerate`, { method: 'POST' }),
+  votesCounterOptions: () => request('/votes/counter-options'),
+  votesGetWeighting: (medalId) => request(`/votes/medals/${medalId}/weighting`),
   votesGetSettings: (medalId) => request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`),
   votesSetSettings: (data, medalId) =>
     request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`,
@@ -3241,6 +3509,10 @@ export const api = {
     request(`/public/votes/${token}/fixtures/${fixtureId}/ballot`, { method: 'POST', body: JSON.stringify(data) }),
 
   // ─── BetterFantasyCricket: public member play ───────────
+  fanViewAsManagers: (token) => request(`/public/fantasy/${token}/view-as/managers`),
+  fanViewAsSwitch: (token, managerId) =>
+    request(`/public/fantasy/${token}/view-as/switch`, { method: 'POST', body: JSON.stringify({ manager_id: managerId }) }),
+  fanViewAsExit: (token) => request(`/public/fantasy/${token}/view-as/exit`, { method: 'POST' }),
   fanLanding: (token) => request(`/public/fantasy/${token}`),
   fanRegister: (token, data) => request(`/public/fantasy/${token}/register`, { method: 'POST', body: JSON.stringify(data) }),
   fanLogin: (token, data) => request(`/public/fantasy/${token}/login`, { method: 'POST', body: JSON.stringify(data) }),
@@ -3251,6 +3523,8 @@ export const api = {
   fanSaveSquad: (token, data) => request(`/public/fantasy/${token}/squad`, { method: 'POST', body: JSON.stringify(data) }),
   fanTransfer: (token, out_player_id, in_player_id) =>
     request(`/public/fantasy/${token}/transfer`, { method: 'POST', body: JSON.stringify({ out_player_id, in_player_id }) }),
+  fanCancelQueuedTransfer: (token, id) =>
+    request(`/public/fantasy/${token}/transfer/queued/${id}`, { method: 'DELETE' }),
   fanSetCaptain: (token, captain_player_id, vice_player_id) =>
     request(`/public/fantasy/${token}/captain`, { method: 'POST', body: JSON.stringify({ captain_player_id, vice_player_id }) }),
   fanChip: (token, chip) => request(`/public/fantasy/${token}/chip`, { method: 'POST', body: JSON.stringify({ chip }) }),
@@ -3294,12 +3568,50 @@ export const api = {
     request(`/public/fantasy/${token}/trades/${tradeId}/respond`, { method: 'POST', body: JSON.stringify({ accept }) }),
 
   // ─── BetterSelect: Selection (lineups) ──────────────────
-  bsSelectionOverview: () => request('/selection/overview'),
+  bsSelectionOverview: ({ hideJuniors = false } = {}) =>
+    request(`/selection/overview${hideJuniors ? '?hide_juniors=true' : ''}`),
   bsGetSelection: (fixtureId) => request(`/selection/${fixtureId}`),
-  bsSetSelection: (fixtureId, players, demotions = []) =>
-    request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players, demotions }) }),
-  bsSetDefaultTeamSize: (size) =>
-    request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({ size }) }),
+  // `lock` locks the side as it is confirmed (Confirm on the board does).
+  bsSetSelection: (fixtureId, players, demotions = [], { lock = false } = {}) =>
+    request(`/selection/${fixtureId}`, { method: 'PUT', body: JSON.stringify({ players, demotions, lock }) }),
+  bsLockSelection: (fixtureId) => request(`/selection/${fixtureId}/lock`, { method: 'POST' }),
+  bsUnlockSelection: (fixtureId) => request(`/selection/${fixtureId}/unlock`, { method: 'POST' }),
+  bsSelectionHistory: (fixtureId) => request(`/selection/${fixtureId}/history`),
+  // Audit History: the club-wide trail of changes to players.
+  bsAuditEvents: (params = {}) => request(`/audit/events${auditQuery(params)}`),
+  bsAuditFacets: () => request('/audit/facets'),
+  // Same filters as the list. Fetched with the session cookie, then saved as a file.
+  bsAuditExport: async (params = {}) => {
+    const res = await fetch(`${BASE}/audit/export.csv${auditQuery(params)}`, { credentials: 'include' })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `Export failed (${res.status})`)
+    const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')?.[1] || 'audit-history.csv'
+    const url = URL.createObjectURL(await res.blob())
+    const a = document.createElement('a'); a.href = url; a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  },
+  // Autosaved, unconfirmed side for a fixture. `opts` goes to fetch, so a
+  // leaving page can pass { keepalive: true }.
+  // Email the CONFIRMED side: `to` is 'captain' (team sheet with every player's
+  // mobile) or 'players' (each selected player their selection, plus `message`).
+  bsNotifySelection: (fixtureId, to, message) =>
+    request(`/selection/${fixtureId}/notify`, { method: 'POST', body: JSON.stringify({ to, message: message || null }) }),
+  bsSelectionNotices: (fixtureId) => request(`/selection/${fixtureId}/notices`),
+  bsGetSelectionDraft: (fixtureId) => request(`/selection/${fixtureId}/draft`),
+  bsSaveSelectionDraft: (fixtureId, draft, opts = {}) =>
+    request(`/selection/${fixtureId}/draft`, { method: 'PUT', body: JSON.stringify(draft), ...opts }),
+  // `baseVersion` is the draft version the board last saw: a draft someone else
+  // has changed since is refused with 409 (error.detail = the current draft).
+  bsDiscardSelectionDraft: (fixtureId, baseVersion = 0, opts = {}) =>
+    request(`/selection/${fixtureId}/draft${baseVersion ? `?base_version=${baseVersion}` : ''}`, { method: 'DELETE', ...opts }),
+  // With a fixtureId the size is saved on that fixture's team; without one it is
+  // the club default.
+  // `minSize` is only sent when given: undefined leaves the team's minimum
+  // alone, null clears it, a number sets it (the fewest players the side may field).
+  bsSetDefaultTeamSize: (size, fixtureId, minSize) =>
+    request('/selection/default-team-size', { method: 'POST', body: JSON.stringify({
+      size, fixture_id: fixtureId || null, ...(minSize === undefined ? {} : { min_size: minSize }),
+    }) }),
   // The previous fixture's named XI (for Selection's "fill from last week").
   bsPreviousXI: (fixtureId) => request(`/selection/${fixtureId}/previous-xi`),
   // Player ids named in any saved XI for the round containing `on` (a date) —
@@ -3319,6 +3631,12 @@ export const api = {
     request('/selection-rules/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
   bsRuleSettings: (data) =>
     request('/selection-rules/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  // The BetterComms templates a selection email can be linked to (written in
+  // Admin > Comms > Templates), plus the {{variables}} they can use. A preview
+  // fills one in with a made-up match; nothing is sent.
+  bsSelectionEmailTemplates: () => request('/selection-rules/email-templates'),
+  bsPreviewSelectionEmailTemplate: (templateId, to) =>
+    request('/selection-rules/email-templates/preview', { method: 'POST', body: JSON.stringify({ template_id: templateId, to }) }),
   // Per-player exceptions to one rule: a permit, an association clearance, or
   // the tick a free-text rule asks for.
   bsRulePlayers: (id) => request(`/selection-rules/${id}/players`),
@@ -3384,6 +3702,11 @@ export const api = {
   // Self check-in link — the one URL behind both the printed QR code and the
   // NFC tag. The backend returns a PATH; the panel prefixes the origin.
   nmGetCheckInLink: () => request('/nets/checkin-link'),
+  // One session's own link (minted on first ask for an older session) and a new
+  // token for it alone.
+  nmSessionCheckInLink: (id) => request(`/nets/sessions/${id}/checkin-link`),
+  nmRegenerateSessionCheckInLink: (id) =>
+    request(`/nets/sessions/${id}/checkin-link/regenerate`, { method: 'POST' }),
   nmSetCheckInLink: (data) =>
     request('/nets/checkin-link', { method: 'POST', body: JSON.stringify(data) }),
   nmRegenerateCheckInLink: () =>
@@ -3416,6 +3739,9 @@ export const api = {
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),
   bsUpdatePlayerProfile: (id, data) =>
     request(`/players/${id}/profile`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // A player held only because their name matches a person who asked to be
+  // removed: the club confirms they are somebody else. Returns the profile.
+  bsReleasePrivacyHold: (id) => request(`/players/${id}/privacy-release`, { method: 'POST' }),
 
   // Former/alternate names — so a live feed (Play.Cricket, a Grassroots
   // scorecard) using an old name still resolves to this player.
@@ -3448,6 +3774,9 @@ export const api = {
   // competitions is discovered via its own org endpoints.
   iqOppositionDossier: ({ opponent, fixtureId, team, grade, name } = {}) =>
     request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId, team, name)}${grade ? `&grade=${encodeURIComponent(grade)}` : ''}`),
+  // The opposition's named XI for a fixture, matched to their scouted squad.
+  iqOppositionLineup: ({ opponent, fixtureId, team, grade, name, refresh } = {}) =>
+    request(`/iq/opposition/lineup?${_iqQs(opponent, fixtureId, team, name)}${grade ? `&grade=${encodeURIComponent(grade)}` : ''}${refresh ? '&refresh=true' : ''}`),
   // Live ladder standing for an upcoming opponent (our row + theirs).
   iqOpponentLadder: ({ opponent, fixtureId } = {}) =>
     request(`/iq/opposition/ladder?${_iqQs(opponent, fixtureId)}`),
@@ -3723,8 +4052,16 @@ export const api = {
   fantasyPatchPool: (poolId, data) =>
     request(`/club-admin/fantasy/pool/${poolId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   fantasyListRounds: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/rounds`),
+  fantasyPriceMovements: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/price-movements`),
+  fantasySetRoundLock: (roundId, lock_at) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/lock`, { method: 'PATCH', body: JSON.stringify({ lock_at }) }),
   fantasySettleRound: (roundId) =>
     request(`/club-admin/fantasy/rounds/${roundId}/settle`, { method: 'POST' }),
+  fantasyUnsettleRound: (roundId) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/unsettle`, { method: 'POST' }),
+  fantasyViewAs: (managerId) =>
+    request('/club-admin/fantasy/view-as', { method: 'POST', body: JSON.stringify({ manager_id: managerId }) }),
+  superFantasyCompetitions: () => request('/club-admin/fantasy/super/competitions'),
   fantasySettleDue: (seasonId) =>
     request(`/club-admin/fantasy/season/${seasonId}/settle-due`, { method: 'POST' }),
   fantasyDeleteSeason: (seasonId) =>
@@ -3757,6 +4094,23 @@ export const api = {
     request(`/club-admin/fantasy/managers/${managerId}`, { method: 'DELETE' }),
   fantasyManagerTeams: (managerId) =>
     request(`/club-admin/fantasy/managers/${managerId}/teams`),
+  fantasyPlayerSearch: (seasonId, q) =>
+    request(`/club-admin/fantasy/season/${seasonId}/player-search?q=${encodeURIComponent(q)}`),
+  fantasyAddSquadPlayer: (squadId, data) =>
+    request(`/club-admin/fantasy/squads/${squadId}/players`, { method: 'POST', body: JSON.stringify(data) }),
+  fantasyRemoveSquadPlayer: (squadId, playerId, fromRound = 1) =>
+    request(`/club-admin/fantasy/squads/${squadId}/players/${playerId}?from_round=${fromRound}`, { method: 'DELETE' }),
+  fantasyGrades: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/grades`),
+  fantasySetGrades: (seasonId, excludedKeys) =>
+    request(`/club-admin/fantasy/season/${seasonId}/grades`, { method: 'PUT', body: JSON.stringify({ excluded_keys: excludedKeys }) }),
+  fantasyUnmatched: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/unmatched-players`),
+  fantasyMergePlayer: (seasonId, keepId, removeId) =>
+    request(`/club-admin/fantasy/season/${seasonId}/merge-player`, { method: 'POST', body: JSON.stringify({ keep_player_id: keepId, remove_player_id: removeId }) }),
+  fantasyManualScores: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/manual-scores`),
+  fantasySetManualScore: (roundId, playerId, data) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/players/${playerId}/score`, { method: 'PUT', body: JSON.stringify(data) }),
+  fantasyClearManualScore: (roundId, playerId) =>
+    request(`/club-admin/fantasy/rounds/${roundId}/players/${playerId}/score`, { method: 'DELETE' }),
 }
 
 function _iqQs(opponent, fixtureId, team, name) {

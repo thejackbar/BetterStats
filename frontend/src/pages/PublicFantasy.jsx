@@ -11,7 +11,7 @@ import { api } from '../lib/api'
 import {
   ensureThemeCss, loadThemePref, saveThemePref, resolveTheme, DEFAULT_ACCENT,
 } from './fantasy/theme'
-import { FantasyCtx, crestText, DISP, useIsDesktop, ThemeToggle } from './fantasy/ui'
+import { FantasyCtx, crestText, DISP, useIsDesktop, ThemeToggle, fantasyName } from './fantasy/ui'
 import { AppHeader, NavPills, Banner } from './fantasy/shell'
 import bcMark from '../assets/bettercricket-black.svg'
 import Auth from './fantasy/Auth'
@@ -29,6 +29,7 @@ import { PlayerProfile, Compare, StatsExplorer } from './fantasy/Players'
 import Notifications, { unreadCount } from './fantasy/Notifications'
 import Settings, { HowToPlay } from './fantasy/Settings'
 import Share from './fantasy/Share'
+import ViewAsBar from './fantasy/ViewAsBar'
 
 const NAV = [['team', 'My Team'], ['points', 'Points'], ['pick', 'Pick Squad'], ['ladder', 'Ladder'], ['leagues', 'Leagues'], ['draft', 'Draft']]
 const QUICK = [['transfers', 'Transfers'], ['chips', 'Chips'], ['fixtures', 'Fixtures'], ['stats', 'Players'], ['live', 'Live'], ['share', 'Share'], ['help', 'Rules']]
@@ -46,11 +47,13 @@ export default function PublicFantasy() {
   const [pool, setPool] = useState(null)
   const [rules, setRules] = useState(null)
   const [round, setRound] = useState(null)
+  const [startPoints, setStartPoints] = useState(null)   // what a mid-season joiner starts on
   const [view, setViewRaw] = useState('team')
   const [params, setParams] = useState({})
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [unread, setUnread] = useState(0)
+  const [viewAs, setViewAs] = useState(null)   // admin viewing as a team (read only)
 
   const [themePref, setThemePref] = useState(loadThemePref())
   const [theme, setTheme] = useState(resolveTheme(loadThemePref()))
@@ -77,7 +80,7 @@ export default function PublicFantasy() {
 
   const loadApp = useCallback(async () => {
     const [m, p] = await Promise.all([api.fanMe(token), api.fanPool(token).catch(() => null)])
-    setManager(m.manager); setSquad(m.squad); setRound(m.round)
+    setManager(m.manager); setSquad(m.squad); setRound(m.round); setStartPoints(m.start_points ?? null)
     if (p) { setPool(p.players); setRules(p.rules) }
     return m
   }, [token])
@@ -86,7 +89,7 @@ export default function PublicFantasy() {
     (async () => {
       try {
         const d = await api.fanLanding(token)
-        setClub(d.club); setSeason(d.season)
+        setClub(d.club); setSeason(d.season); setViewAs(d.view_as || null)
         if (!d.season) { setPhase('dead'); return }
         setRules(d.season.rules)
         if (d.me) {
@@ -106,7 +109,11 @@ export default function PublicFantasy() {
   useEffect(() => { if (phase === 'app') refreshNotifs() }, [phase, refreshNotifs, squad])
 
   const onAuthed = async () => { const m = await loadApp(); setViewRaw(m.squad ? 'team' : 'pick'); setPhase('app') }
-  const logout = async () => { await api.fanLogout(token).catch(() => {}); setManager(null); setSquad(null); setPhase('auth') }
+  const logout = async () => {
+    // While an admin is viewing as a team, "sign out" leaves the view; it must not touch the team.
+    if (viewAs) { await api.fanViewAsExit(token).catch(() => {}); window.location.assign('/admin/fantasy'); return }
+    await api.fanLogout(token).catch(() => {}); setManager(null); setSquad(null); setPhase('auth')
+  }
 
   // Brand mark: the club's own logo, or the BetterCricket mark when none is set.
   const ctx = { club, crest: crestText(club), token, logoUrl: club?.logo_url || bcMark }
@@ -118,8 +125,8 @@ export default function PublicFantasy() {
 
   const screen = () => {
     switch (view) {
-      case 'team': return <MyTeam token={token} manager={manager} squad={squad} season={season} round={round} onChange={loadApp} flash={flash} fail={fail} nav={nav} desktop={desktop} />
-      case 'pick': return <Pick token={token} pool={pool} rules={rules} squad={squad} season={season} onSaved={async () => { flash('Saved.'); await loadApp(); nav('team') }} fail={fail} flash={flash} nav={nav} desktop={desktop} />
+      case 'team': return <MyTeam token={token} manager={manager} squad={squad} season={season} round={round} startPoints={startPoints} onChange={loadApp} flash={flash} fail={fail} nav={nav} desktop={desktop} />
+      case 'pick': return <Pick token={token} pool={pool} rules={rules} squad={squad} season={season} startPoints={startPoints} onSaved={async () => { flash('Saved.'); await loadApp(); nav('team') }} fail={fail} flash={flash} nav={nav} desktop={desktop} />
       case 'transfers': return <Transfers token={token} squad={squad} pool={pool} rules={rules} round={round} onChange={loadApp} flash={flash} fail={fail} nav={nav} desktop={desktop} />
       case 'chips': return <Chips token={token} squad={squad} round={round} onChange={loadApp} flash={flash} fail={fail} nav={nav} />
       case 'points': return <Points token={token} nav={nav} desktop={desktop} />
@@ -143,6 +150,7 @@ export default function PublicFantasy() {
     <FantasyCtx.Provider value={ctx}>
       <div className="bfc-root" data-theme={theme} style={rootSx}>
         <div style={{ maxWidth: desktop ? 'min(1800px, 96vw)' : 540, margin: '0 auto', padding: desktop ? '22px 28px 64px' : '18px 16px 56px' }}>
+          {viewAs && <ViewAsBar token={token} viewAs={viewAs} fail={fail} />}
           {phase !== 'app' && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', maxWidth: 440, margin: '0 auto 4px' }}>
               <ThemeToggle theme={theme} onToggle={onToggleTheme} />
@@ -153,7 +161,7 @@ export default function PublicFantasy() {
 
           {phase === 'dead' && (
             <div style={{ textAlign: 'center', marginTop: 48 }}>
-              <div style={{ font: `800 22px ${DISP}`, textTransform: 'uppercase', color: 'var(--text)' }}>{club?.name || 'Fantasy Cricket'}</div>
+              <div style={{ font: `800 22px ${DISP}`, textTransform: 'uppercase', color: 'var(--text)' }}>{fantasyName(club) || club?.name || 'Fantasy Cricket'}</div>
               <div style={{ maxWidth: 440, margin: '12px auto 0' }}><Banner>This fantasy link isn't active yet. Check with your club.</Banner></div>
             </div>
           )}

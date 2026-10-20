@@ -73,6 +73,13 @@ logger = logging.getLogger(__name__)
 # Payload schema versions — bump on shape changes so stale caches rebuild.
 CAREER_VERSION = 4     # bumped: payload now carries grades across the whole window, not just the latest season
 DEEP_VERSION = 3       # bumped: added batting reliability + style (floor/ceiling, boundary profile)
+# The per-grade, per-season table behind the opposition's named XI ("what has he
+# done in this grade or the one beside it, over the last three seasons").
+GRADE_CAREER_VERSION = 1
+GRADE_CAREER_YEARS = 3
+# One build is (grades fielded in the window) x 2 aggregate calls, once per club per
+# week. The cap keeps a club fielding a great many sides from running away with it.
+MAX_GRADE_CAREER_GRADES = 120
 
 # How far back the external "full career, all clubs" view reaches. The aggregate
 # calls are light (~3 per season row, cached 7 days), so we pull a decade of
@@ -157,6 +164,10 @@ async def external_club_teams(org_guid: str) -> list[dict]:
 
 def _career_key(org_guid: str) -> str:
     return f"career::{org_guid.lower()}"
+
+
+def _gcareer_key(org_guid: str) -> str:
+    return f"gcareer::{org_guid.lower()}"
 
 
 def _deep_key(org_guid: str, player_id: str) -> str:
@@ -411,6 +422,88 @@ async def _build_career(org_guid: str, club_name: str | None = None, years: int 
         "schema_v": CAREER_VERSION,
         "built_at": built_at,
     }
+
+
+_SPONSOR_SUFFIX = re.compile(r"\s*\([^)0-9]*\)\s*$")
+
+
+async def _build_grade_career(org_guid: str, club_name: str | None = None, years: int = GRADE_CAREER_YEARS) -> dict:
+    """Every player's batting and bowling totals PER GRADE PER SEASON for the club's
+    last ``years`` calendar years.
+
+    The aggregate calls take a ``grade_id`` (the deep scan's ``_locate_player_grades``
+    uses it one player at a time). Asked per grade for the whole club it is one pair
+    of calls per grade instead of one pair per player per grade, so the table for a
+    club is a few dozen light calls, cached with the other scout caches. Each row is
+    a ``_rollup`` (summable fields), so a caller can combine any set of rows."""
+    dated = await _dated_seasons(org_guid)
+    built_at = datetime.now(timezone.utc).isoformat()
+    base = {"org": {"id": org_guid, "name": club_name}, "schema_v": GRADE_CAREER_VERSION, "built_at": built_at}
+    if not dated:
+        return {**base, "window": None, "players": []}
+    cur = max(y for y, _, _ in dated)
+    window = sorted([d for d in dated if d[0] >= cur - (years - 1)], reverse=True)[:MAX_CAREER_SEASON_ROWS]
+
+    async def teams_for(sid: str):
+        async with _AGG_SEMAPHORE:
+            try:
+                return sid, await playhq_client.get_teams(org_guid, sid)
+            except Exception as e:
+                logger.warning(f"BetterIQ scout: teams failed for {org_guid}/{sid}: {e}")
+                return sid, []
+
+    year_of = {sid: yr for yr, sid, _ in window}
+    jobs: list[tuple[str, str, str]] = []
+    for sid, teams in await asyncio.gather(*[teams_for(sid) for _, sid, _ in window]):
+        seen: set[str] = set()
+        for t in teams or []:
+            grade_objs = list(t.get("grades") or [])
+            if t.get("grade"):
+                grade_objs.append(t["grade"])
+            for gd in grade_objs:
+                gid = ((gd or {}).get("id") or "").strip()
+                gname = _SPONSOR_SUFFIX.sub("", (gd.get("name") or "").strip())
+                if gid and gname and gid not in seen:
+                    seen.add(gid)
+                    jobs.append((sid, gid, gname))
+    jobs = jobs[:MAX_GRADE_CAREER_GRADES]
+
+    async def fetch(kind: str, fn, sid: str, gid: str):
+        async with _AGG_SEMAPHORE:
+            try:
+                return kind, sid, gid, await fn(org_guid, sid, grade_id=gid)
+            except Exception as e:
+                logger.warning(f"BetterIQ scout: {kind} stats failed for {org_guid}/{sid}/{gid}: {e}")
+                return kind, sid, gid, []
+
+    tasks = []
+    for sid, gid, _gname in jobs:
+        tasks.append(fetch("bat", playhq_client.get_batting_stats, sid, gid))
+        tasks.append(fetch("bowl", playhq_client.get_bowling_stats, sid, gid))
+    results = await asyncio.gather(*tasks)
+
+    gname_of = {(sid, gid): gname for sid, gid, gname in jobs}
+    acc: dict[str, dict] = {}
+    for kind, sid, gid, rows in results:
+        for pl in rows or []:
+            pid = (pl.get("id") or "").strip()
+            if not pid:
+                continue
+            e = acc.setdefault(pid, {"name": pl.get("name") or pl.get("shortName") or "Unknown", "rows": {}})
+            r = e["rows"].setdefault((sid, gid), {"year": year_of[sid], "grade_name": gname_of[(sid, gid)]})
+            r[kind] = pl.get("statistics") or {}
+
+    players = []
+    for pid, e in acc.items():
+        rows = []
+        for r in e["rows"].values():
+            roll = _rollup([r])
+            if _has_activity(roll):
+                rows.append({"year": r["year"], "grade_name": r["grade_name"], **roll})
+        if rows:
+            players.append({"player_id": pid, "name": e["name"], "rows": rows})
+    return {**base, "window": {"from_year": cur - (years - 1), "to_year": cur},
+            "grades_scanned": len(jobs), "players": players}
 
 
 async def get_player_career(

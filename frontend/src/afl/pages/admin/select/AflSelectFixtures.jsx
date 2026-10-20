@@ -132,7 +132,7 @@ export default function AflSelectFixtures() {
                   Final
                 </label>
                 <span className="font-mono text-[11px] text-pb-dim" data-testid="picked">{f.picked ? `${f.picked} named` : 'No side named'}</span>
-                <Link to={`/admin/select/selection?fixture=${f.id}`}
+                <Link to={`/admin/betterselect/selection?fixture=${f.id}`}
                   className="text-sm px-3 py-1.5 rounded border border-[var(--pb-accent)] text-[var(--pb-accent)]">
                   {f.picked ? 'Edit side' : 'Pick side'}
                 </Link>

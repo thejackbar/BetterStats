@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import EmailSuppression, CommsContact
-from app.services import comms_policy
+from app.services import comms_policy, privacy_email
 
 
 def _norm(email: str) -> str:
@@ -55,14 +55,25 @@ async def add_suppression(session: AsyncSession, email: str, reason: str,
     return new_id is not None
 
 
+async def add_privacy_suppression(session: AsyncSession, email: str, detail: str | None = None) -> bool:
+    """Record an address of a person who asked to be removed. reason 'manual'
+    already blocks every category (see ``deliverable``); the source marks it so a
+    club cannot un-suppress it. Does not commit."""
+    return await add_suppression(session, email, "manual", source=privacy_email.SOURCE, detail=detail)
+
+
 async def remove_suppression(session: AsyncSession, email: str) -> int:
     """Manual un-suppress (e.g. the member fixed their mailbox). Returns rows
-    removed. Does not commit."""
+    removed. Does not commit. A removal request is never lifted here: the row
+    stays, and so does the live check in services/privacy_email."""
     e = _norm(email)
     if not e:
         return 0
+    if await privacy_email.is_removed_address(e, session):
+        return 0
     res = await session.execute(
-        delete(EmailSuppression).where(func.lower(EmailSuppression.email) == e))
+        delete(EmailSuppression).where(func.lower(EmailSuppression.email) == e,
+                                       EmailSuppression.source.is_distinct_from(privacy_email.SOURCE)))
     return res.rowcount or 0
 
 
@@ -79,6 +90,10 @@ async def deliverable(session: AsyncSession, *, email: str, organisation_id,
     if not e:
         return False, "no_email"
     cat = comms_policy.normalise_category(category)
+
+    # A person who asked to be removed is never emailed, in any category.
+    if await privacy_email.is_removed_address(e, session):
+        return False, "privacy_request"
 
     reason = await suppression_reason(session, e)
     if reason == "hard_bounce" and comms_policy.blocks_hard_bounce(cat):

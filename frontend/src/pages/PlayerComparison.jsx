@@ -9,6 +9,7 @@ import { PageHeader, PbSpinner } from '../lib/presskit'
 import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
 import Dropdown from '../components/Dropdown'
 import { fmt2, fmtCount } from '../lib/cricketFormat'
+import { useSectionNames } from '../lib/sectionNames'
 
 // Rate metrics → always 2 decimals; every other (integer count) metric →
 // thousands separators. Keys mirror the *_METRICS tables above.
@@ -234,6 +235,7 @@ function getRowHighlights(values, higher) {
 
 export default function PlayerComparison() {
   const { clubSlug } = useParams()
+  const sec = useSectionNames(clubSlug)
   const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
@@ -328,7 +330,7 @@ export default function PlayerComparison() {
       <main className="max-w-[1300px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <PageHeader
           eyebrow="HEAD TO HEAD"
-          title="Compare players."
+          title={sec.name('compare', "Compare players.")}
           meta={[<span key="s">Up to {MAX_PLAYERS} players · Stats side by side.</span>]}
         />
 

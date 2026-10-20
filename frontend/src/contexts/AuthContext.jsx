@@ -49,7 +49,9 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     // BetterFootball has no per-module account plan endpoint; its Core gate
     // is the /auth/me payload alone.
-    if (IS_AFL || !user || user.role === 'super_admin' || !user.club_id) { setAccountPlan(null); return }
+    // A person locked to one module cannot read the plan (it is the Primary Admin's), so they
+    // fall back to the /auth/me core_live flag like any club without plan rows.
+    if (IS_AFL || !user || user.role === 'super_admin' || !user.club_id || (user.access?.mode && user.access.mode !== 'full')) { setAccountPlan(null); return }
     let alive = true
     fetch(API_BASE + '/club-admin/account/plan', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
@@ -133,8 +135,9 @@ export function AuthProvider({ children }) {
   // Super-admin club switching. Persists the acted-as club server-side, then
   // hard-reloads into the admin dashboard so every page refetches under the new
   // club scope (a soft context update would leave already-mounted pages showing
-  // the previous club's data). Pass null to return to the home club.
-  const switchClub = useCallback(async (clubId) => {
+  // the previous club's data). Pass null to return to the home club. `landOn`
+  // is the path under the base to land on (default the dashboard).
+  const switchClub = useCallback(async (clubId, landOn = 'admin') => {
     const res = await fetch(API_BASE + '/auth/switch-club', {
       method: 'POST',
       credentials: 'include',
@@ -154,7 +157,7 @@ export function AuthProvider({ children }) {
     // Base-path aware (see API_BASE above) — a bare '/admin' lands on the
     // umbrella betterat.football landing page for a silo built under a path
     // prefix (e.g. AFL's /afl/), not that silo's own admin app.
-    window.location.assign(import.meta.env.BASE_URL + 'admin')
+    window.location.assign(import.meta.env.BASE_URL + landOn)
   }, [])
 
   const clearJustLoggedIn = useCallback(() => setJustLoggedIn(false), [])
@@ -166,6 +169,18 @@ export function AuthProvider({ children }) {
     if (!user) return false
     if (user.role === 'super_admin' || user.role === 'club_admin') return true
     return Array.isArray(user.capabilities) && user.capabilities.includes(cap)
+  }, [user])
+
+  // Can this person CHANGE what a capability covers, not only open it? A capability held at
+  // VIEW level (the Primary Admin chose View for a menu item) opens the screen but the server
+  // refuses writes, so the screen draws read only. Takes any number of capabilities, true when
+  // the person holds one of them at Manage.
+  const canEditCap = useCallback((...caps) => {
+    if (!user) return false
+    if (user.role === 'super_admin' || user.role === 'club_admin') return true
+    const held = Array.isArray(user.capabilities) ? user.capabilities : []
+    const viewOnly = Array.isArray(user.view_only_capabilities) ? user.view_only_capabilities : []
+    return caps.flat().some(c => held.includes(c) && !viewOnly.includes(c))
   }, [user])
 
   // Module entitlement — the club's explicit module list, sent by the backend
@@ -206,7 +221,7 @@ export function AuthProvider({ children }) {
   })()
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, switchClub, acceptInvite, resetPassword, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, hasModule, coreLive }}>
+    <AuthContext.Provider value={{ user, login, logout, switchClub, acceptInvite, resetPassword, refetch: fetchMe, justLoggedIn, clearJustLoggedIn, hasCapability, canEditCap, hasModule, coreLive }}>
       {children}
     </AuthContext.Provider>
   )

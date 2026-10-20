@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { PbSpinner } from '../../lib/presskit'
+import HonourBoardOrder from './HonourBoardOrder'
 
 const CATEGORIES = [
   'Club Award', 'Association Award', 'Office Bearer',
@@ -162,6 +164,11 @@ export default function AdminAwardDefinitions() {
   const [seeding, setSeeding] = useState(false)
   const [resetTemplate, setResetTemplate] = useState('starter')
   const [error, setError] = useState(null)
+  // Two tabs on one screen: the award types themselves, and the order the
+  // public Honour Board lists them in. The tab lives in the URL so a link to it works.
+  const [params, setParams] = useSearchParams()
+  const tab = params.get('tab') === 'honour-order' ? 'honour-order' : 'types'
+  const pickTab = (t) => setParams(t === 'types' ? {} : { tab: t }, { replace: true })
 
   useEffect(() => {
     if (user?.club_id) {
@@ -262,6 +269,33 @@ export default function AdminAwardDefinitions() {
   return (
     <BetterStatsLayout>
       <div className="max-w-5xl mx-auto">
+        <div className="flex gap-1 border-b pb-hairline-b mb-6 overflow-x-auto" role="tablist" aria-label="Award types">
+          {[['types', 'Award types'], ['honour-order', 'Honour Board order']].map(([id, label]) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => pickTab(id)}
+              className={`px-3.5 py-2.5 text-[13px] whitespace-nowrap border-b-2 transition-colors ${
+                tab === id ? 'text-pb-text border-pb-accent' : 'text-pb-dim border-transparent hover:text-pb-text'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'honour-order' ? (
+          <>
+            <div className="mb-6">
+              <h1 className="font-display font-bold text-2xl text-pb-text tracking-tight">Honour Board order</h1>
+              <p className="text-pb-faint text-sm mt-1">
+                Choose which group, role and person comes first on your public Honour Board, for example Life Members above the Executive Committee.
+              </p>
+            </div>
+            <HonourBoardOrder slug={user?.club_slug} />
+          </>
+        ) : (
+          <>
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="font-display font-bold text-2xl text-pb-text tracking-tight">Award Definitions</h1>
@@ -388,6 +422,8 @@ export default function AdminAwardDefinitions() {
           <p className="text-pb-faintest font-mono text-[10px] text-center py-4">
             {defs.length} total definitions · Click any Display Name cell to rename
           </p>
+        )}
+          </>
         )}
       </div>
     </BetterStatsLayout>

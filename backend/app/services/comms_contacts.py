@@ -49,8 +49,16 @@ async def upsert_contact(session: AsyncSession, organisation_id, email: str,
             existing.marketing_club_id = marketing_club_id
         existing.updated_at = datetime.now(timezone.utc)
         return "updated"
-    session.add(CommsContact(
+    contact = CommsContact(
         organisation_id=organisation_id, email=email, name=name, source=source,
         player_id=player_id, member_id=member_id, marketing_club_id=marketing_club_id,
-    ))
+    )
+    # A contact for someone who asked to be removed (migration 316) is born
+    # excluded: the Directory re-creates contacts on every read, and it must not
+    # bring them back into an audience. The row is kept, as every opt-out is.
+    from app.services import privacy_email
+    if await privacy_email.is_removed_address(email, session):
+        contact.excluded = True
+        contact.excluded_at = datetime.now(timezone.utc)
+    session.add(contact)
     return "added"

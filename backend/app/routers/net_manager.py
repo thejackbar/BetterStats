@@ -56,6 +56,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import (
+    MANAGE_PLAYERS, MANAGE_SELECTIONS, SELECT_NETS, require_any_cap,
+)  # BetterSelect item permissions
+from app.auth.capabilities import (
+    MANAGE_SELECTIONS, require_cap,
+)  # route gates added by the access audit
+from app.auth.capabilities import (
     MANAGE_PLAYERS, MANAGE_SELECTIONS, require_any_cap, require_cap,
 )
 from app.models.db import (
@@ -228,6 +234,8 @@ class SessionCreate(BaseModel):
     label: Optional[str] = None
     notes: Optional[str] = None
     settings: Optional[dict] = None
+    # The squads the session is for; omitted or empty = everyone.
+    squad_team_ids: Optional[list[str]] = None
 
 
 class SessionUpdate(BaseModel):
@@ -236,6 +244,9 @@ class SessionUpdate(BaseModel):
     notes: Optional[str] = None
     settings: Optional[dict] = None
     status: Optional[str] = None
+    # Sent to change it: an explicit null or empty list clears it (everyone),
+    # while leaving it out leaves the session's squads alone.
+    squad_team_ids: Optional[list[str]] = None
 
 
 class AttendeeAdd(BaseModel):
@@ -396,8 +407,39 @@ async def _live_payload(db: AsyncSession, s: NetSession) -> dict:
         "attendee_count": len(attendees),
         "batted_count": sum(1 for a in attendees if a["batted"]),
         "sitting_out_count": sum(1 for a in attendees if not a["bats"]),
+        # The squads this session is for (empty = everyone) and its own
+        # check-in link, when it has one yet (older sessions get theirs the
+        # first time the link is asked for).
+        "squad_team_ids": [str(t) for t in (s.squad_team_ids or [])],
+        "checkin_path": f"/nets-checkin/{s.checkin_token}" if s.checkin_token else None,
         "created_at": s.created_at.isoformat() if s.created_at else None,
     }
+
+
+async def _club_squad_ids(db: AsyncSession, club_id, raw) -> Optional[list[uuid.UUID]]:
+    """The given team ids that really are this club's, or None for "everyone".
+
+    A stray id from another club is dropped rather than stored, so a session can
+    never narrow its check-in list to somebody else's squad."""
+    ids: list[uuid.UUID] = []
+    for v in raw or []:
+        try:
+            ids.append(uuid.UUID(str(v)))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    if not ids:
+        return None
+    rows = await db.execute(
+        text("SELECT id FROM teams WHERE organisation_id = :org AND id = ANY(CAST(:ids AS uuid[]))"),
+        {"org": club_id, "ids": ids},
+    )
+    owned = {r[0] for r in rows.fetchall()}
+    kept = [i for i in ids if i in owned]
+    return kept or None
+
+
+def new_checkin_token() -> str:
+    return secrets.token_urlsafe(18)
 
 
 async def live_sessions(db: AsyncSession, club_id) -> list[NetSession]:
@@ -503,7 +545,7 @@ async def _commit_live(db: AsyncSession, s: NetSession) -> dict:
 
 
 # ── Roster (check-in source) ──────────────────────────────────────────────────
-@router.get("/roster")
+@router.get("/roster", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def net_roster(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -527,8 +569,24 @@ async def net_roster(
     players = await club_player_roster(db, club)
     dormant = await dormant_player_ids(db, club)
     cards = [_player_card(p, p.id in dormant) for p in players]
+    # Which squads each player is in, so check-in can be done squad by squad.
+    mem = await db.execute(
+        text("SELECT player_id, team_id FROM team_members WHERE organisation_id = :org"),
+        {"org": club.id},
+    )
+    by_player: dict[str, list[str]] = {}
+    for pid, tid in mem.fetchall():
+        by_player.setdefault(str(pid), []).append(str(tid))
+    for c in cards:
+        c["squad_team_ids"] = by_player.get(c["id"], [])
+    teams = await db.execute(
+        text("SELECT id, COALESCE(NULLIF(short_name, ''), name), name FROM teams "
+             "WHERE organisation_id = :org AND COALESCE(is_active, true) ORDER BY sequence NULLS LAST, name"),
+        {"org": club.id},
+    )
     return {
         "players": cards,
+        "squads": [{"id": str(i), "label": lbl, "name": nm} for i, lbl, nm in teams.fetchall()],
         # What the screen shows before anyone searches, so it can say how many
         # more names are behind the search box rather than implying the squad
         # is the whole club.
@@ -538,7 +596,7 @@ async def net_roster(
 
 
 # ── Club default timer settings ──────────────────────────────────────────────
-@router.get("/settings")
+@router.get("/settings", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def get_settings(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -551,7 +609,7 @@ async def put_settings(
     body: SettingsBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     merged = _clean_settings(club.net_settings)
     incoming = {k: v for k, v in body.model_dump().items() if v is not None}
@@ -562,7 +620,7 @@ async def put_settings(
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
-@router.get("/sessions")
+@router.get("/sessions", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def list_sessions(
     limit: int = Query(40, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -610,7 +668,7 @@ async def create_session(
     body: SessionCreate,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     """Open a new net session. Seeds its timer settings from the club default
     (or the supplied override), so the manager can just hit Start."""
@@ -625,6 +683,10 @@ async def create_session(
         live_state=_default_live(seed),
         status="active",
         created_by=user.id,
+        # Its own link from the start: a QR printed for this session checks
+        # people into this session only.
+        checkin_token=new_checkin_token(),
+        squad_team_ids=await _club_squad_ids(db, club.id, body.squad_team_ids),
     )
     db.add(s)
     await db.commit()
@@ -632,7 +694,7 @@ async def create_session(
     return await _live_payload(db, s)
 
 
-@router.get("/sessions/{session_id}")
+@router.get("/sessions/{session_id}", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def get_session(
     session_id: str,
     db: AsyncSession = Depends(get_db),
@@ -642,7 +704,7 @@ async def get_session(
     return await _live_payload(db, s)
 
 
-@router.get("/sessions/{session_id}/live")
+@router.get("/sessions/{session_id}/live", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def live_session(
     session_id: str,
     since: Optional[int] = Query(None, description="The version this device last saw"),
@@ -675,7 +737,7 @@ async def update_session(
     body: SessionUpdate,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     s = await _owned_session(db, session_id, club.id)
     if body.session_date is not None:
@@ -684,6 +746,8 @@ async def update_session(
         s.label = body.label or None
     if body.notes is not None:
         s.notes = body.notes or None
+    if "squad_team_ids" in body.model_fields_set:
+        s.squad_team_ids = await _club_squad_ids(db, club.id, body.squad_team_ids)
     if body.settings is not None:
         settings = _clean_settings(body.settings)
         s.settings = settings
@@ -717,7 +781,7 @@ async def delete_session(
     session_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     s = await _owned_session(db, session_id, club.id)
     await db.delete(s)
@@ -732,7 +796,7 @@ async def add_attendee(
     body: AttendeeAdd,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     """Check one person in from the admin screen, at the back of the queue.
 
@@ -798,7 +862,7 @@ async def remove_attendee(
     attendee_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     """Take someone back out of the session. Already gone (another device got
     there first) reads as done, not as an error."""
@@ -823,7 +887,7 @@ async def patch_attendee(
     body: AttendeePatch,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     """Mark one attendee as having had their turn, send them back to the queue,
     move them in or out of the rotation, or set either batting-order flag.
@@ -886,7 +950,7 @@ async def reorder_queue(
     body: QueueOrder,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     """Re-order the waiting queue. The list comes from a browser, so ids that
     aren't in this session are ignored, and anyone the sending device didn't
@@ -957,7 +1021,7 @@ async def rotate_group(
     body: RotateBody,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     s = await _owned_session(db, session_id, club.id)
     settings = _clean_settings(s.settings)
@@ -976,7 +1040,7 @@ async def timer_action(
     body: TimerAction,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     """Drive the clock. Every device sees the same one, because the deadline
     lives here rather than in whichever browser pressed Start.
@@ -1107,7 +1171,7 @@ async def _attendance_rows(db: AsyncSession, club_id, days: int) -> tuple[int, l
     return session_count, players
 
 
-@router.get("/reports/attendance")
+@router.get("/reports/attendance", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def attendance_report(
     days: int = Query(120, ge=0, le=3650, description="0 = all time"),
     db: AsyncSession = Depends(get_db),
@@ -1137,7 +1201,7 @@ def _safe_slug(text_in: Optional[str], fallback: str) -> str:
     return slug[:48] or fallback
 
 
-@router.get("/reports/attendance.csv")
+@router.get("/reports/attendance.csv", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def attendance_report_csv(
     days: int = Query(120, ge=0, le=3650, description="0 = all time"),
     db: AsyncSession = Depends(get_db),
@@ -1169,7 +1233,7 @@ async def attendance_report_csv(
     )
 
 
-@router.get("/sessions/{session_id}/attendance.csv")
+@router.get("/sessions/{session_id}/attendance.csv", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def session_attendance_csv(
     session_id: str,
     db: AsyncSession = Depends(get_db),
@@ -1200,7 +1264,7 @@ async def session_attendance_csv(
     )
 
 
-@router.get("/players/{player_id}/attendance")
+@router.get("/players/{player_id}/attendance", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def player_attendance(
     player_id: str,
     db: AsyncSession = Depends(get_db),
@@ -1282,7 +1346,7 @@ async def _checkin_link_payload(db: AsyncSession, club: Organisation) -> dict:
     }
 
 
-@router.get("/checkin-link")
+@router.get("/checkin-link", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def get_checkin_link(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -1295,7 +1359,7 @@ async def set_checkin_link(
     body: CheckInLinkUpdate,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     if body.enabled is not None:
         club.net_checkin_enabled = bool(body.enabled)
@@ -1316,7 +1380,7 @@ async def set_checkin_link(
 async def regenerate_checkin_link(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     """New token. Every printed QR code and every NFC tag already stuck to the
     gate stops working the moment this returns — which is the point, and why
@@ -1325,6 +1389,50 @@ async def regenerate_checkin_link(
     await db.commit()
     await db.refresh(club)
     return await _checkin_link_payload(db, club)
+
+
+# ── One session's own link ───────────────────────────────────────────────────
+async def _session_link_payload(club: Organisation, s: NetSession) -> dict:
+    return {
+        "session_id": str(s.id),
+        "enabled": bool(club.net_checkin_enabled),
+        "token": s.checkin_token,
+        "path": f"/nets-checkin/{s.checkin_token}" if s.checkin_token else None,
+        "squad_team_ids": [str(t) for t in (s.squad_team_ids or [])],
+    }
+
+
+@router.get("/sessions/{session_id}/checkin-link")
+async def get_session_checkin_link(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
+):
+    """This session's own link. A session made before per-session links existed
+    gets its token the first time it is asked for, then keeps it."""
+    s = await _owned_session(db, session_id, club.id)
+    if not s.checkin_token:
+        s.checkin_token = new_checkin_token()
+        await db.commit()
+        await db.refresh(s)
+    return await _session_link_payload(club, s)
+
+
+@router.post("/sessions/{session_id}/checkin-link/regenerate")
+async def regenerate_session_checkin_link(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
+):
+    """A new token for this session alone. Its printed QR stops working; the
+    club-wide link and every other session's link are untouched."""
+    s = await _owned_session(db, session_id, club.id)
+    s.checkin_token = new_checkin_token()
+    await db.commit()
+    await db.refresh(s)
+    return await _session_link_payload(club, s)
 
 
 # ── New people who scanned in ────────────────────────────────────────────────
@@ -1352,7 +1460,7 @@ def _registration_card(r: NetCheckInRegistration, player_name: Optional[str] = N
     }
 
 
-@router.get("/registrations")
+@router.get("/registrations", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def list_registrations(
     status: str = Query("pending"),
     limit: int = Query(100, ge=1, le=500),
@@ -1405,7 +1513,7 @@ async def approve_registration(
     body: RegistrationDecision,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     """Turn a scanned-in stranger into a real player.
 
@@ -1494,7 +1602,7 @@ async def dismiss_registration(
     reg_id: str,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
 ):
     """Not someone the club wants on the roster.
 
@@ -1536,7 +1644,7 @@ def _guest_key(name: str) -> str:
     return " ".join((name or "").split()).casefold()
 
 
-@router.get("/guests")
+@router.get("/guests", dependencies=[Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS))])
 async def list_unresolved_guests(
     days: int = Query(GUEST_WINDOW_DAYS, ge=0, le=3650),
     db: AsyncSession = Depends(get_db),
@@ -1639,7 +1747,7 @@ async def promote_guest(
     body: GuestPromote,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_any_cap(MANAGE_SELECTIONS, MANAGE_PLAYERS)),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS, MANAGE_PLAYERS)),
 ):
     """Turn a guest into a player, and take their attendance history with them.
 

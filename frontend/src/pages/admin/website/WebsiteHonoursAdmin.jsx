@@ -74,6 +74,41 @@ function CategorySelect({ categories, srcCat, srcSub, onChange }) {
   )
 }
 
+// "Only awards named": narrows an auto board to one award inside its category,
+// e.g. "A Grade Cap Number" inside Club Award. Typing a name that is not listed
+// still works; the list is only a convenience.
+function AchievementFilter({ category, subcategory, value, onChange }) {
+  const [options, setOptions] = useState([])
+  useEffect(() => {
+    if (!category) { setOptions([]); return }
+    let live = true
+    api.webAdminHonourAchievements(category, subcategory)
+      .then(r => { if (live) setOptions(r) })
+      .catch(() => { if (live) setOptions([]) })
+    return () => { live = false }
+  }, [category, subcategory])
+  if (!category) return null
+  const listId = `honour-ach-${category}-${subcategory || 'all'}`.replace(/\s+/g, '-')
+  return (
+    <div>
+      <FieldLabel>Only awards named (optional)</FieldLabel>
+      <input
+        value={value || ''}
+        onChange={e => onChange(e.target.value)}
+        list={listId}
+        placeholder="e.g. A Grade Cap Number"
+        className={inputCls}
+      />
+      <datalist id={listId}>
+        {options.map(o => <option key={o.achievement} value={o.achievement}>{o.count}</option>)}
+      </datalist>
+      <p className="text-pb-faintest text-[11px] mt-1">
+        Leave blank to list every award in the category. Matches the award name exactly.
+      </p>
+    </div>
+  )
+}
+
 function EntryRow({ entry, players, onSaved, onDeleted }) {
   const toast = useToast()
   const [editing, setEditing] = useState(false)
@@ -128,6 +163,7 @@ function Board({ board, players, categories, onChange, onDelete }) {
   const [description, setDescription] = useState(board.description || '')
   const [srcCat, setSrcCat] = useState(board.source_category || null)
   const [srcSub, setSrcSub] = useState(board.source_subcategory || null)
+  const [srcAch, setSrcAch] = useState(board.source_achievement || '')
   const [cols, setCols] = useState(board.columns || 1)
   // new-entry form
   const [ny, setNy] = useState('')
@@ -139,7 +175,7 @@ function Board({ board, players, categories, onChange, onDelete }) {
 
   async function saveBoard() {
     try {
-      const b = await api.webAdminUpdateBoard(board.id, { title, description, source_category: srcCat, source_subcategory: srcSub, columns: cols })
+      const b = await api.webAdminUpdateBoard(board.id, { title, description, source_category: srcCat, source_subcategory: srcSub, source_achievement: srcAch.trim() || null, columns: cols })
       onChange({ ...board, ...b }); setEditing(false)
     } catch (e) { toast.error(e.message) }
   }
@@ -160,9 +196,10 @@ function Board({ board, players, categories, onChange, onDelete }) {
           <div><FieldLabel>Description (optional)</FieldLabel><input value={description} onChange={e => setDescription(e.target.value)} placeholder="A short line under the heading" className={inputCls} /></div>
           <div>
             <FieldLabel>Populate from</FieldLabel>
-            <CategorySelect categories={categories} srcCat={srcCat} srcSub={srcSub} onChange={(c, s) => { setSrcCat(c); setSrcSub(s) }} />
+            <CategorySelect categories={categories} srcCat={srcCat} srcSub={srcSub} onChange={(c, s) => { setSrcCat(c); setSrcSub(s); setSrcAch('') }} />
             <p className="text-pb-faintest text-[11px] mt-1">Pick a category to auto-list everyone with that achievement, or keep it manual.</p>
           </div>
+          <AchievementFilter category={srcCat} subcategory={srcSub} value={srcAch} onChange={setSrcAch} />
           <div className="sm:w-40">
             <FieldLabel>Columns</FieldLabel>
             <select value={cols} onChange={e => setCols(Number(e.target.value))} className={inputCls}>
@@ -186,6 +223,7 @@ function Board({ board, players, categories, onChange, onDelete }) {
               <p className="text-[11px] text-pb-faint mt-0.5">
                 Auto-listing <span className="text-pb-dim font-medium">{board.auto_count ?? 0}</span> from
                 {' '}<span className="text-pb-dim">{board.source_subcategory ? `${board.source_category} — ${board.source_subcategory}` : board.source_category}</span>
+                {board.source_achievement && <>, named <span className="text-pb-dim">&ldquo;{board.source_achievement}&rdquo;</span></>}
               </p>
             )}
           </div>
@@ -234,6 +272,7 @@ export default function WebsiteHonoursAdmin() {
   const [newTitle, setNewTitle] = useState('')
   const [newCat, setNewCat] = useState(null)
   const [newSub, setNewSub] = useState(null)
+  const [newAch, setNewAch] = useState('')
   const [newCols, setNewCols] = useState(1)
 
   useEffect(() => { load() }, [])
@@ -261,8 +300,8 @@ export default function WebsiteHonoursAdmin() {
     const title = newTitle.trim() || (newCat ? (newSub ? `${newCat} — ${newSub}` : newCat) : '')
     if (!title) { toast.error('Give the board a title (or pick a category)'); return }
     try {
-      const b = await api.webAdminCreateBoard({ title, source_category: newCat, source_subcategory: newSub, columns: newCols })
-      setBoards(prev => [...prev, b]); setNewTitle(''); setNewCat(null); setNewSub(null); setNewCols(1); showFlash('Board added')
+      const b = await api.webAdminCreateBoard({ title, source_category: newCat, source_subcategory: newSub, source_achievement: newAch.trim() || null, columns: newCols })
+      setBoards(prev => [...prev, b]); setNewTitle(''); setNewCat(null); setNewSub(null); setNewAch(''); setNewCols(1); showFlash('Board added')
     } catch (e) { toast.error(e.message) }
   }
   async function deleteBoard(id) {
@@ -310,8 +349,9 @@ export default function WebsiteHonoursAdmin() {
           <div><FieldLabel>Title</FieldLabel><input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="e.g. Life Members" className={inputCls} onKeyDown={e => e.key === 'Enter' && addBoard()} /></div>
           <div>
             <FieldLabel>Populate from</FieldLabel>
-            <CategorySelect categories={categories} srcCat={newCat} srcSub={newSub} onChange={(c, s) => { setNewCat(c); setNewSub(s) }} />
+            <CategorySelect categories={categories} srcCat={newCat} srcSub={newSub} onChange={(c, s) => { setNewCat(c); setNewSub(s); setNewAch('') }} />
           </div>
+          <AchievementFilter category={newCat} subcategory={newSub} value={newAch} onChange={setNewAch} />
           <div className="sm:w-40">
             <FieldLabel>Columns</FieldLabel>
             <select value={newCols} onChange={e => setNewCols(Number(e.target.value))} className={inputCls}>

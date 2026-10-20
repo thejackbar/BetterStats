@@ -260,6 +260,8 @@ def by_label(rows, key, value):
 async def main() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         json_cols = (await conn.execute(text(
             "SELECT table_name, column_name FROM information_schema.columns "
             "WHERE table_schema = 'public' AND data_type = 'json'"))).all()

@@ -1,5 +1,6 @@
 import { Suspense } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import ProtectedRoute from '../components/ProtectedRoute'
 import { AuthProvider } from '../contexts/AuthContext'
 import { ThemeProvider } from '../contexts/ThemeContext'
 import { ToastProvider } from '../contexts/ToastContext'
@@ -48,6 +49,8 @@ import AflSelectFixtures from './pages/admin/select/AflSelectFixtures'
 import AflSelectAvailability from './pages/admin/select/AflSelectAvailability'
 import AflSelectSelection from './pages/admin/select/AflSelectSelection'
 import AflSelectRules from './pages/admin/select/AflSelectRules'
+import AflSelectShell from './pages/admin/select/AflSelectShell'
+import AflSelectHome from './pages/admin/select/AflSelectHome'
 import PublicAvailability from '../pages/PublicAvailability'
 
 /**
@@ -56,6 +59,14 @@ import PublicAvailability from '../pages/PublicAvailability'
  * per-sport silos: this reuses the shared contexts, theme system and
  * components; only the pages are AFL-shaped.
  */
+// /admin/select/<screen> became /admin/betterselect/<screen>; keep the query
+// (the Selection screen reads ?fixture=) so a saved link still lands.
+function LegacySelectRedirect() {
+  const { pathname, search } = useLocation()
+  const screen = pathname.replace(/^\/admin\/select\/?/, '')
+  return <Navigate to={{ pathname: `/admin/betterselect${screen ? `/${screen}` : ''}`, search }} replace />
+}
+
 export default function AflApp() {
   return (
     <ErrorBoundary>
@@ -92,18 +103,26 @@ export default function AflApp() {
                   <Route path="sponsors" element={<AflAdminSponsors />} />
                   <Route path="users" element={<AflAdminUsers />} />
                   <Route path="votes" element={<AflAdminVotes />} />
-                  <Route path="select" element={<Navigate to="/admin/select/selection" replace />} />
-                  <Route path="select/squads" element={<AflSelectSquads />} />
-                  <Route path="select/fixtures" element={<AflSelectFixtures />} />
-                  <Route path="select/availability" element={<AflSelectAvailability />} />
-                  <Route path="select/selection" element={<AflSelectSelection />} />
-                  <Route path="select/rules" element={<AflSelectRules />} />
+                  {/* BetterSelect used to sit in this sidebar; it is its own module
+                      surface now (below). Old links and bookmarks keep working. */}
+                  <Route path="select/*" element={<LegacySelectRedirect />} />
                   <Route path="settings" element={<AflAdminSettings />} />
                   <Route path="super/users" element={<AflAdminSuperUsers />} />
                   <Route path="super/clubs" element={<AflAdminSuperClubs />} />
                 </Route>
                 {/* BetterAdmin — the shared cricket screens, beside (not inside)
                     the football admin layout. */}
+                {/* BetterSelect: cricket's module chrome (BetterSelectLayout) around
+                    football's own screens, on cricket's /admin/betterselect URLs. */}
+                <Route path="/admin/betterselect" element={<ProtectedRoute requireModule="select"><AflSelectShell /></ProtectedRoute>}>
+                  <Route index element={<AflSelectHome />} />
+                  <Route path="squads" element={<AflSelectSquads />} />
+                  <Route path="fixtures" element={<AflSelectFixtures />} />
+                  <Route path="availability" element={<AflSelectAvailability />} />
+                  <Route path="selection" element={<AflSelectSelection />} />
+                  <Route path="rules" element={<AflSelectRules />} />
+                  <Route path=":group" element={<AflSelectHome />} />
+                </Route>
                 {betterAdminRoutes()}
                 {betterSocialsRoutes()}
                 <Route path="/:clubSlug" element={<ClubLayout />}>

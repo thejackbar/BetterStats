@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { nameMatchesSearch, formatPlayerName, joinDisplayName, nameSortKey } from '../../lib/nameFormat'
 import { ALPHABET, RANGES, letterOfName, rangeOfName, groupByLetter } from '../../lib/playerAlphabet'
+import usePersistedState from '../../lib/usePersistedState'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 import { PbSpinner } from '../../lib/presskit'
@@ -156,6 +157,7 @@ function ProfileModal({ playerId, teams, canEdit, index, total, onPrev, onNext, 
                 dirty={dirty} saved={saved} onSave={onSave} canEdit={canEdit}
                 canEditAvail={canEdit} onEditAvail={(pl, date) => setAvailEdit({ player: pl, date })}
                 onClose={onClose} onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange}
+                onPrivacyReleased={(updated) => { setProfile(updated); setDraft(draftFromProfile(updated)); onSaved?.(updated) }}
                 footer={showMerch ? <PlayerMerchPanel playerId={playerId} /> : null} />}
         </div>
       </div>
@@ -214,6 +216,10 @@ export default function AdminPlayers() {
   const [teams, setTeams] = useState([])
   const [filter, setFilter] = useState('')
   const [scope, setScope] = useState('all') // all | local | overseas | hidden
+  // "Active" = not marked inactive and not dormant (the server's `is_current`,
+  // the club's own dormancy window). Remembered on this device. Search looks at
+  // everyone, so a name typed in is never hidden by it.
+  const [activeOnly, setActiveOnly] = usePersistedState('players.activeOnly', false, (v) => typeof v === 'boolean')
   const [range, setRange] = useState('ALL')
   const [msg, setMsg] = useState('')
   const [nameFormat, setNameFormat] = useState('last_first')
@@ -252,7 +258,7 @@ export default function AdminPlayers() {
       // — the one place those players are easy to find and put back.
       if (scope === 'hidden' && p.is_public !== false) return false
       const q = filter.trim()
-      if (!q) return true
+      if (!q) return !activeOnly || p.is_current !== false
       return (
         nameMatchesSearch(p.name, q) ||
         nameMatchesSearch(p.display_name_override, q) ||
@@ -260,7 +266,7 @@ export default function AdminPlayers() {
       )
     })
     return out.sort((a, b) => nameSortKey(nameOf(a)).localeCompare(nameSortKey(nameOf(b))))
-  }, [players, scope, filter])
+  }, [players, scope, filter, activeOnly])
 
   // Counts per range over the base set (drives the tab labels).
   const rangeCounts = useMemo(() => {
@@ -456,6 +462,11 @@ export default function AdminPlayers() {
               )
             })}
           </div>
+          <button type="button" onClick={() => setActiveOnly((v) => !v)} aria-pressed={activeOnly} data-active-filter
+            title="Only players not marked inactive who have played inside your dormancy window (or have not played yet). Search always looks at everyone."
+            className={`rounded-lg border font-display font-semibold text-[13px] px-3 py-1.5 transition ${activeOnly ? 'border-pb-accent/50 bg-pb-accent/15 text-pb-accent' : 'border-pb-hairline bg-pb-surface2 text-pb-faint hover:text-pb-text'}`}>
+            Active only
+          </button>
           {!searching && (
             <div className="pl-ranges">
               <button

@@ -9,15 +9,20 @@
 // and is shareable; this component only composes the presentation. The long
 // squad list is handled by SquadPicker (search + quick picks); selection status
 // is a 3-way segmented control rather than yet another checkbox.
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
-import { Icon, Chip, Search, RecencySelect, Dot, Segmented, FilterButton } from './ui'
+import { Icon, Chip, Search, Dot, Segmented, FilterButton } from './ui'
 import { SortMenu, SquadPicker } from './filters'
-import { BOWL_KINDS, HAND_KINDS, FORM_BUCKETS, SORTS, ageFilterOptions, ageFilterLabel } from './selectionMeta'
+import { BOWL_KINDS, HAND_KINDS, FORM_BUCKETS, SORTS, ageFilterOptions, ageFilterLabel, GENDER_OPTS } from './selectionMeta'
 import { RULE_FILTERS } from './selectionRules'
 
 const ROLE_QUICK = [['BAT', 'Bat'], ['BWL', 'Bowl'], ['ALL', 'All'], ['WKT', 'WK']]
 const ROLE_LABEL = { BAT: 'Batter', BWL: 'Bowler', ALL: 'All-rounder', WKT: 'Keeper' }
+const REGISTERED_OPTS = [
+  { value: '', label: 'All' }, { value: 'yes', label: 'Registered' },
+  { value: 'no', label: 'Not registered' }, { value: 'unknown', label: 'Not known' },
+]
+// "Played this season" sits beside the usual look-back windows.
 const STATUS_OPTS = [{ value: '', label: 'All' }, { value: 'unselected', label: 'Unselected' }, { value: 'clash', label: 'In another XI' }]
 // Fees and training. Each carries a third answer — "Not known" — because a
 // club that runs neither BetterFees nor Net Manager, and hasn't set the flag
@@ -62,8 +67,37 @@ function Check({ label, checked, onChange, dot }) {
   )
 }
 
-export default function SelectionFilters({ filters, sort, setSort, squadOptions, yearsF, setYearsF, count, total, flags, rules }) {
+export default function SelectionFilters({ filters, sort, setSort, squadOptions, showGender, count, total, inactiveHidden, flags, rules, teamDefault }) {
   const [open, setOpen] = useState(false)
+  const root = useRef(null)
+  const anchor = useRef(null)
+  const [box, setBox] = useState(null)
+  // The panel floats over the list, so it closes the way a menu does.
+  useEffect(() => {
+    if (!open) return undefined
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    const onDown = (e) => { if (root.current && !root.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onDown)
+    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onDown) }
+  }, [open])
+  // The panel is `fixed` at the spot it would have opened, and never taller than
+  // the room below it: in a window that is short, or a page scrolled down, it
+  // moves up rather than running off the bottom, and scrolls inside itself.
+  useEffect(() => {
+    if (!open) { setBox(null); return undefined }
+    const place = () => {
+      const r = anchor.current?.getBoundingClientRect()
+      if (!r) return
+      const MIN = 180, PAD = 12
+      const top = Math.max(PAD, Math.min(r.top, window.innerHeight - MIN - PAD))
+      setBox({ top, left: r.left, width: r.width, maxHeight: Math.min(window.innerHeight - top - PAD, 620) })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true) }
+  }, [open])
   const { values, search, setSearch, toggle, setValue, setMulti, clearAll, activeCount } = filters
   const hideUnavail = !!values.hideUnavail
   // Empty for a club that hasn't switched ages on, and the whole group is
@@ -79,6 +113,8 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   // so there is nothing for these two groups to filter on and they go.
   const showFees = flags?.show_fees !== false
   const showTraining = flags?.show_training !== false
+  // Only where the club records who is registered this season.
+  const showRegistered = !!flags?.registered
 
   const pills = []
   ;(values.role || []).forEach((r) => pills.push({ k: 'r' + r, label: ROLE_LABEL[r] || r, rm: () => toggle('role', r) }))
@@ -88,17 +124,19 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   ;(values.form || []).forEach((fm) => pills.push({ k: 'f' + fm, label: (FORM_BUCKETS.find((x) => x.value === fm) || {}).label, rm: () => toggle('form', fm) }))
   ;(values.squad || []).forEach((s) => pills.push({ k: 's' + s, label: (squadOptions.find((o) => o.value === s) || {}).label || s, rm: () => toggle('squad', s) }))
   if (values.status) pills.push({ k: 'st', label: values.status === 'unselected' ? 'Unselected' : 'In another XI', rm: () => setValue('status', '') })
+  if (showGender && values.gender) pills.push({ k: 'gn', label: optLabel(GENDER_OPTS, values.gender), rm: () => setValue('gender', '') })
   if (hideUnavail) pills.push({ k: 'hu', label: 'Hide unavailable', rm: () => setValue('hideUnavail', false) })
   if (showFees && values.fees) pills.push({ k: 'fee', label: optLabel(FEES_OPTS, values.fees), rm: () => setValue('fees', '') })
   if (showTraining && values.training) pills.push({ k: 'trn', label: optLabel(TRAINING_OPTS, values.training), rm: () => setValue('training', '') })
+  if (showRegistered && values.registered) pills.push({ k: 'reg', label: optLabel(REGISTERED_OPTS, values.registered), rm: () => setValue('registered', '') })
   if (values.age && ageFilterLabel(values.age, flags)) pills.push({ k: 'age', label: ageFilterLabel(values.age, flags), rm: () => setValue('age', '') })
   if (showRules && values.rules) pills.push({ k: 'rul', label: optLabel(RULE_FILTERS, values.rules), rm: () => setValue('rules', '') })
   // (recency has its own dedicated dropdown control, so it isn't duplicated as a pill)
 
-  const resetAll = () => { clearAll(); setYearsF(0) }
+  const resetAll = () => { clearAll() }
 
   return (
-    <div className="flex flex-col gap-2.5">
+    <div ref={root} className="flex flex-col gap-2.5">
       {/* Row 1 — search · sort · filters */}
       <div className="flex items-center gap-2">
         <Search value={search} onChange={setSearch} placeholder="Search players…" className="flex-1 min-w-0" />
@@ -114,13 +152,31 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
         <span className="h-4 w-px bg-pb-hairline2 mx-0.5" />
         <Chip label="Hide unavailable" dot={hideUnavail ? 'var(--pb-positive)' : undefined}
           active={hideUnavail} onClick={() => setValue('hideUnavail', !hideUnavail)} />
-        <span className="ml-auto"><RecencySelect value={yearsF} onChange={setYearsF} /></span>
       </div>
+
+      {/* The team's starting filters (Settings, Team defaults): shown, never silent. */}
+      {teamDefault && (
+        <div data-team-default className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-pb-hairline2 bg-pb-surface2/40 px-2.5 py-1.5 text-[11.5px]">
+          <span className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faintest">Team default</span>
+          {teamDefault.ignored
+            ? <span className="text-pb-faint">Off for this match: showing everyone the other filters allow.</span>
+            : <span className="text-pb-dim">{teamDefault.summary}</span>}
+          <button type="button" data-team-default-toggle onClick={teamDefault.toggle}
+            className="ml-auto text-pb-accent underline underline-offset-2 hover:text-pb-text">
+            {teamDefault.ignored ? 'Turn on' : 'Show everyone'}
+          </button>
+        </div>
+      )}
 
       {/* Filters panel */}
       {open && (
-        <div className="grid gap-x-5 gap-y-4 rounded-lg border border-pb-hairline2 bg-pb-surface2/40 p-3.5"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+        /* A floating panel, never in the flow: the pool beside it is a fixed-height
+           card, and a panel pushed into it spilled over the card's border. It scrolls
+           inside itself and closes on Escape or a click outside. */
+        <div ref={anchor} className="h-0 -mt-2.5">
+        {box && <div data-filters-panel role="dialog" aria-label="Filters"
+          className="fixed z-40 grid gap-x-5 gap-y-4 rounded-lg border border-pb-hairline2 bg-pb-surface p-3.5 shadow-2xl overflow-y-auto overscroll-contain pb-scroll"
+          style={{ top: box.top, left: box.left, width: box.width, maxHeight: box.maxHeight, gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
           <PanelGroup label="Availability">
             {AVAIL_ORDER.map((s) => (
               <Check key={s} label={AVAILABILITY[s].label} dot={s}
@@ -172,9 +228,20 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
             <SquadPicker options={squadOptions} selected={values.squad || []}
               onToggle={(v) => toggle('squad', v)} onSetMany={(arr) => setMulti('squad', arr)} />
           </PanelGroup>
+          {showGender && (
+            <PanelGroup label="Gender">
+              <Segmented sm value={values.gender || ''} onChange={(v) => setValue('gender', v)} options={GENDER_OPTS} />
+            </PanelGroup>
+          )}
           <PanelGroup label="Selection">
             <Segmented sm value={values.status || ''} onChange={(v) => setValue('status', v)} options={STATUS_OPTS} />
           </PanelGroup>
+          {showRegistered && (
+            <PanelGroup label="Registered">
+              <Segmented sm value={values.registered || ''} onChange={(v) => setValue('registered', v)} options={REGISTERED_OPTS} />
+              <div className="text-[10.5px] leading-snug text-pb-faintest mt-1.5">From the registration tick on the Accounts screen, for this match's season.</div>
+            </PanelGroup>
+          )}
           {showFees && (
             <PanelGroup label="Fees">
               <Segmented sm value={values.fees || ''} onChange={(v) => setValue('fees', v)} options={FEES_OPTS} />
@@ -193,6 +260,7 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
                 manual="Set on a player's profile — run a Net Manager session to have it worked out." />
             </PanelGroup>
           )}
+        </div>}
         </div>
       )}
 
@@ -209,7 +277,7 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
         </div>
       )}
 
-      <div className="text-[11.5px] text-pb-faint pb-num">{count} of {total} shown</div>
+      <div className="text-[11.5px] text-pb-faint pb-num">{count} of {total} shown{inactiveHidden > 0 ? ` · ${inactiveHidden} inactive not shown` : ''}</div>
     </div>
   )
 }

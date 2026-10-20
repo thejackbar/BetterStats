@@ -16,6 +16,7 @@
 //   onSendTo(itemId, 'front'|'back')   jump to either end of the whole stack
 //   layoutName                         the built-in layout, named in the tooltip
 //                                      (null on the blank canvas, which has none)
+import { bindLabel } from '../../../social/boundResolve'
 import { useState } from 'react'
 import { Icon } from '../../../pages/admin/betterselect/ui'
 import { BLANK_FONTS } from '../../../social/blank-template'
@@ -77,7 +78,7 @@ function Swatches({ value, onChange, palette }) {
 
 export default function SelectionInspector({
   items, selIds, onUpdate, onReorder, onDuplicate, onRemove, onAlign,
-  palette, players = [], onPickImage, onEditImage, onSendTo, layoutName = null,
+  palette, players = [], onPickImage, onEditImage, onSendTo, layoutName = null, onOpenSponsors,
 }) {
   const [more, setMore] = useState(false)
   const single = selIds.length === 1 ? items.find(it => it.id === selIds[0]) : null
@@ -126,6 +127,18 @@ export default function SelectionInspector({
           </>
         )}
 
+        {single?.type === 'text' && single.bind && (
+          <>
+            {/* The words come from the post's lineup and match details, so editing
+                the text here would change nothing. Unbind keeps the sample words
+                as plain text you can type over. */}
+            <span className="h-7 px-2 inline-flex items-center rounded-md border text-[11px] text-pb-accent"
+              style={{ borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' }}
+              title="This text is filled in from the post's players and match details">Field: {bindLabel(single.bind)}</span>
+            <Btn title="Stop filling this in automatically and keep the sample words as plain text" onClick={() => patch({ bind: null })}>Unbind</Btn>
+          </>
+        )}
+
         {single?.type === 'brand' && (
           <>
             <Btn active={single.layout === 'row'} title="Logo and name side by side" onClick={() => patch({ layout: 'row' })}>Row</Btn>
@@ -137,11 +150,49 @@ export default function SelectionInspector({
           </>
         )}
 
-        {single && single.type !== 'image' && (
+        {single && single.type !== 'image' && single.type !== 'sponsors' && (
           <Swatches value={single.color} onChange={c => patch({ color: c })} palette={palette} />
         )}
 
-        {single?.type === 'image' && (
+        {single?.type === 'sponsors' && (
+          <>
+            <Btn onClick={() => onOpenSponsors?.()} title="Choose which sponsors are on this post">Change sponsors</Btn>
+            {['light', 'dark', 'none'].map(p => (
+              <Btn key={p} active={(single.panel || 'light') === p} title={p === 'none' ? 'No backing panel' : `${p} backing panel`}
+                onClick={() => patch({ panel: p })}>{p === 'light' ? 'Light' : p === 'dark' ? 'Dark' : 'None'}</Btn>
+            ))}
+          </>
+        )}
+
+        {single?.type === 'image' && single.bind && (
+          <>
+            {/* A photo area filled from the post: choose whose picture it shows. The featured photo is the one
+                set in the Hero Image panel (a player, or an upload); the others follow a lineup place. */}
+            <span className="h-7 px-2 inline-flex items-center rounded-md border text-[11px] text-pb-accent"
+              style={{ borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' }}
+              title="This picture is filled in from the post's players">Field: {bindLabel(single.bind)}</span>
+            <select value={single.bind} onChange={e => patch({ bind: e.target.value })} data-testid="photo-source"
+              title="What this area shows"
+              className="h-7 max-w-[170px] px-1.5 rounded-md border pb-hairline2 bg-pb-surface2 text-pb-text text-[11px]">
+              {/^logo\./.test(single.bind) ? (
+                <>
+                  <option value="logo.team">Club logo</option>
+                  <option value="logo.opponent">Opponent logo</option>
+                </>
+              ) : (
+                <>
+                  <option value="photo">Featured photo (Hero Image)</option>
+                  {Array.from({ length: 15 }, (_, i) => <option key={i} value={`lineup.${i + 1}.photo`}>Player {i + 1}</option>)}
+                </>
+              )}
+            </select>
+            <Btn onClick={() => patch({ fit: single.fit === 'cover' ? 'contain' : 'cover' })}>
+              {single.fit === 'cover' ? 'Fill' : 'Fit'}
+            </Btn>
+            <Btn title="Stop filling this in automatically and keep a plain picture you can replace" onClick={() => patch({ bind: null })}>Unbind</Btn>
+          </>
+        )}
+        {single?.type === 'image' && !single.bind && (
           <>
             <Btn onClick={() => onPickImage(single.id)}>Replace</Btn>
             {/* Crop and background removal for the image already in the block —
@@ -152,6 +203,15 @@ export default function SelectionInspector({
             <Btn onClick={() => patch({ fit: single.fit === 'cover' ? 'contain' : 'cover' })}>
               {single.fit === 'cover' ? 'Fill' : 'Fit'}
             </Btn>
+            {/* Your uploaded design stays put so dragging a block over it moves
+                the block. Unlock to move or resize the picture itself. */}
+            {single.design && (
+              <Btn
+                title={single.locked ? 'Locked to the whole post. Click to move or resize it.' : 'Click to lock it back to the whole post.'}
+                onClick={() => patch({ locked: !single.locked })}>
+                {single.locked ? 'Unlock' : 'Lock'}
+              </Btn>
+            )}
           </>
         )}
 
@@ -236,6 +296,16 @@ export default function SelectionInspector({
             <label className="flex items-center gap-1.5"><Label>Height</Label>
               <Num value={single.h} onChange={v => patch({ h: v })} min={4} max={1080} />
             </label>
+          )}
+          {single.type === 'sponsors' && (
+            <>
+              <label className="flex items-center gap-1.5"><Label>Gap</Label>
+                <Num value={single.gap} onChange={v => patch({ gap: Math.max(0, v) })} min={0} max={200} w="w-14" />
+              </label>
+              <label className="flex items-center gap-1.5"><Label>Padding</Label>
+                <Num value={single.pad} onChange={v => patch({ pad: Math.max(0, v) })} min={0} max={200} w="w-14" />
+              </label>
+            </>
           )}
           {single.type === 'brand' && (
             <label className="flex items-center gap-1.5"><Label>Size</Label>

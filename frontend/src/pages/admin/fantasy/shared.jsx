@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import BetterFantasyLayout from '../../../components/admin/BetterFantasyLayout'
 import { api } from '../../../lib/api'
+import { useAuth } from '../../../contexts/AuthContext'
+import { CAP } from '../../../lib/capabilities'
 
 // Shared pieces for the BetterFantasyCricket admin surface. Each tool (team
 // make-up, scoring, the pool, registered players) is its own page now, so the
@@ -11,10 +13,10 @@ import { api } from '../../../lib/api'
 export const ROLES = ['keeper', 'batter', 'allrounder', 'bowler']
 export const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
 
-export function Btn({ onClick, busy, children, kind = 'accent' }) {
+export function Btn({ onClick, busy, disabled, children, kind = 'accent' }) {
   const base = 'px-3 py-1.5 rounded text-sm font-medium disabled:opacity-50 transition-opacity'
   const cls = kind === 'accent' ? 'bg-pb-accent text-white hover:opacity-90' : 'border pb-hairline text-pb-text hover:bg-pb-surface2'
-  return <button onClick={onClick} disabled={busy} className={`${base} ${cls}`}>{busy ? '…' : children}</button>
+  return <button onClick={onClick} disabled={busy || disabled} className={`${base} ${cls}`}>{busy ? '…' : children}</button>
 }
 
 export function Field({ label, children }) {
@@ -211,7 +213,7 @@ export function ScoringCard({ season, flash, fail, onSaved }) {
         How many fantasy points each thing is worth. A player's output outside their role (a bowler's
         runs, a batter's wickets, a keeper's batting and dismissals) is multiplied by the off-role number,
         and the captain's round total is multiplied before each squad's best {season.rules?.count_best_n ?? 11} are counted.
-        New values apply to rounds settled from now on. Re-settle a scored round to apply them there too.
+        New values apply to rounds settled from now on, and to any round scored in the last fortnight the next time it is brought up to date. Settle an older scored round again to apply them there too.
       </p>
       <div className="space-y-4">
         {SCORING_GROUPS.map(([group, fields]) => (
@@ -295,8 +297,10 @@ export function PoolManager({ season, flash, fail, onChanged }) {
 }
 
 // The priced pool, sortable and searchable. Role is editable inline (stamps the
-// admin override server-side) and a player can be removed from the pool.
-export function PoolTable({ pool, onRoleChange, onRemove }) {
+// admin override server-side) and a player can be removed from the pool. A price
+// shows the move after the last scored round; a hand-set price is marked and can be
+// handed back to the automatic movement.
+export function PoolTable({ pool, onRoleChange, onRemove, onPriceAuto }) {
   const [sort, setSort] = useState({ key: 'current_price', dir: 'desc' })
   const [poolSearch, setPoolSearch] = useState('')
   const [showAll, setShowAll] = useState(false)
@@ -369,7 +373,18 @@ export function PoolTable({ pool, onRoleChange, onRemove }) {
                     </select>
                     {p.role_source === 'admin' && <span className="ml-1 text-[10px] text-pb-accent">set</span>}
                   </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(p.current_price)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">
+                    {fmt(p.current_price)}
+                    {Number(p.price_change) !== 0 && (
+                      <span className={`ml-1 text-xs font-semibold ${Number(p.price_change) > 0 ? 'text-green-500' : 'text-red-400'}`}>
+                        {Number(p.price_change) > 0 ? '▲' : '▼'}{Math.abs(Number(p.price_change)).toFixed(1)}
+                      </span>
+                    )}
+                    {p.price_locked && (
+                      <button type="button" onClick={() => onPriceAuto && onPriceAuto(p)} title="This price was set by hand and does not move. Click to let it follow performances."
+                        className="ml-1 text-[10px] text-pb-accent underline">set · auto</button>
+                    )}
+                  </td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">{fmt(p.total_points)}</td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">{p.owned_count}</td>
                   <td className="py-1.5 text-right">
@@ -396,7 +411,89 @@ const ROLE_RANK = { keeper: 0, batter: 1, allrounder: 2, bowler: 3 }
 
 // Inline panel showing a manager's picked squad(s): the club-ladder team and any
 // draft teams, with captain/vice and each pick's season points.
-function ManagerTeams({ squads, busy }) {
+// Search the club's players by name (in the pool or not) and pick one.
+function PlayerPicker({ seasonId, onPick, placeholder = 'Search players…' }) {
+  const [q, setQ] = useState('')
+  const [rows, setRows] = useState([])
+  useEffect(() => {
+    if (q.trim().length < 2) { setRows([]); return }
+    let on = true
+    const t = setTimeout(() => {
+      api.fantasyPlayerSearch(seasonId, q.trim()).then(d => on && setRows(d.players || [])).catch(() => on && setRows([]))
+    }, 250)
+    return () => { on = false; clearTimeout(t) }
+  }, [q, seasonId])
+  return (
+    <div className="relative min-w-0">
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder={placeholder}
+        className="w-full rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm" />
+      {!!rows.length && (
+        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded border pb-hairline bg-pb-surface shadow-lg">
+          {rows.map(r => (
+            <button key={r.player_id} type="button" onClick={() => { onPick(r); setQ(''); setRows([]) }}
+              className="w-full text-left px-2 py-1.5 text-sm hover:bg-pb-surface2 flex items-center gap-2">
+              <span className="truncate flex-1">{r.name}</span>
+              <span className="text-[11px] text-pb-faint shrink-0">{r.in_pool ? r.role : 'not in pool yet'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Put right a team the rules could not: add a player (optionally in place of
+// another), or take one out. Scored rounds from "From round" on are scored again.
+function SquadEditor({ squad, onChanged, flash, fail }) {
+  const [pick, setPick] = useState(null)
+  const [replace, setReplace] = useState('')
+  const [fromRound, setFromRound] = useState(1)
+  const [busy, setBusy] = useState(false)
+  const [warn, setWarn] = useState([])
+
+  const report = (r, msg) => { setWarn(r.warnings || []); flash(msg); onChanged?.() }
+  const add = async () => {
+    if (!pick) return
+    setBusy(true)
+    try {
+      const r = await api.fantasyAddSquadPlayer(squad.squad_id, {
+        player_id: pick.player_id, replace_player_id: replace || null, from_round: Number(fromRound) || 1,
+      })
+      setPick(null); setReplace('')
+      report(r, `${pick.name} is in the team.`)
+    } catch (e) { fail(e) } finally { setBusy(false) }
+  }
+  return (
+    <div className="mt-3 border-t pb-hairline pt-3">
+      <div className="text-xs text-pb-faint mb-1.5">
+        Add a player to this team. The lock, budget and role quota are ignored, and the rounds already scored from the round you choose are scored again, so they count as if picked then.
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex-1 min-w-[200px]">
+          {pick
+            ? <div className="flex items-center gap-2 rounded border pb-hairline px-2 py-1.5 text-sm"><span className="truncate flex-1">{pick.name}</span>
+                <button onClick={() => setPick(null)} className="text-xs underline text-pb-faint">Change</button></div>
+            : <PlayerPicker seasonId={squad.season_id} onPick={setPick} />}
+        </div>
+        <label className="text-xs text-pb-faint flex flex-col gap-1">Replacing
+          <select value={replace} onChange={e => setReplace(e.target.value)}
+            className="rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm max-w-[180px]">
+            <option value="">Nobody (add)</option>
+            {squad.players.map(p => <option key={p.player_id} value={p.player_id}>{p.name}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-pb-faint flex flex-col gap-1">From round
+          <input type="number" min="1" value={fromRound} onChange={e => setFromRound(e.target.value)}
+            className="w-20 rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm" />
+        </label>
+        <Btn onClick={add} busy={busy}>Add to team</Btn>
+      </div>
+      {warn.map((w, i) => <div key={i} className="mt-1.5 text-xs text-amber-400">{w}</div>)}
+    </div>
+  )
+}
+
+function ManagerTeams({ squads, busy, onChanged, flash, fail }) {
   if (busy && !squads) return <p className="text-xs text-pb-faint">Loading team…</p>
   if (!squads) return null
   if (!squads.length) return <p className="text-xs text-pb-faint">No team selected yet.</p>
@@ -411,6 +508,7 @@ function ManagerTeams({ squads, busy }) {
           <div key={sq.squad_id} className="rounded border pb-hairline bg-pb-surface2/40 p-3">
             <div className="text-sm font-medium">
               {sq.team_name}
+              {sq.players.length !== sq.squad_size && <span className="ml-2 text-xs font-normal text-amber-400">{sq.players.length} of {sq.squad_size} players</span>}
               <span className="text-pb-faint font-normal"> · {sq.league} · {sq.season_year}/{String((sq.season_year + 1) % 100).padStart(2, '0')} · {fmt(sq.total_points)} pts{sq.budget_remaining != null ? ` · $${fmt(sq.budget_remaining)} bank` : ''}</span>
             </div>
             <div className="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-0.5">
@@ -423,9 +521,15 @@ function ManagerTeams({ squads, busy }) {
                     {p.is_vice_captain && <span className="ml-1 text-pb-faint font-semibold">(V)</span>}
                   </span>
                   <span className="tabular-nums text-pb-faint shrink-0">{fmt(p.total_points)} pts</span>
+                  <button onClick={async () => {
+                    if (!window.confirm(`Take ${p.name} out of ${sq.team_name}? Scored rounds are scored again without them.`)) return
+                    try { const r = await api.fantasyRemoveSquadPlayer(sq.squad_id, p.player_id, 1); flash(`${p.name} removed.${(r.warnings || []).length ? ' ' + r.warnings.join(' ') : ''}`); onChanged?.() }
+                    catch (e) { fail(e) }
+                  }} className="text-[11px] underline text-pb-faint hover:text-pb-text shrink-0">Remove</button>
                 </div>
               ))}
             </div>
+            {sq.kind === 'global_salary_cap' && flash && <SquadEditor squad={sq} onChanged={onChanged} flash={flash} fail={fail} />}
           </div>
         )
       })}
@@ -465,6 +569,20 @@ export function ManagersCard({ flash, fail }) {
     try { await api.fantasyDeleteManager(m.id); flash('Player deleted.'); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
   }
+  const viewAs = async (m) => {
+    // Open the tab first (a popup opened after an await is blocked), then point it at the public pages.
+    const w = window.open('', '_blank')
+    setBusy(`v:${m.id}`)
+    try {
+      const r = await api.fantasyViewAs(m.id)
+      const url = window.location.origin + r.url
+      if (w) w.location.href = url; else window.location.assign(url)
+    } catch (e) { w?.close(); fail(e) } finally { setBusy('') }
+  }
+  const reloadTeams = async (m) => {
+    try { const d = await api.fantasyManagerTeams(m.id); setTeams(t => ({ ...t, [m.id]: d.squads })); await load() }
+    catch (e) { fail(e) }
+  }
   const viewTeams = async (m) => {
     if (openId === m.id) { setOpenId(null); return }
     setOpenId(m.id)
@@ -489,7 +607,7 @@ export function ManagersCard({ flash, fail }) {
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search players…" className={`${inp} w-48`} />
         )}
       </div>
-      <p className="text-xs text-pb-faint mb-3">People who signed up on the public link. View the team they picked, edit a name or email, reset a forgotten PIN, or remove a tester or duplicate.</p>
+      <p className="text-xs text-pb-faint mb-3">People who signed up on the public link. View the team they picked, open the whole game as them (read only) with View as, edit a name or email, reset a forgotten PIN, or remove a tester or duplicate.</p>
 
       {managers === null ? <p className="text-sm text-pb-faint">Loading…</p>
         : !list.length ? <p className="text-sm text-pb-faint">{managers.length ? 'No players match.' : 'No one has signed up yet.'}</p>
@@ -511,6 +629,9 @@ export function ManagersCard({ flash, fail }) {
                         <div className="font-medium text-sm truncate">{m.display_name}
                           {m.team_name && <span className="text-pb-faint font-normal"> · {m.team_name}</span>}
                           {!m.has_squad && <span className="ml-2 text-[11px] text-pb-faint">no squad</span>}
+                          {m.has_squad && m.squad_size != null && m.pick_count < m.squad_size && (
+                            <span className="ml-2 text-[11px] text-amber-400">{m.pick_count} of {m.squad_size} players</span>
+                          )}
                         </div>
                         <div className="text-xs text-pb-faint truncate">{m.email || 'no email'}{m.total_points != null ? ` · ${fmt(m.total_points)} pts` : ''}</div>
                       </div>
@@ -519,17 +640,250 @@ export function ManagersCard({ flash, fail }) {
                           {openId === m.id ? 'Hide team' : 'View team'}
                         </button>
                       )}
+                      <button onClick={() => viewAs(m)} disabled={busy === `v:${m.id}`}
+                        title="Open the public Fantasy pages as this player, read only"
+                        className="text-xs underline text-pb-faint hover:text-pb-text disabled:opacity-50">View as</button>
                       <button onClick={() => startEdit(m)} className="text-xs underline text-pb-faint hover:text-pb-text">Edit</button>
                       <button onClick={() => remove(m)} disabled={busy === m.id} className="text-xs underline text-pb-red disabled:opacity-50">Delete</button>
                     </div>
                   )}
                   {openId === m.id && editing !== m.id && (
-                    <div className="mt-2.5"><ManagerTeams squads={teams[m.id]} busy={teamsBusy === m.id} /></div>
+                    <div className="mt-2.5"><ManagerTeams squads={teams[m.id]} busy={teamsBusy === m.id} onChanged={() => reloadTeams(m)} flash={flash} fail={fail} /></div>
                   )}
                 </div>
               ))}
             </div>
           )}
+    </div>
+  )
+}
+
+
+// Type in a player's fantasy points for a round, for someone whose games are not
+// in the data. Settlement leaves these alone; Remove hands the round back to the
+// scorecards.
+export function ManualScoresCard({ season, flash, fail }) {
+  const [rounds, setRounds] = useState([])
+  const [scores, setScores] = useState(null)
+  const [roundId, setRoundId] = useState('')
+  const [pick, setPick] = useState(null)
+  const [points, setPoints] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => api.fantasyManualScores(season.id).then(d => setScores(d.scores)).catch(() => setScores([])), [season.id])
+  useEffect(() => {
+    load()
+    api.fantasyListRounds(season.id).then(d => { setRounds(d.rounds || []); setRoundId(r => r || d.rounds?.[0]?.id || '') }).catch(() => {})
+  }, [season.id, load])
+
+  const save = async () => {
+    if (!pick || !roundId || points === '' || Number.isNaN(Number(points))) return
+    setBusy(true)
+    try {
+      await api.fantasySetManualScore(roundId, pick.player_id, { points: Number(points), note: note.trim() || null })
+      flash(`${pick.name}: ${points} points saved.`); setPick(null); setPoints(''); setNote(''); await load()
+    } catch (e) { fail(e) } finally { setBusy(false) }
+  }
+  const remove = async (r) => {
+    try { await api.fantasyClearManualScore(r.round_id, r.player_id); flash('Typed-in score removed.'); await load() }
+    catch (e) { fail(e) }
+  }
+  const inp = 'rounded border pb-hairline bg-pb-surface px-2 py-1.5 text-sm'
+  return (
+    <div className="pb-card p-5">
+      <h3 className="font-display font-bold mb-1">Typed-in scores</h3>
+      <p className="text-xs text-pb-faint mb-3">
+        For a player whose games are not in the data yet. The points you type replace the scorecard figure for that round, and a round that is already scored is scored again. The player has to be in the pool. Settling never changes a typed-in score.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-pb-faint flex flex-col gap-1">Round
+          <select value={roundId} onChange={e => setRoundId(e.target.value)} className={`${inp} max-w-[180px]`}>
+            {rounds.map(r => <option key={r.id} value={r.id}>{r.name || `Round ${r.round_number}`}</option>)}
+          </select>
+        </label>
+        <div className="flex-1 min-w-[200px]">
+          {pick
+            ? <div className="flex items-center gap-2 rounded border pb-hairline px-2 py-1.5 text-sm"><span className="truncate flex-1">{pick.name}</span>
+                <button onClick={() => setPick(null)} className="text-xs underline text-pb-faint">Change</button></div>
+            : <PlayerPicker seasonId={season.id} onPick={setPick} />}
+        </div>
+        <label className="text-xs text-pb-faint flex flex-col gap-1">Points
+          <input type="number" step="0.5" value={points} onChange={e => setPoints(e.target.value)} className={`${inp} w-24`} />
+        </label>
+        <label className="text-xs text-pb-faint flex flex-col gap-1 flex-1 min-w-[140px]">Note (optional)
+          <input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. 42 off 30, 2 wickets" className={inp} />
+        </label>
+        <Btn onClick={save} busy={busy}>Save score</Btn>
+      </div>
+      {!!scores?.length && (
+        <div className="mt-4 divide-y pb-hairline">
+          {scores.map(r => (
+            <div key={`${r.round_id}-${r.player_id}`} className="py-2 flex items-center gap-3 text-sm">
+              <span className="w-24 text-pb-faint shrink-0">{r.round_name || `Round ${r.round_number}`}</span>
+              <span className="flex-1 min-w-0 truncate">{r.name}{r.note && <span className="text-pb-faint"> · {r.note}</span>}</span>
+              <span className="tabular-nums shrink-0">{fmt(r.points)}</span>
+              <button onClick={() => remove(r)} className="text-xs underline text-pb-faint hover:text-pb-text shrink-0">Remove</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// Players added to Fantasy by hand have no games of their own. When their real games
+// sync they land on a separate profile with the same name, so the hand-added one
+// scores nothing. This lists those pairs with a Merge button. The merge is the
+// club's normal player merge (team picks, pool entry and round points follow the
+// kept profile, and it can be undone from the merge log), then the scored rounds are
+// scored again so the stats show at once.
+export function HandAddedPlayersCard({ season, flash, fail }) {
+  const { hasCapability } = useAuth()
+  const canMerge = hasCapability(CAP.MANAGE_MERGES)
+  const [data, setData] = useState(null)
+  const [busy, setBusy] = useState('')
+  const load = useCallback(() => api.fantasyUnmatched(season.id).then(setData).catch(e => { setData({ pairs: [], waiting: [] }); fail(e) }), [season.id, fail])
+  useEffect(() => { load() }, [load])
+
+  const merge = async (p, t) => {
+    if (!window.confirm(
+      `Merge ${p.name} into ${t.name} (${t.games} game${t.games === 1 ? '' : 's'} this season)?\n\n` +
+      `${t.name} is kept. ${p.name}${p.picked_by ? `, picked in ${p.picked_by} team${p.picked_by === 1 ? '' : 's'},` : ''} is removed, and those teams keep the player under ${t.name}. ` +
+      `Scored rounds are scored again. It can be undone from the merge log.`)) return
+    setBusy(`${p.player_id}:${t.player_id}`)
+    try {
+      await api.fantasyMergePlayer(season.id, t.player_id, p.player_id)
+      flash(`${p.name} merged into ${t.name}. Scored rounds were scored again.`)
+      await load()
+    } catch (e) { fail(e); await load() } finally { setBusy('') }
+  }
+
+  if (!data) return null
+  if (!data.pairs.length && !data.waiting.length) return null
+  return (
+    <div className="pb-card p-5">
+      <h3 className="font-display font-bold mb-1">Hand-added players with stats on another profile</h3>
+      <p className="text-xs text-pb-faint mb-3">
+        These players were added to Fantasy by hand, so they have no games of their own. A profile with the same name has played in {data.season_year},
+        so their points are sitting there. Merge the pair and the stats come through.
+        {!canMerge && ' You need the Merge data permission to merge players.'}
+      </p>
+      {!!data.pairs.length && (
+        <div className="divide-y pb-hairline">
+          {data.pairs.map(p => (
+            <div key={p.player_id} className="py-2.5">
+              <div className="text-sm font-medium min-w-0 break-words">
+                {p.name}
+                <span className="text-pb-faint font-normal text-xs"> · {p.added_by_hand ? 'added by hand' : 'in the pool'} · picked in {p.picked_by} team{p.picked_by === 1 ? '' : 's'} · no games</span>
+              </div>
+              {p.twins.map(t => (
+                <div key={t.player_id} className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
+                  <span className="flex-1 min-w-[12rem] break-words text-pb-dim">Stats are on <span className="text-pb-text">{t.name}</span> ({t.games} game{t.games === 1 ? '' : 's'})</span>
+                  <Btn kind="ghost" onClick={() => merge(p, t)} busy={busy === `${p.player_id}:${t.player_id}`}>
+                    {canMerge ? 'Merge' : 'Merge (no permission)'}
+                  </Btn>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      {!!data.waiting.length && (
+        <div className="mt-3 text-xs text-pb-faint">
+          Picked by teams, but with no games counted this season and no same-name profile to merge:{' '}
+          {data.waiting.map(w => `${w.name} (${w.picked_by} team${w.picked_by === 1 ? '' : 's'}${w.added_by_hand ? ', added by hand' : ''})`).join(', ')}.
+          <div className="mt-1">
+            If one of them has played, their game may be on a different profile (look for a duplicate on the Players page), in a grade that is switched off, or not synced yet.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// Which competitions and grades count towards this season's scoring. Everything is on
+// to begin with; switch a grade (or a whole competition) off and games in it stop
+// scoring. By grade name, so the same grade is left out wherever a shared fixture is
+// stored. A grade that turns up later counts until it is switched off. Saving scores
+// the rounds already scored again, each team keeping the players it had that round.
+export function GradeScopeCard({ season, flash, fail, onSaved }) {
+  const [opts, setOpts] = useState(null)
+  const [off, setOff] = useState(new Set())      // keys switched off in the form
+  const [saved, setSaved] = useState(new Set())  // keys switched off on the server
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => api.fantasyGrades(season.id).then(d => {
+    const o = new Set(d.competitions.flatMap(c => c.grades).filter(g => !g.on).map(g => g.key))
+    setOpts(d); setOff(o); setSaved(o)
+  }).catch(e => { setOpts({ competitions: [] }); fail(e) }), [season.id, fail])
+  useEffect(() => { load() }, [load])
+
+  if (!opts) return null
+  const all = opts.competitions.flatMap(c => c.grades)
+  if (!all.length) {
+    return (
+      <div className="pb-card p-5">
+        <h3 className="font-display font-bold mb-1">Which grades count</h3>
+        <p className="text-xs text-pb-faint">No grades for this season have been synced yet. They appear here once the club has fixtures, and every grade counts until you switch one off.</p>
+      </div>
+    )
+  }
+  const dirty = off.size !== saved.size || [...off].some(k => !saved.has(k))
+  const nothingOn = all.every(g => off.has(g.key))
+  const toggle = (key) => setOff(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
+  const toggleGroup = (grades) => setOff(prev => {
+    const n = new Set(prev)
+    const allOn = grades.every(g => !n.has(g.key))
+    grades.forEach(g => (allOn ? n.add(g.key) : n.delete(g.key)))
+    return n
+  })
+  const save = async () => {
+    if (!window.confirm('Save this? Rounds that are already scored are scored again with these grades, so the ladder will change. Each team keeps the players it had in that round.')) return
+    setBusy(true)
+    try { await api.fantasySetGrades(season.id, [...off]); flash('Saved. Scored rounds were scored again.'); await load(); onSaved?.() }
+    catch (e) { fail(e) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-5">
+      <h3 className="font-display font-bold mb-1">Which competitions and grades count</h3>
+      <p className="text-xs text-pb-faint mb-3">
+        This season ({opts.season_year}) only. Everything counts to begin with. Switch a grade or a whole competition off and games in it stop scoring,
+        including a fixture the other club has stored under its own copy of that grade. A grade that appears later counts until you switch it off.
+      </p>
+      <div className="space-y-4">
+        {opts.competitions.map(c => {
+          const n = c.grades.filter(g => !off.has(g.key)).length
+          return (
+            <div key={c.id || 'other'} className="rounded border pb-hairline">
+              <label className="flex items-center gap-3 px-3 py-2 bg-pb-surface2/40 cursor-pointer">
+                <input type="checkbox" checked={n === c.grades.length} ref={el => { if (el) el.indeterminate = n > 0 && n < c.grades.length }}
+                  onChange={() => toggleGroup(c.grades)} className="h-4 w-4 shrink-0" />
+                <span className="font-medium text-sm min-w-0 break-words flex-1">{c.name}</span>
+                <span className="text-xs text-pb-faint shrink-0">{n} of {c.grades.length} on</span>
+              </label>
+              <div className="divide-y pb-hairline">
+                {c.grades.map(g => (
+                  <label key={g.key} className="flex items-center gap-3 px-3 py-2 cursor-pointer">
+                    <input type="checkbox" checked={!off.has(g.key)} onChange={() => toggle(g.key)} className="h-4 w-4 shrink-0 ml-5" />
+                    <span className={`text-sm min-w-0 break-words flex-1 ${off.has(g.key) ? 'text-pb-faint line-through' : ''}`}>{g.name}</span>
+                    <span className="text-xs text-pb-faint shrink-0">{g.games} game{g.games === 1 ? '' : 's'}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {nothingOn && <p className="mt-3 text-xs text-amber-400">Leave at least one grade switched on, or nothing would score.</p>}
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <Btn onClick={save} busy={busy} disabled={!dirty || nothingOn}>Save and re-score</Btn>
+        {dirty && !busy && <button onClick={() => setOff(new Set(saved))} className="text-xs underline text-pb-faint hover:text-pb-text">Undo changes</button>}
+        {!dirty && off.size > 0 && <span className="text-xs text-pb-faint">{off.size} grade{off.size === 1 ? '' : 's'} switched off</span>}
+      </div>
     </div>
   )
 }

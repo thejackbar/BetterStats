@@ -17,7 +17,7 @@ import json
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,7 @@ from app.auth.capabilities import MANAGE_SOCIAL, require_cap
 from app.auth.modules import require_module
 from app.models.db import Organisation, SocialMediaAsset, User, get_db
 from app.routers.auth import get_current_club
+from app.services import icon_library
 
 router = APIRouter(prefix="/admin/social", tags=["social-media"])
 
@@ -357,3 +358,34 @@ async def import_templates(
             skipped.append({"key": key, "reason": "Already saved"})
     await db.commit()
     return {"added": added, "skipped": skipped}
+
+
+# ── Icon search ────────────────────────────────────────────────────────────
+# An online icon library (Iconify), searched and fetched through us: see
+# services/icon_library.py for what is allowed and why.
+
+@router.get("/icons/search", dependencies=[Depends(require_module("socials"))])
+async def icon_search(
+    q: str = "",
+    limit: int = 48,
+    current_user: User = Depends(require_cap(MANAGE_SOCIAL)),
+    club: Organisation = Depends(get_current_club),
+):
+    try:
+        return await icon_library.search(str(club.id), q, limit)
+    except icon_library.IconError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/icons/svg", dependencies=[Depends(require_module("socials"))])
+async def icon_svg(
+    id: str,
+    color: str | None = None,
+    current_user: User = Depends(require_cap(MANAGE_SOCIAL)),
+    club: Organisation = Depends(get_current_club),
+):
+    try:
+        body = await icon_library.svg(str(club.id), id, color)
+    except icon_library.IconError as e:
+        raise HTTPException(status_code=404 if "not in the library" in str(e) or "not from a set" in str(e) else 502, detail=str(e))
+    return Response(content=body, media_type="image/svg+xml", headers={"Cache-Control": "private, max-age=86400"})

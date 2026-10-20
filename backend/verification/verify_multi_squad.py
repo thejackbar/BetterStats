@@ -81,13 +81,36 @@ async def members(db, pid):
 async def main():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # assemble_selection reads the club's association rules and the nets
         # training window — both raw-SQL lifespan tables create_all never built.
         for t in ("net_sessions", "net_attendance"):
             stmt = _create_stmt(t)
             if stmt:
                 await conn.execute(text(stmt))
+        # The board's draft table and the lock / audit DDL assemble_selection reads.
+        from app.services.selection_draft_ddl import STATEMENTS as _DRAFT_DDL
+        from app.services.selection_lock_ddl import STATEMENTS as _LOCK_DDL
+        from app.services.team_sides_ddl import STATEMENTS as _SIDES_DDL
+        for stmt in list(_DRAFT_DDL) + list(_LOCK_DDL) + list(_SIDES_DDL):
+            await conn.execute(text(stmt))
         for stmt in SELECTION_RULE_STATEMENTS:
+            await conn.execute(text(stmt))
+        # Lifespan-only tables the grade classification (junior hiding, women's
+        # side) reads through grade_alias_map; copied from the lifespan.
+        for stmt in (
+            """CREATE TABLE IF NOT EXISTS season_aliases (
+                id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                alias_season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                undone_at TIMESTAMPTZ)""",
+            """CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL, canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL, undone_at TIMESTAMPTZ)""",
+        ):
             await conn.execute(text(stmt))
 
     org_id = uuid.uuid4()
@@ -264,13 +287,15 @@ async def main():
         db.add(objP); await db.commit()
     async with Session() as db:
         user = await db.get(User, user_id)
-        await update_player_profile(str(pP), PlayerProfileUpdate(squad_team_ids=[str(T1), str(T2)]), db, user)
+        await update_player_profile(str(pP), PlayerProfileUpdate(squad_team_ids=[str(T1), str(T2)]), db, user,
+                                    club=await db.get(Organisation, org_id))
     async with Session() as db:
         check("profile multi-set → {1st,2nd}", await members(db, pP) == {T1, T2})
         check("profile multi-set primary 1st", await primary(db, pP) == T1)
     async with Session() as db:
         user = await db.get(User, user_id)
-        await update_player_profile(str(pP), PlayerProfileUpdate(status="inactive"), db, user)
+        await update_player_profile(str(pP), PlayerProfileUpdate(status="inactive"), db, user,
+                                    club=await db.get(Organisation, org_id))
     async with Session() as db:
         check("inactive clears every squad", await members(db, pP) == set())
         check("inactive clears primary", await primary(db, pP) is None)

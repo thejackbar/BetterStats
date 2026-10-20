@@ -33,11 +33,13 @@ Open the guide first, then grep its archive if you need the reasoning or the mea
 | BetterAdmin or Clubhouse shell and UI kit, Directory, roster, areas and roles, fees and Accounts, merch, assets | `guides/clubhouse-people-roster-fees.md` |
 | BetterIQ: opposition, selection analysis, trends, team analysis, scouting cards | `guides/betteriq.md` |
 | Anything under `services/afl`, `routers/afl`, `frontend/src/afl`, `afl_main.py`, or a shared router mounted on football | `guides/betterfootball-afl.md` |
+| BetterFantasyCricket: rounds, settlement and unsettling, live points, the fantasy admin and member screens | `guides/betterfantasy.md` |
 | BetterPosts, post templates and sizes, layers, club fonts and theme tokens, instructional videos | `guides/betterposts-socials-and-media.md` |
 | Stripe checkout, subscriptions, coupons, pay by invoice, the billing feature flags | `guides/billing-stripe-and-invoicing.md` |
 | Sales workspace, sales performance, commissions, engagement score, the retired Twenty CRM | `guides/sales-crm-and-commissions.md` |
 | Meta ads reporting, `/trial` and `/demo`, webinar and StreamYard, usage tracking, wizard clubs | `guides/marketing-funnel-ads-and-webinar.md` |
 | BetterComms lists, segments, templates, audiences, club notifications | `guides/comms-audiences-and-notifications.md` |
+| Sponsors: tiers, where a sponsor shows, section naming rights, sponsor blocks on BetterPosts, the dashboard slot, the sponsor list | `guides/sponsors-tiers-and-naming.md` |
 | Club Directory crawl, teaser snapshots, new club onboarding, setup wizard, admin navigation, Draft pages, KlubPro, dashboard messages | `guides/club-directory-onboarding-and-admin-shell.md` |
 
 If your change spans two areas, read both guides. If a guide and the code disagree, the code wins: fix the guide in the same change.
@@ -84,7 +86,7 @@ If your change spans two areas, read both guides. If a guide and the code disagr
 14. Background work started from a request (list syncs, notifications, pushes) runs on its own session after the caller's commit and never raises; a marketing-list failure must not take down a registration. A broad `except Exception` around a large rebuild hides a bug in the rebuild behind "fall back to old data". Everything inside it needs the same null-safety as the rest of the function.
 
 **Permissions and gating**
-15. A UI nav item carries the capability its own router already enforces; never a role gate. The server is the real gate, the UI only presents. `admin` is a billing umbrella, not an entitlement key: entitlement checks use `fees`, `comms`, `merch`, `crm`.
+15. A UI nav item carries the capability its own router already enforces; never a role gate. The server is the real gate, the UI only presents. A new signed-in route declares what it needs (`require_cap`, `require_any_cap`, `require_full_admin`) or goes on the open list in `verification/audit_route_access.py` with a reason; that audit fails on an undeclared route. A person can be locked to one module or to chosen menu items, so a route with no declaration is reachable from every module. A capability can be held at View, and a gate refuses a non-GET for it, so a route that only reads must be a GET. `admin` is a billing umbrella, not an entitlement key: entitlement checks use `fees`, `comms`, `merch`, `crm`.
 16. Audience and permission rules fail closed: an unknown value, an unpicked rule or an out-of-scope field empties the result or is refused, never widens it. BetterComms scope rule: a club's audience never exposes Super Admin outreach fields, copy or context. The two field sets are imported by exactly one screen each; never add a runtime switch between them.
 
 **Shared code**

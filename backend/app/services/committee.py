@@ -570,12 +570,16 @@ async def is_office_bearer(session: AsyncSession, org_id, user) -> bool:
 
 
 async def is_club_admin(session: AsyncSession, org_id, user) -> bool:
-    role = (await session.execute(
-        select(ClubMembership.role).where(
-            ClubMembership.user_id == user.id, ClubMembership.club_id == org_id,
-        )
-    )).scalars().first()
-    return role == "club_admin"
+    row = (await session.execute(
+        select(ClubMembership.role, ClubMembership.club_id).where(ClubMembership.user_id == user.id)
+    )).first()
+    if row is None or row.role != "club_admin":
+        return False
+    # A club admin of a club a Super Admin has linked to this one is a club
+    # admin here too (services/club_links.py): their membership row is at their
+    # home club, so matching the club id alone would lock them out of it.
+    from app.services import club_links
+    return await club_links.covers_club(session, row.club_id, org_id)
 
 
 async def can_open_document(session: AsyncSession, club, user, doc: CommitteeDocument) -> bool:

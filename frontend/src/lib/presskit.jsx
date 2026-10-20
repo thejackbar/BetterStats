@@ -231,10 +231,11 @@ export function Skeleton({ className = "", w, h }) {
 }
 
 // ── Page header ────────────────────────────────────────────────────────
+// `aside` is optional extra content in the right-hand column, above `actions`.
 // `logo` is the club crest, shown beside the title when the club has switched
 // it on (organisations.public_header_logo). Beside rather than instead of the
 // name, so the page keeps a real heading for search engines and screen readers.
-export function PageHeader({ eyebrow, title, meta, actions, gradient, logo, logoAlt }) {
+export function PageHeader({ eyebrow, title, meta, actions, gradient, logo, logoAlt, aside }) {
   const content = (
     <div>
       {eyebrow && <Label>{eyebrow}</Label>}
@@ -271,7 +272,17 @@ export function PageHeader({ eyebrow, title, meta, actions, gradient, logo, logo
           {titled}
         </div>
       ) : titled}
-      {actions && <div className="flex gap-2 flex-wrap">{actions}</div>}
+      {aside ? (
+        // `aside` is a block that sits above the actions in the right-hand
+        // column (the dashboard's major-sponsor slot). Without it the header
+        // is exactly what it always was.
+        <div className="flex flex-col gap-3 sm:items-end min-w-0 w-full sm:w-[min(420px,42%)] sm:shrink-0">
+          {aside}
+          {actions && <div className="flex gap-2 flex-wrap sm:justify-end">{actions}</div>}
+        </div>
+      ) : (
+        actions && <div className="flex gap-2 flex-wrap">{actions}</div>
+      )}
     </div>
   );
 }

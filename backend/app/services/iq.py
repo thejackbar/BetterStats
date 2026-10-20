@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import Organisation
 from app.services import grassroots_scores_client
 from app.services import scouting_intel
-from app.services.club_match import club_match_keys
+from app.services.club_match import side_is_club
 from app.services import rate_coverage as rc
 from app.services.iq_filters import (
     grade_canonical_label, grade_match_clause, grade_scope_fragment,
@@ -195,13 +195,31 @@ async def _self_and_absorbed_org_ids(session: AsyncSession, org_id: str) -> set[
     return {org_id} | {r[0] for r in res.fetchall()}
 
 
-async def list_opponents(session: AsyncSession, org_id: str) -> dict:
+async def list_opponents(
+    session: AsyncSession,
+    org_id: str,
+    *,
+    upcoming_limit: int = 12,
+    upcoming_opponent: str | None = None,
+    upcoming_grade: str | None = None,
+    upcoming_from=None,
+    upcoming_to=None,
+) -> dict:
     """Opponents we have history against + upcoming fixtures to scout.
 
-    Returns ``{opponents: [...], upcoming: [...]}``. ``opponents`` is ordered by
-    most-played; each carries a ``coverage`` flag ('rich' | 'limited'). Upcoming
-    fixtures (from BetterSelect's ``fixtures`` table) get an ``opp_key`` resolved
-    by name so the UI can link "scout this opponent" straight to a report.
+    Returns ``{opponents: [...], upcoming: [...], upcoming_total: n}``.
+    ``opponents`` is ordered by most-played; each carries a ``coverage`` flag
+    ('rich' | 'limited'). Upcoming fixtures (from BetterSelect's ``fixtures``
+    table) get an ``opp_key`` resolved by name so the UI can link "scout this
+    opponent" straight to a report.
+
+    ``upcoming`` holds the first ``upcoming_limit`` fixtures that match the
+    optional ``upcoming_*`` filters (opponent or grade/team name contains the
+    text, date window); ``upcoming_total`` counts every match, so a caller can
+    say the list is partial instead of presenting it as the whole draw. When a
+    filter is given, ``upcoming_cancelled`` lists matching fixtures the sync has
+    marked CANCELLED (Cricket Australia no longer lists them): they stay out of
+    ``upcoming`` but a caller asked about one should be able to say so.
     """
     excluded = await _self_and_absorbed_org_ids(session, org_id)
     res = await session.execute(
@@ -289,9 +307,26 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
     # no exact/alias hit — same club, spelled differently across the two feeds.
     opp_pairs = [(o["opp_key"], o["name"]) for o in opponents]
 
+    fx_params: dict = {"org_id": org_id, "lim": max(1, int(upcoming_limit))}
+    fx_filters = ""
+    if upcoming_opponent:
+        fx_filters += " AND LOWER(f.opponent_name) LIKE '%' || LOWER(:opp) || '%'"
+        fx_params["opp"] = upcoming_opponent.strip()
+    if upcoming_grade:
+        fx_filters += (
+            " AND (LOWER(COALESCE(gr.name, '')) LIKE '%' || LOWER(:grade) || '%'"
+            " OR LOWER(COALESCE(t.name, '')) LIKE '%' || LOWER(:grade) || '%')"
+        )
+        fx_params["grade"] = upcoming_grade.strip()
+    if upcoming_from:
+        fx_filters += " AND f.played_on >= :dfrom"
+        fx_params["dfrom"] = upcoming_from
+    if upcoming_to:
+        fx_filters += " AND f.played_on <= :dto"
+        fx_params["dto"] = upcoming_to
     fx_res = await session.execute(
         text(
-            """
+            f"""
             SELECT
                 f.id::text AS id,
                 f.opponent_name,
@@ -299,7 +334,8 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
                 f.home_away,
                 f.venue,
                 gr.name AS grade_name,
-                t.name AS team_name
+                t.name AS team_name,
+                COUNT(*) OVER () AS total
             FROM fixtures f
             LEFT JOIN grades gr ON gr.id = f.grade_id
             LEFT JOIN teams t ON t.id = f.team_id
@@ -307,14 +343,17 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
               AND f.status = 'UPCOMING'
               AND (f.played_on IS NULL OR f.played_on >= CURRENT_DATE)
               AND f.opponent_name IS NOT NULL AND f.opponent_name <> ''
+              {fx_filters}
             ORDER BY f.played_on ASC NULLS LAST, f.start_time ASC NULLS LAST
-            LIMIT 12
+            LIMIT :lim
             """
         ),
-        {"org_id": org_id},
+        fx_params,
     )
+    fx_rows = fx_res.mappings().all()
+    upcoming_total = fx_rows[0]["total"] if fx_rows else 0
     upcoming = []
-    for r in fx_res.mappings():
+    for r in fx_rows:
         nm = (r["opponent_name"] or "").strip().lower()
         key = by_name.get(nm)
         if not key:
@@ -333,7 +372,37 @@ async def list_opponents(session: AsyncSession, org_id: str) -> dict:
             }
         )
 
-    return {"opponents": opponents, "upcoming": upcoming}
+    out = {"opponents": opponents, "upcoming": upcoming, "upcoming_total": int(upcoming_total)}
+    if upcoming_opponent or upcoming_grade or upcoming_from or upcoming_to:
+        # Only on a filtered ask: games CA dropped but the club had worked on.
+        cx_res = await session.execute(
+            text(
+                f"""
+                SELECT f.opponent_name, f.played_on, gr.name AS grade_name, t.name AS team_name
+                FROM fixtures f
+                LEFT JOIN grades gr ON gr.id = f.grade_id
+                LEFT JOIN teams t ON t.id = f.team_id
+                WHERE f.organisation_id = CAST(:org_id AS UUID)
+                  AND f.status = 'CANCELLED'
+                  AND (f.played_on IS NULL OR f.played_on >= CURRENT_DATE)
+                  AND f.opponent_name IS NOT NULL AND f.opponent_name <> ''
+                  {fx_filters}
+                ORDER BY f.played_on ASC NULLS LAST
+                LIMIT 5
+                """
+            ),
+            {k: v for k, v in fx_params.items() if k != "lim"},
+        )
+        out["upcoming_cancelled"] = [
+            {
+                "opponent_name": r["opponent_name"],
+                "played_on": r["played_on"].isoformat() if r["played_on"] else None,
+                "grade_name": r["grade_name"],
+                "team_name": r["team_name"],
+            }
+            for r in cx_res.mappings()
+        ]
+    return out
 
 
 async def _load_aliases(session: AsyncSession, org_id: str) -> dict[str, tuple[str, str | None]]:
@@ -1302,12 +1371,12 @@ async def opponent_ladder(session: AsyncSession, org_id: str, *, opponent: str |
         return {**base, "available": False, "note": "No ladder published for this grade yet."}
 
     org = await session.get(Organisation, uuid.UUID(org_id))
-    club_keys = club_match_keys(org) if org else []
 
     def _hay(r):
         return " ".join(str(x).lower() for x in [r["team_name"], r["org"].get("name"), r["org"].get("shortName")] if x)
     for r in rows:
-        r["is_club"] = any(k and k in _hay(r) for k in club_keys)
+        # Owning organisation id first; the name only for a row without one.
+        r["is_club"] = bool(org) and side_is_club(org, _hay(r), (r["org"] or {}).get("id"))
 
     our_row = next((r for r in rows if r["is_club"]), None)
     nm = (name or "").strip().lower()

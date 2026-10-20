@@ -14,6 +14,7 @@ export const TOOLS = [
   { key: 'text',     icon: 'list',      label: 'Text' },
   { key: 'elements', icon: 'selection', label: 'Shapes' },
   { key: 'photos',   icon: 'player',    label: 'Photos' },
+  { key: 'sponsors', icon: 'share',     label: 'Sponsors' },
   { key: 'data',     icon: 'ladders',   label: 'Club data' },
   { key: 'brand',    icon: 'settings',  label: 'Brand' },
 ]
@@ -23,7 +24,7 @@ export const END_TOOLS = [
 
 export const TOOL_TITLE = {
   source: 'Get your data', design: 'Design', content: 'Content', text: 'Text', elements: 'Shapes',
-  photos: 'Photos & badge', data: 'Club data', brand: 'Brand kit', layers: 'Layers',
+  photos: 'Photos & badge', sponsors: 'Post sponsors', data: 'Club data', brand: 'Brand kit', layers: 'Layers',
 }
 
 function RailButton({ item, active, onClick }) {

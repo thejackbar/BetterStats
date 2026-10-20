@@ -202,12 +202,17 @@ async def main() -> None:
             {"o": ORG, "f": FX_SENIOR, "p": PLAYERS[4]},
         )
 
-    from app.services.vote_medal_ddl import VOTE_MEDAL_STATEMENTS
+    from app.services.vote_medal_ddl import (
+        VOTE_MEDAL_STATEMENTS, VOTE_GRADE_MODE_STATEMENTS, VOTE_GRADE_WEIGHT_STATEMENTS,
+        VOTE_GRADE_COUNTER_STATEMENTS,
+    )
 
     # ── Migration applied three times (the lifespan re-runs it every boot) ──
     for run in (1, 2, 3):
         async with engine.begin() as conn:
-            for stmt in VOTE_MEDAL_STATEMENTS:
+            # The lifespan runs the later columns too (migrations 345, 346, 347).
+            for stmt in (VOTE_MEDAL_STATEMENTS + VOTE_GRADE_MODE_STATEMENTS
+                         + VOTE_GRADE_WEIGHT_STATEMENTS + VOTE_GRADE_COUNTER_STATEMENTS):
                 await conn.execute(text(stmt))
         async with engine.connect() as conn:
             n = (await conn.execute(text(

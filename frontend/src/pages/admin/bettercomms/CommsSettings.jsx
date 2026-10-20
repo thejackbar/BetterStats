@@ -215,7 +215,7 @@ export default function CommsSettings() {
               )}
               <div className="text-pb-faintest text-xs leading-relaxed mb-3">
                 {limits.tier === 'sandbox'
-                  ? `New clubs start with a ${limits.daily_cap}-a-day limit while your sending settles in. Once you've sent cleanly, ask ${PLATFORM_NAME} to lift it.`
+                  ? `Clubs on a trial send up to ${limits.daily_cap} a day. Subscribing to BetterAdmin lifts this to the Production limit. Anything over the daily limit sends in the next daily batch, so nothing is lost.`
                   : limits.tier === 'suspended'
                     ? `Sending is paused because too many emails bounced or were marked as spam. Contact ${PLATFORM_NAME} to review and restore it.`
                     : 'Anything over the daily limit sends automatically the next day, so nothing is lost.'}

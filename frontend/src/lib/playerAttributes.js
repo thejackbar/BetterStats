@@ -16,6 +16,26 @@ export const ROLE_TO_SKILLS = {
   'Wicketkeeper-Batter': ['WKT', 'BAT'],
 }
 
+// The four role codes a lineup post draws (BAT, BOWL, AR, WK), read from
+// whatever the roster holds: the profile role ("All Rounder", "Wicketkeeper-
+// Batter"), a skill code ("ALL", "WKT", "BWL") or a code already in post form.
+// A player with no usable role comes back as `fallback`, never as a guess.
+export function socialRole(player, fallback = 'BAT') {
+  const pick = (raw) => {
+    const k = String(raw || '').toLowerCase().replace(/[^a-z]/g, '')
+    if (!k) return null
+    if (k === 'ar' || k === 'all' || k.startsWith('allround')) return 'AR'
+    if (k === 'wk' || k === 'wkt' || k.includes('keeper')) return 'WK'
+    if (k === 'bowl' || k === 'bwl' || k.startsWith('bowler')) return 'BOWL'
+    if (k === 'bat' || k.startsWith('bat') || k.includes('opener') || k.includes('opening')) return 'BAT'
+    return null
+  }
+  const fromRole = pick(player?.player_role) || pick(player?.role)
+  if (fromRole) return fromRole
+  for (const s of player?.skill_positions || []) { const r = pick(s); if (r) return r }
+  return fallback
+}
+
 export const BAT_HANDS = [['', '—'], ['RIGHT', 'Right handed'], ['LEFT', 'Left handed']]
 
 export const GENDER_OPTS = [['', '—'], ['male', 'Male'], ['female', 'Female']]

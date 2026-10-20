@@ -71,6 +71,8 @@ async def build_schema(engine) -> None:
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # `games.raw_payload` is JSON on the ORM and JSONB in the database the
         # migrations build; the view's UNION can't mix a JSON column with a
         # NULL::jsonb, so reconcile it the way the neighbouring suites do.

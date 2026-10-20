@@ -2,12 +2,12 @@
 
 **Read this before** (concrete triggers):
 - Editing `backend/app/services/votes.py`, `routers/votes.py`, `routers/public_votes.py`, `services/vote_medal_ddl.py`, or the football twins `services/afl/votes.py`, `services/afl/lineups.py`, `routers/afl/votes.py`.
-- Touching `vote_medals`, `vote_settings`, `vote_ballots`, `vote_ballot_picks`, `vote_fixture_overrides`, `vote_nudges`, or migrations 193, 194, 196, 267.
+- Touching `vote_medals`, `vote_settings`, `vote_ballots`, `vote_ballot_picks`, `vote_fixture_overrides`, `vote_nudges`, or migrations 193, 194, 196, 267, 345 to 347.
 - Frontend: `pages/admin/betterselect/AdminVotes.jsx`, `VotesHub.jsx`, `VotesLeaderboard.jsx`, `AwardsNight.jsx`, `pages/PublicVoting.jsx` (`/vote/:token`).
 - Symptoms: a fixture shows 0 eligible voters from every source, rounds out of numeric order, a medal that stops counting after the season rolls over, `AmbiguousParameterError` on an optional filter, votes vanishing after a player merge.
 - Anything that reads `fixture.id` and treats it as `games.id`.
 
-**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/betterselect-votes-and-medals.md`. Grep hints: `vote_medals`, `medal_grade_ids`, `AmbiguousParameterError`, `our_side`, `match_ref_id`, `eligibility_source`, `awaiting_team`, `round_sort_key`, `effective_grade_ids`, `?fixture=`, `bulk-state`, `vote_nudges`, `PodiumCard`, `through_round`.
+**Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/betterselect-votes-and-medals.md`. Grep hints: `grade_vote_counters`, `counter_fixture_ids`, `vote_medals`, `medal_grade_ids`, `AmbiguousParameterError`, `our_side`, `match_ref_id`, `eligibility_source`, `awaiting_team`, `round_sort_key`, `effective_grade_ids`, `?fixture=`, `bulk-state`, `vote_nudges`, `PodiumCard`, `through_round`.
 
 **Related guides**:
 - Player merge (`_merge_players_core`, `merge_carry`): ballots and picks must move with a merge.
@@ -23,7 +23,7 @@
 1. Everything is derived on read from raw ballots plus the current medal config. There are no stored weekly results or season points, so a mid-season config change restates the whole season. Do not add stored totals.
 2. Counting rules live in `services/votes.py` as pure functions (`tally_ballots`, `award_weekly_points`, `clean_ballot_values`, `round_sort_key`, vocabularies). Football imports them; never re-type them. A second copy is how the sports disagree about a countback.
 3. `counting_method` 'tally' = season points are the raw sum. 'rank' (the default) = weekly conversion: the top raw vote-getter earns `ballot_values[0]` and so on. Three voters all giving 3-2-1 to the same three players is still 3+2+1 for that game, not 18.
-4. Ties: 'share' uses standard competition ranking (both take the higher value, the next value(s) consumed). 'countback' breaks on most of the highest value, then down the ballot; dead heats still share.
+4. Ties: 'share' uses standard competition ranking (both take the higher value, the next value(s) consumed). 'countback' breaks on most of the highest value, then down the ballot; dead heats still share. 'countback' is the default for a new medal (migration 352 moved existing 'share' medals to it), so a game hands out the ballot's points and no more unless it is a dead heat after every countback. 'share' is still a choice on the Settings tab. The football twin default is unchanged.
 5. Season year is Jul to Jun for cricket (`season_year_for`). Rounds group on `fixtures.round` (label, else date). The leaderboard replays "as at" any round through `through_round`.
 6. Round order is `round_sort_key(label, date)`: numeric on the label first, sentinel for a non-numeric label (a final sorts after numbered rounds), date second. Never sort round labels as strings ("Round 10" < "Round 7") and never by date alone (several grades share a match date).
 7. `movement`, `tied`, `form`, `cumulative`, `round_gain`, `grade`, `grade_short` and `last_round` are computed inside `build_leaderboard` from a rank snapshot after each counted round. No new storage.
@@ -38,6 +38,10 @@
 14. Migration 267 turns an existing club's settings row into its first medal, `link_token` included, so ballots already cast and links already shared keep working. A club with ballots or overrides but no settings row also gets a medal, or the `NOT NULL` `medal_id` has nothing to point at.
 15. The DDL lives in one list, `services/vote_medal_ddl.py`, run by both alembic and the lifespan in the same order. Every statement stays idempotent (the lifespan re-runs it every boot). `main.py`'s mirror deliberately does not create the two OLD per-fixture ballot uniques, since 267 drops them.
 16. `merge_players` must reassign vote rows (both vote FKs are ON DELETE CASCADE, so a merge would destroy ballots and votes cast for the removed player). De-dup keeps the keeper's ballot/pick, then moves. The ballot de-dup key includes `medal_id`, or a person who voted for both medals on a fixture loses one legitimate ballot. Votes are deliberately not in the merge undo log: an undone merge leaves votes on the kept player.
+15a. Who votes can differ by team: `vote_medals.grade_voter_modes` (grade NAME to mode, migration 345) overrides `voter_mode`. Never read `cfg["voter_mode"]` for a game directly; go through `services.votes.cfg_for_fixture`. The grade picker offers active grades only (`club_grade_options`), and a ticked grade that is no longer played stays counted until removed (`inactive_grades`).
+15c. A captain-only team can name someone else to submit its votes (`vote_medals.grade_vote_counters`, migration 347, keyed by grade NAME). Read it only through `cfg_for_fixture` (`cfg.get("vote_counter")`). The nominee is not on the team list, so any "games this player may vote on" read must add `services.votes.counter_fixture_ids`, and with a counter named the captain and everyone else on the list are refused (`counter_only`) so one team never sends two ballots.
+15b. Grade weighting (`vote_medals.grade_weighting`, migration 346, keyed by grade NAME) multiplies each game's awarded points and nothing else: raw votes and the vote counts stay real. Apply it with `weighted_points` after `award_weekly_points`, never inside the tally. Auto weight = top grade's games / the grade's games; the top grade is first in `grades.display_order`, else most games. Games are fixtures per grade name (byes and cancelled left out), so a new points consumer must read weights through `resolve_grade_weights` or `fixture_weight`, and the football twin does not weight.
+16a. A new medal starts with `enabled = false` (no link, players cannot vote). The only control that turns it on is the "Voting link" row on the Settings tab (and the button in the off notice there); any notice that says "turn it on" must point at a screen that has that control.
 17. asyncpg cannot type a bare `:param IS NULL`. Any "param IS NULL OR col = param" needs `CAST(:param AS uuid)` (see `routers/votes.py` and `services/votes.py` medal filters).
 
 **Eligibility (who can be voted for or vote)**
@@ -63,6 +67,12 @@
 33. `ShareVotePanel` uses client-side URL schemes only (no backend send). "Post to socials" copies the message and links to `/admin/social-post`; no standings-card renderer exists.
 34. Awards night is a forced-dark stage (re-declare `color`, not only the `--pb-*` tokens, since `color` inherits). The router stamps `club_name`, `club_short` (initials fallback), `season_label`, `grade_name`, `grade_id` on the board; `grade_id` is what makes the reveal replay the same grade the leaderboard was scoped to.
 35. Public ballot is one screen: 3 tap targets above the team list, `picks` is still the same fixed-length array. The `RaceChart` is hand-rolled inline SVG; do not pull in a chart library for it.
+35a. The vote pages describe the verified voter through `public_votes._me_payload`, which adds `my_page` (a link to the player's own availability-link dashboard) only for a verified player with the club's self-service link on. Never send the availability token to an unidentified visitor, and do not share a sign-in between `bs_vote` and `bs_avail`.
+35b. The public ballot sends `photo_url` per eligible player only for a public player (`is_public` and no `privacy_hidden_at`). Anything new that puts a face on an unauthenticated page applies the same test.
+35c. A player's page reminds them of votes due via `public_availability._votes_due`, using the ballot page's own eligibility and role rules, so any change to who may vote must keep `_voter_role` and `resolve_eligibility` as the single source. Only open games, only games they played, none they have a ballot on. The medal link is built only for the verified player.
+35d. `_votes_due` must find a player's own games before the expensive check: never cap it by the newest N open games (a club has one open game per grade per round). A new module that draws nothing unless something is due goes in `player_dashboard.AUTO_ON_WHEN_NEW`, and the admin save goes through `player_dashboard.store()` so the list records what was on offer.
+35e. The player's page shows their OWN cast ballots (`votes_cast`): points come from the medal's `ballot_values` by position, a closed game has no change link, and nobody else's ballot is read. The `votes` module stays while there are cast votes.
+35f. The public landing list is cut to the games the verified voter is on the `resolve_eligibility` list of (`_fixtures_player_is_on`, local lookups first through `own_local_fixture_ids`, shared with `_votes_for_player`), and the page must re-read it after verify. Never list a game to someone who did not play it, and never return a team list to `role 'none'`. An unidentified visitor still gets the club list.
 
 **Football twin (v9.34.0)**
 36. Football ballots key on `games` directly (cricket keys on `fixtures`). There is no eligibility source to choose: one team list, read by `services/afl/lineups.py` from `afl_player_game_lines` (PlayHQ `gameView.statistics.{home,away}.players[]`, both sides). It is a plain read of held data: no upstream call, works when PlayHQ is down.
@@ -79,6 +89,7 @@
 - An existing club's count narrows after 267: empty `grade_ids` must mean every grade (rule 12).
 - A grade-restricted medal shows fixtures at zero ballots, or a fixture disappears from it: grade resolved after narrowing, or `effective_grade_ids` not used (rule 13).
 - Merging two records of one person deletes one of their two ballots: de-dup key lacked `medal_id` (rule 16).
+- A first-time visitor on an open game reads "You can't vote on this game" and is never asked who they are: `role 'none'` with `reason 'verify_required'` must go to the name picker (`pick` step), not the ballot step's message (v9.119.0.2).
 - Football team list names the opposition players: read forgot `our_side` (rule 37).
 - A game's points read 18 where 6 is right (three voters all giving 3-2-1): raw tally used where 'rank' conversion is the default (rule 3).
 - Grade-filtered awards night replays whole-club standings: `grade_id` missing from the board payload (rule 34).

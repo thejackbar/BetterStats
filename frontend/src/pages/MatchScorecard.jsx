@@ -5,8 +5,10 @@ import { PbSpinner, Card, ResultPill } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
 import { fmtOvers, oversToBalls, ballsToOvers } from '../lib/cricketFormat'
 import { useAuth } from '../contexts/AuthContext'
+import CardReviewBar from '../components/admin/cardReview/CardReviewBar'
 import { CAP } from '../lib/capabilities'
 import { useClubTheme } from '../hooks/useClubTheme'
+import { rememberClubSlug, readClubSlug } from '../lib/clubSlug'
 import TeamBadge from '../components/TeamBadge'
 
 // Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
@@ -612,6 +614,77 @@ function TeamCard({ label, teamName, opponentName, won = false, batting = [], bo
   )
 }
 
+// A fielding line is a per-player TALLY, not a per-wicket record. A scorebook
+// (and the archive imports built from one) says how many catches a player took
+// in the match, never which batter each one dismissed, so the dismissal text on
+// the card reads a bare "c". This is where those catches are read from.
+//
+// `catches` is meant to include keeper catches, but an imported row can carry
+// its keeper catches in `catches_wk` alone, so the larger of the two is the
+// total taken. Only the columns somebody actually has a figure in are drawn.
+function FieldingSection({ fielding = [], fmtName = n => n }) {
+  const rows = fielding
+    .map(f => {
+      const wk = f.catches_wk || 0
+      return {
+        ...f,
+        wk,
+        total: Math.max(f.catches || 0, wk),
+        st: f.stumpings || 0,
+        ro: f.run_outs || 0,
+      }
+    })
+    .filter(f => f.total + f.st + f.ro > 0)
+    .sort((a, b) => (b.total + b.st + b.ro) - (a.total + a.st + a.ro)
+      || String(a.player_name || '').localeCompare(String(b.player_name || '')))
+  if (!rows.length) return null
+  const cols = [
+    { key: 'total', label: 'CATCHES' },
+    { key: 'wk', label: 'CT (WK)' },
+    { key: 'st', label: 'STUMPINGS' },
+    { key: 'ro', label: 'RUN OUTS' },
+  ].filter(c => rows.some(r => r[c.key] > 0))
+  return (
+    <div data-testid="fielding-section" className="pb-card overflow-hidden mt-4">
+      <div className="px-5 py-3 pb-hairline-b">
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">FIELDING</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="font-mono text-[10px] tracking-wide2 text-pb-faint">
+              <th className="text-left font-normal px-5 py-2">PLAYER</th>
+              {cols.map(c => (
+                <th key={c.key} className="text-right font-normal px-4 py-2">{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={`${r.player_id || r.player_name}-${i}`} className="pb-hairline-t">
+                <td className="px-5 py-2 text-pb-text">
+                  {r.player_id ? (
+                    <Link to={`/players/${r.player_id}`} className="hover:text-pb-accent transition-colors">
+                      {fmtName(r.player_name || '')}
+                    </Link>
+                  ) : (
+                    <span>{fmtName(r.player_name || '')}</span>
+                  )}
+                </td>
+                {cols.map(c => (
+                  <td key={c.key} className="px-4 py-2 text-right font-mono pb-num text-pb-text">
+                    {r[c.key] > 0 ? r[c.key] : <span className="text-pb-faintest">—</span>}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function FallOfWicketsSection({ fow = [], fmtName = n => n }) {
   if (!fow.length) return null
   const byInnings = fow.reduce((acc, f) => {
@@ -852,7 +925,10 @@ export default function MatchScorecard() {
     // Always DB-first → Grassroots fallback for live/unsynced (api.getScorecard);
     // the old PlayHQ Partner path (when ?org was present) is retired. ?org is
     // still read below purely for club name-formatting.
-    api.getScorecard(gameId)
+    // Whose side to read the match from: the club in the link, else the club the
+    // visitor was last browsing. The server only honours it for a club that
+    // played in the game, so a stale one is ignored rather than trusted.
+    api.getScorecard(gameId, orgId || readClubSlug())
       .then(setGame)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -868,6 +944,8 @@ export default function MatchScorecard() {
     if (effectiveOrgId) api.getOrg(effectiveOrgId).then(setOrgData).catch(() => {})
   }, [effectiveOrgId])
   useClubTheme(orgData)
+  // The scorecard URL carries no club slug, so tell the sponsor list which club this is.
+  useEffect(() => { rememberClubSlug(orgData?.slug) }, [orgData?.slug])
 
   useEffect(() => {
     // Only a club admin can even open the claim modal, and the roster list is
@@ -934,6 +1012,7 @@ export default function MatchScorecard() {
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
+      <CardReviewBar gameId={gameId} />
       <main className="max-w-[1300px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <button
           onClick={() => navigate(-1)}
@@ -980,6 +1059,7 @@ export default function MatchScorecard() {
           </div>
         )}
 
+        <FieldingSection fielding={game.fielding ?? []} fmtName={fmtName} />
         <FallOfWicketsSection fow={game.fall_of_wickets ?? []} fmtName={fmtName} />
         <PartnershipsSection partnerships={game.partnerships ?? []} fmtName={fmtName} />
       </main>
@@ -991,7 +1071,7 @@ export default function MatchScorecard() {
           onClose={() => setClaimTarget(null)}
           onSaved={() => {
             setClaimTarget(null)
-            api.getScorecard(gameId).then(setGame).catch(() => {})
+            api.getScorecard(gameId, orgId || readClubSlug()).then(setGame).catch(() => {})
           }}
         />
       )}

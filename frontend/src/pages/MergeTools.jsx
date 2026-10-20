@@ -16,6 +16,25 @@ const KIND_LABEL = {
 // A missing kind is an older response shape, which only ever meant exact.
 const isExactPair = (pair) => !pair.kind || pair.kind === 'exact'
 
+// Merge two records, asking first when the server says both have a game on the same date. One person
+// is not in two games on one day, so that is usually two people who share a name (a junior and an
+// adult). A cancelled confirmation throws an Error with `cancelled` set, which callers do not show.
+async function mergeConfirming(keepId, removeId, orgId) {
+  try {
+    return await api.mergePlayers(keepId, removeId, orgId)
+  } catch (e) {
+    if (e.status === 409 && e.detail?.code === 'same_day_clash') {
+      if (!window.confirm(`${e.detail.message}\n\nMerge them anyway?`)) {
+        const cancelled = new Error('Merge cancelled.')
+        cancelled.cancelled = true
+        throw cancelled
+      }
+      return api.mergePlayers(keepId, removeId, orgId, true)
+    }
+    throw e
+  }
+}
+
 function StatBadge({ label, value }) {
   return (
     <div className="text-center">
@@ -177,11 +196,11 @@ function ManualMerge({ orgId, onMerged }) {
     setMerging(true)
     setError(null)
     try {
-      await api.mergePlayers(keepId, removeInfo.id, orgId)
+      await mergeConfirming(keepId, removeInfo.id, orgId)
       setSelectedA(null); setSelectedB(null); setInfoA(null); setInfoB(null); setKeepId(null)
       onMerged()
     } catch (e) {
-      setError(e.message)
+      if (!e.cancelled) setError(e.message)
     } finally {
       setMerging(false)
     }
@@ -280,10 +299,10 @@ function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored, disabled }) {
     setMerging(true)
     setError(null)
     try {
-      await api.mergePlayers(keepId, removePlayer.id, orgId)
+      await mergeConfirming(keepId, removePlayer.id, orgId)
       onMerged()
     } catch (e) {
-      setError(e.message)
+      if (!e.cancelled) setError(e.message)
       setMerging(false)
     }
   }
@@ -322,6 +341,15 @@ function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored, disabled }) {
             title="A CA-redacted name (********) — this pair is excluded from Bulk Approve"
           >
             Manual review only
+          </span>
+        )}
+        {pair.same_day_clash > 0 && (
+          <span
+            className="font-mono text-[10px] px-2 py-0.5 rounded border text-pb-amber"
+            style={{ borderColor: 'var(--pb-amber)' }}
+            title={`${pair.same_day_clash_message} This pair is excluded from Bulk Approve.`}
+          >
+            Probably two people
           </span>
         )}
         {!isExactPair(pair) && (
@@ -514,13 +542,13 @@ export default function MergeTools({ embeddedOrgId }) {
   useEffect(() => { load() }, [orgId])
 
   const visible = candidates?.filter(c => !skipped.has(`${c.player_a.id}:${c.player_b.id}`)) ?? []
-  const bulkEligible = visible.filter(c => !c.redacted && isExactPair(c))
+  const bulkEligible = visible.filter(c => !c.redacted && !c.same_day_clash && isExactPair(c))
   const bulkReviewCount = visible.length - bulkEligible.length
 
   async function handleBulkApprove() {
     if (bulkEligible.length === 0) return
     const reviewNote = bulkReviewCount > 0
-      ? ` ${bulkReviewCount} pair${bulkReviewCount !== 1 ? 's' : ''} will be left for manual review (redacted names, or the names are close but not identical).`
+      ? ` ${bulkReviewCount} pair${bulkReviewCount !== 1 ? 's' : ''} will be left for manual review (redacted names, games on the same date, or names close but not identical).`
       : ''
     if (!window.confirm(
       `Bulk merge ${bulkEligible.length} exact-name-match pair${bulkEligible.length !== 1 ? 's' : ''}?${reviewNote}`

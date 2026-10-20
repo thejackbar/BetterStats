@@ -14,13 +14,14 @@ from __future__ import annotations
 import json
 import logging
 import re
+import uuid
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
 from app.models.db import async_session_maker
-from app.services import iq_opponent, iq_players, iq_team, iq_trends
+from app.services import iq_lineup, iq_opponent, iq_players, iq_review, iq_team, iq_trends
 from app.services import iq as iq_service
 from app.services.aggregations import get_player_by_opposition
 from app.services.bowling_style import bowling_class, bowling_label
@@ -85,7 +86,13 @@ _SYSTEM = (
     "Upcoming games and the opposition:\n"
     "- For any question about an upcoming match ('who should we pick for the 1st XI "
     "game', 'who do we play next', 'how do we beat them'), start with "
-    "upcoming_fixtures to find the fixture, its team/grade and opponent. Then use "
+    "upcoming_fixtures to find the fixture, its team/grade and opponent. The club has "
+    "many fixtures and that list is capped, so when the user names an opponent, a "
+    "side or a date, pass it as opponent, grade or from_date/to_date rather than "
+    "reading the first page; and never call a capped list 'all' the club's "
+    "fixtures. If nothing matches but the result lists a cancelled game, tell the "
+    "user it is marked cancelled (Cricket Australia no longer lists it) instead of "
+    "saying it does not exist. Then use "
     "opposition_report for our head-to-head and which of OUR players bat/bowl well "
     "against them, current_squad for the side in question, and "
     "opponent_danger_players for their in-form threats.\n"
@@ -94,13 +101,70 @@ _SYSTEM = (
     "players in or around the 1st XI; a lower-grade player's strong record against "
     "this opponent is worth a mention as a possible promotion, never an automatic "
     "pick over the side's regulars.\n"
+    "- When the user asks about OUR side for a game ('the XI selected this weekend', "
+    "'our team', 'how do we win'), find the fixture with upcoming_fixtures, then call "
+    "our_selected_xi for the players actually picked. Never use current_squad or a "
+    "grade filter as the picked side: that is the whole club. Name the XI from "
+    "our_selected_xi, its strengths and weaknesses from balance, warnings and each "
+    "player's form and vs_opponent, then bring in opposition_report and the venue "
+    "record. If our_selected_xi says draft_only, tell the user the side is built but "
+    "not confirmed on the board; if not_selected, say nothing has been picked yet.\n"
     "- If opponent_danger_players says the dossier is still building, answer now "
     "from opposition_report and add that the deeper scout (their current-season "
     "form) will be ready if they ask again in a minute, or on the BetterIQ "
     "Opposition page.\n"
+    "- To analyse who the opposition have PICKED for a game ('quick analysis of "
+    "their selected players', 'who have they named', 'who is a threat in their "
+    "side'), find the fixture with upcoming_fixtures, then call opponent_lineup. "
+    "Lead with the threats and the danger players not named, then say which grades "
+    "the named players usually play (usual_grade, plays_elsewhere), who is new to "
+    "us, and how sure the numbers are. Early in a season this year's figures are a "
+    "small sample, so say what each key player did LAST season (last_season) and "
+    "treat that as the better read until this season has a few games in it. Best of "
+    "all is in_this_grade_band (their record in this grade and the one beside it, "
+    "last three seasons): lead with it, then mention more_in_another_grade where "
+    "present. A player whose figures are from 'their other "
+    "grades and formats' is not a read on this grade, so say so. If they have not "
+    "named a side, say that and offer the opposition_report instead.\n"
     "- If a fixture's opponent has no linked history (has_history false), say the "
     "club can be linked via 'Match club' on the BetterIQ Opposition page to unlock "
     "the head-to-head.\n"
+    "Completed games, player votes and who played well:\n"
+    "- For a game that has ALREADY been played ('give the 3-2-1 for the 3rd XI game', "
+    "'who played well on the 17th', 'player of the match'), find it with recent_games "
+    "(pass team, opponent or a date), or when the user pastes a match link or id "
+    "(betterat.cricket/games/<id>) pass it straight to match_performances. Never say "
+    "you can't see completed games or open the link: the id inside it is all the tool "
+    "needs. team matches the side as the club names it ('3rd XI') and the grade it "
+    "played in ('5th Grade'); they often differ, so use the game's own 'team'.\n"
+    "- To give a 3-2-1 (or any votes), call match_performances, then judge on what "
+    "the scorecard shows: the context of the game (how it was won or lost, batting "
+    "first or chasing, a collapse, the best stand), runs against the team total and "
+    "the batting slot, scoring rate where balls are recorded, not outs that saw a "
+    "chase home, economy and maidens, and the VALUE of each wicket. Wicket value is "
+    "not a head count: each wicket carries the dismissed batter's slot and score. "
+    "Top-order wickets and set batters (30+) are worth the most, a number 9, 10 or 11 "
+    "is worth a lot less, so 3 for 20 that includes both openers can beat 4 for 20 "
+    "made of tail-enders. Likewise a quick 30 at the top that set up a chase can "
+    "outrank a late 35 against a beaten attack. Catches, run outs and stumpings "
+    "count as support, not as the lead reason.\n"
+    "- Give the three names in order (3, 2, 1) with a one-line reason each, and say "
+    "who just missed out if it was close. Treat a figure that is thin (a handful of "
+    "balls, a 1 over spell) as a small sample. Say plainly that it is judged from the "
+    "scorecard only (no ball-by-ball), that only our players are scored, and use the "
+    "scores the tool gives; if the tool says they are approximate, say so. Never "
+    "invent a player or a figure.\n"
+    "Clarifying questions:\n"
+    "- You have an ask_user tool that puts a question to the user as buttons. Use it "
+    "ONLY when the answer would materially change with the choice and you can't "
+    "settle it from the tools: which grade or side when several fit, all-time or this "
+    "season, which of two similar clubs, one-day or two-day or T20 figures. Look up "
+    "the real options first (grades, find_players, upcoming_fixtures) and offer those, "
+    "never invented ones.\n"
+    "- Don't ask when the question is clear enough to answer, when the tools can tell "
+    "you, or about anything minor. Ask at most once. If the user's reply is a choice "
+    "from your buttons or a typed answer to your question, go ahead and answer with "
+    "it, and never ask again in that thread.\n"
     "If the tools don't cover what was asked, say so plainly and point to where in "
     "BetterIQ to look (Opposition scout for an opponent, Player search for one player, "
     "Team analysis for the side)."
@@ -110,6 +174,29 @@ _SYSTEM = (
 # ─── tools ────────────────────────────────────────────────────────────────────
 
 TOOLS = [
+    {
+        "name": "ask_user",
+        "description": "Ask the user ONE short clarifying question, shown as buttons, instead of answering. Use only when the answer would change materially with their choice and the other tools can't settle it (which grade or side, all-time or this season, one-day or two-day or T20). Offer 2 to 5 real options you found with the other tools. Calling this ends your turn; the user's pick comes back as their next message. Never use it when the question is already clear.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "the question, in a short plain sentence"},
+                "options": {
+                    "type": "array",
+                    "description": "2 to 5 choices",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "description": "the button text, a few words"},
+                            "value": {"type": "string", "description": "what is sent back as the user's reply when picked; defaults to the label. Make it a self-contained instruction, e.g. 'Use 3rd Grade'"},
+                        },
+                        "required": ["label"],
+                    },
+                },
+            },
+            "required": ["question", "options"],
+        },
+    },
     {
         "name": "find_players",
         "description": "Find players in the club by name (or list the whole roster when no query). Returns each player's id, role, whether they keep wicket, their bowling_style (e.g. 'Off spin', 'Right-arm fast-medium') and bowling_class ('pace' or 'spin'), their selection squad (their BetterSelect team, e.g. '1st XI'), and career matches/runs/wickets. Use this to get a player_id before calling player_detail or player_vs_club.",
@@ -185,8 +272,17 @@ TOOLS = [
     },
     {
         "name": "upcoming_fixtures",
-        "description": "The club's upcoming fixtures: date, team/grade, opponent, venue, home/away, plus a fixture_id and whether we hold history against that opponent (has_history). Use this FIRST for any question about an upcoming game ('who should we pick for the 1st XI game', 'who do we play next') to identify the fixture, its team and its opponent, then feed the fixture_id into opposition_report / opponent_danger_players.",
-        "input_schema": {"type": "object", "properties": {}},
+        "description": "The club's upcoming fixtures, soonest first: date, team/grade, opponent, venue, home/away, plus a fixture_id and whether we hold history against that opponent (has_history). Use this FIRST for any question about an upcoming game ('who should we pick for the 1st XI game', 'who do we play next') to identify the fixture, its team and its opponent, then feed the fixture_id into opposition_report / opponent_danger_players. A club has many fixtures, so the list is capped: the result gives total_matching and a note when it is partial. To find one game, pass opponent (part of the club name), grade (a grade or team name such as '1st XI' or 'PSWL A') and/or from_date and to_date (YYYY-MM-DD) instead of reading the whole list.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "opponent": {"type": "string", "description": "Part of the opposition club name, e.g. 'Cockburn'."},
+                "grade": {"type": "string", "description": "Part of a grade or team name, e.g. '1st XI' or 'PSWL A'."},
+                "from_date": {"type": "string", "description": "Earliest game date, YYYY-MM-DD."},
+                "to_date": {"type": "string", "description": "Latest game date, YYYY-MM-DD."},
+                "limit": {"type": "integer", "description": "How many to return (default 15, max 40)."},
+            },
+        },
     },
     {
         "name": "opposition_report",
@@ -209,6 +305,47 @@ TOOLS = [
                 "fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"},
                 "opponent": {"type": "string", "description": "opponent club name (or opp_key)"},
             },
+        },
+    },
+    {
+        "name": "our_selected_xi",
+        "description": "OUR OWN picked side for ONE upcoming fixture: the XI confirmed on the BetterSelect board, in batting order, read straight from the saved selection. For each player: role, keeper, captain, bowling style, availability, last five scores and wickets, their record against THIS opponent (vs_opponent), and flags (unavailable, dormant, wrong grade). Also the side's balance (pace, spin, keeper, openers, all-rounders, left and right hand bats), warnings and a one-line verdict. Needs a fixture_id from upcoming_fixtures. Use it for 'the XI for this weekend', 'our side', 'how do we win', 'strengths and weaknesses of the team selected'. Do NOT stand in current_squad or a grade filter for the picked side: that is the whole club, not who is playing. If status is draft_only the selector has built a side but not confirmed it, say so; if not_selected nothing has been picked yet, say that.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"}},
+            "required": ["fixture_id"],
+        },
+    },
+    {
+        "name": "recent_games",
+        "description": "Games the club has ALREADY PLAYED, newest first: date, opponent, result, venue, the grade it was played in ('5th Grade') and the team it was picked as ('3rd XI'), plus a game_id. Use it to find a played game before match_performances, e.g. 'the most recent 3rd XI game' (team='3rd XI', limit 1) or 'the 17 October game' (from_date and to_date). Filter by team (matches the XI or the grade), opponent (part of the club name) and from_date/to_date (YYYY-MM-DD).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "team": {"type": "string", "description": "Team or grade, e.g. '3rd XI' or '5th Grade'."},
+                "opponent": {"type": "string", "description": "Part of the opposition club name."},
+                "from_date": {"type": "string", "description": "Earliest game date, YYYY-MM-DD."},
+                "to_date": {"type": "string", "description": "Latest game date, YYYY-MM-DD."},
+                "limit": {"type": "integer", "description": "How many to return (default 5, max 20)."},
+            },
+        },
+    },
+    {
+        "name": "match_performances",
+        "description": "ONE completed game, in full, for judging who played well and for 3-2-1 votes: the result and true team scores, how it was won or lost, the best stand and any collapse; EVERY batter of ours with position, band (top order, middle order, tail), runs, balls, strike rate, not out, and share of the team total; EVERY bowler with overs, maidens, runs, wickets, economy and each wicket taken labelled with the dismissed batter's position, their score and a value (high, medium, low: a top-order or set batter is high, a tail-ender is low); and fielding (catches, run outs, stumpings). Pass the game_id from recent_games, or the whole match link or id the user pasted (betterat.cricket/games/<id>). Our players only.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"game_id": {"type": "string", "description": "a game id, or a pasted match link containing one"}},
+            "required": ["game_id"],
+        },
+    },
+    {
+        "name": "opponent_lineup",
+        "description": "The opposition's NAMED XI for ONE upcoming fixture, read live from the match record and matched to the players already scouted. For each named player: whether we have scouted them, their season runs, average, strike rate, wickets, economy and form, their threat flag and plan, LAST SEASON's totals from Cricket Australia (last_season), their combined figures in THIS grade and the one beside it over the last three seasons (in_this_grade_band, e.g. 3rd/4th Grade), a figure from any OTHER grade they have played more in (more_in_another_grade), and the GRADES they have played this season (usual_grade, plays_elsewhere when they normally play a different side). Also a ready-made 'analysis' of plain sentences (threats, who is playing out of their usual side, who is new to us, danger players NOT named). Needs a fixture_id from upcoming_fixtures. Use for 'who have they picked', 'quick analysis of the players selected by the opposition', 'who is a threat in their side'. If status is not_named they have not published a team yet, say so.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"fixture_id": {"type": "string", "description": "fixture id from upcoming_fixtures"}},
+            "required": ["fixture_id"],
         },
     },
 ]
@@ -511,27 +648,82 @@ async def _tool_grades(session, org_id):
     return {"grades": names}
 
 
-async def _tool_upcoming_fixtures(session, org_id):
-    data = await iq_service.list_opponents(session, org_id)
-    fixtures = (data.get("upcoming") or [])[:10]
+_UPCOMING_DEFAULT_LIMIT = 15
+_UPCOMING_MAX_LIMIT = 40
+
+
+def _iso_date(v):
+    """A model-supplied YYYY-MM-DD as a date, or None when absent or unreadable."""
+    from datetime import date
+    try:
+        return date.fromisoformat(str(v)[:10]) if v else None
+    except ValueError:
+        return None
+
+
+async def _tool_upcoming_fixtures(
+    session, org_id, opponent=None, grade=None, from_date=None, to_date=None, limit=None,
+):
+    try:
+        limit = min(max(int(limit or _UPCOMING_DEFAULT_LIMIT), 1), _UPCOMING_MAX_LIMIT)
+    except (TypeError, ValueError):
+        limit = _UPCOMING_DEFAULT_LIMIT
+    filtered = bool(opponent or grade or from_date or to_date)
+    data = await iq_service.list_opponents(
+        session, org_id,
+        upcoming_limit=limit,
+        upcoming_opponent=opponent,
+        upcoming_grade=grade,
+        upcoming_from=_iso_date(from_date),
+        upcoming_to=_iso_date(to_date),
+    )
+    fixtures = data.get("upcoming") or []
+    total = int(data.get("upcoming_total") or 0)
+    cancelled = data.get("upcoming_cancelled") or []
     if not fixtures:
-        return {
-            "count": 0,
-            "note": "No upcoming fixtures held. Fixtures sync from the BetterSelect Fixtures screen (or can be added manually there).",
-        }
-    return {"count": len(fixtures), "fixtures": [
-        {
-            "fixture_id": f["fixture_id"],
-            "date": f.get("played_on"),
-            "team": f.get("team_name"),
-            "grade": f.get("grade_name"),
-            "opponent": f.get("opponent_name"),
-            "home_away": f.get("home_away"),
-            "venue": f.get("venue"),
-            "has_history": bool(f.get("opp_key")),
-        }
-        for f in fixtures
-    ]}
+        out = {"count": 0, "total_matching": 0}
+        if filtered:
+            out["note"] = "No upcoming fixture matches that filter. Try a different spelling, a wider date range, or no filter."
+        else:
+            out["note"] = "No upcoming fixtures held. Fixtures sync from the BetterSelect Fixtures screen (or can be added manually there)."
+        if cancelled:
+            out["cancelled"] = cancelled
+            out["cancelled_note"] = (
+                "These games are marked cancelled: Cricket Australia no longer lists them but the club "
+                "had picked a team or recorded votes on them, so they are kept. Say so rather than "
+                "claiming the game never existed."
+            )
+        return out
+    out = {
+        "count": len(fixtures),
+        "total_matching": total,
+        "fixtures": [
+            {
+                "fixture_id": f["fixture_id"],
+                "date": f.get("played_on"),
+                "team": f.get("team_name"),
+                "grade": f.get("grade_name"),
+                "opponent": f.get("opponent_name"),
+                "home_away": f.get("home_away"),
+                "venue": f.get("venue"),
+                "has_history": bool(f.get("opp_key")),
+            }
+            for f in fixtures
+        ],
+    }
+    if total > len(fixtures):
+        out["note"] = (
+            f"Showing the first {len(fixtures)} of {total} matching fixtures, soonest first. This is NOT the whole "
+            "draw: never say these are all the club's fixtures. To find a specific game, call again with "
+            "opponent, grade or a from_date/to_date window."
+        )
+    if cancelled:
+        out["cancelled"] = cancelled
+        out["cancelled_note"] = (
+            "These matching games are marked cancelled: Cricket Australia no longer lists them but the club "
+            "had picked a team or recorded votes on them. Mention them if relevant."
+        )
+    return out
 
 
 async def _resolve_opp_arg(session, org_id: str, opponent: str | None):
@@ -698,6 +890,167 @@ async def _tool_opponent_danger_players(session, org_id, *, fixture_id=None, opp
     return out
 
 
+def _trim_stats(d):
+    """A combined grade-band summary, trimmed to what the model needs."""
+    if not d:
+        return None
+    return {k: d.get(k) for k in ("label", "span", "matches", "innings", "runs", "average", "strike_rate",
+                                  "high_score", "wickets", "economy")}
+
+
+async def _tool_our_selected_xi(session, org_id, *, fixture_id=None):
+    if not fixture_id:
+        return {"error": "Pass a fixture_id from upcoming_fixtures."}
+    from app.models.db import Organisation
+    from app.services import iq_selection
+    club = await session.get(Organisation, org_id)
+    if club is None:
+        return {"error": "club not found"}
+    try:
+        uuid.UUID(str(fixture_id))
+    except ValueError:
+        return {"error": "That is not a fixture_id. Use one from upcoming_fixtures."}
+    d = await iq_selection.selection_analysis(session, club, str(fixture_id))
+    if d is None:
+        return {"error": "No such fixture for this club. Use a fixture_id from upcoming_fixtures."}
+    fx = d.get("fixture") or {}
+    head = {
+        "fixture_id": fx.get("fixture_id"), "date": fx.get("played_on"), "team": fx.get("team_name"),
+        "grade": fx.get("grade_name"), "opponent": fx.get("opponent_name"),
+        "home_away": fx.get("home_away"), "venue": fx.get("venue"),
+    }
+    players = d.get("players") or []
+    if not players:
+        # fixture_lineups is the CONFIRMED XI; the board autosaves a working side
+        # to selection_drafts. Say which one exists rather than call it empty.
+        draft = (await session.execute(
+            text("SELECT draft FROM selection_drafts WHERE fixture_id = CAST(:f AS uuid) "
+                 "AND organisation_id = CAST(:o AS uuid)"),
+            {"f": str(fixture_id), "o": str(org_id)},
+        )).scalar()
+        slots = [s for s in ((draft or {}).get("slots") or []) if s]
+        if slots:
+            names = (await session.execute(
+                text("SELECT id::text AS id, COALESCE(display_name_override, name) AS name FROM players "
+                     "WHERE id = ANY(CAST(:ids AS uuid[])) AND organisation_id = CAST(:o AS uuid)"),
+                {"ids": slots, "o": str(org_id)},
+            )).mappings().all()
+            by_id = {r["id"]: r["name"] for r in names}
+            return {
+                "status": "draft_only", "fixture": head,
+                "draft_players": [by_id[s] for s in slots if s in by_id],
+                "note": "A side has been built on the BetterSelect board but not confirmed yet. These are the "
+                        "draft names only, so say it is unconfirmed and could still change.",
+            }
+        return {"status": "not_selected", "fixture": head,
+                "note": "No side has been picked for this fixture on the BetterSelect board yet."}
+
+    def _p(p):
+        return {
+            "batting_order": p.get("batting_order"), "name": p.get("name"),
+            "captain": p.get("is_captain"), "keeper": p.get("is_wicket_keeper"),
+            "skills": p.get("skills"), "bowling_style": p.get("bowling_type"), "opener": p.get("is_opener"),
+            "availability": p.get("availability"),
+            "games_this_grade_this_season": p.get("season_matches"),
+            "recent_scores": p.get("recent_scores"), "recent_wickets": p.get("recent_wickets"),
+            "vs_this_opponent": p.get("vs_opponent"),
+            "flags": p.get("flags"),
+        }
+
+    return {
+        "status": "confirmed", "fixture": head,
+        "verdict": d.get("verdict"),
+        "balance": d.get("balance"),
+        "players": [_p(p) for p in players],
+        "warnings": [w.get("text") for w in (d.get("warnings") or [])],
+        "scope": _scope_echo(basis="saved XI; form is the last 5 innings or spells; vs_this_opponent is all-time, all grades"),
+    }
+
+
+async def _tool_opponent_lineup(session, org_id, *, fixture_id=None):
+    if not fixture_id:
+        return {"error": "Pass a fixture_id from upcoming_fixtures."}
+    from app.models.db import Organisation
+    club = await session.get(Organisation, org_id)
+    if club is None:
+        return {"error": "club not found"}
+    d = await iq_lineup.opponent_lineup(session, club, fixture_id=fixture_id)
+    status = d.get("status")
+    if status == "building" or d.get("pending"):
+        return {
+            "status": "building",
+            "note": "The scout behind this is still building (takes up to a minute). Tell the user to ask again shortly, or use the Opposition page, which updates as it finishes.",
+        }
+    if status != "named":
+        notes = {
+            "not_named": f"{d.get('team_name') or 'The opposition'} have not named their side yet. Clubs usually publish a day or two before the game.",
+            "no_match": d.get("reason"),
+            "unavailable": d.get("reason"),
+        }
+        return {"status": status, "note": notes.get(status) or d.get("reason") or "No team list available."}
+
+    def _p(p):
+        bat, bowl = p.get("bat") or {}, p.get("bowl") or {}
+        return {
+            "name": p.get("name"), "captain": p.get("is_captain"), "keeper": p.get("is_keeper"),
+            "scouted": p.get("matched"), "junior_name_withheld": p.get("redacted"),
+            "matched_by": p.get("basis"),
+            "figures_from": {"grade": "this fixture's grade", "other_sides": "their other grades and formats"}.get(p.get("pool")),
+            "runs": bat.get("runs"), "innings": bat.get("innings"), "average": _round(bat.get("average")),
+            "strike_rate": _round(bat.get("strike_rate")), "form": bat.get("form"),
+            "wickets": bowl.get("wickets"), "economy": _round(bowl.get("economy")),
+            "threat": p.get("danger"), "alert": (p.get("alert") or {}).get("level"),
+            "plan": p.get("plan"),
+            "usual_grade": p.get("usual_grade"), "plays_elsewhere": p.get("plays_elsewhere"),
+            "usual_side_is": p.get("usual_step"), "grades_this_season": p.get("grades"),
+            "last_season": ({k: (p["last_season"] or {}).get(k) for k in (
+                "label", "matches", "innings", "runs", "average", "strike_rate", "high_score", "wickets", "economy")}
+                if p.get("last_season") else None),
+            "played_last_season_only": p.get("career_only"),
+            "in_this_grade_band": _trim_stats(p.get("band_stats")),
+            "more_in_another_grade": _trim_stats(p.get("other_grade_stats")),
+        }
+
+    return {
+        "status": "named", "team": d.get("team_name"), "date": d.get("date"),
+        "fixture_grade": d.get("fixture_grade"),
+        "analysis": (d.get("analysis") or {}).get("lines"),
+        "players": [_p(p) for p in (d.get("players") or [])],
+        "danger_players_not_named": [x.get("name") for x in (d.get("danger_missing") or [])],
+        "scope": _scope_echo(basis="this season, under the filters in force"),
+    }
+
+
+_RECENT_DEFAULT_LIMIT = 5
+_RECENT_MAX_LIMIT = 20
+_GAME_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
+async def _tool_recent_games(session, org_id, team=None, opponent=None, from_date=None, to_date=None, limit=None):
+    try:
+        limit = min(max(int(limit or _RECENT_DEFAULT_LIMIT), 1), _RECENT_MAX_LIMIT)
+    except (TypeError, ValueError):
+        limit = _RECENT_DEFAULT_LIMIT
+    games = await iq_review.list_recent_games(
+        session, org_id, limit=limit, team=team, opponent=opponent,
+        from_date=_iso_date(from_date), to_date=_iso_date(to_date),
+    )
+    if not games:
+        return {"count": 0, "note": "No played game matches that filter. Try another spelling, a wider date range, or no filter."}
+    return {"count": len(games), "games": games, "scope": _scope_echo(basis="completed games, newest first")}
+
+
+async def _tool_match_performances(session, org_id, *, game_id=None):
+    m = _GAME_ID.search(str(game_id or ""))
+    if not m:
+        return {"error": "Pass a game id from recent_games, or the match link the user pasted."}
+    d = await iq_review.game_performances(session, org_id, m.group(0).lower())
+    if d is None:
+        return {"error": "No such game for this club. Use a game_id from recent_games."}
+    d["scope"] = _scope_echo(basis="this one game, our players only")
+    return d
+
+
 _DISPATCH = {
     "find_players": _tool_find_players,
     "player_detail": _tool_player_detail,
@@ -710,6 +1063,10 @@ _DISPATCH = {
     "upcoming_fixtures": _tool_upcoming_fixtures,
     "opposition_report": _tool_opposition_report,
     "opponent_danger_players": _tool_opponent_danger_players,
+    "opponent_lineup": _tool_opponent_lineup,
+    "our_selected_xi": _tool_our_selected_xi,
+    "recent_games": _tool_recent_games,
+    "match_performances": _tool_match_performances,
 }
 
 
@@ -720,6 +1077,36 @@ _DISPATCH = {
 # typed params don't know cache_control on a system block, but the SDK forwards
 # unknown dict keys to the API unchanged (the same pass-through the scorecard
 # reader's PDF document blocks already rely on), so the plain dict works.
+MAX_CLARIFY_OPTIONS = 5
+
+
+def _clarify_from(args) -> dict | None:
+    """A clean ``{question, options[{label, value}]}`` from an ask_user call, or
+    None when it isn't a usable question (so the loop carries on rather than
+    showing a dead-end with fewer than two buttons)."""
+    if not isinstance(args, dict):
+        return None
+    question = strip_em_dashes(str(args.get("question") or "").strip())[:240]
+    options: list[dict] = []
+    seen: set[str] = set()
+    for raw in (args.get("options") or [])[:MAX_CLARIFY_OPTIONS * 2]:
+        if isinstance(raw, str):
+            raw = {"label": raw}
+        if not isinstance(raw, dict):
+            continue
+        label = strip_em_dashes(str(raw.get("label") or "").strip())[:60]
+        if not label or label.lower() in seen:
+            continue
+        seen.add(label.lower())
+        value = strip_em_dashes(str(raw.get("value") or "").strip())[:200] or label
+        options.append({"label": label, "value": value})
+        if len(options) == MAX_CLARIFY_OPTIONS:
+            break
+    if not question or len(options) < 2:
+        return None
+    return {"question": question, "options": options}
+
+
 _SYSTEM_BLOCKS = [{"type": "text", "text": _SYSTEM, "cache_control": {"type": "ephemeral"}}]
 
 
@@ -774,6 +1161,9 @@ async def answer(
     # tells it who/what the thread is about. Clipped and capped so the context
     # stays small, and validated here so a malformed client body can't poison it.
     messages: list = []
+    # A thread asks at most one clarifying question: when the previous turn WAS
+    # one, this call isn't offered ask_user, so the user's pick gets an answer.
+    last_clarified = False
     for turn in (history or [])[-MAX_HISTORY_TURNS:]:
         if not isinstance(turn, dict):
             continue
@@ -781,27 +1171,41 @@ async def answer(
         prev_a = str(turn.get("answer") or "").strip()[:1500]
         if not prev_q:
             continue
+        last_clarified = bool(turn.get("clarified"))
         messages.append({"role": "user", "content": prev_q})
         messages.append({"role": "assistant", "content": prev_a or "(no answer)"})
     messages.append({"role": "user", "content": f"Club: {club_name}\nQuestion: {question.strip()[:600]}"})
 
+    tools = [t for t in TOOLS if t["name"] != "ask_user"] if last_clarified else TOOLS
     try:
         for _ in range(MAX_STEPS):
             resp = await client.messages.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
                 system=_SYSTEM_BLOCKS,
-                tools=TOOLS,
+                tools=tools,
                 messages=messages,
             )
             if resp.stop_reason != "tool_use":
                 return _answer_from(resp, empty_msg="I couldn't put an answer together, try rephrasing.")
 
+            # The model wants to ask rather than answer: end the turn with the
+            # question and its buttons. Nothing else it called this step runs.
+            ask = next((b for b in resp.content if b.type == "tool_use" and b.name == "ask_user"), None)
+            if ask is not None:
+                clarify = _clarify_from(ask.input)
+                if clarify:
+                    return {"available": True, "answer": clarify["question"], "clarify": clarify}
+
             messages.append({"role": "assistant", "content": resp.content})
             results = []
             for block in resp.content:
                 if block.type == "tool_use":
-                    out = await _run_tool(org_id, block.name, block.input)
+                    if block.name == "ask_user":
+                        # Reached only when the question wasn't usable (see above).
+                        out = {"error": "That wasn't a usable question. Answer with your best reading and say what you assumed."}
+                    else:
+                        out = await _run_tool(org_id, block.name, block.input)
                     results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(out, default=str)})
             messages.append({"role": "user", "content": results})
 

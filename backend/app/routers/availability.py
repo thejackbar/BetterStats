@@ -14,6 +14,7 @@ import re
 import secrets
 import uuid
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,11 +22,23 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_SELECTIONS, SELECT_ANY, SELECT_AVAILABILITY, SELECT_SQUADS, require_any_cap,
+)  # BetterSelect item permissions
+from app.auth.capabilities import (
+    MANAGE_SELECTIONS, require_cap,
+)  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import (
     Fixture, PlayerAvailability, PlayerAvailabilityPeriod, Organisation, Player, User, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
+from app.services import player_dashboard, squad_sides
+from app.services import dormancy
+from app.services.grade_labels import categories_for_name, org_grade_category_sets
+from app.services.junior_fixtures import junior_fixture_ids
+from app.services.name_format import name_sort_key
+from app.services.squad_next_game import fixture_has_started, squad_next_games
 
 router = APIRouter(prefix="/availability", tags=["availability"])
 
@@ -80,7 +93,8 @@ async def dormant_player_ids(db: AsyncSession, club: Organisation) -> set[uuid.U
         for pid, lp in fb.fetchall():
             if lp and (last.get(pid) is None or lp > last[pid]):
                 last[pid] = lp
-    return {pid for pid, lp in last.items() if lp and lp < cutoff}
+    cleared = await dormancy.cleared_map(db, club.id)
+    return {pid for pid, lp in last.items() if dormancy.is_dormant(lp, cleared.get(pid), cutoff)}
 
 
 async def club_player_roster(db: AsyncSession, club: Organisation) -> list[Player]:
@@ -95,7 +109,8 @@ async def club_player_roster(db: AsyncSession, club: Organisation) -> list[Playe
         .where(Player.organisation_id == club.id, Player.is_player.is_(True))
         .order_by(func.coalesce(Player.display_name_override, Player.name))
     )
-    return list(res.scalars().all())
+    # Surname order: a free-text "First Last" override sorts by first name in SQL.
+    return sorted(res.scalars().all(), key=lambda p: name_sort_key(p.display_name))
 
 
 async def active_self_service_players(db: AsyncSession, club: Organisation) -> list[Player]:
@@ -158,42 +173,159 @@ async def _owned_player_ids(db: AsyncSession, club_id) -> set:
     return {r[0] for r in res.fetchall()}
 
 
-async def upcoming_fixtures_by_date(db: AsyncSession, club_id) -> dict[str, list[dict]]:
+def local_now(tz: Optional[str]) -> Optional[datetime]:
+    """Naive local time in the viewer's IANA timezone, or None when none was
+    given or it is not one. None keeps today's behaviour (date only)."""
+    if not tz or len(tz) > 64:
+        return None
+    try:
+        return datetime.now(ZoneInfo(tz)).replace(tzinfo=None)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return None
+
+
+async def upcoming_fixtures_by_date(
+    db: AsyncSession, club_id, with_scope: bool = False, with_detail: bool = False,
+    now_local: Optional[datetime] = None, hide_juniors: bool = False,
+) -> dict[str, list[dict]]:
     """{date_iso: [fixture entries]} for every upcoming club fixture.
 
     Dates are the union of each fixture's played_on and end_on; a two-day game
     appears under both its dates (role 'day1'/'day2'), a one-day game under its
     single date ('single'). Shared by the admin matrix and the player-facing
     self-service page so both agree on which dates are collectable.
+
+    `with_scope` adds the fixture's `team_id` and `grade_id`. Only the admin
+    matrix asks: the self-service page is unauthenticated and has no use for
+    them. `with_detail` adds `start_time` and `venue` for the self-service page.
+
+    `now_local` (the viewer's local time, from `local_now`) drops every game that
+    has started or whose start time has passed, so availability moves on to the
+    next game. Left None, only whole past dates drop, as before.
+
+    `hide_juniors` drops every fixture whose grade Manage Grades calls junior
+    (services/junior_fixtures.py), and with it any date that only juniors play.
     """
     fx_res = await db.execute(
         select(Fixture)
-        .where(Fixture.organisation_id == club_id, Fixture.played_on >= date.today())
+        .where(
+            Fixture.organisation_id == club_id,
+            # A two-day game whose first day has gone still has its second to answer.
+            or_(
+                Fixture.played_on >= (now_local.date() if now_local else date.today()),
+                Fixture.end_on >= (now_local.date() if now_local else date.today()),
+            ),
+            Fixture.status != "CANCELLED",
+        )
         .order_by(Fixture.played_on.asc().nullslast(), Fixture.start_time.asc().nullslast())
     )
     fixtures = fx_res.scalars().all()
+    junior_ids = await junior_fixture_ids(db, club_id, fixtures) if hide_juniors else set()
     by_date: dict[str, list[dict]] = {}
+    today = now_local.date() if now_local else date.today()
     for f in fixtures:
+        if str(f.id) in junior_ids:
+            continue
+        two_day = bool(f.played_on and f.end_on and f.end_on > f.played_on)
         spans = []
         if f.played_on:
-            spans.append((f.played_on, "day1" if f.end_on and f.end_on != f.played_on else "single"))
-        if f.end_on and f.end_on != f.played_on:
+            spans.append((f.played_on, "day1" if two_day else "single"))
+        if two_day:
             spans.append((f.end_on, "day2"))
         for d, role in spans:
-            by_date.setdefault(d.isoformat(), []).append({
+            if d < today:
+                continue
+            # Each day is judged on its own clock: a game's status says it is
+            # under way, which is true of day 1 and says nothing about day 2.
+            if role == "day2":
+                if fixture_has_started(None, d, f.start_time, now_local):
+                    continue
+            elif fixture_has_started(f.status, f.played_on, f.start_time, now_local):
+                continue
+            entry = {
                 "id": str(f.id),
                 "label": f.label,
                 "opponent_name": f.opponent_name,
                 "home_away": f.home_away,
                 "role": role,
                 "two_day": role in ("day1", "day2"),
-            })
+            }
+            if role in ("day1", "day2"):
+                # Both days, so a screen can say "week 1 of 2" and link the pair.
+                entry["day1"] = f.played_on.isoformat()
+                entry["day2"] = f.end_on.isoformat()
+            if with_scope:
+                entry["team_id"] = str(f.team_id) if f.team_id else None
+                entry["grade_id"] = str(f.grade_id) if f.grade_id else None
+            if with_detail:
+                entry["start_time"] = f.start_time
+                entry["venue"] = f.venue
+            by_date.setdefault(d.isoformat(), []).append(entry)
     return by_date
 
 
-async def _upsert(db: AsyncSession, item: AvailabilitySet, club_id, user_id, player_ids: set) -> None:
+def allow_maybe(club) -> bool:
+    """Whether the club records "Maybe". True unless the club switched it off."""
+    return getattr(club, "availability_allow_maybe", True) is not False
+
+
+MAYBE_OFF = "Maybe is switched off for this club. Record Available or Unavailable."
+
+
+@router.get("/config", dependencies=[Depends(require_any_cap(*SELECT_ANY))])
+async def availability_config(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(get_current_user),
+):
+    """The few club settings every BetterSelect screen needs: whether Maybe is
+    offered, the half-available colours, how far back the pools reach, the
+    per-team starting filters, and the club's squads in XI order (so "top 3
+    squads" can be worked out where the pool is)."""
+    from app.services import selection_rules as rules_svc
+    cfg = rules_svc.club_config(club)
+    rows = (await db.execute(
+        text("SELECT id, name, sequence FROM teams WHERE organisation_id = :org AND is_active "
+             "ORDER BY (sequence IS NULL OR sequence <= 0), sequence, name"),
+        {"org": club.id},
+    )).fetchall()
+    return {
+        "allow_maybe": allow_maybe(club),
+        "half_colours": cfg["half_colours"],
+        "week_names": cfg["week_names"],
+        "played_years": cfg["played_years"],
+        "team_defaults": cfg["team_defaults"],
+        "squads": [{"id": str(i), "name": (n or "").strip(), "sequence": q} for i, n, q in rows],
+    }
+
+
+_AVAIL_WORD = {"AVAILABLE": "Available", "UNAVAILABLE": "Unavailable", "MAYBE": "Maybe", "NO_RESPONSE": "No response"}
+
+
+async def audit_availability(db: AsyncSession, club_id, player_id, on_date, old, new, note, self_service: bool = False) -> None:
+    """One audit_events row for a recorded answer: who, which player, which date, from what to what."""
+    from app.services import player_audit
+    if (old or "NO_RESPONSE") == new and not note:
+        return
+    pname = await player_audit.player_name(db, player_id)
+    when = on_date.strftime("%a %-d %b")
+    was = f" (was {_AVAIL_WORD.get(old or 'NO_RESPONSE', old)})" if old and old != new else ""
+    tail = f" - {note}" if note else ""
+    await player_audit.record(
+        db, club_id=club_id, area="availability", action="availability_set",
+        summary=f"{pname} marked {_AVAIL_WORD.get(new, new)} for {when}{was}{tail}",
+        player_id=player_id, player_name_=pname,
+        detail={"date": on_date.isoformat(), "from": old, "to": new, "note": note},
+        # The player's own answer through their link names the player, not a user.
+        **({"user": None, "via": "player link", "by": pname} if self_service else {}),
+    )
+
+
+async def _upsert(db: AsyncSession, item: AvailabilitySet, club_id, user_id, player_ids: set, club=None) -> None:
     if item.status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {item.status}")
+    if item.status == "MAYBE" and club is not None and not allow_maybe(club):
+        raise HTTPException(status_code=400, detail=MAYBE_OFF)
     pid = uuid.UUID(item.player_id)
     if pid not in player_ids:
         raise HTTPException(status_code=404, detail="Player not found")
@@ -204,6 +336,8 @@ async def _upsert(db: AsyncSession, item: AvailabilitySet, club_id, user_id, pla
         )
     )
     row = res.scalar_one_or_none()
+    old_status = row.status if row else None
+    await audit_availability(db, club_id, pid, item.date, old_status, item.status, item.note)
     if row:
         row.status = item.status
         row.note = item.note
@@ -267,8 +401,10 @@ async def resolve_period_statuses(
     return out
 
 
-@router.get("/matrix")
+@router.get("/matrix", dependencies=[Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS))])
 async def availability_matrix(
+    tz: Optional[str] = None,
+    juniors: bool = False,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
@@ -277,8 +413,22 @@ async def availability_matrix(
     Dates are the union of every upcoming fixture's played_on and end_on. Each
     date lists the fixtures occurring that day; a two-day game appears under
     both its dates (role 'day1'/'day2'), a one-day game under its single date.
+
+    `squad_next` is each squad's own next game ({team_id: {date, scope, ...}}),
+    so the Squads board reads a squad's availability against ITS next game and
+    not the club's first date. See services/squad_next_game.py.
+
+    Junior grades (per Manage Grades) are left out unless `juniors=true`.
     """
-    by_date = await upcoming_fixtures_by_date(db, club.id)
+    by_date = await upcoming_fixtures_by_date(
+        db, club.id, with_scope=True, now_local=local_now(tz), hide_juniors=not juniors,
+    )
+    # A squad may cover several teams (migration 336): its next game is the
+    # earliest of any of their grades.
+    sq_sides = await squad_sides.load(db, club.id)
+    squad_next = squad_next_games(
+        by_date, [(tid, (sq_sides.grade_ids(tid) or None)) for tid in sq_sides.squads],
+    )
 
     # All real players (not just status=active): the frontend filter bar decides
     # what to show. We hand back enough per-player signal — manual status, plus
@@ -292,7 +442,7 @@ async def availability_matrix(
         )
         .order_by(func.coalesce(Player.display_name_override, Player.name))
     )
-    players = pl_res.scalars().all()
+    players = sorted(pl_res.scalars().all(), key=lambda p: name_sort_key(p.display_name))
 
     # Recency + squad derivation from appearance history (no schema needed).
     # "dormant" = has played before but not within the club's dormancy window —
@@ -395,6 +545,9 @@ async def availability_matrix(
     from app.services.selection_pool import club_rule_context
     rules = await club_rule_context(db, club, players)
 
+    all_squads = sorted({s for names in squads_map.values() for s in names})
+    squad_meta = await _squad_meta(db, club.id, sq_sides, all_squads)
+
     return {
         "dates": [
             {"date": d, "fixtures": by_date[d]}
@@ -405,12 +558,86 @@ async def availability_matrix(
             for p in players
         ],
         "availability": avail_map,
-        "all_squads": sorted({s for names in squads_map.values() for s in names}),
+        "all_squads": all_squads,
+        # Per squad name: is it switched off, is it a junior side. Lets the
+        # Squad filter offer only the squads worth picking.
+        "squad_meta": squad_meta,
         "dormancy_months": months,
+        "squad_next": squad_next,
         # Empty for a club that has written no rules, which is what keeps the
         # roster and the matrix looking exactly as they did.
         "rules": {"active": rules.active, "applied": rules.rules},
     }
+
+
+async def _squad_meta(db: AsyncSession, club_id, sq_sides, names: list[str]) -> dict[str, dict]:
+    """``{squad name: {active, junior}}`` for the names the Squad filter lists.
+
+    A name is either one of the club's squads (a team) or a team name read off
+    appearance history. A switched-off team is not active. Junior is Manage
+    Grades' answer (as for fixtures, services/junior_fixtures.py): a squad's own
+    grades first, else its name. It fails open: a name that does not read as
+    junior is not junior.
+    """
+    categories = await org_grade_category_sets(db, club_id)
+    by_name = {sq.name.strip(): sq for sq in sq_sides.squads.values()}
+    out: dict[str, dict] = {}
+    for name in names:
+        sq = by_name.get(name)
+        probes = (sq_sides.grade_names(sq.id) if sq else []) or [name]
+        out[name] = {
+            "active": sq.is_active if sq else True,
+            "junior": any("junior" in categories_for_name(categories, g) for g in probes),
+        }
+    return out
+
+
+class DormancyBody(BaseModel):
+    # True: "no longer dormant" (the player is back). False: dormant again.
+    active: bool
+
+
+@router.put("/players/{player_id}/dormancy")
+async def set_dormancy(
+    player_id: str,
+    body: DormancyBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, SELECT_SQUADS, MANAGE_SELECTIONS)),
+):
+    """Mark a long-absent player "no longer dormant", or undo it.
+
+    Sets ``players.dormancy_cleared_on`` to today (None to undo), which counts as
+    a last-active date for the dormancy test and nothing else
+    (services/dormancy.py): the player shows in availability, the squads board,
+    selection and the self-service list in the weeks before their first game, and
+    goes dormant again by itself if they never play. Their last-played date is
+    never touched. Audited, and a person can reverse it.
+    """
+    from app.services import player_audit  # as set_availability does
+    try:
+        pid = uuid.UUID(player_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Player not found")
+    player = await db.get(Player, pid)
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+    before = player.dormancy_cleared_on
+    player.dormancy_cleared_on = date.today() if body.active else None
+    # A swallowed audit error is rolled back inside record(); read what the
+    # reply needs first so nothing is a lazy load afterwards.
+    name = player.display_name
+    cleared_on = player.dormancy_cleared_on
+    await player_audit.record(
+        db, club_id=club.id, area="availability",
+        action="dormancy_cleared" if body.active else "dormancy_restored",
+        summary=f"{name} marked no longer dormant" if body.active else f"{name} marked dormant again",
+        player_id=pid, player_name_=name,
+        detail={"before": before.isoformat() if before else None,
+                "after": cleared_on.isoformat() if cleared_on else None},
+    )
+    await db.commit()
+    return {"player_id": str(pid), "dormancy_cleared_on": cleared_on.isoformat() if cleared_on else None}
 
 
 def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set], cutoff: date,
@@ -419,7 +646,7 @@ def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set],
     # they've played but not since the cutoff. Never-played players are neither
     # (e.g. a freshly-added manual player with no appearance history yet).
     manual_inactive = p.status == "inactive"
-    dormant = bool(last_played) and last_played < cutoff
+    dormant = dormancy.is_dormant(last_played, p.dormancy_cleared_on, cutoff)
     return {
         "id": str(p.id),
         "display_name": p.display_name,
@@ -428,6 +655,9 @@ def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set],
         "player_role": p.player_role,
         "status": p.status,
         "last_played": last_played.isoformat() if last_played else None,
+        # The day a club said this player is back (services/dormancy.py). The
+        # screens judge "still around" on the later of this and last_played.
+        "dormancy_cleared_on": p.dormancy_cleared_on.isoformat() if p.dormancy_cleared_on else None,
         "squads": sorted(squads) if squads else [],
         "is_inactive": manual_inactive,
         "is_dormant": dormant and not manual_inactive,
@@ -453,10 +683,10 @@ async def set_availability(
     body: AvailabilitySet,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
     player_ids = await _owned_player_ids(db, club.id)
-    await _upsert(db, body, club.id, user.id, player_ids)
+    await _upsert(db, body, club.id, user.id, player_ids, club)
     await db.commit()
     return {"status": "ok"}
 
@@ -466,16 +696,16 @@ async def set_availability_bulk(
     body: AvailabilityBulk,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
     player_ids = await _owned_player_ids(db, club.id)
     for item in body.items:
-        await _upsert(db, item, club.id, user.id, player_ids)
+        await _upsert(db, item, club.id, user.id, player_ids, club)
     await db.commit()
     return {"status": "ok", "count": len(body.items)}
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS))])
 async def list_for_date(
     on: date,
     db: AsyncSession = Depends(get_db),
@@ -511,7 +741,7 @@ async def list_for_date(
     return out
 
 
-@router.get("/periods")
+@router.get("/periods", dependencies=[Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS))])
 async def list_periods(
     include_past: bool = False,
     db: AsyncSession = Depends(get_db),
@@ -551,10 +781,12 @@ async def create_period(
     body: PeriodCreate,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
     if body.status not in PERIOD_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
+    if body.status == "MAYBE" and not allow_maybe(club):
+        raise HTTPException(status_code=400, detail=MAYBE_OFF)
     if body.end_date and body.end_date < body.start_date:
         raise HTTPException(status_code=400, detail="End date is before start date")
     try:
@@ -573,6 +805,14 @@ async def create_period(
         recorded_by=user.id,
     )
     db.add(period)
+    from app.services import player_audit
+    pname = await player_audit.player_name(db, pid)
+    rng = body.start_date.strftime("%-d %b") + (f" to {body.end_date.strftime('%-d %b')}" if body.end_date else " onwards")
+    await player_audit.record(
+        db, club_id=club.id, area="availability", action="availability_period_added",
+        summary=f"{pname} marked {_AVAIL_WORD.get(body.status, body.status)} {rng}" + (f" - {period.reason}" if period.reason else ""),
+        player_id=pid, player_name_=pname,
+        detail={"start": body.start_date.isoformat(), "end": body.end_date.isoformat() if body.end_date else None, "status": body.status})
     await db.commit()
     await db.refresh(period)
     return {"status": "ok", "id": period.id}
@@ -583,7 +823,7 @@ async def delete_period(
     period_id: int,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
     res = await db.execute(
         select(PlayerAvailabilityPeriod).where(
@@ -594,6 +834,12 @@ async def delete_period(
     period = res.scalar_one_or_none()
     if not period:
         raise HTTPException(status_code=404, detail="Period not found")
+    from app.services import player_audit
+    pname = await player_audit.player_name(db, period.player_id)
+    await player_audit.record(
+        db, club_id=club.id, area="availability", action="availability_period_removed",
+        summary=f"{pname}: {_AVAIL_WORD.get(period.status, period.status)} period from {period.start_date.strftime('%-d %b')} removed",
+        player_id=period.player_id, player_name_=pname)
     await db.delete(period)
     await db.commit()
     return {"status": "ok"}
@@ -608,6 +854,11 @@ async def delete_period(
 class SelfServiceUpdate(BaseModel):
     enabled: Optional[bool] = None
     require_pin: Optional[bool] = None
+    show_squad: Optional[bool] = None
+    allow_maybe: Optional[bool] = None
+    # The modules on a player's own page, in order. An empty list is a real
+    # choice (everything off); only None means "not sent".
+    dashboard_modules: Optional[list[str]] = None
 
 
 async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
@@ -616,6 +867,11 @@ async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
     return {
         "enabled": bool(club.availability_self_service_enabled),
         "require_pin": bool(club.availability_require_pin),
+        "show_squad": bool(club.availability_show_squad),
+        "allow_maybe": allow_maybe(club),
+        # Every module the page can show, with whether this club has it on and
+        # why it cannot be (a missing module, or a switch it depends on).
+        "dashboard_modules": player_dashboard.catalogue_for(club),
         "token": club.availability_link_token,
         # The link is a frontend route; the admin UI prefixes its own origin.
         "path": f"/avail/{club.availability_link_token}" if club.availability_link_token else None,
@@ -623,7 +879,7 @@ async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
     }
 
 
-@router.get("/self-service")
+@router.get("/self-service", dependencies=[Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS))])
 async def get_self_service(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -638,12 +894,19 @@ async def update_self_service(
     body: SelfServiceUpdate,
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
-    """Enable/disable the link and/or flip the PIN requirement. Enabling for the
-    first time mints a token if the club doesn't have one yet."""
+    """Enable/disable the link, flip the PIN requirement and/or whether players
+    are shown their squad. A key that is not sent leaves its setting alone.
+    Enabling for the first time mints a token if the club doesn't have one yet."""
     if body.require_pin is not None:
         club.availability_require_pin = bool(body.require_pin)
+    if body.show_squad is not None:
+        club.availability_show_squad = bool(body.show_squad)
+    if body.allow_maybe is not None:
+        club.availability_allow_maybe = bool(body.allow_maybe)
+    if body.dashboard_modules is not None:
+        club.player_dashboard_modules = player_dashboard.store(body.dashboard_modules)
     if body.enabled is not None:
         club.availability_self_service_enabled = bool(body.enabled)
         if body.enabled and not club.availability_link_token:
@@ -657,7 +920,7 @@ async def update_self_service(
 async def regenerate_self_service(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+    user: User = Depends(require_any_cap(SELECT_AVAILABILITY, MANAGE_SELECTIONS)),
 ):
     """Rotate the token — the old link/QR stops working immediately."""
     club.availability_link_token = secrets.token_urlsafe(24)

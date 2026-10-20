@@ -91,6 +91,8 @@ async def main() -> int:
         await conn.execute(text("DROP SCHEMA public CASCADE"))
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # fee_members.member_category is added by a raw-SQL migration, not by the
         # ORM model, so create_all does not produce it — and the shipped route
         # body runs reconcile_contacts_from_directory, which selects it. The

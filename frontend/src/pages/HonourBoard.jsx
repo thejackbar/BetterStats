@@ -7,6 +7,7 @@ import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
 import { Label, PageHeader, PbSpinner } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
+import { useSectionNames } from '../lib/sectionNames'
 
 // A board per role the club has recorded somebody in — President, Secretary,
 // Club Coach and the rest — each a list of who held it and when, read out of
@@ -43,6 +44,7 @@ function Years({ spans }) {
 
 export default function HonourBoard() {
   const { clubSlug } = useParams()
+  const sec = useSectionNames(clubSlug)
   const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
   const fmt = useNameFormat(club)
@@ -66,6 +68,9 @@ export default function HonourBoard() {
     [groups])
   const key = (b) => `${b.group}|${b.role}`
   const current = boards.find(b => key(b) === sel) || boards[0]
+  // Life Members is one award per person with the year it was given, so the
+  // years column says "Awarded" and a seasons tally (always 1) is left off.
+  const isLife = current?.group === 'Life Members'
 
   if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
@@ -75,8 +80,8 @@ export default function HonourBoard() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <PageHeader
-          eyebrow={`HONOUR BOARD · ${club?.name?.toUpperCase() || ''}`}
-          title="Who ran the club."
+          eyebrow={sec.renamed('honour_board') ? (club?.name?.toUpperCase() || '') : `HONOUR BOARD · ${club?.name?.toUpperCase() || ''}`}
+          title={sec.name('honour_board', "Who ran the club.")}
           meta={[<span key="x">Every role the club has kept a record of, and who held it.</span>]}
         />
 
@@ -145,13 +150,16 @@ export default function HonourBoard() {
                   <Label style={{ color: 'var(--pb-accent)' }}>{current.role}</Label>
                   <span className="sm:ml-auto font-mono text-[11px] text-pb-faint">
                     {current.group} · {current.holder_count} {current.holder_count === 1 ? 'person' : 'people'}
+                    {/* Said only when the club chose an order; the standard one needs no note. */}
+                    {current.sort === 'oldest' && ' · oldest first'}
+                    {current.sort === 'manual' && ' · in the club\u2019s order'}
                   </span>
                 </div>
                 <table className="w-full text-[13px]">
                   <thead className="pb-hairline-b">
                     <tr>
                       <th className="px-4 sm:px-5 py-2 text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint">Name</th>
-                      <th className="px-4 sm:px-5 py-2 text-right font-mono text-[10px] tracking-wide2 uppercase text-pb-faint">Years</th>
+                      <th className="px-4 sm:px-5 py-2 text-right font-mono text-[10px] tracking-wide2 uppercase text-pb-faint">{isLife ? 'Awarded' : 'Years'}</th>
                       {/* The season tally is the least of the three and the
                           first to go when there is no room for it. */}
                       {/* `sm:table-cell` is NOT usable here: index.css
@@ -160,7 +168,9 @@ export default function HonourBoard() {
                           Tailwind's display utility of that name and quietly
                           restyles the cell. The arbitrary-property form
                           generates a different class and so does not. */}
-                      <th className="hidden sm:[display:table-cell] px-5 py-2 text-right font-mono text-[10px] tracking-wide2 uppercase text-pb-faint">Seasons</th>
+                      {!isLife && (
+                        <th className="hidden sm:[display:table-cell] px-5 py-2 text-right font-mono text-[10px] tracking-wide2 uppercase text-pb-faint">Seasons</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -180,7 +190,9 @@ export default function HonourBoard() {
                         <td className="px-4 sm:px-5 py-2 text-right font-mono whitespace-nowrap">
                           <Years spans={h.spans} />
                         </td>
-                        <td className="hidden sm:[display:table-cell] px-5 py-2 text-right font-mono text-pb-dim">{h.seasons}</td>
+                        {!isLife && (
+                          <td className="hidden sm:[display:table-cell] px-5 py-2 text-right font-mono text-pb-dim">{h.seasons}</td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

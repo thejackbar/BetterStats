@@ -14,6 +14,7 @@ the numbers match the rest of the app exactly. Org-scoping for the club-wide
 from __future__ import annotations
 
 import json
+import logging
 import math
 import statistics
 
@@ -32,8 +33,10 @@ from app.services.aggregations import (
     get_player_by_venue,
     get_season_by_season,
     get_upcoming_milestones_for_org,
+    raise_games_to_grid_total,
 )
 from app.services import milestone_rules
+from app.services.session_safety import rollback_keeping
 from app.services.grade_scope import resolve_scope_for_player
 from app.services import iq_filters
 from app.services.iq_filters import (
@@ -519,11 +522,23 @@ async def player_trend(
     batting = await get_career_batting(session, player_id, scope=scope_obj)
     bowling = await get_career_bowling(session, player_id, scope=scope_obj)
     fielding = await get_career_fielding(session, player_id, scope=scope_obj)
+    # The matches figure the player's own profile shows (raised to the by-grade grid, never
+    # lower), so the "matches" milestone and the games rate here agree with their page. Not
+    # when a grade was picked: no scope was resolved then, and the figures are that grade's.
+    if not grade_id:
+        try:
+            await raise_games_to_grid_total(
+                session, player_id, org_id, None, scope_obj, batting, bowling, fielding)
+        except Exception:
+            await rollback_keeping(session)
+            logging.getLogger(__name__).exception("iq trend games vs profile failed for player %s", player_id)
 
     # Next milestones from career totals.
+    scheme = await milestone_rules.load_scheme(session, org_id)
+
     def _milestone(mt: str, category: str, current: int | None):
         cur = int(current or 0)
-        target = milestone_rules.next_threshold(mt, cur)
+        target = milestone_rules.next_threshold(mt, cur, scheme)
         if not target:
             return None
         return {"type": mt, "category": category, "current": cur,

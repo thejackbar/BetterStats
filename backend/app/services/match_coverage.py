@@ -12,9 +12,11 @@ So picking a competition, a grade type or a format can move the matches figure
 in either direction, and the per-competition figures do not sum to the career
 total. Measured across the platform (95,151 players): the two sources agree
 for 41%, we hold more than CA counts for 20% (worst +221) and CA counts more
-than we hold for 39% (worst -484). Neither is wrong and neither can be made to
-follow the other without renumbering tens of thousands of careers, so the
-figures stay as they are and the page says why they differ.
+than we hold for 39% (worst -484). Neither is wrong, so this module reports
+both and the page says why they differ. (v9.110.13: the profile HEADER is no
+longer pure CA. It is raised to the Analysis grid's per season and grade total
+when that is higher, `aggregations.raise_games_to_grid_total`; `career_matches`
+here stays CA's own figure.)
 
 **A MATCH WITH NO SCORECARD IS NOT AN UNASSIGNED MATCH.** The obvious reading
 is that the shortfall is games sitting in a grade nobody grouped, which an

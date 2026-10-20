@@ -18,13 +18,13 @@ const BASE = process.env.BASE || 'http://127.0.0.1:5199'
 const EXECUTABLE = process.env.PW_CHROMIUM || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
 
 const ALL = [
-  'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10',
+  'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11',
   'C1', 'C2', 'C3', 'C4',
   'RS1', 'RS2', 'RS3', 'RS4', 'RS5', 'RS6',
   'FX1', 'FX2', 'FX3', 'FX4', 'FX5', 'FX6',
   'RR1', 'RR2', 'RR3', 'RR4', 'RR5', 'RR6', 'RR7',
   'SC1', 'SC2', 'SC3',
-  'EV1', 'EV2', 'EV3', 'EV4', 'EV5', 'EV6', 'EV7', 'EV8', 'EV9', 'EV10', 'EV11',
+  'EV1', 'EV2', 'EV3', 'EV4', 'EV5', 'EV6', 'EV7', 'EV8', 'EV9', 'EV10', 'EV11', 'EL1', 'EL2', 'EL3',
   'BL1',
 ]
 const IDS = ONLY.length ? ONLY : ALL

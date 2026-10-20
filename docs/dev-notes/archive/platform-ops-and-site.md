@@ -304,3 +304,16 @@ Push to this branch AND to `main` via MCP after each change.
 - `stats["player_seasons"]` in sync is `len(player_data)` summed across seasons, i.e. player-season records, not unique players. With 52 seasons × ~3.4 avg seasons/player ≈ 5326 (which Applecross actually shows). Renamed from `stats["players"]` to match what it counts.
 
 <!-- END original CLAUDE.md L12812-12819 -->
+
+## v9.108.4: privacy policy rewrite (2026-10-08)
+
+`frontend/src/pages/marketing/Privacy.jsx` was rewritten to the owner's supplied text, same layout. It now describes the per-person "removed at the person's request" behaviour (hidden at every club, name shown as `********`, club emails stopped, profile kept from coming back) and its limits. The old APP/Privacy Act sentence and the separate OAIC "Complaints" section are not in the supplied text, so they are gone; put them back if the adviser wants them.
+
+
+## v9.124.3.2 (2026-10-20): club pages add to the iOS home screen as the club
+
+Adding a club page to an iPhone home screen opened betterat.cricket, because the one static manifest had `start_url: "/"`. Added `GET /clubs/{slug}/manifest` (club name, short name, theme colour, logo, `start_url` `/{slug}`; a PIN-locked or blocked club gets the start_url only with BetterCricket defaults, since manifest fetches carry no cookies) and `setManifest` in `lib/favicon.js`, called from `FaviconManager`. Not run in the sandbox (no Python or Node dependencies installed); needs a check on a real iPhone after deploy, because Safari reads the manifest link when Add to Home Screen is tapped.
+
+## v9.124.4.1 (2026-10-20): the manifest link is set in the HTML, not by JavaScript
+
+v9.124.3.2 swapped the manifest link from React, and an iPhone still showed BetterCricket and https://betterat.cricket/ in the Add to Home Screen sheet, because iOS reads the link as the page loads. nginx now rewrites `href="/site.webmanifest"` in `index.html` per request (`map $request_uri $manifest_href`, `sub_filter` inside `location = /index.html`). Tested with a local nginx 1.24 against the real `index.html`: club slug and club sub-pages get `/api/clubs/{slug}/manifest`; `/`, reserved roots and `/index.html` keep the static file. The sheet's URL field is read-only on iOS whenever Open as Web App is on; the URL shown is the manifest `start_url`.

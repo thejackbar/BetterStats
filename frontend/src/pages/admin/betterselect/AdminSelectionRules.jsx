@@ -622,9 +622,11 @@ function BoardSettingsCard({ settings, onSave, canEdit }) {
         select_show_age: !!form.select_show_age,
         select_show_age_under: form.select_show_age_under ?? null,
         dormancy_months: Number(form.dormancy_months),
-        default_team_size: Number(form.default_team_size),
+        // Blank (a custom box cleared) falls back to 11; anything typed is kept to 0..30.
+        default_team_size: form.default_team_size === '' ? 11 : Math.min(30, Math.max(0, Math.floor(Number(form.default_team_size)) || 0)),
         show_fees: form.show_fees !== false,
         show_training: form.show_training !== false,
+        notify_captain_on_confirm: !!form.notify_captain_on_confirm,
       })
     } finally { setSaving(false) }
   }
@@ -684,6 +686,21 @@ function BoardSettingsCard({ settings, onSave, canEdit }) {
             fees or training still shows, because that one you asked for.
           </p>
         </div>
+        <div className="pt-4 pb-hairline-t">
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" className="accent-pb-accent mt-0.5 shrink-0" checked={!!form.notify_captain_on_confirm}
+              onChange={(e) => setForm((f) => ({ ...f, notify_captain_on_confirm: e.target.checked }))} />
+            <span className="leading-tight">
+              <span className="text-pb-text text-[13.5px]">Email the captain when a side is confirmed</span>
+              <span className={`${HINT} block mt-0.5`}>
+                The captain gets the side in batting order with each player's mobile from their profile.
+                It needs a captain flagged in the side and an email address on the captain's profile.
+                A side the captain already has is not sent twice. You can also send it, or email the
+                players, yourself from the Email button on the Selection board.
+              </span>
+            </span>
+          </label>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2 pt-4 pb-hairline-t">
           <div>
             <label className={LABEL}>Dormant player window</label>
@@ -696,11 +713,25 @@ function BoardSettingsCard({ settings, onSave, canEdit }) {
           </div>
           <div>
             <label className={LABEL}>Default side size</label>
-            <select className={FIELD} value={form.default_team_size ?? 11}
-              onChange={(e) => setForm((f) => ({ ...f, default_team_size: Number(e.target.value) }))}>
-              {[[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-            <p className={HINT}>What a new team sheet opens on.</p>
+            {(() => {
+              const size = form.default_team_size ?? 11
+              const custom = size === '' || (size > 0 && ![11, 12, 13].includes(size))
+              return (
+                <div className="flex gap-2">
+                  <select className={FIELD} value={custom ? 'custom' : size}
+                    onChange={(e) => setForm((f) => ({ ...f, default_team_size: e.target.value === 'custom' ? 7 : Number(e.target.value) }))}>
+                    {[[11, '11'], [12, '12'], [13, '13'], [0, 'No limit']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    <option value="custom">Custom…</option>
+                  </select>
+                  {custom && (
+                    <input type="number" inputMode="numeric" min={1} max={30} value={size} aria-label="Custom side size, 1 to 30"
+                      onChange={(e) => setForm((f) => ({ ...f, default_team_size: e.target.value === '' ? '' : Math.min(30, Math.max(1, Math.floor(Number(e.target.value)) || 1)) }))}
+                      className={`${FIELD} w-20 shrink-0`} />
+                  )}
+                </div>
+              )
+            })()}
+            <p className={HINT}>What a new team sheet opens on. A team can have its own on the Selection board.</p>
           </div>
         </div>
         {canEdit && (
@@ -711,11 +742,118 @@ function BoardSettingsCard({ settings, onSave, canEdit }) {
   )
 }
 
+/* ── Selection emails: the club's own wording ────────────────────────────── */
+// The captain's email and the players' email can each be a BetterComms template
+// the club wrote in Admin > Comms > Templates. Unset means our standard wording.
+const EMAIL_SLOTS = [
+  ['captain', 'captain_email_template_id', 'The captain\'s email', 'Sent to the captain of a confirmed side. It can include the team sheet with every player\'s mobile.'],
+  ['players', 'player_email_template_id', 'The players\' email', 'Sent to each selected player. It never carries anyone\'s phone number.'],
+]
+
+function EmailTemplatesCard({ settings, onSave, canEdit }) {
+  const [info, setInfo] = useState(null)             // { comms_available, templates, variables }
+  const [form, setForm] = useState({})
+  const [saving, setSaving] = useState(false)
+  const [preview, setPreview] = useState(null)       // { to, subject, html } | { to, error }
+  const [previewing, setPreviewing] = useState(null)
+  useEffect(() => {
+    api.bsSelectionEmailTemplates().then(setInfo).catch(() => setInfo({ comms_available: false, templates: [], variables: [] }))
+  }, [])
+  useEffect(() => {
+    setForm({
+      captain_email_template_id: settings.captain_email_template_id || '',
+      player_email_template_id: settings.player_email_template_id || '',
+    })
+  }, [settings.captain_email_template_id, settings.player_email_template_id])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      // null clears a link; an id sets it.
+      await onSave({
+        captain_email_template_id: form.captain_email_template_id || null,
+        player_email_template_id: form.player_email_template_id || null,
+      })
+    } finally { setSaving(false) }
+  }
+  const showPreview = async (to, templateId) => {
+    setPreviewing(to)
+    try {
+      const r = await api.bsPreviewSelectionEmailTemplate(templateId, to)
+      setPreview({ to, subject: r.subject, html: r.html })
+    } catch (e) { setPreview({ to, error: e.message }) }
+    finally { setPreviewing(null) }
+  }
+
+  if (!info) return null
+  const templates = info.templates || []
+  const dirty = EMAIL_SLOTS.some(([, key]) => (form[key] || '') !== (settings[key] || ''))
+  return (
+    <Card>
+      <SectionHead title="Selection emails"
+        sub="Write the wording yourself instead of using ours. Build a template in Admin, Comms, Templates, then pick it here." />
+      {!info.comms_available ? (
+        <p className="text-[12.5px] text-pb-dim" data-testid="templates-no-comms">
+          Custom email templates need BetterComms, which is not on for your club. The standard wording is used.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {EMAIL_SLOTS.map(([to, key, label, hint]) => {
+            const current = form[key] || ''
+            const gone = current && !templates.some((t) => t.id === current)
+            return (
+              <div key={to}>
+                <label className={LABEL} htmlFor={`tpl-${to}`}>{label}</label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select id={`tpl-${to}`} className={`${FIELD} sm:w-[300px] min-w-0`} value={current} disabled={!canEdit}
+                    onChange={(e) => { setForm((f) => ({ ...f, [key]: e.target.value })); setPreview(null) }}>
+                    <option value="">Standard wording</option>
+                    {gone && <option value={current}>A deleted template (standard wording is used)</option>}
+                    {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                  {current && !gone && (
+                    <Btn variant="ghost" sm disabled={previewing != null} onClick={() => showPreview(to, current)}>
+                      {previewing === to ? 'Loading…' : 'Preview'}
+                    </Btn>
+                  )}
+                </div>
+                <p className={HINT}>{hint}</p>
+                {preview && preview.to === to && (
+                  preview.error ? <p className="text-[12.5px] text-pb-amber mt-2">{preview.error}</p> : (
+                    <div className="mt-2 rounded-lg border border-pb-hairline overflow-hidden" data-testid={`tpl-preview-${to}`}>
+                      <div className="px-3 py-2 text-[12.5px] bg-pb-surface2 text-pb-text">
+                        <span className="text-pb-faintest">Subject: </span>{preview.subject}
+                      </div>
+                      <iframe title={`Preview of ${label}`} sandbox="" srcDoc={preview.html} className="w-full h-[360px] bg-white" />
+                      <div className="px-3 py-1.5 text-[11.5px] text-pb-faintest">Made-up match and side. Nothing was sent.</div>
+                    </div>
+                  )
+                )}
+              </div>
+            )
+          })}
+          {templates.length === 0 && (
+            <p className={HINT}>You have no templates yet.</p>
+          )}
+          <p className={HINT}>
+            <Link to="/admin/comms/templates" className="text-pb-accent underline">Open Templates</Link>
+            {' '}to write one. In the editor, the selection variables appear under the layout. Anything a template leaves out
+            falls back to our wording, and a template that has been deleted is skipped with a note when you send.
+          </p>
+          {canEdit && (
+            <div><Btn variant="primary" sm onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save'}</Btn></div>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 /* ── The screen ──────────────────────────────────────────────────────────── */
 export default function AdminSelectionRules() {
-  const { hasCapability } = useAuth()
+  const { hasCapability, canEditCap } = useAuth()
   const toast = useToast()
-  const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
+  const canEdit = canEditCap(CAP.SELECT_RULES, CAP.MANAGE_SELECTIONS)
   const [data, setData] = useState(null)
   const [editing, setEditing] = useState(null)      // {kind, ...rule} or null
   const [exceptions, setExceptions] = useState(null)
@@ -835,6 +973,8 @@ export default function AdminSelectionRules() {
         </Card>
 
         <BoardSettingsCard settings={data.settings || {}} onSave={saveSettings} canEdit={canEdit} />
+
+        <EmailTemplatesCard settings={data.settings || {}} onSave={saveSettings} canEdit={canEdit} />
 
         <p className="text-[11.5px] text-pb-faintest">
           A player's date of birth and overseas status live on their profile —{' '}

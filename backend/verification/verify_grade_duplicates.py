@@ -136,6 +136,8 @@ async def build_schema() -> None:
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         # `games.raw_payload` is JSON on the ORM model and JSONB in the database
         # the migrations build, so a create_all harness gets the narrower type
         # and the effective view's UNION cannot reconcile the two branches.

@@ -9,6 +9,7 @@ import ClubPinGate from './ClubPinGate'
 import LadderBoard from '../components/LadderBoard'
 import SeasonSelector from '../components/SeasonSelector'
 import { PageHeader, PbSpinner } from '../lib/presskit'
+import { useSectionNames } from '../lib/sectionNames'
 
 // Contextual links from a grade ladder to its results / leaderboard for the
 // same season, plus the club-wide fixture list (which is live from the CA feed
@@ -30,6 +31,7 @@ function gradeNav(slug, seasonId, gradeId, gradeName) {
 
 export default function Ladders() {
   const { clubSlug } = useParams()
+  const sec = useSectionNames(clubSlug)
   const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
   useClubTheme(club)
 
@@ -71,8 +73,8 @@ export default function Ladders() {
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <PageHeader
-          eyebrow={`LADDERS · ${club?.name?.toUpperCase() || ''}`}
-          title="Where we stand."
+          eyebrow={sec.renamed('ladders') ? (club?.name?.toUpperCase() || '') : `LADDERS · ${club?.name?.toUpperCase() || ''}`}
+          title={sec.name('ladders', "Where we stand.")}
           meta={[<span key="x">Live standings — pick a season and grade to dig into the history.</span>]}
         />
 

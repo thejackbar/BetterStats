@@ -44,10 +44,10 @@ const api = (path, opts = {}) => page.evaluate(async ([p, o]) => {
 }, [path, opts])
 
 console.log('\n── The menu ──')
-check('BetterSelect is in the football admin menu', (await count(page.getByRole('link', { name: 'Selection', exact: true }))) > 0)
+check('BetterSelect is in the football admin menu', (await count(page.getByRole('link', { name: 'BetterSelect', exact: true }))) > 0)
 
 console.log('\n── The ground ──')
-await page.goto(`${BASE}/admin/select/selection`); await page.waitForTimeout(2500)
+await page.goto(`${BASE}/admin/betterselect/selection`); await page.waitForTimeout(2500)
 check('the board opens on the next fixture', /fixture=/.test(page.url()))
 check('eighteen positions on the ground', (await count(page.locator('[data-slot]'))) === 18, String(await count(page.locator('[data-slot]'))))
 for (const s of ['FB', 'CHB', 'C', 'CHF', 'FF', 'RUCK', 'RR', 'ROV']) {
@@ -126,7 +126,7 @@ await page.waitForTimeout(1500)
 check('the save is refused with the reason', (await textOf(page.getByTestId('save-errors'))).includes('Player16'))
 
 console.log('\n── Fixtures ──')
-await page.goto(`${BASE}/admin/select/fixtures`); await page.waitForTimeout(2000)
+await page.goto(`${BASE}/admin/betterselect/fixtures`); await page.waitForTimeout(2000)
 check('the PlayHQ draw is listed', (await count(page.getByTestId('fixture-row'))) >= 3, String(await count(page.getByTestId('fixture-row'))))
 check('a named side shows its count', (await textOf(page.getByTestId('fixture-row').first())).includes('named'))
 check('each fixture has a way to pick its side', (await count(page.getByRole('link', { name: /Pick side|Edit side/ }))) >= 3)
@@ -140,7 +140,7 @@ const fw = last('POST', /\/afl-select\/fixtures$/)
 check('adding a game sends its opponent and date', body(fw).opponent_name === 'Trial match' && body(fw).played_on === '2026-12-05', fw?.b || '')
 
 console.log('\n── Availability ──')
-await page.goto(`${BASE}/admin/select/availability`); await page.waitForTimeout(2000)
+await page.goto(`${BASE}/admin/betterselect/availability`); await page.waitForTimeout(2000)
 check('the matrix shows the match dates', (await count(page.locator('[data-testid=avail-matrix] thead th'))) >= 3)
 await press(page.getByTestId('avail-cell'))
 await page.waitForTimeout(800)
@@ -160,7 +160,7 @@ if (link) {
 }
 
 console.log('\n── Squads ──')
-await page.goto(`${BASE}/admin/select/squads`); await page.waitForTimeout(2000)
+await page.goto(`${BASE}/admin/betterselect/squads`); await page.waitForTimeout(2000)
 check('two sides, seniors first', (await textOf(page.getByTestId('side-row').first())).includes('Seniors'))
 const sel2 = page.getByLabel(/Squad for Senior, Player26/)
 await sel2.selectOption({ label: 'Curtin Uni Wesley Reserves' }).catch(() => {})
@@ -175,7 +175,7 @@ await press(page.getByRole('button', { name: /Move Curtin Uni Wesley Reserves do
 await page.waitForTimeout(500)
 
 console.log('\n── Rules ──')
-await page.goto(`${BASE}/admin/select/rules`); await page.waitForTimeout(2000)
+await page.goto(`${BASE}/admin/betterselect/rules`); await page.waitForTimeout(2000)
 check('the starter rules are listed', (await count(page.getByTestId('rule-card'))) >= 2)
 check("the stand-down reads as AFL's 21 days", (await textOf(page.locator('main'))).includes("21 days' stand-down"))
 await page.getByLabel('New rule').selectOption('age').catch(() => {})
@@ -191,7 +191,7 @@ await phone.locator('form input:not([type=password])').first().fill('coach')
 await phone.fill('input[type="password"]', 'pass1234'); await phone.keyboard.press('Enter')
 await phone.waitForURL(/\/admin/, { timeout: 15000 })
 for (const s of ['selection', 'fixtures', 'availability', 'squads', 'rules']) {
-  await phone.goto(`${BASE}/admin/select/${s}`); await phone.waitForTimeout(1800)
+  await phone.goto(`${BASE}/admin/betterselect/${s}`); await phone.waitForTimeout(1800)
   check(`${s}: no sideways scroll at 390px`, await phone.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
 }
 

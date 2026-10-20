@@ -11,7 +11,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../contexts/AuthContext'
 import { ruleBadges } from './selectionRules'
-import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availRank } from '../../../lib/availability'
+import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availRank, weekPatterns, weekPatternOf, weekFlag, weekNameOf } from '../../../lib/availability'
+import { useAllowMaybe, useWeekNames } from '../../../lib/useAvailabilityConfig'
+import { gameDatesLabel } from './selectionMeta'
 
 /* ── Icons — simple geometric line glyphs (stroke = currentColor) ────────── */
 const ICON_PATHS = {
@@ -42,6 +44,9 @@ const ICON_PATHS = {
   timer: <><circle cx="12" cy="13" r="8" /><path d="M12 13V9M9 2h6M12 5V2" /></>,
   play: <><path d="M7 5l12 7-12 7z" fill="currentColor" stroke="none" /></>,
   pause: <><rect x="7" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none" /><rect x="13.5" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none" /></>,
+  history: <><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1" /><path d="M3.5 4v4.5H8" /><path d="M12 7.5V12l3 2" /></>,
+  lock: <><rect x="5" y="11" width="14" height="9.5" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
+  undo: <><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></>,
   reset: <><path d="M3.5 12a8.5 8.5 0 1 1 2.5 6" /><path d="M3.5 20v-5h5" /></>,
   sound: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /></>,
   mute: <><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M22 9l-6 6M16 9l6 6" /></>,
@@ -208,16 +213,29 @@ export function Dot({ status, size = 9, glow = false, className = '', style }) {
   )
 }
 
-/* Clickable status dot — calls onEdit(player) (used to open QuickAvailModal). */
+/* Clickable status dot — calls onEdit(player) (used to open QuickAvailModal).
+   A real button, not a span: the dot is 9px, and on a phone a thumb lands on the
+   avatar link beside it (the player's profile) about as often as on the dot. So
+   a touch screen gets a 40px square to hit, pulled back with negative margins so
+   the card does not grow to match. Wherever the pointer is coarse, not by
+   viewport width: a tablet in landscape has the same thumb. */
 export function AvailDot({ player, status, onEdit, glow, size }) {
   const s = status ?? player?.availability ?? player?.avail ?? 'NO_RESPONSE'
+  if (!onEdit) {
+    return <span className="inline-flex items-center"><Dot status={s} glow={glow} size={size} /></span>
+  }
   return (
-    <span
-      onClick={onEdit ? (e) => { e.stopPropagation(); onEdit(player) } : undefined}
-      title={onEdit ? 'Update availability' : undefined}
-      className={`inline-flex items-center -m-1 p-1 rounded-full ${onEdit ? 'cursor-pointer' : ''}`}>
+    <button
+      type="button"
+      draggable={false}
+      onClick={(e) => { e.stopPropagation(); onEdit(player) }}
+      onMouseDown={(e) => e.stopPropagation()}
+      title="Update availability"
+      aria-label={`Update availability for ${playerName(player)}`}
+      data-avail-dot
+      className="shrink-0 inline-flex items-center justify-center -m-1 p-1 rounded-full cursor-pointer [@media(pointer:coarse)]:-mx-1.5 [@media(pointer:coarse)]:-my-3 [@media(pointer:coarse)]:w-10 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:p-0 [@media(pointer:coarse)]:active:bg-pb-surface">
       <Dot status={s} glow={glow} size={size} />
-    </span>
+    </button>
   )
 }
 
@@ -286,7 +304,21 @@ const BTN_VARIANTS = {
   soft: 'bg-pb-surface2 text-pb-text border border-pb-hairline hover:border-pb-hairline2',
   danger: 'bg-transparent text-pb-red border border-pb-red/40 hover:bg-pb-red/10',
 }
-export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, disabled = false, type = 'button', className = '', title, href, download, target, rel }) {
+/* The "Show juniors" switch. Junior grades are whatever Manage Grades says they
+ * are; they are left out of Availability, Fixtures and Selection until asked
+ * for. One shared preference, remembered on this device (select.juniors). */
+export function JuniorsToggle({ value, onChange, className = '' }) {
+  return (
+    <button type="button" onClick={() => onChange(!value)} aria-pressed={value} data-juniors-toggle
+      title="Junior grades are set in Manage Grades"
+      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${value ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'} ${className}`}>
+      {value ? 'Juniors shown' : 'Show juniors'}
+    </button>
+  )
+}
+
+export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, disabled = false, type = 'button', className = '', title, href, download, target, rel, ...rest }) {
+  // `rest` carries data-* and aria-* attributes through to the element.
   const size = sm ? 'text-[12.5px] px-2.5 py-1.5 gap-1.5' : 'text-[13.5px] px-3.5 py-2 gap-2'
   const cls = `inline-flex items-center justify-center rounded-lg font-display leading-none transition whitespace-nowrap disabled:opacity-40 disabled:cursor-default ${size} ${BTN_VARIANTS[variant] || BTN_VARIANTS.ghost} ${className}`
   const inner = <>{icon && <Icon name={icon} size={sm ? 14 : 16} />}{children}</>
@@ -295,12 +327,12 @@ export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, di
   if (href) {
     return (
       <a href={disabled ? undefined : href} download={download} title={title}
-        target={target} rel={target === '_blank' ? (rel || 'noopener noreferrer') : rel}
+        target={target} rel={target === '_blank' ? (rel || 'noopener noreferrer') : rel} {...rest}
         className={`${cls}${disabled ? ' opacity-40 pointer-events-none' : ''}`}>{inner}</a>
     )
   }
   return (
-    <button type={type} onClick={disabled ? undefined : onClick} disabled={disabled} title={title} className={cls}>
+    <button type={type} onClick={disabled ? undefined : onClick} disabled={disabled} title={title} className={cls} {...rest}>
       {inner}
     </button>
   )
@@ -355,22 +387,58 @@ export function Empty({ children, className = '' }) {
 }
 
 /* ── Player recency filter (shared, deliberately quiet) ──────────────────────
- * "Played within N years (by last appearance)". Used on every player list so
- * the long tail of historical-only players can be hidden — rendered as a small
- * subtle dropdown, never a prominent chip row. */
+ * "Played within N years (by last appearance)", or the other way round: "last
+ * played MORE than N years ago", for finding the lapsed. Used on every player
+ * list so the long tail of historical-only players can be hidden or looked at
+ * on its own — rendered as a small subtle dropdown, never a prominent chip row.
+ *
+ * One number carries the choice, so a list keeps a single `years` state: 0 is
+ * any time, 1 to 10 is "within that many years", and RECENCY_OVER + N is "last
+ * played more than N years ago". The Selection board's own windows (settings,
+ * 0 to 10 and -1) never reach the second range. */
+export const RECENCY_OVER = 1000
 export const RECENCY_OPTIONS = [
   { value: 0, label: 'Played: any time' },
-  { value: 1, label: 'Played ≤ 1 yr' },
-  { value: 2, label: 'Played ≤ 2 yrs' },
-  { value: 3, label: 'Played ≤ 3 yrs' },
-  { value: 5, label: 'Played ≤ 5 yrs' },
-  { value: 10, label: 'Played ≤ 10 yrs' },
+  { value: 1, label: 'Played ≤ 1 yr', group: 'Played within' },
+  { value: 2, label: 'Played ≤ 2 yrs', group: 'Played within' },
+  { value: 3, label: 'Played ≤ 3 yrs', group: 'Played within' },
+  { value: 5, label: 'Played ≤ 5 yrs', group: 'Played within' },
+  { value: 10, label: 'Played ≤ 10 yrs', group: 'Played within' },
+  { value: RECENCY_OVER + 1, label: 'Last played > 1 yr ago', group: 'Not played for a while' },
+  { value: RECENCY_OVER + 2, label: 'Last played > 2 yrs ago', group: 'Not played for a while' },
+  { value: RECENCY_OVER + 3, label: 'Last played > 3 yrs ago', group: 'Not played for a while' },
+  { value: RECENCY_OVER + 5, label: 'Last played > 5 yrs ago', group: 'Not played for a while' },
+  { value: RECENCY_OVER + 10, label: 'Last played > 10 yrs ago', group: 'Not played for a while' },
 ]
-export function playedWithinYears(lastPlayed, years) {
+// Last played MORE than `years` years ago. The exact complement of "within" on
+// the cutoff day. A player with no game at all is not lapsed (a new manual add
+// has never played), so is left out; "Played: any time" still lists them.
+export function playedOverYears(lastPlayed, years) {
+  if (!lastPlayed) return false
+  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
+  return new Date(lastPlayed + 'T00:00:00') < cutoff
+}
+// `years` of -1 means "played this season": `seasonStart` is the first day of the
+// season the match sits in (the server sends it); without one it filters nothing.
+// A RECENCY_OVER + N value means "last played more than N years ago".
+export function playedWithinYears(lastPlayed, years, seasonStart) {
   if (!years) return true
+  if (years > RECENCY_OVER) return playedOverYears(lastPlayed, years - RECENCY_OVER)
+  if (years < 0) return !seasonStart || (!!lastPlayed && lastPlayed >= seasonStart)
   if (!lastPlayed) return true // never-played (e.g. a new manual add) — keep
   const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
   return new Date(lastPlayed + 'T00:00:00') >= cutoff
+}
+// The date a player counts as last active when judging whether they are still
+// around: the later of their last game and the day a club marked them "no longer
+// dormant" (the server sends both, services/dormancy.py). Only for those who have
+// played: a name with no game has no history to be old. The real `last_played`
+// stays what a card, a badge and the "Hasn't played" filter say.
+export function recencyOf(p) {
+  const last = p?.last_played
+  if (!last) return null
+  const back = p.dormancy_cleared_on
+  return back && back > last ? back : last
 }
 // A date N months back as a plain YYYY-MM-DD string, so it compares directly
 // against a `last_played` off the API with no timezone in the way. Clamped to
@@ -385,13 +453,23 @@ export function monthsAgoISO(months) {
   const pad = (n) => String(n).padStart(2, '0')
   return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`
 }
-export function RecencySelect({ value, onChange, title = 'Hide players who haven’t played recently', className = '', options = RECENCY_OPTIONS }) {
+export function RecencySelect({ value, onChange, title = 'Filter by when players last played', className = '', options = RECENCY_OPTIONS }) {
+  const opt = (o) => <option key={o.value} value={o.value} className="bg-pb-surface text-pb-text">{o.label}</option>
+  // Options that name a `group` sit under a heading, in the order given; the rest stay loose.
+  const groups = []
+  options.forEach((o) => {
+    const last = groups[groups.length - 1]
+    if (o.group && last && last.group === o.group) last.items.push(o)
+    else groups.push({ group: o.group || null, items: [o] })
+  })
   return (
     <select value={value} onChange={(e) => onChange(Number(e.target.value))} title={title}
       className={`bg-transparent text-[11.5px] rounded-md border px-1.5 py-1 focus:outline-none focus:border-pb-accent transition-colors ${
         value ? 'text-pb-accent border-pb-accent/40' : 'text-pb-faint border-pb-hairline hover:text-pb-text'
       } ${className}`}>
-      {options.map((o) => <option key={o.value} value={o.value} className="bg-pb-surface text-pb-text">{o.label}</option>)}
+      {groups.map((g, i) => (g.group
+        ? <optgroup key={`${g.group}-${i}`} label={g.group} className="bg-pb-surface text-pb-text">{g.items.map(opt)}</optgroup>
+        : g.items.map(opt)))}
     </select>
   )
 }
@@ -457,29 +535,156 @@ export function AvailSummary({ players, statusOf = (p) => p.availability ?? p.av
   )
 }
 
+/* The tag beside a player for a two-day game: "W2 ONLY", "W1 OUT", "W2 ?". One
+   component for every screen, so the same words are always the same colour as
+   the card's dot and edge. Plain text, never a pill or anything clickable. */
+export function WeekFlag({ days, className = '' }) {
+  const names = useWeekNames()
+  const f = weekFlag(days, names)
+  if (!f) return null
+  const tip = days.map((d, i) => `${weekNameOf(names, i)} (${gameDatesLabel(d.date)}): ${(AVAILABILITY[d.status] || AVAILABILITY.NO_RESPONSE).label}`).join('\n')
+  return (
+    <span data-week-flag title={tip} className={`font-mono font-semibold shrink-0 cursor-default ${className || 'text-[9.5px]'}`}
+      style={{ color: (AVAILABILITY[f.status] || AVAILABILITY.NO_RESPONSE).cssVar }}>
+      {f.text}
+    </span>
+  )
+}
+
+/* A two-day game is answered a week at a time, or for both weeks at once.
+   `days` is [{date, status}] in order; onPick(status, which) where `which` is a
+   date or 'both'. Declared at module level (never inside a render). */
+function TwoDayAvail({ days, onPick, allowMaybe }) {
+  const names = useWeekNames()
+  const fmt = (iso) => {
+    try { return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }
+    catch { return iso }
+  }
+  const choices = AVAIL_ORDER.filter((s) => allowMaybe || s !== 'MAYBE')
+  const same = days.every((d) => d.status === days[0].status) ? days[0].status : null
+  const rows = [
+    { key: 'both', which: 'both', title: 'Both weeks', sub: days.map((d) => fmt(d.date)).join(' + '), current: same },
+    ...days.map((d, i) => ({ key: d.date, which: d.date, title: weekNameOf(names, i), sub: fmt(d.date), current: d.status })),
+  ]
+  // The four things a player actually says about a two-day game. Each is two
+  // per-date answers, so it goes out as one onPick per week.
+  const pattern = weekPatternOf(days.map((d) => d.status))
+  const patterns = days.length === 2 ? weekPatterns(names) : []
+  return (
+    <div className="p-4 flex flex-col gap-3" data-two-day-avail>
+      {patterns.length > 0 && (
+        <div data-week-patterns>
+          <div className="flex items-baseline justify-between gap-2 mb-1.5">
+            <span className="font-display font-bold text-[14px]">Which weeks?</span>
+            <span className="text-[11.5px] text-pb-faint">{days.map((d) => fmt(d.date)).join(' + ')}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {patterns.map((w) => {
+              const meta = AVAILABILITY[w.tone]
+              const on = pattern === w.key
+              return (
+                <button key={w.key} type="button" data-week-pattern={w.key}
+                  onClick={() => days.forEach((d, i) => onPick(w.statuses[i], d.date))}
+                  className="min-h-[48px] rounded-lg font-display font-semibold text-[13.5px] px-2 transition"
+                  style={{
+                    border: `1.5px solid ${on ? meta.cssVar : 'var(--pb-hairline2)'}`,
+                    background: on ? `color-mix(in srgb, ${meta.cssVar} 14%, transparent)` : 'transparent',
+                    color: on ? meta.cssVar : 'var(--pb-dim)',
+                  }}>
+                  {w.title}
+                </button>
+              )
+            })}
+          </div>
+          <div className="text-[11.5px] text-pb-faint mt-2">{allowMaybe ? 'Or set each week below, for a Maybe or a different answer each week.' : 'Or set each week below.'}</div>
+        </div>
+      )}
+      {rows.map((r) => (
+        <div key={r.key} data-avail-row={r.key === 'both' ? 'both' : r.key}>
+          <div className="flex items-baseline justify-between gap-2 mb-1.5">
+            <span className="font-display font-bold text-[14px]">{r.title}</span>
+            <span className="text-[11.5px] text-pb-faint">{r.sub}</span>
+          </div>
+          <div className={`grid gap-2 ${choices.length === 4 ? 'grid-cols-4' : 'grid-cols-3'}`}>
+            {choices.map((s) => {
+              const meta = AVAILABILITY[s]
+              const on = r.current === s
+              return (
+                <button key={s} type="button" data-pick={s} onClick={() => onPick(s, r.which)}
+                  title={`${r.title === 'Both weeks' ? r.title : r.title + ' (' + r.sub + ')'}: ${meta.label}`}
+                  className="min-h-[44px] rounded-lg font-display font-semibold text-[12.5px] px-1 transition"
+                  style={{
+                    border: `1.5px solid ${on ? meta.cssVar : 'var(--pb-hairline2)'}`,
+                    background: on ? `color-mix(in srgb, ${meta.cssVar} 12%, transparent)` : 'transparent',
+                    color: on ? meta.cssVar : 'var(--pb-dim)',
+                  }}>
+                  {meta.glyph} {meta.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /* ── Quick-update availability modal (presentational) ─────────────────────
    onPick(status) is called when a status is chosen; the caller persists it. */
-export function QuickAvailModal({ player, dateLabel, current, onPick, onClose }) {
+export function QuickAvailModal({ player, dateLabel, current, onPick, onClose, days }) {
+  const navigate = useNavigate()
+  // A club that has switched Maybe off is only offered the other answers.
+  const allowMaybe = useAllowMaybe()
+  // A bottom sheet on a phone (the buttons land under the thumb, and it can only
+  // ever be as wide as the screen), a centred card from `sm` up.
   return (
-    <div onClick={onClose} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div onClick={(e) => e.stopPropagation()} className="w-[380px] max-w-full bg-pb-surface rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl">
+    <div onClick={onClose} role="dialog" aria-modal="true" aria-label="Update availability"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm">
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full sm:w-[380px] max-w-full bg-pb-surface rounded-t-2xl sm:rounded-2xl border border-pb-hairline2 overflow-hidden shadow-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0">
         <div className="flex items-center gap-3 px-[18px] py-4 border-b border-pb-hairline">
-          {player && <Avatar player={player} size={38} noLink />}
-          <div className="flex-1 min-w-0">
-            <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">
-              Update availability{dateLabel ? ` · ${dateLabel}` : ''}
-            </div>
-            <div className="font-display font-bold text-[17px] mt-0.5 truncate">{player ? playerName(player) : 'Player'}</div>
-          </div>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1" aria-label="Close"><Icon name="close" size={18} /></button>
+          {/* The face and the name are the way through to the player's profile
+              and edit page: you opened this to change one answer, and the next
+              thing you want is often to fix who they are. */}
+          {player?.id
+            ? (
+              <button type="button" onClick={() => { onClose(); navigate(`/admin/betterselect/players?player=${player.id}`) }}
+                data-open-profile aria-label={`Open ${playerName(player)}'s profile`} title="Open profile and edit player"
+                className="flex items-center gap-3 flex-1 min-w-0 text-left -my-1 py-1 rounded-lg active:bg-pb-surface2">
+                <Avatar player={player} size={44} noLink />
+                <span className="flex-1 min-w-0">
+                  <span className="block font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">
+                    Update availability{dateLabel ? ` · ${dateLabel}` : ''}
+                  </span>
+                  <span className="block font-display font-bold text-[17px] mt-0.5 truncate">{playerName(player)}</span>
+                  <span className="block text-[11.5px] text-pb-faint">Open profile and edit ›</span>
+                </span>
+              </button>
+            )
+            : (
+              <>
+                {player && <Avatar player={player} size={38} noLink />}
+                <div className="flex-1 min-w-0">
+                  <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">
+                    Update availability{dateLabel ? ` · ${dateLabel}` : ''}
+                  </div>
+                  <div className="font-display font-bold text-[17px] mt-0.5 truncate">{player ? playerName(player) : 'Player'}</div>
+                </div>
+              </>
+            )}
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text w-10 h-10 -mr-2 inline-flex items-center justify-center" aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
+        {Array.isArray(days) && days.length > 1 && (
+          <TwoDayAvail days={days} onPick={onPick} allowMaybe={allowMaybe} />
+        )}
+        {!(Array.isArray(days) && days.length > 1) && (
         <div className="p-4 grid grid-cols-2 gap-2.5">
-          {AVAIL_ORDER.map((s) => {
+          {AVAIL_ORDER.filter((s) => allowMaybe || s !== 'MAYBE').map((s) => {
             const meta = AVAILABILITY[s]
             const on = current === s
             return (
               <button key={s} type="button" onClick={() => onPick(s)}
-                className="flex items-center gap-2.5 px-3.5 py-3 rounded-xl font-display font-semibold text-[14.5px] text-left transition"
+                className="flex items-center gap-2.5 px-3.5 py-3.5 sm:py-3 min-h-[56px] sm:min-h-0 rounded-xl font-display font-semibold text-[14.5px] text-left transition"
                 style={{
                   border: `1.5px solid ${on ? meta.cssVar : 'var(--pb-hairline2)'}`,
                   background: on ? `color-mix(in srgb, ${meta.cssVar} 12%, transparent)` : 'transparent',
@@ -496,6 +701,7 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose })
             )
           })}
         </div>
+        )}
         <div className="px-4 pb-4 flex items-center gap-1.5 text-[11.5px] text-pb-faint">
           <Icon name="info" size={13} /> Tap a status — saves instantly.
         </div>

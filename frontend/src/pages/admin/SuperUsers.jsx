@@ -31,6 +31,7 @@ export default function SuperUsers() {
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ username: '', password: '', display_name: '', email: '', mobile_number: '', club_id: '', role: 'club_admin' })
   const [resetTarget, setResetTarget] = useState(null)
+  const [emailingId, setEmailingId] = useState(null)
   const [newPassword, setNewPassword] = useState('')
   const [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
@@ -112,6 +113,19 @@ export default function SuperUsers() {
       setMsg(err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const emailResetLink = async (u) => {
+    setMsg(null)
+    setEmailingId(u.id)
+    try {
+      await api.superSendPasswordReset(u.id)
+      setMsg(`Reset link emailed to ${u.email}`)
+    } catch (err) {
+      setMsg(err.message)
+    } finally {
+      setEmailingId(null)
     }
   }
 
@@ -261,6 +275,9 @@ export default function SuperUsers() {
             <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
               Reset password for <span className="text-pb-amber">{resetTarget.username}</span>
             </p>
+            <p className="text-pb-faint text-xs">
+              This sets the password straight away and does not email anyone. To let them choose their own, use Email reset link.
+            </p>
             <div className="flex gap-2">
               <input
                 type="text"
@@ -392,6 +409,14 @@ export default function SuperUsers() {
                       className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
                     >
                       Reset password
+                    </button>
+                    <button
+                      onClick={() => emailResetLink(u)}
+                      disabled={emailingId === u.id || !u.email}
+                      title={u.email ? 'Email this user a link to choose their own password' : 'This user has no email address on file'}
+                      className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors disabled:opacity-40"
+                    >
+                      {emailingId === u.id ? 'Sending…' : 'Email reset link'}
                     </button>
                     {!isSelf && (
                       <button

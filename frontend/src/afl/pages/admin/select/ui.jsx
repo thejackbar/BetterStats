@@ -1,15 +1,36 @@
 // Small shared pieces for football BetterSelect's screens. Plain football
 // admin styling: the same tokens the rest of the football admin uses.
+import { createContext, useContext } from 'react'
+import { createPortal } from 'react-dom'
+
+// BetterSelect's screens run inside cricket's BetterSelectLayout (see
+// AflSelectShell), which owns the title and keeps a screen's actions in the
+// header beside the module switcher. A screen still says its own title,
+// caption and actions here; the title is the shell's (it knows the route), the
+// actions are carried up into the header, and the caption stays on the page as
+// the one-line introduction, since a football caption is a sentence, not the
+// short count line cricket's header holds.
+export const SelectHeaderContext = createContext(null)
 
 export function PageHead({ title, caption, right }) {
-  return (
-    <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
-      <div className="min-w-0">
-        <h1 className="text-xl font-bold">{title}</h1>
-        {caption && <p className="text-sm text-pb-dim mt-1 max-w-2xl">{caption}</p>}
+  const slot = useContext(SelectHeaderContext)
+  if (!slot) {
+    // Not inside the shell (a screen mounted on its own): the old inline head.
+    return (
+      <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold">{title}</h1>
+          {caption && <p className="text-sm text-pb-dim mt-1 max-w-2xl">{caption}</p>}
+        </div>
+        {right && <div className="flex flex-wrap items-center gap-2 max-w-full min-w-0">{right}</div>}
       </div>
-      {right && <div className="flex flex-wrap items-center gap-2 max-w-full min-w-0">{right}</div>}
-    </div>
+    )
+  }
+  return (
+    <>
+      {caption && <p className="text-sm text-pb-dim mb-4 max-w-2xl">{caption}</p>}
+      {right && slot.actionsEl && createPortal(right, slot.actionsEl)}
+    </>
   )
 }
 

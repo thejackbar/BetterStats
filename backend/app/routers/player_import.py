@@ -35,11 +35,15 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.capabilities import (
+    MANAGE_PLAYERS, require_cap,
+)  # route gates added by the access audit
 from app.auth.capabilities import MANAGE_PLAYERS, require_cap
 from app.models.db import Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club, get_current_user
 from app.services import import_ingest as ingest
 from app.services import profile_import as prof
+from app.services import player_privacy
 from app.services.audit_log import log_activity
 from app.services.squad_membership import sync_squad_membership
 
@@ -243,11 +247,14 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             current = _current_profile(p) if p else {}
             name = (p.display_name if p else tgt["raw_name"])
         else:
+            p = None
             current = {}
             name = tgt["raw_name"]
 
         proposed = {}
         for f, v in tgt["patch"].items():
+            if f == "is_public" and v is True and p is not None and player_privacy.is_privacy_hidden(p):
+                continue
             if v is not None and v != current.get(f):
                 proposed[f] = v
 
@@ -440,6 +447,9 @@ async def commit(
 
         touched = False
         for f, v in tgt["patch"].items():
+            # A sheet row saying "show" must not undo a person's request (316).
+            if f == "is_public" and v is True and player_privacy.is_privacy_hidden(player):
+                continue
             if v is not None and getattr(player, f, None) != v:
                 setattr(player, f, v)
                 fields_written += 1
@@ -516,7 +526,7 @@ def _template_examples(squad_names: list | None = None) -> list:
     ]
 
 
-@router.get("/template.csv")
+@router.get("/template.csv", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
 async def template(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
@@ -535,7 +545,7 @@ async def template(
     )
 
 
-@router.get("/template.xlsx")
+@router.get("/template.xlsx", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
 async def template_xlsx(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),

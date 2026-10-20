@@ -40,6 +40,7 @@ export const GROUPS = [
     icon: 'grip',
     desc: 'Merge duplicate players and grades.',
     items: [
+      { to: '/admin/card-review', label: 'Card Review', icon: 'list', cap: CAP.MANAGE_MANUAL_ENTRIES, desc: 'Choose, match by match, whether the site shows the Cricket Australia scorecard or the club\'s own.' },
       { to: '/admin/merge', label: 'Merge Players', icon: 'teams', cap: CAP.MANAGE_MERGES, desc: 'Combine duplicate player records into one.' },
       { to: '/admin/grades', label: 'Grades & Competitions', icon: 'grip', cap: CAP.MANAGE_MERGES, desc: 'Group grades into competitions and order them, label grades by type, and merge grades that are the same competition under different names.' },
     ],

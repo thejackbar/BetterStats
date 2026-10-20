@@ -22,6 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
 from app.content import blog as blog_content
+from app.services import junior_hiding
+from app.services import section_names
 from app.services import instructional_videos as video_svc
 from app.services import webinar
 from app.models.db import Player, Organisation, get_db
@@ -181,6 +183,7 @@ UUID_RE = re.compile(
 CLUB_SECTIONS = {
     "dashboard", "players", "leaderboard", "records",
     "compare", "statlab", "yearbook", "yearbooks", "games",
+    "honour-board", "premierships", "ladders",
 }
 # Single-segment paths that are NOT club slugs (must stay in sync with App.jsx routes).
 RESERVED_ROOT_SEGMENTS = {
@@ -216,9 +219,9 @@ def _parse_route(path: str):
     if segments[0] == "preview" and len(segments) == 2:
         return {"type": "teaser", "token": segments[1]}
     if len(segments) >= 2 and segments[1] in CLUB_SECTIONS:
-        return {"type": "club", "slug": segments[0]}
+        return {"type": "club", "slug": segments[0], "section": segments[1]}
     if len(segments) == 1 and segments[0] not in RESERVED_ROOT_SEGMENTS:
-        return {"type": "club", "slug": segments[0]}
+        return {"type": "club", "slug": segments[0], "section": None}
     return None
 
 
@@ -612,6 +615,20 @@ async def _player_html(player_id: str, page_url: str, base: str, db: AsyncSessio
 
     org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
 
+    # A player hidden from the public site, including anyone who asked to be
+    # removed (migration 316), gets no share card: this is served to crawlers
+    # with no signed-in viewer, and would otherwise print their name and photo
+    # into search and social previews after the profile itself had gone.
+    if player.is_public is False:
+        return None
+
+    # A junior-only player a club hides from its public Stats gets no share
+    # card either: this is served to crawlers with no signed-in viewer.
+    if org is not None:
+        hiding = await junior_hiding.resolve(db, org.id)
+        if hiding.enabled and str(player.id).lower() in hiding.player_ids:
+            return None
+
     name = player.display_name
     club_name = org.name if org else ""
     description = (
@@ -653,7 +670,7 @@ async def _player_html(player_id: str, page_url: str, base: str, db: AsyncSessio
     )
 
 
-async def _club_html(slug: str, page_url: str, base: str, db: AsyncSession) -> str | None:
+async def _club_html(slug: str, page_url: str, base: str, db: AsyncSession, section: str | None = None) -> str | None:
     result = await db.execute(
         select(Organisation).where(Organisation.slug == slug.lower())
     )
@@ -675,8 +692,17 @@ async def _club_html(slug: str, page_url: str, base: str, db: AsyncSession) -> s
         **({"logo": _abs_url(org.logo_url, base)} if org.logo_url else {}),
         "areaServed": {"@type": "Country", "name": "Australia"},
     }
+    title = f"{org.name} Cricket Club Stats & Records | BetterCricket"
+    # A section the club has renamed (a sponsor's name on the leaderboard, say)
+    # shares under its own name, so the card matches the page.
+    key = section_names.PATH_SEGMENT_TO_KEY.get(section or "")
+    entry = (org.section_names or {}).get(key) if key and isinstance(org.section_names, dict) else None
+    custom = section_names.clean_name((entry or {}).get("name")) if isinstance(entry, dict) else None
+    if custom:
+        title = f"{custom} | {org.name} | BetterCricket"
+        description = f"{custom} at {org.name}, on BetterCricket."
     return _html(
-        f"{org.name} Cricket Club Stats & Records | BetterCricket",
+        title,
         description,
         image,
         page_url,
@@ -727,7 +753,7 @@ async def og_preview(
     elif route and route["type"] == "video":
         html = await _video_html(route["slug"], page_url, base, db)
     elif route and route["type"] == "club":
-        html = await _club_html(route["slug"], page_url, base, db)
+        html = await _club_html(route["slug"], page_url, base, db, route.get("section"))
     elif route and route["type"] == "teaser":
         html = await _teaser_html(route["token"], page_url, base, db)
 

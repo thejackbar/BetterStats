@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { useToast } from '../../contexts/ToastContext'
+import { CATEGORY_LABELS } from '../../lib/gradeCategories'
 
 const SLIDE_TYPE_INFO = {
   sponsors: { label: 'Sponsors', desc: 'One sponsor, every sponsor in rotation, or every sponsor on one screen.', module: null },
@@ -11,6 +12,7 @@ const SLIDE_TYPE_INFO = {
   leaderboard: { label: 'Leaderboard', desc: 'Top run-scorers, wicket-takers or fielders, podium-style.', module: null },
   records: { label: 'Club Records', desc: 'A record category, like Most Runs or Best Bowling Figures.', module: null },
   statlab_report: { label: 'Custom StatLab Report', desc: 'Any report saved and approved in StatLab.', module: null },
+  honours: { label: 'Honour Boards', desc: 'Your honour boards, awards from your records (such as cap numbers), premiership squads, or office bearers and life members.', module: null },
   social_posts: { label: 'Recent Social Posts', desc: 'Posts saved from the Post Designer with "Save to Club Room".', module: 'socials' },
   custom_images: { label: 'Custom Images', desc: 'Any images you upload below, like action shots or club notices.', module: null },
 }
@@ -69,6 +71,8 @@ export default function AdminClubRoom() {
   const [sponsors, setSponsors] = useState([])
   const [seasons, setSeasons] = useState([])
   const [reports, setReports] = useState([])
+  const [honourSources, setHonourSources] = useState({ boards: [], groups: [] })
+  const [gradeTypes, setGradeTypes] = useState({ available: [], default: [] })
   const dragItem = useRef(null)
   const fileInputRef = useRef(null)
 
@@ -78,6 +82,8 @@ export default function AdminClubRoom() {
     api.adminListSponsors().then(setSponsors).catch(() => {})
     api.adminListSeasons().then(setSeasons).catch(() => {})
     api.clubRoomListReports().then(setReports).catch(() => {})
+    api.clubRoomHonourSources().then(setHonourSources).catch(() => {})
+    api.clubRoomGradeTypes().then(setGradeTypes).catch(() => {})
   }, [])
 
   async function load() {
@@ -128,6 +134,7 @@ export default function AdminClubRoom() {
     if (slideType === 'leaderboard') return { stat_group: 'batting', sort_by: 'total_runs', season_id: '', limit: 10 }
     if (slideType === 'records') return { category: 'batting.top_career_runs', season_id: '', limit: 8 }
     if (slideType === 'statlab_report') return { report_id: '' }
+    if (slideType === 'honours') return { kind: 'boards', board_id: '', group: '' }
     return {}
   }
 
@@ -363,6 +370,8 @@ export default function AdminClubRoom() {
                             sponsors={sponsors}
                             seasons={seasons}
                             reports={reports}
+                            honourSources={honourSources}
+                            gradeTypes={gradeTypes}
                             customMedia={customMedia}
                             socialMedia={socialMedia}
                           />
@@ -498,16 +507,156 @@ function slideSummary(slide, info) {
     if (cfg.mode === 'grid') return `${info.label} · all on one screen`
     return `${info.label} · rotating`
   }
-  if (slide.slide_type === 'leaderboard') return `${info.label} · ${cfg.stat_group || 'batting'}`
-  if (slide.slide_type === 'records') return `${info.label} · ${(RECORD_CATEGORIES.find(c => c.key === cfg.category) || {}).label || ''}`
+  const grade = cfg.categories ? (cfg.categories === 'all' ? 'All grades' : CATEGORY_LABELS[cfg.categories]) : null
+  const withGrade = text => (grade ? `${text} · ${grade}` : text)
+  if (slide.slide_type === 'leaderboard') return withGrade(`${info.label} · ${cfg.stat_group || 'batting'}`)
+  if (slide.slide_type === 'records') return withGrade(`${info.label} · ${(RECORD_CATEGORIES.find(c => c.key === cfg.category) || {}).label || ''}`)
   if (slide.slide_type === 'statlab_report') return info.label
+  if (slide.slide_type === 'honours') {
+    if (cfg.kind === 'awards') return `${info.label} · ${cfg.achievement || cfg.category || 'awards from your records'}`
+    if (cfg.kind === 'premierships') return `${info.label} · premiership squads`
+    if (cfg.kind === 'office_bearers') return `${info.label} · ${cfg.group || 'office bearers and life members'}`
+    return `${info.label} · ${cfg.board_id ? 'one board' : 'all your boards'}`
+  }
   if (cfg.media_ids?.length) return `${info.label} · ${cfg.media_ids.length} picked`
   if (cfg.count) return `${info.label} · up to ${cfg.count}`
   return info.label
 }
 
-function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports, customMedia, socialMedia }) {
+// Which grade type a leaderboard or records slide counts. Not set means the
+// club's own default, which is what the rest of the stats screens use. Only the
+// grade types this club has are offered, so there is no pick that shows nothing.
+function GradeTypeField({ value, onChange, gradeTypes }) {
+  const available = gradeTypes?.available || []
+  if (available.length === 0) return null
+  const known = value && value !== 'all' && !available.some(a => a.key === value)
+  return (
+    <div className="col-span-2">
+      <label className={labelCls}>Grade type</label>
+      <select value={value || ''} onChange={e => onChange(e.target.value || undefined)} className={fieldCls}>
+        <option value="">Club default</option>
+        {available.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
+        {known && <option value={value}>{CATEGORY_LABELS[value] || value} (none in your grades)</option>}
+        <option value="all">All grades</option>
+      </select>
+    </div>
+  )
+}
+
+// "Awards from your records": list what the club has recorded in an award
+// category, optionally only the awards of one exact name (A Grade Cap Number).
+// The slide's own title above names the board; with none set the award name does.
+function AwardsSourceFields({ cfg, setConfig, honourSources }) {
+  const categories = honourSources.award_categories || []
+  const [names, setNames] = useState([])
+  useEffect(() => {
+    if (!cfg.category) { setNames([]); return }
+    let live = true
+    api.clubRoomAwardNames(cfg.category, cfg.subcategory)
+      .then(r => { if (live) setNames(r) })
+      .catch(() => { if (live) setNames([]) })
+    return () => { live = false }
+  }, [cfg.category, cfg.subcategory])
+  const idx = categories.findIndex(c => c.category === cfg.category && (c.subcategory || null) === (cfg.subcategory || null))
+  const listId = 'club-room-award-names'
+  const typed = (cfg.achievement || '').trim().toLowerCase()
+  // A name that matches nothing makes the slide vanish from the show, so say so here.
+  const matchesNothing = !!typed && names.length > 0 && !names.some(n => n.achievement.trim().toLowerCase() === typed)
+  return (
+    <div className="space-y-2">
+      <div>
+        <label className={labelCls}>Award category</label>
+        <select
+          value={cfg.category && idx >= 0 ? String(idx) : ''}
+          onChange={e => {
+            if (e.target.value === '') return setConfig({ category: undefined, subcategory: undefined, achievement: undefined })
+            const c = categories[Number(e.target.value)]
+            setConfig({ category: c.category, subcategory: c.subcategory || undefined, achievement: undefined })
+          }}
+          className={fieldCls}
+        >
+          <option value="">Choose a category</option>
+          {categories.map((c, i) => (
+            <option key={i} value={i}>{c.subcategory ? `${c.category} · ${c.subcategory}` : c.category} ({c.count})</option>
+          ))}
+        </select>
+        {categories.length === 0 && (
+          <p className="text-pb-faintest text-[11px] mt-1">No awards recorded yet. Import or add them on the Awards page first.</p>
+        )}
+      </div>
+      {cfg.category && (
+        <div>
+          <label className={labelCls}>Only awards named (optional)</label>
+          <input
+            value={cfg.achievement || ''}
+            onChange={e => setConfig({ achievement: e.target.value || undefined })}
+            list={listId}
+            placeholder="e.g. A Grade Cap Number"
+            className={fieldCls}
+          />
+          <datalist id={listId}>
+            {names.map(n => <option key={n.achievement} value={n.achievement}>{n.count}</option>)}
+          </datalist>
+          <p className="text-pb-faintest text-[11px] mt-1">
+            Leave blank to list every award in the category. Matches the award name exactly, so men's and ladies' lists need different award names.
+          </p>
+          {matchesNothing && (
+            <p className="text-amber-400 text-[11px] mt-1">
+              No award in this category has exactly that name, so this slide would be skipped. Pick one from the list.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports, honourSources, gradeTypes, customMedia, socialMedia }) {
   const cfg = draft.config
+
+  if (slide.slide_type === 'honours') {
+    const kind = cfg.kind || 'boards'
+    return (
+      <div className="space-y-2">
+        <div>
+          <label className={labelCls}>What to show</label>
+          <select value={kind} onChange={e => setConfig({ kind: e.target.value })} className={fieldCls}>
+            <option value="boards">Our honour boards</option>
+            <option value="awards">Awards from your records (e.g. cap numbers)</option>
+            <option value="premierships">Premiership squads</option>
+            <option value="office_bearers">Office bearers and life members</option>
+          </select>
+        </div>
+        {kind === 'boards' && (
+          <div>
+            <label className={labelCls}>Board</label>
+            <select value={cfg.board_id || ''} onChange={e => setConfig({ board_id: e.target.value })} className={fieldCls}>
+              <option value="">All boards, one after another</option>
+              {honourSources.boards.map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
+            </select>
+            {honourSources.boards.length === 0 && (
+              <p className="text-pb-faintest text-[11px] mt-1">
+                No honour boards yet. Build them under Website → Honours and they appear here.
+              </p>
+            )}
+          </div>
+        )}
+        {kind === 'awards' && <AwardsSourceFields cfg={cfg} setConfig={setConfig} honourSources={honourSources} />}
+        {kind === 'office_bearers' && (
+          <div>
+            <label className={labelCls}>Group</label>
+            <select value={cfg.group || ''} onChange={e => setConfig({ group: e.target.value })} className={fieldCls}>
+              <option value="">Every group</option>
+              {honourSources.groups.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
+        )}
+        <p className="text-pb-faintest text-[11px]">
+          Each board, flag or role gets its own slide. Long lists scroll by themselves.
+        </p>
+      </div>
+    )
+  }
 
   if (slide.slide_type === 'sponsors') {
     return (
@@ -563,6 +712,7 @@ function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports
             {sortOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
           </select>
         </div>
+        <GradeTypeField value={cfg.categories} onChange={v => setConfig({ categories: v })} gradeTypes={gradeTypes} />
         <div>
           <label className={labelCls}>Season</label>
           <select value={cfg.season_id || ''} onChange={e => setConfig({ season_id: e.target.value })} className={fieldCls}>
@@ -588,6 +738,7 @@ function SlideConfigFields({ slide, draft, setConfig, sponsors, seasons, reports
             {RECORD_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
           </select>
         </div>
+        <GradeTypeField value={cfg.categories} onChange={v => setConfig({ categories: v })} gradeTypes={gradeTypes} />
         <div>
           <label className={labelCls}>Season</label>
           <select value={cfg.season_id || ''} onChange={e => setConfig({ season_id: e.target.value })} className={fieldCls}>

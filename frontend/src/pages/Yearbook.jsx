@@ -1306,7 +1306,8 @@ function SponsorsTab({ clubSlug }) {
 
   useEffect(() => {
     api.getClubSponsors(clubSlug).then(data => {
-      const list = data?.sponsors || []
+      // The yearbook draws logos, so a sponsor with none is left out.
+      const list = (data?.sponsors || []).filter(s => s.logo_url)
       setSponsors(list)
       if (list.length > 5) {
         const shuffled = [...list].sort(() => Math.random() - 0.5)

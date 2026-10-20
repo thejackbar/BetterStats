@@ -49,3 +49,20 @@ export function setClubFavicon(logoUrl) {
   addIconLink({ rel: 'icon', href: logoUrl })
   addIconLink({ rel: 'apple-touch-icon', href: logoUrl })
 }
+
+// Web app manifest. The static one has start_url "/", and iOS "Add to Home
+// Screen" follows it, so a club page saved to the home screen opened the site
+// root. On a club's pages the link points at the backend's per-club manifest
+// (start_url "/{slug}"); everywhere else it goes back to the static file.
+const DEFAULT_MANIFEST = '/site.webmanifest'
+
+export function setManifest(slug) {
+  const href = slug ? `/api/clubs/${encodeURIComponent(slug)}/manifest` : DEFAULT_MANIFEST
+  let el = document.head.querySelector('link[rel="manifest"]')
+  if (!el) {
+    el = document.createElement('link')
+    el.rel = 'manifest'
+    document.head.appendChild(el)
+  }
+  if (el.getAttribute('href') !== href) el.setAttribute('href', href)
+}

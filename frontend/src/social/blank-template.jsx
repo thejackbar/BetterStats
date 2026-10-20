@@ -12,6 +12,7 @@ import { IS_AFL } from '../lib/sport'
 // ─────────────────────────────────────────────────────────────────────────────
 import { useRef } from 'react'
 import { BrandLockup, GrainSVG, CreditMark } from './cricket-templates'
+import { resolveBind, splitPlayerName, bindLabel, autoMarks } from './boundResolve'
 
 // Colour tokens resolve against the live palette so a palette switch re-tints
 // any block left on a token; a raw hex (custom colour) passes straight through.
@@ -31,6 +32,8 @@ let _seq = 0
 const nextId = () => `bi${Date.now().toString(36)}${(_seq++).toString(36)}`
 
 export const BLANK_FONTS = [
+  // The club's own brand font (Brand settings), so a post follows a font change.
+  { key: 'club', name: 'Club font', family: "var(--social-display-font, 'Anton', sans-serif)" },
   { key: 'anton', name: 'Anton', family: "'Anton', sans-serif" },
   { key: 'barlow', name: 'Barlow Condensed', family: "'Barlow Condensed', sans-serif" },
   { key: 'bebas', name: 'Bebas Neue', family: "'Bebas Neue', sans-serif" },
@@ -101,10 +104,29 @@ export function newBlankItem(type, opts = {}) {
     return {
       id, type: 'image', x: opts.x ?? 340, y: opts.y ?? 340, w: opts.w ?? 400, h: opts.h ?? 400,
       src: opts.src ?? null, srcName: opts.srcName, radius: 0, fit: opts.fit || 'contain', rotation: 0,
+      // A club's own design (a Canva export): full-bleed, behind everything and
+      // locked so a drag meant for a block on top cannot shove it aside. Absent
+      // on every ordinary image, so saved posts are unchanged.
+      ...(opts.design ? { design: true, locked: true } : null),
     }
   }
   if (type === 'brand') {
     return { id, type: 'brand', x: 60, y: 60, size: 160, layout: 'row', showName: true, showLogo: true, align: 'left', color: 'ink' }
+  }
+  if (type === 'sponsors') {
+    // A grid of the club's sponsor logos, resized to fit the box as sponsors are
+    // added or taken off. `sponsorIds` is resolved against the club's live sponsor
+    // list (data.sponsors), so a saved template always shows current logos.
+    // `auto` marks a block the editor placed by default and nobody has moved yet,
+    // so it can follow the post's team and size until somebody takes it over.
+    return {
+      id, type: 'sponsors', x: opts.x ?? 48, y: opts.y ?? 900, w: opts.w ?? 984, h: opts.h ?? 130,
+      sponsorIds: opts.sponsorIds || [], panel: opts.panel || 'light', gap: opts.gap ?? 28, pad: opts.pad ?? 18,
+      rotation: 0, auto: !!opts.auto,
+      // The layout draws the backing itself (a whole bar, not a box round the logos):
+      // `panel` still holds the choice, and the layout reads it from here.
+      ...(opts.layoutBacked ? { layoutBacked: true } : null),
+    }
   }
   if (type === 'element') {
     const shape = opts.shape || 'line'
@@ -145,9 +167,11 @@ export function itemBBox(it) {
 // the Content panel. Images prefer their stored asset name.
 export function itemLabel(it) {
   if (!it) return ''
+  if (it.type === 'text' && it.bind) return `Field: ${bindLabel(it.bind)}`
   if (it.type === 'text') return `“${(it.text || '').slice(0, 16) || 'Text'}${(it.text || '').length > 16 ? '…' : ''}”`
-  if (it.type === 'image') return it.srcName || (it.src ? 'Image' : 'Image (empty)')
+  if (it.type === 'image') return it.design ? 'Your design' : it.bind ? `Field: ${bindLabel(it.bind)}` : (it.srcName || (it.src ? 'Image' : 'Image (empty)'))
   if (it.type === 'brand') return 'Club badge'
+  if (it.type === 'sponsors') return 'Sponsors'
   if (it.type === 'element') return { line: 'Line', divider: 'Divider', rect: 'Box', ellipse: 'Circle', triangle: 'Triangle', star: 'Star', arrow: 'Arrow', chevron: 'Chevron', diamond: 'Diamond', hexagon: 'Hexagon' }[it.shape] || 'Element'
   if (it.type === 'data') return {
     fixtures: 'Fixtures', results: 'Results', record: 'Record', scorecard: 'Scorecard',
@@ -215,17 +239,31 @@ export function starterItems(key) {
   return s ? s.build() : []
 }
 
+// The club's own design as the bottom layer: the image block at the back of the
+// stack, sized to the canvas. Any earlier design is replaced, everything else is
+// kept, so swapping the picture never costs the blocks placed on top of it.
+export function withDesign(items, src, srcName, width, height) {
+  const design = newBlankItem('image', { design: true, src, srcName, x: 0, y: 0, w: width, h: height, fit: 'cover' })
+  return [design, ...(items || []).filter((it) => !it.design)]
+}
+
 export function defaultBlankItems() {
   return starterItems('players')
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
-function TextBlock({ item, palette }) {
+function TextBlock({ item, palette, data }) {
+  // A bound field prints the live value; null (nothing held yet) shows its sample.
+  const live = item.bind ? resolveBind(item.bind, data) : null
+  const base = live === null || live === undefined ? item.text : live
+  // A name carries its (C), (WK) and DEBUT marks without the template asking for them.
+  const shown = item.autoMarks && live ? `${base}${autoMarks(item.bind, data)}` : base
   return (
     <div style={{
       width: item.w,
       fontFamily: item.fontFamily, fontSize: item.fontSize,
-      fontWeight: item.bold ? 800 : 400,
+      // The club's display font names its own weight (a one-weight face must not be bolded).
+      fontWeight: item.bold ? (String(item.fontFamily || '').includes('--social-display-font') ? 'var(--social-display-font-weight, 800)' : 800) : 400,
       color: resolveBlankColor(item.color, palette),
       textAlign: item.align, lineHeight: item.lineHeight ?? 1,
       letterSpacing: item.letterSpacing || 0,
@@ -234,11 +272,26 @@ function TextBlock({ item, palette }) {
       background: item.bg && item.bg !== 'none' ? resolveBlankColor(item.bg, palette) : 'transparent',
       padding: item.bg && item.bg !== 'none' ? '0.15em 0.4em' : 0,
       boxDecorationBreak: 'clone',
-    }}>{item.text || ' '}</div>
+    }}>{shown || ' '}</div>
   )
 }
 
-function ImageBlock({ item, palette }) {
+function ImageBlock({ item, palette, data }) {
+  // A bound picture (a player's photo) shows the live one; nothing held yet shows a
+  // labelled placeholder, and a place with no player or no photo prints nothing.
+  if (item.bind) {
+    const live = resolveBind(item.bind, data)
+    if (live) return <img src={live} alt="" draggable={false} style={{ width: item.w, height: item.h, objectFit: item.fit || 'cover', borderRadius: item.radius || 0, display: 'block', pointerEvents: 'none' }} />
+    if (live === '') return <div style={{ width: item.w, height: item.h }} />
+    return (
+      <div style={{
+        width: item.w, height: item.h, borderRadius: item.radius || 0,
+        border: `3px dashed ${resolveBlankColor('ink', palette)}55`, boxSizing: 'border-box',
+        display: 'grid', placeItems: 'center', fontFamily: "'JetBrains Mono', monospace", fontSize: 22, letterSpacing: 2,
+        color: `${resolveBlankColor('ink', palette)}99`, textAlign: 'center', padding: 16,
+      }}>{bindLabel(item.bind).toUpperCase()}</div>
+    )
+  }
   if (item.src) {
     return <img src={item.src} alt="" draggable={false} style={{ width: item.w, height: item.h, objectFit: item.fit || 'contain', borderRadius: item.radius || 0, display: 'block', pointerEvents: 'none' }} />
   }
@@ -283,13 +336,6 @@ const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.BASE_URL + 'ap
 const headshotUrl = (p) => (p?.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null)
 
 // "LAST, First" / "First Last" split, mirroring splitName in AdminSocialPost.
-function splitPlayerName(name) {
-  const n = String(name || '').trim()
-  if (!n) return ['', '']
-  if (n.includes(', ')) { const [l, f] = n.split(', '); return [f || '', l || ''] }
-  const parts = n.split(/\s+/)
-  return [parts.slice(0, -1).join(' '), parts.slice(-1)[0] || '']
-}
 
 function DataBlock({ item, palette, data = {} }) {
   const ink = resolveBlankColor(item.color, palette)
@@ -363,10 +409,12 @@ function DataBlock({ item, palette, data = {} }) {
   if (item.kind === 'scorecard') {
     const sc = data.scorecard
     const m = sc?.meta || {}
-    const side = (t, label) => {
+    // A side's `bowling` is the bowling in the innings it BATTED, so it lists
+    // the other side's bowlers. This side's own best bowler is in `other`.
+    const side = (t, label, other) => {
       if (!t) return null
       const topBat = (t.batting || []).slice().sort((a, b) => (b.r || 0) - (a.r || 0))[0]
-      const topBowl = (t.bowling || []).slice().sort((a, b) => (b.w || 0) - (a.w || 0))[0]
+      const topBowl = ((other && other.bowling) || []).slice().sort((a, b) => (b.w || 0) - (a.w || 0))[0]
       return (
         <div style={{ padding: '14px 0', borderTop: `1px solid ${rule}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -383,8 +431,8 @@ function DataBlock({ item, palette, data = {} }) {
     return (
       <div style={wrap}>
         <Head>{(m.result || 'SCORECARD').toUpperCase()}</Head>
-        {side(sc?.home, 'HOME')}
-        {side(sc?.away, 'AWAY')}
+        {side(sc?.home, 'HOME', sc?.away)}
+        {side(sc?.away, 'AWAY', sc?.home)}
       </div>
     )
   }
@@ -457,11 +505,66 @@ function DataBlock({ item, palette, data = {} }) {
   return null
 }
 
+// Where a default sponsor strip goes on a canvas of this size: a full-width band
+// along the bottom edge, taller when there are more logos to fit.
+export function defaultSponsorGeometry(width, height, count) {
+  const h = count <= 2 ? 120 : count <= 4 ? 140 : 190
+  return { x: 48, w: Math.max(200, width - 96), h, y: Math.max(0, height - h - 40) }
+}
+
+// Best column count for n logos in a w x h box. A logo is assumed about twice as
+// wide as it is tall, so the score is the largest logo a cell can hold. The last
+// row is centred, so an odd count does not leave a hole.
+export function sponsorGridLayout(n, w, h, gap) {
+  if (!n || w <= 0 || h <= 0) return { cols: 1, rows: 1, cellW: 0, cellH: 0 }
+  let best = null
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols)
+    const cellW = (w - gap * (cols - 1)) / cols
+    const cellH = (h - gap * (rows - 1)) / rows
+    if (cellW <= 0 || cellH <= 0) continue
+    const score = Math.min(cellW, cellH * 2)
+    if (!best || score > best.score + 0.5) best = { cols, rows, cellW, cellH, score }
+  }
+  return best || { cols: n, rows: 1, cellW: w / n, cellH: h, score: 0 }
+}
+
+const SPONSOR_PANELS = {
+  light: { background: 'rgba(255,255,255,0.94)', borderRadius: 18 },
+  dark: { background: 'rgba(8,10,14,0.62)', borderRadius: 18 },
+  none: { background: 'transparent', borderRadius: 0 },
+}
+
+function SponsorGridBlock({ item, data }) {
+  const list = (data && data.sponsors) || []
+  const picked = (item.sponsorIds || []).map((id) => list.find((s) => s.id === id)).filter((s) => s && s.url)
+  if (!picked.length) return null
+  const pad = item.pad ?? 18
+  const gap = item.gap ?? 28
+  const lay = sponsorGridLayout(picked.length, item.w - pad * 2, item.h - pad * 2, gap)
+  const panel = item.layoutBacked ? SPONSOR_PANELS.none : (SPONSOR_PANELS[item.panel] || SPONSOR_PANELS.light)
+  return (
+    <div data-sponsor-grid="" style={{
+      width: item.w, height: item.h, boxSizing: 'border-box', padding: pad,
+      display: 'flex', flexWrap: 'wrap', alignContent: 'center', justifyContent: 'center', gap,
+      ...panel,
+    }}>
+      {picked.map((s) => (
+        <div key={s.id} style={{ width: lay.cellW, height: lay.cellH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <img src={s.url} alt={s.name} draggable={false}
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function renderContent(item, palette, team, data) {
-  if (item.type === 'text') return <TextBlock item={item} palette={palette} />
-  if (item.type === 'image') return <ImageBlock item={item} palette={palette} />
+  if (item.type === 'text') return <TextBlock item={item} palette={palette} data={data} />
+  if (item.type === 'image') return <ImageBlock item={item} palette={palette} data={data} />
   if (item.type === 'element') return <ElementBlock item={item} palette={palette} />
   if (item.type === 'data') return <DataBlock item={item} palette={palette} data={data} />
+  if (item.type === 'sponsors') return <SponsorGridBlock item={item} data={data} />
   return <BrandLockup team={team} palette={palette} size={item.size} layout={item.layout} align={item.align} showName={item.showName} showLogo={item.showLogo !== false} nameColor={resolveBlankColor(item.color, palette)} />
 }
 
@@ -500,6 +603,7 @@ function BlankBlock({ item, palette, team, data, interactive, selected, single, 
         // Re-armed explicitly so a block stays grabbable inside a pass-through
         // layer, whose root deliberately takes no pointer events at all.
         ...(interactive ? { pointerEvents: 'auto' } : null),
+        ...(item.locked ? { pointerEvents: 'none' } : null),
       }}>
       {renderContent(item, palette, team, data)}
       {interactive && single && (
@@ -662,7 +766,7 @@ export function BlankCanvas({
       Object.entries(starts).forEach(([id, it]) => {
         const p = { x: Math.round(bb.x + (it.x - bb.x) * f), y: Math.round(bb.y + (it.y - bb.y) * f) }
         if (it.type === 'text') { p.fontSize = Math.max(8, Math.round(it.fontSize * f)); p.w = Math.max(40, Math.round(it.w * f)) }
-        else if (it.type === 'image') { p.w = Math.max(30, Math.round(it.w * f)); p.h = Math.max(30, Math.round(it.h * f)) }
+        else if (it.type === 'image' || it.type === 'sponsors') { p.w = Math.max(30, Math.round(it.w * f)); p.h = Math.max(30, Math.round(it.h * f)) }
         else if (it.type === 'element') { p.w = Math.max(4, Math.round(it.w * f)); p.h = Math.max(2, Math.round((it.h || 0) * f)); if (it.thickness) p.thickness = Math.max(1, Math.round(it.thickness * f)) }
         else if (it.type === 'brand') p.size = Math.max(40, Math.round(it.size * f))
         patch[id] = p
@@ -704,15 +808,20 @@ export function BlankCanvas({
           <CreditMark ink={palette.ink || '#fff'} h={44} />
         </div>
       )}
-      {items.map((it) => (
+      {items.map((raw) => {
+        // The saved size is the canvas it was uploaded to. Drawn at the live
+        // canvas, so a design follows the Square / 4:5 / Story picker.
+        const it = raw.design && raw.locked ? { ...raw, x: 0, y: 0, w: width, h: height, rotation: 0 } : raw
+        return (
         <BlankBlock
-          key={it.id} item={it} palette={palette} team={team} data={data} interactive={interactive}
+          key={it.id} item={it} palette={palette} team={team} data={data} interactive={interactive && !it.locked}
           selected={selSet.has(it.id)} single={selectedIds.length === 1 && selSet.has(it.id)}
           outline={outline} handle={handle} accent={accent}
           onPointerDown={beginMove} onResize={beginResize} onRotate={beginRotate}
           onDuplicate={onDuplicate} onRemove={onRemove}
         />
-      ))}
+        )
+      })}
       {interactive && multi && gbb && (
         <div style={{ position: 'absolute', left: gbb.x, top: gbb.y, width: gbb.w, height: gbb.h, outline: `${outline}px dashed ${accent}`, pointerEvents: 'none' }}>
           <div onPointerDown={(e) => beginResizeGroup(e, gbb)} title="Drag to resize group"
