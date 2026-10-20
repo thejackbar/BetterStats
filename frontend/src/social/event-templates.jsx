@@ -24,6 +24,8 @@ import { IS_AFL, PLATFORM_NAME } from '../lib/sport'
 import { aspectOf, pick, share } from './postAspect'
 import { LayerRoot } from './postLayers'
 import { EVENT_LIST_TEMPLATES, SPONSOR_SLOTS as LIST_SLOTS, MAX_LIST_ITEMS } from './event-list-templates'
+import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
+import { usePostLook } from './postLook'
 
 // Bundled motif glyphs (already in the repo at src/assets/thiings/).
 import icoTrophy from '../assets/thiings/trophy.png'
@@ -64,15 +66,16 @@ function BSMark({ size = 22, color = '#f25aa6' }) {
 
 // Full-bleed photo layer + scrim for the directions that take a hero image.
 // Falls back to a diagonal accent weave (so the slot reads even with no photo).
-function PhotoLayer({ motif, palette, height = '100%', scrimFrom = 0.04, label }) {
+function PhotoLayer({ motif, palette, height = '100%', scrimFrom = 0.04, label, parts }) {
   const P = palette
+  const texture = usePostLook().texture !== false
   return (
     <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height, overflow: 'hidden' }}>
       {motif?.imageUrl ? (
         <img src={motif.imageUrl} alt="" crossOrigin="anonymous"
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: motif.opacity ?? 0.85 }} />
       ) : (
-        <div style={{ position: 'absolute', inset: 0, background: `repeating-linear-gradient(135deg, ${P.primary} 0px, ${P.primary} 17px, ${a(P.accent, 0.1)} 17px, ${a(P.accent, 0.1)} 34px)` }}>
+        <div style={{ position: 'absolute', inset: 0, background: texture ? `repeating-linear-gradient(135deg, ${P.primary} 0px, ${P.primary} 17px, ${a(P.accent, 0.1)} 17px, ${a(P.accent, 0.1)} 34px)` : P.primary }}>
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, opacity: 0.5 }}>
             <div style={{ width: 60, height: 60, border: `2px solid ${a(P.accent, 0.45)}`, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ width: 22, height: 22, border: `2px solid ${a(P.accent, 0.45)}`, borderRadius: '50%' }} />
@@ -81,7 +84,7 @@ function PhotoLayer({ motif, palette, height = '100%', scrimFrom = 0.04, label }
           </div>
         </div>
       )}
-      <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(180deg, ${a(P.accent, 0.16)} 0%, transparent 38%), linear-gradient(0deg, ${P.primary} ${scrimFrom * 100}%, transparent 64%)` }} />
+      <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(180deg, ${a(pc(parts, 'photoGlow', P.accent), 0.16)} 0%, transparent 38%), linear-gradient(0deg, ${pc(parts, 'photoFade', P.primary)} ${scrimFrom * 100}%, transparent 64%)` }} />
     </div>
   )
 }
@@ -99,14 +102,15 @@ function ClubLockup({ team, palette, color }) {
   )
 }
 
-function Watermark({ sponsor, color = 'rgba(255,255,255,0.42)' }) {
+function Watermark({ sponsor, color = 'rgba(255,255,255,0.42)', parts }) {
+  const credit = pc(parts, 'creditColor', color)
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <BSMark />
-        <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color }}>Made with {PLATFORM_NAME}</span>
+        <BSMark color={pc(parts, 'markColor', '#f25aa6')} />
+        <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: credit }}>Made with {PLATFORM_NAME}</span>
       </div>
-      {sponsor ? <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color }}>{sponsor}</div> : null}
+      {sponsor ? <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'sponsorColor', credit) }}>{sponsor}</div> : null}
     </div>
   )
 }
@@ -151,47 +155,74 @@ const slotEV1 = (width, height) => {
   const A = aspectOf(width, height)
   return slotRect(width, height, { x: 64, bottom: pick(A, { square: 40, portrait: 44, story: 120 }), h: pick(A, { square: 112, portrait: 120, story: 136 }) })
 }
-export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
+export function EVT_Floodlit({ team, event = {}, width = 1080, height = 1080, palette, motif, parts }) {
   const P = palette
   const A = aspectOf(width, height)
   const slot = slotEV1(width, height)
+  const texture = usePostLook().texture !== false
+  const priceBg = pc(parts, 'priceBg', P.accent)
+  const rule = pc(parts, 'dividerColor', 'rgba(255,255,255,0.16)')
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
-      <PhotoLayer motif={motif} palette={P} height={share(height, 680)} scrimFrom={0.04} label={motif?.label} />
-      <div style={{ position: 'absolute', left: -180, top: -180, width: 520, height: 520, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.3)}, transparent 68%)`, pointerEvents: 'none' }} />
+      <PhotoLayer motif={motif} palette={P} height={share(height, 680)} scrimFrom={0.04} label={motif?.label} parts={parts} />
+      {texture ? <div style={{ position: 'absolute', left: -180, top: -180, width: 520, height: 520, borderRadius: '50%', background: `radial-gradient(circle, ${a(pc(parts, 'glowColor', P.accent), 0.3)}, transparent 68%)`, pointerEvents: 'none' }} /> : null}
 
       <div style={{ position: 'absolute', top: 56, left: 64, right: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <ClubLockup team={team} palette={P} color="#fff" />
-        <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, border: `1.5px solid ${a(P.accent, 0.45)}`, borderRadius: 999, padding: '9px 18px', background: a(P.accent, 0.1) }}>Club Event</div>
+        <ClubLockup team={team} palette={P} color={pc(parts, 'clubColor', '#fff')} />
+        <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: pc(parts, 'badgeColor', P.accent), border: `1.5px solid ${pc(parts, 'badgeBorder', a(P.accent, 0.45))}`, borderRadius: 999, padding: '9px 18px', background: a(pc(parts, 'badgeBg', P.accent), 0.1) }}>{pt(parts, 'badgeText', 'Club Event')}</div>
       </div>
 
       <div style={{ position: 'absolute', left: 64, right: 64, bottom: height - slot.y + 22, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: 14 }}>{event.kicker}</div>
+        <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: pc(parts, 'kickerColor', P.accent), marginBottom: 14 }}>{event.kicker}</div>
         <div style={{ height: twoLineBox(148, 0.86), display: 'flex', alignItems: 'flex-end' }}>
           <AutoFitText text={(event.title || '').toUpperCase()} max={148} min={56} lines={2} measureDeps={[event.title]}
-            style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.86, textTransform: 'uppercase', color: '#fff', letterSpacing: 1 }} />
+            style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.86, textTransform: 'uppercase', color: pc(parts, 'titleColor', '#fff'), letterSpacing: 1 }} />
         </div>
-        {event.subtitle ? <div style={{ fontSize: 30, color: 'rgba(255,255,255,0.78)', marginTop: pick(A, { square: 16, portrait: 22 }), maxWidth: 760, lineHeight: 1.3 }}>{event.subtitle}</div> : null}
+        {event.subtitle ? <div style={{ fontSize: 30, color: pc(parts, 'subtitleColor', 'rgba(255,255,255,0.78)'), marginTop: pick(A, { square: 16, portrait: 22 }), maxWidth: 760, lineHeight: 1.3 }}>{event.subtitle}</div> : null}
 
-        <div style={{ display: 'flex', marginTop: pick(A, { square: 28, portrait: 40 }), borderTop: '1px solid rgba(255,255,255,0.16)', borderBottom: '1px solid rgba(255,255,255,0.16)' }}>
+        <div style={{ display: 'flex', marginTop: pick(A, { square: 28, portrait: 40 }), borderTop: `1px solid ${rule}`, borderBottom: `1px solid ${rule}` }}>
           {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v], i) => (
-            <div key={l} style={{ flex: i === 2 ? 1.4 : 1, padding: i ? '22px 0 22px 28px' : '22px 0', borderLeft: i ? '1px solid rgba(255,255,255,0.16)' : 'none' }}>
-              <div style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 3, textTransform: 'uppercase', color: 'rgba(255,255,255,0.45)' }}>{l}</div>
-              <div style={{ fontFamily: SPORT, fontWeight: 700, fontSize: 38, color: '#fff', marginTop: 6 }}>{v}</div>
+            <div key={l} style={{ flex: i === 2 ? 1.4 : 1, padding: i ? '22px 0 22px 28px' : '22px 0', borderLeft: i ? `1px solid ${rule}` : 'none' }}>
+              <div style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 3, textTransform: 'uppercase', color: pc(parts, 'labelColor', 'rgba(255,255,255,0.45)') }}>{l}</div>
+              <div style={{ fontFamily: SPORT, fontWeight: 700, fontSize: 38, color: pc(parts, 'valueColor', '#fff'), marginTop: 6 }}>{v}</div>
             </div>
           ))}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginTop: pick(A, { square: 22, portrait: 30 }) }}>
-          {event.price ? <div style={{ background: P.accent, color: P.primary, fontFamily: SPORT, fontWeight: 800, fontSize: 40, textTransform: 'uppercase', letterSpacing: 1, padding: '12px 26px', borderRadius: 10 }}>{event.price}</div> : null}
-          {event.cta ? <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)' }}>{event.cta}</div> : null}
+          {event.price ? <div style={{ background: priceBg, color: pc(parts, 'priceColor', partPicked(parts, 'priceBg') ? inkOn(priceBg) : P.primary), fontFamily: SPORT, fontWeight: 800, fontSize: 40, textTransform: 'uppercase', letterSpacing: 1, padding: '12px 26px', borderRadius: 10 }}>{event.price}</div> : null}
+          {event.cta ? <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'ctaColor', 'rgba(255,255,255,0.7)') }}>{event.cta}</div> : null}
         </div>
 
-        <div style={{ marginTop: pick(A, { square: 20, portrait: 30 }) }}><Watermark sponsor={event.sponsor} /></div>
+        <div style={{ marginTop: pick(A, { square: 20, portrait: 30 }) }}><Watermark sponsor={event.sponsor} parts={parts} /></div>
       </div>
     </LayerRoot>
   )
 }
+registerParts({
+  EV1: [
+    colorPart('photoFade', 'Photo fade at the foot', 'Photo', (p) => p.primary),
+    colorPart('photoGlow', 'Photo top tint', 'Photo', (p) => p.accent),
+    colorPart('glowColor', 'Corner glow', 'Photo', (p) => p.accent),
+    colorPart('clubColor', 'Club name', 'Heading', () => '#ffffff'),
+    colorPart('kickerColor', 'Line above the title', 'Heading', (p) => p.accent),
+    colorPart('titleColor', 'Title', 'Heading', () => '#ffffff'),
+    colorPart('subtitleColor', 'Subtitle', 'Heading', () => '#ffffff'),
+    textPart('badgeText', 'Tag words', 'Tag', () => 'Club Event'),
+    colorPart('badgeColor', 'Tag text', 'Tag', (p) => p.accent),
+    colorPart('badgeBg', 'Tag fill', 'Tag', (p) => p.accent),
+    colorPart('badgeBorder', 'Tag outline', 'Tag', (p) => p.accent),
+    colorPart('dividerColor', 'Lines around the details', 'Details', () => '#ffffff'),
+    colorPart('labelColor', 'Detail captions', 'Details', () => '#ffffff'),
+    colorPart('valueColor', 'Date, time and venue', 'Details', () => '#ffffff'),
+    colorPart('priceBg', 'Price tag', 'Price and action', (p) => p.accent),
+    colorPart('priceColor', 'Price text', 'Price and action', (p) => p.primary),
+    colorPart('ctaColor', 'Call to action', 'Price and action', () => '#ffffff'),
+    colorPart('creditColor', 'Made with line', 'Footer', () => '#ffffff'),
+    colorPart('sponsorColor', 'Sponsor line', 'Footer', () => '#ffffff'),
+    colorPart('markColor', 'Logo mark', 'Footer', () => '#f25aa6'),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EV2 — COLOUR BLOCK · club colour leads, giant motif (bold, high-energy)
@@ -203,10 +234,16 @@ const slotEV2 = (width, height) => {
   const A = aspectOf(width, height)
   return slotRect(width, height, { x: 64, bottom: pick(A, { square: 36, portrait: 44, story: 120 }), h: pick(A, { square: 100, portrait: 116, story: 136 }) })
 }
-export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
+export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palette, motif, parts }) {
   const P = palette
   const aspect = aspectOf(width, height)
   const slot = slotEV2(width, height)
+  const texture = usePostLook().texture !== false
+  const band = pc(parts, 'bandBg', P.accent)
+  const cellBg = pc(parts, 'cardBg', P.primary)
+  const ctaBg = pc(parts, 'ctaBg', P.accent)
+  const ctaText = pc(parts, 'ctaColor', partPicked(parts, 'ctaBg') ? inkOn(ctaBg) : P.primary)
+  const rule = pc(parts, 'dividerColor', 'rgba(255,255,255,0.12)')
   // The colour band is a touch shorter on the square so the detail panel has
   // room for all four cells + the CTA + the sponsor strip. Portrait/story keep
   // their share of the canvas.
@@ -214,54 +251,77 @@ export function EVT_Block({ team, event = {}, width = 1080, height = 1080, palet
   const tight = aspect === 'square'
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
-      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: bandH, background: `linear-gradient(150deg, ${P.accent} 0%, ${a(P.accent, 0.78)} 100%)`, overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: bandH, background: `linear-gradient(150deg, ${band} 0%, ${a(band, 0.78)} 100%)`, overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.3, mixBlendMode: 'overlay' }} />
-          : <img src={motif?.icon || icoHandshake} alt="" style={{ position: 'absolute', right: -130, top: 54, width: 560, height: 560, objectFit: 'contain', opacity: 0.26, transform: 'rotate(-8deg)' }} />}
-        <div style={{ position: 'absolute', right: -220, top: -40, width: 560, height: 560, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,0.18), transparent 66%)' }} />
+          : (texture ? <img src={motif?.icon || icoHandshake} alt="" style={{ position: 'absolute', right: -130, top: 54, width: 560, height: 560, objectFit: 'contain', opacity: 0.26, transform: 'rotate(-8deg)' }} /> : null)}
+        {texture ? <div style={{ position: 'absolute', right: -220, top: -40, width: 560, height: 560, borderRadius: '50%', background: `radial-gradient(circle, ${partPicked(parts, 'glowColor') ? a(parts.glowColor, 0.18) : 'rgba(255,255,255,0.18)'}, transparent 66%)` }} /> : null}
 
         <div style={{ position: 'absolute', top: tight ? 44 : 60, left: 64, right: 64, display: 'flex', alignItems: 'center', gap: 16 }}>
-          <BrandLockup team={team} palette={P} size={tight ? 84 : 96} nameColor="#fff" nameSize={tight ? 30 : 32} />
-          <div style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: '#fff', border: '1.5px solid rgba(255,255,255,0.55)', borderRadius: 999, padding: '9px 18px' }}>Club Event</div>
+          <BrandLockup team={team} palette={P} size={tight ? 84 : 96} nameColor={pc(parts, 'clubColor', '#fff')} nameSize={tight ? 30 : 32} />
+          <div style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: pc(parts, 'badgeColor', '#fff'), border: `1.5px solid ${pc(parts, 'badgeBorder', 'rgba(255,255,255,0.55)')}`, borderRadius: 999, padding: '9px 18px' }}>{pt(parts, 'badgeText', 'Club Event')}</div>
         </div>
 
         <div style={{ position: 'absolute', left: 64, right: 64, bottom: tight ? 38 : 52 }}>
-          <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: 'rgba(255,255,255,0.9)', marginBottom: tight ? 10 : 16 }}>{event.kicker}</div>
+          <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: pc(parts, 'kickerColor', 'rgba(255,255,255,0.9)'), marginBottom: tight ? 10 : 16 }}>{event.kicker}</div>
           <div style={{ height: twoLineBox(tight ? 144 : 158, 0.82), display: 'flex', alignItems: 'flex-end' }}>
             <AutoFitText text={(event.title || '').toUpperCase()} max={tight ? 144 : 158} min={56} lines={2} measureDeps={[event.title]}
-              style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.82, textTransform: 'uppercase', color: '#fff', letterSpacing: 1, textShadow: '0 4px 30px rgba(0,0,0,0.18)' }} />
+              style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.82, textTransform: 'uppercase', color: pc(parts, 'titleColor', '#fff'), letterSpacing: 1, textShadow: '0 4px 30px rgba(0,0,0,0.18)' }} />
           </div>
         </div>
       </div>
 
       <div style={{ position: 'absolute', left: 0, top: bandH, right: 0, bottom: height - slot.y + 12, padding: pick(aspect, { square: '26px 64px 0', portrait: '46px 64px 0', story: '54px 64px 0' }), boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
-        {event.subtitle ? <div style={{ fontSize: pick(aspect, { square: 25, portrait: 27, story: 29 }), color: 'rgba(255,255,255,0.74)', lineHeight: 1.3, maxWidth: 840, marginBottom: pick(aspect, { square: 16, portrait: 30, story: 34 }), flexShrink: 0 }}>{event.subtitle}</div> : null}
+        {event.subtitle ? <div style={{ fontSize: pick(aspect, { square: 25, portrait: 27, story: 29 }), color: pc(parts, 'subtitleColor', 'rgba(255,255,255,0.74)'), lineHeight: 1.3, maxWidth: 840, marginBottom: pick(aspect, { square: 16, portrait: 30, story: 34 }), flexShrink: 0 }}>{event.subtitle}</div> : null}
         {/* The four details SHARE whatever the panel has left, at every size, so
             they fill the space and centre their content instead of the fixed
             2×2 stack running past the panel (the square used to clip its bottom
             row). A long value wraps to two lines rather than being truncated. */}
         <div style={{
           flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: 'repeat(2, minmax(0, 1fr))', gap: 1,
-          background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, overflow: 'hidden',
+          background: rule, border: `1px solid ${rule}`, borderRadius: 14, overflow: 'hidden',
         }}>
-          {[['Date', event.date], ['Time', event.time], ['Venue', event.venue], ['Entry', event.price]].map(([l, v]) => (
-            <div key={l} style={{ background: P.primary, padding: tight ? '10px 24px' : '16px 24px', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
-              <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, marginBottom: 5 }}>{l}</div>
-              <div style={{ fontFamily: SPORT, fontWeight: 700, fontSize: pick(aspect, { square: 34, portrait: 40, story: 44 }), color: '#fff', lineHeight: 1.04, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{v}</div>
+          {[['Date', event.date], ['Time', event.time], ['Venue', event.venue], [pt(parts, 'entryLabel', 'Entry'), event.price]].map(([l, v]) => (
+            <div key={l} style={{ background: cellBg, padding: tight ? '10px 24px' : '16px 24px', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' }}>
+              <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: pc(parts, 'labelColor', P.accent), marginBottom: 5 }}>{l}</div>
+              <div style={{ fontFamily: SPORT, fontWeight: 700, fontSize: pick(aspect, { square: 34, portrait: 40, story: 44 }), color: pc(parts, 'valueColor', partPicked(parts, 'cardBg') ? inkOn(cellBg) : '#fff'), lineHeight: 1.04, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{v}</div>
             </div>
           ))}
         </div>
         {event.cta ? (
-          <div style={{ marginTop: pick(aspect, { square: 14, portrait: 26, story: 28 }), flexShrink: 0, background: P.accent, borderRadius: 14, padding: pick(aspect, { square: '12px 28px', portrait: '20px 28px', story: '22px 30px' }), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-            <span style={{ fontFamily: SPORT, fontWeight: 800, fontSize: pick(aspect, { square: 36, portrait: 42, story: 44 }), textTransform: 'uppercase', letterSpacing: 1, color: P.primary, lineHeight: 1 }}>{event.cta}</span>
-            <span style={{ fontFamily: MONO, fontSize: 15, color: P.primary, opacity: 0.7, flexShrink: 0 }}>↗</span>
+          <div style={{ marginTop: pick(aspect, { square: 14, portrait: 26, story: 28 }), flexShrink: 0, background: ctaBg, borderRadius: 14, padding: pick(aspect, { square: '12px 28px', portrait: '20px 28px', story: '22px 30px' }), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+            <span style={{ fontFamily: SPORT, fontWeight: 800, fontSize: pick(aspect, { square: 36, portrait: 42, story: 44 }), textTransform: 'uppercase', letterSpacing: 1, color: ctaText, lineHeight: 1 }}>{event.cta}</span>
+            <span style={{ fontFamily: MONO, fontSize: 15, color: ctaText, opacity: 0.7, flexShrink: 0 }}>↗</span>
           </div>
         ) : null}
-        <div style={{ marginTop: 'auto', flexShrink: 0, paddingTop: pick(aspect, { square: 12, portrait: 28, story: 30 }) }}><Watermark sponsor={event.sponsor} /></div>
+        <div style={{ marginTop: 'auto', flexShrink: 0, paddingTop: pick(aspect, { square: 12, portrait: 28, story: 30 }) }}><Watermark sponsor={event.sponsor} parts={parts} /></div>
       </div>
     </LayerRoot>
   )
 }
+registerParts({
+  EV2: [
+    colorPart('bandBg', 'Colour band', 'Colour band', (p) => p.accent),
+    colorPart('glowColor', 'Corner glow', 'Colour band', () => '#ffffff'),
+    colorPart('clubColor', 'Club name', 'Colour band', () => '#ffffff'),
+    textPart('badgeText', 'Tag words', 'Colour band', () => 'Club Event'),
+    colorPart('badgeColor', 'Tag text', 'Colour band', () => '#ffffff'),
+    colorPart('badgeBorder', 'Tag outline', 'Colour band', () => '#ffffff'),
+    colorPart('kickerColor', 'Line above the title', 'Colour band', () => '#ffffff'),
+    colorPart('titleColor', 'Title', 'Colour band', () => '#ffffff'),
+    colorPart('subtitleColor', 'Subtitle', 'Details panel', () => '#ffffff'),
+    colorPart('dividerColor', 'Lines between details', 'Details panel', () => '#ffffff'),
+    colorPart('cardBg', 'Detail boxes', 'Details panel', (p) => p.primary),
+    colorPart('labelColor', 'Detail captions', 'Details panel', (p) => p.accent),
+    colorPart('valueColor', 'Detail values', 'Details panel', () => '#ffffff'),
+    textPart('entryLabel', 'Price caption', 'Details panel', () => 'Entry'),
+    colorPart('ctaBg', 'Call to action bar', 'Call to action', (p) => p.accent),
+    colorPart('ctaColor', 'Call to action text', 'Call to action', (p) => p.primary),
+    colorPart('creditColor', 'Made with line', 'Footer', () => '#ffffff'),
+    colorPart('sponsorColor', 'Sponsor line', 'Footer', () => '#ffffff'),
+    colorPart('markColor', 'Logo mark', 'Footer', () => '#f25aa6'),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EV3 — TICKET · refined, editorial, motif watermark (premium occasions)
@@ -272,28 +332,32 @@ const slotEV3 = (width, height) => {
   const A = aspectOf(width, height)
   return slotRect(width, height, { x: 100, bottom: pick(A, { square: 76, portrait: 80, story: 110 }), h: pick(A, { square: 104, portrait: 116, story: 132 }) })
 }
-export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
+export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, palette, motif, parts }) {
   const P = palette
   const aspect = aspectOf(width, height)
   const slot = slotEV3(width, height)
   const tight = aspect === 'square'
-  const paper = P.paper || '#f4efe4'
-  const ink = P.deepInk || '#1f1c14'
+  const texture = usePostLook().texture !== false
+  const paper = pc(parts, 'paperColor', P.paper || '#f4efe4')
+  const ink = pc(parts, 'deepInkColor', P.deepInk || '#1f1c14')
   const line = a(ink, 0.2)
+  const rule = pc(parts, 'dividerColor', line)
+  const tear = pc(parts, 'ev3TearLine', line)
+  const stampBg = pc(parts, 'badgeBg', paper)
   const SERIF = "'Cormorant Garamond', serif"
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink, fontFamily: SERIF }}>
-      <img src={motif?.icon || icoTrophy} alt="" style={{ position: 'absolute', left: '50%', top: share(height, 300), transform: 'translateX(-50%)', width: 600, height: 600, objectFit: 'contain', opacity: 0.12 }} />
-      <div style={{ position: 'absolute', inset: 42, border: `1.5px solid ${line}`, pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', inset: 50, border: `1px solid ${a(ink, 0.12)}`, pointerEvents: 'none' }} />
+      {texture ? <img src={motif?.icon || icoTrophy} alt="" style={{ position: 'absolute', left: '50%', top: share(height, 300), transform: 'translateX(-50%)', width: 600, height: 600, objectFit: 'contain', opacity: 0.12 }} /> : null}
+      <div style={{ position: 'absolute', inset: 42, border: `1.5px solid ${pc(parts, 'frameColor', line)}`, pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', inset: 50, border: `1px solid ${pc(parts, 'frameInnerColor', a(ink, 0.12))}`, pointerEvents: 'none' }} />
 
       {/* Stamp lives in the top-right corner (the content is centred, so that
           corner is always clear) rather than at a fixed y that the headline
           slides under on a taller canvas. */}
       {event.price ? (
-        <div style={{ position: 'absolute', top: pick(aspect, { square: 118, portrait: 130, story: 150 }), right: 94, width: 138, height: 138, borderRadius: '50%', border: `2px solid ${P.accent}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-9deg)', background: paper }}>
-          <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 3, textTransform: 'uppercase', color: P.accent }}>Entry</div>
-          <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 46, lineHeight: 1, color: ink, marginTop: 2 }}>{event.price}</div>
+        <div style={{ position: 'absolute', top: pick(aspect, { square: 118, portrait: 130, story: 150 }), right: 94, width: 138, height: 138, borderRadius: '50%', border: `2px solid ${pc(parts, 'badgeBorder', P.accent)}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-9deg)', background: stampBg }}>
+          <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 3, textTransform: 'uppercase', color: pc(parts, 'badgeColor', P.accent) }}>{pt(parts, 'entryLabel', 'Entry')}</div>
+          <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 46, lineHeight: 1, color: pc(parts, 'priceColor', partPicked(parts, 'badgeBg') ? inkOn(stampBg) : ink), marginTop: 2 }}>{event.price}</div>
         </div>
       ) : null}
 
@@ -301,9 +365,9 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
         <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: tight ? 10 : 16 }}>
           {team.logo ? <ClubLogo src={team.logo} size={tight ? 80 : 98} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={tight ? 80 : 98} shape="shield" />}
           <div style={{ display: 'flex', alignItems: 'center', gap: 18, maxWidth: '84%' }}>
-            <div style={{ width: 44, height: 1, background: line, flexShrink: 0 }} />
-            <div style={{ fontFamily: SPORT, fontSize: 30, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: ink, lineHeight: 0.98 }}>{team.fullName || team.name}</div>
-            <div style={{ width: 44, height: 1, background: line, flexShrink: 0 }} />
+            <div style={{ width: 44, height: 1, background: rule, flexShrink: 0 }} />
+            <div style={{ fontFamily: SPORT, fontSize: 30, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'clubColor', ink), lineHeight: 0.98 }}>{team.fullName || team.name}</div>
+            <div style={{ width: 44, height: 1, background: rule, flexShrink: 0 }} />
           </div>
         </div>
 
@@ -311,37 +375,63 @@ export function EVT_Ticket({ team, event = {}, width = 1080, height = 1080, pale
             margins top and bottom) — the poster reads as a ticket with its
             details, not three groups flung to the top, middle and edges. */}
         <div style={{ marginTop: 'auto', marginBottom: 'auto', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: tight ? 14 : 30 }}>
-          <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 6, textTransform: 'uppercase', color: P.accent, marginBottom: tight ? 10 : 16 }}>{event.kicker}</div>
+          <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 6, textTransform: 'uppercase', color: pc(parts, 'kickerColor', P.accent), marginBottom: tight ? 10 : 16 }}>{event.kicker}</div>
           <div style={{ height: twoLineBox(tight ? 136 : 158, 0.92), display: 'flex', alignItems: 'center', width: '100%' }}>
             <AutoFitText text={event.title} max={tight ? 136 : 158} min={60} lines={2} measureDeps={[event.title]}
-              style={{ fontFamily: SERIF, fontWeight: 600, lineHeight: 0.92, color: ink, letterSpacing: 1, textAlign: 'center', width: '100%' }} />
+              style={{ fontFamily: SERIF, fontWeight: 600, lineHeight: 0.92, color: pc(parts, 'titleColor', ink), letterSpacing: 1, textAlign: 'center', width: '100%' }} />
           </div>
-          {event.subtitle ? <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 500, fontSize: pick(aspect, { square: 31, portrait: 37, story: 39 }), color: a(ink, 0.66), marginTop: tight ? 8 : 14, maxWidth: 720, lineHeight: 1.3 }}>{event.subtitle}</div> : null}
+          {event.subtitle ? <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontWeight: 500, fontSize: pick(aspect, { square: 31, portrait: 37, story: 39 }), color: pc(parts, 'subtitleColor', a(ink, 0.66)), marginTop: tight ? 8 : 14, maxWidth: 720, lineHeight: 1.3 }}>{event.subtitle}</div> : null}
 
           <div style={{ position: 'relative', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: tight ? '22px 0 20px' : '34px 0 32px' }}>
-            <div style={{ position: 'absolute', left: -58, width: 34, height: 34, borderRadius: '50%', background: a(ink, 0.08), border: `1px solid ${line}` }} />
-            <div style={{ flex: 1, borderTop: `2px dashed ${line}` }} />
-            <div style={{ position: 'absolute', right: -58, width: 34, height: 34, borderRadius: '50%', background: a(ink, 0.08), border: `1px solid ${line}` }} />
+            <div style={{ position: 'absolute', left: -58, width: 34, height: 34, borderRadius: '50%', background: pc(parts, 'ev3HoleBg', a(ink, 0.08)), border: `1px solid ${tear}` }} />
+            <div style={{ flex: 1, borderTop: `2px dashed ${tear}` }} />
+            <div style={{ position: 'absolute', right: -58, width: 34, height: 34, borderRadius: '50%', background: pc(parts, 'ev3HoleBg', a(ink, 0.08)), border: `1px solid ${tear}` }} />
           </div>
           <div style={{ display: 'flex', alignItems: 'stretch', maxWidth: '100%' }}>
             {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v], i) => (
-              <div key={l} style={{ padding: '0 30px', textAlign: 'center', borderLeft: i ? `1px solid ${line}` : 'none', minWidth: 0 }}>
-                <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: a(ink, 0.5) }}>{l}</div>
-                <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 36, color: ink, marginTop: 4, lineHeight: 1.08 }}>{v}</div>
+              <div key={l} style={{ padding: '0 30px', textAlign: 'center', borderLeft: i ? `1px solid ${rule}` : 'none', minWidth: 0 }}>
+                <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 3, textTransform: 'uppercase', color: pc(parts, 'labelColor', a(ink, 0.5)) }}>{l}</div>
+                <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 36, color: pc(parts, 'valueColor', ink), marginTop: 4, lineHeight: 1.08 }}>{v}</div>
               </div>
             ))}
           </div>
-          {event.cta ? <div style={{ marginTop: tight ? 20 : 28, fontFamily: MONO, fontSize: 15, letterSpacing: 3, textTransform: 'uppercase', color: P.accent, border: `1.5px solid ${P.accent}`, borderRadius: 999, padding: '11px 26px' }}>{event.cta}</div> : null}
+          {event.cta ? <div style={{ marginTop: tight ? 20 : 28, fontFamily: MONO, fontSize: 15, letterSpacing: 3, textTransform: 'uppercase', color: pc(parts, 'ctaColor', P.accent), border: `1.5px solid ${pc(parts, 'ctaBorder', P.accent)}`, borderRadius: 999, padding: '11px 26px' }}>{event.cta}</div> : null}
         </div>
 
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <BSMark size={18} color={P.accent} />
-          <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: a(ink, 0.5) }}>Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+          <BSMark size={18} color={pc(parts, 'markColor', P.accent)} />
+          <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'creditColor', a(ink, 0.5)) }}>Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
         </div>
       </div>
     </LayerRoot>
   )
 }
+registerParts({
+  EV3: [
+    colorPart('paperColor', 'Paper', 'Paper and frame', (p) => p.paper || '#f4efe4'),
+    colorPart('deepInkColor', 'Main ink', 'Paper and frame', (p) => p.deepInk || '#1f1c14'),
+    colorPart('frameColor', 'Outer frame line', 'Paper and frame', (p) => p.deepInk || '#1f1c14'),
+    colorPart('frameInnerColor', 'Inner frame line', 'Paper and frame', (p) => p.deepInk || '#1f1c14'),
+    colorPart('clubColor', 'Club name', 'Heading', (p) => p.deepInk || '#1f1c14'),
+    colorPart('kickerColor', 'Line above the title', 'Heading', (p) => p.accent),
+    colorPart('titleColor', 'Title', 'Heading', (p) => p.deepInk || '#1f1c14'),
+    colorPart('subtitleColor', 'Subtitle', 'Heading', (p) => p.deepInk || '#1f1c14'),
+    colorPart('dividerColor', 'Rules by the club name and between details', 'Ticket stub', (p) => p.deepInk || '#1f1c14'),
+    colorPart('ev3TearLine', 'Tear line and notches outline', 'Ticket stub', (p) => p.deepInk || '#1f1c14'),
+    colorPart('ev3HoleBg', 'Notches', 'Ticket stub', (p) => p.deepInk || '#1f1c14'),
+    colorPart('labelColor', 'Detail captions', 'Ticket stub', (p) => p.deepInk || '#1f1c14'),
+    colorPart('valueColor', 'Date, time and venue', 'Ticket stub', (p) => p.deepInk || '#1f1c14'),
+    textPart('entryLabel', 'Stamp caption', 'Entry stamp', () => 'Entry'),
+    colorPart('badgeBg', 'Stamp fill', 'Entry stamp', (p) => p.paper || '#f4efe4'),
+    colorPart('badgeBorder', 'Stamp ring', 'Entry stamp', (p) => p.accent),
+    colorPart('badgeColor', 'Stamp caption colour', 'Entry stamp', (p) => p.accent),
+    colorPart('priceColor', 'Price', 'Entry stamp', (p) => p.deepInk || '#1f1c14'),
+    colorPart('ctaColor', 'Call to action text', 'Call to action', (p) => p.accent),
+    colorPart('ctaBorder', 'Call to action outline', 'Call to action', (p) => p.accent),
+    colorPart('markColor', 'Logo mark', 'Footer', (p) => p.accent),
+    colorPart('creditColor', 'Made with line', 'Footer', (p) => p.deepInk || '#1f1c14'),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EV4 — SCOREBOARD · LED dot-matrix, mono numerals (fixtures & selections)
@@ -352,10 +442,11 @@ const slotEV4 = (width, height) => {
   const A = aspectOf(width, height)
   return slotRect(width, height, { x: 64, bottom: pick(A, { square: 40, portrait: 44, story: 120 }), h: pick(A, { square: 108, portrait: 116, story: 136 }) })
 }
-export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
+export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, palette, motif, parts }) {
   const P = palette
   const aspect = aspectOf(width, height)
   const slot = slotEV4(width, height)
+  const texture = usePostLook().texture !== false
   // Title box grows modestly with the canvas; the FLEX GAP below the headline
   // takes the rest, so a taller post breathes in the middle rather than the
   // fixture card sliding under the CTA bar (the reported collision — the card
@@ -363,14 +454,16 @@ export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, 
   // stopping them meeting).
   const titleH = twoLineBox(150, 0.84)
   const rowPad = pick(aspect, { square: 9, portrait: 22, story: 30 })
+  const bullet = pc(parts, 'ev4Bullet', P.accent)
+  const rowRule = pc(parts, 'dividerColor', a(P.accent, 0.3))
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: P.primary, color: '#fff' }}>
-      <div style={{ position: 'absolute', inset: 0, backgroundImage: `radial-gradient(${a(P.accent, 0.1)} 1.4px, transparent 1.6px)`, backgroundSize: '24px 24px' }} />
-      <div style={{ position: 'absolute', left: -160, bottom: -160, width: 560, height: 560, borderRadius: '50%', background: `radial-gradient(circle, ${a(P.accent, 0.16)}, transparent 68%)` }} />
-      <img src={motif?.icon || (IS_AFL ? icoStar : icoBat)} alt="" style={{ position: 'absolute', right: 54, top: 64, width: 150, height: 150, objectFit: 'contain', opacity: 0.5 }} />
+      {texture ? <div style={{ position: 'absolute', inset: 0, backgroundImage: `radial-gradient(${a(pc(parts, 'ledColor', P.accent), 0.1)} 1.4px, transparent 1.6px)`, backgroundSize: '24px 24px' }} /> : null}
+      {texture ? <div style={{ position: 'absolute', left: -160, bottom: -160, width: 560, height: 560, borderRadius: '50%', background: `radial-gradient(circle, ${a(pc(parts, 'glowColor', P.accent), 0.16)}, transparent 68%)` }} /> : null}
+      {texture ? <img src={motif?.icon || (IS_AFL ? icoStar : icoBat)} alt="" style={{ position: 'absolute', right: 54, top: 64, width: 150, height: 150, objectFit: 'contain', opacity: 0.5 }} /> : null}
 
       <div style={{ position: 'absolute', top: 60, left: 64, right: 230, display: 'flex', alignItems: 'center', gap: 16 }}>
-        <BrandLockup team={team} palette={P} size={96} nameColor="#fff" nameSize={32} />
+        <BrandLockup team={team} palette={P} size={96} nameColor={pc(parts, 'clubColor', '#fff')} nameSize={32} />
       </div>
 
       {/* One column bounded top AND bottom, so the fixture card can never reach
@@ -379,45 +472,70 @@ export function EVT_Scoreboard({ team, event = {}, width = 1080, height = 1080, 
       <div style={{ position: 'absolute', left: 64, right: 64, top: pick(aspect, { square: 188, portrait: share(height, 214) }), bottom: height - slot.y + 16, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
-            <div style={{ width: 13, height: 13, borderRadius: '50%', background: P.accent, boxShadow: `0 0 16px ${P.accent}` }} />
-            <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: P.accent }}>{event.kicker}</div>
+            <div style={{ width: 13, height: 13, borderRadius: '50%', background: bullet, boxShadow: `0 0 16px ${bullet}` }} />
+            <div style={{ fontFamily: MONO, fontSize: 18, letterSpacing: 6, textTransform: 'uppercase', color: pc(parts, 'kickerColor', P.accent) }}>{event.kicker}</div>
           </div>
           <div style={{ height: titleH, display: 'flex', alignItems: 'flex-end' }}>
             <AutoFitText text={(event.title || '').toUpperCase()} max={150} min={56} lines={2} measureDeps={[event.title]}
-              style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.84, textTransform: 'uppercase', color: '#fff', letterSpacing: 1 }} />
+              style={{ fontFamily: SPORT, fontWeight: 800, lineHeight: 0.84, textTransform: 'uppercase', color: pc(parts, 'titleColor', '#fff'), letterSpacing: 1 }} />
           </div>
-          {event.subtitle ? <div style={{ fontFamily: MONO, fontSize: 21, color: 'rgba(255,255,255,0.6)', marginTop: 6, lineHeight: 1.5, maxWidth: 820 }}>{event.subtitle}</div> : null}
+          {event.subtitle ? <div style={{ fontFamily: MONO, fontSize: 21, color: pc(parts, 'subtitleColor', 'rgba(255,255,255,0.6)'), marginTop: 6, lineHeight: 1.5, maxWidth: 820 }}>{event.subtitle}</div> : null}
         </div>
 
         {/* Card floats in the middle of the slack (auto margins top AND bottom),
             so a taller post keeps the headline at the top and the footer at the
             foot with the details centred between — not one pooled gap. */}
-        <div style={{ marginTop: 'auto', marginBottom: 'auto', flexShrink: 0, border: `1.5px solid ${a(P.accent, 0.3)}`, borderRadius: 18, background: a(P.accent, 0.1), overflow: 'hidden' }}>
-          <div style={{ background: a(P.accent, 0.16), padding: '14px 28px', borderBottom: `1px solid ${a(P.accent, 0.3)}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 4, textTransform: 'uppercase', color: P.accent }}>▸ Fixture Card</span>
-            <span style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 2, color: 'rgba(255,255,255,0.4)' }}>{event.price}</span>
+        <div style={{ marginTop: 'auto', marginBottom: 'auto', flexShrink: 0, border: `1.5px solid ${pc(parts, 'cardBorder', a(P.accent, 0.3))}`, borderRadius: 18, background: a(pc(parts, 'cardBg', P.accent), 0.1), overflow: 'hidden' }}>
+          <div style={{ background: a(pc(parts, 'headerBg', P.accent), 0.16), padding: '14px 28px', borderBottom: `1px solid ${pc(parts, 'headerRule', a(P.accent, 0.3))}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 4, textTransform: 'uppercase', color: pc(parts, 'ev4CardTitleColor', P.accent) }}>{pt(parts, 'ev4CardTitle', '▸ Fixture Card')}</span>
+            <span style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 2, color: pc(parts, 'priceColor', 'rgba(255,255,255,0.4)') }}>{event.price}</span>
           </div>
           <div style={{ padding: '6px 28px' }}>
             {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v], i) => (
-              <div key={l} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 20, padding: `${rowPad}px 0`, borderBottom: i < 2 ? `1px dashed ${a(P.accent, 0.3)}` : 'none' }}>
-                <span style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 4, textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', flexShrink: 0 }}>{l}</span>
-                <span style={{ fontFamily: SPORT, fontWeight: 700, fontSize: 46, color: i === 2 ? P.accent : '#fff', textAlign: 'right', lineHeight: 1.05 }}>{v}</span>
+              <div key={l} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 20, padding: `${rowPad}px 0`, borderBottom: i < 2 ? `1px dashed ${rowRule}` : 'none' }}>
+                <span style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 4, textTransform: 'uppercase', color: pc(parts, 'labelColor', 'rgba(255,255,255,0.5)'), flexShrink: 0 }}>{l}</span>
+                <span style={{ fontFamily: SPORT, fontWeight: 700, fontSize: 46, color: i === 2 ? pc(parts, 'ev4VenueColor', P.accent) : pc(parts, 'valueColor', '#fff'), textAlign: 'right', lineHeight: 1.05 }}>{v}</span>
               </div>
             ))}
           </div>
         </div>
 
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-          <div style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 2, textTransform: 'uppercase', color: P.accent }}>{event.cta}</div>
+          <div style={{ fontFamily: MONO, fontSize: 16, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'ctaColor', P.accent) }}>{event.cta}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
-            {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)' }}>{event.sponsor}</span> : null}
-            <BSMark size={20} />
+            {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'sponsorColor', 'rgba(255,255,255,0.4)') }}>{event.sponsor}</span> : null}
+            <BSMark size={20} color={pc(parts, 'markColor', '#f25aa6')} />
           </div>
         </div>
       </div>
     </LayerRoot>
   )
 }
+registerParts({
+  EV4: [
+    colorPart('ledColor', 'Dot grid', 'Backdrop', (p) => p.accent),
+    colorPart('glowColor', 'Corner glow', 'Backdrop', (p) => p.accent),
+    colorPart('clubColor', 'Club name', 'Heading', () => '#ffffff'),
+    colorPart('ev4Bullet', 'Glowing dot by the title line', 'Heading', (p) => p.accent),
+    colorPart('kickerColor', 'Line above the title', 'Heading', (p) => p.accent),
+    colorPart('titleColor', 'Title', 'Heading', () => '#ffffff'),
+    colorPart('subtitleColor', 'Subtitle', 'Heading', () => '#ffffff'),
+    colorPart('cardBg', 'Fixture card tint', 'Fixture card', (p) => p.accent),
+    colorPart('cardBorder', 'Fixture card outline', 'Fixture card', (p) => p.accent),
+    colorPart('headerBg', 'Card heading bar', 'Fixture card', (p) => p.accent),
+    colorPart('headerRule', 'Line under the card heading', 'Fixture card', (p) => p.accent),
+    textPart('ev4CardTitle', 'Card heading words', 'Fixture card', () => '▸ Fixture Card'),
+    colorPart('ev4CardTitleColor', 'Card heading text', 'Fixture card', (p) => p.accent),
+    colorPart('priceColor', 'Price', 'Fixture card', () => '#ffffff'),
+    colorPart('dividerColor', 'Dashed lines between rows', 'Fixture card', (p) => p.accent),
+    colorPart('labelColor', 'Row captions', 'Fixture card', () => '#ffffff'),
+    colorPart('valueColor', 'Date and time', 'Fixture card', () => '#ffffff'),
+    colorPart('ev4VenueColor', 'Venue', 'Fixture card', (p) => p.accent),
+    colorPart('ctaColor', 'Call to action', 'Footer', (p) => p.accent),
+    colorPart('sponsorColor', 'Sponsor line', 'Footer', () => '#ffffff'),
+    colorPart('markColor', 'Logo mark', 'Footer', () => '#f25aa6'),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EV5 — GAZETTE · newspaper masthead + serif headline (stately notices)
@@ -429,15 +547,21 @@ const slotEV5 = (width, height) => {
   const A = aspectOf(width, height)
   return slotRect(width, height, { x: 56, bottom: pick(A, { square: 52, portrait: 56, story: 110 }), h: pick(A, { square: 100, portrait: 112, story: 132 }) })
 }
-export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
+export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, palette, motif, parts }) {
   const P = palette
   const aspect = aspectOf(width, height)
   const slot = slotEV5(width, height)
   const tight = aspect === 'square'
-  const paper = P.paper || '#f4f0e6'
-  const ink = P.deepInk || '#1a1814'
+  const texture = usePostLook().texture !== false
+  const paper = pc(parts, 'paperColor', P.paper || '#f4f0e6')
+  const ink = pc(parts, 'deepInkColor', P.deepInk || '#1a1814')
   const line = a(ink, 0.28)
   const faint = a(ink, 0.55)
+  const heavy = pc(parts, 'ev5RuleColor', ink)
+  const thin = pc(parts, 'dividerColor', line)
+  const box = pc(parts, 'cardBorder', ink)
+  const band = pc(parts, 'bandBg', ink)
+  const onBand = partPicked(parts, 'bandBg') ? inkOn(band) : null
   const SERIF = "'Playfair Display', serif"
   const BODY = "'Spectral', serif"
   const t5max = pick(aspect, { square: 92, portrait: 128, story: 138 })
@@ -448,66 +572,100 @@ export function EVT_Gazette({ team, event = {}, width = 1080, height = 1080, pal
           promoting this div's own children, and a block spliced in among them
           would be offset by the inset from where it was dropped. */}
       <div data-layer="Poster content" style={{ position: 'absolute', top: 56, left: 56, right: 56, bottom: height - slot.y + 14, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, paddingBottom: tight ? 6 : 10 }}>
-          <span>Vol. XCIV — No. 12</span><span>Est. 1921</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'ev5IssueColor', faint), paddingBottom: tight ? 6 : 10 }}>
+          <span>{pt(parts, 'ev5Issue', 'Vol. XCIV — No. 12')}</span><span>{pt(parts, 'ev5Est', 'Est. 1921')}</span>
         </div>
-        <div style={{ borderTop: `3px solid ${ink}`, borderBottom: `1px solid ${ink}`, padding: tight ? '10px 0 8px' : '16px 0 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26 }}>
+        <div style={{ borderTop: `3px solid ${heavy}`, borderBottom: `1px solid ${heavy}`, padding: tight ? '10px 0 8px' : '16px 0 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26 }}>
           {team.logo ? <ClubLogo src={team.logo} size={tight ? 68 : 88} /> : <ClubLogo monogram={team.monogram} color={ink} size={tight ? 64 : 80} shape="shield" />}
           {/* AutoFit the masthead so a long club name shrinks instead of wrapping
               to a two-line block that eats the poster. */}
           <div style={{ flex: 1, minWidth: 0 }}>
             <AutoFitText text={team.fullName || team.name} max={tight ? 60 : 72} min={34} lines={2} measureDeps={[team.fullName || team.name]}
-              style={{ fontFamily: SERIF, fontWeight: 900, lineHeight: 0.96, color: ink, letterSpacing: 0.5, textAlign: 'center' }} />
+              style={{ fontFamily: SERIF, fontWeight: 900, lineHeight: 0.96, color: pc(parts, 'clubColor', ink), letterSpacing: 0.5, textAlign: 'center' }} />
           </div>
         </div>
-        <div style={{ borderBottom: `3px solid ${ink}`, padding: tight ? '6px 0' : '9px 0', textAlign: 'center', fontFamily: MONO, fontSize: 14, letterSpacing: 5, textTransform: 'uppercase', color: ink }}>{event.kicker}</div>
+        <div style={{ borderBottom: `3px solid ${heavy}`, padding: tight ? '6px 0' : '9px 0', textAlign: 'center', fontFamily: MONO, fontSize: 14, letterSpacing: 5, textTransform: 'uppercase', color: pc(parts, 'kickerColor', ink) }}>{event.kicker}</div>
 
         <div style={{ textAlign: 'center', padding: pick(aspect, { square: '16px 0 2px', portrait: '30px 0 8px', story: '54px 0 12px' }) }}>
-          <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: P.accent, marginBottom: pick(aspect, { square: 6, portrait: 18, story: 20 }) }}>— Official Notice —</div>
+          <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: pc(parts, 'ev5NoticeColor', P.accent), marginBottom: pick(aspect, { square: 6, portrait: 18, story: 20 }) }}>{pt(parts, 'ev5Notice', '— Official Notice —')}</div>
           <div style={{ height: twoLineBox(t5max, 0.9), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <AutoFitText text={event.title} max={t5max} min={52} lines={2} measureDeps={[event.title]}
-              style={{ fontFamily: SERIF, fontWeight: 900, lineHeight: 0.9, color: ink }} />
+              style={{ fontFamily: SERIF, fontWeight: 900, lineHeight: 0.9, color: pc(parts, 'titleColor', ink) }} />
           </div>
-          {event.subtitle ? <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: pick(aspect, { square: 24, portrait: 33, story: 36 }), color: a(ink, 0.72), marginTop: pick(aspect, { square: 8, portrait: 20, story: 22 }), maxWidth: 840, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.32 }}>{event.subtitle}</div> : null}
+          {event.subtitle ? <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: pick(aspect, { square: 24, portrait: 33, story: 36 }), color: pc(parts, 'subtitleColor', a(ink, 0.72)), marginTop: pick(aspect, { square: 8, portrait: 20, story: 22 }), maxWidth: 840, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.32 }}>{event.subtitle}</div> : null}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 40, marginTop: pick(aspect, { square: 12, portrait: 22, story: 40 }), flex: 1, minHeight: 0, borderTop: `1px solid ${line}`, paddingTop: pick(aspect, { square: 14, portrait: 22, story: 40 }) }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 40, marginTop: pick(aspect, { square: 12, portrait: 22, story: 40 }), flex: 1, minHeight: 0, borderTop: `1px solid ${thin}`, paddingTop: pick(aspect, { square: 14, portrait: 22, story: 40 }) }}>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <div style={{ flex: 1, border: `1px solid ${ink}`, backgroundColor: '#d8d3c6', backgroundImage: motif?.imageUrl ? undefined : `radial-gradient(${a(ink, 0.42)} 1.3px, transparent 1.6px)`, backgroundSize: '7px 7px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ flex: 1, border: `1px solid ${box}`, backgroundColor: pc(parts, 'photoBg', '#d8d3c6'), backgroundImage: (motif?.imageUrl || !texture) ? undefined : `radial-gradient(${a(ink, 0.42)} 1.3px, transparent 1.6px)`, backgroundSize: '7px 7px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {motif?.imageUrl
                 ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'grayscale(1) contrast(1.1)' }} />
-                : <span style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 3, textTransform: 'uppercase', color: a(ink, 0.55), background: paper, padding: '6px 14px' }}>{motif?.label || 'Add a photo'}</span>}
+                : <span style={{ fontFamily: MONO, fontSize: 14, letterSpacing: 3, textTransform: 'uppercase', color: pc(parts, 'ev5PhotoLabel', a(ink, 0.55)), background: paper, padding: '6px 14px' }}>{motif?.label || 'Add a photo'}</span>}
             </div>
-            <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 18, color: faint, marginTop: 10 }}>Pictured: members at last year's event.</div>
+            <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 18, color: pc(parts, 'ev5CaptionColor', faint), marginTop: 10 }}>{pt(parts, 'ev5Caption', "Pictured: members at last year's event.")}</div>
           </div>
 
-          <div style={{ border: `2px solid ${ink}`, padding: pick(aspect, { square: '12px 22px', portrait: '18px 24px', story: '28px 28px' }), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 28, color: ink, borderBottom: `2px solid ${ink}`, paddingBottom: tight ? 6 : 10, marginBottom: 4, flexShrink: 0 }}>At a Glance</div>
+          <div style={{ border: `2px solid ${box}`, padding: pick(aspect, { square: '12px 22px', portrait: '18px 24px', story: '28px 28px' }), display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 28, color: pc(parts, 'ev5GlanceColor', ink), borderBottom: `2px solid ${pc(parts, 'headerRule', ink)}`, paddingBottom: tight ? 6 : 10, marginBottom: 4, flexShrink: 0 }}>{pt(parts, 'ev5GlanceTitle', 'At a Glance')}</div>
             {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v]) => (
-              <div key={l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: pick(aspect, { square: '7px 0', portrait: '11px 0', story: '17px 0' }), borderBottom: `1px solid ${line}` }}>
-                <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, flexShrink: 0 }}>{l}</span>
-                <span style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 27, color: ink, textAlign: 'right', lineHeight: 1.1 }}>{v}</span>
+              <div key={l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: pick(aspect, { square: '7px 0', portrait: '11px 0', story: '17px 0' }), borderBottom: `1px solid ${thin}` }}>
+                <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'labelColor', faint), flexShrink: 0 }}>{l}</span>
+                <span style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 27, color: pc(parts, 'valueColor', ink), textAlign: 'right', lineHeight: 1.1 }}>{v}</span>
               </div>
             ))}
-            <div style={{ marginTop: 'auto', background: ink, padding: tight ? '9px 18px' : '13px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)', flexShrink: 0 }}>Admission</span>
-              <span style={{ fontFamily: SERIF, fontWeight: 900, fontSize: 30, color: '#fff' }}>{event.price}</span>
+            <div style={{ marginTop: 'auto', background: band, padding: tight ? '9px 18px' : '13px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'ev5AdmissionColor', onBand || 'rgba(255,255,255,0.6)'), flexShrink: 0 }}>{pt(parts, 'entryLabel', 'Admission')}</span>
+              <span style={{ fontFamily: SERIF, fontWeight: 900, fontSize: 30, color: pc(parts, 'priceColor', onBand || '#fff') }}>{event.price}</span>
             </div>
           </div>
         </div>
 
-        <div style={{ borderTop: `3px solid ${ink}`, marginTop: pick(aspect, { square: 10, portrait: 26, story: 30 }), paddingTop: pick(aspect, { square: 8, portrait: 14 }), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-          <span style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 22, color: ink }}>{event.cta}</span>
+        <div style={{ borderTop: `3px solid ${heavy}`, marginTop: pick(aspect, { square: 10, portrait: 26, story: 30 }), paddingTop: pick(aspect, { square: 8, portrait: 14 }), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 22, color: pc(parts, 'ctaColor', ink) }}>{event.cta}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>{event.sponsor}</span> : null}
-            <span style={{ color: line }}>|</span>
-            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: faint }}>Made with {PLATFORM_NAME}</span>
+            {event.sponsor ? <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'sponsorColor', faint) }}>{event.sponsor}</span> : null}
+            <span style={{ color: thin }}>|</span>
+            <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'creditColor', faint) }}>Made with {PLATFORM_NAME}</span>
           </div>
         </div>
       </div>
     </LayerRoot>
   )
 }
+registerParts({
+  EV5: [
+    colorPart('paperColor', 'Paper', 'Paper', (p) => p.paper || '#f4f0e6'),
+    colorPart('deepInkColor', 'Main ink', 'Paper', (p) => p.deepInk || '#1a1814'),
+    textPart('ev5Issue', 'Issue line words', 'Masthead', () => 'Vol. XCIV — No. 12'),
+    textPart('ev5Est', 'Founded line words', 'Masthead', () => 'Est. 1921'),
+    colorPart('ev5IssueColor', 'Issue and founded lines', 'Masthead', (p) => p.deepInk || '#1a1814'),
+    colorPart('ev5RuleColor', 'Heavy rules', 'Masthead', (p) => p.deepInk || '#1a1814'),
+    colorPart('clubColor', 'Club name', 'Masthead', (p) => p.deepInk || '#1a1814'),
+    colorPart('kickerColor', 'Line under the masthead', 'Masthead', (p) => p.deepInk || '#1a1814'),
+    textPart('ev5Notice', 'Notice line words', 'Headline', () => '— Official Notice —'),
+    colorPart('ev5NoticeColor', 'Notice line', 'Headline', (p) => p.accent),
+    colorPart('titleColor', 'Title', 'Headline', (p) => p.deepInk || '#1a1814'),
+    colorPart('subtitleColor', 'Subtitle', 'Headline', (p) => p.deepInk || '#1a1814'),
+    colorPart('photoBg', 'Photo backdrop', 'Photo', () => '#d8d3c6'),
+    colorPart('ev5PhotoLabel', 'Words on an empty photo', 'Photo', (p) => p.deepInk || '#1a1814'),
+    textPart('ev5Caption', 'Photo caption words', 'Photo', () => "Pictured: members at last year's event."),
+    colorPart('ev5CaptionColor', 'Photo caption', 'Photo', (p) => p.deepInk || '#1a1814'),
+    textPart('ev5GlanceTitle', 'Details box heading words', 'Details box', () => 'At a Glance'),
+    colorPart('ev5GlanceColor', 'Details box heading', 'Details box', (p) => p.deepInk || '#1a1814'),
+    colorPart('cardBorder', 'Photo and details box outlines', 'Details box', (p) => p.deepInk || '#1a1814'),
+    colorPart('headerRule', 'Line under the box heading', 'Details box', (p) => p.deepInk || '#1a1814'),
+    colorPart('dividerColor', 'Thin rules', 'Details box', (p) => p.deepInk || '#1a1814'),
+    colorPart('labelColor', 'Detail captions', 'Details box', (p) => p.deepInk || '#1a1814'),
+    colorPart('valueColor', 'Date, time and venue', 'Details box', (p) => p.deepInk || '#1a1814'),
+    textPart('entryLabel', 'Price caption', 'Price bar', () => 'Admission'),
+    colorPart('bandBg', 'Price bar', 'Price bar', (p) => p.deepInk || '#1a1814'),
+    colorPart('ev5AdmissionColor', 'Price caption colour', 'Price bar', () => '#ffffff'),
+    colorPart('priceColor', 'Price', 'Price bar', () => '#ffffff'),
+    colorPart('ctaColor', 'Call to action', 'Footer', (p) => p.deepInk || '#1a1814'),
+    colorPart('sponsorColor', 'Sponsor line', 'Footer', (p) => p.deepInk || '#1a1814'),
+    colorPart('creditColor', 'Made with line', 'Footer', (p) => p.deepInk || '#1a1814'),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EV6 — STICKER POP · playful rounded badges (casual socials)
@@ -519,20 +677,25 @@ const slotEV6 = (width, height) => {
   const A = aspectOf(width, height)
   return slotRect(width, height, { x: 72, bottom: slotEV6Bottom(A), h: pick(A, { square: 100, portrait: 112, story: 132 }) })
 }
-export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, palette, motif }) {
+export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, palette, motif, parts }) {
   const P = palette
   const aspect = aspectOf(width, height)
   const slot = slotEV6(width, height)
   const tight = aspect === 'square'
-  const paper = P.paper || '#fbf6ec'
-  const ink = P.deepInk || '#23202c'
+  const texture = usePostLook().texture !== false
+  const paper = pc(parts, 'paperColor', P.paper || '#fbf6ec')
+  const ink = pc(parts, 'deepInkColor', P.deepInk || '#23202c')
+  const pillBg = pc(parts, 'bandBg', P.accent)
+  const chipBg = pc(parts, 'cardBg', '#fff')
+  const ctaBg = pc(parts, 'ctaBg', ink)
+  const priceBg = pc(parts, 'priceBg', P.accent)
   const FUN = "'Fredoka', sans-serif"
   return (
     <LayerRoot style={{ ...FRAME(width, height), background: paper, color: ink }}>
-      <div style={{ position: 'absolute', right: -130, top: -130, width: 480, height: 480, borderRadius: '50%', background: a(P.accent, 0.18) }} />
-      <div style={{ position: 'absolute', left: -90, bottom: share(height, 110), width: 300, height: 300, borderRadius: '50%', border: `4px dashed ${a(P.accent, 0.4)}` }} />
+      {texture ? <div style={{ position: 'absolute', right: -130, top: -130, width: 480, height: 480, borderRadius: '50%', background: a(pc(parts, 'ev6BlobColor', P.accent), 0.18) }} /> : null}
+      {texture ? <div style={{ position: 'absolute', left: -90, bottom: share(height, 110), width: 300, height: 300, borderRadius: '50%', border: `4px dashed ${a(pc(parts, 'ev6RingColor', P.accent), 0.4)}` }} /> : null}
 
-      <div style={{ position: 'absolute', top: pick(aspect, { square: 84, portrait: share(height, 130), story: 190 }), right: 96, width: tight ? 236 : 280, height: tight ? 236 : 280, background: '#fff', borderRadius: 36, boxShadow: '0 18px 44px rgba(0,0,0,0.16)', transform: 'rotate(7deg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: pick(aspect, { square: 84, portrait: share(height, 130), story: 190 }), right: 96, width: tight ? 236 : 280, height: tight ? 236 : 280, background: pc(parts, 'ev6StickerBg', '#fff'), borderRadius: 36, boxShadow: '0 18px 44px rgba(0,0,0,0.16)', transform: 'rotate(7deg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {motif?.imageUrl
           ? <img src={motif.imageUrl} alt="" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           : <img src={motif?.icon || icoTarget} alt="" style={{ width: tight ? 170 : 200, height: tight ? 170 : 200, objectFit: 'contain' }} />}
@@ -541,7 +704,7 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
       <div style={{ position: 'absolute', top: 72, left: 72, right: 72, bottom: height - slot.y + 16, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flexShrink: 0, alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 18, maxWidth: 640 }}>
           {team.logo ? <ClubLogo src={team.logo} size={92} /> : <ClubLogo monogram={team.monogram} color={P.accent} size={92} shape="shield" />}
-          <div style={{ background: P.accent, color: '#fff', fontFamily: FUN, fontWeight: 600, fontSize: 28, letterSpacing: 1, padding: '12px 26px', borderRadius: 999, transform: 'rotate(-3deg)', boxShadow: `0 8px 22px ${a(P.accent, 0.4)}` }}>{team.fullName || team.name}</div>
+          <div style={{ background: pillBg, color: pc(parts, 'clubColor', partPicked(parts, 'bandBg') ? inkOn(pillBg) : '#fff'), fontFamily: FUN, fontWeight: 600, fontSize: 28, letterSpacing: 1, padding: '12px 26px', borderRadius: 999, transform: 'rotate(-3deg)', boxShadow: `0 8px 22px ${a(pillBg, 0.4)}` }}>{team.fullName || team.name}</div>
         </div>
 
         {/* Hero + chips + CTA sit as one cluster: centred on square/portrait,
@@ -551,28 +714,28 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
             498px on a story. */}
         <div style={{ marginTop: pick(aspect, { square: 'auto', portrait: 'auto', story: 96 }), marginBottom: 'auto', width: '100%', display: 'flex', flexDirection: 'column', paddingTop: tight ? 12 : 28 }}>
           <div>
-            <div style={{ display: 'inline-block', background: a(P.accent, 0.18), color: P.accent, fontFamily: FUN, fontWeight: 600, fontSize: 22, padding: '8px 18px', borderRadius: 999, marginBottom: tight ? 10 : 18 }}>{event.kicker}</div>
+            <div style={{ display: 'inline-block', background: a(pc(parts, 'badgeBg', P.accent), 0.18), color: pc(parts, 'kickerColor', P.accent), fontFamily: FUN, fontWeight: 600, fontSize: 22, padding: '8px 18px', borderRadius: 999, marginBottom: tight ? 10 : 18 }}>{event.kicker}</div>
             <div style={{ height: twoLineBox(tight ? 136 : 158, 0.9), display: 'flex', alignItems: 'flex-end' }}>
               <AutoFitText text={event.title} max={tight ? 136 : 158} min={60} lines={2} measureDeps={[event.title]}
-                style={{ fontFamily: FUN, fontWeight: 700, lineHeight: 0.9, color: ink, letterSpacing: -1 }} />
+                style={{ fontFamily: FUN, fontWeight: 700, lineHeight: 0.9, color: pc(parts, 'titleColor', ink), letterSpacing: -1 }} />
             </div>
-            {event.subtitle ? <div style={{ fontWeight: 500, fontSize: tight ? 26 : 29, color: a(ink, 0.7), marginTop: tight ? 10 : 18, maxWidth: 760, lineHeight: tight ? 1.3 : 1.36 }}>{event.subtitle}</div> : null}
+            {event.subtitle ? <div style={{ fontWeight: 500, fontSize: tight ? 26 : 29, color: pc(parts, 'subtitleColor', a(ink, 0.7)), marginTop: tight ? 10 : 18, maxWidth: 760, lineHeight: tight ? 1.3 : 1.36 }}>{event.subtitle}</div> : null}
           </div>
 
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: pick(aspect, { square: 20, portrait: 36, story: 40 }) }}>
             {[['Date', event.date], ['Time', event.time], ['Venue', event.venue]].map(([l, v]) => (
-              <div key={l} style={{ background: '#fff', border: `2.5px solid ${ink}`, borderRadius: 18, padding: '14px 22px', boxShadow: `5px 5px 0 ${ink}` }}>
-                <div style={{ fontWeight: 600, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: P.accent }}>{l}</div>
-                <div style={{ fontFamily: FUN, fontWeight: 600, fontSize: 34, color: ink, lineHeight: 1.1 }}>{v}</div>
+              <div key={l} style={{ background: chipBg, border: `2.5px solid ${pc(parts, 'cardBorder', ink)}`, borderRadius: 18, padding: '14px 22px', boxShadow: `5px 5px 0 ${pc(parts, 'ev6ChipShadow', ink)}` }}>
+                <div style={{ fontWeight: 600, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: pc(parts, 'labelColor', P.accent) }}>{l}</div>
+                <div style={{ fontFamily: FUN, fontWeight: 600, fontSize: 34, color: pc(parts, 'valueColor', partPicked(parts, 'cardBg') ? inkOn(chipBg) : ink), lineHeight: 1.1 }}>{v}</div>
               </div>
             ))}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginTop: pick(aspect, { square: 20, portrait: 42, story: 46 }) }}>
-            {event.cta ? <div style={{ background: ink, color: '#fff', fontFamily: FUN, fontWeight: 600, fontSize: 34, padding: tight ? '14px 34px' : '18px 38px', borderRadius: 999, boxShadow: '0 10px 26px rgba(0,0,0,0.2)' }}>{event.cta}</div> : <span />}
+            {event.cta ? <div style={{ background: ctaBg, color: pc(parts, 'ctaColor', partPicked(parts, 'ctaBg') ? inkOn(ctaBg) : '#fff'), fontFamily: FUN, fontWeight: 600, fontSize: 34, padding: tight ? '14px 34px' : '18px 38px', borderRadius: 999, boxShadow: '0 10px 26px rgba(0,0,0,0.2)' }}>{event.cta}</div> : <span />}
             {event.price ? (
-              <div style={{ width: tight ? 124 : 150, height: tight ? 124 : 150, borderRadius: '50%', background: P.accent, color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-9deg)', boxShadow: `0 12px 30px ${a(P.accent, 0.4)}`, flexShrink: 0 }}>
-                <span style={{ fontWeight: 600, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.85 }}>Entry</span>
+              <div style={{ width: tight ? 124 : 150, height: tight ? 124 : 150, borderRadius: '50%', background: priceBg, color: pc(parts, 'priceColor', partPicked(parts, 'priceBg') ? inkOn(priceBg) : '#fff'), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-9deg)', boxShadow: `0 12px 30px ${a(priceBg, 0.4)}`, flexShrink: 0 }}>
+                <span style={{ fontWeight: 600, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.85 }}>{pt(parts, 'entryLabel', 'Entry')}</span>
                 <span style={{ fontFamily: FUN, fontWeight: 700, fontSize: tight ? 34 : 42, lineHeight: 1, textAlign: 'center', padding: '0 8px' }}>{event.price}</span>
               </div>
             ) : null}
@@ -581,12 +744,39 @@ export function EVT_Sticker({ team, event = {}, width = 1080, height = 1080, pal
       </div>
 
       <div style={{ position: 'absolute', bottom: slotEV6Bottom(aspect) - 30, left: 72, display: 'flex', alignItems: 'center', gap: 9 }}>
-        <BSMark size={18} />
-        <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: a(ink, 0.5) }}>Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
+        <BSMark size={18} color={pc(parts, 'markColor', '#f25aa6')} />
+        <span style={{ fontWeight: 500, fontSize: 13, letterSpacing: 1, color: pc(parts, 'creditColor', a(ink, 0.5)) }}>Made with {PLATFORM_NAME}{event.sponsor ? ` · ${event.sponsor}` : ''}</span>
       </div>
     </LayerRoot>
   )
 }
+registerParts({
+  EV6: [
+    colorPart('paperColor', 'Paper', 'Paper', (p) => p.paper || '#fbf6ec'),
+    colorPart('deepInkColor', 'Main ink', 'Paper', (p) => p.deepInk || '#23202c'),
+    colorPart('ev6BlobColor', 'Corner circle', 'Paper', (p) => p.accent),
+    colorPart('ev6RingColor', 'Dashed ring', 'Paper', (p) => p.accent),
+    colorPart('ev6StickerBg', 'Picture sticker', 'Heading', () => '#ffffff'),
+    colorPart('bandBg', 'Club name pill', 'Heading', (p) => p.accent),
+    colorPart('clubColor', 'Club name', 'Heading', () => '#ffffff'),
+    colorPart('badgeBg', 'Line above the title, pill', 'Heading', (p) => p.accent),
+    colorPart('kickerColor', 'Line above the title, text', 'Heading', (p) => p.accent),
+    colorPart('titleColor', 'Title', 'Heading', (p) => p.deepInk || '#23202c'),
+    colorPart('subtitleColor', 'Subtitle', 'Heading', (p) => p.deepInk || '#23202c'),
+    colorPart('cardBg', 'Detail boxes', 'Detail boxes', () => '#ffffff'),
+    colorPart('cardBorder', 'Detail box outline', 'Detail boxes', (p) => p.deepInk || '#23202c'),
+    colorPart('ev6ChipShadow', 'Detail box shadow', 'Detail boxes', (p) => p.deepInk || '#23202c'),
+    colorPart('labelColor', 'Detail captions', 'Detail boxes', (p) => p.accent),
+    colorPart('valueColor', 'Date, time and venue', 'Detail boxes', (p) => p.deepInk || '#23202c'),
+    colorPart('ctaBg', 'Call to action pill', 'Call to action and price', (p) => p.deepInk || '#23202c'),
+    colorPart('ctaColor', 'Call to action text', 'Call to action and price', () => '#ffffff'),
+    colorPart('priceBg', 'Price circle', 'Call to action and price', (p) => p.accent),
+    colorPart('priceColor', 'Price text', 'Call to action and price', () => '#ffffff'),
+    textPart('entryLabel', 'Price circle caption', 'Call to action and price', () => 'Entry'),
+    colorPart('markColor', 'Logo mark', 'Footer', () => '#f25aa6'),
+    colorPart('creditColor', 'Made with line', 'Footer', (p) => p.deepInk || '#23202c'),
+  ],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EV7 — KINETIC · diagonal bands, italic motion type (high-energy sport)
