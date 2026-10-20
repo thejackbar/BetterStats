@@ -157,6 +157,13 @@ export function extractFields(page: PageLike): Extraction | ExtractError {
     const clean = box.text.replace(/\s+/g, " ").trim();
     if (!box.hasToken) {
       // Plain words stay as written, unless they sit in a rotated group.
+      // Words like "CLUB LOGO" are a placeholder somebody typed: without the {{ }} they stay as
+      // those words on the post, so say how to make them a logo, photo or sponsors area.
+      if (clean && isAreaBinding(bindFromToken(clean))) {
+        warnings.push(
+          `“${clean}” is plain text, so BetterCricket prints those words. To fill it in automatically, type {{${clean.toLowerCase()}}} instead, or use the Add buttons.`,
+        );
+      }
       if (clean && !box.rotated && texts.length < MAX_FIXED) {
         texts.push({
           text: box.text.trim(),
