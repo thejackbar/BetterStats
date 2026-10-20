@@ -1438,7 +1438,11 @@ async def get_fielding_leaderboard(
         -- (the "Prior Seasons & Adjustments" bucket) belong in the all-seasons
         -- total. A specific-season filter below still excludes them (a NULL
         -- season never matches the season filter). Org scope is the player join.
+        -- Narrowed to the club's own players as a bound array, so the planner
+        -- narrows the season view up front. A bare join to `players` built the
+        -- view for every club on the platform and kept the club's 1.5%.
         WHERE p.organisation_id = :org_id
+          AND pss.player_id = ANY(CAST(:club_player_ids AS uuid[]))
     """
     if season_ids:
         base += " AND pss.season_id = ANY(:season_ids)"
@@ -1450,6 +1454,7 @@ async def get_fielding_leaderboard(
         base += " AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)"
     base += f" GROUP BY p.id, COALESCE(p.display_name_override, p.name) ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
 
+    params["club_player_ids"] = await _club_player_ids(session, org_id)
     result = await session.execute(text(base), params)
     return [dict(r) for r in result.mappings()]
 
@@ -4076,7 +4081,11 @@ async def get_batting_leaderboard_extended(
         -- (the "Prior Seasons & Adjustments" bucket) belong in the all-seasons
         -- total. A specific-season filter below still excludes them (a NULL
         -- season never matches the season filter). Org scope is the player join.
+        -- Narrowed to the club's own players as a bound array, so the planner
+        -- narrows the season view up front. A bare join to `players` built the
+        -- view for every club on the platform and kept the club's 1.5%.
         WHERE p.organisation_id = :org_id
+          AND pss.player_id = ANY(CAST(:club_player_ids AS uuid[]))
     """
     if season_ids:
         base += " AND pss.season_id = ANY(:season_ids)"
@@ -4093,6 +4102,7 @@ async def get_batting_leaderboard_extended(
                   "min_rate_innings", min_rate_innings)], keyword="HAVING")
     base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
 
+    params["club_player_ids"] = await _club_player_ids(session, org_id)
     result = await session.execute(text(base), params)
     return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
@@ -4622,7 +4632,11 @@ async def get_bowling_leaderboard_extended(
         -- (the "Prior Seasons & Adjustments" bucket) belong in the all-seasons
         -- total. A specific-season filter below still excludes them (a NULL
         -- season never matches the season filter). Org scope is the player join.
+        -- Narrowed to the club's own players as a bound array, so the planner
+        -- narrows the season view up front. A bare join to `players` built the
+        -- view for every club on the platform and kept the club's 1.5%.
         WHERE p.organisation_id = :org_id
+          AND pss.player_id = ANY(CAST(:club_player_ids AS uuid[]))
     """
     if season_ids:
         base += " AND pss.season_id = ANY(:season_ids)"
@@ -4647,6 +4661,7 @@ async def get_bowling_leaderboard_extended(
         base += " HAVING " + " AND ".join(having_clauses)
     base += f" {order_clause} LIMIT :limit"
 
+    params["club_player_ids"] = await _club_player_ids(session, org_id)
     result = await session.execute(text(base), params)
     return [_with_rate_coverage(dict(r)) for r in result.mappings()]
 
@@ -5340,8 +5355,11 @@ async def get_club_summary(
         base.update(await _club_results(session, org_id, season_ids=season_ids, scope=scope))
         return base
 
-    where = "WHERE p.organisation_id = :org_id"
-    params: dict = {"org_id": org_id}
+    # The club's own players go in as a bound array so the planner narrows the
+    # season view up front. Joined to `players` alone it built the view for every
+    # club on the platform (374k rows, 45s for a big club) and kept 1.5% of it.
+    where = "WHERE p.organisation_id = :org_id AND pss.player_id = ANY(CAST(:club_player_ids AS uuid[]))"
+    params: dict = {"org_id": org_id, "club_player_ids": await _club_player_ids(session, org_id)}
     if season_ids:
         where += " AND pss.season_id = ANY(:season_ids)"
         params["season_ids"] = season_ids
