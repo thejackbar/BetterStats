@@ -1,8 +1,8 @@
 export default {
   version: 'v9.124.0',
   date: '2026-10-19',
-  // Above v9.123.7's sortKey. Check origin/main at merge time.
-  sortKey: '2026-10-29T10:00:00Z',
+  // Above v9.123.9's sortKey. Check origin/main at merge time.
+  sortKey: '2026-10-30T10:00:00Z',
   title: 'Card review: choose between the Cricket Australia scorecard and the club scorecard',
   items: [
     'A match that is stored twice, once from Cricket Australia and once from a file, a typed-in entry or a photo of the book, now has a Card review page under Clean your data. It sorts every such match into five groups: scores agree, small differences, scores differ, pairing looks wrong, and no Cricket Australia card. Each group opens as a list with one line per match.',

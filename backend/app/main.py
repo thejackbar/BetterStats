@@ -4533,8 +4533,8 @@ async def lifespan(app: FastAPI):
         for _stmt in _DORMANCY_DDL:
             await conn.execute(text(_stmt))
 
-        # Migration 350: card review, the club's choice between a match's two stored
-        # versions, with its history. Same one-copy rule: this and alembic's 350 both run
+        # Migration 351: card review, the club's choice between a match's two stored
+        # versions, with its history. Same one-copy rule: this and alembic's 351 both run
         # services/card_review_ddl.STATEMENTS.
         from app.services.card_review_ddl import STATEMENTS as _CARD_REVIEW_DDL
         for _stmt in _CARD_REVIEW_DDL:

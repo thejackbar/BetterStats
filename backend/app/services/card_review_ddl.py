@@ -18,7 +18,7 @@ shows. Card review adds three things on top of that and nothing underneath:
 ``card_review_log`` is the history, one row per change, with the state it replaced and the ids
 of any rows a hybrid copy inserted, so one match can be put back exactly as it was.
 
-ONE copy of the DDL: alembic's 350 and main.py's lifespan mirror both run STATEMENTS. Every
+ONE copy of the DDL: alembic's 351 and main.py's lifespan mirror both run STATEMENTS. Every
 statement is idempotent.
 """
 
