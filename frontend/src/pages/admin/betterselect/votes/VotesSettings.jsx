@@ -408,7 +408,7 @@ export default function VotesSettings({
               options={[{ value: 'share', label: 'Allow ties' }, { value: 'countback', label: 'Countback' }]} />
             <div className="text-[11px] text-pb-faintest mt-1.5">
               {cfg.tie_policy === 'share'
-                ? 'Tied players share the position and both take the higher points.'
+                ? 'Tied players share the position and both take the higher points, so a game can hand out more points than the ballot holds.'
                 : `Ties break on who received more ${cfg.ballot_values[0]}s, then ${cfg.ballot_values[1] ?? '—'}s, and so on. A dead heat after every countback still shares.`}
             </div>
           </Row>

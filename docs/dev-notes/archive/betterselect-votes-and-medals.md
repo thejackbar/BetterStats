@@ -525,3 +525,11 @@ Reported: a captain sometimes outsources vote counting to another person, who is
 - Settings: a "Votes counted by" select under each team whose effective mode is Captain only. Ballot entry on the game page defaults to the counter instead of the captain.
 - Not changed: the football twin (it has no per-team voter mode), and a nominee who is not a player of the club cannot be picked, since they could not verify on the voting link.
 - Checked with `backend/scripts/verify_vote_counters.py` (41 checks against Postgres; the previous commit fails 28) and `backend/scripts/drive_vote_counters.py` (13 checks in Chromium on the production build, including 390px). `verify_vote_grade_voter_modes.py` (25), `verify_vote_medals.py` (59, its table setup now also runs the 347 statement), `verify_vote_grade_weights.py` (33), `verification/verify_vote_landing_own_games.py` (16) and `verify_player_votes_reminder.py` (37) unchanged.
+
+## v9.124.0.1: a level week is settled on countback by default (migration 352)
+
+Reported: Round 1 vs Hola Health WSCC 1st XI, a 3-2-1 medal. Dagg and Roach both had 17 raw votes (Dagg 4 threes, 1 two, 3 ones; Roach 1 three, 6 twos, 2 ones). With `tie_policy` 'share' both took 2, so the game handed out 7 points. The club wants Dagg 2 and Roach 1: countback on most 3s, and a maximum number of points per game unless it is a true dead heat.
+
+- `award_weekly_points` already did countback; the medal was on 'share', the default. `VoteMedal.tie_policy` model default, its `effective_config` fallback and the column default are now 'countback'. Migration 352 sets the column default and moves every existing 'share' medal to 'countback' once (not in the lifespan mirror, which would overwrite a later choice on every boot). The old `VoteSettings` model is history and unchanged.
+- The football twin (`afl_vote_medals`, `services/afl/votes.py`) is not changed.
+- Checked by running the shipped `award_weekly_points` on the reported tallies: 'share' gives Edwards 3, Dagg 2, Roach 2 (the control, reproducing the report); 'countback' gives Edwards 3, Dagg 2, Roach 1; an exact tie after countback still shares. Not run against Postgres or in the browser: no dependencies are installed in this sandbox.

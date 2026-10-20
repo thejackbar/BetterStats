@@ -1830,7 +1830,7 @@ class VoteSettings(Base):
     voter_mode = Column(Text, nullable=False, default="players", server_default="players")  # 'players' | 'captain'
     ballot_values = Column(JSONB, nullable=False, default=[3, 2, 1])  # descending, position 1 first
     counting_method = Column(Text, nullable=False, default="rank", server_default="rank")  # 'rank' | 'tally'
-    tie_policy = Column(Text, nullable=False, default="share", server_default="share")  # 'share' | 'countback'
+    tie_policy = Column(Text, nullable=False, default="countback", server_default="countback")  # 'share' | 'countback'
     allow_self_vote = Column(Boolean, nullable=False, default=False, server_default="false")
     allow_non_participants = Column(Boolean, nullable=False, default=False, server_default="false")
     auto_close_days = Column(Integer, nullable=False, default=7, server_default="7")

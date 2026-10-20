@@ -553,7 +553,7 @@ def effective_config(s: Optional[VoteMedal]) -> dict:
         "grade_weighting": clean_grade_weighting(getattr(s, "grade_weighting", None) if s else None),
         "ballot_values": clean_ballot_values(s.ballot_values if s else None),
         "counting_method": (s.counting_method if s and s.counting_method in COUNTING_METHODS else "rank"),
-        "tie_policy": (s.tie_policy if s and s.tie_policy in TIE_POLICIES else "share"),
+        "tie_policy": (s.tie_policy if s and s.tie_policy in TIE_POLICIES else "countback"),
         "allow_self_vote": bool(s.allow_self_vote) if s else False,
         "allow_non_participants": bool(s.allow_non_participants) if s else False,
         "auto_close_days": int(s.auto_close_days) if s and s.auto_close_days else 7,
