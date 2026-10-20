@@ -949,7 +949,21 @@ Slice 3 of the teaser campaign. A snapshot is JSON; an email and an ad need a pi
 
 **Email.** `{{teaser_url}}` and `{{teaser_image_url}}` are resolved with the trial figures in `_trial_vars` (preview, test send) and in the batch read in the send, so a preview cannot show a different email from the one that goes out. `teaser_image_url` also checks the file exists, because `image_version` alone cannot tell a drawn club from one whose volume was lost. The existing UTM tagging of links adds `utm_id` to `teaser_url`, so the club's engagement score picks up the visit. Known limit: a template that uses the image for a club with no picture renders `src=""`; the "Snapshot and picture ready" audience choice is the guard. Open tracking from the image fetch is not recorded: mail proxies prefetch, so it would be noise.
 
-**Not done.** Slice 4 (Meta creative export), feeding teaser views and taps into the engagement score, marking a preview visit as a prospect session.
+**Not done.** Feeding teaser views and taps into the engagement score, marking a preview visit as a prospect session.
 
 **Verification.** `verify_club_teaser_images.py` (63, control run reports the missing module and does not crash), `verify_teaser_card_browser.mjs` (39; control with ads printing names and no name shrinking fails 6 checks), the panel suite (49; control against the old panel fails the 7 new behaviours). A full local render (Postgres, the public teaser router, Vite, the shipped `render_club_teasers --apply`) produced all three formats for two clubs; the screenshots were read by eye. Two existing suites needed their harness to follow the shipped path: `verify_club_trial_segments.py` now creates the teaser table and builds the batch the way the send does.
+
+## The Meta ad pack (v9.128.1, Oct 2026)
+
+Slice 4 of the teaser campaign. Meta cannot carry a per-viewer token, so an ad cannot be personalised the way an email is. What can be done per club is geo targeting: a pin at the club's location with a radius, and creative for that club. The pack is that creative plus the data to set the targeting up, exported as a zip.
+
+**Chosen over calling the Meta API.** Creating campaigns and ad sets through the connected Meta tools would spend money and publish to the public from a button, so it was left out on purpose. The pack is read-only and calls nothing outside BetterCricket; a person uploads it. If automated creation is ever wanted it should be its own change behind a feature flag and an explicit approval step.
+
+**What is in it.** `manifest.csv` (one row per club: location, radius, geo_ready, lead figure, headline, primary text, description, call to action, two landing links, picture paths, utm code), `feed/` and `story/` pictures from the same files the renderer wrote, and a README that walks through Ads Manager. The ad pictures were already name-free (slice 3); the words are too. First draft of the copy said "Your top run-scorer made 565 runs" and "Is this your club?"; both address the viewer and assume they belong to the club, so the copy is now "The club's top run-scorer made 565 runs in Summer 2025/26. Claim the club to see every player and record." and the headline is "<Club> season, ready to claim", or "Club season, ready to claim" when the name makes it too long.
+
+**Selection.** Directory filters (the same ones the CSV takes) then eligibility. Pictures must be on disk, not just marked drawn, for the reason in slice 3 (a lost volume). The page row shows matching, eligible and without-location counts so the operator knows what a pack will hold before downloading, and a Skip box so a second pack takes the next 50.
+
+**Not done.** Creating the campaign in Meta, a custom-audience export (hashed emails), feeding ad visits into the engagement score beyond the shared `utm_id`, and a recorded history of packs generated.
+
+**Verification.** `verify_club_teaser_adpack.py` (43; control with the copy naming the player and customers allowed in fails 6, old code reports the missing module), the panel browser suite (62; control with the row unmounted fails 12). A full local run drew real pictures with Chromium for two clubs, then downloaded the pack over HTTP through the shipped route: right headers, six files, manifest rows with location, radius 20 and the campaign name cleaned to `spring-push`.
 

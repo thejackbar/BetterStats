@@ -1623,6 +1623,12 @@ export const api = {
     const qs = mktQS(filters)
     return `${BASE}/club-admin/marketing/export.csv${qs ? `?${qs}` : ''}`
   },
+  // The Meta ad pack for the filters on screen. The zip is opened as a link
+  // (cookie auth travels with it); the summary says what it would hold.
+  mktAdPackSummary: (filters = {}, pack = {}) =>
+    request(`/club-admin/marketing/teaser/ad-pack/summary?${mktQS({ ...filters, ...pack })}`),
+  mktAdPackUrl: (filters = {}, pack = {}) =>
+    `${BASE}/club-admin/marketing/teaser/ad-pack.zip?${mktQS({ ...filters, ...pack })}`,
   mktSetClubEmailed: (clubId, emailed, note) =>
     request(`/club-admin/marketing/clubs/${clubId}/emailed`,
       { method: 'PATCH', body: JSON.stringify({ emailed, note: note || null }) }),
