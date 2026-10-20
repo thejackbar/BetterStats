@@ -45,7 +45,7 @@ const line = (id, gid, o = {}) => ({
   group: 'differ', headline: 'Team total 171 v 168', item_count: 6, items: items6, size: 55, suggested: null,
   current: 'club', decided_by_hand: false, decided_at: null, note: null,
   source: { kind: 'file', label: 'Imported from file Stage2.csv', filename: 'Stage2.csv', at: '2026-10-19T00:00:00Z', by: 'jack' },
-  ca_holds: { balls: 9, credits: 8, fow: 7, partnerships: 6 }, club_holds: { balls: 0 },
+  ca_holds: { balls: 9, credits: 8, fow: 7, partnerships: 6 }, club_holds: { balls: 0 }, club_richer: {},
   shared: 8, club_batters: 11, ca_batters: 11, ...o,
 })
 const ROWS = [
@@ -55,7 +55,7 @@ const ROWS = [
 ]
 const OVERVIEW = {
   total: 3328, groups: { agree: 2112, small: 533, differ: 222, pairing: 233, nocard: 228 },
-  current: { ca: 0, club: 3328, hybrid: 0 }, decided_by_hand: 0,
+  current: { ca: 0, club: 3328, hybrid: 0 }, decided_by_hand: 0, agree_club_richer: 87,
   seasons: [
     { season: 'Summer 2025/26', matches: 253, ca: 0, club: 253, hybrid: 0, needs_decision: 31 },
     { season: 'Summer 2024/25', matches: 232, ca: 0, club: 232, hybrid: 0, needs_decision: 27 },
@@ -90,11 +90,15 @@ const routes = (page, calls, o = {}) => page.route('**/api/**', async (route) =>
   }
   if (/card-review\/overview/.test(url)) return json(OVERVIEW)
   if (/card-review\/bulk\/batches/.test(url)) return json({ batches: [{ batch_id: 'bt1', created_at: '2026-10-19T05:00:00Z', matches: 12, still_switched: 12 }] })
-  if (/card-review\/bulk\/preview/.test(url)) return json({ matches: 2112, by_season: [{ season: 'Summer 2025/26', matches: 162 }], sample: [{ match_id: M1, game_id: G1, date: '2026-03-14', grade: '1st XI', opposition: 'Northfield' }] })
+  if (/card-review\/bulk\/preview/.test(url)) return json({ matches: 2112, held_back: 87, by_season: [{ season: 'Summer 2025/26', matches: 162 }], sample: [{ match_id: M1, game_id: G1, date: '2026-03-14', grade: '1st XI', opposition: 'Northfield' }] })
   if (/card-review\/bulk\/apply/.test(url)) return json({ batch_id: 'bt2', switched: 2112, skipped: [] })
   if (/card-review\/accept/.test(url)) return json({ switched: 1, skipped: [] })
   if (/card-review\/matches\?/.test(url)) {
     const g = new URL(url).searchParams.get('group')
+    if (new URL(url).searchParams.get('richer') === 'yes') {
+      return json({ total: 1, offset: 0, limit: 50, sources: ['Stage2.csv'],
+        rows: [line(M1, G1, { group: 'agree', headline: null, item_count: 0, items: [], size: 0, suggested: 'hybrid', club_richer: { balls: 6 } })] })
+    }
     return json({ total: g === 'pairing' ? 1 : 2, offset: 0, limit: 50, sources: ['Stage2.csv'],
       rows: g === 'pairing' ? [line(M3, G1, { group: 'pairing', headline: null, item_count: 0, items: [], shared: 0, ca_batters: 11, club_batters: 11 })] : ROWS })
   }
@@ -150,11 +154,15 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   check('and their names', ['Scores agree', 'Small differences', 'Scores differ', 'Pairing looks wrong', 'No Cricket Australia card'].every(n => text.toLowerCase().includes(n.toLowerCase())))
   check('progress by season lists each season', (await page.locator('[data-testid="seasons"] tbody tr').count()) === 2)
   check('the spreadsheet link points at the export', (await page.getAttribute('[data-testid="export-link"]', 'href')).endsWith('/club-admin/card-review/export.csv'))
+  check('the agree card says how many are held back from the switch, with a way to look at them',
+    (await page.locator('[data-testid="richer-note"]').innerText()).includes('87') && (await page.getAttribute('[data-testid="richer-link"]', 'href')) === '/admin/card-review/agree?richer=yes')
   check('a previous bulk switch is offered an undo', (await page.locator('[data-testid="batches"]').innerText()).includes('Undo this batch'))
   await page.screenshot({ path: SHOTS + 'card_review_overview_1440.png', fullPage: true })
   await page.click('[data-testid="preview-switch"]')
   await page.waitForSelector('[data-testid="bulk-modal"]')
   check('the bulk switch opens a preview, not an action', posts(calls, /bulk\/apply/).length === 0)
+  check('and says how many agreeing matches it leaves out, and why',
+    (await page.locator('[data-testid="bulk-held-back"]').innerText()).includes('87') && (await page.locator('[data-testid="bulk-held-back"]').innerText()).includes('club card holds something'))
   const dis = await page.isDisabled('[data-testid="bulk-apply"]')
   check('Apply stays disabled until the sample has been looked at', dis === true)
   await page.check('[data-testid="bulk-ack"]')
@@ -204,6 +212,24 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   await page.getByText('Last 3 seasons').click()
   await page.waitForTimeout(400)
   check('"Last 3 seasons" asks again for the newest three', calls.slice(n).some(c => new URL(c.url).searchParams.get('recent_seasons') === '3'))
+  check('the screen raised no errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ── the matches held back from the bulk switch ────────────────────────────────────────────────
+{
+  console.log('\n-- matches whose club card holds more --')
+  const { ctx, page, calls, errors } = await open(browser, 1440, '/admin/card-review/agree?richer=yes')
+  await page.waitForSelector('[data-testid="queue-row"]', { timeout: 15000 })
+  const first = calls.find(c => /card-review\/matches\?/.test(c.url))
+  check('the link asks for just those matches', new URL(first.url).searchParams.get('richer') === 'yes', first.url)
+  check('each is marked as holding more on the club card', (await page.locator('[data-testid="richer-badge"]').count()) === 1)
+  check('and its suggestion is the combined choice, not Cricket Australia', (await page.locator('[data-testid="queue-row"]').first().innerText()).toLowerCase().includes('club + ca detail'))
+  await page.click('[data-testid="richer-filter"]')
+  await page.click('text=Any')
+  await page.waitForTimeout(300)
+  const last = calls.filter(c => /card-review\/matches\?/.test(c.url)).pop()
+  check('turning the filter off stops asking for them', !new URL(last.url).searchParams.has('richer'), last.url)
   check('the screen raised no errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }

@@ -146,3 +146,4 @@ All dry run by default; `--apply` acts.
 - A match's displayed card is `review_choice` plus `pair_prefers_import`. Any code that switches which card shows must go through `services/card_review_actions` so the choice is logged, undoable and sets `pairing_locked`.
 - Card review never deletes a card or a row it did not insert. A hybrid undo removes only its recorded ids. New tables recording player activity still belong on `merge_carry.CARRIED`.
 - `review_detail` holds a live Cricket Australia snapshot for the match page; `get_scorecard` reads it only for a manual game with no `extracted_payload`.
+- "Scores agree" never means "Cricket Australia holds more". A bulk switch only takes matches where `club_richer` is empty; any new kind of detail the club card can hold must be added to `club_richer_of`.

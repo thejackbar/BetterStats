@@ -10,6 +10,7 @@ Mutations (each must make the suite FAIL, which is what proves the checks bite):
   MUTATE=hand    the bulk switch ignores a choice a person made by hand
   MUTATE=undo    undo puts the flags back but leaves the copied rows behind
   MUTATE=lock    a choice does not lock the pairing
+  MUTATE=richer  the bulk switch ignores a club card that holds more than Cricket Australia's
 """
 from __future__ import annotations
 
@@ -73,6 +74,9 @@ async def main():
     if mutate == "hand":
         cr_cand = act.bulk_candidates
         act.bulk_candidates = lambda rows: [r for r in rows if r["group"] == "agree" and r["current"] != "ca"]
+    if mutate == "richer":
+        act.bulk_candidates = lambda rows: [r for r in rows if r["group"] == "agree"
+                                            and not r["decided_by_hand"] and r["current"] != "ca"]
     if mutate == "lock":
         real_set = act.set_choice
 
@@ -663,10 +667,66 @@ async def main():
           {r[0] for r in parsed[1:]} & {str(ids["agree"][0]), str(ids["nocard"][0])}, set())
     check("scores that differ come first", parsed[1][5], "Scores differ")
     check("each row carries every difference, a review link and empty reviewer columns",
-          (all(r[8] for r in parsed[1:]), parsed[1][15].startswith("https://betterat.cricket/admin/card-review/match/"),
-           parsed[1][16], parsed[1][17]), (True, True, "", ""))
+          (all(r[8] for r in parsed[1:]), parsed[1][16].startswith("https://betterat.cricket/admin/card-review/match/"),
+           parsed[1][17], parsed[1][18]), (True, True, "", ""))
     check("the file name says which club and day", resp.headers["content-disposition"].startswith(
         'attachment; filename="card-review-pay-'), True)
+
+    # --- a club card that holds more than Cricket Australia's ----------------------------------
+    print("\n-- where the club card holds something Cricket Australia's lacks, nothing is switched for it --")
+    balled = [(w, r, p, h, 10 + i * 7, i_) for i, (w, r, p, h, _b, i_) in enumerate(six)]
+    nob = [(w, r, p, h, None, i_) for (w, r, p, h, _b, i_) in six_ca]
+    await make("rich_detail", day=date(2026, 1, 17), club_bat=balled, ca_bat=nob)
+    await make("rich_only", day=date(2026, 1, 10), club_bat=balled, ca_bat=nob)
+    club_nob = [(w, r, p, h, None, i_) for (w, r, p, h, _b, i_) in six]
+    await make("rich_ca_more", day=date(2026, 1, 3), club_bat=club_nob, ca_bat=six_ca)
+    same_balls = [(w, r, p, hd, b, i_) for (w, r, p, _h, b, i_), (_, hd) in zip(balled, caps)]
+    await make("rich_same", day=date(2025, 12, 27), club_bat=balled, ca_bat=same_balls)
+    _, rg = ids["rich_detail"]
+    async with async_session_maker() as s:
+        await s.execute(text("""INSERT INTO bowler_wickets (game_id, innings_number, bowler_id, fielder_id,
+            batter_name, batter_position, batter_runs, dismissal_type, caught_behind)
+            VALUES (:g, 2, :b, NULL, 'Hale', 1, 10, 'bowled', FALSE)"""), {"g": rg, "b": ours["Cole"]})
+        await s.commit()
+    rows2 = await review()
+    rd, ro, rm, rs = (rows2[str(ids[k][0])] for k in ("rich_detail", "rich_only", "rich_ca_more", "rich_same"))
+    check("a match whose scores agree can still be flagged as holding more on the club card",
+          (rd["group"], rd["club_richer"]), ("agree", {"balls": 6}))
+    check("balls faced held only by the club card count per batter", ro["club_richer"], {"balls": 6})
+    check("when Cricket Australia also holds detail the suggestion is the combined choice", rd["suggested"], "hybrid")
+    check("when it holds none the suggestion is to keep the club card", ro["suggested"], "club")
+    check("a card where Cricket Australia holds the balls is not flagged, and suggests Cricket Australia",
+          (rm["club_richer"], rm["suggested"]), ({}, "ca"))
+    check("balls on both cards are not flagged", (rs["group"], rs["club_richer"], rs["suggested"]), ("agree", {}, "ca"))
+    check("the counts for credits, fall of wickets and partnerships flag only where the club has more",
+          (cr.club_richer_of([], [], {"credits": 3, "fow": 2, "partnerships": 1}, {"credits": 2, "fow": 2}),
+           cr.club_richer_of([], [], {"credits": 1}, {"credits": 4})), ({"credits": 1, "partnerships": 1}, {}))
+    cand = {r["match_id"] for r in act.bulk_candidates(list(rows2.values()))}
+    check("the bulk switch leaves out the flagged matches", cand & {rd["match_id"], ro["match_id"]}, set())
+    check("and still takes an agreeing match whose club card holds nothing extra",
+          rs["match_id"] in cand, True)
+    ov = cr.overview(list(rows2.values()))
+    check("the overview counts the agreeing matches held back", ov["agree_club_richer"], 2)
+    async with async_session_maker() as s:
+        await act.bulk_apply(s, ORG, USER)
+    check("applying the bulk switch leaves a flagged match showing the club card",
+          (await q("SELECT review_choice FROM manual_games WHERE id = :m", m=ids["rich_detail"][0]))[0][0], None)
+    async with async_session_maker() as s:
+        route._CACHE.clear()
+        listed = await route.card_review_matches(group="agree", richer="yes", decided=None, season=None,
+                                                 source_file=None, recent_seasons=None, limit=50, offset=0,
+                                                 club=club, db=s)
+        route._CACHE.clear()
+        resp = await route.card_review_export(club=club, db=s)
+        body = "".join([chunk if isinstance(chunk, str) else chunk.decode() async for chunk in resp.body_iterator])
+    check("the list can show just those matches", {r["match_id"] for r in listed["rows"]},
+          {rd["match_id"], ro["match_id"]})
+    parsed2 = list(_csv.reader(_io.StringIO(body.lstrip("\ufeff"))))
+    hdr = parsed2[0]
+    flagged = [r for r in parsed2[1:] if r[0] in {rd["match_id"], ro["match_id"]}]
+    check("the spreadsheet lists them, saying what the club card holds",
+          sorted(r[hdr.index("Club scorecard holds more")] for r in flagged), ["balls faced 6", "balls faced 6"])
+    check("and still leaves out a plain agreeing match", rs["match_id"] in {r[0] for r in parsed2[1:]}, False)
 
     print(f"\n{PASS} passed, {FAIL} failed")
     await engine.dispose()

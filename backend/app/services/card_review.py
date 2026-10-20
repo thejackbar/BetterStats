@@ -25,7 +25,9 @@ THE FIVE GROUPS. Each paired match is in exactly one:
 * ``agree``   nothing differs.
 
 A SUGGESTION is a default, never an action. ``agree`` and ``small`` suggest Cricket Australia
-(it holds the richer card and the numbers are the same). ``differ`` with at most three
+(it holds the richer card and the numbers are the same) unless the club card holds something
+Cricket Australia lacks (``club_richer``): then the suggestion is the combined choice when
+Cricket Australia has detail too, else the club card, and a bulk switch skips the match. ``differ`` with at most three
 differences and a Cricket Australia card that holds detail suggests ``hybrid`` (the club's
 numbers with Cricket Australia's detail added where it fits). Anything else suggests nothing.
 """
@@ -364,8 +366,28 @@ def headline(item: dict) -> str:
     return f"{item['label']} {a} v {c}"
 
 
-def suggest(group: str, items: list, ca_has_detail: bool) -> Optional[str]:
+def club_richer_of(club_bat: list, ca_bat: list, club_holds: dict, ca_holds: dict) -> dict:
+    """What the club card holds that Cricket Australia's card does not, as {kind: how many}.
+    Balls faced are counted per batter (same player and innings, club has a figure, Cricket
+    Australia has none); credits, fall of wickets and partnerships by count, where the club has
+    more. Empty means the club card adds nothing, so Cricket Australia's card is the richer one."""
+    ca_has_balls = {(r["pid"], r["innings_number"]) for r in ca_bat if not r["dnb"] and (r["balls"] or 0) > 0}
+    out = {}
+    balls = sum(1 for r in club_bat if not r["dnb"] and (r["balls"] or 0) > 0
+                and (r["pid"], r["innings_number"]) not in ca_has_balls)
+    if balls:
+        out["balls"] = balls
+    for kind in ("credits", "fow", "partnerships"):
+        extra = (club_holds.get(kind) or 0) - (ca_holds.get(kind) or 0)
+        if extra > 0:
+            out[kind] = extra
+    return out
+
+
+def suggest(group: str, items: list, ca_has_detail: bool, club_richer: Optional[dict] = None) -> Optional[str]:
     if group in ("agree", "small"):
+        if club_richer:
+            return "hybrid" if ca_has_detail else "club"
         return "ca"
     if any(it["kind"] in ("result_flip", "team_total") for it in items):
         return None  # a different winner or total is never suggested
@@ -442,13 +464,15 @@ async def review_rows(db, org_id, *, mids: Optional[list] = None) -> list:
         ca_balls = sum(1 for r in ca_bat.get(gid, []) if not r["dnb"] and (r["balls"] or 0) > 0)
         club_balls = sum(1 for r in club_bat.get(mid, []) if not r["dnb"] and r["balls"] is not None)
         ca_has_detail = bool(ca_inv.get("credits") or ca_inv.get("fow") or ca_balls)
+        club_richer = club_richer_of(club_bat.get(mid, []), ca_bat.get(gid, []), club_inv, ca_inv)
         out.append({
             "match_id": mid, "game_id": gid, "season": p["season_name"], "grade": p["grade_name"],
             "date": p["m_date"] or p["g_date"], "opposition": p["m_opposition"] or p["g_opposition"],
             "group": cmp["group"], "items": cmp["items"], "headline": cmp["headline"],
             "size": cmp["size"], "shared": cmp["shared"], "club_batters": cmp["club_batters"],
             "ca_batters": cmp["ca_batters"],
-            "suggested": suggest(cmp["group"], cmp["items"], ca_has_detail),
+            "suggested": suggest(cmp["group"], cmp["items"], ca_has_detail, club_richer),
+            "club_richer": club_richer,
             "current": current_choice(p), "decided_by_hand": p["review_source"] == "hand",
             "decided_source": p["review_source"], "decided_at": p["review_decided_at"],
             "note": p["review_note"], "pair_ok": bool(p["review_pair_ok"]),
@@ -480,7 +504,9 @@ def overview(rows: list) -> dict:
             s["needs_decision"] += 1
     seasons = sorted(by_season.values(), key=lambda s: (season_sort_key(s["season"]), s["season"]))
     current = {c: sum(1 for r in rows if r["current"] == c) for c in CHOICES}
+    richer = sum(1 for r in rows if r["group"] == "agree" and r["club_richer"] and not r["decided_by_hand"])
     return {"total": len(rows), "groups": groups, "seasons": seasons, "current": current,
+            "agree_club_richer": richer,
             "decided_by_hand": sum(1 for r in rows if r["decided_by_hand"])}
 
 
@@ -630,9 +656,12 @@ async def pairing_candidates(db, org_id, mid, *, limit: int = 3) -> list:
 # --- the spreadsheet for the reviewer --------------------------------------------------------------
 
 _CHOICE_WORDS = {"ca": "Cricket Australia", "club": "Club scorecard", "hybrid": "Club + CA detail", None: ""}
+RICHER_WORDS = {"balls": "balls faced", "credits": "dismissal credits", "fow": "fall of wickets",
+                "partnerships": "partnerships"}
 EXPORT_HEADERS = ["Match id", "Season", "Grade", "Date", "Opposition", "Group", "Biggest difference",
                   "Number of differences", "All differences", "Size (0 to 100)", "Suggested", "Showing now",
                   "Chosen by hand", "Club scorecard source", "Cricket Australia also holds",
+                  "Club scorecard holds more",
                   "Review link", "Your choice", "Notes"]
 _GROUP_WORDS = {"agree": "Scores agree", "small": "Small differences", "differ": "Scores differ",
                 "pairing": "Pairing looks wrong", "nocard": "No Cricket Australia card"}
@@ -640,17 +669,22 @@ _GROUP_WORDS = {"agree": "Scores agree", "small": "Small differences", "differ":
 
 def export_rows(rows: list, base_url: str = "") -> list:
     """One spreadsheet row per match with a discrepancy (everything except an exact match or a
-    match with no Cricket Australia card), newest season first, biggest difference first. The last
-    two columns are blank for the reviewer to fill in."""
-    keep = [r for r in rows if r["group"] in ("differ", "small", "pairing")]
+    match with no Cricket Australia card), newest season first, biggest difference first. An exact
+    match is listed only when the club card holds something Cricket Australia's lacks, because a
+    person has to decide it. The last two columns are blank for the reviewer to fill in."""
+    keep = [r for r in rows if r["group"] in ("differ", "small", "pairing")
+            or (r["group"] == "agree" and r["club_richer"])]
     keep.sort(key=lambda r: (season_sort_key(r["season"]), str(r["date"]) or ""), reverse=False)
-    keep.sort(key=lambda r: ({"differ": 0, "pairing": 1, "small": 2}[r["group"]], season_sort_key(r["season"]),
+    keep.sort(key=lambda r: ({"differ": 0, "pairing": 1, "small": 2, "agree": 3}[r["group"]], season_sort_key(r["season"]),
                              -r["size"], str(r["date"])))
     out = []
     for r in keep:
         diffs = "; ".join(
             (f"{i['label']}: Cricket Australia {i['ca']}, club {i['club']}"
              if i["ca"] is not None and i["club"] is not None else i["label"]) for i in r["items"])
+        richer = ", ".join(f"{name} {r['club_richer'][k]}" for k, name in RICHER_WORDS.items() if r["club_richer"].get(k))
+        if not diffs:
+            diffs = "The scores agree, but the club card holds more than Cricket Australia's"
         holds = ", ".join(f"{k} {v}" for k, v in (
             ("balls faced", r["ca_holds"].get("balls")), ("dismissal credits", r["ca_holds"].get("credits")),
             ("fall of wickets", r["ca_holds"].get("fow")), ("partnerships", r["ca_holds"].get("partnerships")),
@@ -659,6 +693,6 @@ def export_rows(rows: list, base_url: str = "") -> list:
             r["match_id"], r["season"] or "", r["grade"] or "", str(r["date"] or ""), r["opposition"] or "",
             _GROUP_WORDS[r["group"]], r["headline"] or "", len(r["items"]), diffs, r["size"],
             _CHOICE_WORDS[r["suggested"]], _CHOICE_WORDS[r["current"]],
-            "yes" if r["decided_by_hand"] else "", r["source"]["label"], holds,
+            "yes" if r["decided_by_hand"] else "", r["source"]["label"], holds, richer,
             f"{base_url}/admin/card-review/match/{r['match_id']}" if base_url else "", "", ""])
     return out

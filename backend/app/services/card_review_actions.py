@@ -313,9 +313,11 @@ async def history(db, org_id, mid) -> list:
 # --- the bulk switch for matches whose cards agree -----------------------------------------------
 
 def bulk_candidates(rows: list) -> list:
-    """Matches that agree on every figure, that nobody has chosen for by hand, and that are not
-    already showing Cricket Australia."""
-    return [r for r in rows if r["group"] == "agree" and not r["decided_by_hand"] and r["current"] != "ca"]
+    """Matches that agree on every figure, that nobody has chosen for by hand, that are not
+    already showing Cricket Australia, and whose club card holds nothing Cricket Australia's lacks
+    (a match where it does is for a person: switching would hide that detail from the site)."""
+    return [r for r in rows if r["group"] == "agree" and not r["decided_by_hand"]
+            and r["current"] != "ca" and not r["club_richer"]]
 
 
 def bulk_preview(rows: list, *, sample: int = 10, seed: int = 7) -> dict:
@@ -325,7 +327,9 @@ def bulk_preview(rows: list, *, sample: int = 10, seed: int = 7) -> dict:
         by_season[r["season"] or "No season"] = by_season.get(r["season"] or "No season", 0) + 1
     rng = random.Random(seed)
     picked = rng.sample(cand, min(sample, len(cand)))
-    return {"matches": len(cand),
+    held_back = sum(1 for r in rows if r["group"] == "agree" and not r["decided_by_hand"]
+                    and r["current"] != "ca" and r["club_richer"])
+    return {"matches": len(cand), "held_back": held_back,
             "by_season": [{"season": s, "matches": n} for s, n in
                           sorted(by_season.items(), key=lambda kv: (cr.season_sort_key(kv[0]), kv[0]))],
             "sample": [{"match_id": r["match_id"], "game_id": r["game_id"], "date": r["date"],

@@ -10,7 +10,7 @@ import { GROUPS, matchPageUrl, fmtDate } from '../../components/admin/cardReview
 const ORDER = ['agree', 'small', 'differ', 'pairing', 'nocard']
 const INK = { agree: TONES.ok.hex, small: '#7fb0ff', differ: TONES.warn.hex, pairing: TONES.block.hex, nocard: 'var(--pb-dim)' }
 const NEXT = {
-  agree: 'Show Cricket Australia where the scores agree',
+  agree: 'Switch to Cricket Australia',
   small: 'Skim and confirm',
   differ: 'Needs a decision',
   pairing: 'Check the pairing first',
@@ -62,6 +62,11 @@ function BulkModal({ onClose, onDone }) {
             <p className="mt-1.5 text-[13px] text-pb-dim">
               In these matches both cards have the same scores and result. Switching only changes which card the site shows.
             </p>
+            {preview.held_back > 0 && (
+              <p className="mt-2 text-[12.5px] text-pb-dim" data-testid="bulk-held-back">
+                {preview.held_back.toLocaleString()} more agree but are left out, because the club card holds something Cricket Australia's lacks (such as balls faced). Those need a person to choose.
+              </p>
+            )}
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div className="rounded-lg border border-pb-hairline bg-pb-surface2 p-4">
                 <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-pb-faint mb-2">What the site gains</div>
@@ -199,6 +204,12 @@ export default function AdminCardReview() {
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Badge toneKey={GROUPS[g].tone}>{NEXT[g]}</Badge>
             </div>
+            {g === 'agree' && data.agree_club_richer > 0 && (
+              <p className="mt-2 text-[12px] leading-[1.45] text-pb-dim" data-testid="richer-note">
+                {data.agree_club_richer.toLocaleString()} of these hold something on the club card that Cricket Australia's lacks, so the switch leaves them out.{' '}
+                <Link className="underline" to="/admin/card-review/agree?richer=yes" data-testid="richer-link">Look at them</Link>
+              </p>
+            )}
             <div className="mt-3">
               {g === 'agree' && agreeLeft > 0
                 ? <Button variant="primary" size="sm" onClick={() => setBulk(true)} data-testid="preview-switch">Preview the switch</Button>

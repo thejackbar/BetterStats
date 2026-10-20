@@ -13,7 +13,7 @@ export const CHOICES = [
 export const CHOICE_NAME = { ca: 'Cricket Australia', club: 'Club scorecard', hybrid: 'Club scorecard with Cricket Australia detail' }
 
 export const GROUPS = {
-  agree: { label: 'Scores agree', tone: 'ok', blurb: 'Same runs, wickets and result on both. Cricket Australia also holds bowler and fielder names, balls faced and the opposition innings.' },
+  agree: { label: 'Scores agree', tone: 'ok', blurb: 'Same runs, wickets and result on both. Cricket Australia usually also holds bowler and fielder names, balls faced and the opposition innings.' },
   small: { label: 'Small differences', tone: 'accent', blurb: 'The batting agrees. The date, the extras, the bowling figures or how a batter was out differ slightly.' },
   differ: { label: 'Scores differ', tone: 'warn', blurb: 'At least one batter, or the winner, is different. These need a person to choose.' },
   pairing: { label: 'Pairing looks wrong', tone: 'block', blurb: 'The two cards may not be the same match. Check the pairing before choosing.' },

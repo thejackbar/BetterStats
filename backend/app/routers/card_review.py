@@ -60,7 +60,7 @@ def _line(r: dict) -> dict:
         "date": r["date"], "opposition": r["opposition"], "group": r["group"],
         "headline": r["headline"], "item_count": len(r["items"]), "items": r["items"],
         "size": r["size"], "suggested": r["suggested"], "current": r["current"],
-        "decided_by_hand": r["decided_by_hand"], "decided_at": r["decided_at"], "note": r["note"],
+        "club_richer": r["club_richer"], "decided_by_hand": r["decided_by_hand"], "decided_at": r["decided_at"], "note": r["note"],
         "source": r["source"], "ca_holds": r["ca_holds"], "club_holds": r["club_holds"],
         "shared": r["shared"], "club_batters": r["club_batters"], "ca_batters": r["ca_batters"],
     }
@@ -110,6 +110,7 @@ async def card_review_matches(
     season: Optional[str] = Query(None),
     decided: Optional[str] = Query(None, description="'yes' only chosen by hand, 'no' only not yet"),
     source_file: Optional[str] = Query(None),
+    richer: Optional[str] = Query(None, description="'yes' only where the club card holds more than Cricket Australia's, 'no' only where it does not"),
     recent_seasons: Optional[int] = Query(None, ge=1, description="only the newest N seasons"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -127,6 +128,10 @@ async def card_review_matches(
         rows = [r for r in rows if r["decided_by_hand"]]
     elif decided == "no":
         rows = [r for r in rows if not r["decided_by_hand"]]
+    if richer == "yes":
+        rows = [r for r in rows if r["club_richer"]]
+    elif richer == "no":
+        rows = [r for r in rows if not r["club_richer"]]
     if source_file:
         rows = [r for r in rows if (r["source"].get("filename") or r["source"]["label"]) == source_file]
     if recent_seasons:

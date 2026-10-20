@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useNavigate, useParams, Link } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import { PbSpinner } from '../../lib/presskit'
@@ -28,6 +28,11 @@ function Line({ r, open, onToggle, selected, onSelect, onChoose, busy }) {
           <Link to={`/admin/card-review/match/${r.match_id}`} className="text-pb-text hover:text-pb-accent-ink" data-testid="headline">
             {r.headline || 'Open'}
           </Link>
+          {r.club_richer && Object.keys(r.club_richer).length > 0 && (
+            <span className="ml-2 align-middle" title={`The club card holds more than Cricket Australia's: ${richerText(r)}`} data-testid="richer-badge">
+              <Badge toneKey="warn">Club card holds more</Badge>
+            </span>
+          )}
           {r.item_count > 1 && (
             <button
               type="button" onClick={onToggle} aria-expanded={open} data-testid="caret"
@@ -135,8 +140,12 @@ function PairingCard({ r, onChanged }) {
   )
 }
 
+const RICHER_WORDS = { balls: 'balls faced', credits: 'dismissal credits', fow: 'fall of wickets', partnerships: 'partnerships' }
+const richerText = r => Object.entries(r.club_richer || {}).map(([k, n]) => `${RICHER_WORDS[k] || k} ${n}`).join(', ')
+
 export default function AdminCardReviewList() {
   const { group } = useParams()
+  const [search] = useSearchParams()
   const navigate = useNavigate()
   const toast = useToast()
   const g = GROUPS[group]
@@ -149,13 +158,14 @@ export default function AdminCardReviewList() {
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState({})
   const [picked, setPicked] = useState({})
-  const [filters, setFilters] = useState({ season: '', decided: 'no', recent: false, source_file: '' })
+  const [filters, setFilters] = useState({ season: '', decided: 'no', recent: false, source_file: '', richer: search.get('richer') === 'yes' })
   const seq = useRef(0)
 
   const query = useCallback((offset) => ({
     group, limit: PAGE, offset, season: filters.season || undefined,
     decided: filters.decided === 'all' ? undefined : filters.decided,
     recent_seasons: filters.recent ? 3 : undefined, source_file: filters.source_file || undefined,
+    richer: filters.richer ? 'yes' : undefined,
   }), [group, filters])
 
   const load = useCallback((more = false) => {
@@ -228,6 +238,12 @@ export default function AdminCardReviewList() {
           <SegItem active={filters.decided === 'yes'} onClick={() => setFilters(f => ({ ...f, decided: 'yes' }))}>Decided</SegItem>
           <SegItem active={filters.decided === 'all'} onClick={() => setFilters(f => ({ ...f, decided: 'all' }))}>All</SegItem>
         </SegGroup>
+        {(group === 'agree' || group === 'small') && (
+          <SegGroup>
+            <SegItem active={!filters.richer} onClick={() => setFilters(f => ({ ...f, richer: false }))}>Any</SegItem>
+            <SegItem active={filters.richer} onClick={() => setFilters(f => ({ ...f, richer: true }))} data-testid="richer-filter">Club card holds more</SegItem>
+          </SegGroup>
+        )}
         <Select className="!w-auto" value={filters.season} onChange={e => setFilters(f => ({ ...f, season: e.target.value }))} aria-label="Season">
           <option value="">Every season</option>
           {seasons.map(s => <option key={s} value={s}>{s}</option>)}
