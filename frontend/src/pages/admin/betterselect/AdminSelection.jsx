@@ -377,15 +377,16 @@ export default function AdminSelection() {
   const usedIds = useMemo(() => new Set(slots.filter(Boolean)), [slots])
 
   // Default (Squad order) comparator: own squad, then players the squad above
-  // has not picked, then the squad below, then the rest → form score →
-  // availability → name.
+  // has not picked, then the squad below, then the rest → availability (those
+  // who have answered Available or Maybe above those who have not) → form
+  // score → name.
   const cmp = useCallback((a, b) => {
     const at = poolRank(a), bt = poolRank(b)
     if (at !== bt) return at - bt
-    const sa = a.score ?? 0, sb = b.score ?? 0
-    if (sa !== sb) return sb - sa
     const r = availRank(a.availability) - availRank(b.availability)
     if (r !== 0) return r
+    const sa = a.score ?? 0, sb = b.score ?? 0
+    if (sa !== sb) return sb - sa
     return (a.display_name || '').localeCompare(b.display_name || '')
   }, [])
 

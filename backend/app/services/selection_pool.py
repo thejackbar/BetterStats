@@ -243,6 +243,21 @@ def _pool_rank(open_seq: int | None, tier: int | None, drop_in: bool, squad_matc
     return 1099
 
 
+_AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2, "UNAVAILABLE": 3}
+
+
+def pool_sort_key(e: dict) -> tuple:
+    """The pool's default order: the rank bucket, then availability (someone who
+    has answered Available or Maybe above someone who has not answered), then
+    form score, then name. The browser mirrors it in AdminSelection's `cmp`."""
+    return (
+        _pool_rank(e["open_seq"], e["tier"], bool(e["drop_in_from"]), bool(e["squad_match"])),
+        _AVAIL_RANK.get(e["availability"], 9),
+        -(e["score"] or 0.0),
+        (e["display_name"] or "").lower(),
+    )
+
+
 def _squad_order(teams: dict[str, tuple[str, int]]) -> dict[str, int]:
     """Each live squad's place in the club's hierarchy, 1 = highest.
 
@@ -970,13 +985,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             ),
         })
 
-    _AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2, "UNAVAILABLE": 3}
-    pool.sort(key=lambda e: (
-        _pool_rank(e["open_seq"], e["tier"], bool(e["drop_in_from"]), bool(e["squad_match"])),
-        -(e["score"] or 0.0),
-        _AVAIL_RANK.get(e["availability"], 9),
-        (e["display_name"] or "").lower(),
-    ))
+    pool.sort(key=pool_sort_key)
 
     return {
         "fixture": {

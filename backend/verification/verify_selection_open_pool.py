@@ -162,6 +162,25 @@ async def main():
     check("maybe is not open", by["Three Maybe"].get("open_seq"), None)
     check("no answer is not open", by["Four NoResponse"].get("open_seq"), None)
 
+    print("\n# B2. Within a bucket, an answer beats form: Maybe above no answer, above unavailable")
+    from app.services.selection_pool import pool_sort_key
+    def row(name, availability, score):
+        return {"open_seq": None, "tier": 1, "drop_in_from": None, "squad_match": True,
+                "availability": availability, "score": score, "display_name": name}
+    mixed = [row("Silent Star", "NO_RESPONSE", 90.0), row("Out Star", "UNAVAILABLE", 95.0),
+             row("Maybe Low", "MAYBE", 1.0), row("Avail Low", "AVAILABLE", 0.0),
+             row("Maybe High", "MAYBE", 20.0)]
+    check("same bucket: available, maybes (form order), no answer, unavailable",
+          [r["display_name"] for r in sorted(mixed, key=pool_sort_key)],
+          ["Avail Low", "Maybe High", "Maybe Low", "Silent Star", "Out Star"])
+    check("same answer: form still decides",
+          [r["display_name"] for r in sorted([row("B", "NO_RESPONSE", 5.0), row("A", "NO_RESPONSE", 9.0)], key=pool_sort_key)],
+          ["A", "B"])
+    check("a rank bucket still outranks an answer",
+          [r["display_name"] for r in sorted([{**row("Below", "AVAILABLE", 0.0), "squad_match": False, "tier": 2},
+                                              row("Own", "NO_RESPONSE", 0.0)], key=pool_sort_key)],
+          ["Own", "Below"])
+
     print("\n# C. Named elsewhere that day is not open")
     check("confirmed in the 2nd XI: not open", by["Two Avail Picked"].get("open_seq"), None)
     check("in the 2nd XI's draft: not open", by["Two Avail In Draft"].get("open_seq"), None)
