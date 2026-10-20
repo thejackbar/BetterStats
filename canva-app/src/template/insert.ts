@@ -45,6 +45,22 @@ export async function insertBlock(
     const existing = page.elements.toArray();
     let after: DesignEditing.AbsoluteElement | undefined =
       existing[existing.length - 1];
+    // Marker rectangles first, so the words sit on top of them.
+    for (const r of spec.rects ?? []) {
+      const state = session.helpers.elementStateBuilder.createRectElement({
+        top: r.top,
+        left: r.left,
+        width: r.width,
+        height: r.height,
+        transparency: r.transparency,
+        fill: { colorContainer: { type: "solid", color: r.color } },
+      });
+      const el = page.elements.insertAfter(after, state);
+      if (!el) {
+        throw new Error("Canva would not add a rectangle to the page.");
+      }
+      after = el;
+    }
     for (const box of spec.boxes) {
       const state = session.helpers.elementStateBuilder.createTextElement({
         top: box.top,

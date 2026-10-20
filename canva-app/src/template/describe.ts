@@ -3,7 +3,7 @@ import type { FillLike, PageLike } from "./types";
 
 export type SurfaceFill =
   | { kind: "solid"; color: string }
-  | { kind: "image" }
+  | { kind: "image"; imageRef: string | null }
   | { kind: "video" }
   | { kind: "mixed" }
   | { kind: "none" };
@@ -29,7 +29,7 @@ export type Surface = {
   /** Any rotation at all, for the list in the panel. */
   rotated: boolean;
   /** What the export does with it. Set once the page has been read as a whole. */
-  use: "panel" | "background" | "left_out";
+  use: "panel" | "background" | "area" | "left_out";
 };
 
 const FULL = 0.95;
@@ -55,8 +55,11 @@ export function visualBounds(
 /** What one fill is: a colour, a picture, a video, or nothing. */
 export function fillOf(fill: FillLike): SurfaceFill {
   const media = fill.mediaContainer.ref;
-  if (media && (media.type === "image" || media.type === "video")) {
-    return { kind: media.type };
+  if (media && media.type === "image") {
+    return { kind: "image", imageRef: media.imageRef ?? null };
+  }
+  if (media && media.type === "video") {
+    return { kind: "video" };
   }
   const color = fill.colorContainer.ref;
   if (color && color.type === "solid") {

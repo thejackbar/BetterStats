@@ -64,7 +64,10 @@ describe("describeSurfaces", () => {
       fill: { kind: "solid", color: "#111111" },
     });
     expect(mixed).toMatchObject({ paths: 2, fill: { kind: "mixed" } });
-    expect(pic).toMatchObject({ paths: 1, fill: { kind: "image" } });
+    expect(pic).toMatchObject({
+      paths: 1,
+      fill: { kind: "image", imageRef: null },
+    });
   });
 
   it("marks an element that covers the page as the background", () => {
