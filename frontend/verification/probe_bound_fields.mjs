@@ -1,7 +1,7 @@
 // Pure checks for bound text fields: which words are a field, and what a field
 // prints. Plain Node, no browser:  node frontend/verification/probe_bound_fields.mjs
 import { readFileSync } from 'node:fs'
-import { bindFromToken, bindLabel, resolveBind, boundSlotCount, splitPlayerName } from '../src/social/boundResolve.js'
+import { bindFromToken, bindLabel, resolveBind, boundSlotCount, splitPlayerName, autoMarks, isAreaBind } from '../src/social/boundResolve.js'
 let pass = 0, fail = 0
 const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); ok ? pass++ : fail++; console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${ok ? '' : `  got ${JSON.stringify(got)} want ${JSON.stringify(want)}`}`) }
 
@@ -90,6 +90,26 @@ eq('no lineup yet: a mark shows its sample (null)', resolveBind('lineup.1.captai
 eq('vice captain by name', resolveBind('vice', MK), 'B Two')
 eq('keeper by name', resolveBind('keeper', MK), 'B Two')
 eq('bindLabel for a photo', bindLabel('lineup.2.photo'), 'Player 2 (photo)')
+
+// The featured photo, and marks that follow names on their own
+eq('photo is the featured photo', bindFromToken('photo'), 'photo')
+eq('player photo (no number) is the featured photo', bindFromToken('Player Photo'), 'photo')
+eq('hero photo is the featured photo', bindFromToken('{{hero photo}}'), 'photo')
+eq('the featured photo is an area', isAreaBind('photo'), true)
+eq('a name is not an area', isAreaBind('lineup.1.name'), false)
+eq('bindLabel of the featured photo', bindLabel('photo'), 'Featured photo')
+eq('featured photo before any data is null (placeholder)', resolveBind('photo', {}), null)
+eq('featured photo is the address the editor holds', resolveBind('photo', { featuredPhoto: '/img/x.jpg' }), '/img/x.jpg')
+eq('featured photo is empty when players are held but none has one', resolveBind('photo', { featuredPhoto: '' }), '')
+const AM = { lineup: [{ name: 'A One', captain: true }, { name: 'B Two', keeper: true, debut: true }, { name: 'C Three', captain: true, viceCaptain: false, keeper: true }, { name: 'D Four' }] }
+eq('automatic mark for a captain', autoMarks('lineup.1.name', AM), ' (C)')
+eq('automatic marks combine for one player', autoMarks('lineup.2.name', AM), ' (WK, DEBUT)')
+eq('captain and keeper together', autoMarks('lineup.3.name', AM), ' (C, WK)')
+eq('no marks for an ordinary player', autoMarks('lineup.4.name', AM), '')
+eq('marks follow the last-name field too', autoMarks('lineup.1.last', AM), ' (C)')
+eq('but not the first-name field (it would print twice)', autoMarks('lineup.1.first', AM), '')
+eq('marks can be switched off', autoMarks('lineup.1.name', { ...AM, marksOn: false }), '')
+eq('a place beyond the lineup has none', autoMarks('lineup.9.name', AM), '')
 
 // Counting slots
 eq('slot count is the highest slot used', boundSlotCount([{ bind: 'lineup.3.name' }, { bind: 'lineup.11.last' }, { bind: 'opponent' }, {}]), 11)

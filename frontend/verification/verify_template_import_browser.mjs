@@ -478,6 +478,68 @@ const photosOnPost = (page) => page.evaluate((rootSrc) => { const root = (new Fu
   await page.close()
 }
 
+// 6h. Marks come after names on their own, and the featured photo follows the Hero Image panel.
+const LINEUP3 = { ...LINEUP, name: 'Auto', fields: [...LINEUP.fields, { token: 'photo', x: 600, y: 400, w: 300, h: 360 }] }
+const photoSrcs = (page) => page.evaluate((rootSrc) => { const root = (new Function(`return (${rootSrc})()`))(); return root ? [...root.querySelectorAll('img')].map((i) => i.getAttribute('src') || '').filter((x) => /players\/.+\/photo/.test(x)) : null }, ROOT.toString())
+{
+  const e = await open({ photos: ['p1', 'p3'], debutIds: ['p2'] })
+  const { page } = e
+  await importFile(page, LINEUP3)
+  await e.run.loadXI(); await page.waitForTimeout(900)
+  const r = await rows(page, [330, 388, 562, 446])
+  ck('the captain\'s name carries (C) with no mark box in the template', r && r[0] && /\(C\)$/.test(r[0].text), JSON.stringify(r && r[0]))
+  ck('a debutant\'s name carries DEBUT', r && r[1] && /DEBUT/.test(r[1].text), JSON.stringify(r && r[1]))
+  ck('the keeper\'s name carries (WK)', r && r[2] && /\(WK\)$/.test(r[2].text), JSON.stringify(r && r[2]))
+  ck('an ordinary player carries no mark', r && r[3] && !/\(|DEBUT/.test(r[3].text), JSON.stringify(r && r[3]))
+  const first = await photoSrcs(page)
+  ck('the featured photo is the captain\'s by default', first && first.length === 1 && /players\/p1\/photo/.test(first[0]), JSON.stringify(first))
+  // Change it in the Hero Image panel, the photo function of BetterPosts.
+  await tab(page, 'Content'); await page.waitForTimeout(300)
+  const heroSel = page.locator('select').filter({ has: page.locator('option', { hasText: /Auto/ }) }).first()
+  const hasHero = await seen(heroSel)
+  ck('the Content tab has the Hero Image panel with a Hero Player picker on this layout', hasHero)
+  await heroSel.selectOption('p3').catch(() => {}); await page.waitForTimeout(500)
+  const second = await photoSrcs(page)
+  ck('picking another hero player changes the template\'s photo', second && second.length === 1 && /players\/p3\/photo/.test(second[0]), JSON.stringify(second))
+  // The marks can be switched off under Design.
+  await tab(page, 'Design'); await page.waitForTimeout(300)
+  const box = page.getByTestId('template-marks').locator('input')
+  ck('the marks box is ticked by default', await box.isChecked().catch(() => false))
+  await box.uncheck(); await page.waitForTimeout(400)
+  const off = await rows(page, [330, 562])
+  ck('with the marks box unticked the names are plain', off && off[0] && !/\(C\)/.test(off[0].text) && off[1] && !/\(WK\)/.test(off[1].text), JSON.stringify(off))
+  await page.close()
+}
+{
+  // Select a photo area on the canvas and point it at a lineup player instead.
+  const e = await open({ photos: ['p1', 'p3'] })
+  const { page } = e
+  await importFile(page, LINEUP3)
+  await e.run.loadXI(); await page.waitForTimeout(900)
+  const photoImg = page.locator('img[src*="players/p1/photo"]').first()
+  const at = await photoImg.count()
+  ck('the photo area is on the canvas to click', at > 0)
+  if (at) {
+    await photoImg.click({ force: true, timeout: 5000 }).catch(() => {}); await page.waitForTimeout(500)
+    const sel = page.getByTestId('photo-source')
+    ck('selecting it offers Featured photo and each player', await seen(sel))
+    await sel.selectOption('lineup.3.photo').catch(() => {}); await page.waitForTimeout(500)
+    const src = await photoSrcs(page)
+    ck('choosing Player 3 shows player 3\'s photo in the same box', src && src.length === 1 && /players\/p3\/photo/.test(src[0]), JSON.stringify(src))
+  }
+  await page.close()
+}
+{
+  // A template that places marks itself does not get them twice.
+  const e = await open({ debutIds: ['p2'] })
+  const { page } = e
+  await importFile(page, { ...LINEUP, name: 'Own marks', fields: [...LINEUP.fields, { token: 'player 1 captain', x: 120, y: 330, w: 40, fontSize: 30 }] })
+  await e.run.loadXI(); await page.waitForTimeout(900)
+  const r = await rows(page, [330, 388])
+  ck('a template with its own mark boxes gets no automatic marks on the names', r && r[0] && !/\(C\)/.test(r[0].text) && r[1] && !/DEBUT/.test(r[1].text), JSON.stringify(r))
+  await page.close()
+}
+
 // 7. Bad files change nothing and say why.
 for (const [label, file, expect] of [
   ['not JSON', 'this is not json', /not JSON/],
