@@ -2,6 +2,12 @@
 // copy of the rules in frontend/src/social/boundResolve.js (bindFromToken); both
 // sides are tested against token-cases.json so they cannot drift apart.
 
+import {
+  isPostAreaBinding,
+  postBindFromToken,
+  postBindLabel,
+} from "./postFields";
+
 export const LINEUP_SLOTS = 15;
 
 const MATCH_KEYS = ["competition", "round", "venue", "date", "time", "season"];
@@ -89,7 +95,8 @@ export function bindFromToken(token: string): string | null {
   if (MATCH_KEYS.includes(t)) {
     return `match.${t}`;
   }
-  return null;
+  // The other post types' words (fixture 2 venue, our score, potm photo, ...).
+  return postBindFromToken(t);
 }
 
 const WORD: Record<string, string> = {
@@ -106,6 +113,7 @@ const WORD: Record<string, string> = {
 
 /** A photo or the sponsors takes an area of the design, not a line of text. */
 export const isAreaBinding = (binding: string | null): boolean =>
+  isPostAreaBinding(binding) ||
   binding === "sponsors" ||
   binding === "photo" ||
   /^logo\.(team|opponent)$/.test(binding ?? "") ||
@@ -125,6 +133,10 @@ export function bindLabel(binding: string): string {
   }
   if (binding === "logo.opponent") {
     return "Opponent logo";
+  }
+  const other = postBindLabel(binding);
+  if (other) {
+    return other;
   }
   const name = binding.startsWith("match.") ? binding.slice(6) : binding;
   return name.replace(/^./, (c) => c.toUpperCase());

@@ -1,11 +1,12 @@
 import type { Panel } from "./panels";
+import type { PostType } from "./postFields";
 import type { ColorRole, FontRole } from "./roles";
 import type { Extraction, Field, FixedText } from "./types";
 
 export const FORMAT = "bettercricket-template";
 
-/** Where BetterCricket imports it: the Lineup layout, or the Blank canvas. */
-export type PostType = "lineup" | "general";
+/** Where BetterCricket imports it: the layout of its own post type, or the Blank canvas. */
+export type { PostType };
 
 type Look = {
   x: number;

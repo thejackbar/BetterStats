@@ -2,6 +2,7 @@
 // prints. Plain Node, no browser:  node frontend/verification/probe_bound_fields.mjs
 import { readFileSync } from 'node:fs'
 import { bindFromToken, bindLabel, resolveBind, boundSlotCount, splitPlayerName, autoMarks, isAreaBind } from '../src/social/boundResolve.js'
+import { hasTypeField } from '../src/social/postFields.js'
 let pass = 0, fail = 0
 const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); ok ? pass++ : fail++; console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${ok ? '' : `  got ${JSON.stringify(got)} want ${JSON.stringify(want)}`}`) }
 
@@ -30,6 +31,15 @@ eq('player 1 banana is not a field', bindFromToken('player 1 banana'), null)
 const shared = JSON.parse(readFileSync(new URL('../../canva-app/src/template/token-cases.json', import.meta.url), 'utf8'))
 eq('the shared token table is not empty', shared.length > 10, true)
 for (const c of shared) eq(`shared with Canva app: ${JSON.stringify(c.token)}`, bindFromToken(c.token), c.binding)
+
+// Which words belong to which post type, shared with the Canva app the same way.
+const typeCases = JSON.parse(readFileSync(new URL('../../canva-app/src/template/type-cases.json', import.meta.url), 'utf8'))
+eq('the shared type table is not empty', typeCases.length > 10, true)
+for (const c of typeCases) eq(`type ${c.type} with ${JSON.stringify(c.binds)}`, hasTypeField(c.type, c.binds), c.ok)
+
+// A photo not chosen yet shows its label (null), a value the group lacks prints nothing ('').
+eq('announcement photo is null with no player', resolveBind('announce.photo', { post: { announce: { photo: null } } }), null)
+eq('a field the group does not have is blank', resolveBind('announce.name', { post: { announce: { kind: 'X' } } }), '')
 
 // Labels
 eq('label for a slot', bindLabel('lineup.3.last'), 'Player 3 (last name)')
@@ -126,6 +136,51 @@ eq('a club with no logo prints nothing', resolveBind('logo.team', { teamLogo: ''
 eq('opponent logo before an opponent is chosen is null', resolveBind('logo.opponent', { opponent: null, opponentLogo: null }), null)
 eq('an opponent with no logo prints nothing', resolveBind('logo.opponent', { opponent: 'South Perth', opponentLogo: null }), '')
 eq('an opponent logo is the address held', resolveBind('logo.opponent', { opponent: 'South Perth', opponentLogo: '/o.png' }), '/o.png')
+
+// The other post types: what a bound field prints from the post bundle (data.post)
+const POST = {
+  fixtures: [{ grade: '1ST XI', opponent: 'SUBIACO', short: 'SUB', homeaway: 'HOME', time: '12:30 PM', venue: 'TOMPKINS PARK' }],
+  results: [{ grade: '2ND XI', opponent: 'WILLETTON', us: '176', them: '9/201', outcome: 'LOSS', margin: 'BY 25 RUNS' }],
+  stats: [{ label: 'Runs', value: '87' }, { label: 'SR', value: '' }],
+  milestones: [{ name: 'George Pullinger', value: '200', unit: 'GAMES', date: '4 Oct', photo: '/p.jpg' }],
+  totw: [{ name: 'A One', line: '5/22', points: 80, photo: '' }],
+  items: [{ title: 'Quiz Night', date: 'Fri 24 Oct', venue: 'Clubhouse' }],
+  final: { us: '6/188', them: '184', result: 'WIN', margin: 'BY 4 WICKETS', winner: 'SCARBOROUGH' },
+  potm: { name: 'George Pullinger', first: 'George', last: 'Pullinger', photo: '/h.jpg', summary: '' },
+  toss: { text: 'SCARBOROUGH WON THE TOSS AND ELECTED TO BAT', winner: 'SCARBOROUGH', decision: 'BAT' },
+  announce: { headline: 'NAMED CAPTAIN', subheadline: 'FOR 2025-26', photo: '/a.jpg' },
+  event: { title: 'Curry Night', photo: '' },
+  ms: { title: 'Milestones' }, tw: { heading: 'SENIOR' },
+  perf: { us: { bat: [{ name: 'J. Barendse', line: '64 (71)' }], bowl: [] }, them: { bat: [], bowl: [{ name: 'T. Hughes', line: '3/44' }] } },
+}
+const D = { post: POST }
+eq('fixture 1 grade', resolvePostBindProbe('fixture.1.grade'), '1ST XI')
+function resolvePostBindProbe(b) { return resolveBind(b, D) }
+eq('fixture 1 venue', resolveBind('fixture.1.venue', D), 'TOMPKINS PARK')
+eq('a fixture row that is not held prints nothing', resolveBind('fixture.5.venue', D), '')
+eq('result 1 us and them', [resolveBind('result.1.us', D), resolveBind('result.1.them', D)], ['176', '9/201'])
+eq('stat 1', [resolveBind('stat.1.label', D), resolveBind('stat.1.value', D)], ['Runs', '87'])
+eq('an empty stat value is empty', resolveBind('stat.2.value', D), '')
+eq('milestone value and photo', [resolveBind('milestone.1.value', D), resolveBind('milestone.1.photo', D)], ['200', '/p.jpg'])
+eq('totw line', resolveBind('totw.1.line', D), '5/22')
+eq('totw points is text', resolveBind('totw.1.points', D), '80')
+eq('event item title', resolveBind('item.1.title', D), 'Quiz Night')
+eq('final score', [resolveBind('final.us', D), resolveBind('final.them', D), resolveBind('final.result', D)], ['6/188', '184', 'WIN'])
+eq('potm last', resolveBind('potm.last', D), 'Pullinger')
+eq('toss text', resolveBind('toss.text', D), 'SCARBOROUGH WON THE TOSS AND ELECTED TO BAT')
+eq('announcement headline', resolveBind('announce.headline', D), 'NAMED CAPTAIN')
+eq('event title', resolveBind('event.title', D), 'Curry Night')
+eq('milestones title', resolveBind('ms.title', D), 'Milestones')
+eq('team of the week heading', resolveBind('tw.heading', D), 'SENIOR')
+eq('our batter 1', [resolveBind('perf.us.bat.1.name', D), resolveBind('perf.us.bat.1.line', D)], ['J. Barendse', '64 (71)'])
+eq('their bowler line', resolveBind('perf.them.bowl.1.line', D), '3/44')
+eq('an empty performance list prints nothing', resolveBind('perf.us.bowl.1.name', D), '')
+eq('no post bundle: a fixture shows its sample (null)', resolveBind('fixture.1.venue', {}), null)
+eq('no post bundle: the final score shows its sample (null)', resolveBind('final.us', {}), null)
+eq('a type the bundle does not hold is null, not blank', resolveBind('toss.text', { post: { fixtures: [] } }), null)
+eq('a group the post holds but a missing field is blank', resolveBind('potm.role', D), '')
+eq('post photos are areas', ['milestone.1.photo', 'totw.2.photo', 'potm.photo', 'announce.photo', 'event.photo'].every((b) => isAreaBind(b)), true)
+eq('a fixture venue is not an area', isAreaBind('fixture.1.venue'), false)
 
 // Counting slots
 eq('slot count is the highest slot used', boundSlotCount([{ bind: 'lineup.3.name' }, { bind: 'lineup.11.last' }, { bind: 'opponent' }, {}]), 11)
