@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Cropper } from 'react-cropper'
 import 'cropperjs/dist/cropper.css'
+import { preloadBackgroundRemoval, releaseBackgroundRemoval, removeBackgroundFromUrl } from '../lib/bgRemoval'
 
 // Reusable crop + background-removal modal.
 //
@@ -35,6 +36,7 @@ export default function ImageEditorModal({
   const [srcUrl, setSrcUrl] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [removingBg, setRemovingBg] = useState(false)
+  const [bgProgress, setBgProgress] = useState(null) // { stage: 'download' | 'compute', pct }
   const [keying, setKeying] = useState(false)
   const [showColourKey, setShowColourKey] = useState(false)
   const [tolerance, setTolerance] = useState(48)
@@ -105,6 +107,14 @@ export default function ImageEditorModal({
     }
   }, [])
 
+  // Start fetching the cut-out model while the person crops, so the button is
+  // quick when they press it (the files are cached after the first time).
+  useEffect(() => {
+    if (!open || !allowBackgroundRemoval) return
+    preloadBackgroundRemoval()
+    return releaseBackgroundRemoval // frees the model when the editor closes
+  }, [open, allowBackgroundRemoval])
+
   // Escape closes
   useEffect(() => {
     if (!open) return
@@ -129,14 +139,15 @@ export default function ImageEditorModal({
     if (!srcUrl) return
     setShowColourKey(false)
     setRemovingBg(true)
+    setBgProgress(null)
     try {
-      const { removeBackground } = await import('@imgly/background-removal')
-      const blob = await removeBackground(srcUrl, { debug: false })
+      const blob = await removeBackgroundFromUrl(srcUrl, setBgProgress)
       setDerived(blob)
     } catch (err) {
       setLoadError(err.message || 'Background removal failed')
     } finally {
       setRemovingBg(false)
+      setBgProgress(null)
     }
   }, [srcUrl, setDerived])
 
@@ -287,7 +298,7 @@ export default function ImageEditorModal({
                   disabled={!srcUrl || applying || removingBg || keying}
                   title="Best for photos of people or products"
                   className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-text hover:bg-pb-surface2 transition disabled:opacity-40"
-                >{removingBg ? '⏳ Removing background…' : '✂ Remove background (photo)'}</button>
+                >{removingBg ? `⏳ ${bgLabel(bgProgress)}` : '✂ Remove background (photo)'}</button>
                 <button
                   type="button"
                   onClick={handleColourKeyToggle}
@@ -365,6 +376,12 @@ export default function ImageEditorModal({
       </div>
     </div>
   )
+}
+
+function bgLabel(p) {
+  if (p?.stage === 'download') return `Loading cut-out tool ${p.pct}%…`
+  if (p?.stage === 'compute') return 'Cutting out the subject…'
+  return 'Removing background…'
 }
 
 // Colour-key the background out of a logo. Samples the background colour from

@@ -22,6 +22,8 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['@imgly/background-removal'],
   },
+  // The cut-out worker dynamic-imports the ONNX runtime, which needs ES output.
+  worker: { format: 'es' },
   build: {
     rollupOptions: {
       output: {
