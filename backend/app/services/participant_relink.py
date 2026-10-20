@@ -499,6 +499,36 @@ async def recent_games_without_detail(db: AsyncSession, org_id, days: int = RERE
     return {r[0] for r in res.all()}
 
 
+async def recent_unfinished_games(db: AsyncSession, org_id, days: int = REREAD_DAYS) -> set:
+    """Match ids of recent games we stored while CA did not call them COMPLETED (in play, or still
+    listed as to come), which the run reads again so their figures can be put right.
+
+    A game stored in play keeps the figures it was stored with (`card_figures_refresh`), and a two-day
+    game dated on its first Saturday is outside every run's window by the next weekend, so nothing else
+    would ever ask for its card again. `games.status` is CA's word at the last read: once a run reads the
+    game and CA says COMPLETED the status moves on and the game drops out of this list. A game with no
+    stored status (a row from before the column) and one CA called off are left out. Same fortnight and
+    same cap as `recent_games_without_detail`.
+    """
+    res = await db.execute(text("""
+        SELECT g.id::text
+          FROM games g
+          LEFT JOIN grades gr ON gr.id = g.grade_id
+          LEFT JOIN seasons s ON s.id = gr.season_id
+         WHERE g.played_at >= CURRENT_DATE - CAST(:days AS INTEGER)
+           AND g.played_at <= CURRENT_DATE
+           AND (g.home_org_id = CAST(:org AS UUID) OR g.away_org_id = CAST(:org AS UUID)
+                OR s.organisation_id = CAST(:org AS UUID))
+           AND g.status IS NOT NULL
+           AND UPPER(g.status) NOT IN ('COMPLETED', 'ABANDONED', 'CANCELLED')
+           AND EXISTS (SELECT 1 FROM game_appearances ga JOIN players p ON p.id = ga.player_id
+                        WHERE ga.game_id = g.id AND p.organisation_id = CAST(:org AS UUID))
+         ORDER BY g.played_at DESC
+         LIMIT :cap
+    """), {"org": str(org_id), "days": days, "cap": MAX_REREAD})
+    return {r[0] for r in res.all()}
+
+
 async def adopt_identity(db: AsyncSession, org_id, adopt: dict) -> int:
     """Give a hand-added player the Cricket Australia id sync just matched them to.
 

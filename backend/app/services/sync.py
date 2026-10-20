@@ -2038,6 +2038,8 @@ async def sync_grassroots_game_level_data(
             from app.services import participant_relink
             async with async_session_maker() as _s:
                 reread_ids = await participant_relink.recent_games_without_detail(_s, org_uuid)
+                # A game stored while CA still had it in play: read again to put its figures right.
+                reread_ids |= await participant_relink.recent_unfinished_games(_s, org_uuid)
             if reread_ids:
                 logger.info(f"GR-sync: {len(reread_ids)} recent game(s) without player detail will be re-read")
         except Exception as _e:
@@ -2482,6 +2484,22 @@ async def sync_grassroots_game_level_data(
                         except Exception as _e:
                             await session.rollback()
                             logger.warning(f"GR-sync: repair of {match_id_str} failed: {_e}")
+                        # A game stored while CA still had it in play keeps the figures it was stored
+                        # with (the re-read above only adds rows). Once CA calls the card COMPLETED,
+                        # put a recent game's figures right, in place.
+                        try:
+                            from app.services import card_figures_refresh, participant_relink
+                            if participant_relink.played_within(scorecard):
+                                _changed = await card_figures_refresh.refresh_stored_figures(
+                                    session, org_uuid, match_uuid, scorecard,
+                                    lambda g: _team_pid(_parse_uuid(g)))
+                                if _changed:
+                                    stats["gr_figures_refreshed"] = (
+                                        stats.get("gr_figures_refreshed", 0) + len(_changed))
+                                    stats["gr_games_refreshed"] = stats.get("gr_games_refreshed", 0) + 1
+                        except Exception as _e:
+                            await session.rollback()
+                            logger.warning(f"GR-sync: figure refresh of {match_id_str} failed: {_e}")
                         stats["gr_games_skipped_done"] += 1
                         continue
                     # else: the row exists (the other synced club created it)

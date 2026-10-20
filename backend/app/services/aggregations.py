@@ -2288,7 +2288,17 @@ def _attribute_cells(gi: dict) -> tuple:
         for gn, delta in manual_by_season.get(sid, {}).items():
             if not delta:
                 continue
-            row_cells[gn] = max(row_cells.get(gn, 0) + delta, 0)
+            have = row_cells.get(gn, 0)
+            row_cells[gn] = max(have + delta, 0)
+            if have + delta < 0 and season_unattributed.get(sid):
+                # The grade holds fewer matches than the correction takes off (none, when CA only
+                # gives the season as a total and no scorecard places a match in it). The rest comes
+                # off the matches we could not place in a grade; clamping it away here lost a
+                # downward correction altogether, so a player the club took from 100 matches to 98
+                # still read 100 on the grid, the profile header and the milestones.
+                season_unattributed[sid] = max(season_unattributed[sid] - (-(have + delta)), 0)
+                if not season_unattributed[sid]:
+                    season_unattributed.pop(sid)
             if row_cells[gn] == 0:
                 row_cells.pop(gn)
                 cell_unknown.pop((sid, gn), None)
