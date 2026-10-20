@@ -157,6 +157,26 @@ export function sponsorsBlock(page: PageSize): BlockSpec {
   );
 }
 
+/**
+ * One photo area for the post's featured player. BetterCricket fills it from the
+ * Hero Image panel: the player picked there (the captain by default) or an upload,
+ * so the club changes the photo in BetterPosts and never in Canva.
+ */
+export function featuredPhotoBlock(page: PageSize): BlockSpec {
+  const side = Math.round(page.width * 0.3);
+  return areaBlock(
+    "Featured photo",
+    "photo",
+    {
+      top: Math.round(page.height * 0.28),
+      left: Math.round(page.width * 0.62),
+      width: side,
+      height: Math.round(side * 1.2),
+    },
+    clamp(Math.round(page.height * 0.02), 10, 40),
+  );
+}
+
 /** What a player can carry besides a name, as the picker lists it. */
 export const PLAYER_EXTRAS = [
   "photo",

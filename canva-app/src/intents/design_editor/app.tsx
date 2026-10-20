@@ -27,6 +27,7 @@ import {
 } from "src/template/extract";
 import {
   FIELD_TOKENS,
+  featuredPhotoBlock,
   fieldBlock,
   lineUpBlock,
   matchDetailsBlock,
@@ -573,7 +574,7 @@ export const App = () => {
         <Text size="small">
           {intl.formatMessage({
             defaultMessage:
-              "A photo is an area BetterCricket fills with that player's picture. A mark prints C, VC, WK or DEBUT only for the players who are one.",
+              "Captain, vice-captain, keeper and debut marks, C, VC, WK and DEBUT, are added after the names automatically, so you do not need boxes for them. Add a mark box only to place one yourself. A photo area is filled with that player's picture.",
             description: "Explains photos and marks",
           })}
         </Text>
@@ -646,6 +647,19 @@ export const App = () => {
           {intl.formatMessage({
             defaultMessage: "Add to player",
             description: "Button that adds a photo area or a mark for a player",
+          })}
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => addBlock((size) => featuredPhotoBlock(size))}
+          loading={busy}
+          disabled={off}
+          stretch
+        >
+          {intl.formatMessage({
+            defaultMessage: "Add featured photo",
+            description:
+              "Button that adds the photo area BetterPosts fills from its photo settings",
           })}
         </Button>
         <Button

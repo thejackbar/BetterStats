@@ -1,5 +1,6 @@
 import {
   FIELD_TOKENS,
+  featuredPhotoBlock,
   fieldBlock,
   lineUpBlock,
   matchDetailsBlock,
@@ -227,5 +228,18 @@ describe("area and mark blocks", () => {
     const b = playerExtraBlock({ width: 1080, height: 1080 }, 1, "captain");
     expect(b.rects).toBeUndefined();
     expect(must(b.boxes[0]).text).toBe("{{player 1 captain}}");
+  });
+});
+
+describe("featuredPhotoBlock", () => {
+  it("is a photo area with the featured photo word in it, inside the page", () => {
+    for (const size of SIZES) {
+      const b = featuredPhotoBlock(size);
+      const r = must(b.rects?.[0]);
+      expect(must(b.boxes[0]).text).toBe("{{photo}}");
+      expect(bindFromToken("{{photo}}")).toBe("photo");
+      expect(r.left + r.width).toBeLessThanOrEqual(size.width);
+      expect(r.top + r.height).toBeLessThanOrEqual(size.height);
+    }
   });
 });

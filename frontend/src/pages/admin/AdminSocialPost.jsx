@@ -155,12 +155,12 @@ const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080, T13: 
 const HERO_FOCUS_TEMPLATES = Object.keys(HERO_CROP_ASPECT)
 // The layouts drawn around a hero photo. Derived from the same id list the Hero
 // Image panel is gated on, so the two can't drift apart.
-const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5']
+const HERO_SLOT_TEMPLATES = ['T1', 'T3', 'T6', 'T7', 'T10', 'T11', 'T13', 'C1', 'C3', 'C5', CUSTOM_LAYOUT_ID]
 // The lineups that can mark which listed player is the one in the photo, and
 // the ones whose Hero Player picker names that player. T7 and the announcement
 // layouts have a single player, so there is no list to mark.
 const HERO_MARK_TEMPLATES = ['T1', 'T3', 'T10', 'T11']
-const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11']
+const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', CUSTOM_LAYOUT_ID]
 // The lineups that draw a DEBUT tag beside a flagged player. The flag is kept
 // on the player either way, so switching layout never loses it.
 const DEBUT_TEMPLATES = ['T1', 'T3', 'T10', 'T11', 'T12']
@@ -1314,6 +1314,8 @@ export default function AdminSocialPost() {
   const designInputRef = useRef(null)
   const [designBusy, setDesignBusy] = useState(false)
   const [clubStyle, setClubStyle] = useState(true)
+  // (C), (VC), (WK) and DEBUT after the names on "Your template", from the flags set in Content.
+  const [templateMarks, setTemplateMarks] = useState(true)
   // Club media library (persisted via the social-media API).
   const [mediaAssets, setMediaAssets] = useState([])
   // Below md the editor drops its drag canvas for a guided phone quick-post
@@ -3280,6 +3282,10 @@ export default function AdminSocialPost() {
     // and so on). null means the editor holds nothing for it yet.
     lineup: templatePlayers.map((p) => ({ name: [p.first, p.last].filter(Boolean).join(' '), first: p.first, last: p.last, role: p.roleLong || p.role || '', captain: p.captain, keeper: p.keeper, viceCaptain: p.viceCaptain, debut: p.debut, photo: p.headshot })),
     opponent: opponent.name ? oppData.name : null, headline: headline || null,
+    // The photo a template's featured-photo area shows: the Hero Image panel's upload, else the chosen
+    // (or captain's) headshot. '' once players are held but none has a photo; null before any.
+    featuredPhoto: templatePlayers.length ? (heroImage.blobUrl || featuredOf(templatePlayers, heroPlayerId)?.headshot || '') : (heroImage.blobUrl || null),
+    marksOn: templateMarks,
     // Sponsor grids resolve their ids against the club's live list, so a saved
     // template always draws current logos.
     sponsors: adminSponsors.filter(sponsorLogoUrl).map((s) => ({ id: s.id, name: s.name, url: sponsorLogoUrl(s) })),
@@ -5063,6 +5069,15 @@ export default function AdminSocialPost() {
                       <CanvaImportBox clubStyle={clubStyle} onClubStyle={setClubStyle} onImport={importTemplateText} busy={designBusy}
                         hint="Choose Line up in the Canva app, and the template becomes a Lineup layout here, with the Data tab, players and match details linked up." />
                     </div>
+                  )}
+                  {templateId === CUSTOM_LAYOUT_ID && (
+                    <label className="flex items-start gap-2 cursor-pointer self-start" data-testid="template-marks">
+                      <input type="checkbox" checked={templateMarks} onChange={(e) => setTemplateMarks(e.target.checked)} className="mt-0.5" />
+                      <span className="text-[11px] text-pb-dim leading-relaxed">
+                        Show (C), (VC), (WK) and DEBUT after the names
+                        <span className="block text-pb-faintest">Set them per player in Content. Your template needs no boxes for them.</span>
+                      </span>
+                    </label>
                   )}
                   {!isBlankTab && templateId !== CUSTOM_LAYOUT_ID && (
                     <div className="flex flex-col gap-1 self-start">

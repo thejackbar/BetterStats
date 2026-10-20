@@ -35,7 +35,9 @@
 // and reported, never guessed):
 //   player N | player N first | player N last | player N role   N = 1 to LINEUP_MAX
 //   player N photo        a picture area bound to that player's photo (h is the area's height)
+//   photo                 the featured photo (the Hero Image panel's player or upload)
 //   player N captain | vice | keeper | debut   print C, VC, WK or DEBUT when the player is one
+//                          (without any of these, names carry (C), (WK) and DEBUT by themselves)
 //   sponsors              a sponsors area (h is the area's height)
 //   captain | vice | keeper | opponent | team | headline
 //   competition | round | venue | date | time | season
@@ -190,6 +192,8 @@ export function itemsFromTemplate(parsed, { designUrl, designName, width, height
     }
   })
   const fixed = parsed.texts.map((t) => ({ ...make(t.text, t), fromTemplate: true }))
+  // Marks come after names on their own, unless the template placed marks itself.
+  const placedMarks = parsed.fields.some((f) => /^lineup\.\d+\.(captain|vice|keeper|debut)$/.test(f.bind || ''))
   const fields = parsed.fields.map((f) => {
     // A photo or the sponsors is an area, not words: it takes the box the designer drew.
     if (f.bind === 'sponsors') {
@@ -208,6 +212,7 @@ export function itemsFromTemplate(parsed, { designUrl, designName, width, height
       // so importing again replaces exactly these and leaves the club's own blocks.
       fromTemplate: true,
       ...(f.bind ? { bind: f.bind } : null),
+      ...(!placedMarks && /^lineup\.\d+\.(name|last)$/.test(f.bind || '') ? { autoMarks: true } : null),
     }
   })
   // Whatever the club put on top before stays, except an earlier import's own

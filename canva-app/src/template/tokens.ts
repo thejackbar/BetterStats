@@ -39,6 +39,16 @@ export function bindFromToken(token: string): string | null {
   ) {
     return t;
   }
+  // The featured photo: whoever the Hero Image panel names, or the photo uploaded there.
+  if (
+    t === "photo" ||
+    t === "player photo" ||
+    t === "featured photo" ||
+    t === "hero" ||
+    t === "hero photo"
+  ) {
+    return "photo";
+  }
   if (t === "wicketkeeper" || t === "wicket keeper") {
     return "keeper";
   }
@@ -71,13 +81,18 @@ const WORD: Record<string, string> = {
 
 /** A photo or the sponsors takes an area of the design, not a line of text. */
 export const isAreaBinding = (binding: string | null): boolean =>
-  binding === "sponsors" || /^lineup\.\d+\.photo$/.test(binding ?? "");
+  binding === "sponsors" ||
+  binding === "photo" ||
+  /^lineup\.\d+\.photo$/.test(binding ?? "");
 
 /** A short plain label for the panel, e.g. "Player 3 (last name)". */
 export function bindLabel(binding: string): string {
   const p = binding.match(/^lineup\.(\d+)\.(\w+)$/);
   if (p) {
     return `Player ${p[1]}${WORD[p[2] ?? ""] ?? ""}`;
+  }
+  if (binding === "photo") {
+    return "Featured photo";
   }
   const name = binding.startsWith("match.") ? binding.slice(6) : binding;
   return name.replace(/^./, (c) => c.toUpperCase());

@@ -12,7 +12,7 @@ import { IS_AFL } from '../lib/sport'
 // ─────────────────────────────────────────────────────────────────────────────
 import { useRef } from 'react'
 import { BrandLockup, GrainSVG, CreditMark } from './cricket-templates'
-import { resolveBind, splitPlayerName, bindLabel } from './boundResolve'
+import { resolveBind, splitPlayerName, bindLabel, autoMarks } from './boundResolve'
 
 // Colour tokens resolve against the live palette so a palette switch re-tints
 // any block left on a token; a raw hex (custom colour) passes straight through.
@@ -255,7 +255,9 @@ export function defaultBlankItems() {
 function TextBlock({ item, palette, data }) {
   // A bound field prints the live value; null (nothing held yet) shows its sample.
   const live = item.bind ? resolveBind(item.bind, data) : null
-  const shown = live === null || live === undefined ? item.text : live
+  const base = live === null || live === undefined ? item.text : live
+  // A name carries its (C), (WK) and DEBUT marks without the template asking for them.
+  const shown = item.autoMarks && live ? `${base}${autoMarks(item.bind, data)}` : base
   return (
     <div style={{
       width: item.w,
