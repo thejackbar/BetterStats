@@ -70,6 +70,9 @@ function isConstrainedDevice() {
 
 let envPromise = null
 
+// What the ONNX runtime says when the browser will not give it memory.
+const OUT_OF_MEMORY = /out of memory|no available backend|RangeError|bad_alloc|OOM/i
+
 // Resolve once per page: where the files live, which path this device takes.
 function resolveEnv() {
   if (!envPromise) {
@@ -106,6 +109,7 @@ function resolveEnv() {
         gpu,
         constrained,
         light,
+        kind: light ? 'light' : 'isnet_quint8', // what our own ONNX call runs on a constrained device
         // ISNet fallback for a constrained device with no light model: the
         // quint8 variant, on a shrunk photo.
         model: constrained ? 'isnet_quint8' : 'isnet_fp16',
@@ -199,19 +203,39 @@ export async function preloadBackgroundRemoval() {
 export async function removeBackgroundFromUrl(srcUrl, onProgress, { full = false } = {}) {
   const base = await resolveEnv()
   const env = full && base.constrained
-    ? { ...base, light: null, model: 'isnet_fp16', gpu: false }
+    ? { ...base, light: null, kind: 'isnet_fp16', model: 'isnet_fp16', gpu: false }
     : base
   const kind = full && base.constrained ? 'full' : 'normal'
   runStarted(kind)
   let ok = false
   try {
+    const attempt = async () => {
+      try {
+        return await callWorker({ type: 'run', url: srcUrl, env }, onProgress)
+      } catch (err) {
+        if (!err.workerBroken) throw err
+        console.warn('Background removal worker unavailable, running on the main thread', err)
+        return cutOutCore(srcUrl, env, onProgress)
+      }
+    }
     let blob
     try {
-      blob = await callWorker({ type: 'run', url: srcUrl, env }, onProgress)
+      try {
+        blob = await attempt()
+      } catch (err) {
+        // A phone can refuse the runtime's memory while a previous worker's is
+        // still being handed back. Give it a moment on a fresh worker, once.
+        if (!(env.constrained && OUT_OF_MEMORY.test(err.message))) throw err
+        releaseBackgroundRemoval()
+        await new Promise((r) => setTimeout(r, 1500))
+        blob = await attempt()
+      }
     } catch (err) {
-      if (!err.workerBroken) throw err
-      console.warn('Background removal worker unavailable, running on the main thread', err)
-      blob = await cutOutCore(srcUrl, env, onProgress)
+      if (!OUT_OF_MEMORY.test(err.message)) throw err
+      if (kind === 'full') store.set(FULL_CRASHED, '1') // this phone cannot do the full one
+      throw new Error(kind === 'full'
+        ? 'This phone does not have enough memory for the full-quality cut-out. The quick cut-out or the logo button will still work.'
+        : 'This device ran out of memory for the cut-out. Close other tabs and try again, or use the logo button.')
     }
     ok = true
     return { blob, light: !!env.light }
