@@ -264,7 +264,7 @@ export default function TeaserPreview() {
         </div>
 
         <p className="mt-8 text-xs text-pb-dim leading-relaxed">
-          These figures come from Cricket Australia's public match data for {seasonName}. Something not right?{' '}
+          Something not right?{' '}
           <a className="underline" href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${name} teaser page`)}`}>Tell us</a>.
         </p>
       </main>
