@@ -71,6 +71,7 @@ export const SUPER_SECTIONS = [
     items: [
       { to: '/admin/super/comms-limits', label: 'BetterComms Limits', blurb: 'Email send tiers and suspended clubs.', badge: 'commsRequests' },
       { to: '/admin/super/announce', label: 'Club Announcements', blurb: 'Post a notice to every club.' },
+      { to: '/admin/super/product-updates', label: 'Daily Update', blurb: 'The 9am "what\'s new" note in every club\'s notifications: start or stop it, preview, and take a post down.' },
       { to: '/admin/super/broadcasts', label: 'Dashboard Messages', blurb: 'A message at the top of club admin dashboards, for every club, chosen clubs or chosen people.' },
     ],
   },

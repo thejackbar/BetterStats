@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 # timezone-pinned in this file uses Perth; the sync jobs used to be the
 # exception and silently ran on UTC.
 PERTH = ZoneInfo("Australia/Perth")
+# The daily product update goes out on the team's morning, not the clubs'.
+MELBOURNE = ZoneInfo("Australia/Melbourne")
 
 scheduler = AsyncIOScheduler()
 
@@ -647,6 +649,21 @@ async def run_notification_scan():
         logger.error(f"Notification scan failed: {e}")
 
 
+async def run_product_update():
+    """Daily product update, 09:00 Melbourne time (see services/product_blast.py).
+
+    Reads the releases not yet covered, has the model write a short club-facing
+    note, checks it, and raises it in every club's notifications. Does nothing
+    while the Stop switch is on, and posts nothing on a day with nothing
+    client-facing. Never raises."""
+    from app.services import product_blast
+    try:
+        result = await product_blast.run_daily()
+        logger.info(f"Product update: {result.get('status')} {result.get('reason') or ''}".strip())
+    except Exception as e:
+        logger.error(f"Product update failed: {e}")
+
+
 async def send_diary_reminders():
     """Daily Club Diary reminder scan — opt-in per task definition (off by
     default), not gated by any platform flag since Club Diary is an
@@ -1009,6 +1026,21 @@ def start_scheduler():
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+    )
+    # Daily product update — 09:00 Melbourne, the team's morning. The grace
+    # window lets a restart a few minutes either side of 09:00 still run it;
+    # the one-post-a-day rule makes a second run harmless.
+    scheduler.add_job(
+        run_product_update,
+        trigger="cron",
+        hour=9,
+        minute=0,
+        timezone=MELBOURNE,
+        id="daily_product_update",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
     )
     # Meta Ads HQ dashboard — hourly campaign/ad snapshot (was daily 09:00
     # Perth; hourly per direct request for the self-serve campaign launch, so

@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     playhq_base_url: str = "https://grassrootsapiproxy.cricket.com.au"
     playhq_api_key: str = ""
     anthropic_api_key: str = ""
+    # Daily product update (services/product_blast.py). The changelog is read from
+    # the deployed frontend, because the backend image holds no frontend source:
+    # empty means {public_base_url}/changelog.json. The model is the one that
+    # reads the release notes and writes the club-facing summary.
+    product_blast_changelog_url: str = ""
+    product_blast_model: str = "claude-sonnet-4-6"
     cors_origins: str = "http://localhost:3000"
 
     # ─── KlubPro → BetterStats migration tooling (super-admin onboarding only) ──

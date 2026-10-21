@@ -17,6 +17,7 @@ from app.auth.modules import require_module
 from app.routers import instructional_videos
 from app.routers import audit as audit_router
 from app.routers import admin_broadcasts
+from app.routers import product_updates
 from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
 from app.routers import card_review, auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, fines, website, comms, public_comms, public_ses, public_contact, public_teaser, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
@@ -4665,6 +4666,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _NOTIFICATION_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 353: the daily product update — the log of each day's post
+        # and its Stop switch (which starts stopped). Same one-copy rule — this
+        # list and alembic's 353 both run services/product_blast_ddl.STATEMENTS.
+        from app.services.product_blast_ddl import STATEMENTS as _PRODUCT_BLAST_DDL
+        for _stmt in _PRODUCT_BLAST_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 293: a Club Directory Rediscover re-reads a club's committee
         # from PlayHQ and reconciles against it. former_at marks a delisted
         # officer we kept rather than deleted (an unsubscribe, a bounce, a
@@ -6504,6 +6512,7 @@ app.include_router(sales_commissions.router)  # Sales Commissions — forecast +
 app.include_router(usage.router)
 app.include_router(login_attempts.router)
 app.include_router(admin_broadcasts.router)  # Super-admin messages on the club admin dashboard
+app.include_router(product_updates.router)  # Super-admin: daily product update (Stop switch, log)
 app.include_router(club_links_router.router)  # Super Admin: link clubs so Club Admins can switch between them
 app.include_router(privacy_requests_router.router)  # Super Admin: find a person, download the PDF of what we hold about them
 app.include_router(meta_ads.router)  # Meta Ads HQ dashboard (super-admin) — BetterCricket's own ad spend

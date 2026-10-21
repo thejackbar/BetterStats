@@ -2598,6 +2598,17 @@ export const api = {
     request('/club-admin/broadcasts/seen', { method: 'POST', body: JSON.stringify({ ids }) }),
   dismissAdminBroadcast: (id) =>
     request(`/club-admin/broadcasts/${id}/dismiss`, { method: 'POST' }),
+  // Daily product update (routers/product_updates.py): the Stop switch, a preview
+  // of the next post, the log of every attempt, Run now, and Take down.
+  superProductUpdates: () => request('/club-admin/super/product-updates'),
+  superProductUpdatesControl: (paused) =>
+    request('/club-admin/super/product-updates/control', { method: 'POST', body: JSON.stringify({ paused }) }),
+  superProductUpdatesPreview: () =>
+    request('/club-admin/super/product-updates/preview', { method: 'POST' }),
+  superProductUpdatesRun: () =>
+    request('/club-admin/super/product-updates/run', { method: 'POST' }),
+  superProductUpdatesTakeDown: (id) =>
+    request(`/club-admin/super/product-updates/${id}`, { method: 'DELETE' }),
   superListBroadcasts: () => request('/club-admin/super/broadcasts'),
   superBroadcastAudience: () => request('/club-admin/super/broadcasts/audience'),
   superCreateBroadcast: (data) =>

@@ -68,7 +68,7 @@ function AlertRow({ alert, onClose }) {
         <span className="mt-1.5 w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
         <div className="min-w-0 flex-1">
           <span className={`text-sm ${alert.read ? 'text-pb-dim' : 'text-pb-text'}`}>{alert.title}</span>
-          {alert.body && <p className="text-xs text-pb-faint mt-0.5 leading-[1.5]">{alert.body}</p>}
+          {alert.body && <p className="text-xs text-pb-faint mt-0.5 leading-[1.5] whitespace-pre-line">{alert.body}</p>}
           <p className="text-[10px] text-pb-faintest mt-1">{relativeTime(alert.created_at)}</p>
         </div>
       </div>

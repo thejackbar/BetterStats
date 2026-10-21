@@ -491,7 +491,18 @@ async def _src_sync_completed(session: AsyncSession, org_id, config: dict) -> li
     return out
 
 
+async def _src_product_update(session: AsyncSession, org_id, config: dict) -> list[dict]:
+    """The daily product update is raised for every club at 9am Melbourne time by
+    ``product_blast.fan_out``. This is only the catch-up: a club that was added,
+    or had the event switched back on, after that run is handed the last couple of
+    days' posts, and ``emit`` skips any it already has. A retracted post is not
+    ``posted`` and so is never handed over again."""
+    from app.services import product_blast
+    return await product_blast.posted_for_catch_up(session)
+
+
 SOURCES = {
+    "product_update": _src_product_update,
     "milestone_achieved": _src_milestone_achieved,
     "milestone_upcoming": _src_milestone_upcoming,
     "grade_milestone_achieved": _src_grade_milestone_achieved,
