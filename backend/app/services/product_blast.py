@@ -456,6 +456,46 @@ async def retract(session: AsyncSession, blast_id: str) -> Optional[dict]:
     return {"id": blast_id, "notifications_removed": removed}
 
 
+async def public_updates(session: AsyncSession, limit: int = 60) -> list[dict]:
+    """Every posted update, newest first, for the What's New page. Only the fields
+    a club is meant to read: no raw model text, no release versions, no reasons."""
+    rows = (await session.execute(text("""
+        SELECT id, blast_date, headline, bullets FROM product_blasts
+        WHERE status = 'posted' AND headline IS NOT NULL
+        ORDER BY blast_date DESC, created_at DESC LIMIT :n
+    """), {"n": max(1, min(200, limit))})).mappings().all()
+    return [{"id": str(r["id"]), "date": r["blast_date"].isoformat(),
+             "headline": r["headline"], "bullets": list(r["bullets"] or [])} for r in rows]
+
+
+async def staff_alerts(session: AsyncSession) -> list[dict]:
+    """The last few days' posts as bell rows for BetterCricket staff.
+
+    Staff are never recipients (``notifications.recipients_for``), and a super
+    admin acting as a club holds no delivery at it, so without this the owner
+    could never see the bell the clubs see. Shown as already read so they do not
+    inflate the badge.
+    """
+    rows = (await session.execute(text("""
+        SELECT id, headline, bullets, created_at FROM product_blasts
+        WHERE status = 'posted' AND blast_date >= :cutoff
+        ORDER BY created_at DESC
+    """), {"cutoff": datetime.now(MELBOURNE).date() - timedelta(days=CATCH_UP_DAYS)})).mappings().all()
+    out = []
+    for r in rows:
+        if not r["headline"] or not r["bullets"]:
+            continue
+        item = notification_item(str(r["id"]), r["headline"], list(r["bullets"]))
+        out.append({
+            "id": f"blast-{r['id']}", "event_key": EVENT_KEY, "severity": "info",
+            "title": item["title"], "body": item["body"], "link": item["link"],
+            "payload": item["payload"], "occurred_at": None,
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "read": True,
+        })
+    return out
+
+
 async def posted_for_catch_up(session: AsyncSession) -> list[dict]:
     """Recent posted blasts, for the notification scan to hand to a club that
     missed the 9am fan-out. Read only; ``emit`` decides what is new."""

@@ -487,6 +487,35 @@ async def main() -> None:
         await s.commit()
     check("a club that was already told is not told twice", await notified(A) == 2)
 
+    print("\nWhat's New page and the staff bell")
+    from app.routers import notifications as nroutes
+    from app.models.db import User, Organisation
+    async with Session() as s:
+        page_items = (await nroutes.get_product_updates(60, None, s))["items"]
+    posted_ids = {str(r["id"]) for r in await rows() if r["status"] == "posted"}
+    check("the page lists every posted update and nothing else",
+          {i["id"] for i in page_items} == posted_ids and target not in {i["id"] for i in page_items},
+          str(page_items))
+    check("a listed update carries only what a club may read",
+          page_items and set(page_items[0]) == {"id", "date", "headline", "bullets"}, str(page_items[:1]))
+    check("newest first", [i["date"] for i in page_items] == sorted((i["date"] for i in page_items), reverse=True))
+    async with Session() as s:
+        staff = await pb.staff_alerts(s)
+    check("staff see the recent posts, already read so the badge is not inflated",
+          staff and all(a["read"] is True and a["event_key"] == "product_update" for a in staff), str(staff))
+    check("a retracted post is not shown to staff", all(target not in a["id"] for a in staff))
+    async with Session() as s:
+        summ = await nroutes._build_notifications_summary(await s.get(User, STAFF), await s.get(Organisation, A), s)
+    check("a super admin acting as a club sees the update in the bell",
+          any(a["event_key"] == "product_update" for a in summ["alerts"]), str(summ["alerts"]))
+    check("and it does not count as unseen", not any(not a["read"] for a in summ["alerts"]
+                                                       if a["event_key"] == "product_update"))
+    async with Session() as s:
+        summ = await nroutes._build_notifications_summary(await s.get(User, A_ADMIN), await s.get(Organisation, A), s)
+    mine = [a for a in summ["alerts"] if a["event_key"] == "product_update"]
+    check("a club admin sees it once, from their own delivery, and unread",
+          len(mine) == 1 and mine[0]["read"] is False and summ["alert_count"] >= 1, str(mine))
+
     print("\nRoutes")
     async with Session() as s:
         ov = await routes.overview(s, None)

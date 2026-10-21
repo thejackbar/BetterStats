@@ -24,6 +24,7 @@ from app.services.session_safety import rollback_keeping
 from app.services import notification_events as ev
 from app.services import notification_scan
 from app.services import notifications as notif
+from app.services import product_blast
 from app.services.merch import merch_alerts as get_merch_alerts
 from app.services.assets import asset_alerts as get_asset_alerts, count_asset_alerts
 
@@ -369,6 +370,10 @@ async def _build_notifications_summary(
 
     alerts = await _safe(
         db, lambda: notif.feed(db, user_id, org_id, limit=20), [], what="summary.alerts")
+    if user_role == "super_admin":
+        # Staff are not recipients, so show them what the clubs were sent.
+        alerts = list(alerts) + await _safe(
+            db, lambda: product_blast.staff_alerts(db), [], what="summary.product_updates")
     alert_count = sum(1 for a in alerts if not a.get("read"))
 
     unseen_count = (len(sync_runs) + len(new_milestones) + pending_count + pending_reports_count
@@ -601,6 +606,17 @@ async def get_notification_feed(
     limit = max(1, min(100, limit))
     items = await notif.feed(db, current_user.id, club.id, limit=limit, unread_only=unread_only)
     return {"items": items, "unread": await notif.unread_count(db, current_user.id, club.id)}
+
+
+@router.get("/product-updates")
+async def get_product_updates(
+    limit: int = 60,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The daily "what's new" notes posted so far, for the What's New page. The
+    same text every club admin is sent, so any signed-in club user may read it."""
+    return {"items": await product_blast.public_updates(db, limit)}
 
 
 @router.post("/notifications/feed/read")

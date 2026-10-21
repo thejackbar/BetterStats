@@ -3,6 +3,7 @@ import AdminLayout from '../../components/admin/AdminLayout'
 import { CHANGELOG } from '../../data/changelog'
 import { api } from '../../lib/api'
 import { SITE_VERSION } from '../../version'
+import { useAuth } from '../../contexts/AuthContext'
 
 function compareVersions(a, b) {
   const parse = v => (v || '').replace('v', '').split('.').map(Number)
@@ -16,7 +17,17 @@ function compareVersions(a, b) {
 }
 
 export default function AdminChangelog() {
+  const { user } = useAuth()
+  const isStaff = user?.role === 'super_admin'
   const [lastSeen, setLastSeen] = useState(null)
+  // null while loading, then the daily updates posted so far.
+  const [updates, setUpdates] = useState(null)
+
+  useEffect(() => {
+    api.getProductUpdates()
+      .then(d => setUpdates(d?.items || []))
+      .catch(() => setUpdates([]))
+  }, [])
 
   useEffect(() => {
     api.getNotificationsCount()
@@ -34,10 +45,41 @@ export default function AdminChangelog() {
           </span>
         </div>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
-          Full history of BetterStats updates. The bell shows only entries newer than the
-          last one you dismissed — this page keeps everything around.
+          A short note on what has changed in BetterCricket, posted on days something is new.
+          The same note arrives in your notifications.
         </p>
 
+        <div className="space-y-4 mb-10" data-testid="daily-updates">
+          {updates === null && <p className="text-sm text-pb-faint">Loading…</p>}
+          {updates && updates.length === 0 && (
+            <div className="pb-card p-5 text-sm text-pb-faint">
+              Nothing has been posted yet. New notes appear here each morning something has changed.
+            </div>
+          )}
+          {(updates || []).map(u => (
+            <div key={u.id} className="pb-card p-5" data-testid="daily-update">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <span className="text-sm font-medium text-pb-text">{u.headline}</span>
+                <span className="font-mono text-[10px] text-pb-faintest ml-auto">{u.date}</span>
+              </div>
+              <ul className="space-y-1.5 pl-1">
+                {u.bullets.map((b, i) => (
+                  <li key={i} className="flex gap-2 text-sm text-pb-dim">
+                    <span className="text-pb-faintest mt-0.5 shrink-0">·</span>
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+
+        {/* The raw release notes are written for the team. Staff only. */}
+        {isStaff && (
+          <>
+            <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-3">
+              Release history (staff only)
+            </h2>
         <div className="space-y-5">
           {CHANGELOG.map(entry => {
             const isNew = compareVersions(entry.version, lastSeen) > 0
@@ -73,6 +115,8 @@ export default function AdminChangelog() {
             )
           })}
         </div>
+          </>
+        )}
       </div>
     </AdminLayout>
   )

@@ -39,7 +39,8 @@ const BLASTS = () => [
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function open({ width = 1280, preview = null, role = 'super_admin', lastSeen = 'v99.0.0' } = {}) {
+async function open({ width = 1280, preview = null, role = 'super_admin', lastSeen = 'v99.0.0',
+                     startPath = '/admin/super/product-updates', ready = '[data-testid="control-card"]', title = 'Daily Update' } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1600 } })
   const page = await ctx.newPage()
   const errors = []
@@ -61,6 +62,13 @@ async function open({ width = 1280, preview = null, role = 'super_admin', lastSe
     if (path === '/auth/me') {
       return json({ id: 'u1', username: 'staff', role, capabilities: ['*'], club_slug: 'applecross',
                     can_switch_clubs: true, entitlements: { modules: ['stats'], status: 'active' } })
+    }
+    if (path === '/club-admin/product-updates') {
+      return json({ items: [
+        { id: 'b1', date: '2026-10-21', headline: 'New: share a scorecard, plus a fix',
+          bullets: ['You can now share any scorecard as a picture.', 'Fixed an issue with some bowling figures.'] },
+        { id: 'b0', date: '2026-10-20', headline: 'New: copy a squad', bullets: ["You can now copy last week's squad."] },
+      ] })
     }
     if (path === '/club-admin/super/product-updates' && method === 'GET') {
       return json({ paused: state.paused, blasts: state.blasts, max_age_days: 7 })
@@ -101,17 +109,17 @@ async function open({ width = 1280, preview = null, role = 'super_admin', lastSe
     return json({})
   })
 
-  await page.goto(`${BASE}/admin/super/product-updates`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${BASE}${startPath}`, { waitUntil: 'domcontentloaded' })
   try {
-    await page.waitForSelector('text=Daily Update', { timeout: 15000 })
+    await page.waitForSelector(`text=${title}`, { timeout: 15000 })
+    await page.waitForSelector(ready, { timeout: 15000 })
   } catch {
     await ctx.close()
-    console.log('FAIL the Daily Update screen is not present in this build')
+    console.log(`FAIL the ${title} screen is not present in this build`)
     console.log('\n0 passed, 1 failed')
     await browser.close()
     process.exit(1)
   }
-  await page.waitForSelector('[data-testid="control-card"]', { timeout: 15000 })
   return { page, ctx, errors, calls, state }
 }
 
@@ -245,6 +253,29 @@ const noOverflow = page => page.evaluate(
   ck('the daily update is in the panel', panel.includes('New: share a scorecard, plus a fix'))
   ck('and there is no "What\'s New" release list under it', !/what.s new/i.test(panel) && !/\bv9\.\d+\.\d+/.test(panel), panel)
   ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ── the What's New page shows the daily updates ─────────────────────────────
+// It used to list every release in full, in the team's own words. A club admin now
+// reads the daily notes there; the raw release history stays with staff.
+for (const role of ['club_admin', 'super_admin']) {
+  const { page, ctx, errors } = await open({ role, startPath: '/admin/changelog', title: "What's New",
+                                              ready: '[data-testid="daily-updates"]' })
+  await page.waitForSelector('[data-testid="daily-update"]')
+  const daily = page.locator('[data-testid="daily-update"]')
+  ck(`${role}: the page lists the posted updates, newest first`,
+    (await daily.count()) === 2 && (await daily.nth(0).innerText()).includes('New: share a scorecard, plus a fix')
+      && (await daily.nth(0).innerText()).includes('Fixed an issue with some bowling figures.'))
+  const body = await page.locator('div.max-w-3xl').first().innerText()
+  if (role === 'club_admin') {
+    ck('club admin: no raw release list', !/release history/i.test(body) && !/\bv9\.\d+\.\d+/.test(body.replace(/current: v[\d.]+/i, '')), body.slice(0, 400))
+  } else {
+    ck('staff: the release history is still there, under its own heading',
+      /release history \(staff only\)/i.test(body) && /\bv9\.128\./.test(body))
+  }
+  ck(`${role}: no page errors`, errors.length === 0, errors.join(' | '))
+  if (role === 'club_admin') await page.screenshot({ path: '/tmp/claude-0/shots/whatsnew.png' })
   await ctx.close()
 }
 
