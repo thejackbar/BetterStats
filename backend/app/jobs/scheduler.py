@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -664,6 +665,18 @@ async def run_product_update():
         logger.error(f"Product update failed: {e}")
 
 
+async def run_product_update_if_missed():
+    """Run today's product update if the 09:00 run did not happen or did not finish
+    (see ``product_blast.run_missed_today``). A no-op on a normal day."""
+    from app.services import product_blast
+    try:
+        result = await product_blast.run_missed_today()
+        if result.get("status") not in ("early", "already_ran"):
+            logger.info(f"Product update catch-up: {result.get('status')} {result.get('reason') or ''}".strip())
+    except Exception as e:
+        logger.error(f"Product update catch-up failed: {e}")
+
+
 async def send_diary_reminders():
     """Daily Club Diary reminder scan — opt-in per task definition (off by
     default), not gated by any platform flag since Club Diary is an
@@ -1027,9 +1040,7 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Daily product update — 09:00 Melbourne, the team's morning. The grace
-    # window lets a restart a few minutes either side of 09:00 still run it;
-    # the one-post-a-day rule makes a second run harmless.
+    # Daily product update — 09:00 Melbourne, the team's morning.
     scheduler.add_job(
         run_product_update,
         trigger="cron",
@@ -1040,7 +1051,29 @@ def start_scheduler():
         replace_existing=True,
         max_instances=1,
         coalesce=True,
-        misfire_grace_time=1800,
+    )
+    # Jobs live in memory, so a restart across 09:00 loses that day's run (APScheduler
+    # does not replay a run the process was not alive for), and a changelog that was
+    # unreachable at 09:00 leaves only a failed row. This second job and the one-off
+    # at start-up run the same check hourly through the working day and do nothing
+    # once the day has been dealt with.
+    scheduler.add_job(
+        run_product_update_if_missed,
+        trigger="cron",
+        hour="10-17",
+        minute=5,
+        timezone=MELBOURNE,
+        id="daily_product_update_retry",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        run_product_update_if_missed,
+        trigger="date",
+        run_date=datetime.now(timezone.utc) + timedelta(minutes=3),
+        id="product_update_startup_check",
+        replace_existing=True,
     )
     # Meta Ads HQ dashboard — hourly campaign/ad snapshot (was daily 09:00
     # Perth; hourly per direct request for the self-serve campaign launch, so

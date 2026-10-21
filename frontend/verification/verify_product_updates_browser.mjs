@@ -47,7 +47,7 @@ async function open({ width = 1280, preview = null, role = 'super_admin', lastSe
   const calls = []
   page.on('pageerror', e => errors.push(String(e)))
   page.on('dialog', d => d.accept())
-  const state = { paused: true, blasts: BLASTS() }
+  const state = { paused: true, blasts: BLASTS(), backfill: { running: false, done: 0, total: 0, current: null, error: null, stored: {} }, polls: 0 }
 
   await page.route('**/api/**', async (route) => {
     const req = route.request()
@@ -71,7 +71,12 @@ async function open({ width = 1280, preview = null, role = 'super_admin', lastSe
       ] })
     }
     if (path === '/club-admin/super/product-updates' && method === 'GET') {
-      return json({ paused: state.paused, blasts: state.blasts, max_age_days: 7 })
+      if (state.backfill.running) {
+        state.polls += 1
+        state.backfill = { ...state.backfill, done: Math.min(state.polls, 3), total: 3, current: '2026-08-0' + state.polls }
+        if (state.polls >= 3) state.backfill = { running: false, done: 3, total: 3, current: null, error: null, stored: { posted: 2, skipped: 1 } }
+      }
+      return json({ paused: state.paused, blasts: state.blasts, max_age_days: 7, backfill: state.backfill })
     }
     if (path === '/club-admin/super/product-updates/control') {
       state.paused = !!payload.paused
@@ -81,6 +86,10 @@ async function open({ width = 1280, preview = null, role = 'super_admin', lastSe
       return json(preview || { status: 'preview', headline: 'New: copy a squad',
         bullets: ['You can now copy last week\'s squad into a new one.'],
         versions: ['v9.203.0', 'v9.203.1'], raw_output: '{}' })
+    }
+    if (path === '/club-admin/super/product-updates/backfill') {
+      state.backfill = { running: true, done: 0, total: 3, current: '2026-08-01', error: null, stored: {} }
+      return json({ started: true })
     }
     if (path === '/club-admin/super/product-updates/run') {
       state.blasts = [{ ...BLASTS()[0], id: 'b9', headline: 'Run now post' }, ...state.blasts]
@@ -198,6 +207,26 @@ const noOverflow = page => page.evaluate(
     calls.length === 1 && calls[0].method === 'DELETE' && calls[0].path.endsWith('/b1'), JSON.stringify(calls))
   ck('a taken-down post cannot be taken down again',
     (await page.locator('[data-testid="blast-row"]').nth(1).getByRole('button', { name: 'Take down' }).count()) === 0)
+  await ctx.close()
+}
+
+// ── backfilling the history ─────────────────────────────────────────────────
+{
+  const { page, ctx, calls } = await open()
+  const card = page.locator('[data-testid="backfill-card"]')
+  ck('the history card says nothing is sent', (await card.getByText('Nothing is sent to any club.').count()) === 1)
+  calls.length = 0
+  await card.getByRole('button', { name: 'Backfill history' }).click()
+  await page.waitForSelector('[data-testid="backfill-progress"]')
+  ck('Backfill history posts to the backfill endpoint once and nothing else',
+    calls.length === 1 && calls[0].path.endsWith('/backfill') && calls[0].method === 'POST', JSON.stringify(calls))
+  ck('it shows progress while it runs', /Day \d of 3/.test(await card.locator('[data-testid="backfill-progress"]').innerText()))
+  ck('and cannot be started twice',
+    await card.getByRole('button', { name: 'Backfilling…' }).isDisabled())
+  await page.waitForSelector('[data-testid="backfill-stored"]', { timeout: 15000 })
+  ck('it ends by saying what was stored',
+    (await card.locator('[data-testid="backfill-stored"]').innerText()).includes('2 notes, 1 quiet days'))
+  ck('the log still shows only the daily attempts', (await page.locator('[data-testid="blast-row"]').count()) === 4)
   await ctx.close()
 }
 

@@ -23,6 +23,13 @@ Nothing here deletes a blast. Retracting one marks it and removes only the
 notifications it raised.
 """
 
+# Added after 353 shipped, so migration 354 runs just these and 353 (on a fresh
+# database) runs them as part of STATEMENTS. ``backfilled`` marks a note written
+# afterwards for a past day: it shows on What's New and is never notified.
+BACKFILL_STATEMENTS: list[str] = [
+    "ALTER TABLE product_blasts ADD COLUMN IF NOT EXISTS backfilled BOOLEAN NOT NULL DEFAULT FALSE",
+]
+
 STATEMENTS: list[str] = [
     """
     CREATE TABLE IF NOT EXISTS product_blast_control (
@@ -66,6 +73,7 @@ STATEMENTS: list[str] = [
     CREATE INDEX IF NOT EXISTS ix_product_blasts_created
         ON product_blasts (created_at DESC)
     """,
+    *BACKFILL_STATEMENTS,
 ]
 
 # Downgrade drops only what this migration added.

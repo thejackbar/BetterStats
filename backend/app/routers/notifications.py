@@ -610,7 +610,7 @@ async def get_notification_feed(
 
 @router.get("/product-updates")
 async def get_product_updates(
-    limit: int = 60,
+    limit: int = 500,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

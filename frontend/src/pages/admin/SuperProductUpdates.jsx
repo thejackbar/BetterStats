@@ -116,6 +116,15 @@ export default function SuperProductUpdates() {
 
   useEffect(() => { load() }, [])
 
+  // While a backfill runs, keep the progress fresh. It is one model call per day,
+  // so it takes a while; the notes are saved as it goes.
+  const backfillRunning = !!data?.backfill?.running
+  useEffect(() => {
+    if (!backfillRunning) return undefined
+    const id = setInterval(load, 3000)
+    return () => clearInterval(id)
+  }, [backfillRunning])
+
   const run = async (key, fn) => {
     setBusy(key)
     setNotice('')
@@ -146,6 +155,14 @@ export default function SuperProductUpdates() {
         : r.status === 'already_posted'
           ? 'Today already has a post.'
           : r.reason || 'Nothing was posted.')
+      await load()
+    })
+  }
+
+  const startBackfill = () => {
+    if (!window.confirm('Write a note for every past day in the release history? Nothing is sent to any club. The notes only appear on the What\'s New page. It makes one request per day, so it takes a while.')) return
+    return run('backfill', async () => {
+      await api.superProductUpdatesBackfill()
       await load()
     })
   }
@@ -216,6 +233,34 @@ export default function SuperProductUpdates() {
               <p className="mt-2 text-xs text-pb-faint">
                 Looks at releases from the last {data.max_age_days} days that have not been covered yet.
               </p>
+            </div>
+
+            <div className="pb-card p-4 mb-4" data-testid="backfill-card">
+              <p className="text-sm font-semibold text-pb-text">History</p>
+              <p className="mt-1 text-sm text-pb-dim">
+                Fill the What's New page with a note for every past day in the release history.
+                Nothing is sent to any club.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <Button variant="soft" disabled={backfillRunning || busy === 'backfill'} onClick={startBackfill}>
+                  {backfillRunning ? 'Backfilling…' : 'Backfill history'}
+                </Button>
+                {backfillRunning && (
+                  <span className="text-xs text-pb-faint" data-testid="backfill-progress">
+                    Day {data.backfill.done} of {data.backfill.total}
+                    {data.backfill.current ? ` (${data.backfill.current})` : ''}
+                  </span>
+                )}
+              </div>
+              {!backfillRunning && Object.keys(data.backfill?.stored || {}).length > 0 && (
+                <p className="mt-2 text-xs text-pb-faint" data-testid="backfill-stored">
+                  Stored so far: {data.backfill.stored.posted || 0} notes, {data.backfill.stored.skipped || 0} quiet days
+                  {data.backfill.stored.blocked ? `, ${data.backfill.stored.blocked} held back` : ''}.
+                </p>
+              )}
+              {data.backfill?.error && !backfillRunning && (
+                <p className="mt-2 text-xs text-pb-faint">Last problem: {data.backfill.error}</p>
+              )}
             </div>
 
             {notice && <Note toneKey="accent" className="mb-4">{notice}</Note>}

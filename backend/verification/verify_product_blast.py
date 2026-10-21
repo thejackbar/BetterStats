@@ -719,6 +719,163 @@ async def main() -> None:
     pb.settings.anthropic_api_key = real_key
     check("no API key is a readable failure, not a fallback", nokey is not None and "API key" in nokey, str(nokey))
 
+    print("\nBackfilling the release history")
+    BF = date(2027, 3, 15)
+    d = lambda n: BF - timedelta(days=n)
+    hist = [
+        entry("v9.400.0", d(10), "Squads", ["Copy a squad."]),
+        entry("v9.400.1", d(10), "Squads 2", ["Squad copy fix."]),
+        entry("v9.401.0", d(9), "Plumbing", ["Moved a table."]),
+        entry("v9.402.0", d(8), "Leaky", ["Something technical."]),
+        entry("v9.403.0", d(1), "Ladders", ["Ladder page."]),
+        entry("v9.404.0", d(11), "Already posted day", ["Old thing."]),
+        entry("v9.405.0", BF, "Today", ["Belongs to the next 9am run."]),
+        entry("v9.406.0", BF + timedelta(days=2), "Future", ["Dated ahead."]),
+    ]
+    async with Session() as s_:
+        await s_.execute(text("""INSERT INTO product_blasts (blast_date, status, headline, bullets, versions)
+                                 VALUES (:d, 'posted', 'Earlier post', '["x"]'::jsonb, '[]'::jsonb)"""), {"d": d(11)})
+        await s_.commit()
+    bf_calls = []
+
+    async def bf_fetch():
+        return list(hist)
+
+    async def bf_sum(entries, problem=None, previous=None):
+        day = entries[0]["date"]
+        bf_calls.append(day)
+        if day == d(9).isoformat():
+            return {"has_client_news": False}
+        if day == d(8).isoformat():
+            return {"has_client_news": True, "headline": "Faster pages",
+                    "bullets": ["Fixed a database migration that slowed things."]}
+        return {"has_client_news": True, "headline": f"Notes for {day}",
+                "bullets": [f"You can now do the thing from {day} on the squad page."]}
+
+    sent_before = await notified()
+    state = {"running": False, "done": 0, "total": 0, "current": None, "error": None,
+             "posted": 0, "skipped": 0, "blocked": 0}
+    res = await pb.backfill_history(fetch=bf_fetch, summariser=bf_sum, today=BF, state=state)
+    check("the backfill finishes", res["status"] == "finished", str(res))
+    async with Session() as s_:
+        stored = await pb.backfill_summary(s_)
+    check("a note per past day, a quiet day, and a held-back day",
+          stored == {"posted": 2, "skipped": 1, "blocked": 1}, str(stored))
+    bf_rows = [r for r in await rows() if r["backfilled"]]
+    check("each is dated to the day it covers",
+          {str(r["blast_date"]) for r in bf_rows} == {d(10).isoformat(), d(9).isoformat(), d(8).isoformat(), d(1).isoformat()},
+          str([str(r["blast_date"]) for r in bf_rows]))
+    check("a day that already has a post is left alone", d(11).isoformat() not in bf_calls)
+    check("today's and future releases are left for the daily run",
+          all(v not in {x for r in bf_rows for x in r["versions"]} for v in ("v9.405.0", "v9.406.0")))
+    check("both releases on one day are read together", [r["versions"] for r in bf_rows
+          if str(r["blast_date"]) == d(10).isoformat()] == [["v9.400.0", "v9.400.1"]])
+    check("NOTHING is sent to any club", await notified() == sent_before)
+    check("and no notification row exists for a backfilled note",
+          await count("SELECT COUNT(*) FROM notifications n JOIN product_blasts b ON n.dedupe_key = 'product_update:' || b.id::text WHERE b.backfilled") == 0)
+    check("a leaky past day is held back like any other", any(r["status"] == "blocked" for r in bf_rows))
+    async with Session() as s_:
+        public = await pb.public_updates(s_, 500)
+        log_ids = {r["id"] for r in await pb.recent_blasts(s_, 100)}
+    check("the notes appear on the What's New page", {i["date"] for i in public} >= {d(10).isoformat(), d(1).isoformat()})
+    check("they are kept out of the daily log", not ({str(r["id"]) for r in bf_rows} & log_ids))
+    n_calls = len(bf_calls)
+    res = await pb.backfill_history(fetch=bf_fetch, summariser=bf_sum, today=BF, state=state)
+    check("running it again reads nothing twice", len(bf_calls) == n_calls and state["posted"] == 0, str(state))
+
+    # A backfilled note dated within the catch-up window must still never reach a bell.
+    real_today = datetime.now(pb.MELBOURNE).date()
+    recent = [entry("v9.410.0", real_today - timedelta(days=1), "Yesterday", ["A thing from yesterday."])]
+
+    async def recent_fetch():
+        return recent
+    await pb.backfill_history(fetch=recent_fetch, summariser=bf_sum, today=real_today, state=dict(state))
+    async with Session() as s_:
+        recent_row = await s_.scalar(text("SELECT COUNT(*) FROM product_blasts WHERE backfilled AND status='posted' AND blast_date = :d"),
+                                     {"d": real_today - timedelta(days=1)})
+        catch = await pb.posted_for_catch_up(s_)
+        staff = await pb.staff_alerts(s_)
+    check("a backfilled note from yesterday exists", recent_row == 1)
+    bf_ids = {str(r["id"]) for r in await rows() if r["backfilled"]}
+    check("but the scan's catch-up never hands it to a club",
+          all(c["payload"]["blast_id"] not in bf_ids for c in catch))
+    check("nor the staff bell", all(a["payload"]["blast_id"] not in bf_ids for a in staff))
+
+    boom = {"running": False, "done": 0, "total": 0, "current": None, "error": None, "posted": 0, "skipped": 0, "blocked": 0}
+    boom_calls = []
+
+    async def failing(entries, problem=None, previous=None):
+        boom_calls.append(1)
+        raise RuntimeError("no key")
+    many = [entry(f"v9.5{i:02d}.0", date(2027, 5, 1) + timedelta(days=i), "T", ["x"]) for i in range(8)]
+
+    async def many_fetch():
+        return many
+    res = await pb.backfill_history(fetch=many_fetch, summariser=failing, today=date(2027, 6, 1), state=boom)
+    check("a broken setup stops after three failed days instead of burning a request per day",
+          res["status"] == "stopped" and len(boom_calls) == pb.BACKFILL_ABORT_AFTER and "no key" in (boom["error"] or ""), str(res))
+    check("and stores nothing for the days that failed",
+          await count("SELECT COUNT(*) FROM product_blasts WHERE 'v9.500.0' = ANY(ARRAY(SELECT jsonb_array_elements_text(versions)))") == 0)
+    busy = dict(boom, running=True)
+    check("a second backfill while one runs is refused",
+          (await pb.backfill_history(fetch=many_fetch, summariser=failing, state=busy))["status"] == "already_running")
+
+    async def down():
+        raise pb.ChangelogUnavailable("site down")
+    res = await pb.backfill_history(fetch=down, summariser=bf_sum, today=BF, state=dict(boom))
+    check("an unreachable changelog is reported", res["status"] == "failed" and "site down" in res["reason"], str(res))
+    check("the full history file is a different path from the daily one",
+          pb.changelog_url(True).endswith("/changelog-all.json") and pb.changelog_url(False).endswith("/changelog.json"))
+
+    pb.BACKFILL_STATE["running"] = True
+    try:
+        await routes.backfill(None)
+        started = None
+    except HTTPException as exc:
+        started = exc.status_code
+    pb.BACKFILL_STATE["running"] = False
+    check("the route refuses to start a second backfill", started == 409, str(started))
+    async with Session() as s_:
+        ov = await routes.overview(s_, None)
+    check("the overview reports backfill progress and what is stored",
+          "stored" in ov["backfill"] and ov["backfill"]["stored"].get("posted", 0) >= 2, str(ov["backfill"]))
+
+    print("\nA missed 9am run is picked up")
+    mel = lambda y, m, dd, h, mi=5: datetime(y, m, dd, h, mi, tzinfo=pb.MELBOURNE)
+    EDGES.changelog = [entry("v9.600.0", date(2027, 4, 1), "Fresh", ["Brand new thing."])]
+    EDGES.queue, EDGES.fail_fetch, EDGES.fail_model = [], False, None
+    EDGES.reply = dict(CLEAN)
+    async with Session() as s_:
+        await pb.set_paused(s_, False)
+    res = await pb.run_missed_today(now=mel(2027, 4, 1, 8, 59), fetch=EDGES.fetch, summariser=EDGES.summarise)
+    check("before 9am nothing is run (the 9am job will)", res["status"] == "early")
+    res = await pb.run_missed_today(now=mel(2027, 4, 1, 10), fetch=EDGES.fetch, summariser=EDGES.summarise)
+    check("a restart across 9am is caught at the next hourly check", res["status"] == "posted", str(res))
+    res = await pb.run_missed_today(now=mel(2027, 4, 1, 11), fetch=EDGES.fetch, summariser=EDGES.summarise)
+    check("and once the day is done it does nothing more", res["status"] == "already_ran", str(res))
+    EDGES.changelog.append(entry("v9.601.0", date(2027, 4, 2), "Next", ["Another new thing."]))
+    EDGES.fail_fetch = True
+    res = await pb.run_missed_today(now=mel(2027, 4, 2, 9), fetch=EDGES.fetch, summariser=EDGES.summarise)
+    check("a failure at 9am leaves a failed row", res["status"] == "failed", str(res))
+    EDGES.fail_fetch = False
+    res = await pb.run_missed_today(now=mel(2027, 4, 2, 10), fetch=EDGES.fetch, summariser=EDGES.summarise)
+    check("the hourly check retries it and posts", res["status"] == "posted", str(res))
+    EDGES.changelog.append(entry("v9.602.0", date(2027, 4, 3), "Third", ["A third thing."]))
+    EDGES.fail_fetch = True
+    outcomes = []
+    for h in (9, 10, 11, 12):
+        outcomes.append((await pb.run_missed_today(now=mel(2027, 4, 3, h), fetch=EDGES.fetch,
+                                                   summariser=EDGES.summarise))["status"])
+    check("a day that keeps failing is tried three times and then left until tomorrow",
+          outcomes == ["failed", "failed", "failed", "gave_up"], str(outcomes))
+    EDGES.fail_fetch = False
+    async with Session() as s_:
+        await pb.set_paused(s_, True)
+    res = await pb.run_missed_today(now=mel(2027, 4, 4, 10), fetch=EDGES.fetch, summariser=EDGES.summarise)
+    check("the Stop switch holds the catch-up back too", res["status"] == "paused", str(res))
+    async with Session() as s_:
+        await pb.set_paused(s_, False)
+
     print("\nThe job")
     from app.jobs import scheduler as sched
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -736,7 +893,12 @@ async def main() -> None:
     check("the job exists", job is not None)
     check("it fires at 09:00", fields.get("hour") == "9" and fields.get("minute") == "0", str(fields))
     check("in Melbourne time", job is not None and str(job.trigger.timezone) == "Australia/Melbourne")
-    check("a restart near 9am still runs it", job is not None and job.misfire_grace_time >= 600)
+    retry = probe.get_job("daily_product_update_retry")
+    rf = {f.name: str(f) for f in retry.trigger.fields} if retry else {}
+    check("an hourly check through the working day catches a missed run",
+          retry is not None and rf.get("hour") == "10-17" and str(retry.trigger.timezone) == "Australia/Melbourne", str(rf))
+    check("and one runs shortly after every start-up, which a restart across 9am needs",
+          probe.get_job("product_update_startup_check") is not None)
 
 
 async def _run() -> None:

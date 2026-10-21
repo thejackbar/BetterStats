@@ -99,6 +99,7 @@
 49. Coverage is by VERSION, not date: `posted`/`skipped`/`blocked`/`retracted` cover their versions, `failed` does not (retry tomorrow). One `posted` row per Melbourne day (partial unique index). The release notes come from `dist/changelog.json` (`frontend/vite-plugins/emitChangelog.js`, served `no-cache`), because the backend image has no frontend source.
 50. It rides the notification engine: event `product_update` (bell on, email off by default) raised per club by `product_blast.fan_out` and caught up by the scan source, so club, channel and person switches all apply. Take down deletes only the notifications it raised. Any suite that builds the notification tables must also apply `product_blast_ddl` or the catch-up source fails and rolls the scan back.
 51. A rejected draft is retried with the reason (up to `MAX_ATTEMPTS`), never relaxed: only `check_output` decides what posts. A new limit belongs in `check_output` AND the prompt, or the model keeps tripping it.
+52. A backfilled note (`backfilled` TRUE) is history only: every notification path (fan-out, scan catch-up, staff bell, the log) must filter `NOT backfilled`, whatever its date. APScheduler jobs are in memory, so a restart across 09:00 loses the run: `run_missed_today` (start-up and hourly) is what covers it, and it needs the one-per-day rows to know the day is done.
 
 ## Traps and failure signatures
 

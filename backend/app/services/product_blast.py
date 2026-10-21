@@ -182,10 +182,17 @@ class ChangelogUnavailable(Exception):
     pass
 
 
-async def fetch_changelog() -> list[dict]:
-    """The deployed changelog, newest first. Raises ``ChangelogUnavailable``."""
+def changelog_url(all_history: bool = False) -> str:
     url = settings.product_blast_changelog_url or (
         settings.public_base_url.rstrip("/") + "/changelog.json")
+    return url[: -len("changelog.json")] + "changelog-all.json" if all_history else url
+
+
+async def fetch_changelog(all_history: bool = False) -> list[dict]:
+    """The deployed changelog, newest first. Raises ``ChangelogUnavailable``.
+    ``all_history`` reads the whole release history (about a megabyte) instead of
+    the recent releases the daily run needs; only the backfill asks for it."""
+    url = changelog_url(all_history)
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             resp = await client.get(url, headers={"Cache-Control": "no-cache"})
@@ -205,18 +212,21 @@ def _parse_date(value: object) -> Optional[date]:
         return None
 
 
-def candidate_entries(changelog: list[dict], covered: set[str], today: date) -> list[dict]:
+def candidate_entries(changelog: list[dict], covered: set[str], today: date,
+                      max_age_days: Optional[int] = MAX_AGE_DAYS,
+                      cap: Optional[int] = MAX_ENTRIES) -> list[dict]:
     """The releases worth reading: not covered yet and recent enough.
 
     Oldest first, so the note reads in the order things happened. Over the cap,
-    the newest are kept and the rest wait for the next run.
+    the newest are kept and the rest wait for the next run. ``max_age_days=None``
+    and ``cap=None`` are the backfill's: every uncovered release, however old.
     """
-    cutoff = today - timedelta(days=MAX_AGE_DAYS)
+    cutoff = today - timedelta(days=max_age_days) if max_age_days is not None else None
     found = []
     for e in changelog:
         version = str(e.get("version") or "").strip()
         released = _parse_date(e.get("date"))
-        if not version or version in covered or released is None or released < cutoff:
+        if not version or version in covered or released is None or (cutoff and released < cutoff):
             continue
         items = [str(i).strip()[:MAX_ITEM_CHARS] for i in (e.get("items") or [])
                  if isinstance(i, str) and i.strip()][:MAX_ITEMS_PER_ENTRY]
@@ -227,7 +237,7 @@ def candidate_entries(changelog: list[dict], covered: set[str], today: date) -> 
             "items": items,
         })
     found.sort(key=lambda x: (x["date"], x["version"]))
-    return found[-MAX_ENTRIES:]
+    return found[-cap:] if cap else found
 
 
 # ─── Writing it ──────────────────────────────────────────────────────────────
@@ -384,7 +394,7 @@ async def recent_blasts(session: AsyncSession, limit: int = 30) -> list[dict]:
     rows = (await session.execute(text("""
         SELECT id, blast_date, status, headline, bullets, versions, reason, model,
                raw_output, orgs_notified, created_at, retracted_at
-        FROM product_blasts ORDER BY created_at DESC LIMIT :n
+        FROM product_blasts WHERE NOT backfilled ORDER BY created_at DESC LIMIT :n
     """), {"n": max(1, min(100, limit))})).mappings().all()
     return [{
         "id": str(r["id"]),
@@ -405,17 +415,18 @@ async def recent_blasts(session: AsyncSession, limit: int = 30) -> list[dict]:
 async def _record(session: AsyncSession, *, blast_date: date, status: str,
                   headline: Optional[str] = None, bullets: Optional[list] = None,
                   versions: Optional[list] = None, reason: Optional[str] = None,
-                  raw_output: Optional[str] = None) -> str:
+                  raw_output: Optional[str] = None, backfilled: bool = False) -> str:
     row = (await session.execute(text("""
         INSERT INTO product_blasts
-            (blast_date, status, headline, bullets, versions, reason, model, raw_output)
+            (blast_date, status, headline, bullets, versions, reason, model, raw_output, backfilled)
         VALUES (:d, :status, :headline, CAST(:bullets AS jsonb), CAST(:versions AS jsonb),
-                :reason, :model, :raw)
+                :reason, :model, :raw, :bf)
         RETURNING id
     """), {
         "d": blast_date, "status": status, "headline": headline,
         "bullets": json.dumps(bullets or []), "versions": json.dumps(versions or []),
         "reason": reason, "model": settings.product_blast_model, "raw": raw_output,
+        "bf": backfilled,
     })).first()
     return str(row[0])
 
@@ -488,7 +499,7 @@ async def public_updates(session: AsyncSession, limit: int = 60) -> list[dict]:
         SELECT id, blast_date, headline, bullets FROM product_blasts
         WHERE status = 'posted' AND headline IS NOT NULL
         ORDER BY blast_date DESC, created_at DESC LIMIT :n
-    """), {"n": max(1, min(200, limit))})).mappings().all()
+    """), {"n": max(1, min(500, limit))})).mappings().all()
     return [{"id": str(r["id"]), "date": r["blast_date"].isoformat(),
              "headline": r["headline"], "bullets": list(r["bullets"] or [])} for r in rows]
 
@@ -503,7 +514,7 @@ async def staff_alerts(session: AsyncSession) -> list[dict]:
     """
     rows = (await session.execute(text("""
         SELECT id, headline, bullets, created_at FROM product_blasts
-        WHERE status = 'posted' AND blast_date >= :cutoff
+        WHERE status = 'posted' AND NOT backfilled AND blast_date >= :cutoff
         ORDER BY created_at DESC
     """), {"cutoff": datetime.now(MELBOURNE).date() - timedelta(days=CATCH_UP_DAYS)})).mappings().all()
     out = []
@@ -526,7 +537,7 @@ async def posted_for_catch_up(session: AsyncSession) -> list[dict]:
     missed the 9am fan-out. Read only; ``emit`` decides what is new."""
     rows = (await session.execute(text("""
         SELECT id, headline, bullets, created_at FROM product_blasts
-        WHERE status = 'posted' AND blast_date >= :cutoff
+        WHERE status = 'posted' AND NOT backfilled AND blast_date >= :cutoff
         ORDER BY created_at
     """), {"cutoff": datetime.now(MELBOURNE).date() - timedelta(days=CATCH_UP_DAYS)})).mappings().all()
     return [notification_item(str(r["id"]), r["headline"], list(r["bullets"] or []), r["created_at"])
@@ -552,6 +563,39 @@ async def run_daily(*, dry_run: bool = False,
     except Exception as exc:
         logger.exception("product update: unexpected failure")
         return {"status": "failed", "reason": f"unexpected error ({type(exc).__name__})"}
+
+
+async def write_note(entries: list[dict], summariser: Summariser) -> dict:
+    """Draft, check and, when the checks reject a draft, send it back for a fix.
+
+    Returns ``{"outcome": "ok", "clean", "raw_output", "versions"}``, or an
+    outcome of ``skipped`` (nothing a club would care about), ``blocked`` (still
+    rejected after ``MAX_ATTEMPTS``) or ``failed`` (the model errored), with the
+    fields the log row needs. A retry is a new draft, never an exemption: only
+    ``check_output`` decides what is posted.
+    """
+    versions = [e["version"] for e in entries]
+    raw, clean, problem, tries = None, None, None, 0
+    while tries < MAX_ATTEMPTS:
+        tries += 1
+        try:
+            raw = await (summariser(entries) if tries == 1
+                         else summariser(entries, problem=problem, previous=raw))
+        except Exception as exc:
+            return {"outcome": "failed", "versions": [],
+                    "reason": f"The summary could not be written: {exc}."}
+        if isinstance(raw, dict) and raw.get("has_client_news") is False:
+            return {"outcome": "skipped", "versions": versions,
+                    "raw_output": json.dumps(raw, default=str)[:4000],
+                    "reason": f"Nothing client-facing in {len(versions)} release(s)."}
+        clean, problem = check_output(raw)
+        if clean is not None:
+            break
+    raw_text = json.dumps(raw, default=str)[:4000]
+    if clean is None:
+        return {"outcome": "blocked", "versions": versions, "raw_output": raw_text,
+                "reason": f"Held back after {tries} tries: {problem}."}
+    return {"outcome": "ok", "clean": clean, "raw_output": raw_text, "versions": versions}
 
 
 async def _run(*, dry_run: bool, fetch, summariser, today: date) -> dict:
@@ -586,29 +630,10 @@ async def _run(*, dry_run: bool, fetch, summariser, today: date) -> dict:
         return await finish("skipped", reason="No new releases since the last update.")
     versions = [e["version"] for e in entries]
 
-    # A draft the checks reject is sent back with the reason, so a headline a few
-    # characters over the limit fixes itself instead of costing the day. Only the
-    # checks decide what is posted: a retry is a new draft, never an exemption.
-    raw, clean, problem, tries = None, None, None, 0
-    while tries < MAX_ATTEMPTS:
-        tries += 1
-        try:
-            raw = await (summariser(entries) if tries == 1
-                         else summariser(entries, problem=problem, previous=raw))
-        except Exception as exc:
-            return await finish("failed", versions=[],
-                                reason=f"The summary could not be written: {exc}.")
-        if isinstance(raw, dict) and raw.get("has_client_news") is False:
-            return await finish("skipped", versions=versions,
-                                raw_output=json.dumps(raw, default=str)[:4000],
-                                reason=f"Nothing client-facing in {len(versions)} release(s).")
-        clean, problem = check_output(raw)
-        if clean is not None:
-            break
-    raw_text = json.dumps(raw, default=str)[:4000]
-    if clean is None:
-        return await finish("blocked", versions=versions, raw_output=raw_text,
-                            reason=f"Held back after {tries} tries: {problem}.")
+    note = await write_note(entries, summariser)
+    if note["outcome"] != "ok":
+        return await finish(note["outcome"], **{k: v for k, v in note.items() if k != "outcome"})
+    clean, raw_text = note["clean"], note["raw_output"]
 
     if dry_run:
         return {"status": "preview", "versions": versions, "raw_output": raw_text, **clean}
@@ -631,3 +656,139 @@ async def _run(*, dry_run: bool, fetch, summariser, today: date) -> dict:
         await session.commit()
     return {"status": "posted", "blast_id": blast_id, "orgs_notified": told,
             "versions": versions, **clean}
+
+
+# ─── Making sure a day is not missed ─────────────────────────────────────────
+
+#: Tries a day gets after a failed run before it is left until tomorrow.
+MAX_FAILED_RUNS_PER_DAY = 3
+
+
+async def run_missed_today(*, now: Optional[datetime] = None, **kwargs) -> dict:
+    """Run today's update if the 9am run did not happen or did not finish.
+
+    The scheduler holds its jobs in memory, so a restart at 9am loses that day's
+    run, and a changelog that was unreachable at 9am left only a ``failed`` row.
+    This is called at start-up and hourly through the working day, and does
+    nothing once today has a ``posted``, ``skipped`` or ``blocked`` row, before 9am,
+    or after ``MAX_FAILED_RUNS_PER_DAY`` failures. It respects the Stop switch
+    exactly as the 9am run does.
+    """
+    now = now or datetime.now(MELBOURNE)
+    if now.hour < 9:
+        return {"status": "early"}
+    async with async_session_maker() as session:
+        rows = (await session.execute(text(
+            "SELECT status FROM product_blasts WHERE blast_date = :d AND NOT backfilled"),
+            {"d": now.date()})).scalars().all()
+    if any(r in ("posted", "skipped", "blocked") for r in rows):
+        return {"status": "already_ran"}
+    if sum(1 for r in rows if r == "failed") >= MAX_FAILED_RUNS_PER_DAY:
+        return {"status": "gave_up"}
+    return await run_daily(today=now.date(), **kwargs)
+
+
+# ─── Backfilling the release history ─────────────────────────────────────────
+
+#: Progress of a backfill in this process. The results are rows in the log, so a
+#: restart loses only this counter and a second run carries on where it stopped.
+BACKFILL_STATE: dict = {"running": False, "done": 0, "total": 0, "current": None,
+                        "error": None, "posted": 0, "skipped": 0, "blocked": 0}
+
+#: Most releases read for one past day, and failures in a row before giving up
+#: (no API key, the model down), so a broken setup does not burn a hundred calls.
+BACKFILL_DAY_CAP = 60
+BACKFILL_ABORT_AFTER = 3
+
+
+async def fetch_full_changelog() -> list[dict]:
+    return await fetch_changelog(all_history=True)
+
+
+async def backfill_summary(session: AsyncSession) -> dict:
+    rows = (await session.execute(text("""
+        SELECT status, COUNT(*) FROM product_blasts WHERE backfilled GROUP BY status
+    """))).all()
+    return {status: n for status, n in rows}
+
+
+async def backfill_history(*, fetch: Callable[[], Awaitable[list[dict]]] = fetch_full_changelog,
+                           summariser: Summariser = summarise,
+                           today: Optional[date] = None,
+                           state: Optional[dict] = None) -> dict:
+    """Write a note for every past day in the release history that has none.
+
+    **NOTHING IS SENT.** Each note is stored with ``backfilled`` set, so it shows on
+    the What's New page and is never raised as a notification, whatever its date:
+    the fan-out, the scan's catch-up and the staff bell all skip it. A club is
+    told about a day only by the 9am run, on the day.
+
+    Past days only (today's releases belong to the next 9am run), one note per
+    day, every release not already covered. The same draft, check and retry
+    path as the daily run, so a backfilled note meets the same rules. A day that
+    fails is left alone and picked up by the next run. Never raises.
+    """
+    state = BACKFILL_STATE if state is None else state
+    if state.get("running"):
+        return {"status": "already_running"}
+    today = today or datetime.now(MELBOURNE).date()
+    state.update(running=True, done=0, total=0, current=None, error=None,
+                 posted=0, skipped=0, blocked=0)
+    try:
+        try:
+            changelog = await fetch()
+        except ChangelogUnavailable as exc:
+            state["error"] = f"Could not read the changelog: {exc}."
+            return {"status": "failed", "reason": state["error"]}
+        async with async_session_maker() as session:
+            covered = await covered_versions(session)
+            have_post = set((await session.execute(text(
+                "SELECT blast_date FROM product_blasts WHERE status = 'posted'"))).scalars().all())
+        entries = [e for e in candidate_entries(changelog, covered, today, max_age_days=None, cap=None)
+                   if e["date"] < today.isoformat()]
+        by_day: dict[str, list[dict]] = {}
+        for e in entries:
+            by_day.setdefault(e["date"], []).append(e)
+        days = sorted(by_day)
+        state["total"] = len(days)
+        failures = 0
+        for day in days:
+            state["current"] = day
+            day_date = date.fromisoformat(day)
+            if day_date in have_post:
+                state["done"] += 1
+                continue
+            day_entries = by_day[day][-BACKFILL_DAY_CAP:]
+            note = await write_note(day_entries, summariser)
+            if note["outcome"] == "failed":
+                failures += 1
+                state["error"] = note["reason"]
+                if failures >= BACKFILL_ABORT_AFTER:
+                    break
+                state["done"] += 1
+                continue
+            failures = 0
+            clean = note.get("clean")
+            status = "posted" if note["outcome"] == "ok" else note["outcome"]
+            async with async_session_maker() as session:
+                try:
+                    await _record(session, blast_date=day_date, status=status,
+                                  headline=clean["headline"] if clean else None,
+                                  bullets=clean["bullets"] if clean else None,
+                                  versions=note["versions"], reason=note.get("reason")
+                                  or "Backfilled from the release history.",
+                                  raw_output=note.get("raw_output"), backfilled=True)
+                    await session.commit()
+                except IntegrityError:
+                    await session.rollback()
+            state[status] = state.get(status, 0) + 1
+            state["done"] += 1
+        return {"status": "finished" if failures < BACKFILL_ABORT_AFTER else "stopped",
+                "days": len(days), **{k: state[k] for k in ("posted", "skipped", "blocked")}}
+    except Exception as exc:
+        logger.exception("product update: backfill failed")
+        state["error"] = f"Unexpected error ({type(exc).__name__})."
+        return {"status": "failed", "reason": state["error"]}
+    finally:
+        state["running"] = False
+        state["current"] = None

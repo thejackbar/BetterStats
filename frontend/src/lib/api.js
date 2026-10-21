@@ -2609,6 +2609,8 @@ export const api = {
     request('/club-admin/super/product-updates/preview', { method: 'POST' }),
   superProductUpdatesRun: () =>
     request('/club-admin/super/product-updates/run', { method: 'POST' }),
+  superProductUpdatesBackfill: () =>
+    request('/club-admin/super/product-updates/backfill', { method: 'POST' }),
   superProductUpdatesTakeDown: (id) =>
     request(`/club-admin/super/product-updates/${id}`, { method: 'DELETE' }),
   superListBroadcasts: () => request('/club-admin/super/broadcasts'),

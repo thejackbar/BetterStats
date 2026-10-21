@@ -43,6 +43,8 @@ export default function emitChangelog() {
       // The daily update only ever looks a week back, so the whole history (nearly
       // a megabyte) is not worth fetching every morning.
       writeFileSync(path.join(outDir, 'changelog.json'), JSON.stringify(entries.slice(0, RECENT_ENTRIES)))
+      // The whole history, read only when a super admin runs the backfill.
+      writeFileSync(path.join(outDir, 'changelog-all.json'), JSON.stringify(entries))
     },
   }
 }
