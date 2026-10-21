@@ -24,7 +24,6 @@ import { useTheme } from '../../../contexts/ThemeContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
-import { availRank } from '../../../lib/availability'
 import { Icon, Avatar, Btn, RoleChips, Tag, Empty, QuickAvailModal, playedWithinYears, recencyOf, RuleTags } from './ui'
 import { useFilters } from './filters'
 import SelectionHistory from './SelectionHistory'
@@ -37,7 +36,7 @@ import { DualRailView, TeamSheetView } from './SelectionViews'
 import { AddPlayersSheet, SlotSheet, MobileBar } from './SelectionMobile'
 import SendSide from './SendSide'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
-import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank, normGender, gameDatesLabel } from './selectionMeta'
+import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank, poolAvailRank, normGender, gameDatesLabel } from './selectionMeta'
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
 import { teamSeq, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
 import { confirmSig, restoreDraft } from './selectionDraft'
@@ -383,7 +382,7 @@ export default function AdminSelection() {
   const cmp = useCallback((a, b) => {
     const at = poolRank(a), bt = poolRank(b)
     if (at !== bt) return at - bt
-    const r = availRank(a.availability) - availRank(b.availability)
+    const r = poolAvailRank(a) - poolAvailRank(b)
     if (r !== 0) return r
     const sa = a.score ?? 0, sb = b.score ?? 0
     if (sa !== sb) return sb - sa

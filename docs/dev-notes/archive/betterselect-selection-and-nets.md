@@ -1679,3 +1679,8 @@ Asked for (Oct 2026): on Selection > Pool, put the players who have answered abo
 Asked for (Oct 2026): the Selection list should follow the Fixtures order and the squads order. A club with 12:00 OD sides and a 12:30 1st XI saw the OD sides first.
 - `selection_overview` sorted by date, start time, then team rank, so kick-off beat the squad's place. It now sorts date, team rank (ranked first), name with numbers read as numbers, start time, id. The Fixtures page already ranked before start time. The screen keeps the server's order and only groups by day.
 - Proof: `verify_squad_sides.py` section C (48 checks on real Postgres) now expects the 1pm 1st XI above the 9am 2nd XI; control on the previous `selection.py` fails that one check.
+
+## Pool order: "W2 only" above no answer (v9.128.5.1)
+Asked for (Oct 2026): players who are available for the second weekend only should go above those who have not put in availability on Selection > Pool.
+- The pool row's `availability` is the combined, least favourable answer, so a W2-only player read UNAVAILABLE and sorted last. The sort now treats `availability_days` of unavailable then available as rank 1.5 (after Maybe, before no answer), the same rank `lib/availability` gives HALF_W2. Server: `selection_pool.pool_sort_key` / `_is_w2_only`; browser: `selectionMeta.poolAvailRank` used by `cmp`. Ordering only (rule 95): `availability`, filters, rules, drop-in and open-pick logic are unchanged. W1-only is deliberately not lifted.
+- Proof: `verify_selection_open_pool.py` (31 checks; control without the half rank fails the W2 check).

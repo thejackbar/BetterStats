@@ -244,15 +244,24 @@ def _pool_rank(open_seq: int | None, tier: int | None, drop_in: bool, squad_matc
 
 
 _AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2, "UNAVAILABLE": 3}
+_HALF_RANK = 1.5  # same place as the browser's HALF_W2: after Maybe, before no answer
+
+
+def _is_w2_only(days) -> bool:
+    """Plainly unavailable the first weekend of a two-day game and plainly
+    available the second (lib/availability.halfStatus 'HALF_W2'). Ordering only:
+    `availability` stays the combined, least favourable answer."""
+    return bool(days) and len(days) >= 2 and days[0].get("status") == "UNAVAILABLE" and days[1].get("status") == "AVAILABLE"
 
 
 def pool_sort_key(e: dict) -> tuple:
     """The pool's default order: the rank bucket, then availability (someone who
-    has answered Available or Maybe above someone who has not answered), then
-    form score, then name. The browser mirrors it in AdminSelection's `cmp`."""
+    has answered Available or Maybe, or is available the second weekend only,
+    above someone who has not answered), then form score, then name. The browser
+    mirrors it in AdminSelection's `cmp`."""
     return (
         _pool_rank(e["open_seq"], e["tier"], bool(e["drop_in_from"]), bool(e["squad_match"])),
-        _AVAIL_RANK.get(e["availability"], 9),
+        _HALF_RANK if _is_w2_only(e.get("availability_days")) else _AVAIL_RANK.get(e["availability"], 9),
         -(e["score"] or 0.0),
         (e["display_name"] or "").lower(),
     )
