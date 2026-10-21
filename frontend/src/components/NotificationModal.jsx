@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CHANGELOG } from '../data/changelog'
 import { api } from '../lib/api'
 import MilestoneSplitNote from './MilestoneSplitNote'
 
@@ -19,20 +18,6 @@ const MILESTONE_STAT_LABELS = {
   catches: 'career catches',
 }
 
-function compareVersions(a, b) {
-  const parse = v => (v || '').replace('v', '').split('.').map(Number)
-  const av = parse(a)
-  const bv = parse(b)
-  for (let i = 0; i < Math.max(av.length, bv.length); i++) {
-    const diff = (av[i] || 0) - (bv[i] || 0)
-    if (diff !== 0) return diff
-  }
-  return 0
-}
-
-function getNewEntries(lastSeenVersion) {
-  return CHANGELOG.filter(e => compareVersions(e.version, lastSeenVersion) > 0)
-}
 
 function relativeTime(isoString) {
   if (!isoString) return ''
@@ -182,7 +167,6 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
   if (!isOpen) return null
 
   const loading = !summary && !error
-  const newEntries = cleared ? [] : getNewEntries(summary?.last_seen_version)
   const syncRuns = cleared ? [] : (summary?.sync_runs || [])
   const newMilestones = cleared ? [] : (summary?.new_milestones || [])
   const upcoming = (summary?.upcoming_milestones || []).slice(0, 5)
@@ -198,7 +182,7 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
   const hasSinceLastVisit = syncRuns.length > 0 || newMilestones.length > 0
   // Only the time-based items are "readable" — pending requests / report
   // approvals are live state and stay put until they're actually dealt with.
-  const canClear = !cleared && !!onClear && (hasSinceLastVisit || newEntries.length > 0)
+  const canClear = !cleared && !!onClear && hasSinceLastVisit
 
   const handleClear = async () => {
     if (clearing || !onClear) return
@@ -227,7 +211,6 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
 
   const hasAnything =
     alerts.length > 0 ||
-    newEntries.length > 0 ||
     hasSinceLastVisit ||
     upcoming.length > 0 ||
     pendingCount > 0 ||
@@ -393,37 +376,6 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
                     </svg>
                   </Link>
                 )}
-              </div>
-            </section>
-          )}
-
-          {/* What's New */}
-          {newEntries.length > 0 && (
-            <section>
-              <SectionHead title="What's New" color="var(--pb-accent)" />
-              <div className="space-y-4">
-                {newEntries.map(entry => (
-                  <div key={entry.version}>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span
-                        className="font-mono text-[10px] px-1.5 py-0.5 rounded font-bold"
-                        style={{ background: 'var(--pb-accent)', color: '#000' }}
-                      >
-                        {entry.version}
-                      </span>
-                      <span className="text-sm font-medium text-pb-text">{entry.title}</span>
-                      <span className="text-xs text-pb-faintest ml-auto">{entry.date}</span>
-                    </div>
-                    <ul className="space-y-1 pl-1">
-                      {entry.items.map((item, i) => (
-                        <li key={i} className="flex gap-2 text-xs text-pb-dim">
-                          <span className="text-pb-faintest mt-0.5 shrink-0">·</span>
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
               </div>
             </section>
           )}

@@ -39,7 +39,7 @@ const BLASTS = () => [
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function open({ width = 1280, preview = null, role = 'super_admin' } = {}) {
+async function open({ width = 1280, preview = null, role = 'super_admin', lastSeen = 'v99.0.0' } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1600 } })
   const page = await ctx.newPage()
   const errors = []
@@ -84,7 +84,7 @@ async function open({ width = 1280, preview = null, role = 'super_admin' } = {})
       return json({ id, notifications_removed: 12 })
     }
     if (/\/notifications\/summary$/.test(path)) {
-      return json({ last_seen_at: null, last_seen_version: 'v99.0.0', unseen_count: 1, failed_sync_count: 0,
+      return json({ last_seen_at: null, last_seen_version: lastSeen, unseen_count: 1, failed_sync_count: 0,
         sync_runs: [], new_milestones: [], upcoming_milestones: [], pending_sync_requests: 0,
         pending_reports_count: 0, merch_alerts: { low_stock: [], expiring: [], service_due: [], total: 0 },
         asset_alerts: { service_due: [], total: 0 },
@@ -96,7 +96,7 @@ async function open({ width = 1280, preview = null, role = 'super_admin' } = {})
         alert_count: 1 })
     }
     if (/\/notifications\/count$/.test(path)) {
-      return json({ unseen_count: 1, alert_count: 1, failed_sync_count: 0, last_seen_version: 'v99.0.0' })
+      return json({ unseen_count: 1, alert_count: 1, failed_sync_count: 0, last_seen_version: lastSeen })
     }
     return json({})
   })
@@ -228,6 +228,23 @@ const noOverflow = page => page.evaluate(
   ck('it links to What\'s New', (await page.locator('div.fixed.inset-0 a[href="/admin/changelog"]').count()) >= 1)
   await page.screenshot({ path: '/tmp/claude-0/shots/bell.png' })
   ck('no page errors on the bell', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ── the bell no longer lists release notes ─────────────────────────────────
+// A person who last looked at v9.0.0 used to see every release since then in the
+// bell: a badge counting hundreds, and the full technical text under "What's New".
+// The daily update replaces that, so the only count is the one stored notification.
+{
+  const { page, ctx, errors } = await open({ lastSeen: 'v9.0.0' })
+  const badge = (await page.locator('button[aria-label="Notifications"]').first().innerText()).trim()
+  ck('the badge counts the daily update and not hundreds of releases', badge === '1', JSON.stringify(badge))
+  await page.locator('button[aria-label="Notifications"]').first().click()
+  await page.waitForSelector('text=Fixed an issue with some bowling figures.')
+  const panel = await page.locator('div.fixed.inset-0').first().innerText()
+  ck('the daily update is in the panel', panel.includes('New: share a scorecard, plus a fix'))
+  ck('and there is no "What\'s New" release list under it', !/what.s new/i.test(panel) && !/\bv9\.\d+\.\d+/.test(panel), panel)
+  ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }
 

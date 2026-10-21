@@ -1,18 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../lib/api'
-import { CHANGELOG } from '../data/changelog'
-import { SITE_VERSION } from '../version'
-
-function compareVersions(a, b) {
-  const parse = v => (v || '').replace('v', '').split('.').map(Number)
-  const av = parse(a)
-  const bv = parse(b)
-  for (let i = 0; i < Math.max(av.length, bv.length); i++) {
-    const diff = (av[i] || 0) - (bv[i] || 0)
-    if (diff !== 0) return diff
-  }
-  return 0
-}
 
 export default function NotificationBell({ onOpen, refreshTrigger }) {
   const [data, setData] = useState({ unseen_count: 0, last_seen_version: null })
@@ -32,11 +19,9 @@ export default function NotificationBell({ onOpen, refreshTrigger }) {
     return () => clearInterval(id)
   }, [refresh])
 
-  const newChangelogCount = CHANGELOG.filter(
-    e => compareVersions(e.version, data.last_seen_version) > 0
-  ).length
-
-  const totalCount = (data.unseen_count || 0) + newChangelogCount
+  // Release notes no longer count here: the daily update (a stored notification,
+  // already in unseen_count) is how clubs hear what changed.
+  const totalCount = data.unseen_count || 0
   const capped = totalCount > 99 ? '99+' : totalCount
   const hasFailures = (data.failed_sync_count || 0) > 0
   const badgeBg = hasFailures ? 'var(--pb-negative)' : 'var(--pb-accent)'

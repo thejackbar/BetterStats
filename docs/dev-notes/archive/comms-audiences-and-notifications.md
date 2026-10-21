@@ -901,3 +901,7 @@ A short, club-facing "what's new" note goes into every club's notification bell 
 
 Not done: no per-module filtering (a club hears about features of modules it does not hold); no editing of a draft before it posts (by decision); the blocklist is a backstop, so a leak phrased without any listed word and without a structural tell would pass, which is why Take down and the log exist; `scan_org` rolls the whole club back when any later source fails, which would also drop a catch-up emit raised earlier in the same run (existing behaviour, the 9am fan-out is unaffected).
 
+### Bell no longer lists changelog releases (v9.128.4.1)
+
+Asked for after the daily update shipped: "replace all the previous notifications with the daily update". Clarified with the owner as the bell's release-notes entries only; no stored notification is deleted. `NotificationBell` (badge), `NotificationModal` (the "What's New" section and its Mark all read condition) and `AdminLayout` (the Super Admin login auto-open) stopped reading `CHANGELOG`; the badge is now `unseen_count` alone, and the daily update arrives as a stored notification inside it. The What's New page (`AdminChangelog`) and `users.last_seen_app_version` are untouched. `frontend/verification/verify_product_updates_browser.mjs` gained 4 checks (34 total); control run against the previous bell shows a "99+" badge and the release list. `verify_notifications_browser.mjs` (56) still passes. Open: the daily update's link still goes to the What's New page, which lists the full technical text.
+
