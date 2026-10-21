@@ -126,7 +126,7 @@ def summary_only_seasons_clause(scope: GradeScope, pss: str = "pss") -> str:
 
     Needs a `held_years` CTE in the query.
     """
-    return f"""({pss}.source = 'api'{scope.clause(f"{pss}.grade_id", "aggregate")}
+    return f"""({pss}.source = 'api'{scope.clause(f"{pss}.grade_id", "aggregate", ungrouped_ok=True)}
         AND COALESCE({pss}.matches, 0) <= {HISTORICAL_BUNDLE_MATCH_CAP}
         AND EXISTS (SELECT 1 FROM seasons ys
                      WHERE ys.id = {pss}.season_id AND ys.year IS NOT NULL

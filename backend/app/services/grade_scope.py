@@ -241,6 +241,7 @@ class GradeScope:
         "excluded_labels", "format_fallback_ids", "param", "competitions",
         "competition_names", "competition_extra_ids", "hidden_grade_ids",
         "grades", "grade_names", "grade_pick_ids", "explicit_categories",
+        "competitions_all",
     )
 
     def __init__(
@@ -260,6 +261,7 @@ class GradeScope:
         grade_names: Sequence[str] = (),
         grade_pick_ids: Sequence = (),
         explicit_categories: bool = False,
+        competitions_all: bool = False,
     ):
         self.categories = tuple(categories)
         # True when a person PICKED the categories (Juniors, Masters...) rather
@@ -296,6 +298,14 @@ class GradeScope:
         # show a club figures it did not ask for.
         self.competitions = tuple(competitions) if competitions is not None else None
         self.competition_names = tuple(competition_names)
+        # True when the pick is EVERY competition the club offers, which is what
+        # the stats pages' "All" sends once the club's competition row is drawn
+        # (see useGradeFilters). That is not a person narrowing to some
+        # competitions, so an aggregate with no grade (a BetterImport book, a
+        # career lump) has to stay in it: such a row can belong to no
+        # competition and is still part of "All". A pick of some competitions
+        # leaves it out as before. See `competition_clause`.
+        self.competitions_all = bool(competitions_all) and bool(self.competitions)
         # Grade rows belonging to ANOTHER club that our own games sit in and
         # that resolve into one of the wanted competitions. They cannot be
         # reached by the subquery below (their own `competition_id` is that
@@ -382,6 +392,7 @@ class GradeScope:
         *,
         game_alias: Optional[str] = None,
         label_column: Optional[str] = None,
+        ungrouped_ok: bool = False,
     ) -> str:
         """A WHERE fragment (leading AND) narrowing to what is in scope.
 
@@ -415,7 +426,11 @@ class GradeScope:
         a grade-less manual game — carries no competition and drops out; see
         the module docstring for why that is the right way round.
         """
-        out = self.competition_clause(column) + self.grade_clause(column)
+        # A residual (it carries a label_column) or a CA season total
+        # (`ungrouped_ok`) has no grade to place in a competition, so "All"
+        # keeps it; see `competitions_all`.
+        keep_ungrouped = kind == "aggregate" and (label_column is not None or ungrouped_ok)
+        out = self.competition_clause(column, keep_ungrouped=keep_ungrouped) + self.grade_clause(column)
         if self.category_active:
             if label_column is not None:
                 # A residual that carries a classifiable grade_label (an import
@@ -477,7 +492,7 @@ class GradeScope:
             )
         return f" AND ({cond})"
 
-    def competition_clause(self, column: str = "g.grade_id") -> str:
+    def competition_clause(self, column: str = "g.grade_id", *, keep_ungrouped: bool = False) -> str:
         """The competition condition for a grade column (leading AND).
 
         A plain inclusion with NO ``IS NULL`` tolerance, which is the opposite
@@ -497,8 +512,12 @@ class GradeScope:
             return " AND FALSE"
         extra = (f" OR {column} = ANY(:{self._comp_extra_param})"
                  if self.competition_extra_ids else "")
+        # `keep_ungrouped` is asked for by the residual readers only, and only
+        # an "All" pick honours it: a row with no grade is in All and in no
+        # single competition.
+        ungrouped = f"{column} IS NULL OR " if keep_ungrouped and self.competitions_all else ""
         return (
-            f" AND ({column} IN (SELECT gsc.id FROM grades gsc"
+            f" AND ({ungrouped}{column} IN (SELECT gsc.id FROM grades gsc"
             f" WHERE gsc.competition_id = ANY(:{self._comp_param})){extra})"
         )
 
@@ -548,8 +567,9 @@ class GradeScope:
         pills doing nothing whenever a grade was selected.
 
         The COMPETITION filter is kept for the same reason as the format one:
-        it is never a default, so it can only be there because somebody asked
-        for it, and a grade picked inside a competition is not a contradiction.
+        a grade picked inside a competition is not a contradiction. (The page's
+        "All" sends every competition, so it can now be there without anyone
+        narrowing; `competitions_all` is what tells the two apart.)
         """
         return GradeScope(
             self.categories, [], (), self.param,
@@ -559,6 +579,7 @@ class GradeScope:
             hidden_grade_ids=self.hidden_grade_ids,
             grades=self.grades, grade_names=self.grade_names,
             grade_pick_ids=self.grade_pick_ids,
+            competitions_all=self.competitions_all,
         )
 
     def as_meta(self) -> dict:
@@ -766,6 +787,12 @@ async def resolve_scope(
     if wanted_grades is not None:
         pick_ids, pick_names = await _resolve_picked_grades(
             session, org_id, wanted_grades, club_grades)
+    # "All competitions" is every one the club offers, selected together. The
+    # pills are single-select, so only the page's own "All" can send the lot.
+    comps_all = False
+    if comp_ids:
+        offered = {str(c["id"]) for c in await org_available_competitions(session, org_id)}
+        comps_all = bool(offered) and offered <= {str(c) for c in comp_ids}
     excluded_ids = []
     excluded_categories = set()
     fallback_ids = []
@@ -838,6 +865,7 @@ async def resolve_scope(
         grade_names=pick_names,
         grade_pick_ids=pick_ids,
         explicit_categories=explicit,
+        competitions_all=comps_all,
     )
 
 
