@@ -35,7 +35,8 @@ from app.models.db import (
 from app.routers.auth import get_current_club, get_current_user
 from app.services import player_dashboard, squad_sides
 from app.services import dormancy
-from app.services.grade_labels import categories_for_name, org_grade_category_sets
+from app.services.club_grades import club_grade_competitions
+from app.services.grade_labels import categories_for_name, grade_key, org_grade_category_sets
 from app.services.junior_fixtures import junior_fixture_ids
 from app.services.name_format import name_sort_key
 from app.services.squad_next_game import fixture_has_started, squad_next_games
@@ -547,6 +548,7 @@ async def availability_matrix(
 
     all_squads = sorted({s for names in squads_map.values() for s in names})
     squad_meta = await _squad_meta(db, club.id, sq_sides, all_squads)
+    competitions, comp_by_squad = await _current_competitions(db, club.id, by_date, sq_sides, all_squads)
 
     return {
         "dates": [
@@ -554,7 +556,8 @@ async def availability_matrix(
             for d in sorted(by_date.keys())
         ],
         "players": [
-            _player_entry(p, last_played_map.get(p.id), squads_map.get(p.id), cutoff, rules)
+            _player_entry(p, last_played_map.get(p.id), squads_map.get(p.id), cutoff, rules,
+                          competitions=sorted({c for n in squads_map.get(p.id, ()) for c in comp_by_squad.get(n, ())}))
             for p in players
         ],
         "availability": avail_map,
@@ -562,6 +565,10 @@ async def availability_matrix(
         # Per squad name: is it switched off, is it a junior side. Lets the
         # Squad filter offer only the squads worth picking.
         "squad_meta": squad_meta,
+        # The competitions the club has games in from here on, in the club's own
+        # order: [{id, name}]. Each player carries the ids of those their squads
+        # play in. Lets the Competition filter offer today's competitions only.
+        "competitions": competitions,
         "dormancy_months": months,
         "squad_next": squad_next,
         # Empty for a club that has written no rules, which is what keeps the
@@ -590,6 +597,58 @@ async def _squad_meta(db: AsyncSession, club_id, sq_sides, names: list[str]) -> 
             "junior": any("junior" in categories_for_name(categories, g) for g in probes),
         }
     return out
+
+
+async def _current_competitions(
+    db: AsyncSession, club_id, by_date: dict, sq_sides, names: list[str],
+) -> tuple[list[dict], dict[str, set]]:
+    """``([{id, name}], {squad name: {competition id}})`` for the Competition filter.
+
+    "Current" means a competition one of the club's upcoming games is in: the
+    competition of the fixture's grade (else its squad's grade), through the
+    club's own answer (``club_grade_competitions``), never a shared fixture's
+    foreign ``competition_id``. A squad is in a competition when any grade of
+    its teams is: a club squad by its teams, a name read off appearance history
+    by the grade of that name. A grade nobody has grouped into a competition
+    counts for nothing, so a squad with no grouped grade is in none (the screen
+    says so rather than guessing).
+    """
+    grade_comp = await club_grade_competitions(db, club_id)
+
+    def grade_of(entry) -> Optional[str]:
+        if entry.get("grade_id"):
+            return entry["grade_id"]
+        sq = sq_sides.squads.get(entry.get("team_id") or "")
+        return sq.grade_id if sq else None
+
+    current: set[str] = set()
+    for entries in by_date.values():
+        for e in entries:
+            c = grade_comp.get(grade_of(e) or "")
+            if c:
+                current.add(str(c))
+    if not current:
+        return [], {}
+
+    rows = (await db.execute(
+        text(
+            "SELECT id, name FROM club_competitions "
+            "WHERE organisation_id = :org AND id = ANY(CAST(:ids AS uuid[])) "
+            "ORDER BY display_order NULLS LAST, name"
+        ),
+        {"org": club_id, "ids": [uuid.UUID(c) for c in current]},
+    )).fetchall()
+    competitions = [{"id": str(r[0]), "name": r[1]} for r in rows]
+
+    by_name = {sq.name.strip(): sq for sq in sq_sides.squads.values()}
+    out: dict[str, set] = {}
+    for name in names:
+        sq = by_name.get(name)
+        grade_ids = sq_sides.grade_ids(sq.id) if sq else sq_sides.grade_ids_by_key.get(grade_key(name), set())
+        comps = {str(grade_comp[g]) for g in grade_ids if grade_comp.get(g)} & current
+        if comps:
+            out[name] = comps
+    return competitions, out
 
 
 class DormancyBody(BaseModel):
@@ -641,7 +700,7 @@ async def set_dormancy(
 
 
 def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set], cutoff: date,
-                  rules=None) -> dict:
+                  rules=None, competitions: Optional[list] = None) -> dict:
     # Derived recency. inactive (manual) takes precedence; otherwise dormant if
     # they've played but not since the cutoff. Never-played players are neither
     # (e.g. a freshly-added manual player with no appearance history yet).
@@ -653,12 +712,15 @@ def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set],
         "photo_url": p.photo_url,
         "skill_positions": p.skill_positions or [],
         "player_role": p.player_role,
+        "gender": p.gender,
         "status": p.status,
         "last_played": last_played.isoformat() if last_played else None,
         # The day a club said this player is back (services/dormancy.py). The
         # screens judge "still around" on the later of this and last_played.
         "dormancy_cleared_on": p.dormancy_cleared_on.isoformat() if p.dormancy_cleared_on else None,
         "squads": sorted(squads) if squads else [],
+        # Ids from the matrix's `competitions`: those this player's squads play in.
+        "competitions": competitions or [],
         "is_inactive": manual_inactive,
         "is_dormant": dormant and not manual_inactive,
         # Convenience flag the UI defaults its filter on: a "current" player is
