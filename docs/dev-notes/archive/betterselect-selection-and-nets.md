@@ -1714,3 +1714,8 @@ Not done, on purpose: a seamless sign in to Fantasy from this page (the PIN here
 
 Checks: `backend/verification/verify_player_page_dashboard.py` (50; the control on the previous commit fails 36), browser twin `frontend/verification/verify_player_page_dashboard_browser.mjs` (39). Five older browser scripts were updated for the removed tabs.
 
+
+## Pool order: half-available players lead (v9.128.8.1)
+Asked for (Oct 2026): players free one week of a two-week game ("the Bs") should be at the top of the Selection pool because they are nearly conditional and need dealing with first. Supersedes the rank-1.5 lift of v9.128.5.1 for the players it covers.
+- Server: each pool row carries `half_open` (`selection_pool._is_half` on `availability_days`, either way round, and the fixture has a date, `gender_ok`, not manually inactive, not in this XI, not named in another XI or other side's draft). `pool_sort_key` puts `not half_open` first, then the old bucket, availability, score, name. Browser: `selectionMeta.poolRank` subtracts 10000 from the bucket when `half_open`, so squad order holds inside the group. Ordering only (rule 95): `availability`, filters, rules and `autofill_eligible` are untouched. The half-available players left out (in an XI, inactive) still get the rank-1.5 W2-only placement.
+- Proof: `verify_selection_open_pool.py` (39 checks; section F drives a real two-day fixture; control on the previous service fails 5).
