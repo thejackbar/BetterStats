@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Cropper } from 'react-cropper'
 import 'cropperjs/dist/cropper.css'
-import { preloadBackgroundRemoval, releaseBackgroundRemoval, removeBackgroundFromUrl } from '../lib/bgRemoval'
+import { cutOutCrashedBefore, preloadBackgroundRemoval, releaseBackgroundRemoval, removeBackgroundFromUrl } from '../lib/bgRemoval'
 
 // Reusable crop + background-removal modal.
 //
@@ -37,6 +37,7 @@ export default function ImageEditorModal({
   const [loadError, setLoadError] = useState(null)
   const [removingBg, setRemovingBg] = useState(false)
   const [bgProgress, setBgProgress] = useState(null) // { stage: 'download' | 'compute', pct }
+  const [bgCrashed, setBgCrashed] = useState(false) // the last cut-out here never finished
   const [keying, setKeying] = useState(false)
   const [showColourKey, setShowColourKey] = useState(false)
   const [tolerance, setTolerance] = useState(48)
@@ -111,6 +112,7 @@ export default function ImageEditorModal({
   // quick when they press it (the files are cached after the first time).
   useEffect(() => {
     if (!open || !allowBackgroundRemoval) return
+    setBgCrashed(cutOutCrashedBefore())
     preloadBackgroundRemoval()
     return releaseBackgroundRemoval // frees the model when the editor closes
   }, [open, allowBackgroundRemoval])
@@ -142,6 +144,7 @@ export default function ImageEditorModal({
     setBgProgress(null)
     try {
       const blob = await removeBackgroundFromUrl(srcUrl, setBgProgress)
+      setBgCrashed(false)
       setDerived(blob)
     } catch (err) {
       setLoadError(err.message || 'Background removal failed')
@@ -309,6 +312,14 @@ export default function ImageEditorModal({
               </>
             )}
           </div>
+
+          {allowBackgroundRemoval && bgCrashed && !removingBg && (
+            <p className="mt-3 font-mono text-[10px] leading-relaxed text-pb-faint">
+              The last photo cut-out on this device did not finish, most likely because it ran out of
+              memory. This time it uses a lighter, quicker method, so edges can come out a little
+              rougher. The logo button is the other option.
+            </p>
+          )}
 
           {allowBackgroundRemoval && showColourKey && (
             <div className="mt-3 rounded border pb-hairline bg-pb-surface2 px-4 py-3">
