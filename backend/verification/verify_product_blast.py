@@ -197,17 +197,23 @@ class Edges:
         self.fail_fetch = False
         self.fail_model = None
         self.model_calls = 0
+        self.queue = []          # replies to hand out first, one per call
+        self.retries = []        # (problem, previous) for every retry call
 
     async def fetch(self):
         if self.fail_fetch:
             raise pb.ChangelogUnavailable("the site was down")
         return list(self.changelog)
 
-    async def summarise(self, entries):
+    async def summarise(self, entries, problem=None, previous=None):
         self.model_calls += 1
+        if problem is not None:
+            self.retries.append((problem, previous))
         if self.fail_model:
             raise RuntimeError(self.fail_model)
         self.seen = entries
+        if self.queue:
+            return self.queue.pop(0)
         return self.reply
 
 
@@ -221,6 +227,11 @@ async def run(day=TODAY, **kw):
 async def count(sql, **params):
     async with Session() as s:
         return (await s.execute(text(sql), params)).scalar() or 0
+
+
+async def count_text(sql, **params):
+    async with Session() as s:
+        return (await s.execute(text(sql), params)).scalar() or ""
 
 
 async def notified(org=None, user=None, channel="in_app"):
@@ -417,6 +428,68 @@ async def main() -> None:
           res["status"] == "failed" and "changelog" in res["reason"], str(res))
     EDGES.fail_fetch = False
 
+    print("\nA draft the checks reject is sent back and fixed")
+    DAY1 = TODAY + timedelta(days=6)
+    EDGES.changelog.append(entry("v9.210.0", DAY1, "Voting and fees", ["Voting page filters.", "Fees split."]))
+    long_head = "New: " + "voting upgrades and fees split and availability and more " * 2
+    good = {"has_client_news": True, "headline": "New: voting and fees updates",
+            "bullets": ["The voting page now shows only your own games.", "Fees can be split by who owes what."]}
+    EDGES.queue = [{"has_client_news": True, "headline": long_head, "bullets": good["bullets"]}, good]
+    calls, retries = EDGES.model_calls, len(EDGES.retries)
+    res = await run(day=DAY1)
+    check("a headline that is too long is fixed on the second try and posted",
+          res["status"] == "posted" and res["headline"] == good["headline"], str(res))
+    check("it took exactly two model calls", EDGES.model_calls - calls == 2, str(EDGES.model_calls - calls))
+    prob, prev = EDGES.retries[retries]
+    check("the retry is told exactly what was wrong and shown the draft",
+          "headline" in prob and "characters" in prob and prev["headline"] == long_head, f"{prob} / {prev}")
+    check("the rejected draft is never what was posted",
+          long_head not in (await count_text("SELECT string_agg(title, '|') FROM notifications WHERE event_key='product_update'")))
+
+    DAY2 = TODAY + timedelta(days=7)
+    EDGES.changelog.append(entry("v9.211.0", DAY2, "Plumbing", ["Moved a table."]))
+    leaky = {"has_client_news": True, "headline": "Faster pages",
+             "bullets": ["Fixed a database migration that slowed the ladder."]}
+    EDGES.queue = [leaky, good | {"headline": "New: ladder fix", "bullets": ["The ladder page loads without a hiccup."]}]
+    calls = EDGES.model_calls
+    before = await notified()
+    res = await run(day=DAY2)
+    check("a leaky first draft is rewritten and the clean one posts",
+          res["status"] == "posted" and res["headline"] == "New: ladder fix", str(res))
+    check("the leaky text reached nobody",
+          "database" not in (await count_text("SELECT string_agg(body || title, '|') FROM notifications WHERE event_key='product_update'")))
+    check("the retry named the leak", any("database" in p for p, _ in EDGES.retries[-1:]), str(EDGES.retries[-1:]))
+
+    DAY3 = TODAY + timedelta(days=8)
+    EDGES.changelog.append(entry("v9.212.0", DAY3, "More plumbing", ["Moved another table."]))
+    EDGES.queue = []
+    EDGES.reply = leaky
+    calls = EDGES.model_calls
+    res = await run(day=DAY3)
+    check("a draft that never passes is tried three times and then held back",
+          res["status"] == "blocked" and EDGES.model_calls - calls == pb.MAX_ATTEMPTS
+          and "after 3 tries" in res["reason"], str(res))
+    check("nothing from the held-back day was sent",
+          "slowed the ladder" not in (await count_text("SELECT string_agg(body, '|') FROM notifications WHERE event_key='product_update'")))
+    EDGES.reply = dict(CLEAN)
+
+    DAY4 = TODAY + timedelta(days=9)
+    EDGES.changelog.append(entry("v9.213.0", DAY4, "Late", ["A thing."]))
+    EDGES.queue = [leaky]
+    EDGES.fail_model = None
+    orig = EDGES.summarise
+
+    async def flaky(entries, problem=None, previous=None):
+        if problem is not None:
+            raise RuntimeError("overloaded on retry")
+        return await orig(entries, problem, previous)
+    res = await pb.run_daily(fetch=EDGES.fetch, summariser=flaky, today=DAY4)
+    check("a model failure on the retry posts nothing and is retried tomorrow",
+          res["status"] == "failed" and "overloaded on retry" in res["reason"], str(res))
+    EDGES.queue = []
+    res = await run(day=DAY4 + timedelta(days=1))
+    check("tomorrow reads that release again", res["status"] == "posted" and "v9.213.0" in res["versions"], str(res))
+
     print("\nTake down")
     async with Session() as s:
         posted = [r for r in await rows() if r["status"] == "posted"]
@@ -464,8 +537,13 @@ async def main() -> None:
     # catch-up reads "today" in Melbourne; the posted rows here carry TODAY-based dates,
     # so pin them to the real Melbourne day for this check.
     async with Session() as s:
-        await s.execute(text("UPDATE product_blasts SET blast_date = :d WHERE status IN ('posted','retracted')"),
-                        {"d": datetime.now(pb.MELBOURNE).date()})
+        # Newest post is today; the rest are older and on distinct days (one posted per day).
+        await s.execute(text("""
+            UPDATE product_blasts p SET blast_date = CAST(:d AS date) - (CASE WHEN r.rn = 1 THEN 0 ELSE r.rn + 2 END)::int
+            FROM (SELECT id, row_number() OVER (ORDER BY (status = 'posted') DESC, created_at DESC) AS rn
+                  FROM product_blasts WHERE status IN ('posted','retracted')) r
+            WHERE p.id = r.id AND p.status IN ('posted','retracted')
+        """), {"d": datetime.now(pb.MELBOURNE).date()})
         await s.commit()
     async with Session() as s:
         org = await s.get(scan.Organisation, late)
@@ -481,11 +559,12 @@ async def main() -> None:
     check("a retracted post is not handed over again",
           await count("SELECT COUNT(*) FROM notifications WHERE dedupe_key = :k",
                       k=f"product_update:{target}") == 0)
+    told_a = await notified(A)
     async with Session() as s:
         org = await s.get(scan.Organisation, A)
         await scan.scan_org(s, org)
         await s.commit()
-    check("a club that was already told is not told twice", await notified(A) == 2)
+    check("a club that was already told is not told twice", await notified(A) == told_a and told_a >= 2)
 
     print("\nWhat's New page and the staff bell")
     from app.routers import notifications as nroutes
@@ -513,8 +592,10 @@ async def main() -> None:
     async with Session() as s:
         summ = await nroutes._build_notifications_summary(await s.get(User, A_ADMIN), await s.get(Organisation, A), s)
     mine = [a for a in summ["alerts"] if a["event_key"] == "product_update"]
-    check("a club admin sees it once, from their own delivery, and unread",
-          len(mine) == 1 and mine[0]["read"] is False and summ["alert_count"] >= 1, str(mine))
+    check("a club admin sees each post once, from their own delivery, and unread",
+          len(mine) >= 1 and len({a["id"] for a in mine}) == len(mine)
+          and all(a["read"] is False and not a["id"].startswith("blast-") for a in mine)
+          and summ["alert_count"] >= len(mine), str(mine)[:300])
 
     print("\nRoutes")
     async with Session() as s:
@@ -608,6 +689,22 @@ async def main() -> None:
         anthropic.AsyncAnthropic = real
         pb.settings.anthropic_api_key = real_key
     check("the reply is the tool input", out.get("headline") == "New")
+    check("a first request carries no rejection notice", "rejected" not in sent["messages"][0]["content"])
+    first_sent = dict(sent)
+    anthropic.AsyncAnthropic = FakeClient
+    pb.settings.anthropic_api_key = "test-key"
+    try:
+        await pb.summarise([{"version": "v1", "date": "2026-10-21", "title": "T", "items": ["x"]}],
+                           problem="the headline was 94 characters", previous={"headline": "too long"})
+    finally:
+        anthropic.AsyncAnthropic = real
+        pb.settings.anthropic_api_key = real_key
+    check("a retry request states the problem, the previous draft and still wraps the notes as data",
+          "the headline was 94 characters" in sent["messages"][0]["content"]
+          and "too long" in sent["messages"][0]["content"]
+          and "<release_notes>" in sent["messages"][0]["content"])
+    sent.clear()
+    sent.update(first_sent)
     check("the tool is forced", sent.get("tool_choice") == {"type": "tool", "name": "post_update"})
     check("the release notes go in as data, inside tags",
           "<release_notes>" in sent["messages"][0]["content"]

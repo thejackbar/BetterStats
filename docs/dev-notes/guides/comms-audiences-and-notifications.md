@@ -98,6 +98,7 @@
 48. The 9am Melbourne "what's new" note is written by a model and posted with NO human review, so the code is the reviewer: forced tool, `product_blast.check_output` (blocklists, structural patterns, shape), fail closed on any error (no fallback to raw release notes), and a Stop switch that starts STOPPED and that the DDL never flips. A new leak class is a one-line addition to `TECH_TERMS` / `INTERNAL_TERMS`, and needs a check that a clean line of the same shape still passes.
 49. Coverage is by VERSION, not date: `posted`/`skipped`/`blocked`/`retracted` cover their versions, `failed` does not (retry tomorrow). One `posted` row per Melbourne day (partial unique index). The release notes come from `dist/changelog.json` (`frontend/vite-plugins/emitChangelog.js`, served `no-cache`), because the backend image has no frontend source.
 50. It rides the notification engine: event `product_update` (bell on, email off by default) raised per club by `product_blast.fan_out` and caught up by the scan source, so club, channel and person switches all apply. Take down deletes only the notifications it raised. Any suite that builds the notification tables must also apply `product_blast_ddl` or the catch-up source fails and rolls the scan back.
+51. A rejected draft is retried with the reason (up to `MAX_ATTEMPTS`), never relaxed: only `check_output` decides what posts. A new limit belongs in `check_output` AND the prompt, or the model keeps tripping it.
 
 ## Traps and failure signatures
 

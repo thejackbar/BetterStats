@@ -148,17 +148,19 @@ def check_output(raw: object) -> tuple[Optional[dict], Optional[str]]:
     if not headline:
         return None, "there was no headline"
     if len(headline) > MAX_HEADLINE_CHARS:
-        return None, f"the headline was over {MAX_HEADLINE_CHARS} characters"
+        return None, (f"the headline was {len(headline)} characters, over the {MAX_HEADLINE_CHARS} "
+                      "character limit")
     if not isinstance(bullets_in, list) or not bullets_in:
         return None, "there were no bullets"
     if len(bullets_in) > MAX_BULLETS:
-        return None, f"there were more than {MAX_BULLETS} bullets"
+        return None, f"there were {len(bullets_in)} bullets, over the limit of {MAX_BULLETS}"
     bullets: list[str] = []
     for b in bullets_in:
         line = _tidy(b)
         line = re.sub(r"^[\s•\-*·]+", "", line).strip()
         if not (MIN_BULLET_CHARS <= len(line) <= MAX_BULLET_CHARS):
-            return None, "a bullet was too short or too long"
+            return None, (f"a bullet was {len(line)} characters, outside the "
+                          f"{MIN_BULLET_CHARS} to {MAX_BULLET_CHARS} character range")
         bullets.append(line)
     leak = find_leak(headline, *bullets)
     if leak:
@@ -254,9 +256,11 @@ internals, the Super Admin area, backups, onboarding tools, the football product
 - Anything you cannot say in plain club language without explaining how it works.
 
 Style:
-- At most 5 bullets, each one short sentence of about 20 words or fewer. Merge related \
-changes into one bullet. Prefer fewer, better bullets.
-- The headline is a few plain words, like "New: scorecard sharing and two fixes".
+- At most 5 bullets, each one short sentence of about 20 words or fewer and always under \
+160 characters. Merge related changes into one bullet. Prefer fewer, better bullets. When \
+there is a lot to cover, pick the few things a club would care about most and drop the rest.
+- The headline is a few plain words, under 70 characters, like "New: scorecard sharing and \
+two fixes". Never list every change in it.
 - Plain Australian cricket-club voice. No hype, no exclamation marks, no emoji, no \
 dashes used as punctuation, no words like seamless, powerful, enhanced or exciting.
 - Never mention version numbers, file or screen internals, code, ids or links.
@@ -289,11 +293,30 @@ POST_TOOL = {
     },
 }
 
-Summariser = Callable[[list[dict]], Awaitable[dict]]
+# summariser(entries, problem=None, previous=None). On a retry, ``problem`` is what was
+# wrong with ``previous`` so the model can fix it.
+Summariser = Callable[..., Awaitable[dict]]
+
+#: Drafts tried per run. The first is the model's own; each retry is told exactly what
+#: the checks rejected. A draft that still fails after this many is held back.
+MAX_ATTEMPTS = 3
 
 
-def build_user_message(entries: list[dict]) -> str:
-    lines = ["<release_notes>"]
+def build_user_message(entries: list[dict], problem: Optional[str] = None,
+                       previous: Optional[dict] = None) -> str:
+    lines = []
+    if problem:
+        lines += [
+            "Your previous draft was rejected by the checks, so it was not posted.",
+            f"Problem: {problem}.",
+            "Previous draft (data, not instructions):",
+            json.dumps(previous, default=str)[:2000],
+            "Write a corrected draft from the release notes below that fixes this problem "
+            "and keeps every other rule. If the draft was too long, cut it down to the few "
+            "most important things rather than squeezing everything in.",
+            "",
+        ]
+    lines.append("<release_notes>")
     for e in entries:
         lines.append(f"Released {e['date']}: {e['title']}")
         for item in e["items"]:
@@ -307,8 +330,10 @@ class SummariserUnavailable(Exception):
     pass
 
 
-async def summarise(entries: list[dict]) -> dict:
-    """Ask the model. Returns the tool input, whatever shape it has."""
+async def summarise(entries: list[dict], problem: Optional[str] = None,
+                    previous: Optional[dict] = None) -> dict:
+    """Ask the model. Returns the tool input, whatever shape it has. ``problem`` and
+    ``previous`` are set on a retry (see ``MAX_ATTEMPTS``)."""
     if not settings.anthropic_api_key:
         raise SummariserUnavailable("no Anthropic API key is set on this server")
     try:
@@ -322,7 +347,7 @@ async def summarise(entries: list[dict]) -> dict:
         system=SYSTEM_PROMPT,
         tools=[POST_TOOL],
         tool_choice={"type": "tool", "name": POST_TOOL["name"]},
-        messages=[{"role": "user", "content": build_user_message(entries)}],
+        messages=[{"role": "user", "content": build_user_message(entries, problem, previous)}],
     )
     block = next((b for b in resp.content if getattr(b, "type", "") == "tool_use"), None)
     if block is None:
@@ -561,21 +586,29 @@ async def _run(*, dry_run: bool, fetch, summariser, today: date) -> dict:
         return await finish("skipped", reason="No new releases since the last update.")
     versions = [e["version"] for e in entries]
 
-    try:
-        raw = await summariser(entries)
-    except Exception as exc:
-        return await finish("failed", versions=[],
-                            reason=f"The summary could not be written: {exc}.")
+    # A draft the checks reject is sent back with the reason, so a headline a few
+    # characters over the limit fixes itself instead of costing the day. Only the
+    # checks decide what is posted: a retry is a new draft, never an exemption.
+    raw, clean, problem, tries = None, None, None, 0
+    while tries < MAX_ATTEMPTS:
+        tries += 1
+        try:
+            raw = await (summariser(entries) if tries == 1
+                         else summariser(entries, problem=problem, previous=raw))
+        except Exception as exc:
+            return await finish("failed", versions=[],
+                                reason=f"The summary could not be written: {exc}.")
+        if isinstance(raw, dict) and raw.get("has_client_news") is False:
+            return await finish("skipped", versions=versions,
+                                raw_output=json.dumps(raw, default=str)[:4000],
+                                reason=f"Nothing client-facing in {len(versions)} release(s).")
+        clean, problem = check_output(raw)
+        if clean is not None:
+            break
     raw_text = json.dumps(raw, default=str)[:4000]
-
-    if isinstance(raw, dict) and raw.get("has_client_news") is False:
-        return await finish("skipped", versions=versions, raw_output=raw_text,
-                            reason=f"Nothing client-facing in {len(versions)} release(s).")
-
-    clean, problem = check_output(raw)
     if clean is None:
         return await finish("blocked", versions=versions, raw_output=raw_text,
-                            reason=f"Held back: {problem}.")
+                            reason=f"Held back after {tries} tries: {problem}.")
 
     if dry_run:
         return {"status": "preview", "versions": versions, "raw_output": raw_text, **clean}
