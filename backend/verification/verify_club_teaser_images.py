@@ -406,6 +406,32 @@ async def main() -> None:
         check("a path-shaped format is refused by the path builder as well",
               all(_raises(lambda a=a: ti.image_path(*a)) for a in (("../x", "card"), (B["token"], "../card"), ("", "card"))))
 
+    print("the renderer and the read limit")
+    from starlette.requests import Request
+
+    def req(ip, header=None):
+        hdrs = [(b"x-forwarded-for", ip.encode())]
+        if header is not None:
+            hdrs.append((ti.RENDER_HEADER.encode(), header.encode()))
+        return Request({"type": "http", "method": "GET", "path": "/", "headers": hdrs, "client": (ip, 1)})
+
+    async def read(ip, header=None):
+        async with Session() as s2:
+            try:
+                await pt.get_teaser(B["token"], req(ip, header), s2)
+                return 200
+            except HTTPException as e:
+                return e.status_code
+    ip = "10.9.8." + str(uuid.uuid4().int % 200 + 1)
+    codes = [await read(ip) for _ in range(pt.READ_LIMIT + 5)]
+    check("the public is still limited per IP (the limit is not removed, only the renderer is exempt)",
+          codes[: pt.READ_LIMIT] == [200] * pt.READ_LIMIT and codes[pt.READ_LIMIT:] == [429] * 5, str(set(codes)))
+    check("the renderer's key lets a throttled address read, however many times (360 reads is 120 clubs)",
+          all([await read(ip, ti.render_key()) == 200 for _ in range(360)]))
+    check("a wrong key, an empty key and a key for another secret do not", [await read(ip, "nope"), await read(ip, ""), await read(ip, ti.render_key()[:-1] + "0")] == [429, 429, 429])
+    check("the key is derived from the app secret, 64 hex characters, and is not the secret itself",
+          re.fullmatch(r"[0-9a-f]{64}", ti.render_key()) and ti.render_key() != ti.settings.secret_key)
+
     print("the share card")
     async with Session() as s:
         html_b = await og._teaser_html(B["token"], f"https://site.test/preview/{B['token']}", "https://site.test", s)
@@ -477,8 +503,12 @@ def _raises(fn) -> bool:
 PAGES = {}
 
 
+SEEN: list = []
+
+
 class H(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
+        SEEN.append((self.path.split("?")[0], self.headers.get("x-teaser-render")))
         body = PAGES.get(self.path.split("?")[0])
         if body is None:
             self.send_response(404); self.end_headers(); return
@@ -538,6 +568,50 @@ async def chromium_checks(exe: str) -> None:
         check("a card whose content does not fit its frame is refused, not saved with the bottom cut off",
               "does not fit" in msg and not ti.image_path(big, "card").exists(), msg)
         check("no temporary files are left in the image directory", not list(Path(TMP).rglob(".*.tmp")))
+
+        # The key goes to the rendered site's own teaser call, and to nobody else.
+        other = HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=other.serve_forever, daemon=True).start()
+        other_base = f"http://127.0.0.1:{other.server_address[1]}"
+        keyed = "tk" + uuid.uuid4().hex[:14]
+        PAGES[f"/preview/{keyed}/card/card"] = (
+            '<!doctype html><body style="margin:0"><div data-card data-card-ready="0" style="width:1200px;height:630px;overflow:hidden">'
+            f'<script>Promise.all([fetch("/api/public/teaser/{keyed}"), fetch("{other_base}/public/teaser/zzz", {{mode:"no-cors"}})])'
+            '.then(()=>document.querySelector("[data-card]").dataset.cardReady="1")</script></div></body>')
+        PAGES[f"/api/public/teaser/{keyed}"] = "{}"
+        PAGES["/public/teaser/zzz"] = "{}"
+        SEEN.clear()
+        try:
+            async with ti.ChromiumRenderer(executable_path=exe) as r:
+                await ti.render_club(r, keyed, base=base, formats=("card",))
+        finally:
+            other.shutdown()
+        mine = [h for path, h in SEEN if path.endswith(keyed)]
+        theirs = [h for path, h in SEEN if path.endswith("/zzz")]
+        check("the renderer sends its key on the site's own teaser call",
+              mine and all(h == ti.render_key() for h in mine), str(SEEN))
+        check("and sends it to no other host (a logo or font server never sees it)",
+              theirs and all(h is None for h in theirs), str(SEEN))
+
+        gone = "tk" + uuid.uuid4().hex[:14]
+        PAGES[f"/preview/{gone}/card/card"] = '<!doctype html><div data-testid="teaser-card-missing">Not found</div>'
+        loading = "tk" + uuid.uuid4().hex[:14]
+        PAGES[f"/preview/{loading}/card/card"] = '<!doctype html><div data-testid="teaser-card-loading"></div>'
+        ti.RENDER_TIMEOUT_MS = 2000
+        try:
+            async def why(tok):
+                try:
+                    async with ti.ChromiumRenderer(executable_path=exe) as r:
+                        await ti.render_club(r, tok, base=base, formats=("card",))
+                except RuntimeError as e:
+                    return str(e)
+                return ""
+            m1, m2 = await why(gone), await why(loading)
+        finally:
+            ti.RENDER_TIMEOUT_MS = old
+        check("a card that was refused says so (a rate limit answers not found), not a bare timeout",
+              "not found" in m1 and "rate limit" in m1, m1)
+        check("a card still waiting for its data says that", "waiting for the teaser data" in m2, m2)
     finally:
         srv.shutdown()
 

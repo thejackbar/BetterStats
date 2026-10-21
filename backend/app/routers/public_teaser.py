@@ -62,8 +62,11 @@ async def _row(db: AsyncSession, token: str):
 
 @router.get("/{token}")
 async def get_teaser(token: str, request: Request, db: AsyncSession = Depends(get_db)):
-    rate_limit.enforce(f"teaser:read:{client_ip(request)}", READ_LIMIT, READ_WINDOW,
-                       detail="Too many requests.")
+    # The picture renderer reads this three times per club from one address and
+    # proves itself with a derived key; everyone else is limited per IP.
+    if not club_teaser_images.is_render_key(request.headers.get(club_teaser_images.RENDER_HEADER)):
+        rate_limit.enforce(f"teaser:read:{client_ip(request)}", READ_LIMIT, READ_WINDOW,
+                           detail="Too many requests.")
     row = await _row(db, token)
     snap = row["snapshot"]
     view = club_teaser.presentation(snap)

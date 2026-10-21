@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import brandWhite from '../../assets/bettercricket-white.svg'
@@ -24,6 +24,7 @@ export const CARD_FORMATS = {
   story: { width: 1080, height: 1920, names: false },
 }
 
+const LOGO_WAIT_MS = 5000
 const fmtNum = (n) => Number(n || 0).toLocaleString()
 
 // Words that tell you nothing about which club it is, left out of the crest.
@@ -69,7 +70,16 @@ export function pickFacts(data, names) {
 
 function Crest({ name, logo, size, onDone }) {
   const [failed, setFailed] = useState(false)
-  useEffect(() => { if (!logo) onDone() }, [logo])   // eslint-disable-line react-hooks/exhaustive-deps
+  const settled = useRef(false)   // the logo loaded or errored: the give-up timer must not undo it
+  useEffect(() => {
+    if (!logo) { onDone(); return undefined }
+    // A logo host that hangs fires neither load nor error. Give it a few
+    // seconds, then draw without it (the crest of initials shows) rather than
+    // holding the whole card, and every picture behind it, for the browser's
+    // own much longer timeout.
+    const t = setTimeout(() => { if (!settled.current) { setFailed(true); onDone() } }, LOGO_WAIT_MS)
+    return () => clearTimeout(t)
+  }, [logo])   // eslint-disable-line react-hooks/exhaustive-deps
   const box = {
     width: size, height: size, borderRadius: size * 0.22, flex: 'none',
     display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
@@ -77,8 +87,9 @@ function Crest({ name, logo, size, onDone }) {
   if (logo && !failed) {
     return (
       <div style={{ ...box, background: '#ffffff' }}>
-        <img src={logo} alt="" crossOrigin="anonymous" onLoad={onDone}
-             onError={() => { setFailed(true); onDone() }}
+        <img src={logo} alt="" crossOrigin="anonymous"
+             onLoad={() => { settled.current = true; onDone() }}
+             onError={() => { settled.current = true; setFailed(true); onDone() }}
              style={{ width: '88%', height: '88%', objectFit: 'contain' }} />
       </div>
     )
