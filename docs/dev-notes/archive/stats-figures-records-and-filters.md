@@ -2579,7 +2579,7 @@ Found while chasing Kalamunda's report (21 Oct 2026) that Christopher Lewis, who
 
 **Proof.** `backend/verification/verify_rate_coverage.py` gains 21 checks (126 in all) that call the shipped route bodies against a real Postgres with the club bar at 5 (batting) and 3 (bowling): a player with 3 covered innings stays on the runs board under the all-seasons, club-scope and picked-grade branches, drops off the strike rate board, comes back on an explicit 0, and drops off a runs board when the viewer picks 5; the player who clears the bar is on every board. The control (previous `stats_display.py` and `leaderboard.py`) fails exactly the four runs/wickets checks and nothing else. Separately the Kalamunda book fixture from `verify_import_through_season.py` was imported and read through the route: with a club bar of 5 the board was empty before the change and lists all four players after it.
 
-## "All" competitions dropped a club's imported history from every board (v9.128.6.2)
+## "All" competitions dropped a club's imported history from every board (v9.128.6.4)
 
 Reported by Kalamunda (21 Oct 2026), with a screenshot: Christopher Lewis, their leading run scorer, was on the Leaderboard when it first drew and gone a moment later. The first attempt (previous entry, the strike rate minimum) was a different defect and did not explain a player vanishing after load.
 

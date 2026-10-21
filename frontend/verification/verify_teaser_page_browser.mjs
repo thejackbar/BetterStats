@@ -88,7 +88,7 @@ await section('block 1', async () => {
   const { page, ctx, errors, events } = await open(`/preview/${TOKEN}`)
   ck('the club and its place are named', /Flemington Cricket Club/.test(await textOf(page.locator('[data-testid="teaser-club"]')))
      && /Ascot Vale, VIC/.test(await textOf(page.locator('main'))))
-  ck('the season is shown', /Summer 2025\/26/.test(await textOf(page.locator('main'))))
+  ck('the season is shown', /Summer 2025\/26/i.test(await textOf(page.locator('main'))))
   ck('it LEADS with the top run-scorer: 565 runs, named', (await textOf(page.locator('[data-testid="teaser-hero-value"]'))) === '565'
      && /K\. Parekh/.test(await textOf(page.locator('[data-testid="teaser-hero-player"]'))))
   ck('with the average, highest score and hundred beneath', /average 56\.5, highest score 100\*, 1 hundred/.test(await textOf(tile(page, 'hero'))))
@@ -100,7 +100,8 @@ await section('block 1', async () => {
   const rows = await page.locator('[data-tile="batting"] li').evaluateAll((els) => els.map((e) => getComputedStyle(e).opacity))
   ck('batting shows five rows, the first three full and the last two dimmed', rows.length === 5
      && rows.slice(0, 3).every((o) => o === '1') && rows.slice(3).every((o) => Number(o) < 0.6), rows.join(','))
-  ck('the source is stated', /Cricket Australia's public match data for Summer 2025\/26/.test(await textOf(page.locator('main'))))
+  ck('the page carries no source line, only the tell-us link', !/public match data/i.test(await textOf(page.locator('main')))
+     && /Something not right\?\s*Tell us/.test(await textOf(page.locator('main'))))
   ck('the tab title names the club and season', /Flemington Cricket Club: your Summer 2025\/26/.test(await page.title()))
   ck('the page tells search engines not to index it',
      await page.locator('meta[name="robots"]').first().getAttribute('content') === 'noindex, nofollow')

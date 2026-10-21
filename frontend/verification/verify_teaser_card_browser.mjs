@@ -119,6 +119,29 @@ await section('logo that fails', async () => {
   await ctx.close()
 })
 
+await section('logo that hangs', async () => {
+  const { page, ctx } = await open('card', { logo: 'http://127.0.0.1:5204/hang-logo.png' })
+  await page.route('**/hang-logo.png', () => { /* never answers */ })
+  const t0 = Date.now()
+  await page.waitForSelector('[data-card][data-card-ready="1"]', { timeout: 12000 })
+  const waited = Date.now() - t0
+  ck('a logo host that never answers does not hold the card: it is ready within about 5 seconds, with the crest',
+     waited < 9000 && (await page.locator('[data-card] img[crossorigin]').count()) === 0, `${waited}ms`)
+  await ctx.close()
+})
+
+await section('logo that loads', async () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
+  const { page, ctx } = await open('card', { logo: 'http://127.0.0.1:5204/ok-logo.png' })
+  await page.route('**/ok-logo.png', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: png }))
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await ready(page)
+  await page.waitForTimeout(6000)
+  ck('a logo that loaded stays on the card after the give-up time has passed (the timer does not undo it)',
+     (await page.locator('[data-card] img[crossorigin]').count()) === 1)
+  await ctx.close()
+})
+
 await section('long name', async () => {
   const long = { ...DATA, club: { ...DATA.club, name: 'Brisbane Masters Cricket Incorporated Seniors and Veterans Association of Queensland' } }
   for (const fmt of Object.keys(SIZES)) {

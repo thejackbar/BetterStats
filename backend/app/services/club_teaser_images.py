@@ -32,10 +32,13 @@ Rules this module keeps:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
 import os
 import re
 import time
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -86,6 +89,23 @@ def image_path(token: str, fmt: str) -> Path:
 
 def render_base_url() -> str:
     return (settings.teaser_render_base_url or settings.public_base_url).rstrip("/")
+
+
+# The renderer reads the public teaser endpoint three times per club (once per
+# format), and that endpoint is rate limited per IP for the public. The renderer
+# proves who it is with a key derived from the app's secret, so it is not
+# throttled by its own limit (the first real run stopped at about 40 clubs an
+# hour). The key only ever goes to the site being rendered, never to a font or
+# logo host, and it unlocks nothing but "skip the read limit".
+RENDER_HEADER = "x-teaser-render"
+
+
+def render_key() -> str:
+    return hmac.new(settings.secret_key.encode(), b"club-teaser-render", hashlib.sha256).hexdigest()
+
+
+def is_render_key(value: Optional[str]) -> bool:
+    return bool(value) and hmac.compare_digest(str(value), render_key())
 
 
 def card_url(token: str, fmt: str, *, base: Optional[str] = None) -> str:
@@ -258,8 +278,23 @@ class ChromiumRenderer:
                                               device_scale_factor=1)
         try:
             page = await ctx.new_page()
+            origin = "{0.scheme}://{0.netloc}".format(urlparse(url))
+            key = render_key()
+
+            async def add_key(route):
+                # Only this site's own teaser data call gets the key.
+                req = route.request
+                if req.url.startswith(origin) and "/public/teaser/" in req.url:
+                    await route.continue_(headers={**req.headers, RENDER_HEADER: key})
+                else:
+                    await route.continue_()
+
+            await page.route("**/public/teaser/**", add_key)
             await page.goto(url, wait_until="domcontentloaded", timeout=RENDER_TIMEOUT_MS)
-            await page.wait_for_selector('[data-card][data-card-ready="1"]', timeout=RENDER_TIMEOUT_MS)
+            try:
+                await page.wait_for_selector('[data-card][data-card-ready="1"]', timeout=RENDER_TIMEOUT_MS)
+            except Exception as e:  # noqa: BLE001 - say WHY the card never came up
+                raise RuntimeError(await self._why_not_ready(page, e)) from None
             el = await page.query_selector("[data-card]")
             # A card whose content does not fit its frame would be saved with
             # the bottom cut off. Refuse it instead: the club stays unpictured
@@ -269,6 +304,22 @@ class ChromiumRenderer:
             return await el.screenshot(type="png")
         finally:
             await ctx.close()
+
+    @staticmethod
+    async def _why_not_ready(page, err) -> str:
+        """A bare "timeout waiting for the card" is no use to an operator. Look at
+        what the page actually showed."""
+        try:
+            if await page.query_selector('[data-testid="teaser-card-missing"]'):
+                return ("the card page said not found: the club's teaser data was refused or is no "
+                        "longer a good snapshot (a rate limit answers the same way)")
+            if await page.query_selector('[data-testid="teaser-card-loading"]'):
+                return "the card page was still waiting for the teaser data (the API did not answer in time)"
+            if await page.query_selector("[data-card]"):
+                return "the card drew but never became ready (a logo or font that did not settle)"
+        except Exception:  # noqa: BLE001
+            pass
+        return f"the card page did not come up: {str(err).splitlines()[0][:120]}"
 
 
 async def render_club(renderer, token: str, *, base: Optional[str] = None,

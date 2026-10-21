@@ -155,7 +155,7 @@ async def main() -> None:
         cust = await link.token_for_ca_org(s, [K["cust"]["ca"], K["cust"]["guid"]])
         junior = await link.token_for_ca_org(s, [K["junior"]["guid"]])
         none = [await link.token_for_ca_org(s, v) for v in ([], [None, ""], ["nope"], ["' OR 1=1 --"], [g()])]
-        many = await link.token_for_ca_org(s, [g() for _ in range(40)] + [K["alpha"]["ca"]])
+        many = await link.token_for_ca_org(s, [f"00000000-0000-4000-8000-{i:012d}" for i in range(40)] + [K["alpha"]["ca"]])   # ids that sort first, so the real one is past the cut
     check("CA's organisation id gives the club's token", by_ca == K["alpha"]["token"] and by_ca_up == K["alpha"]["token"])
     check("PlayHQ's own id (the directory guid) gives it too, for a club whose CA id is not recorded",
           by_guid == K["bravo"]["token"])
