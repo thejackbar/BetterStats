@@ -25,6 +25,8 @@ const LOCAL_PATH = `${BASE}assets/bg-removal/`
 
 const INFLIGHT = 'bgRemoval.inflight'
 const CRASHED = 'bgRemoval.crashed'
+// The opt-in full-quality run on a phone died: stop offering it there.
+const FULL_CRASHED = 'bgRemoval.fullCrashed'
 
 const store = {
   get: (k) => { try { return window.localStorage.getItem(k) } catch { return null } },
@@ -35,7 +37,8 @@ const store = {
 // A run that was under way when the page died leaves INFLIGHT behind (pagehide
 // clears it on a normal close or navigation, but a killed tab gets no event).
 if (typeof window !== 'undefined') {
-  if (store.get(INFLIGHT)) { store.set(CRASHED, '1'); store.del(INFLIGHT) }
+  const left = store.get(INFLIGHT)
+  if (left) { store.set(left === 'full' ? FULL_CRASHED : CRASHED, '1'); store.del(INFLIGHT) }
   window.addEventListener('pagehide', () => store.del(INFLIGHT))
 }
 
@@ -44,11 +47,17 @@ export function cutOutCrashedBefore() {
   return store.get(CRASHED) === '1'
 }
 
+// Whether the opt-in full-quality cut-out on a phone is still worth offering.
+export function fullQualityOffered() {
+  return store.get(FULL_CRASHED) !== '1'
+}
+
+// INFLIGHT holds the kind of run under way: 'full' (the heavy opt-in one) or 'normal'.
 let active = 0
-function runStarted() { if (active++ === 0) store.set(INFLIGHT, String(Date.now())) }
-function runEnded(ok) {
+function runStarted(kind) { if (active++ === 0 || kind === 'full') store.set(INFLIGHT, kind) }
+function runEnded(ok, kind) {
   if (--active <= 0) { active = 0; store.del(INFLIGHT) }
-  if (ok) store.del(CRASHED)
+  if (ok) { store.del(CRASHED); if (kind === 'full') store.del(FULL_CRASHED) }
 }
 
 function isConstrainedDevice() {
@@ -173,20 +182,27 @@ export async function preloadBackgroundRemoval() {
   try {
     const env = await resolveEnv()
     if (env.constrained) return // would hold the model's memory while the person is only cropping
-    runStarted()
+    runStarted('normal')
     try {
       await callWorker({ type: 'preload', env })
     } finally {
-      runEnded(false)
+      runEnded(false, 'normal')
     }
   } catch { /* the real call reports its own error */ }
 }
 
-// Cut the subject out of an image URL. Resolves to a PNG Blob.
-// onProgress gets { stage: 'download' | 'compute', pct }.
-export async function removeBackgroundFromUrl(srcUrl, onProgress) {
-  const env = await resolveEnv()
-  runStarted()
+// Cut the subject out of an image URL. Resolves to { blob, light }: a PNG Blob,
+// and whether the light model made it (rougher edges, so the editor offers a
+// retry). onProgress gets { stage: 'download' | 'compute', pct }.
+// { full: true } makes a constrained device run the full ISNet model on the
+// shrunk photo, the opt-in way to a better cut-out: it can take a phone tab down.
+export async function removeBackgroundFromUrl(srcUrl, onProgress, { full = false } = {}) {
+  const base = await resolveEnv()
+  const env = full && base.constrained
+    ? { ...base, light: null, model: 'isnet_fp16', gpu: false }
+    : base
+  const kind = full && base.constrained ? 'full' : 'normal'
+  runStarted(kind)
   let ok = false
   try {
     let blob
@@ -198,9 +214,9 @@ export async function removeBackgroundFromUrl(srcUrl, onProgress) {
       blob = await cutOutCore(srcUrl, env, onProgress)
     }
     ok = true
-    return blob
+    return { blob, light: !!env.light }
   } finally {
-    runEnded(ok)
+    runEnded(ok, kind)
     if (env.constrained) releaseBackgroundRemoval() // hand the model's memory back
   }
 }

@@ -1230,3 +1230,10 @@ Follow-up to v9.126.0 (which did Team of the Week only): every layout now lists 
 - Crash flag. `bgRemoval.inflight` is set while a run is active and cleared on `pagehide`, so a normal close leaves nothing. A killed tab leaves it, the next load turns it into `bgRemoval.crashed`, the next run takes the light path and the editor says why, and a finished run clears it.
 - Quality: on the portrait from the report silueta's edge is a little rougher at the shoulder than ISNet's; usable. Not verified on a real phone: the sandbox emulates the iPhone user agent and touch only. Memory in the sandbox is not the iOS limit.
 
+## Background removal: full-quality retry on phones (v9.128.3.1)
+
+- Report: after v9.128.3 the cut-out finished on the iPhone, but the photo's arm was gone. The light model (silueta, 320px, squashed square) loses thin or shadowed limbs; ISNet does not.
+- It also leaves open whether the original crash was ISNet's memory or the WebGPU path v9.124.7 switched on. The opt-in `Try full quality` runs ISNet fp16 on the 1600px original, CPU only, which separates the two on a real phone.
+- `removeBackgroundFromUrl(url, onProgress, { full })` now resolves `{ blob, light }`. The editor shows the button only after a light result and only while `fullQualityOffered()`. The retry runs from the originally loaded photo (`ownedBlobUrlRef`), not the already cut-out one.
+- Proof: the real `ImageEditorModal` in an emulated iPhone (production bundle, sandbox): light cut-out 7s with the button shown, full 15s with it hidden after; desktop never shows it; a left-over `inflight: 'full'` sets `fullCrashed` and hides it with no crash notice; `inflight: 'normal'` shows the crash notice, still offers it, and a finished run clears the flag. Not run on a real phone.
+
