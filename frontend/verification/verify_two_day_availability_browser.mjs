@@ -132,7 +132,6 @@ try {
     failDate = null
 
     // My page names the weeks.
-    await tryClick(page, '[data-tab="mine"]')
     await page.waitForSelector('[data-my-page]')
     const mine = await textOf(page, '[data-my-page]')
     check('My page labels the two weeks', /w1 · 2-day game/i.test(mine) && /w2 · 2-day game/i.test(mine), mine.slice(0, 200))

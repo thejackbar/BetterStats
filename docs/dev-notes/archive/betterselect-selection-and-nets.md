@@ -1696,3 +1696,21 @@ Asked for (Oct 2026): keep the top row with the dates visible, like a frozen pan
 - The header cells were already `sticky top-0`, but the card around the table was `overflow-auto` with no height. A box with `overflow` becomes the sticky container, and with no height it never scrolls, so the PAGE scrolled and the header had nothing to stick to. Fix in `AdminAvailability.jsx`: the card gets `useFitHeight({ enabled: !isPhone && loaded, bottom: 20 })`, the same measured height the whiteboard board uses, so it scrolls inside itself. Below `lg` it is left as it was (`data-fit="off"`).
 - The hook is called above the loading and empty-screen early returns and `enabled` waits for the card to exist, so the first measure is not taken against the spinner.
 - Proof: `verify_availability_frozen_header_browser.mjs` (34 checks at 1440x900, 1280x720, 1440x600, a resize, and 390px). Control with the fitted height removed fails 16: the page scrolls 1200px and the date row ends at -925px.
+
+## Player page as one dashboard (v9.128.8)
+
+Asked for: clean up the player page so a player does not need to go elsewhere. Their photo, the season as a dashboard, availability answered on the same screen, and a link into their Fantasy (team, deadlines, scores).
+
+Read as: the page behind `/avail/:token`, which had an Availability tab and a separate My page tab, no photo, and a four-figure season block.
+
+What changed:
+- One screen, tabs removed. `PlayerHero` (photo or initials, shirt number, squads, public profile link), tiles, the answer editor extracted from the old tab into `AvailabilityEditor`, then the club's modules. Helpers moved to `frontend/src/pages/playerhome/`.
+- `availability` left the module catalogue, `DEFAULT_MODULES` and the admin list. A stored key is dropped on read.
+- `season_overview` keeps its flat keys and adds batting, bowling and fielding panels; `recent_form` adds the last five innings and spells (club games, all grades, said on the card).
+- New `fantasy` module with the privacy rules in guide rule 97a. Matched by exact email; no picks ever.
+- `/me` and `/me/profile` both carry `player` with `photo_url`, `shirt_number` and `profile_path` (null for a profile the club switched off).
+
+Not done, on purpose: a seamless sign in to Fantasy from this page (the PIN here is weaker than the fantasy login), and linking a fantasy manager to a player by stored id instead of email. Season stayed a club choice; only Fantasy was added to the default list.
+
+Checks: `backend/verification/verify_player_page_dashboard.py` (50; the control on the previous commit fails 36), browser twin `frontend/verification/verify_player_page_dashboard_browser.mjs` (39). Five older browser scripts were updated for the removed tabs.
+

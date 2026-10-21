@@ -161,7 +161,7 @@ const run = async () => {
     await availStubs(page, { verified: true })
     await page.goto(`${BASE}${MY}`)
     await page.locator('[data-my-page]').waitFor()
-    check('already signed in: it opens straight on My page', (await page.locator('[data-tab="mine"]').getAttribute('aria-selected')) === 'true')
+    check('already signed in: it opens on the player\'s page, whatever ?tab says', (await page.locator('[data-hero]').count()) === 1)
     await ctx.close()
   })
 
@@ -192,8 +192,8 @@ const run = async () => {
     const p2 = await ctx2.newPage(); p2.setDefaultTimeout(8000)
     await availStubs(p2, { verified: true })
     await p2.goto(`${BASE}/avail/atok`)
-    await p2.getByText('Signed in as').waitFor()
-    check('and a plain link still opens on Availability', (await p2.locator('[data-tab="weekend"]').getAttribute('aria-selected')) === 'true')
+    await p2.locator('[data-hero]').waitFor()
+    check('and a plain link opens the same page, availability editor included', (await p2.locator('[data-availability]').count()) === 1)
     await ctx2.close()
   })
 

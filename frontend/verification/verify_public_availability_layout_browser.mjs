@@ -72,7 +72,7 @@ async function stub(page, holder) {
 
 // Each date card -> its game rows as the player sees them.
 const readCards = (page) => page.evaluate(() => [...document.querySelectorAll('div.rounded-xl.border')]
-  .filter((c) => c.querySelector('[data-fixture]') || /Available/.test(c.textContent))
+  .filter((c) => !c.hasAttribute('data-tile') && (c.querySelector('[data-fixture]') || /Available/.test(c.textContent)))
   .map((c) => ({
     heading: c.querySelector('.font-display')?.textContent.trim(),
     rows: [...c.querySelectorAll('[data-fixture]')].map((r) => {
@@ -94,7 +94,7 @@ const open = async (browser, me, width = 390) => {
   const holder = { me, urls: [] }
   await stub(page, holder)
   await page.goto(`${BASE}/avail/tok123`)
-  await page.waitForSelector('text=Signed in as', { timeout: 20000 })
+  await page.waitForSelector('[data-hero]', { timeout: 20000 })
   await page.waitForTimeout(300)
   return { ctx, page, holder }
 }
@@ -190,7 +190,8 @@ const run = async () => {
   ;({ ctx, page } = await open(browser, payload(false)))
   cards = await readCards(page)
   check('no squad: every Saturday game is shown', rowsOf(cards[0]).length === 5 && cards[0]?.toggle === null, JSON.stringify(cards[0]?.toggle))
-  const text = (await page.locator('body').innerText()).toLowerCase()
+  // The games to answer, not the whole dashboard (its Your squad card explains itself).
+  const text = (await page.locator('[data-availability]').innerText()).toLowerCase()
   check('no squad: no "your squad" tag anywhere', !text.includes('your squad'))
   check('no squad: no bold team names', rowsOf(cards[0]).length === 5 && rowsOf(cards[0]).every((r) => r.teamWeight < 700))
   await ctx.close()

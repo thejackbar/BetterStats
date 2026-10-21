@@ -268,7 +268,7 @@ async def main():
 
     print("\n# I. The player's page: the club's modules")
     prof = await profile(ids["sam"])
-    check("a club that never chose gets the original page, plus Fines for a squad that has it on (Show squad is off, so the squad section carries a note)", prof["modules"], ["availability", "squad", "selected", "training", "fines"])
+    check("a club that never chose gets the original page (availability is the page itself, not a module), plus Fines for a squad that has it on (Show squad is off, so the squad section carries a note)", prof["modules"], ["squad", "selected", "training", "fines"])
     check("a module that is off is never queried", (prof["season"], prof["fees"]), (None, None))
 
     res, _ = await admin(av.update_self_service, av.SelfServiceUpdate(dashboard_modules=["bogus", "season", "fines", "season", "fees", "ladder"]))

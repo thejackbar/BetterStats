@@ -31,13 +31,17 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import MODULE_SELECT, org_has_module
 from app.config.settings import settings
-from app.models.db import Grade, Organisation, Player, PlayerAvailability, VoteBallot, VoteMedal, get_db
+from app.models.db import (
+    FantasyManager, FantasyPoolPlayer, FantasyRound, FantasySquad, Grade, Organisation, Player, PlayerAvailability,
+    Sponsor, VoteBallot, VoteMedal, get_db,
+)
 from app.routers.ladders import _compute_team_ladders
+from app.routers import public_fantasy as pf
 from app.routers import public_votes as pv
 from app.routers.availability import (
     MAYBE_OFF,
@@ -48,7 +52,7 @@ from app.routers.availability import (
     phone_last4,
     upcoming_fixtures_by_date,
 )
-from app.services import fines as fines_svc, player_dashboard, rate_limit, selection_rules as rules_svc, squad_sides
+from app.services import fines as fines_svc, player_dashboard, rate_limit, section_names, selection_rules as rules_svc, squad_sides
 from app.services import votes as vote_svc
 from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.squad_next_game import fixtures_for_player
@@ -176,6 +180,19 @@ async def _player_for_session(db: AsyncSession, request: Request, club: Organisa
     if not player or player.organisation_id != club.id:
         raise HTTPException(status_code=401, detail="Not verified")
     return player
+
+
+def _player_card(player: Player) -> dict:
+    """Who the page is for: their name, photo and shirt number, and the way to their
+    public profile. Their own details only."""
+    return {
+        "id": str(player.id),
+        "display_name": player.display_name,
+        "photo_url": player.photo_url,
+        "shirt_number": player.shirt_number,
+        # A profile the club has switched off (or the player asked to remove) is not linked.
+        "profile_path": f"/players/{player.id}" if player.is_public is not False else None,
+    }
 
 
 @router.get("/{token}")
@@ -354,7 +371,7 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
             }
     return {
         "club": _club_branding(club),
-        "player": {"id": str(player.id), "display_name": player.display_name},
+        "player": _player_card(player),
         "allow_maybe": allow_maybe(club),
         "week_names": rules_svc.club_config(club)["week_names"],
         "dates": _grouped_dates(by_date),
@@ -480,6 +497,114 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
     return due, cast[:VOTES_CAST_SHOWN]
 
 
+FANTASY_DEADLINES_SHOWN = 3
+
+
+async def _fantasy_for_player(db: AsyncSession, club: Organisation, player: Player) -> Optional[dict]:
+    """The Fantasy card: the next lock deadlines, the way in, and, when the player's
+    own fantasy team can be found, where it sits. None when the club has nothing
+    running (no season, or one still being set up), which drops the module.
+
+    Read only, and deliberately light on the team. The fantasy login is the
+    manager's own email and PIN; this page's PIN is the last four digits of a
+    mobile, which teammates often know. So the card carries the same figures the
+    club ladder already shows (name, rank, points) and never the picks, captain
+    or transfers: before a round locks those are what a rival would want. The
+    team is found by the player's email on file matching exactly ONE fantasy
+    manager's email at this club; no email, no match or two matches means no
+    team, and the card still has the deadlines and the link. With the PIN off,
+    anyone holding the link could open anybody's page, so the team is left out
+    (same rule as fees)."""
+    season = await pf._current_season(db, club)
+    if season is None or season.status == "setup":
+        return None
+    league = await pf._global_league(db, season)
+    rounds = (await db.execute(
+        select(FantasyRound).where(
+            FantasyRound.fantasy_season_id == season.id, FantasyRound.status != "scored",
+        ).order_by(FantasyRound.round_number).limit(FANTASY_DEADLINES_SHOWN)
+    )).scalars().all()
+    deadlines = [
+        {"number": r.round_number, "name": r.name,
+         "lock_at": r.lock_at.isoformat() if r.lock_at else None, "locked": pf._round_locked(r)}
+        for r in rounds
+    ]
+    current = rounds[0] if rounds else None
+
+    sponsors = (await db.execute(select(Sponsor).where(Sponsor.organisation_id == club.id))).scalars().all()
+    named = section_names.resolve(club.section_names, sponsors).get("fantasy") or {}
+
+    team = None
+    email = (player.email or "").strip().lower()
+    if club.availability_require_pin and email and league is not None:
+        managers = (await db.execute(
+            select(FantasyManager.id).where(
+                FantasyManager.organisation_id == club.id,
+                func.lower(func.trim(FantasyManager.email)) == email,
+            ).limit(2)
+        )).scalars().all()
+        if len(managers) == 1:
+            squad = (await db.execute(
+                select(FantasySquad).where(FantasySquad.league_id == league.id, FantasySquad.manager_id == managers[0])
+            )).scalar_one_or_none()
+            if squad is None:
+                team = {"built": False}
+            else:
+                last = (await db.execute(
+                    text("""SELECT r.round_number, srs.points FROM fantasy_squad_round_scores srs
+                            JOIN fantasy_rounds r ON r.id = srs.round_id
+                            WHERE srs.squad_id = CAST(:sid AS UUID) AND r.status = 'scored'
+                            ORDER BY r.round_number DESC LIMIT 1"""),
+                    {"sid": str(squad.id)},
+                )).first()
+                # Points the running round has banked so far (the stored provisional
+                # row), only while it is locked. Shown beside the total, never added to it.
+                live = None
+                if current is not None and deadlines and deadlines[0]["locked"]:
+                    live = (await db.execute(
+                        text("""SELECT points FROM fantasy_squad_round_scores
+                                WHERE squad_id = CAST(:sid AS UUID) AND round_id = CAST(:rid AS UUID)"""),
+                        {"sid": str(squad.id), "rid": str(current.id)},
+                    )).scalar_one_or_none()
+                total = (await db.execute(
+                    select(func.count()).select_from(FantasySquad).where(FantasySquad.league_id == league.id)
+                )).scalar_one()
+                team = {
+                    "built": True,
+                    "team_name": squad.team_name,
+                    "points": float(squad.total_points or 0),
+                    "rank": await pf._overall_rank(db, league.id, squad.id),
+                    "of": int(total or 0),
+                    "last_round": {"number": last[0], "points": float(last[1])} if last else None,
+                    "this_round_points": float(live) if live is not None else None,
+                    "free_transfers": squad.free_transfers,
+                }
+
+    # How the player themselves is doing as a pick: public on the club's pool list.
+    pool = (await db.execute(
+        select(FantasyPoolPlayer).where(
+            FantasyPoolPlayer.fantasy_season_id == season.id, FantasyPoolPlayer.player_id == player.id,
+        )
+    )).scalar_one_or_none()
+    as_player = None
+    if pool is not None:
+        as_player = {
+            "points": float(pool.total_points or 0),
+            "last_round_points": float(pool.last_round_points or 0),
+            "price": float(pool.current_price or 0),
+            "price_change": float(pool.price_change or 0),
+            "owned_count": int(pool.owned_count or 0),
+        }
+    return {
+        "link": f"/fantasy/{club.fantasy_link_token}",
+        "name": named.get("name"),
+        "season": {"name": season.name, "status": season.status, "registration_open": bool(season.registration_open)},
+        "deadlines": deadlines,
+        "team": team,
+        "as_player": as_player,
+    }
+
+
 @router.get("/{token}/me/profile")
 async def get_my_profile(token: str, request: Request, tz: Optional[str] = None, db: AsyncSession = Depends(get_db)):
     """The verified player's own page ("My page"): the modules the club has turned
@@ -513,7 +638,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
 
     # The newer modules fail on their own: one that cannot be built is dropped
     # from this response and the rest of the page still loads.
-    season = fees = fines = None
+    season = fees = fines = fantasy = None
     votes: list[dict] = []
     votes_cast: list[dict] = []
     if "votes" in modules:
@@ -531,6 +656,22 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
             logger.exception("player page: season overview failed for %s", player.id)
             await rollback_keeping(db, club, player)
             modules = [m for m in modules if m != "season"]
+        if season is not None:
+            # The recent-form strip fails on its own: the season still draws without it.
+            try:
+                season["form"] = await player_dashboard.recent_form(db, club, player)
+            except Exception:
+                logger.exception("player page: recent form failed for %s", player.id)
+                await rollback_keeping(db, club, player)
+                season["form"] = {"batting": [], "bowling": []}
+    if "fantasy" in modules:
+        try:
+            fantasy = await _fantasy_for_player(db, club, player)
+        except Exception:
+            logger.exception("player page: fantasy failed for %s", player.id)
+            await rollback_keeping(db, club, player)
+        if fantasy is None:
+            modules = [m for m in modules if m != "fantasy"]
     if "fees" in modules:
         try:
             fees = await player_dashboard.fees_owing(db, club, player)
@@ -550,7 +691,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
 
     return {
         "club": _club_branding(club),
-        "player": {"id": str(player.id), "display_name": player.display_name},
+        "player": _player_card(player),
         "modules": modules,
         "squads": squad_names,
         "squads_visible": squads_visible,
@@ -559,6 +700,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         "season": season,
         "fees": fees,
         "fines": fines,
+        "fantasy": fantasy,
         "votes": votes,
         "votes_cast": votes_cast,
     }
