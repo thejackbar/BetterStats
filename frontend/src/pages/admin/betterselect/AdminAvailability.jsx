@@ -10,6 +10,8 @@ import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useAllowMaybe, useSelectConfig, useWeekNames } from '../../../lib/useAvailabilityConfig'
+import { useMediaQuery } from '../../../hooks/useMediaQuery'
+import { useFitHeight } from './useFitHeight'
 import {
   Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
   playedWithinYears, RuleTags, Chip, RecencySelect, RECENCY_OPTIONS, RECENCY_OVER, recencyOf, monthsAgoISO,
@@ -79,6 +81,7 @@ export default function AdminAvailability() {
   const toast = useToast()
   const navigate = useNavigate()
   const canEdit = canEditCap(CAP.SELECT_AVAILABILITY, CAP.MANAGE_SELECTIONS)
+  const isPhone = useMediaQuery('(max-width: 1023px)')
 
   const [data, setData] = useState(null)
   const [avail, setAvail] = useState({}) // {playerId: {date: {status, source, note, ...}}}
@@ -372,6 +375,12 @@ export default function AdminAvailability() {
     }
   }
 
+  // The matrix card scrolls inside itself, so the date row (sticky top-0) stays
+  // put while the players scroll. It needs a height to scroll against: measured
+  // from where the card starts to the bottom of the window, like the whiteboard.
+  // Only measured once the card exists (not on the spinner or empty screens).
+  const [matrixRef, matrixH] = useFitHeight({ enabled: !isPhone && data !== null && dates.length > 0, bottom: 20 })
+
   if (data === null) {
     return <BetterSelectLayout title="Availability"><PbSpinner message="Loading availability…" /></BetterSelectLayout>
   }
@@ -513,7 +522,8 @@ export default function AdminAvailability() {
       )}
 
       {/* Matrix */}
-      <div className="pb-card overflow-auto">
+      <div ref={matrixRef} data-avail-matrix data-fit={matrixH != null ? 'on' : 'off'} className="pb-card overflow-auto"
+        style={matrixH != null ? { height: matrixH } : undefined}>
         <table className="border-separate w-full" style={{ borderSpacing: 0, minWidth: 760 }}>
           <thead>
             <tr>
