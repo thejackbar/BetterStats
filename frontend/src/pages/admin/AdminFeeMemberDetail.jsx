@@ -8,7 +8,11 @@ import { PbSpinner } from '../../lib/presskit'
 import { formatSeason } from '../../lib/cricketFormat'
 
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
-const PAY_METHODS = ['', 'EFT', 'Cash', 'PlayHQ', 'Comp', 'Other']
+const PAY_METHODS = ['', 'EFT', 'Cash', 'Square', 'PlayHQ', 'Comp', 'Other']
+
+// Match fees are paid by EFT unless the person says otherwise. The membership
+// method on the member-season is about membership and does not carry across.
+const MATCH_FEE_DEFAULT_METHOD = 'EFT'
 const STATUS_OPTIONS = [
   ['prospect', 'Prospect'], ['invited', 'Invited'], ['application_started', 'Application Started'],
   ['awaiting_documents', 'Awaiting Documents'], ['awaiting_payment', 'Awaiting Payment'],
@@ -131,7 +135,8 @@ function PaymentForm({ memberSeasonId, defaultKind = 'membership', defaultMethod
       </div>
       <div>
         <label className="font-mono text-[9px] tracking-wide3 text-pb-faint mb-1 block">KIND</label>
-        <select className={`${cell} w-full`} value={form.kind} onChange={e => setForm(f => ({ ...f, kind: e.target.value }))}>
+        <select className={`${cell} w-full`} value={form.kind}
+          onChange={e => setForm(f => ({ ...f, kind: e.target.value, method: e.target.value === 'match_day' ? MATCH_FEE_DEFAULT_METHOD : defaultMethod }))}>
           <option value="membership">Membership</option>
           <option value="match_day">Match Day</option>
         </select>
@@ -163,7 +168,7 @@ function PaymentForm({ memberSeasonId, defaultKind = 'membership', defaultMethod
 // single match_day payment; the backend auto-allocates it across games
 // oldest-first and surfaces any surplus as credit. Distinct from PaymentForm
 // (which also handles membership) so the common case is one field + Record.
-function RecordMatchFeeForm({ memberSeasonId, defaultMethod = 'EFT', onCreated }) {
+function RecordMatchFeeForm({ memberSeasonId, defaultMethod = MATCH_FEE_DEFAULT_METHOD, onCreated }) {
   const toast = useToast()
   const [amount, setAmount] = useState('')
   const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10))
@@ -634,7 +639,7 @@ export default function AdminFeeMemberDetail() {
             {data.member_season && (
               <RecordMatchFeeForm
                 memberSeasonId={data.member_season.id}
-                defaultMethod={data.member_season.membership_payment_method || 'EFT'}
+                defaultMethod={MATCH_FEE_DEFAULT_METHOD}
                 onCreated={load}
               />
             )}

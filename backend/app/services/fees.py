@@ -364,7 +364,8 @@ def fee_settled_before(now: datetime | None = None) -> date:
     return now.astimezone(FEE_TZ).date()
 
 
-async def recompute_fee_match_days(organisation_id: str, season_id: str | None = None) -> dict:
+async def recompute_fee_match_days(organisation_id: str, season_id: str | None = None,
+                                   dry_run: bool = False) -> dict:
     """Rebuild auto-derived match-day rows for one season.
 
     A game is only charged from the day after its match day (`fee_settled_before`).
@@ -378,6 +379,9 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
     - Upserts one fee_match_days row per (member-season, game). Rows an admin
       has overridden (auto_derived=False) are never touched.
     - Deletes stale auto rows (player withdrew, or grade newly excluded).
+
+    `dry_run` does all of it and rolls back instead of committing, so the counts
+    (and `removed`, the unpaid rows it would withdraw) say what a real run does.
     """
     async with async_session_maker() as session:
         org_id = organisation_id if isinstance(organisation_id, uuid.UUID) else uuid.UUID(str(organisation_id))
@@ -472,9 +476,11 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
         appearances = [a for a in appearances if a.player_id in player_ids]
 
         if not player_ids:
-            await _delete_stale_auto_entries(session, sid, valid_keys=set())
-            await session.commit()
-            return {"season_id": str(sid), "members_created": 0, "entries_upserted": 0, "entries_deleted": 0}
+            removed: list = []
+            n_deleted = await _delete_stale_auto_entries(session, sid, valid_keys=set(), removed=removed)
+            await (session.rollback() if dry_run else session.commit())
+            return {"season_id": str(sid), "members_created": 0, "entries_upserted": 0,
+                    "entries_deleted": n_deleted, "removed": removed}
 
         # Schedule names → id for carry-forward tier defaulting.
         schedule_by_name = {
@@ -589,8 +595,9 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
                     entries_upserted += 1
             # else: admin-overridden or already paid — leave untouched.
 
-        entries_deleted = await _delete_stale_auto_entries(session, sid, valid_keys)
-        await session.commit()
+        removed = []
+        entries_deleted = await _delete_stale_auto_entries(session, sid, valid_keys, removed=removed)
+        await (session.rollback() if dry_run else session.commit())
 
         logger.info(
             "Fee recompute org=%s season=%s: +%d members, %d entries upserted, %d stale removed",
@@ -601,6 +608,7 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
             "members_created": members_created,
             "entries_upserted": entries_upserted,
             "entries_deleted": entries_deleted,
+            "removed": removed,
         }
 
 
@@ -667,7 +675,8 @@ async def _aggregate_player_ids(session, season_id, org_id, grades: dict) -> set
     return ids
 
 
-async def _delete_stale_auto_entries(session, season_id, valid_keys: set) -> int:
+async def _delete_stale_auto_entries(session, season_id, valid_keys: set,
+                                     removed: list | None = None) -> int:
     """Remove auto-derived rows that no longer correspond to an appearance
     (player withdrew, or grade is now excluded). Overridden rows are kept."""
     ms_ids = (
@@ -689,6 +698,10 @@ async def _delete_stale_auto_entries(session, season_id, valid_keys: set) -> int
     deleted = 0
     for r in rows:
         if (r.member_season_id, r.game_id) not in valid_keys:
+            if removed is not None:
+                removed.append({"member_season_id": str(r.member_season_id), "game_id": str(r.game_id),
+                                "played_at": r.played_at.isoformat() if r.played_at else None,
+                                "days_played": float(r.days_played)})
             await session.delete(r)
             deleted += 1
     return deleted

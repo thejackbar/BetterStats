@@ -67,7 +67,7 @@ def sign_xero_state(org_id, user_id) -> str:
 
 # Bank-statement-friendly payment kinds + methods. Free-form 'Other' is allowed.
 PAYMENT_KINDS = ("membership", "match_day")
-PAYMENT_METHODS = ("EFT", "Cash", "PlayHQ", "Comp", "Other")
+PAYMENT_METHODS = ("EFT", "Cash", "Square", "PlayHQ", "Comp", "Other")
 
 
 # _f/_financials now live in services/fees.py (extracted, not duplicated) so
@@ -1390,7 +1390,8 @@ async def create_payment(
         amount=_money(data.amount),
         paid_at=_parse_date(data.paid_at),
         kind=data.kind,
-        method=(data.method or "").strip() or None,
+        # A match fee with no method is an EFT; membership keeps a blank as blank.
+        method=(data.method or "").strip() or ("EFT" if data.kind == "match_day" else None),
         bank_ref=(data.bank_ref or "").strip() or None,
         notes=(data.notes or "").strip() or None,
         created_by_user_id=user.id,

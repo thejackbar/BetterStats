@@ -9,7 +9,7 @@ import { PbSpinner } from '../../lib/presskit'
 import { formatSeason } from '../../lib/cricketFormat'
 
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
-const PAY_METHODS = ['EFT', 'Cash', 'PlayHQ', 'Other']
+const PAY_METHODS = ['EFT', 'Cash', 'Square', 'PlayHQ', 'Other']
 
 function sortSeasons(seasons) {
   return seasons.filter(s => !s.alias_of).sort((a, b) => (b.year || 0) - (a.year || 0) || (b.name > a.name ? 1 : -1))

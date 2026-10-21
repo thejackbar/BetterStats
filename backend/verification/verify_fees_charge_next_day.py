@@ -140,6 +140,25 @@ async def main():
     check("a paid charge is left alone when its game moves", g_paid in got2)
     check("games that did not move keep their charge", {g_yesterday, g_undated} <= got2)
 
+    # The backfill's dry run reports what it would withdraw and changes nothing.
+    async with async_session_maker() as db:
+        await db.execute(text("UPDATE games SET played_at = :d WHERE id = :g"),
+                         {"d": today + timedelta(days=1), "g": g_yesterday})
+        await db.commit()
+    before = await charged()
+    dry = await recompute_fee_match_days(str(org), str(sid), dry_run=True)
+    check("dry run reports the unpaid row it would remove", dry["entries_deleted"], 1)
+    check("dry run names that row's game", [r["game_id"] for r in dry["removed"]], [str(g_yesterday)])
+    check("dry run changes nothing", await charged(), before)
+    real = await recompute_fee_match_days(str(org), str(sid))
+    check("the real run removes the same row", real["entries_deleted"], 1)
+    check("the removed row is gone after the real run", g_yesterday in await charged(), False)
+    async with async_session_maker() as db:
+        await db.execute(text("UPDATE games SET played_at = :d WHERE id = :g"),
+                         {"d": today - timedelta(days=1), "g": g_yesterday})
+        await db.commit()
+    await recompute_fee_match_days(str(org), str(sid))
+
     # And it comes back once the new match day is behind us.
     async with async_session_maker() as db:
         await db.execute(text("UPDATE games SET played_at = :d WHERE id = :g"),
