@@ -129,7 +129,8 @@ async def batting_leaderboard(
     rows = await get_batting_leaderboard_extended(
         db, org_id, season_id, grade_id, sort_by, limit,
         min_runs=min_runs,
-        min_rate_innings=await stats_display.resolve_min_rate_innings(db, org_id, min_rate_innings),
+        min_rate_innings=await stats_display.resolve_min_rate_innings(
+            db, org_id, min_rate_innings, ranked_on_rate=sort_by == "strike_rate"),
         grade_name=grade_name, finals_only=finals_only, captain_only=captain_only,
         gender=gender, overseas=overseas, scope=scope)
     rows = await _visible(db, org_id, viewer, rows)
@@ -194,7 +195,8 @@ async def bowling_leaderboard(
     rows = await get_bowling_leaderboard_extended(
         db, org_id, season_id, grade_id, sort_by, limit,
         min_overs=min_overs, min_wickets=min_wickets,
-        min_rate_spells=await stats_display.resolve_min_rate_spells(db, org_id, min_rate_spells),
+        min_rate_spells=await stats_display.resolve_min_rate_spells(
+            db, org_id, min_rate_spells, ranked_on_rate=sort_by == "economy"),
         grade_name=grade_name, finals_only=finals_only, captain_only=captain_only,
         gender=gender, overseas=overseas, scope=scope)
     rows = await _visible(db, org_id, viewer, rows)

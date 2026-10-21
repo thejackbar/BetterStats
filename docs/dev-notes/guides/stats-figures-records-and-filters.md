@@ -16,7 +16,7 @@
 1. Runs and balls in a rate come from the same innings. Never `SUM(runs)/SUM(balls)` across a season or career. Only the ratio changes source; runs, innings, wickets keep theirs.
 2. Covered = `balls IS NOT NULL AND (balls > 0 OR runs = 0)` (old sync stored a missing count as 0).
 3. No scorecards (BetterImport totals): the aggregate stands, payload `basis: "aggregate"`. Do not withhold.
-4. Minimums count covered innings/spells. Platform default 0 on purpose (`organisations.stats_min_rate_innings`/`_spells`, NULL = none, via `services/stats_display.py`). A viewer's explicit 0 is real: test None, not falsiness.
+4. Minimums count covered innings/spells. Platform default 0 on purpose (`organisations.stats_min_rate_innings`/`_spells`, NULL = none, via `services/stats_display.py`). A viewer's explicit 0 is real: test None, not falsiness. The club's number stands in for an omitted pick ONLY when the board is ranked on the rate it qualifies (batting `sort_by=strike_rate`, bowling `economy`; `ranked_on_rate` in `stats_display`). On any other ranking it would drop players for a rate nobody is ranking, and a player whose history is a BetterImport book has zero covered innings, so the club's top run scorer vanished from the runs board (v9.128.6.1, `verify_rate_coverage.py`).
 5. Strike-rate records are per season, never all time.
 6. Rates come from the server only. Use `rc.with_coverage` (presence-aware) and `batting_rate_columns(extra=...)` when did-not-bat rows are selected. Every new rate query imports `rc`.
 7. Overs are cricket notation (10.2): convert to balls before summing or dividing.
@@ -144,6 +144,7 @@
 - Records: `/records/{org}/milestones` still reads the per-innings views directly; the views' anti-join estimate is still wrong for every reader that is not `get_records`; `_club_pss` (0.6 to 1s) is the largest cost left; nothing cached or concurrent (cache on last sync; separate sessions, never `asyncio.gather` on one `AsyncSession`)
 - Scout screens and `iq._their_key_players` not marked aggregate-basis; `iq_team._role_ratings`, `iq_trends._similar_players` use aggregates on purpose.
 - `player_season_stats.batting_average` is a second stored copy.
+- The club-default (scoped) bowling branch of `get_bowling_leaderboard_extended` never applies `min_rate_spells` (the batting twin does); the unscoped, picked-grade, finals and captain branches do. Found in v9.128.6.1, left alone because fixing it drops players from clubs' economy boards.
 - Result filter offers "Tied" but never matches. Family targets ignore other context filters. Gender filter casing bug. Club rankings unfiltered and unnoted (decision needed). Players with ~100 games and CA 0 unexplained.
 - No PlayHQ competition name (WAF). AFL silo, BetterIQ, Yearbooks not on GradeScope defaults.
 

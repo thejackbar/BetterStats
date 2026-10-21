@@ -494,6 +494,74 @@ async def main() -> None:
                 "UPDATE organisations SET stats_min_rate_innings = NULL WHERE id = :o"), {"o": ORG})
             await session.commit()
 
+        async with guard(session, "the club's bar on a board ranked by something else"):
+            # Reported by Kalamunda: their leading run scorer, whose history is a
+            # BetterImport book with no scorecards behind it, was on StatLab and
+            # missing from the Leaderboard. The club's strike-rate bar counts
+            # covered scorecard innings, an import has none, and the page sends no
+            # bar of its own unless the board is ranked on strike rate, so the
+            # club's number was dropping players from a board ranked on RUNS.
+            print("\n— a club's strike-rate bar only qualifies a board ranked on the rate —")
+            from app.routers import leaderboard as lb
+            await session.execute(text(
+                "UPDATE organisations SET stats_min_rate_innings = 5, stats_min_rate_spells = 3 "
+                "WHERE id = :o"), {"o": ORG})
+            await session.commit()
+
+            async def route_bat(**kw):
+                args = dict(org_id=str(ORG), season_id=None, grade_id=None, grade_name=None,
+                            sort_by="total_runs", limit=50, min_runs=0, min_rate_innings=None,
+                            finals_only=None, captain_only=None, gender=None, overseas=None,
+                            categories=None, formats=None, competitions=None, viewer=None)
+                args.update(kw)
+                return await lb.batting_leaderboard(db=session, **args)
+
+            async def route_bowl(**kw):
+                args = dict(org_id=str(ORG), season_id=None, grade_id=None, grade_name=None,
+                            sort_by="total_wickets", limit=50, min_overs=0, min_wickets=0,
+                            min_rate_spells=None, finals_only=None, captain_only=None,
+                            gender=None, overseas=None, categories=None, formats=None,
+                            competitions=None, viewer=None)
+                args.update(kw)
+                return await lb.bowling_leaderboard(db=session, **args)
+
+            def on(rows, pid):
+                return any(str(r["player_id"]) == str(pid) for r in rows)
+
+            for label, kw in (("all seasons", dict()),
+                              ("the club's grade scope", dict(categories="senior")),
+                              ("a picked grade", dict(grade_name="1st Grade"))):
+                runs = await route_bat(**kw)
+                check(f"{label}: ranked on runs, a player under the bar (3 covered innings) is"
+                      f" still on the board", on(runs, BAT),
+                      str([r.get("name") for r in runs]))
+                check(f"{label}: and so is a player who clears it", on(runs, RECORD))
+                rate = await route_bat(sort_by="strike_rate", **kw)
+                check(f"{label}: ranked on strike rate the club's bar still applies (3 < 5)",
+                      not on(rate, BAT), str([r.get("name") for r in rate]))
+                check(f"{label}: and the player who clears it is there to be ranked", on(rate, RECORD),
+                      str([r.get("name") for r in rate]))
+                picked = await route_bat(min_rate_innings=5, **kw)
+                check(f"{label}: a bar the viewer picks is theirs to apply on any ranking",
+                      not on(picked, BAT) and on(picked, RECORD), str([r.get("name") for r in picked]))
+                off = await route_bat(sort_by="strike_rate", min_rate_innings=0, **kw)
+                check(f"{label}: a viewer's explicit 0 still switches the bar off", on(off, BAT))
+
+            # A picked grade, because the club-default (scoped) bowling branch does not
+            # apply the spells bar at all yet, which this change leaves alone.
+            wk = await route_bowl(grade_name="1st Grade")
+            check("bowling: ranked on wickets, 2 covered spells under a bar of 3 stays on the board",
+                  on(wk, BOWL), str([r.get("name") for r in wk]))
+            econ = await route_bowl(grade_name="1st Grade", sort_by="economy")
+            check("bowling: ranked on economy the club's bar still applies (2 < 3)", not on(econ, BOWL),
+                  str([r.get("name") for r in econ]))
+            check("bowling: and the bowler who clears it is there to be ranked", on(econ, RECORD),
+                  str([r.get("name") for r in econ]))
+            await session.execute(text(
+                "UPDATE organisations SET stats_min_rate_innings = NULL, stats_min_rate_spells = NULL "
+                "WHERE id = :o"), {"o": ORG})
+            await session.commit()
+
         async with guard(session, "other surfaces"):
             print("\n— the FORMATS page, StatLab, the Yearbook and the record book —")
             from app.services.player_formats import player_format_splits
