@@ -61,6 +61,7 @@ async def main():
     from app.services import card_review_doubles as dbl
     from app.services import card_review_find as fnd
     from app.scripts import fix_wrong_links as fwl
+    from app.scripts import explain_card as xc
     from app.services.card_review_ddl import STATEMENTS as REVIEW_DDL
     from app.services.superseded_ddl import STATEMENTS as SUPERSEDED_DDL
     from app.services.competition_ddl import STATEMENTS as COMP_DDL
@@ -922,6 +923,26 @@ async def main():
         un = await act.bulk_undo(s, ORG, None, done["applied"]["batch_id"])
     check("the batch is undone by its id, with no user needed",
           (un["undone"] >= 1, (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0]), (True, ids["g_wA"]))
+
+    print("\n-- explain a card: what is sitting on the game it should be on --")
+    import contextlib
+    import io as _io2
+
+    async def explained(prefix):
+        buf = _io2.StringIO()
+        async with async_session_maker() as s:
+            with contextlib.redirect_stdout(buf):
+                await xc.explain(s, str(ORG), prefix)
+        return buf.getvalue()
+    snap_before, logs_before = await snap(), await logs()
+    held = await explained(str(ids["m_wA"])[:8])
+    check("a card whose game is held by another card says which card, and that it shares none of its batters",
+          ("held by card" in held, f"card {str(ids['m_wB'])[:8]}" in held, "shares 0 of its 4" in held), (True, True, True))
+    free = await explained(str(ids["m_wB"])[:8])
+    check("a wrong-linked card says its link does not match and that the right game is free",
+          ("LINKED NOW" in free, "FREE and matches this card" in free), (True, True))
+    check("an id that matches nothing is said plainly", "no card starts with that" in await explained("zzzzzzzz"), True)
+    check("explaining writes nothing: no link moved, no history line added", (await snap(), await logs()), (snap_before, logs_before))
 
     print("\n-- nothing was deleted by any of it --")
     check("every card is still there",

@@ -69,8 +69,9 @@ async def run_org(db, org_id, *, apply: bool, max_rounds: int = 3) -> dict:
     review = await cr.review_rows(db, org_id)
     pairing = {r["match_id"] for r in review if r["group"] == "pairing"}
     offered = {r["a"]["id"] for r in found["rows"] if r["kind"] == "relink"}
+    left = [r for r in review if r["match_id"] in pairing and r["match_id"] not in offered]
     out = {"before": before, "rows": found["rows"], "pairing_total": len(pairing),
-           "pairing_without_a_move": len(pairing - offered), "applied": None, "after": None}
+           "pairing_without_a_move": len(pairing - offered), "applied": None, "after": None, "pairing_left": left}
     if apply:
         out["applied"] = await act.bulk_fix_doubles(db, org_id, None, max_rounds=max_rounds)
         out["after"] = tally(await dbl.find_doubles(db, org_id))
@@ -91,6 +92,13 @@ def _print_report(name: str, rep: dict, apply: bool) -> None:
     print(f"  left for a person: {b['other']} weaker match(es) in Possible doubles")
     print(f"  'Pairing looks wrong': {rep['pairing_total']}, of which {rep['pairing_without_a_move']} get no move from this scan "
           f"(a swap with no free game, no true twin, or too weak): see repair_crossed_pairs and the Pairing step")
+    left = rep.get("pairing_left") or []
+    if left:
+        print(f"  the cards still 'pairing looks wrong' with no move offered (explain one: python -m app.scripts.explain_card <club> <id>):")
+        for r in sorted(left, key=lambda r: str(r["date"]))[:40]:
+            print(f"    [{r['match_id'][:8]}] {r['date']}  {r['grade']} v {r['opposition']}  ({r['shared']} of {min(r['club_batters'], r['ca_batters']) or r['club_batters']} batters agree with the game it is on)")
+        if len(left) > 40:
+            print(f"    ... and {len(left) - 40} more")
     if apply and rep["applied"]:
         a = rep["applied"]
         if not (a["relinked"] or a["linked"]):
