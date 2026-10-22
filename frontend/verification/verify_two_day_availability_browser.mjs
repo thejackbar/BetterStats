@@ -80,7 +80,7 @@ try {
     const page = await ctx.newPage()
     await stub(page, holder)
     await page.goto(`${BASE}/avail/tok-two-day`, { waitUntil: 'domcontentloaded' })
-    await page.waitForSelector('[data-fixture]')
+    await page.waitForSelector('[data-date-card]')
 
     const cards = await page.$$eval('[data-date-card]', (els) => els.map((e) => e.getAttribute('data-date-card')))
     check('week 1 and week 2 of the game are both open on first load', cards.includes(SAT1) && cards.includes(SAT2), JSON.stringify(cards))
@@ -149,7 +149,7 @@ try {
   const page = await ctx.newPage()
   await stub(page, holder)
   await page.goto(`${BASE}/avail/tok-two-day`, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('[data-fixture]')
+  await page.waitForSelector('[data-date-card]')
   check('week 2 is still answerable and tagged', /w2 · 2-day game/i.test(await textOf(page, `[data-date-card="${SAT2}"]`)))
   check('no both-weeks card when only one week is left', (await page.locator('[data-both-weeks]').count()) === 0)
   await ctx.close()

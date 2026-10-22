@@ -1756,3 +1756,9 @@ Decision worth knowing: the availability link was designed to be low-trust and p
 
 Checks: `verify_player_page_dashboard.py` (69; section I, control fails 5), `frontend/verification/verify_player_page_nav_browser.mjs` (23; 360 and 390px, hidden and signed-in cases).
 
+## Availability dates fold by default (v9.128.11)
+
+Reported (Oct 2026, Applecross): a Saturday with ten fixtures made the player scroll past every game to reach the answer buttons. Asked for: show just the date and the buttons, with the fixtures on an expand.
+
+Done: `DateCard` shows the day and the answer buttons, with a "Show N games" toggle and the fixture list in a hidden panel under the buttons. The answer saves with the games still folded. Checks: `verify_public_availability_layout_browser.mjs` (47, including the folded default, an answer while folded, and that the buttons do not move on open); `verify_two_day_availability_browser.mjs` waited on a fixture row and now waits on the date card.
+

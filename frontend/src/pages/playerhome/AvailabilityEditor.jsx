@@ -182,6 +182,57 @@ function BothWeeks({ pair, me, choices, onPick, busy }) {
   )
 }
 
+// One date: the day and the answer buttons, with the games behind a tap. A date can
+// carry ten fixtures across the club; answering is the job, so they stay folded
+// until the player wants to see them. The buttons stay put when it opens (the games
+// open below them), and an answer is never blocked on looking.
+function DateCard({ d, cur, wk, choices, saving, saved, onAnswer }) {
+  const [open, setOpen] = useState(false)
+  const n = (d.fixtures || []).length
+  const panel = `fixtures-${d.date}`
+  return (
+    <div className="rounded-xl border pb-hairline p-3.5" data-date-card={d.date} data-fixtures-open={open ? 'yes' : 'no'}>
+      <div className="flex items-baseline justify-between gap-2 mb-2.5">
+        <div className="font-display font-bold text-[16px]">{fmtDay(d.date)}</div>
+        <div className="flex items-baseline gap-2 shrink-0">
+          {wk && <Tag tone="var(--pb-amber)">{wk}</Tag>}
+          {saved && <span className="font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
+        </div>
+      </div>
+      <div className={`grid ${choices.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
+        {choices.map((s) => {
+          const meta = AVAILABILITY[s]
+          const active = cur === s
+          return (
+            <button
+              key={s}
+              onClick={() => onAnswer(d.date, s)}
+              disabled={saving}
+              className="py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
+              style={active
+                ? { background: meta.cssVar, color: 'var(--pb-bg)' }
+                : { background: `color-mix(in srgb, ${meta.cssVar} 12%, transparent)`, color: meta.cssVar, border: `1px solid color-mix(in srgb, ${meta.cssVar} 30%, transparent)` }}
+            >
+              {meta.glyph} {meta.label}
+            </button>
+          )
+        })}
+      </div>
+      {n > 0 && (
+        <button type="button" data-fixtures-toggle onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-controls={panel}
+          className="mt-2.5 w-full flex items-center justify-center gap-1.5 py-1.5 text-[12.5px] text-pb-faint hover:text-pb-text">
+          {open ? 'Hide games' : `Show ${n} game${n === 1 ? '' : 's'}`}
+          <span aria-hidden="true" className="transition-transform" style={{ transform: open ? 'rotate(180deg)' : 'none' }}>⌄</span>
+        </button>
+      )}
+      {/* Hidden, not unmounted: the "other club games" choice inside survives a fold. */}
+      <div id={panel} hidden={!open} className="mt-1.5">
+        <FixtureList fixtures={d.fixtures || []} />
+      </div>
+    </div>
+  )
+}
+
 // The next games with their answer buttons. Opens on the first week with games and
 // reveals one more per tap, so a long fixture list is not the first thing a player
 // sees. `onAnswer(date, status)` saves one date, `onBoth(pair, statuses)` both weeks
@@ -217,35 +268,7 @@ export function AvailabilityEditor({ me, choices, savingDate, savedDate, onAnswe
                   {savedDate === pr.key && <span className="absolute right-3 bottom-2 font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
                 </div>
               ))}
-              <div className="rounded-xl border pb-hairline p-3.5" data-date-card={d.date}>
-                <div className="flex items-baseline justify-between gap-2 mb-2">
-                  <div className="font-display font-bold text-[16px]">{fmtDay(d.date)}</div>
-                  <div className="flex items-baseline gap-2 shrink-0">
-                    {wk && <Tag tone="var(--pb-amber)">{wk}</Tag>}
-                    {savedDate === d.date && <span className="font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
-                  </div>
-                </div>
-                <FixtureList fixtures={d.fixtures || []} />
-                <div className={`grid ${choices.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
-                  {choices.map((s) => {
-                    const meta = AVAILABILITY[s]
-                    const active = cur === s
-                    return (
-                      <button
-                        key={s}
-                        onClick={() => onAnswer(d.date, s)}
-                        disabled={savingDate === d.date}
-                        className="py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
-                        style={active
-                          ? { background: meta.cssVar, color: 'var(--pb-bg)' }
-                          : { background: `color-mix(in srgb, ${meta.cssVar} 12%, transparent)`, color: meta.cssVar, border: `1px solid color-mix(in srgb, ${meta.cssVar} 30%, transparent)` }}
-                      >
-                        {meta.glyph} {meta.label}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
+              <DateCard d={d} cur={cur} wk={wk} choices={choices} saving={savingDate === d.date} saved={savedDate === d.date} onAnswer={onAnswer} />
             </Fragment>
           )
         })}
