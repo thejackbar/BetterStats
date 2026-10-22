@@ -9,8 +9,10 @@ not list the 204 until the script has run.
 Seeded games:
 
   fixable   fall of wickets stored, no stands, scorecard fits  -> stands added
-  mismatch  fall of wickets stored, no stands, card's fall of wickets
-            disagrees with its dismissals                     -> refused, no stands
+  short     fall of wickets stored, no stands, card holds 2 of its 3
+            wickets (a scorer who recorded some)             -> the stands those settle
+  mismatch  fall of wickets stored, no stands, card holds MORE fall of
+            wickets than dismissals                           -> refused, no stands
   has       already holds stands                              -> never selected
   no_fow    no fall of wickets stored                         -> never selected
   gone      fall of wickets stored, Cricket Australia 204s    -> counted, not written
@@ -49,7 +51,7 @@ S = uuid.uuid4(); G = uuid.uuid4()
 T_US, T_OPP = uuid.uuid4(), uuid.uuid4()
 GUIDS = {k: uuid.uuid4() for k in "ABCD"}
 PIDS = {k: uuid.uuid4() for k in "ABCD"}
-GAMES = {k: uuid.uuid4() for k in ("fixable", "mismatch", "has", "no_fow", "gone", "foreign")}
+GAMES = {k: uuid.uuid4() for k in ("fixable", "short", "mismatch", "has", "no_fow", "gone", "foreign")}
 
 
 def card(fow_rows: list[tuple]) -> dict:
@@ -74,7 +76,8 @@ def card(fow_rows: list[tuple]) -> dict:
 
 
 GOOD = card([(1, 10, "A"), (2, 20, "B"), (3, 224, "C")])
-BAD = card([(1, 10, "A"), (2, 20, "B")])            # 2 fall of wicket rows, 3 dismissals
+SHORT = card([(1, 10, "A"), (2, 20, "B")])          # 2 fall of wicket rows, 3 dismissals: a short card
+BAD = card([(1, 10, "A"), (2, 20, "B"), (3, 224, "C"), (4, 230, "D")])   # 4 rows, 3 dismissals: refused
 FOREIGN = card([(1, 10, "A"), (2, 20, "B"), (3, 224, "C")])
 FOREIGN["teams"][0]["owningOrganisation"] = {"id": str(THEIRS)}   # no team on the card is this club's
 
@@ -161,7 +164,7 @@ async def main() -> None:
     bf.async_session_maker = Session
 
     asked: list[str] = []
-    by_id = {str(GAMES["fixable"]): GOOD, str(GAMES["mismatch"]): BAD, str(GAMES["gone"]): None,
+    by_id = {str(GAMES["fixable"]): GOOD, str(GAMES["short"]): SHORT, str(GAMES["mismatch"]): BAD, str(GAMES["gone"]): None,
              str(GAMES["foreign"]): FOREIGN}
 
     async def fetch(match_id: str):
@@ -174,11 +177,11 @@ async def main() -> None:
 
     # Dry run reads and reports but writes nothing.
     t = await bf.run("our-club", pause=0, apply=False, fetch=fetch)
-    check("dry run: reports the stands it would add", t["stands_added"] == 3, str(t))
+    check("dry run: reports the stands it would add", t["stands_added"] == 5, str(t))
     check("dry run: writes nothing", await stands("fixable") == [])
     check("dry run: the board is unchanged", 204 not in await board())
     check("only games with fall of wickets and no stands were asked for",
-          set(asked) == {str(GAMES[k]) for k in ("fixable", "mismatch", "gone", "foreign")}, str(asked))
+          set(asked) == {str(GAMES[k]) for k in ("fixable", "short", "mismatch", "gone", "foreign")}, str(asked))
 
     asked.clear()
     buf = io.StringIO()
@@ -187,10 +190,13 @@ async def main() -> None:
     out = buf.getvalue()
     check("apply: three stands written for the fixable game", await stands("fixable") == [10, 10, 204], str(await stands("fixable")))
     check("apply: the shipped records route now lists the 204", 204 in await board(), str(await board()))
-    check("apply: the mismatched card is refused and writes no stand", await stands("mismatch") == [])
+    check("apply: a card short of wickets gets the stands its figures settle (1st and 2nd)",
+          await stands("short") == [10, 10], str(await stands("short")))
+    check("apply: a card with more fall of wickets than dismissals is refused and writes no stand",
+          await stands("mismatch") == [])
     check("apply: the two games that got no stand are counted", t["refused"] == 2, str(t))
     check("reason: names the fall of wickets v dismissals mismatch",
-          "2 fall of wickets v 3 dismissals on the card" in out, out)
+          "4 fall of wickets v 3 dismissals on the card" in out, out)
     check("reason: names a card with no team owned by the club",
           "no team on the card is owned by this club" in out, out)
     check("--explain dumps the rows the derivation read", "fow   2" in out and "bat   3" in out, out)

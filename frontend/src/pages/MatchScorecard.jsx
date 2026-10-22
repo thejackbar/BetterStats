@@ -10,6 +10,7 @@ import { CAP } from '../lib/capabilities'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { rememberClubSlug, readClubSlug } from '../lib/clubSlug'
 import TeamBadge from '../components/TeamBadge'
+import FallOfWicketsEditor from '../components/FallOfWicketsEditor'
 
 // Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
 function sumOversBalls(bowlingRows) {
@@ -685,15 +686,26 @@ function FieldingSection({ fielding = [], fmtName = n => n }) {
   )
 }
 
-function FallOfWicketsSection({ fow = [], fmtName = n => n }) {
-  if (!fow.length) return null
+function FallOfWicketsSection({ fow = [], fmtName = n => n, inningsTotals = {}, onEdit = null }) {
+  if (!fow.length && !onEdit) return null
   const byInnings = fow.reduce((acc, f) => {
     const k = f.innings_number; if (!acc[k]) acc[k] = []; acc[k].push(f); return acc
   }, {})
   return (
     <div className="pb-card p-5 mt-4">
-      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3">FALL OF WICKETS</p>
-      {Object.entries(byInnings).map(([inn, items]) => (
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">FALL OF WICKETS</p>
+        {onEdit && (
+          <button type="button" onClick={onEdit}
+            className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-accent transition-colors">
+            {fow.length ? 'EDIT' : 'ADD'}
+          </button>
+        )}
+      </div>
+      {!fow.length && <p className="text-xs text-pb-faint">No fall of wickets was recorded for this match.</p>}
+      {Object.entries(byInnings).map(([inn, items]) => {
+        const wickets = (inningsTotals || {})[inn]?.wickets
+        return (
         <div key={inn} className="mb-3 last:mb-0">
           {Object.keys(byInnings).length > 1 && (
             <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest mb-2 uppercase">Innings {inn}</p>
@@ -716,8 +728,14 @@ function FallOfWicketsSection({ fow = [], fmtName = n => n }) {
               </div>
             ))}
           </div>
+          {wickets > items.length && (
+            <p className="text-[11px] text-pb-faintest mt-2">
+              {items.length} of {wickets} wickets recorded. Partnerships are only worked out for the wickets the figures settle.
+            </p>
+          )}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -918,6 +936,10 @@ export default function MatchScorecard() {
   const fmtName = useNameFormat(orgData)
   const { hasCapability } = useAuth()
   const canManage = hasCapability(CAP.MANAGE_PLAYERS)
+  // Typing the fall of wickets Cricket Australia is missing: a synced match only (an uploaded card is
+  // edited from Manual entries).
+  const canEditFow = hasCapability(CAP.MANAGE_MANUAL_ENTRIES)
+  const [editingFow, setEditingFow] = useState(false)
   const [claimTarget, setClaimTarget] = useState(null)
   const [existingPlayers, setExistingPlayers] = useState([])
 
@@ -1060,9 +1082,25 @@ export default function MatchScorecard() {
         )}
 
         <FieldingSection fielding={game.fielding ?? []} fmtName={fmtName} />
-        <FallOfWicketsSection fow={game.fall_of_wickets ?? []} fmtName={fmtName} />
+        <FallOfWicketsSection
+          fow={game.fall_of_wickets ?? []}
+          fmtName={fmtName}
+          inningsTotals={game.innings_totals}
+          onEdit={canEditFow && !game.is_manual ? () => setEditingFow(true) : null}
+        />
         <PartnershipsSection partnerships={game.partnerships ?? []} fmtName={fmtName} />
       </main>
+
+      {editingFow && (
+        <FallOfWicketsEditor
+          gameId={gameId}
+          onClose={() => setEditingFow(false)}
+          onSaved={() => {
+            setEditingFow(false)
+            api.getScorecard(gameId, orgId || readClubSlug()).then(setGame).catch(() => {})
+          }}
+        />
+      )}
 
       {claimTarget && (
         <ClaimFillInModal

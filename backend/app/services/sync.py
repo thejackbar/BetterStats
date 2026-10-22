@@ -21,6 +21,7 @@ from app.services import auto_sync, dismissal, merge_redirects, participant_name
 from app.services.boundary_counts import clean as _bounds
 from app.services.game_status import NOT_PLAYED_STATUSES, card_called_off, not_played_game_sql
 from app.services.grade_labels import suggest_categories, suggest_category
+from app.services.partial_partnerships import derive_partial
 
 logger = logging.getLogger(__name__)
 
@@ -1786,10 +1787,22 @@ def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
     # Incomplete FOW data poisons every partnership it touches: the loop below
     # marches `at_crease` forward one wicket per FOW row, so a single 5/215 row
     # in an innings that actually lost 7 wickets gets attributed to the openers
-    # as a 215-run 5th-wicket stand. Refuse to derive unless FOW count matches
-    # the dismissals in the batting card.
+    # as a 215-run 5th-wicket stand. The row-by-row walk below therefore only runs
+    # when the FOW count matches the dismissals in the batting card.
     dismissed_pids = _dismissed_pids_grassroots(batting_rows)
-    if not dismissed_pids or len(fow_rows) != len(dismissed_pids):
+    if not dismissed_pids:
+        return []
+    if len(fow_rows) != len(dismissed_pids):
+        # A short fall of wickets (four of six recorded) is not thrown away: the walk
+        # that works by wicket NUMBER, not by row, keeps the stands the figures settle
+        # (1st, 4th and 5th of 1, 3, 4, 5) and drops the rest. More rows than wickets
+        # is still refused (a retirement coded as a wicket, or a duplicate).
+        if 0 < len(fow_rows) < len(dismissed_pids):
+            batters = sorted(valid, key=lambda r: r.get("batOrder") or 99)
+            not_out = {b.get("participantId") for b in batters
+                       if (b.get("dismissalTypeId") or 0) == 1
+                       or (b.get("dismissalType") or "").lower() == "not out"}
+            return derive_partial(batters, dismissed_pids, fow_rows, _MAX_STAND_EXTRAS, not_out)
         return []
 
     # PSWL / women's scorecards sometimes encode a *retirement* as a FOW row
@@ -2912,6 +2925,14 @@ async def sync_grassroots_game_level_data(
                              "WHERE id = :gid AND innings_totals IS NULL"),
                         {"it": json.dumps(_totals), "gid": match_id_str},
                     )
+
+                # Fall of wickets a club typed from its own scorebook outlives a Full Rebuild:
+                # the synced rows above are replaced for any innings it covers.
+                if bat_count or bowl_count or appear_count:
+                    from app.services import fow_overrides
+                    await fow_overrides.apply_in_sync(
+                        session, org_uuid, match_uuid, scorecard,
+                        lambda g: _team_pid(_parse_uuid(g)))
 
                 if bat_count == 0 and bowl_count == 0 and appear_count == 0:
                     stats["gr_games_skipped_no_data"] += 1

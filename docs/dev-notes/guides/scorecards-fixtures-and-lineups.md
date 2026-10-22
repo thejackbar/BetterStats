@@ -41,6 +41,9 @@
 **Manual cards, fall of wickets, partnerships**
 17. `get_scorecard` shares one row builder for synced and manual tables (`BI = ManualBattingInnings if is_manual else BattingInnings`). Any column read there must exist on BOTH tables or every manual card 500s. NULL `caught_behind` means the card does not say and reads as a plain catch (see Flag 1).
 18. `get_game_fall_of_wickets` and `get_game_partnerships` take `org_id` and scope the `players` join (`AND (:org_id IS NULL OR p.organisation_id = :org_id)`). Unscoped, another club's player showed on our card and wickets doubled. Fall of wickets also de-dupes by `(innings_number, wicket_number)`. A row that loses its link and has no stored name reads "Unknown", never a wrong person.
+18a. A short fall of wickets still gives stands (v9.129.0). `sync._derive_partnerships_grassroots` keeps the row-by-row walk ONLY when the FOW count equals the card's dismissals; fewer rows (but at least one) go to `partial_partnerships.derive_partial`, which works by wicket NUMBER (`order`), not row position. A stand needs both neighbouring scores (`score(N) - score(N-1)`, wicket 0 is 0) and a pair at the crease that EVERY consistent placement of the unrecorded batters agrees on; otherwise no row. More rows than dismissals, a retirement on the card, a duplicate wicket or batter, a batter not dismissed, a backwards score or an over-cap stand refuse the whole innings. Check: `verification/verify_partial_partnerships.py` (soundness over 20,000 random innings).
+18b. A club can type the fall of wickets for ITS OWN innings of a SYNCED match (`routers/game_fow.py`, cap `MANAGE_MANUAL_ENTRIES`, `services/fow_overrides.py`). Rows live in `fow_overrides` (migration 357) with NO foreign key to `games`: Full Rebuild deletes and re-stores every synced game and would cascade a FK away. Sync re-applies them per game (`apply_in_sync`, in a savepoint); the route applies them at once. They REPLACE the synced FOW and the club's partnerships for that innings (`attach_innings_detail(replace_innings=...)`); a stand holding another club's player is never deleted. Reset deletes the typed rows and reads the card again. Each save and reset writes an `audit_events` row (`area='scorecard'`), no undo button. An uploaded or imported card is not editable here (409). The match page's EDIT shows only when `is_manual` is false.
+18c. With every wicket typed, each needs its batter (the unknown-batter walk only exists for a short list). Typed batters are keyed by the raw CA participant id, resolved at apply time, so a later merge or registration needs no re-typing.
 
 **Frontend scorecard**
 19. `splitSides` files an innings under whoever batted (team name); alternating is only the fallback. A follow-on has one side batting twice in a row.
@@ -95,6 +98,7 @@ none specific to this area. A Full Rebuild (`POST /club-admin/hard-refresh`) is 
 
 ## Open follow-ups
 
+- The scorebook (`scorebook_innings.derive_partnerships`) and CricketStatz derivers still refuse a short fall of wickets; only the Cricket Australia deriver is partial-tolerant. The opposition's innings is not editable. The unbroken last stand is never derived for a synced card.
 - Fill-in stats never land in stored per-game tables (`sync_grassroots_game_level_data` gates inserts on `our_team_pids`); the live scorecard fix is view-only.
 - `fielding_stats` has no live GR merge in `get_scorecard` (DB only).
 - No admin flow to edit a fill-in's name or match a PlayHQ profile by pasted URL.

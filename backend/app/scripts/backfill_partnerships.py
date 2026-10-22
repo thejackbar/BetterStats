@@ -3,7 +3,8 @@
 WHY THIS EXISTS
 ---------------
 Sync works a game's partnerships out of its fall of wickets
-(`_derive_partnerships_grassroots`). A game stored before that was written, or
+(`_derive_partnerships_grassroots`; a fall of wickets short of the card's dismissals still gives the
+stands its figures settle, see `services/partial_partnerships.py`). A game stored before that was written, or
 while Cricket Australia had no fall of wickets for it, keeps no partnership rows,
 and a finished game is never read again for them: `repair_stored_game` (older than
 14 days) only attaches missing PLAYERS, and the re-read that also fills in fall of
@@ -77,12 +78,17 @@ def explain_innings(inn: dict) -> str:
     dismissed = _dismissed_pids_grassroots(batting)
     if not dismissed:
         return "no dismissals on the batting card"
-    if len(fow) != len(dismissed):
+    if not fow:
+        return "no fall of wickets on the card"
+    if len(fow) > len(dismissed):
         return f"{len(fow)} fall of wickets v {len(dismissed)} dismissals on the card"
     fow_pids = {f.get("participantId") for f in fow if f.get("participantId")}
     if fow_pids and not fow_pids.issubset(dismissed):
         return "a fall of wicket names a batter who was not dismissed"
     if not _derive_partnerships_grassroots(batting, fow):
+        if len(fow) < len(dismissed):
+            return (f"{len(fow)} of {len(dismissed)} wickets recorded, and none of the stands can be stated "
+                    "from them (a missing wicket's score, a retirement on the card, or a pair that depends on a guess)")
         return "a stand is worth more than its batters scored plus extras, or the score goes backwards"
     return "ok"
 

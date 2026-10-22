@@ -496,6 +496,12 @@ export const api = {
   // page needs to be told whose side to read it from.
   getScorecard: (gameId, org) =>
     request(`/games/${gameId}/scorecard${org ? `?org=${encodeURIComponent(org)}` : ''}`),
+  // A club types the fall of wickets Cricket Australia is missing for its own innings of a synced match.
+  getFowEditor: (gameId) => request(`/games/${gameId}/fall-of-wickets/editor`),
+  saveFow: (gameId, innings, rows) =>
+    request(`/games/${gameId}/fall-of-wickets/${innings}`, { method: 'PUT', body: JSON.stringify({ rows }) }),
+  resetFow: (gameId, innings) =>
+    request(`/games/${gameId}/fall-of-wickets/${innings}`, { method: 'DELETE' }),
 
   // Admin / merge tools
   getMergeCandidates: (orgId) => request(`/admin/merge-candidates?org_id=${orgId}`),

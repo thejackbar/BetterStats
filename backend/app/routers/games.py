@@ -1487,6 +1487,9 @@ async def get_scorecard(
         "home_team": home_team,
         "away_team": away_team,
         "home_away_known": home_away_known,
+        # An uploaded or imported card (not a synced one). The match page offers a typed fall of
+        # wickets only for a synced match; a manual card is edited from Manual entries.
+        "is_manual": bool(is_manual),
         # False only for an imported match whose source recorded both innings
         # and not the order they were batted in. The page then names each card
         # by its team rather than "Innings 1" and draws no winning margin, since

@@ -254,7 +254,39 @@ async def attach(db: AsyncSession, org_id, game_id, scorecard: dict, wanted: dic
     return n
 
 
-async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: dict, resolve) -> dict:
+def is_club_innings_of(inn: dict, team: dict, resolve, our_pids: set) -> bool:
+    """Whether this innings of a scorecard is the club's own side batting.
+
+    The batting team's id when the payload carries one, else a vote: the club's innings is the
+    card whose batters are mostly club players. The same test sync applies when it stores a game.
+    """
+    inn_team_id = None
+    for key in ("battingTeamId", "teamId"):
+        if inn.get(key):
+            inn_team_id = str(inn[key]).lower()
+            break
+    if inn_team_id is None:
+        for key in ("battingTeam", "team"):
+            o = inn.get(key)
+            if isinstance(o, dict) and o.get("id"):
+                inn_team_id = str(o["id"]).lower()
+                break
+    if inn_team_id is not None and team.get("id"):
+        return inn_team_id == str(team["id"]).lower()
+    club_n = total_n = 0
+    for br in inn.get("batting") or []:
+        bp = br.get("participantId")
+        if not bp:
+            continue
+        total_n += 1
+        c = resolve(bp)
+        if c is not None and c in our_pids:
+            club_n += 1
+    return total_n > 0 and club_n * 2 > total_n
+
+
+async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: dict, resolve,
+                                replace_innings: frozenset = frozenset()) -> dict:
     """Add the fall of wickets and partnerships a stored game lacks, one innings at a time.
 
     The scorecard route draws batting from live Cricket Australia data but reads fall of wickets and
@@ -265,6 +297,10 @@ async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: di
     Per innings and per table, rows are written only when the game has NONE for that innings: a
     shared fixture's other club may have written them already (they cover both innings), and a
     partial set is never mixed with a second one. Nothing is overwritten or deleted.
+
+    `replace_innings` names innings whose rows the caller has just cleared on purpose (a club's typed
+    fall of wickets, see `fow_overrides`): they are written even if rows remain, such as a stand the
+    other club of a shared fixture holds in the same innings.
     """
     team = _our_team(scorecard, org_id)
     n = {"fow": 0, "partnerships": 0}
@@ -285,6 +321,8 @@ async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: di
         "SELECT DISTINCT innings_number FROM fall_of_wickets WHERE game_id = :g"), {"g": gid})).all()}
     have_part = {r[0] for r in (await db.execute(text(
         "SELECT DISTINCT innings_number FROM partnerships WHERE game_id = :g"), {"g": gid})).all()}
+    have_fow -= set(replace_innings)
+    have_part -= set(replace_innings)
 
     for inn in scorecard.get("innings") or []:
         inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
@@ -307,30 +345,7 @@ async def attach_innings_detail(db: AsyncSession, org_id, game_id, scorecard: di
 
         if inn_num in have_part:
             continue
-        inn_team_id = None
-        for key in ("battingTeamId", "teamId"):
-            if inn.get(key):
-                inn_team_id = str(inn[key]).lower()
-                break
-        if inn_team_id is None:
-            for key in ("battingTeam", "team"):
-                o = inn.get(key)
-                if isinstance(o, dict) and o.get("id"):
-                    inn_team_id = str(o["id"]).lower()
-                    break
-        if inn_team_id is not None and team.get("id"):
-            is_club_innings = inn_team_id == str(team["id"]).lower()
-        else:
-            club_n = total_n = 0
-            for br in batting_rows:
-                bp = br.get("participantId")
-                if not bp:
-                    continue
-                total_n += 1
-                c = resolve(bp)
-                if c is not None and c in our_pids:
-                    club_n += 1
-            is_club_innings = total_n > 0 and club_n * 2 > total_n
+        is_club_innings = is_club_innings_of(inn, team, resolve, our_pids)
 
         for p in _derive_partnerships_grassroots(batting_rows, fow_rows):
             b1_id = b2_id = b1_name = b2_name = None
