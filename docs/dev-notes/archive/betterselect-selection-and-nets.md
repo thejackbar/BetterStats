@@ -1822,3 +1822,13 @@ Asked for: after v9.129.3 the OD6 Black 2 squad had its games (sync matched 11),
 Fix: `GET /teams` carries `matched_grades` (`_matched_grades`): the grade names of the squad's upcoming, non-cancelled games, only for a squad with no grade or teams of its own. The header shows them with "by team name" and keeps the amber "No grade linked" only when a squad has neither. The squad is deliberately not linked to the grade: a grade belongs to one squad, so linking would take it from the 8th XI.
 
 Check: `verify_shared_grade_squads.py` section E (29 checks; the control without the field fails both E checks).
+
+## Whiteboard: changing a locked side (v9.129.5)
+
+Asked for: on the Selection Whiteboard a locked side was hard to move players in and out of. The board ignored the lock, so a drag appeared to work and the autosave was then refused (409 `locked`) and the column showed "Not saving".
+
+Fix: the whiteboard knows each column's `locked` (from `data.fixture.locked`; a locked side shows its confirmed XI and ignores any draft, as the board does). Every edit (drop, remove, swap, tap from the pool, captain, keeper) goes through `guarded(fids, apply)`: if a side involved is locked it asks `window.confirm("<team> is locked. Are you sure you want to change it?")`, applies the change, then sends the existing `POST /selection/{id}/unlock` (audited as `unlocked`) and only then lets autosave run. Autosave skips a locked column. A failed unlock reloads the column. A 409 `locked` on a draft save (locked by someone else since load) re-marks the column locked and keeps the change on the board; the next edit asks. Confirm still locks (`lock: true`). No backend change.
+
+Not done: an unlocked side that ends up unchanged (a move undone) stays unlocked until it is confirmed or locked from the board.
+
+Check: `frontend/verification/verify_whiteboard_locked_browser.mjs` (33 checks; the control on the previous build fails 18 of them: no prompt, the draft goes to a locked side and is refused). `verify_draft_table_browser.mjs` and `verify_two_day_whiteboard_browser.mjs` still pass.
