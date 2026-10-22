@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 # timezone-pinned in this file uses Perth; the sync jobs used to be the
 # exception and silently ran on UTC.
 PERTH = ZoneInfo("Australia/Perth")
+# The daily product update goes out on the team's morning, not the clubs'.
+MELBOURNE = ZoneInfo("Australia/Melbourne")
 
 scheduler = AsyncIOScheduler()
 
@@ -647,6 +650,33 @@ async def run_notification_scan():
         logger.error(f"Notification scan failed: {e}")
 
 
+async def run_product_update():
+    """Daily product update, 09:00 Melbourne time (see services/product_blast.py).
+
+    Reads the releases not yet covered, has the model write a short club-facing
+    note, checks it, and raises it in every club's notifications. Does nothing
+    while the Stop switch is on, and posts nothing on a day with nothing
+    client-facing. Never raises."""
+    from app.services import product_blast
+    try:
+        result = await product_blast.run_daily()
+        logger.info(f"Product update: {result.get('status')} {result.get('reason') or ''}".strip())
+    except Exception as e:
+        logger.error(f"Product update failed: {e}")
+
+
+async def run_product_update_if_missed():
+    """Run today's product update if the 09:00 run did not happen or did not finish
+    (see ``product_blast.run_missed_today``). A no-op on a normal day."""
+    from app.services import product_blast
+    try:
+        result = await product_blast.run_missed_today()
+        if result.get("status") not in ("early", "already_ran"):
+            logger.info(f"Product update catch-up: {result.get('status')} {result.get('reason') or ''}".strip())
+    except Exception as e:
+        logger.error(f"Product update catch-up failed: {e}")
+
+
 async def send_diary_reminders():
     """Daily Club Diary reminder scan — opt-in per task definition (off by
     default), not gated by any platform flag since Club Diary is an
@@ -1009,6 +1039,41 @@ def start_scheduler():
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+    )
+    # Daily product update — 09:00 Melbourne, the team's morning.
+    scheduler.add_job(
+        run_product_update,
+        trigger="cron",
+        hour=9,
+        minute=0,
+        timezone=MELBOURNE,
+        id="daily_product_update",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # Jobs live in memory, so a restart across 09:00 loses that day's run (APScheduler
+    # does not replay a run the process was not alive for), and a changelog that was
+    # unreachable at 09:00 leaves only a failed row. This second job and the one-off
+    # at start-up run the same check hourly through the working day and do nothing
+    # once the day has been dealt with.
+    scheduler.add_job(
+        run_product_update_if_missed,
+        trigger="cron",
+        hour="10-17",
+        minute=5,
+        timezone=MELBOURNE,
+        id="daily_product_update_retry",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        run_product_update_if_missed,
+        trigger="date",
+        run_date=datetime.now(timezone.utc) + timedelta(minutes=3),
+        id="product_update_startup_check",
+        replace_existing=True,
     )
     # Meta Ads HQ dashboard — hourly campaign/ad snapshot (was daily 09:00
     # Perth; hourly per direct request for the self-serve campaign launch, so

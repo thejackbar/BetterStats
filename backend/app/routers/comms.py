@@ -54,7 +54,7 @@ from app.routers.auth import get_current_user, get_current_club, require_super_a
 from app.services.marketing_org import get_outreach_org, org_is_outreach
 from app.services import email_suppression as suppress
 from app.services import comms_segments
-from app.services import club_trial_window
+from app.services import club_teaser_images, club_trial_window
 from app.services import comms_contacts
 from app.services import comms_lists
 from app.services import directory
@@ -520,6 +520,8 @@ MERGE_VARIABLES = [
     {"name": "trial_days_left", "desc": "Days until the recipient club's trial ends (blank if it isn't on a trial)", "marketing_only": True},
     {"name": "trial_days_since_expiry", "desc": "Days since the recipient club's trial expired (blank if it hasn't)", "marketing_only": True},
     {"name": "trial_end_date", "desc": "The date the recipient club's trial ends or ended, e.g. 14 September 2026", "marketing_only": True},
+    {"name": "teaser_url", "desc": "Link to the recipient club's own season page (blank if the club has no snapshot yet). Opens a page where tapping anything invites them to claim the club", "marketing_only": True},
+    {"name": "teaser_image_url", "desc": "Address of the recipient club's season picture, for an image in the email (blank until the picture has been drawn). Put it inside a link to {{teaser_url}}", "marketing_only": True},
     {"name": "utm_source", "desc": "Source from this email's UTM section (place inside a link)", "marketing_only": True},
     {"name": "utm_medium", "desc": "Medium from this email's UTM section (place inside a link)", "marketing_only": True},
     {"name": "utm_campaign", "desc": "Campaign from this email's UTM section (place inside a link)", "marketing_only": True},
@@ -550,7 +552,11 @@ async def _trial_vars(db: AsyncSession, mc: "Optional[MarketingClub]") -> dict:
     prospect trial to report, so the variables simply don't apply there)."""
     if mc is None:
         return {}
-    return await club_trial_window.vars_for_marketing_club(db, mc)
+    # The teaser link and picture ride along with the trial figures: both are
+    # computed facts about the recipient's club, resolved in one place for the
+    # preview, the test send and the real send, and neither is overridable.
+    return {**await club_trial_window.vars_for_marketing_club(db, mc),
+            **await club_teaser_images.vars_for_marketing_club(db, mc)}
 
 
 def _contact_vars(mc: "Optional[MarketingClub]", overrides: "Optional[dict]",
@@ -583,7 +589,11 @@ async def _sample_dir_vars(db: AsyncSession, org: Organisation) -> Optional[dict
         return None
     mc = (await db.execute(
         select(MarketingClub).where(MarketingClub.detail_fetched_at.isnot(None))
-        .order_by(MarketingClub.name).limit(1))).scalars().first()
+        # A club with a drawn teaser picture first, so the preview can show it.
+        .order_by(text("EXISTS (SELECT 1 FROM club_teaser_snapshots t WHERE "
+                       "t.marketing_club_id = marketing_clubs.id AND t.status = 'ok' "
+                       "AND t.image_version IS NOT NULL) DESC"), MarketingClub.name)
+        .limit(1))).scalars().first()
     if mc:
         return {**_marketing_vars(mc), **await _trial_vars(db, mc)}
     # A made-up club has no real trial, and the sample must not imply one — the
@@ -591,7 +601,7 @@ async def _sample_dir_vars(db: AsyncSession, org: Organisation) -> Optional[dict
     # trial, so the preview shows the honest worst case rather than a number.
     return {"club": "Sample Cricket Club", "association": "Sample Association",
             "utm_code": "sample-cricket-club", "state": "WA", "website": "https://example.com",
-            **club_trial_window.BLANK_TRIAL_VARS}
+            **club_trial_window.BLANK_TRIAL_VARS, **club_teaser_images.BLANK_TEASER_VARS}
 
 
 def _context_var_keys(org: Organisation) -> list:
@@ -601,7 +611,8 @@ def _context_var_keys(org: Organisation) -> list:
     keys = ["first_name", "name", "email", "club"]
     if org_is_outreach(org):
         keys += ["association", "utm_code", "state", "website",
-                 "trial_days_left", "trial_days_since_expiry", "trial_end_date"]
+                 "trial_days_left", "trial_days_since_expiry", "trial_end_date",
+                 "teaser_url", "teaser_image_url"]
     keys.append("unsubscribe_url")
     return keys
 
@@ -1781,10 +1792,14 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
                 # renders blank instead of going out as a raw token.
                 trial_by_club = await club_trial_window.vars_by_marketing_club(
                     s, [mc for _, _, mc in rows_v if mc is not None])
+                # And their teaser link / picture, in one read as well.
+                teaser_by_club = await club_teaser_images.vars_by_marketing_club(
+                    s, [mc for _, _, mc in rows_v if mc is not None])
                 for cid, ov, mc in rows_v:
                     merged = _contact_vars(
                         mc, ov,
-                        trial_by_club.get(mc.id, club_trial_window.BLANK_TRIAL_VARS)
+                        {**trial_by_club.get(mc.id, club_trial_window.BLANK_TRIAL_VARS),
+                         **teaser_by_club.get(mc.id, club_teaser_images.BLANK_TEASER_VARS)}
                         if mc is not None else None)
                     if merged:
                         mc_vars[cid] = merged
@@ -3352,6 +3367,69 @@ STARTER_TEMPLATES = [
         ),
     },
 ]
+
+
+# Starter templates for the BetterCricket outreach org ONLY. They use merge
+# variables that mean nothing to an ordinary club ({{teaser_url}} resolves for a
+# Club Directory recipient and for nobody else), so they are not in
+# STARTER_TEMPLATES, which every club gets.
+OUTREACH_STARTER_TEMPLATES = [
+    {
+        "name": "Club season snapshot",
+        "html": (
+            '<p style="margin:0 0 4px 0; font-family:inherit; font-size:12px; letter-spacing:0.08em; '
+            'text-transform:uppercase; color:#8a8a92;">Your season so far</p>\n'
+            '<h1 style="margin:0 0 16px 0; font-family:inherit; font-size:22px; line-height:1.3; '
+            'color:#1c1c21; font-weight:700;">{{club}}\'s season is already on BetterCricket</h1>\n\n'
+            '<p style="margin:0 0 20px 0;">Hi {{first_name}},<br><br>We took {{club}}\'s season from '
+            'Cricket Australia\'s public match data and built it into a page: your top run-scorers and '
+            'wicket-takers, your ladder places and your season bests. Tap the picture to see it.</p>\n\n'
+            '<!-- Both variables are blank for a club with no snapshot or no picture yet. Send this '
+            'only to the audience rule "Club has a teaser snapshot: Snapshot and picture ready". -->\n'
+            '<p style="margin:0 0 20px 0;">\n'
+            '  <a href="{{teaser_url}}" target="_blank">\n'
+            '    <img src="{{teaser_image_url}}" width="560" alt="{{club}}: your season so far on BetterCricket" '
+            'style="display:block; width:100%; max-width:560px; height:auto; border:0; border-radius:8px;">\n'
+            '  </a>\n'
+            '</p>\n\n'
+            '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">\n'
+            '<tr><td align="center" bgcolor="#16c784" style="border-radius:6px;">\n'
+            '  <a href="{{teaser_url}}" target="_blank" style="display:block; padding:12px 24px; '
+            'font-family:inherit; font-size:14px; font-weight:700; color:#08110b;">See {{club}}\'s season</a>\n'
+            '</td></tr>\n'
+            '</table>\n\n'
+            '<p style="margin:0 0 20px 0;">If it looks like your club, you can claim it from that page. '
+            'It is a free trial, no card, and takes about three minutes to set up.</p>\n\n'
+            '<p style="margin:0 0 20px 0; font-size:12px; color:#8a8a92;">Picture not showing? '
+            'Open your page here: {{teaser_url}}</p>\n\n'
+            '<p style="margin:0;">Regards,<br>The BetterCricket team</p>\n'
+        ),
+    },
+]
+
+
+async def seed_outreach_templates(conn) -> int:
+    """Put the outreach-only starter templates into the BetterCricket outreach
+    org's library (the DB flag, or the configured slug as the fallback, the same
+    two ways ``marketing_org`` finds it). Same rule as ``seed_starter_templates``:
+    a same-named template that has content is never touched."""
+    slug = (settings.marketing_outreach_org_slug or "").strip()
+    total = 0
+    for t in OUTREACH_STARTER_TEMPLATES:
+        result = await conn.execute(
+            text("""
+                INSERT INTO comms_templates (id, organisation_id, name, html)
+                SELECT gen_random_uuid(), o.id, :name, :html
+                FROM organisations o
+                WHERE o.is_marketing_outreach IS TRUE OR (:slug <> '' AND o.slug = :slug)
+                ON CONFLICT (organisation_id, name) DO UPDATE
+                    SET html = EXCLUDED.html, updated_at = NOW()
+                    WHERE btrim(regexp_replace(comms_templates.html, '<[^>]*>', '', 'g')) = ''
+            """),
+            {"name": t["name"], "html": t["html"], "slug": slug},
+        )
+        total += result.rowcount or 0
+    return total
 
 
 async def seed_starter_templates(conn) -> int:

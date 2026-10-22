@@ -36,7 +36,7 @@ import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
 import { formatSeason } from '../../../lib/cricketFormat'
-import { AVAILABILITY, AVAIL_ORDER, combineStatus, halfStatus } from '../../../lib/availability'
+import { AVAILABILITY, AVAIL_ORDER, availSortRank, combineStatus, halfStatus } from '../../../lib/availability'
 import {
   Icon, Avatar, Dot, AvailDot, RoleChips, Btn, Search, Chip, Empty, AvailSummary, QuickAvailModal, WeekFlag,
   RecencySelect, playedWithinYears, monthsAgoISO, recencyOf,
@@ -506,10 +506,14 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
   const { onCardDragStart, onCardDragEnd, ...columnDrag } = dragHandlers
   const sorted = useMemo(() => {
     if (sortMode === 'first' || sortMode === 'last') return orderPlayers(members, sortMode)
+    // The shared availability sort (lib/availability `availSortRank`): a player free
+    // one week of the next two-day game and away the other leads; the rest keep the
+    // combined answer (`statusOf`, the least favourable week). Ordering only.
+    const rank = (id) => availSortRank(statusOf(id), next.endDate ? [next.date, next.endDate].map((date) => ({ date, status: statusAt(id, date) })) : null)
     return [...members].sort((a, b) =>
-      (AVAILABILITY[statusOf(a.id)]?.rank ?? 9) - (AVAILABILITY[statusOf(b.id)]?.rank ?? 9)
+      rank(a.id) - rank(b.id)
       || (a.display_name || a.name || '').localeCompare(b.display_name || b.name || ''))
-  }, [members, statusOf, sortMode])
+  }, [members, statusOf, statusAt, next.date, next.endDate, sortMode])
 
   return (
     <div {...columnDrag} className="pb-card flex flex-col min-h-0 transition-colors self-start"

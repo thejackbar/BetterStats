@@ -8,18 +8,72 @@
 // library's CDN default when that folder is not there.
 //
 // The model runs in a Web Worker so the page stays responsive; if a worker
-// cannot start, it runs on the main thread instead. WebGPU is used when the
-// browser has it (seconds become well under one); the WASM path is one thread
-// (the app is not cross-origin isolated). Same fp16 model on both: the smaller
-// quint8 one only saved ~30% in a CPU test, not worth the quality risk.
+// cannot start, it runs on the main thread instead. On a desktop browser with
+// WebGPU it uses the graphics chip (seconds become well under one); otherwise
+// the WASM path is one thread (the app is not cross-origin isolated).
+//
+// Phones and tablets, low-memory devices, and any device where the last cut-out
+// never finished take the constrained path: no WebGPU, no background preload,
+// the photo shrunk before it is read, the light model (see bgRemovalCore.js),
+// and the worker thrown away afterwards so its memory comes back. The full ISNet
+// model needs ~770MB of working memory, which gets a phone tab killed (the page
+// goes blank and reloads, so there is no error to catch).
 import { cutOutCore } from './bgRemovalCore'
 
 const BASE = import.meta.env.BASE_URL || '/'
 const LOCAL_PATH = `${BASE}assets/bg-removal/`
 
+const INFLIGHT = 'bgRemoval.inflight'
+const CRASHED = 'bgRemoval.crashed'
+// The opt-in full-quality run on a phone died: stop offering it there.
+const FULL_CRASHED = 'bgRemoval.fullCrashed'
+
+const store = {
+  get: (k) => { try { return window.localStorage.getItem(k) } catch { return null } },
+  set: (k, v) => { try { window.localStorage.setItem(k, v) } catch { /* private mode */ } },
+  del: (k) => { try { window.localStorage.removeItem(k) } catch { /* private mode */ } },
+}
+
+// A run that was under way when the page died leaves INFLIGHT behind (pagehide
+// clears it on a normal close or navigation, but a killed tab gets no event).
+if (typeof window !== 'undefined') {
+  const left = store.get(INFLIGHT)
+  if (left) { store.set(left === 'full' ? FULL_CRASHED : CRASHED, '1'); store.del(INFLIGHT) }
+  window.addEventListener('pagehide', () => store.del(INFLIGHT))
+}
+
+// True while the last cut-out on this device did not finish and none has since.
+export function cutOutCrashedBefore() {
+  return store.get(CRASHED) === '1'
+}
+
+// Whether the opt-in full-quality cut-out on a phone is still worth offering.
+export function fullQualityOffered() {
+  return store.get(FULL_CRASHED) !== '1'
+}
+
+// INFLIGHT holds the kind of run under way: 'full' (the heavy opt-in one) or 'normal'.
+let active = 0
+function runStarted(kind) { if (active++ === 0 || kind === 'full') store.set(INFLIGHT, kind) }
+function runEnded(ok, kind) {
+  if (--active <= 0) { active = 0; store.del(INFLIGHT) }
+  if (ok) { store.del(CRASHED); if (kind === 'full') store.del(FULL_CRASHED) }
+}
+
+function isConstrainedDevice() {
+  const ua = navigator.userAgent || ''
+  const handheld = /Android|iPhone|iPad|iPod|Mobile/i.test(ua)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) // iPadOS asks for the desktop site
+  const lowMemory = typeof navigator.deviceMemory === 'number' && navigator.deviceMemory <= 4
+  return handheld || lowMemory || cutOutCrashedBefore()
+}
+
 let envPromise = null
 
-// Resolve once per page: where the files live and whether WebGPU is usable.
+// What the ONNX runtime says when the browser will not give it memory.
+const OUT_OF_MEMORY = /out of memory|no available backend|RangeError|bad_alloc|OOM/i
+
+// Resolve once per page: where the files live, which path this device takes.
 function resolveEnv() {
   if (!envPromise) {
     envPromise = (async () => {
@@ -32,12 +86,35 @@ function resolveEnv() {
         if (json && json['/models/isnet_fp16']) publicPath = url.href.replace('resources.json', '')
       } catch { /* fall back to the CDN default */ }
 
-      let gpu = false
-      try {
-        gpu = !!(navigator.gpu && await navigator.gpu.requestAdapter())
-      } catch { /* no WebGPU */ }
+      const constrained = isConstrainedDevice()
 
-      return { publicPath, gpu }
+      let light = null
+      if (constrained && publicPath) {
+        try {
+          const res = await fetch(new URL('light-model.json', publicPath))
+          const meta = res.ok ? await res.json() : null
+          if (meta?.name && meta.size) light = { url: new URL(meta.name, publicPath).href, size: meta.size }
+        } catch { /* no light model: ISNet quint8 below */ }
+      }
+
+      let gpu = false
+      if (!constrained) {
+        try {
+          gpu = !!(navigator.gpu && await navigator.gpu.requestAdapter())
+        } catch { /* no WebGPU */ }
+      }
+
+      return {
+        publicPath,
+        gpu,
+        constrained,
+        light,
+        kind: light ? 'light' : 'isnet_quint8', // what our own ONNX call runs on a constrained device
+        // ISNet fallback for a constrained device with no light model: the
+        // quint8 variant, on a shrunk photo.
+        model: constrained ? 'isnet_quint8' : 'isnet_fp16',
+        maxSide: constrained ? 1600 : 0,
+      }
     })()
   }
   return envPromise
@@ -108,19 +185,62 @@ export function releaseBackgroundRemoval() {
 export async function preloadBackgroundRemoval() {
   try {
     const env = await resolveEnv()
-    await callWorker({ type: 'preload', env })
+    if (env.constrained) return // would hold the model's memory while the person is only cropping
+    runStarted('normal')
+    try {
+      await callWorker({ type: 'preload', env })
+    } finally {
+      runEnded(false, 'normal')
+    }
   } catch { /* the real call reports its own error */ }
 }
 
-// Cut the subject out of an image URL. Resolves to a PNG Blob.
-// onProgress gets { stage: 'download' | 'compute', pct }.
-export async function removeBackgroundFromUrl(srcUrl, onProgress) {
-  const env = await resolveEnv()
+// Cut the subject out of an image URL. Resolves to { blob, light }: a PNG Blob,
+// and whether the light model made it (rougher edges, so the editor offers a
+// retry). onProgress gets { stage: 'download' | 'compute', pct }.
+// { full: true } makes a constrained device run the full ISNet model on the
+// shrunk photo, the opt-in way to a better cut-out: it can take a phone tab down.
+export async function removeBackgroundFromUrl(srcUrl, onProgress, { full = false } = {}) {
+  const base = await resolveEnv()
+  const env = full && base.constrained
+    ? { ...base, light: null, kind: 'isnet_fp16', model: 'isnet_fp16', gpu: false }
+    : base
+  const kind = full && base.constrained ? 'full' : 'normal'
+  runStarted(kind)
+  let ok = false
   try {
-    return await callWorker({ type: 'run', url: srcUrl, env }, onProgress)
-  } catch (err) {
-    if (!err.workerBroken) throw err
-    console.warn('Background removal worker unavailable, running on the main thread', err)
-    return cutOutCore(srcUrl, env, onProgress)
+    const attempt = async () => {
+      try {
+        return await callWorker({ type: 'run', url: srcUrl, env }, onProgress)
+      } catch (err) {
+        if (!err.workerBroken) throw err
+        console.warn('Background removal worker unavailable, running on the main thread', err)
+        return cutOutCore(srcUrl, env, onProgress)
+      }
+    }
+    let blob
+    try {
+      try {
+        blob = await attempt()
+      } catch (err) {
+        // A phone can refuse the runtime's memory while a previous worker's is
+        // still being handed back. Give it a moment on a fresh worker, once.
+        if (!(env.constrained && OUT_OF_MEMORY.test(err.message))) throw err
+        releaseBackgroundRemoval()
+        await new Promise((r) => setTimeout(r, 1500))
+        blob = await attempt()
+      }
+    } catch (err) {
+      if (!OUT_OF_MEMORY.test(err.message)) throw err
+      if (kind === 'full') store.set(FULL_CRASHED, '1') // this phone cannot do the full one
+      throw new Error(kind === 'full'
+        ? 'This phone does not have enough memory for the full-quality cut-out. The quick cut-out or the logo button will still work.'
+        : 'This device ran out of memory for the cut-out. Close other tabs and try again, or use the logo button.')
+    }
+    ok = true
+    return { blob, light: !!env.light }
+  } finally {
+    runEnded(ok, kind)
+    if (env.constrained) releaseBackgroundRemoval() // hand the model's memory back
   }
 }

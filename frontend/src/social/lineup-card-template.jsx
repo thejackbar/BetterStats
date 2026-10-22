@@ -24,6 +24,8 @@ import { AutoFitText, CreditMark, RoleChip, DebutTag, LINEUP_MAX } from './crick
 import { mixHex } from './split-template'
 import { aspectOf, pick } from './postAspect'
 import { LayerRoot } from './postLayers'
+import { pc, pt, inkOn, registerParts, colorPart, textPart, colorPart as C, textPart as T, picked as partPicked } from './layoutParts'
+import { usePostLook } from './postLook'
 
 // The club's chosen display face and its weight (Style, Font in the editor), the
 // same variables every other layout reads, so the card follows the brand.
@@ -202,15 +204,17 @@ function useSharedNameSize(listRef, cap) {
 
 export function LineupCard({
   width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players, palette = {},
-  card, sponsorCount = 1, sponsorPanel = 'light', logoRatio = 1, headline = '',
+  card, sponsorCount = 1, sponsorPanel = 'light', logoRatio = 1, headline = '', parts,
 }) {
   const P = (players || []).slice(0, LINEUP_MAX)
   const c = { ...LINEUP_CARD_DEFAULTS, ...(card || {}) }
   const accent = palette.accent || '#1d4ed8'
-  const panel = c.panel || accent
-  const corner = c.corner || accent
-  const cornerLight = mixHex(corner, '#ffffff', 0.38)
-  const wash = c.wash || cardWashDefault(accent)
+  // The club's saved card look is the floor; a part picked for this post sits on
+  // top of it, and a part left alone keeps whatever the saved look produces.
+  const panel = pc(parts, 'cardBg', c.panel || accent)
+  const corner = pc(parts, 't12Corner', c.corner || accent)
+  const cornerLight = pc(parts, 't12CornerStripe', mixHex(corner, '#ffffff', 0.38))
+  const wash = pc(parts, 't12Wash', c.wash || cardWashDefault(accent))
   const washOpacity = Math.max(0, Math.min(1, Number(c.washOpacity)))
   const g = cardGeo(width, height, sponsorCount, P.length)
   const { A, rowH } = g
@@ -220,10 +224,11 @@ export function LineupCard({
   const pale = isLight(wash) && (photoOnly || washOpacity > 0.5)
   const ink = pale ? '#0b0b0c' : '#ffffff'
   const panelInk = isLight(panel) ? '#0b0b0c' : '#ffffff'
-  const rail = mixHex(panel, panelInk === '#ffffff' ? '#ffffff' : '#000000', 0.14)
-  const line = panelInk === '#ffffff' ? 'rgba(255,255,255,0.26)' : 'rgba(0,0,0,0.22)'
-  const chipBg = panelInk === '#ffffff' ? '#ffffff' : '#0b0b0c'
-  const chipInk = panelInk === '#ffffff' ? '#0b0b0c' : '#ffffff'
+  const rail = pc(parts, 't12Rail', mixHex(panel, panelInk === '#ffffff' ? '#ffffff' : '#000000', 0.14))
+  const line = pc(parts, 'dividerColor', panelInk === '#ffffff' ? 'rgba(255,255,255,0.26)' : 'rgba(0,0,0,0.22)')
+  const chipBg = pc(parts, 'badgeBg', panelInk === '#ffffff' ? '#ffffff' : '#0b0b0c')
+  // The tag's text follows its background once the club has set one.
+  const chipInk = pc(parts, 'badgeColor', partPicked(parts, 'badgeBg') ? inkOn(chipBg) : (panelInk === '#ffffff' ? '#0b0b0c' : '#ffffff'))
   const listRef = useRef(null)
   const nameCap = Math.round(rowH * 0.62)
   const { size: nameSize, fontSig } = useSharedNameSize(listRef, nameCap)
@@ -241,8 +246,11 @@ export function LineupCard({
   const logoH = logoW / ratio
 
   // The Backing choice in the Sponsors tool colours the whole bar, not a box in it.
-  const barBg = sponsorPanel === 'dark' ? 'rgba(8,10,14,0.9)' : sponsorPanel === 'none' ? 'transparent' : '#ffffff'
-  const barLight = barBg === '#ffffff'
+  const barDrawn = sponsorPanel !== 'none'
+  const barBase = sponsorPanel === 'dark' ? 'rgba(8,10,14,0.9)' : sponsorPanel === 'none' ? 'transparent' : '#ffffff'
+  // A colour picked for the bar only counts while there is a bar (Backing: None draws none).
+  const barBg = barDrawn ? pc(parts, 'footerBg', barBase) : barBase
+  const barLight = barDrawn && partPicked(parts, 'footerBg') ? isLight(barBg) : barBg === '#ffffff'
   const detailsX = LIST_X + LIST_W + 48
   const detailsW = width - EDGE - detailsX
   const fixture = pick(A, { square: 58, portrait: 64, story: 70 })
@@ -295,10 +303,10 @@ export function LineupCard({
             }}>
               <div style={{
                 width: numW, flexShrink: 0, textAlign: 'right', paddingRight: 12, boxSizing: 'border-box',
-                fontSize: nameSize, lineHeight: 1, opacity: 0.92,
+                fontSize: nameSize, lineHeight: 1, opacity: 0.92, color: pc(parts, 'numColor', undefined),
               }}>{i + 1}.</div>
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                <span data-name="" style={{ display: 'inline-block', whiteSpace: 'nowrap', fontSize: nameSize, letterSpacing: 0.3, lineHeight: 1.1, color: panelInk }}>
+                <span data-name="" style={{ display: 'inline-block', whiteSpace: 'nowrap', fontSize: nameSize, letterSpacing: 0.3, lineHeight: 1.1, color: pc(parts, 'nameColor', panelInk) }}>
                   {`${p.first || ''} ${p.last || ''}`.trim()}
                 </span>
               </div>
@@ -321,24 +329,24 @@ export function LineupCard({
       }}>
         {compText && (
           <AutoFitText text={compText} max={Math.round(small * 0.7)} min={12} lines={1}
-            measureDeps={[fontSig]} style={{ letterSpacing: 2, lineHeight: 1.2, opacity: 0.85, marginBottom: 14 }} />
+            measureDeps={[fontSig]} style={{ letterSpacing: 2, lineHeight: 1.2, opacity: 0.85, marginBottom: 14, color: pc(parts, 'roundColor', undefined) }} />
         )}
         {(headline || '').trim() && (
           <AutoFitText text={headline.trim().toUpperCase()} max={Math.round(small * 0.8)} min={12} lines={1}
-            measureDeps={[fontSig]} style={{ letterSpacing: 1.5, lineHeight: 1.2, marginBottom: 10 }} />
+            measureDeps={[fontSig]} style={{ letterSpacing: 1.5, lineHeight: 1.2, marginBottom: 10, color: pc(parts, 't12Headline', undefined) }} />
         )}
         <AutoFitText text={(team.name || '').toUpperCase()} max={fixture} min={18} lines={1}
-          measureDeps={[fontSig]} style={{ letterSpacing: 0.5, lineHeight: 1.15 }} />
-        <div style={{ fontSize: Math.round(small * 0.85), lineHeight: 1.5, letterSpacing: 1 }}>VS</div>
+          measureDeps={[fontSig]} style={{ letterSpacing: 0.5, lineHeight: 1.15, color: pc(parts, 'clubColor', undefined) }} />
+        <div style={{ fontSize: Math.round(small * 0.85), lineHeight: 1.5, letterSpacing: 1, color: pc(parts, 't12VsColor', undefined) }}>{pt(parts, 't12Vs', 'VS')}</div>
         <AutoFitText text={(opponent.name || '').toUpperCase()} max={fixture} min={18} lines={1}
-          measureDeps={[fontSig]} style={{ letterSpacing: 0.5, lineHeight: 1.15 }} />
+          measureDeps={[fontSig]} style={{ letterSpacing: 0.5, lineHeight: 1.15, color: pc(parts, 'oppColor', undefined) }} />
         <div style={{ marginTop: 34 }}>
           <AutoFitText text={(match.date || '').toUpperCase()} max={small} min={14} lines={1}
-            measureDeps={[fontSig]} style={{ letterSpacing: 0.4, lineHeight: 1.3 }} />
+            measureDeps={[fontSig]} style={{ letterSpacing: 0.4, lineHeight: 1.3, color: pc(parts, 't12DateColor', undefined) }} />
           <AutoFitText text={(match.time || '').toUpperCase()} max={small} min={14} lines={1}
-            measureDeps={[fontSig]} style={{ letterSpacing: 0.4, lineHeight: 1.3 }} />
+            measureDeps={[fontSig]} style={{ letterSpacing: 0.4, lineHeight: 1.3, color: pc(parts, 't12DateColor', undefined) }} />
           <AutoFitText text={(match.venue || '').toUpperCase()} max={small} min={14} lines={2}
-            measureDeps={[fontSig]} style={{ letterSpacing: 0.4, lineHeight: 1.3 }} />
+            measureDeps={[fontSig]} style={{ letterSpacing: 0.4, lineHeight: 1.3, color: pc(parts, 't12VenueColor', undefined) }} />
         </div>
       </div>
 
@@ -351,6 +359,34 @@ export function LineupCard({
   )
 }
 LineupCard.displayName = 'LineupCard'
+
+// What the club can set on the Match Day Card (Brand, "Match Day Card elements"). The
+// photo, wash, corner, panel and logo are the club's saved card look; a colour picked
+// here is for this post and wins over it, and Auto keeps the saved look.
+const T12_BG = 'Background', T12_LIST = 'Starting XI', T12_DET = 'Fixture details', T12_BAR = 'Sponsor bar'
+registerParts({
+  T12: [
+    C('t12Wash', 'Colour wash', T12_BG, (p) => cardWashDefault(p.accent), { autoLabel: 'Card style' }),
+    C('t12Corner', 'Corner slashes', T12_BG, (p) => p.accent, { autoLabel: 'Card style' }),
+    C('t12CornerStripe', 'Corner light stripe', T12_BG, (p) => mixHex(p.accent, '#ffffff', 0.38)),
+    C('cardBg', 'XI panel', T12_LIST, (p) => p.accent, { autoLabel: 'Card style' }),
+    C('t12Rail', 'Icon column', T12_LIST, (p) => mixHex(p.accent, isLight(p.accent) ? '#000000' : '#ffffff', 0.14)),
+    C('dividerColor', 'Row dividers', T12_LIST, (p) => (isLight(p.accent) ? '#000000' : '#ffffff')),
+    C('numColor', 'Number', T12_LIST, (p) => (isLight(p.accent) ? '#0b0b0c' : '#ffffff')),
+    C('nameColor', 'Name', T12_LIST, (p) => (isLight(p.accent) ? '#0b0b0c' : '#ffffff')),
+    C('badgeBg', 'Captain, vice and debut tag', T12_LIST, (p) => (isLight(p.accent) ? '#0b0b0c' : '#ffffff')),
+    C('badgeColor', 'Text on that tag', T12_LIST, (p) => (isLight(p.accent) ? '#ffffff' : '#0b0b0c')),
+    C('roundColor', 'Competition line', T12_DET, () => '#ffffff'),
+    C('t12Headline', 'Headline', T12_DET, () => '#ffffff'),
+    C('clubColor', 'Club name', T12_DET, () => '#ffffff'),
+    T('t12Vs', 'Versus word', T12_DET, () => 'VS'),
+    C('t12VsColor', 'Versus word colour', T12_DET, () => '#ffffff'),
+    C('oppColor', 'Opposition', T12_DET, () => '#ffffff'),
+    C('t12DateColor', 'Date and time', T12_DET, () => '#ffffff'),
+    C('t12VenueColor', 'Venue', T12_DET, () => '#ffffff'),
+    C('footerBg', 'Sponsor bar', T12_BAR, () => '#ffffff', { autoLabel: 'Backing' }),
+  ],
+})
 
 // Where this file's layouts keep the sponsor grid (see sponsorSlots.js).
 export const SPONSOR_SLOTS = { T12: lineupCardSponsorSlot }

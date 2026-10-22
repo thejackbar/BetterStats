@@ -21,6 +21,8 @@ import { mixHex } from './split-template'
 import { aspectOf, pick } from './postAspect'
 import { LayerRoot } from './postLayers'
 import { cornerLine, glowDisc, badgeStyle, glowColor } from './card-kit'
+import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
+import { usePostLook } from './postLook'
 
 const FONT = "var(--social-display-font, 'Anton', 'Hanken Grotesk', sans-serif)"
 const WEIGHT = 'var(--social-display-font-weight, 700)'
@@ -56,8 +58,9 @@ export function roundCoverSponsorSlot(width = 1080, height = 1080, count = 1) {
 
 export function RoundCover({
   width = 1080, height = 1080, team = {}, opponent = {}, match = {}, palette = {}, heroImage, heroFocus,
-  headline, sponsorCount = 0,
+  headline, sponsorCount = 0, parts,
 }) {
+  const texture = usePostLook().texture !== false
   const g = roundCoverGeo(width, height, sponsorCount)
   // A tall cut-out is shown whole, standing in the box; a wide photo fills it.
   // Which one it is comes from the picture's own shape, read once it loads.
@@ -67,7 +70,13 @@ export function RoundCover({
   const base = palette.primary || '#0b1530'
   const glow = glowColor(palette, mixHex)
   const wordInk = mixHex(glow, base, 0.35)
-  const shade = mixHex(base, '#000000', 0.55)
+  const shade = pc(parts, 't13ShadeColor', mixHex(base, '#000000', 0.55))
+  // The glass pane both club marks sit in: a tint and an edge, set once for the pair.
+  const pane = (w, h) => ({
+    ...badgeStyle(w, h),
+    background: pc(parts, 't13BadgeBg', 'rgba(255,255,255,0.14)'),
+    border: `1px solid ${pc(parts, 't13BadgeBorder', 'rgba(255,255,255,0.9)')}`,
+  })
   const fixture = `${team.name || ''} vs ${opponent.name || ''}`.toUpperCase()
   const round = String(match.round || '').toUpperCase()
   const when = [match.date, match.time].filter(Boolean).join(' · ').toUpperCase()
@@ -84,24 +93,27 @@ export function RoundCover({
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden', background: base, color: ink, fontFamily: FONT, fontWeight: WEIGHT,
     }}>
-      {glowDisc('Glow', glow, { left: Math.round(width * 0.06), top: -Math.round(height * 0.08), size: Math.round(width * 1.05) })}
+      {glowDisc('Glow', pc(parts, 't13GlowColor', glow), { left: Math.round(width * 0.06), top: -Math.round(height * 0.08), size: Math.round(width * 1.05) })}
 
-      <div data-layer="Side word" style={{
-        position: 'absolute', left: wordSize + 6, top: 12, width: wordBox, height: wordSize,
-        transform: 'rotate(90deg)', transformOrigin: '0 0', color: wordInk, pointerEvents: 'none',
-      }}>
-        <AutoFitText text="SELECTION" max={wordSize} min={40} lines={1} measureDeps={[width, height]}
-          style={{ lineHeight: 0.95, letterSpacing: 2, textAlign: 'left' }} />
-      </div>
+      {texture ? (
+        <div data-layer="Side word" style={{
+          position: 'absolute', left: wordSize + 6, top: 12, width: wordBox, height: wordSize,
+          transform: 'rotate(90deg)', transformOrigin: '0 0', color: pc(parts, 't13SideColor', wordInk), pointerEvents: 'none',
+        }}>
+          <AutoFitText text={pt(parts, 't13SideWord', 'SELECTION')} max={wordSize} min={40} lines={1} measureDeps={[width, height]}
+            style={{ lineHeight: 0.95, letterSpacing: 2, textAlign: 'left' }} />
+        </div>
+      ) : null}
 
-      {cornerLine('Corner top left', accent, { width, height })}
-      {cornerLine('Corner bottom right', accent, { width, height, flip: true })}
+      {cornerLine('Corner top left', pc(parts, 't13CornerColor', accent), { width, height })}
+      {cornerLine('Corner bottom right', pc(parts, 't13CornerColor', accent), { width, height, flip: true })}
 
       {heroImage && (
         <div data-layer="Hero photo" style={{
           position: 'absolute', left: width - heroW, top: g.heroTop, width: heroW, height: heroH, overflow: 'hidden',
           WebkitMaskImage: 'linear-gradient(to bottom, #000 62%, transparent 100%)',
           maskImage: 'linear-gradient(to bottom, #000 62%, transparent 100%)',
+          background: pc(parts, 'photoBg', undefined),
         }}>
           <img src={heroImage} alt="" onLoad={(e) => setShape(e.currentTarget.naturalWidth / (e.currentTarget.naturalHeight || 1))}
             style={{ width: '100%', height: '100%', objectFit: shape && shape < (heroW / heroH) * 0.8 ? 'contain' : 'cover', display: 'block', ...heroFocusStyle(heroFocus) }} />
@@ -118,29 +130,29 @@ export function RoundCover({
         alignItems: 'center', textAlign: 'center',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: Math.round(g.logoH * 0.4) }}>
-          <div style={badgeStyle(g.logoW, g.logoH)}>
+          <div style={pane(g.logoW, g.logoH)}>
             <ClubLogo src={team.logo} monogram={team.monogram} color={ink} size={g.logoH - 14} shape="shield" />
           </div>
-          <div style={{ fontSize: Math.round(g.logoH * 0.62), lineHeight: 1, color: ink, opacity: 0.9 }}>V</div>
-          <div style={badgeStyle(g.logoW, g.logoH)}>
+          <div style={{ fontSize: Math.round(g.logoH * 0.62), lineHeight: 1, color: pc(parts, 't13VColor', ink), opacity: 0.9 }}>V</div>
+          <div style={pane(g.logoW, g.logoH)}>
             <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={ink} size={g.logoH - 14} shape="shield" />
           </div>
         </div>
         {side && (
-          <div style={{ fontSize: Math.round(g.lineMax * 0.8), letterSpacing: 4, color: ink, opacity: 0.8, marginBottom: 6 }}>{side}</div>
+          <div style={{ fontSize: Math.round(g.lineMax * 0.8), letterSpacing: 4, color: pc(parts, 't13LineColor', ink), opacity: 0.8, marginBottom: 6 }}>{side}</div>
         )}
         <div style={{ width: '100%' }}>
           <AutoFitText text={round || 'ROUND'} max={g.roundMax} min={48} lines={1} measureDeps={[width, height]}
-            style={{ color: accent, lineHeight: 0.98, letterSpacing: 1, textAlign: 'center', textShadow: '0 4px 24px rgba(0,0,0,0.45)' }} />
+            style={{ color: pc(parts, 'roundColor', accent), lineHeight: 0.98, letterSpacing: 1, textAlign: 'center', textShadow: '0 4px 24px rgba(0,0,0,0.45)' }} />
         </div>
         <div style={{ width: '100%', marginTop: 14 }}>
           <AutoFitText text={fixture} max={g.lineMax} min={14} lines={1} measureDeps={[width, height]}
-            style={{ color: ink, lineHeight: 1.25, letterSpacing: 1, textAlign: 'center' }} />
+            style={{ color: pc(parts, 't13TeamColor', ink), lineHeight: 1.25, letterSpacing: 1, textAlign: 'center' }} />
         </div>
         {when && (
           <div style={{ width: '100%', marginTop: 4, opacity: 0.85 }}>
             <AutoFitText text={when} max={g.dateMax} min={12} lines={1} measureDeps={[width, height]}
-              style={{ color: ink, lineHeight: 1.4, letterSpacing: 1.5, textAlign: 'center' }} />
+              style={{ color: pc(parts, 't13DateColor', ink), lineHeight: 1.4, letterSpacing: 1.5, textAlign: 'center' }} />
           </div>
         )}
       </div>
@@ -152,6 +164,24 @@ export function RoundCover({
   )
 }
 RoundCover.displayName = 'RoundCover'
+
+registerParts({
+  T13: [
+    colorPart('t13GlowColor', 'Glow behind the photo', 'Background', (p) => glowColor(p, mixHex)),
+    colorPart('t13CornerColor', 'Corner lines', 'Background', (p) => p.accent || '#ffc233'),
+    textPart('t13SideWord', 'Word up the left edge', 'Background', () => 'SELECTION'),
+    colorPart('t13SideColor', 'Word up the left edge colour', 'Background', (p) => mixHex(glowColor(p, mixHex), p.primary || '#0b1530', 0.35)),
+    colorPart('photoBg', 'Photo backdrop', 'Photo', null, { autoLabel: 'None' }),
+    colorPart('t13ShadeColor', 'Fade at the foot', 'Photo', (p) => mixHex(p.primary || '#0b1530', '#000000', 0.55)),
+    colorPart('t13BadgeBg', 'Club mark panes', 'Round and fixture', null, { autoLabel: 'Soft white' }),
+    colorPart('t13BadgeBorder', 'Club mark pane edge', 'Round and fixture', null, { autoLabel: 'White' }),
+    colorPart('t13VColor', 'The "V" between the clubs', 'Round and fixture', (p) => p.ink || '#ffffff'),
+    colorPart('t13LineColor', 'Line above the round', 'Round and fixture', (p) => p.ink || '#ffffff'),
+    colorPart('roundColor', 'Round', 'Round and fixture', (p) => p.accent || '#ffc233'),
+    colorPart('t13TeamColor', 'Team names', 'Round and fixture', (p) => p.ink || '#ffffff'),
+    colorPart('t13DateColor', 'Date and time', 'Round and fixture', (p) => p.ink || '#ffffff'),
+  ],
+})
 
 // Where this file's layouts keep the sponsor grid (see sponsorSlots.js).
 export const SPONSOR_SLOTS = { T13: roundCoverSponsorSlot }

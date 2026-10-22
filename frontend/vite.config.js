@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import emitChangelog from './vite-plugins/emitChangelog.js'
 
 // VITE_BASE: the path prefix a silo build lives under (e.g. '/afl/' for the
 // betterat.football umbrella — see docs/afl-betterstats-plan.md). Unset/empty
@@ -18,7 +19,7 @@ const basedApiProxy = BASE !== '/' ? {
 
 export default defineConfig({
   base: BASE,
-  plugins: [react()],
+  plugins: [react(), emitChangelog()],
   optimizeDeps: {
     exclude: ['@imgly/background-removal'],
   },

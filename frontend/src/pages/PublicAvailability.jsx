@@ -1,222 +1,26 @@
-// BetterSelect — self-service player availability (public, no login).
+// BetterSelect — the player's own page (public, no login).
 //
 // Reached via a per-club magic link (/avail/:token) pinned in a group chat or a
-// QR. Three mobile-first steps: pick your name → prove it's you with the last 4
-// digits of your mobile → tap Available / Maybe / Unavailable for the weekend.
+// QR. Pick your name, prove it's you with the last 4 digits of your mobile, and
+// land on one dashboard: your photo and squads, the next games to answer
+// (Available / Maybe / Unavailable), and whichever cards the club has turned on
+// (votes, selected sides, training, ladder, season, fantasy, fees, fines).
 // A signed cookie keeps you verified (~30 days); "Not you?" clears it.
 //
 // White-labelled from the club's own colours; the only dependency on the rest of
 // the app is the shared availability colour map so a player's chips match the
 // admin matrix exactly.
-import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import { AVAILABILITY, weekPatterns, weekPatternOf, DEFAULT_WEEK_NAMES } from '../lib/availability'
+import { AvailabilityEditor, ALL_CHOICES, unansweredNextWeek } from './playerhome/AvailabilityEditor'
+import Group, { useOpenSections } from './playerhome/Group'
+import DetailsModal from './playerhome/DetailsModal'
+import FantasyCard, { fmtLockShort, nextDeadline, ordinal } from './playerhome/FantasyCard'
+import PlayerHero from './playerhome/PlayerHero'
+import SeasonDashboard from './playerhome/SeasonDashboard'
+import { Muted, Section, fmtShort, money } from './playerhome/ui'
 
-// The three answers a player can give (NO_RESPONSE is the absence of one).
-const ALL_CHOICES = ['AVAILABLE', 'MAYBE', 'UNAVAILABLE']
-
-function fmtDay(d) {
-  try {
-    return new Date(d + 'T00:00:00').toLocaleDateString(undefined, {
-      weekday: 'long', day: 'numeric', month: 'short',
-    })
-  } catch { return d }
-}
-
-// Dates grouped into Monday to Sunday weeks, in order. The page opens on the
-// first week with games (a Tuesday T20 and the Saturday game sit together) and
-// reveals one more week per tap, so a long fixture list is not the first thing
-// a player sees.
-function weekKey(iso) {
-  const d = new Date(iso + 'T00:00:00')
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-function groupByWeek(dates) {
-  // A two-day game spans two weeks. Its weeks join into one group, so week 2 is
-  // never hidden behind "See more games" while week 1 is open.
-  const parent = {}
-  const find = (x) => { parent[x] = parent[x] ?? x; while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x] } return x }
-  const have = new Set(dates.map((d) => d.date))
-  for (const d of dates) {
-    find(weekKey(d.date))
-    for (const f of d.fixtures || []) {
-      if (f.two_day && f.day1 && f.day2 && have.has(f.day1) && have.has(f.day2)) {
-        parent[find(weekKey(f.day2))] = find(weekKey(f.day1))
-      }
-    }
-  }
-  const order = []
-  const byRoot = {}
-  for (const d of dates) {
-    const k = find(weekKey(d.date))
-    if (!byRoot[k]) { byRoot[k] = []; order.push(k) }
-    byRoot[k].push(d)
-  }
-  return order.map((k) => byRoot[k])
-}
-
-// The pairs of dates that are the two weeks of one game (or several games on the
-// same two dates): [{ key, day1, day2, teams: [name], opponents: [name] }].
-function twoDayPairs(dates) {
-  const have = new Set(dates.map((d) => d.date))
-  const out = {}
-  for (const d of dates) {
-    for (const f of d.fixtures || []) {
-      if (f.two_day && f.role === 'day1' && f.day1 && f.day2 && have.has(f.day1) && have.has(f.day2)) {
-        const key = `${f.day1}|${f.day2}`
-        out[key] = out[key] || { key, day1: f.day1, day2: f.day2, fixtures: [] }
-        out[key].fixtures.push(f)
-      }
-    }
-  }
-  return out
-}
-
-// "13:00" → "1:00pm". The time is the club's own local display string, so an
-// unexpected format is shown as it came rather than guessed at.
-function fmtTime(t) {
-  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec((t || '').trim())
-  if (!m) return (t || '').trim()
-  const h = Number(m[1])
-  if (h > 23) return t
-  return `${h % 12 === 0 ? 12 : h % 12}:${m[2]}${h >= 12 ? 'pm' : 'am'}`
-}
-
-// The player's own games first, then by start time (untimed last), then team.
-function orderFixtures(fxs) {
-  return [...fxs].sort((a, b) =>
-    (b.mine ? 1 : 0) - (a.mine ? 1 : 0)
-    || (a.start_time || '99:99').localeCompare(b.start_time || '99:99')
-    || (a.team_name || '').localeCompare(b.team_name || ''))
-}
-
-function Tag({ children, tone }) {
-  return (
-    <span className="font-mono text-[9.5px] tracking-wide2 uppercase rounded px-1.5 py-0.5 shrink-0"
-      style={tone
-        ? { background: `color-mix(in srgb, ${tone} 16%, transparent)`, color: tone }
-        : { background: 'var(--pb-surface2)', color: 'var(--pb-faint)' }}>
-      {children}
-    </span>
-  )
-}
-
-// One game: when, which of our teams, home or away, against whom, where.
-function FixtureRow({ f }) {
-  const opp = f.opponent_name || f.label || 'TBC'
-  const bye = f.home_away === 'BYE'
-  const where = f.home_away === 'AWAY' ? 'at' : 'vs'
-  return (
-    <div data-fixture data-mine={f.mine ? 'yes' : 'no'}
-      className={`flex gap-3 rounded-lg px-2.5 py-2 ${f.mine ? 'border-l-[3px]' : ''}`}
-      style={f.mine
-        ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' }
-        : undefined}>
-      <div className={`w-[58px] shrink-0 font-mono text-[12px] pt-0.5 ${f.mine ? 'text-pb-text font-bold' : 'text-pb-faint'}`}>
-        {fmtTime(f.start_time) || 'TBC'}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          {f.team_name && (
-            <span className={f.mine ? 'font-display font-bold text-[15px] text-pb-text' : 'text-[13px] font-medium text-pb-dim'}>
-              {f.team_name}
-            </span>
-          )}
-          {f.mine && <Tag tone="var(--pb-accent)">Your squad</Tag>}
-          {bye ? <Tag>Bye</Tag> : f.home_away ? <Tag>{f.home_away === 'AWAY' ? 'Away' : 'Home'}</Tag> : null}
-        </div>
-        {!bye && (
-          <div className={`mt-0.5 ${f.mine ? 'text-[14px] text-pb-text' : 'text-[12.5px] text-pb-faint'}`}>
-            {where} {opp}
-          </div>
-        )}
-        {f.two_day && f.day1 && f.day2 && (
-          <div className="text-[11.5px] text-pb-faint mt-0.5" data-two-day-note>
-            Two-day game: {fmtShort(f.day1)} and {fmtShort(f.day2)}
-          </div>
-        )}
-        {f.venue && <div className="text-[11.5px] text-pb-faint mt-0.5">{f.venue}</div>}
-      </div>
-    </div>
-  )
-}
-
-// A date's games. The player's own come first and bold. When some are theirs and
-// the rest are other grades' games, the rest wait behind a tap; with none of
-// theirs (a fill-in, or a player in no squad) everything stays open.
-function FixtureList({ fixtures }) {
-  const [showAll, setShowAll] = useState(false)
-  const ordered = orderFixtures(fixtures)
-  const mine = ordered.filter((f) => f.mine)
-  const others = ordered.filter((f) => !f.mine)
-  const collapse = mine.length > 0 && others.length > 0 && !showAll
-  const shown = collapse ? mine : ordered
-  return (
-    <div className="flex flex-col gap-1 mb-3">
-      {shown.map((f, i) => <FixtureRow key={`${f.id}-${f.role}-${i}`} f={f} />)}
-      {mine.length > 0 && others.length > 0 && (
-        <button type="button" onClick={() => setShowAll((v) => !v)}
-          className="self-start px-2.5 py-1 text-[12px] text-pb-faint underline">
-          {showAll ? 'Hide other club games' : `Show ${others.length} other club game${others.length === 1 ? '' : 's'}`}
-        </button>
-      )}
-    </div>
-  )
-}
-
-// One tap for a two-day game: both weeks, week 1 only, week 2 only, or neither.
-// Each week keeps its own answer underneath (a player can be free for week 1 and
-// away for week 2, or say Maybe); this is the quick way to say the usual things.
-function BothWeeks({ pair, me, choices, onPick, busy }) {
-  const weekNames = { ...DEFAULT_WEEK_NAMES, ...(me.week_names || {}) }
-  const a = me.availability?.[pair.day1]?.status || 'NO_RESPONSE'
-  const b = me.availability?.[pair.day2]?.status || 'NO_RESPONSE'
-  const same = a === b ? a : null
-  const pattern = weekPatternOf([a, b])
-  const names = [...new Set(pair.fixtures.map((f) => f.team_name).filter(Boolean))]
-  const btn = (meta, active, extra) => (active
-    ? { background: meta.cssVar, color: 'var(--pb-bg)', ...extra }
-    : { background: `color-mix(in srgb, ${meta.cssVar} 12%, transparent)`, color: meta.cssVar, border: `1px solid color-mix(in srgb, ${meta.cssVar} 30%, transparent)`, ...extra })
-  // The data-both values keep the old same-answer names for the two that are one
-  // (AVAILABLE, UNAVAILABLE); the half answers are W1 and W2.
-  const attr = { both: 'AVAILABLE', w1: 'W1', w2: 'W2', none: 'UNAVAILABLE' }
-  return (
-    <div data-both-weeks={pair.key} className="rounded-xl border p-3.5"
-      style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 45%, transparent)', background: 'color-mix(in srgb, var(--pb-amber) 6%, transparent)' }}>
-      <div className="flex items-baseline justify-between gap-2 mb-0.5">
-        <div className="font-display font-bold text-[16px]">Two-day game: which weeks?</div>
-        <Tag tone="var(--pb-amber)">2 weeks</Tag>
-      </div>
-      <div className="text-[12.5px] text-pb-dim mb-2.5">
-        {fmtShort(pair.day1)} and {fmtShort(pair.day2)}{names.length ? ` · ${names.join(', ')}` : ''}
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        {weekPatterns(weekNames).map((w) => (
-          <button key={w.key} type="button" data-both={attr[w.key]} data-week-pattern={w.key}
-            onClick={() => onPick(pair, w.statuses)} disabled={busy}
-            className="py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
-            style={btn(AVAILABILITY[w.tone], pattern === w.key)}>
-            {w.title}
-          </button>
-        ))}
-        {choices.includes('MAYBE') && (
-          <button type="button" data-both="MAYBE" onClick={() => onPick(pair, ['MAYBE', 'MAYBE'])} disabled={busy}
-            className="col-span-2 py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
-            style={btn(AVAILABILITY.MAYBE, same === 'MAYBE')}>
-            {AVAILABILITY.MAYBE.glyph} Maybe for both weeks
-          </button>
-        )}
-      </div>
-      <div className="text-[12px] mt-2" data-both-summary style={{ color: same ? 'var(--pb-faint)' : 'var(--pb-amber)' }}>
-        {same
-          ? `Same answer for both weeks. You can still change one week below.`
-          : `${weekNames.w1}: ${(AVAILABILITY[a] || AVAILABILITY.NO_RESPONSE).label} · ${weekNames.w2}: ${(AVAILABILITY[b] || AVAILABILITY.NO_RESPONSE).label}`}
-      </div>
-    </div>
-  )
-}
 
 function ClubHeader({ club }) {
   const initials = (club?.name || 'Club').split(' ').map((w) => w[0]).join('').slice(0, 3).toUpperCase()
@@ -243,68 +47,9 @@ function Banner({ tone = 'error', children }) {
   )
 }
 
-function fmtShort(d) {
-  try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) } catch { return d }
-}
-
-// "W1 · 2-day game" (the club's own week name) for the days of a two-day game,
-// '' for an ordinary date.
-function weekLabel(d, names) {
-  const f = (d.fixtures || []).find((x) => x.two_day)
-  if (!f) return ''
-  const n = { ...DEFAULT_WEEK_NAMES, ...(names || {}) }
-  return `${f.role === 'day2' ? n.w2 : n.w1} · 2-day game`
-}
-
-function Section({ title, children, className = '' }) {
-  return (
-    <section className={`rounded-xl border pb-hairline p-3.5 mb-3 min-w-0 break-inside-avoid ${className}`}>
-      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-2">{title}</div>
-      {children}
-    </section>
-  )
-}
-
-const money = (n) => `${n < 0 ? '-' : ''}$${Math.abs(Number(n) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-
-function Muted({ children, ...rest }) {
-  return <div className="text-sm text-pb-faint" {...rest}>{children}</div>
-}
-
-// A line of label and value, for the small figure grids.
-function Stat({ label, value }) {
-  return (
-    <div className="rounded-lg px-3 py-2" style={{ background: 'var(--pb-surface2)' }}>
-      <div className="font-display font-bold text-[18px] leading-tight">{value ?? '-'}</div>
-      <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint mt-0.5">{label}</div>
-    </div>
-  )
-}
-
 // ─── The modules of the player's own page ───
 // Each one is a Section the club can turn on or off in BetterSelect. They are
 // declared here, at module level, and picked by key from the server's list.
-
-function AvailabilityModule({ me }) {
-  const upcoming = (me.dates || []).slice(0, 6)
-  return (
-    <Section title="Your availability">
-      {upcoming.length === 0 && <Muted>No upcoming games to answer yet.</Muted>}
-      <div className="flex flex-col gap-1.5">
-        {upcoming.map((d) => {
-          const cur = me.availability?.[d.date]?.status || 'NO_RESPONSE'
-          const meta = AVAILABILITY[cur] || AVAILABILITY.NO_RESPONSE
-          return (
-            <div key={d.date} className="flex items-center justify-between gap-3 text-sm">
-              <span>{fmtShort(d.date)}{weekLabel(d, me.week_names) ? <span className="text-pb-faint"> · {weekLabel(d, me.week_names)}</span> : null}</span>
-              <span className="font-semibold" style={{ color: meta.cssVar }}>{meta.glyph} {meta.label}</span>
-            </div>
-          )
-        })}
-      </div>
-    </Section>
-  )
-}
 
 // Games the player can still vote on and has not, then (for reference) the votes
 // they have already cast with who they gave 3, 2 and 1 to. Each to-cast game links
@@ -360,26 +105,6 @@ function VotesModule({ data }) {
         </div>
       )}
     </Section>
-  )
-}
-
-// A reminder above everything else while a vote is due.
-function VotesBanner({ votes }) {
-  const n = votes.length
-  return (
-    <div className="rounded-xl px-4 py-3 mb-3 flex items-center gap-3" data-votes-banner
-      style={{ background: 'color-mix(in srgb, var(--pb-amber) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-amber) 40%, transparent)' }}>
-      <div className="min-w-0 flex-1 text-sm">
-        <b>{n === 1 ? 'You have a vote to cast.' : `You have ${n} votes to cast.`}</b>
-        {/* Name the game and the medal: a club can run several medals on one game, and a vote
-            already cast for one of them does not cover the others. */}
-        <span className="text-pb-dim"> {n === 1
-          ? `${votes[0].medal}: ${votes[0].round ? `${votes[0].round} · ` : ''}vs ${votes[0].opponent || 'TBC'} is still open for voting.`
-          : 'Games you played are still open for voting.'}</span>
-      </div>
-      <a href={votes[0].link} className="shrink-0 px-3.5 py-2 rounded-lg text-[13px] font-semibold"
-        style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{n === 1 ? 'Vote now' : 'Vote'}</a>
-    </div>
   )
 }
 
@@ -481,28 +206,32 @@ function LadderModule({ state }) {
   )
 }
 
-function SeasonModule({ data }) {
-  const s = data.season
+// What the player has paid, newest first, across seasons. Five show, the rest open on a tap.
+function PaymentsList({ payments }) {
+  const [all, setAll] = useState(false)
+  if (!payments || payments.length === 0) return null
+  const shown = all ? payments : payments.slice(0, 5)
+  // The season is only worth saying when the payments span more than one.
+  const manySeasons = new Set(payments.map((p) => p.season)).size > 1
   return (
-    <Section title={s?.season ? `Your season: ${s.season}` : 'Your season'}>
-      {!s ? <Muted data-no-season>No games recorded for you yet.</Muted> : (
-        <>
-          <div className="grid grid-cols-3 gap-2">
-            <Stat label="Matches" value={s.matches} />
-            <Stat label="Runs" value={s.runs} />
-            <Stat label="High score" value={s.high_score} />
-            <Stat label="Bat avg" value={s.batting_average} />
-            <Stat label="Wickets" value={s.wickets} />
-            <Stat label="Catches" value={s.catches} />
-          </div>
-          {s.best_bowling && <div className="text-[12.5px] text-pb-dim mt-2">Best bowling {s.best_bowling}</div>}
-          <div className="text-[11.5px] text-pb-faintest mt-2">
-            {s.auto_shown ? 'Counts the grades you have played. ' : 'Counts the grade types your club shows in its public stats. '}
-            Your latest season with games.
-          </div>
-        </>
+    <div className="mt-3" data-fee-payments>
+      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Fees paid</div>
+      {shown.map((p, i) => (
+        <div key={`${p.date}-${i}`} className="flex items-baseline gap-3 py-1.5 border-t pb-hairline first:border-t-0 text-[13px]" data-fee-payment>
+          <span className="w-[84px] shrink-0 text-pb-faint">{p.date ? fmtShort(p.date) : 'No date'}</span>
+          <span className="min-w-0 flex-1 truncate">
+            {p.kind}{p.method ? ` · ${p.method}` : ''}
+            {manySeasons && p.season ? <span className="text-pb-faint"> · {p.season}</span> : null}
+          </span>
+          <span className="shrink-0 font-semibold">{money(p.amount)}</span>
+        </div>
+      ))}
+      {payments.length > 5 && (
+        <button type="button" data-fee-payments-more onClick={() => setAll((v) => !v)} className="text-[12px] text-pb-faint underline mt-1">
+          {all ? 'Show fewer' : `Show all ${payments.length} payments`}
+        </button>
       )}
-    </Section>
+    </div>
   )
 }
 
@@ -525,6 +254,7 @@ function FeesModule({ data }) {
           )}
           {f.credit > 0 && <div className="text-[12.5px] text-pb-dim mt-1.5">You are {money(f.credit)} in credit.</div>}
           <div className="text-[11.5px] text-pb-faintest mt-2">{f.season ? `${f.season}. ` : ''}Paid so far {money(f.total_paid)}.</div>
+          <PaymentsList payments={f.payments} />
         </>
       )}
     </Section>
@@ -608,69 +338,71 @@ function FinesModule({ data }) {
   )
 }
 
-// A headline figure at the top of the dashboard.
-function Tile({ label, value, hint, tone, id }) {
-  return (
-    <div className="rounded-xl border pb-hairline px-3 py-2.5 min-w-0" data-tile={id}>
-      <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint truncate">{label}</div>
-      <div className="font-display font-bold text-[19px] leading-tight mt-0.5 truncate" style={tone ? { color: tone } : undefined}>{value}</div>
-      {hint && <div className="text-[11.5px] text-pb-faint mt-0.5 truncate">{hint}</div>}
-    </div>
-  )
+// The sections of the page, in the order a player reads them. Each holds the club's
+// modules that belong to it, in the club's own order; a section with none drops out.
+// Selection always shows, because the answer buttons are in it.
+const GROUPS = [
+  { id: 'selection', title: 'Selection', keys: ['squad', 'selected', 'training', 'ladder'] },
+  { id: 'admin', title: 'Club admin', keys: ['fees', 'fines'] },
+  { id: 'voting', title: 'Voting', keys: ['votes'], hideTitle: true },
+  { id: 'stats', title: 'Stats', keys: ['season'] },
+  { id: 'fantasy', title: 'Fantasy', keys: ['fantasy'], hideTitle: true },
+]
+
+const AMBER = 'var(--pb-amber)'
+const GREEN = 'var(--pb-positive)'
+
+// One line per section, from data the page already holds, shown even when the
+// section is closed. Left empty rather than made up when there is nothing true to say.
+function summaryFor(id, { me, data, ladder }) {
+  if (id === 'selection') {
+    const n = unansweredNextWeek(me)
+    if (n > 0) return { text: `${n} to answer`, tone: AMBER }
+    const side = (data?.selected || [])[0]
+    if (side) return { text: `Selected ${fmtShort(side.date)} ${side.home_away === 'AWAY' ? 'at' : 'vs'} ${side.opponent_name || side.label || 'TBC'}` }
+    return (me.dates || []).length ? { text: 'All answered', tone: GREEN } : { text: 'No games to answer yet' }
+  }
+  if (!data) return {}
+  if (id === 'admin') {
+    const fees = data.fees?.on_record ? data.fees.total_outstanding : null
+    const fines = (data.fines || []).length ? data.fines.reduce((a, f) => a + Math.max(f.owing, 0), 0) : null
+    if (fees === null && fines === null) return {}
+    const owing = (fees || 0) + (fines || 0)
+    return owing > 0 ? { text: `${money(owing)} owing`, tone: AMBER } : { text: 'All square', tone: GREEN }
+  }
+  if (id === 'voting') {
+    const n = (data.votes || []).length
+    if (n > 0) return { text: n === 1 ? '1 vote to cast' : `${n} votes to cast`, tone: AMBER }
+    return (data.votes_cast || []).length ? { text: 'Up to date', tone: GREEN } : {}
+  }
+  if (id === 'stats') {
+    const s = data.season
+    return s ? { text: `${s.matches} ${s.matches === 1 ? 'match' : 'matches'} · ${s.runs} runs · ${s.wickets} wkts` } : { text: 'No games yet' }
+  }
+  if (id === 'fantasy') {
+    const f = data.fantasy
+    const next = f && nextDeadline(f.deadlines)
+    if (!next) return {}
+    const rank = f.team && f.team.built && f.team.rank ? ` · ${ordinal(f.team.rank)}` : ''
+    return next.locked
+      ? { text: `${next.name || `Round ${next.number}`} locked${rank}` }
+      : { text: `Locks ${fmtLockShort(next.lock_at)}${rank}`, tone: AMBER }
+  }
+  return {}
 }
 
-// The tiles for the modules the club has on, from data the page already holds.
-// A tile is left out rather than shown empty when it has nothing true to say.
-function dashboardTiles({ me, data, modules, ladder }) {
-  const tiles = []
-  const has = (k) => modules.includes(k)
-  const dates = (me.dates || []).slice(0, 6)
-  const side = (data.selected || [])[0]
-  if (has('selected') && side) {
-    tiles.push({ id: 'next', label: 'Next game', value: fmtShort(side.date), hint: `${side.home_away === 'AWAY' ? '@' : 'vs'} ${side.opponent_name || side.label || 'TBC'}` })
-  } else if ((has('availability') || has('selected')) && dates[0]) {
-    const st = me.availability?.[dates[0].date]?.status || 'NO_RESPONSE'
-    tiles.push({ id: 'next', label: 'Next game', value: fmtShort(dates[0].date), hint: st === 'NO_RESPONSE' ? 'Not answered yet' : `You said ${(AVAILABILITY[st] || AVAILABILITY.NO_RESPONSE).label}` })
-  }
-  if (has('availability') && dates.length) {
-    const answered = dates.filter((d) => (me.availability?.[d.date]?.status || 'NO_RESPONSE') !== 'NO_RESPONSE').length
-    tiles.push({ id: 'availability', label: 'Availability', value: `${answered} of ${dates.length}`, hint: 'next games answered', tone: answered < dates.length ? 'var(--pb-amber)' : 'var(--pb-positive)' })
-  }
-  const due = data.votes || []
-  if (has('votes') && due.length) {
-    tiles.push({ id: 'votes', label: 'Votes due', value: due.length, hint: due.length === 1 ? 'game to vote on' : 'games to vote on', tone: 'var(--pb-amber)' })
-  }
-  const first = ladder.ladders?.[0]
-  const mine = first?.rows.find((r) => r.is_club)
-  if (has('ladder') && ladder.status === 'ok' && mine && mine.rank != null) {
-    tiles.push({ id: 'ladder', label: 'Ladder', value: `#${mine.rank}`, hint: first.team })
-  }
-  if (has('season') && data.season) {
-    tiles.push({ id: 'season', label: 'Runs this season', value: data.season.runs, hint: `${data.season.wickets} wickets · ${data.season.matches} matches` })
-  }
-  if (has('fines') && (data.fines || []).length) {
-    const owing = data.fines.reduce((a, f) => a + Math.max(f.owing, 0), 0)
-    tiles.push({ id: 'fines', label: 'Fines owing', value: owing > 0 ? money(owing) : 'All square', tone: owing > 0 ? 'var(--pb-amber)' : 'var(--pb-positive)' })
-  }
-  if (has('fees') && data.fees?.on_record) {
-    const owe = data.fees.total_outstanding
-    tiles.push({ id: 'fees', label: 'Fees owing', value: owe > 0 ? money(owe) : 'Nothing owing', tone: owe > 0 ? 'var(--pb-amber)' : 'var(--pb-positive)' })
-  }
-  if (has('training') && data.training) {
-    tiles.push({ id: 'training', label: 'Training', value: data.training.attended_8_weeks, hint: 'sessions in 8 weeks' })
-  }
-  return tiles
-}
-
-// The player's own page: whichever modules the club has turned on, in the club's
-// order, under a row of headline tiles. Only their own data, behind the same PIN
-// cookie as the availability answers. Availability comes from the page's own
-// state; the rest from one call. On a wide screen the modules sit in a grid, on a
-// phone they are one column.
-function MyPage({ token, me }) {
+// The player's own page: who they are, then collapsible sections (Selection with the
+// answer buttons, Club admin, Voting, Stats, Fantasy). Only their own data, behind
+// the same PIN cookie as the availability answers. The answers live in the page's own
+// state (`availability` is the editor, built by the parent so a tap saves from here);
+// the rest arrives in one call. A phone gets one column, a wide screen two.
+function MyPage({ token, me, club, availability, onSwitch }) {
   const [data, setData] = useState(null)
   const [failed, setFailed] = useState(false)
   const [ladder, setLadder] = useState({ status: 'loading', ladders: [] })
+  const sections = useOpenSections()
+  const [showDetails, setShowDetails] = useState(false)
+  const [notice, setNotice] = useState(null) // {text, tone} after a save
   useEffect(() => {
     let alive = true
     const load = () => api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
@@ -683,7 +415,7 @@ function MyPage({ token, me }) {
   }, [token])
 
   // A server that doesn't send the list is the page as it was before clubs could choose.
-  const modules = data ? (data.modules ?? ['availability', 'squad', 'selected', 'training']) : []
+  const modules = data ? (data.modules ?? ['squad', 'selected', 'training']) : []
   const wantsLadder = modules.includes('ladder')
   useEffect(() => {
     if (!wantsLadder) return undefined
@@ -696,49 +428,74 @@ function MyPage({ token, me }) {
 
   const render = (key) => {
     switch (key) {
-      case 'availability': return <AvailabilityModule key={key} me={me} />
       case 'votes': return <VotesModule key={key} data={data} />
       case 'squad': return <SquadModule key={key} data={data} />
       case 'selected': return <SelectedModule key={key} data={data} />
       case 'training': return <TrainingModule key={key} data={data} />
       case 'ladder': return <LadderModule key={key} state={ladder} />
-      case 'season': return <SeasonModule key={key} data={data} />
+      case 'season': return <SeasonDashboard key={key} data={data} />
+      case 'fantasy': return <FantasyCard key={key} data={data} />
       case 'fees': return <FeesModule key={key} data={data} />
       case 'fines': return <FinesModule key={key} data={data} />
       default: return null
     }
   }
 
-  const tiles = data ? dashboardTiles({ me, data, modules, ladder }) : []
+  // The profile call names the squads the club lets players see; until it lands the
+  // availability call already carries them, so the hero does not wait.
+  const squads = data ? (data.squads || []) : (me.squads || [])
+  const shown = GROUPS
+    .map((g) => ({ ...g, mods: modules.filter((m) => g.keys.includes(m)) }))
+    .filter((g) => g.id === 'selection' || g.mods.length > 0)
+  const allOpen = shown.every((g) => sections.isOpen(g.id))
 
   return (
     <div data-my-page>
-      {failed && <div className="text-sm text-pb-faint mb-3">Your page could not load. Pull down to try again.</div>}
-      {!data && !failed && <div className="text-sm text-pb-faint mb-3">Loading your page…</div>}
-      {data && modules.length === 0 && (
-        <div className="text-sm text-pb-faint" data-no-modules>Your club has not added anything to this page yet.</div>
-      )}
-      {data && modules.includes('votes') && (data.votes || []).length > 0 && <VotesBanner votes={data.votes} />}
-      {tiles.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5 mb-3" data-tiles>
-          {tiles.map((t) => <Tile key={t.id} {...t} />)}
+      <PlayerHero club={club} player={data?.player || me.player} squads={squads} onSwitch={onSwitch}
+        onUpdateDetails={data?.can_update_details ? () => { setNotice(null); setShowDetails(true) } : null} />
+      {notice && (
+        <div role="status" data-details-notice className="rounded-lg px-3.5 py-2.5 mb-3 text-sm flex items-start gap-3"
+          style={{ background: 'color-mix(in srgb, var(--pb-positive) 12%, transparent)', color: 'var(--pb-positive)', border: '1px solid color-mix(in srgb, var(--pb-positive) 35%, transparent)' }}>
+          <span className="min-w-0 flex-1">{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="shrink-0 opacity-70 hover:opacity-100">✕</button>
         </div>
       )}
-      {data && modules.length > 0 && (
-        // Columns rather than a grid: the cards differ a lot in height (Fines is tall), and
-        // columns pack them tight with no gaps. The club's order runs down each column in turn.
-        <div className="md:columns-2 lg:columns-3 md:gap-3" data-modules>
-          {modules.map(render)}
-        </div>
+      {showDetails && (
+        <DetailsModal token={token} onClose={() => setShowDetails(false)}
+          onSaved={({ phoneChanged }) => {
+            setShowDetails(false)
+            setNotice(phoneChanged
+              ? 'Your details are saved. Your PIN is now the last 4 digits of your new mobile.'
+              : 'Your details are saved. Your club will see the change.')
+          }} />
       )}
+      {failed && <div className="text-sm text-pb-faint mb-3" data-profile-failed>The rest of your page could not load. Reload to try again.</div>}
+      {!data && !failed && <div className="text-sm text-pb-faint mb-3" data-profile-loading>Loading your page…</div>}
+      <div className="flex justify-end mb-2">
+        <button type="button" data-toggle-all onClick={() => sections.setAll(shown.map((g) => g.id), !allOpen)}
+          className="text-[12px] text-pb-faint underline">{allOpen ? 'Collapse all' : 'Expand all'}</button>
+      </div>
+      <div className="md:columns-2 md:gap-3" data-groups>
+        {shown.map((g) => {
+          const { text, tone } = summaryFor(g.id, { me, data, ladder })
+          return (
+            <Group key={g.id} id={g.id} hideTitle={g.hideTitle}
+              title={g.id === 'fantasy' && data?.fantasy?.name ? data.fantasy.name : g.title}
+              summary={text} tone={tone} open={sections.isOpen(g.id)} onToggle={sections.toggle}>
+              {g.id === 'selection' && availability}
+              {g.mods.map(render)}
+            </Group>
+          )
+        })}
+      </div>
     </div>
   )
 }
 
 export default function PublicAvailability() {
   const { token } = useParams()
-  // Arriving from the voting page: `?tab=mine` opens the player's own page and
-  // `?player=<id>` has them already picked, so it is only the PIN left to type.
+  // Arriving from the voting page: `?player=<id>` has them already picked, so it is
+  // only the PIN left to type. (`?tab=mine` on older links is ignored: there is one page now.)
   const [searchParams] = useSearchParams()
   const playerParam = searchParams.get('player') || ''
   const autoPicked = useRef(false)
@@ -754,11 +511,7 @@ export default function PublicAvailability() {
   const [me, setMe] = useState(null) // {player, dates, availability}
   const [savingDate, setSavingDate] = useState(null)
   const [savedDate, setSavedDate] = useState(null)
-  const [weeksOpen, setWeeksOpen] = useState(1) // weeks of games showing, from the next one
-  const [tab, setTab] = useState(searchParams.get('tab') === 'mine' ? 'mine' : 'weekend') // weekend | mine
   const pinRef = useRef(null)
-  const weeks = useMemo(() => groupByWeek(me?.dates || []), [me?.dates])
-  const pairs = useMemo(() => twoDayPairs(me?.dates || []), [me?.dates])
   // A club that has switched Maybe off offers only Available and Unavailable.
   const choices = me?.allow_maybe === false ? ALL_CHOICES.filter((c) => c !== 'MAYBE') : ALL_CHOICES
 
@@ -867,7 +620,7 @@ export default function PublicAvailability() {
 
   const switchPlayer = async () => {
     try { await api.availPublicSwitch(token) } catch {}
-    setMe(null); setChosen(null); setPin(''); setSearch(''); setError(''); setWeeksOpen(1)
+    setMe(null); setChosen(null); setPin(''); setSearch(''); setError('')
     setStep('pick')
   }
 
@@ -916,8 +669,8 @@ export default function PublicAvailability() {
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text" style={accent ? { '--pb-accent': accent } : undefined}>
-      {/* The dashboard tab opens out on a wide screen; everything else stays a phone-width column. */}
-      <div className={`${step === 'weekend' && tab === 'mine' ? 'max-w-md md:max-w-5xl' : 'max-w-md'} mx-auto px-4 py-8 sm:py-12`}>
+      {/* The dashboard opens out on a wide screen; the name and PIN steps stay a phone-width column. */}
+      <div className={`${step === 'weekend' ? 'max-w-md md:max-w-5xl' : 'max-w-md'} mx-auto px-4 py-6 sm:py-10`}>
         {step === 'loading' && (
           <div className="py-24 text-center text-pb-faint text-sm">Loading…</div>
         )}
@@ -930,7 +683,7 @@ export default function PublicAvailability() {
           </div>
         )}
 
-        {step !== 'loading' && step !== 'dead' && <ClubHeader club={club} />}
+        {(step === 'pick' || step === 'pin') && <ClubHeader club={club} />}
 
         {/* Step 1 — pick your name */}
         {step === 'pick' && (
@@ -1008,107 +761,26 @@ export default function PublicAvailability() {
           </form>
         )}
 
-        {/* Step 3 — your weekend */}
+        {/* Step 3 — your page: who you are, the next games to answer, and the club's cards */}
         {step === 'weekend' && me && (
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <div className="font-mono text-[11px] text-pb-faint">Signed in as</div>
-                <div className="font-display font-bold text-lg">{me.player?.display_name}</div>
-              </div>
-              <button onClick={switchPlayer} className="text-pb-faint text-xs hover:text-pb-text underline shrink-0">Not you?</button>
-            </div>
-            {(me.squads || []).length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5 -mt-2 mb-4" data-my-squads>
-                <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Your squad</span>
-                {me.squads.map((n) => (
-                  <span key={n} className="text-[12px] font-semibold rounded-full px-2.5 py-0.5"
-                    style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}>{n}</span>
-                ))}
-              </div>
-            )}
-            <div role="tablist" className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-pb-surface2 mb-4 md:max-w-sm">
-              {[['weekend', 'Availability'], ['mine', 'My page']].map(([id, label]) => (
-                <button key={id} role="tab" aria-selected={tab === id} data-tab={id} onClick={() => setTab(id)}
-                  className={`py-2 rounded-lg text-sm font-semibold transition-colors ${tab === id ? 'bg-pb-surface text-pb-text shadow-sm' : 'text-pb-faint'}`}>{label}</button>
-              ))}
-            </div>
             <Banner>{error}</Banner>
-
-            {tab === 'mine' && <MyPage token={token} me={me} />}
-            {tab === 'weekend' && (<>
-
-            {(me.dates || []).length === 0 && (
-              <div className="rounded-xl border pb-hairline px-4 py-10 text-center text-pb-faint text-sm">
-                No upcoming fixtures to set availability for yet. Check back soon.
-              </div>
-            )}
-
-            <div className="flex flex-col gap-3">
-              {weeks.slice(0, weeksOpen).flat().map((d) => {
-                const cur = me.availability?.[d.date]?.status || 'NO_RESPONSE'
-                const startsPair = Object.values(pairs).filter((pr) => pr.day1 === d.date)
-                const wk = weekLabel(d, me.week_names)
-                return (
-                  <Fragment key={d.date}>
-                  {startsPair.map((pr) => (
-                    <div key={pr.key} className="relative">
-                      <BothWeeks pair={pr} me={me} choices={choices} onPick={setBoth} busy={savingDate === pr.key} />
-                      {savedDate === pr.key && <span className="absolute right-3 bottom-2 font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
-                    </div>
-                  ))}
-                  <div className="rounded-xl border pb-hairline p-3.5" data-date-card={d.date}>
-                    <div className="flex items-baseline justify-between gap-2 mb-2">
-                      <div className="font-display font-bold text-[16px]">{fmtDay(d.date)}</div>
-                      <div className="flex items-baseline gap-2 shrink-0">
-                        {wk && <Tag tone="var(--pb-amber)">{wk}</Tag>}
-                        {savedDate === d.date && <span className="font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
-                      </div>
-                    </div>
-                    <FixtureList fixtures={d.fixtures || []} />
-                    <div className={`grid ${choices.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
-                      {choices.map((s) => {
-                        const meta = AVAILABILITY[s]
-                        const active = cur === s
-                        return (
-                          <button
-                            key={s}
-                            onClick={() => setAnswer(d.date, s)}
-                            disabled={savingDate === d.date}
-                            className="py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
-                            style={active
-                              ? { background: meta.cssVar, color: 'var(--pb-bg)' }
-                              : { background: `color-mix(in srgb, ${meta.cssVar} 12%, transparent)`, color: meta.cssVar, border: `1px solid color-mix(in srgb, ${meta.cssVar} 30%, transparent)` }}
-                          >
-                            {meta.glyph} {meta.label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                  </Fragment>
-                )
-              })}
-            </div>
-            {weeks.length > weeksOpen && (
-              <button type="button" data-see-more onClick={() => setWeeksOpen((n) => n + 1)}
-                className="w-full mt-3 py-3 rounded-lg border pb-hairline text-sm font-semibold text-pb-text hover:bg-pb-surface2 transition-colors">
-                See more games
-                <span className="block text-[11.5px] font-normal text-pb-faint mt-0.5">
-                  {(() => { const n = weeks.slice(weeksOpen).flat().length; return `${n} more day${n === 1 ? '' : 's'} with games` })()}
-                </span>
-              </button>
-            )}
-            {weeksOpen > 1 && (
-              <button type="button" data-show-fewer onClick={() => setWeeksOpen(1)}
-                className="block mx-auto mt-3 text-[12px] text-pb-faint underline">
-                Show only the next games
-              </button>
-            )}
-            <p className="text-center text-pb-faintest text-[11px] mt-6">
-              Your answers save automatically. One tap covers every game that day. For a two-day game, answer each week or both at once.
-            </p>
-            </>)}
+            <MyPage
+              token={token}
+              me={me}
+              club={club}
+              onSwitch={switchPlayer}
+              availability={(
+                <AvailabilityEditor
+                  me={me}
+                  choices={choices}
+                  savingDate={savingDate}
+                  savedDate={savedDate}
+                  onAnswer={setAnswer}
+                  onBoth={setBoth}
+                />
+              )}
+            />
           </div>
         )}
 

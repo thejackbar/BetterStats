@@ -157,6 +157,11 @@ async def build_schema() -> None:
             for _ in range(3):     # applied three times, as a live boot does
                 for stmt in nddl.STATEMENTS:
                     await conn.execute(text(stmt))
+            # The daily product update's catch-up source reads its log table, which
+            # the lifespan creates alongside the notification tables.
+            from app.services.product_blast_ddl import STATEMENTS as _PBD
+            for stmt in _PBD:
+                await conn.execute(text(stmt))
         # The grade milestone scan reads the per-innings views and the club's
         # grade merges, the same way the Records page does. grade_merge_logs is
         # lifespan raw SQL, invisible to create_all, so it is copied here column

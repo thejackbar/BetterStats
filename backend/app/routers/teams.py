@@ -256,8 +256,13 @@ async def grade_options(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
-    """Grades from the club's most recent season(s) — to populate the team
-    grade picker. Returns the latest two seasons that actually have grades."""
+    """Grades to populate the team and squad-team pickers, newest season first.
+
+    Always the latest two seasons that have grades, plus any other season (an
+    older one, or one with no year because CA sent no start date) that holds a
+    grade one of the club's upcoming fixtures is in. A newly synced grade is
+    therefore never left out of the picker because its season sorted behind two
+    others."""
     seasons = (await db.execute(
         select(Season).where(Season.organisation_id == club.id)
         .order_by(Season.year.desc().nullslast(), Season.name.desc())
@@ -269,13 +274,21 @@ async def grade_options(
     by_season: dict = {}
     for g in grades_res.scalars().all():
         by_season.setdefault(str(g.season_id), []).append({"id": str(g.id), "name": g.display_name, "key": grade_key(g.display_name)})
+    live_res = await db.execute(text(
+        "SELECT DISTINCT g.season_id FROM fixtures f JOIN grades g ON g.id = f.grade_id"
+        " WHERE f.organisation_id = :org AND f.status IN ('UPCOMING', 'IN_PROGRESS')"
+        " AND (f.played_on IS NULL OR f.played_on >= CURRENT_DATE)"
+    ), {"org": club.id})
+    live_seasons = {str(r[0]) for r in live_res.fetchall()}
     out = []
+    kept = 0
     for s in seasons:
         gl = by_season.get(str(s.id))
-        if gl:
+        if not gl:
+            continue
+        if kept < 2 or str(s.id) in live_seasons:
             out.append({"season_id": str(s.id), "season_name": s.name, "year": s.year, "grades": gl})
-        if len(out) >= 2:  # latest two seasons with grades is plenty for "current grade"
-            break
+            kept += 1
     return {"seasons": out}
 
 

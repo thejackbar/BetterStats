@@ -58,6 +58,8 @@ import { sponsorSlotFor } from '../../social/sponsorSlots'
 import { useBlankLayer } from '../../social/useBlankLayer'
 import { useTemplateLayers } from '../../social/useTemplateLayers'
 import { PostLayerProvider } from '../../social/postLayers'
+import { PostLookContext, alphaHex, DEFAULT_VEIL } from '../../social/postLook'
+import { partsFor, partsKey, cleanParts } from '../../social/layoutParts'
 import { useEditHistory } from '../../social/useEditHistory'
 import { usePages } from '../../social/usePages'
 import PageStrip from '../../components/admin/socialpost/PageStrip'
@@ -279,6 +281,16 @@ const DISPLAY_FONTS = [
   { key: 'abril',        name: 'Abril Fatface',    family: "'Abril Fatface', serif",         weight: 400 },
   { key: 'bungee',       name: 'Bungee',           family: "'Bungee', sans-serif",           weight: 400 },
 ]
+
+// The club's own picks for the four colour roles, over whichever palette is open.
+// Only a real #rrggbb counts; anything else leaves the palette's own colour.
+const ROLE_KEYS = ['primary', 'secondary', 'accent', 'ink']
+function applyRoleTweaks(palette, tweaks) {
+  if (!palette || !tweaks) return palette
+  const out = { ...palette }
+  ROLE_KEYS.forEach((k) => { if (/^#[0-9a-fA-F]{6}$/.test(tweaks[k] || '')) out[k] = tweaks[k] })
+  return out
+}
 
 function applyTheme(palette, isDark) {
   if (isDark || !palette) return palette
@@ -510,6 +522,119 @@ function withAlpha(hex, alphaHex) {
 // ─────────────────────────────────────────────────────────────────────────────
 // UI COMPONENTS
 // ─────────────────────────────────────────────────────────────────────────────
+// A #rrggbb for a colour input; anything else (a translucent #rrggbb99, a name)
+// is cut back to the opaque colour or a neutral so the picker always has a value.
+function hex6(c, fallback = '#000000') {
+  return typeof c === 'string' && /^#[0-9a-fA-F]{6}/.test(c) ? c.slice(0, 7) : fallback
+}
+
+// One colour the club can set: a swatch that opens the picker, a word saying
+// whether it is the layout's own ("Auto") or a pick, and a way back.
+function ColourField({ label, value, auto, autoLabel, onChange, onClear, testId }) {
+  const picked = typeof value === 'string' && value !== ''
+  return (
+    <div className="flex items-center justify-between gap-2 min-h-8" data-testid={testId}>
+      <span className="text-[11px] text-pb-dim font-mono truncate">{label}</span>
+      <span className="flex items-center gap-1.5 shrink-0">
+        {picked
+          ? <button type="button" onClick={onClear} className="text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Auto</button>
+          : <span className="text-[10px] font-mono text-pb-faintest">{autoLabel || 'Auto'}</span>}
+        <input type="color" aria-label={label} value={hex6(picked ? value : auto, '#808080')}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent p-0" />
+      </span>
+    </div>
+  )
+}
+
+// How the layout sits on the picked background: the veil its own fill puts over
+// it, and the dots, stripes and grain it draws on top. Both default to what the
+// layout always did on a built-in texture and to "none" on the club's own photo.
+function BackgroundFinish({ ownPhoto, tint, tintAuto, onTint, texture, textureAuto, onTexture, onReset, touched }) {
+  return (
+    <div className="mt-2 pt-2 border-t pb-hairline flex flex-col gap-2" data-testid="bg-finish">
+      <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Over the background</span>
+      <label className="flex items-center gap-2 text-[11px] text-pb-faint font-mono">
+        <span className="w-24 shrink-0">Layout tint</span>
+        <input type="range" min={0} max={100} step={5} value={Math.round(tint * 100)} data-testid="bg-tint"
+          onChange={(e) => onTint(Number(e.target.value) / 100)} className="flex-1 min-w-0" />
+        <span className="w-9 text-right text-pb-faintest">{Math.round(tint * 100)}%</span>
+      </label>
+      <label className="flex items-center gap-2 text-[11px] text-pb-faint font-mono">
+        <input type="checkbox" checked={texture} data-testid="bg-texture" onChange={(e) => onTexture(e.target.checked)} />
+        Layout dots, stripes and grain
+      </label>
+      <p className="text-[10px] leading-relaxed text-pb-faintest">
+        {ownPhoto
+          ? 'Your photo shows as it is: no tint and no pattern. Raise the tint if the text is hard to read on it.'
+          : 'The layout lays its own colour (60% by default) and a fine pattern over the background. Lower the tint to see more of it.'}
+      </p>
+      {touched && (
+        <button type="button" onClick={onReset} data-testid="bg-finish-reset"
+          className="self-start text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Back to automatic</button>
+      )}
+    </div>
+  )
+}
+
+// The four colour roles every layout is drawn from, set over whichever palette
+// is open. This is the one place a club changes the text colour or the panel
+// colour of a post without making a whole new custom palette.
+const ROLE_FIELDS = [
+  { key: 'primary', label: 'Background' },
+  { key: 'secondary', label: 'Panels and shapes' },
+  { key: 'accent', label: 'Accent' },
+  { key: 'ink', label: 'Text' },
+]
+function ColourRoles({ base, tweaks, onChange, onClear, onReset }) {
+  const any = ROLE_FIELDS.some((f) => tweaks[f.key])
+  return (
+    <section className="pb-card p-4" data-testid="colour-roles">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Colours</h2>
+        {any && <button type="button" onClick={onReset} className="text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Reset all</button>}
+      </div>
+      <p className="text-pb-faintest text-[10px] mb-2">These four colours run every layout. Change one here and the whole post follows; use the elements below to colour one thing on its own.</p>
+      <div className="flex flex-col">
+        {ROLE_FIELDS.map((f) => (
+          <ColourField key={f.key} label={f.label} value={tweaks[f.key]} auto={base?.[f.key]}
+            onChange={(v) => onChange(f.key, v)} onClear={() => onClear(f.key)} testId={`role-${f.key}`} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// Per-element colours and words for the open layout (social/layoutParts.js).
+function LayoutElements({ name, spec, palette, parts, onChange, onClear, onReset }) {
+  const groups = [...new Set(spec.map((p) => p.group))]
+  const any = spec.some((p) => parts[p.key] !== undefined)
+  return (
+    <section className="pb-card p-4" data-testid="layout-elements">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{name} elements</h2>
+        {any && <button type="button" onClick={onReset} className="text-[10px] font-mono text-pb-faintest hover:text-pb-text underline">Reset all</button>}
+      </div>
+      <p className="text-pb-faintest text-[10px] mb-2">Set any part on its own: the title words, the name text, the backdrop behind each photo. Anything you leave on Auto follows the colours above.</p>
+      {groups.map((g) => (
+        <div key={g} className="mb-2 last:mb-0">
+          <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 mt-1 mb-0.5">{g}</div>
+          {spec.filter((p) => p.group === g).map((p) => p.kind === 'text' ? (
+            <label key={p.key} className="flex items-center justify-between gap-2 min-h-8" data-testid={`part-${p.key}`}>
+              <span className="text-[11px] text-pb-dim font-mono truncate">{p.label}</span>
+              <input value={parts[p.key] ?? ''} placeholder={p.auto(palette)} maxLength={24}
+                onChange={(e) => onChange(p.key, e.target.value)}
+                className="w-32 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-xs text-pb-text placeholder:text-pb-faintest font-mono" />
+            </label>
+          ) : (
+            <ColourField key={p.key} label={p.label} value={parts[p.key]} auto={p.auto ? p.auto(palette) : palette.secondary}
+              autoLabel={p.autoLabel} onChange={(v) => onChange(p.key, v)} onClear={() => onClear(p.key)} testId={`part-${p.key}`} />
+          ))}
+        </div>
+      ))}
+    </section>
+  )
+}
 function PaletteSwatch({ pal, selected, onClick }) {
   return (
     <button
@@ -1447,7 +1572,33 @@ export default function AdminSocialPost() {
   // picked per post. bgStyle is set to the sentinel 'custom-image' while one
   // is active; bgCustomUrl carries which.
   const [bgAssets, setBgAssets] = useState([])
-  const [bgCustomUrl, setBgCustomUrl] = useState(null)
+  const [bgCustomUrl, setBgCustomUrl] = useState(() => {
+    try { return localStorage.getItem('bs_social_bg_url') || null } catch { return null }
+  })
+  // How a layout sits on that background. Both are null until the club touches
+  // them, which means "automatic": the built-in textures keep the layout's own
+  // 60% fill and its dots, stripes and grain (as they always have), and the
+  // club's own photo gets neither, because a veil and a dot pattern over a
+  // photo somebody uploaded is the opposite of what uploading it was for.
+  const [bgTint, setBgTint] = useState(() => {
+    const v = localStorage.getItem('bs_social_bg_tint')
+    return v === null || v === '' || isNaN(Number(v)) ? null : Math.max(0, Math.min(1, Number(v)))
+  })
+  const [bgTexture, setBgTexture] = useState(() => {
+    const v = localStorage.getItem('bs_social_bg_texture')
+    return v === '1' ? true : v === '0' ? false : null
+  })
+  // Colour roles the club has set over whichever palette is open: the same four
+  // roles every layout is drawn from (background, panel, accent, text), so one
+  // change reaches all of them. Only the keys somebody touched are stored.
+  const [roleTweaks, setRoleTweaks] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('bs_social_roles') || '{}') || {} } catch { return {} }
+  })
+  // Per-element colours and words for the open layout, keyed by post type
+  // (layoutParts.js `partsKey`). A part that is absent is what the layout always drew.
+  const [layoutParts, setLayoutParts] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('bs_social_parts') || '{}') || {} } catch { return {} }
+  })
 
   const [match, setMatch] = useState({ competition: '', round: '', venue: '', date: '', time: '', season: '' })
   const patchMatch = patch => setMatch(m => ({ ...m, ...patch }))
@@ -1828,7 +1979,7 @@ export default function AdminSocialPost() {
       }
       const tpl = {
         key, name: finalName, templateId, custom: usingOverlay,
-        style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent },
+        style: { palette: paletteKey, dark: darkMode, font: fontKey, bg: bgStyle, bgColors, customBg, customAccent, bgTint, bgTexture, roles: roleTweaks, parts: layoutParts[partsKey(templateId)] || null, bgUrl: bgStyle === 'custom-image' ? bgCustomUrl : null },
         blank: items,
         event: eventContent,
         // The stacking order goes with the design. Without it a template saved
@@ -1900,6 +2051,13 @@ export default function AdminSocialPost() {
     if (st.bgColors) setBgColors(st.bgColors)
     if (st.customBg) setCustomBg(st.customBg)
     if (st.customAccent) setCustomAccent(st.customAccent)
+    // Absent means a template saved before these existed: leave the editor's own
+    // choice alone for the veil and texture, and start the colours untouched.
+    setBgTint(typeof st.bgTint === 'number' ? st.bgTint : null)
+    setBgTexture(typeof st.bgTexture === 'boolean' ? st.bgTexture : null)
+    setRoleTweaks(st.roles && typeof st.roles === 'object' ? st.roles : {})
+    setLayoutParts((all) => ({ ...all, [partsKey(tpl.templateId)]: cleanParts(tpl.templateId, st.parts) }))
+    if (st.bg === 'custom-image' && typeof st.bgUrl === 'string' && st.bgUrl) setBgCustomUrl(st.bgUrl)
     if (tpl.event && typeof tpl.event === 'object') {
       if (tpl.event.facts && typeof tpl.event.facts === 'object') setEvent({ ...DEFAULT_EVENT, ...tpl.event.facts })
       if (tpl.event.preset) setEventPreset(tpl.event.preset)
@@ -2041,6 +2199,17 @@ export default function AdminSocialPost() {
   useEffect(() => { localStorage.setItem('bs_social_dark', JSON.stringify(darkMode)) }, [darkMode])
   useEffect(() => { localStorage.setItem('bs_social_font', fontKey) }, [fontKey])
   useEffect(() => { localStorage.setItem('bs_social_bg', bgStyle) }, [bgStyle])
+  // A blob: URL dies with the page, so only a stored one is kept across a reload.
+  useEffect(() => {
+    try {
+      if (bgCustomUrl && !String(bgCustomUrl).startsWith('blob:')) localStorage.setItem('bs_social_bg_url', bgCustomUrl)
+      else if (!bgCustomUrl) localStorage.removeItem('bs_social_bg_url')
+    } catch { /* private mode: the choice just does not survive a reload */ }
+  }, [bgCustomUrl])
+  useEffect(() => { localStorage.setItem('bs_social_bg_tint', bgTint == null ? '' : String(bgTint)) }, [bgTint])
+  useEffect(() => { localStorage.setItem('bs_social_bg_texture', bgTexture == null ? '' : bgTexture ? '1' : '0') }, [bgTexture])
+  useEffect(() => { localStorage.setItem('bs_social_roles', JSON.stringify(roleTweaks)) }, [roleTweaks])
+  useEffect(() => { localStorage.setItem('bs_social_parts', JSON.stringify(layoutParts)) }, [layoutParts])
   useEffect(() => { localStorage.setItem('bs_social_bg_colors', JSON.stringify(bgColors)) }, [bgColors])
   useEffect(() => { localStorage.setItem('bs_social_bg_text', bgBigText) }, [bgBigText])
   useEffect(() => { localStorage.setItem('bs_social_bg_text_op', String(bgBigTextOpacity)) }, [bgBigTextOpacity])
@@ -3033,7 +3202,7 @@ export default function AdminSocialPost() {
          || PALETTES[paletteKey]
          || orgToPalette(settings))
 
-  const themedPalette = applyTheme(activePalette, darkMode)
+  const themedPalette = applyRoleTweaks(applyTheme(activePalette, darkMode), roleTweaks)
 
   const nameFormat = settings?.player_name_format || 'last_first'
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
@@ -3184,7 +3353,13 @@ export default function AdminSocialPost() {
   // DOM) shows through — the templates' hardcoded `background: palette.primary`
   // fills can't be touched individually (~40 of them), so this is done by
   // feeding them a translucent palette instead.
-  const templatePalette = bgActive ? { ...renderPalette, primary: withAlpha(renderPalette.primary, '99') } : renderPalette
+  const templatePalette = bgActive ? { ...renderPalette, primary: withAlpha(renderPalette.primary, DEFAULT_VEIL) } : renderPalette
+  // The veil and the layout's own texture over the background (postLook.js).
+  const ownPhotoBg = bgStyle === 'custom-image'
+  const bgTintEff = bgTint ?? (ownPhotoBg ? 0 : 0.6)
+  const bgTextureEff = bgTexture ?? !ownPhotoBg
+  const postLook = { veil: bgActive ? alphaHex(bgTintEff) : null, texture: bgActive ? bgTextureEff : true }
+  const openParts = partsFor(templateId) ? cleanParts(templateId, layoutParts[partsKey(templateId)]) : null
 
   const filteredPlayers = allPlayers.filter(p => {
     if (!playerSearch) return true
@@ -3427,6 +3602,7 @@ export default function AdminSocialPost() {
     extraProps.club = clubMark
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
+  if (openParts) extraProps.parts = openParts
   if (tmpl.kind === 'totw') {
     // The competition stays as typed: a team of the week spans grades, so the
     // 'COMPETITION' placeholder the other posts fall back to would print on it.
@@ -3767,7 +3943,7 @@ export default function AdminSocialPost() {
       <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers}
         palette={templatePalette} headline={headline} width={W} height={H} {...extraProps} {...props} />
     )
-    return <PostLayerProvider value={templateLayerValue(interactive, scale)}>{node}</PostLayerProvider>
+    return <PostLookContext.Provider value={postLook}><PostLayerProvider value={templateLayerValue(interactive, scale)}>{node}</PostLayerProvider></PostLookContext.Provider>
   }
   const postPages = (() => {
     if (isBlankTab && pages.count > 1) {
@@ -4906,6 +5082,13 @@ export default function AdminSocialPost() {
                   </label>
                 </div>
               </div>
+              {bgActive && (
+                <BackgroundFinish
+                  ownPhoto={ownPhotoBg} tint={bgTintEff} texture={bgTextureEff}
+                  onTint={setBgTint} onTexture={setBgTexture}
+                  touched={bgTint != null || bgTexture != null}
+                  onReset={() => { setBgTint(null); setBgTexture(null) }} />
+              )}
               {bgStyle === 'gradient-custom' && (
                 <div className="flex gap-1.5 flex-wrap items-center mt-2">
                   <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 w-full">Direction</span>
@@ -5048,6 +5231,20 @@ export default function AdminSocialPost() {
                 </div>
               )}
             </section>
+
+            <ColourRoles
+              base={applyTheme(activePalette, darkMode)} tweaks={roleTweaks}
+              onChange={(k, v) => setRoleTweaks((t) => ({ ...t, [k]: v }))}
+              onClear={(k) => setRoleTweaks((t) => { const n = { ...t }; delete n[k]; return n })}
+              onReset={() => setRoleTweaks({})} />
+
+            {partsFor(templateId) && (
+              <LayoutElements
+                name={tmpl.name} spec={partsFor(templateId)} palette={renderPalette} parts={openParts || {}}
+                onChange={(k, v) => setLayoutParts((all) => ({ ...all, [partsKey(templateId)]: { ...(all[partsKey(templateId)] || {}), [k]: v } }))}
+                onClear={(k) => setLayoutParts((all) => { const n = { ...(all[partsKey(templateId)] || {}) }; delete n[k]; return { ...all, [partsKey(templateId)]: n } })}
+                onReset={() => setLayoutParts((all) => ({ ...all, [partsKey(templateId)]: {} }))} />
+            )}
 
             </>)}
 

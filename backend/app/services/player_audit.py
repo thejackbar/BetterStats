@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
-AREAS = ("selection", "availability", "squads")
+AREAS = ("selection", "availability", "squads", "details")
 
 # action code -> the label the list shows. Codes are stored; labels may change.
 ACTIONS: dict[str, str] = {
@@ -56,6 +56,7 @@ ACTIONS: dict[str, str] = {
     "squad_created": "Squad created",
     "squad_updated": "Squad edited",
     "squad_deleted": "Squad deleted",
+    "details_updated": "Contact details updated by the player",
 }
 
 _actor: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar("audit_actor", default=None)

@@ -69,6 +69,11 @@ async def main() -> int:
         await conn.run_sync(Base.metadata.create_all)
         # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
         await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
+        # The email variables {{teaser_url}} / {{teaser_image_url}} are resolved on the same
+        # path as the trial figures, so the real preview and send read this table.
+        from app.services.club_teaser_ddl import STATEMENTS as TEASER_DDL
+        for stmt in TEASER_DDL:
+            await conn.execute(text(stmt))
 
     Session = async_sessionmaker(engine, expire_on_commit=False)
     async with Session() as db:
@@ -355,8 +360,11 @@ async def main() -> int:
         # so the two must agree contact for contact.
         from app.routers.comms import _contact_vars
         batch = await ctw.vars_by_marketing_club(db, list(mclubs.values()))
+        # The send also reads each club's teaser link and picture in one batch.
+        from app.services import club_teaser_images as cti
+        teaser = await cti.vars_by_marketing_club(db, list(mclubs.values()))
         drift = [label for label, mc in mclubs.items()
-                 if _contact_vars(mc, contacts[label].merge_vars, batch[mc.id])
+                 if _contact_vars(mc, contacts[label].merge_vars, {**batch[mc.id], **teaser[mc.id]})
                  != await _send_vars(db, contacts[label], mc)]
         check("the batched send and the one-at-a-time preview agree for every club",
               not drift and len(batch) == len(mclubs), drift or len(batch))

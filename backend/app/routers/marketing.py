@@ -78,7 +78,103 @@ async def teaser_status(db: AsyncSession = Depends(get_db), _=Depends(require_su
             "stopped": stopped, "in_hours": in_hours,
             "max_rate": ps.TEASER_MAX_RATE, "min_rate": ps._FLOAT_KEYS["club_teaser_calls_per_second"][0],
             "progress": progress,
-            "estimate": ct.crawl_estimate(progress["due"], progress["avg_calls"], rate, start, end)}
+            "estimate": ct.crawl_estimate(progress["due"], progress["avg_calls"], rate, start, end),
+            "images": await _images_block(db)}
+
+
+async def _images_block(db: AsyncSession) -> dict:
+    from app.services import club_teaser_images as ti
+    last = ti.RUN_STATE.get("last") or {}
+    return {**await ti.images_progress(db),
+            "running": bool(ti.RUN_STATE.get("running")),
+            "last": ({"drawn": last.get("drawn", 0), "failed": len(last.get("failed") or []),
+                      "status": last.get("status"), "error": last.get("error")}
+                     if last else None)}
+
+
+class RenderBody(BaseModel):
+    limit: int = 50
+
+
+async def _render_in_background(limit: int):
+    from app.services import club_teaser_images as ti
+    await ti.render_pending(async_session_maker, limit=limit)
+
+
+@router.post("/teaser/render")
+async def teaser_render(body: RenderBody, background: BackgroundTasks,
+                        db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+    """Draw the teaser pictures that are due (new snapshots, and snapshots whose
+    figures changed). Runs after the response on its own sessions; the panel
+    reads progress from ``/teaser/status``. One run at a time."""
+    from app.services import club_teaser_images as ti
+    if ti.RUN_STATE.get("running"):
+        return {"started": False, "reason": "already_running"}
+    limit = max(1, min(int(body.limit), 200))
+    background.add_task(_render_in_background, limit)
+    return {"started": True, "limit": limit}
+
+
+async def _dir_filters(
+    q: Optional[str] = None, state: Optional[str] = None, association: Optional[str] = None,
+    status: Optional[str] = None, postcode_from: Optional[str] = None, postcode_to: Optional[str] = None,
+    contact: Optional[str] = None, person: Optional[str] = None,
+    junior: str = "off", carnival: str = "off", school: str = "off", rep: str = "off",
+    cricket_au: str = "off", emailed: str = "off", exported: str = "off", suppressed: str = "off",
+    excluded: str = "off", visited: bool = False,
+    associations: Optional[List[str]] = Query(None), countries: Optional[List[str]] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """The Club Directory filters as query parameters (the same ones the CSV
+    export takes), turned into ``club_filters`` keyword arguments."""
+    modes = {"junior": junior, "carnival": carnival, "school": school, "rep": rep,
+             "cricket_au": cricket_au, "emailed": emailed, "exported": exported,
+             "suppressed": suppressed, "excluded": excluded}
+    return await cd.expand_shortcode(db, _filter_kwargs(
+        q, state, association, status, postcode_from, postcode_to, contact, person,
+        modes=modes, associations=associations, visited=visited, countries=countries))
+
+
+@router.get("/teaser/ad-pack/summary")
+async def ad_pack_summary(
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+    filters: dict = Depends(_dir_filters), db: AsyncSession = Depends(get_db),
+    _=Depends(require_super_admin),
+):
+    """What a Meta ad pack would hold for the filters on screen: how many clubs
+    match, how many of those have pictures and can go in a pack, how many of
+    those have no location, and how many this pack takes. Read-only."""
+    from app.services import club_teaser_adpack as ap
+    sel = await ap.select_clubs(db, filters, limit=limit, offset=offset)
+    return {"matching": sel["matching"], "eligible": sel["eligible"],
+            "without_location": sel["without_location"], "in_pack": len(sel["clubs"]),
+            "limit": sel["limit"], "offset": sel["offset"], "max_limit": ap.MAX_LIMIT,
+            "default_radius_km": ap.DEFAULT_RADIUS_KM}
+
+
+@router.get("/teaser/ad-pack.zip")
+async def ad_pack_zip(
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+    campaign: str = "club-season", radius_km: int = 15,
+    filters: dict = Depends(_dir_filters), db: AsyncSession = Depends(get_db),
+    _=Depends(require_super_admin),
+):
+    """The Meta ad pack for the filters on screen: a zip with a manifest, the
+    feed and story picture for each club, and a README. An export only; it
+    calls nothing outside BetterCricket."""
+    import asyncio
+    from starlette.background import BackgroundTask
+    from fastapi.responses import FileResponse
+    from app.services import club_teaser_adpack as ap
+    sel = await ap.select_clubs(db, filters, limit=limit, offset=offset)
+    if not sel["clubs"]:
+        raise HTTPException(status_code=404, detail="No clubs with pictures match these filters.")
+    path = await asyncio.to_thread(ap.build_zip, sel["clubs"], campaign=ap.clean_campaign(campaign),
+                                   radius_km=ap.clamp_radius(radius_km))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return FileResponse(path, media_type="application/zip",
+                        filename=f"bettercricket-ad-pack-{stamp}.zip",
+                        background=BackgroundTask(path.unlink, missing_ok=True))
 
 
 # The tri-state directory filters (off / include / exclude). Same keys front to

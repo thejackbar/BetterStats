@@ -29,12 +29,14 @@ const status = (over = {}) => ({
   state: 'off', rate: 0, window_start: 5, window_end: 22, stopped: false, in_hours: true,
   min_rate: 0.05, max_rate: 10, progress: PROGRESS, estimate: null, ...over,
 })
+const PACK = { matching: 40, eligible: 12, without_location: 3, in_pack: 12, limit: 50, offset: 0, max_limit: 100, default_radius_km: 15 }
 const RUNNING = status({ state: 'running', rate: 2, estimate: { calls: 101500, hours: 14.1, window_hours: 17,
                           days: 0.8, rate_to_finish_in_one_window: 1.66 } })
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function open({ initial = status(), width = 1400, refuse = null } = {}) {
+async function open({ initial = status(), width = 1400, refuse = null, pack = null } = {}) {
+  const renders = [], packReqs = []
   const ctx = await browser.newContext({ viewport: { width, height: 1400 } })
   const page = await ctx.newPage()
   const errors = [], patches = []
@@ -64,6 +66,16 @@ async function open({ initial = status(), width = 1400, refuse = null } = {}) {
                estimate: rate ? RUNNING.estimate : null }
       return json({})
     }
+    if (/marketing\/teaser\/render/.test(p) && req.method() === 'POST') {
+      renders.push(JSON.parse(req.postData() || '{}'))
+      live = { ...live, images: { ...live.images, running: true } }
+      return json({ started: true, limit: renders.at(-1).limit })
+    }
+    if (/marketing\/teaser\/ad-pack\/summary/.test(p)) {
+      packReqs.push(new URL(req.url()).searchParams)
+      if (pack === 'error') return json({ detail: 'boom' }, 500)
+      return json(pack || PACK)
+    }
     if (/marketing\/teaser\/status/.test(p)) return json(live)
     if (/marketing\/status/.test(p)) {
       return json({ state: 'idle', detail: 'Idle', paused: false, clubs: 40, associations_pending: 0,
@@ -81,7 +93,7 @@ async function open({ initial = status(), width = 1400, refuse = null } = {}) {
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
   await panel(page).waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
   await page.waitForTimeout(500)
-  return { page, ctx, errors, patches, dialogs, setLive: (s) => { live = s },
+  return { page, ctx, errors, patches, renders, packReqs, dialogs, setLive: (s) => { live = s },
            setAccept: (v) => { acceptDialog = v } }
 }
 
@@ -246,6 +258,117 @@ for (const [label, st, want] of [
   })
   ck('the panel does not overflow itself at 390px', m && m.panel <= 0, JSON.stringify(m))
   ck('no page errors at 390px', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ---- 10. Pictures for emails and ads ------------------------------------------
+const IMAGES = { ready: 12, pending: 7, stale: 2, running: false, last: null }
+{
+  const { page, ctx, errors, renders } = await open({ initial: status({ images: IMAGES }) })
+  const box = textOf(t(page, 'teaser-images'))
+  ck('the drawn and waiting counts show, with how many are out of date',
+     (await textOf(t(page, 'teaser-images-ready'))) === '12' && (await textOf(t(page, 'teaser-images-pending'))) === '7'
+     && /2 out of date/.test(await box), await box)
+  ck('the button names how many it will draw', /Draw 7 pictures/.test(await textOf(t(page, 'teaser-draw'))))
+  await press(t(page, 'teaser-draw'))
+  await page.waitForTimeout(500)
+  ck('pressing it sends exactly one request, for a batch of 50', renders.length === 1 && renders[0].limit === 50, JSON.stringify(renders))
+  ck('and the panel says it is drawing, with the button off', /drawing now/.test(await textOf(t(page, 'teaser-images')))
+     && await dis(t(page, 'teaser-draw')))
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ initial: status({ images: { ready: 5, pending: 0, stale: 0, running: false, last: null } }) })
+  ck('with nothing waiting the button is off and says so', await dis(t(page, 'teaser-draw'))
+     && /Draw pictures/.test(await textOf(t(page, 'teaser-draw'))))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ initial: status({ images: { ...IMAGES, last: { status: 'error', drawn: 0, failed: 0, error: 'no chromium here' } } }) })
+  ck('a batch that could not run says why', /no chromium here/.test(await textOf(t(page, 'teaser-images-error'))))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ initial: status({ images: { ...IMAGES, last: { status: 'ok', drawn: 5, failed: 2, error: null } } }) })
+  ck('clubs that could not be drawn are counted, with the usual reason',
+     /2 clubs could not be drawn/.test(await textOf(t(page, 'teaser-images-failed'))) && /long name/.test(await textOf(t(page, 'teaser-images-failed'))))
+  await ctx.close()
+}
+{
+  const { page, ctx, errors } = await open({ initial: status() })
+  ck('a status with no pictures block (an older server) hides the row and does not crash',
+     (await t(page, 'teaser-images').count()) === 0 && (await panel(page).count()) === 1 && errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ initial: status({ images: { ...IMAGES, last: { status: 'ok', drawn: 5, failed: 2, error: null } } }), width: 390 })
+  const m = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="teaser-panel"]')
+    return el ? { panel: el.scrollWidth - el.clientWidth, page: document.documentElement.scrollWidth - document.documentElement.clientWidth } : null
+  })
+  ck('the pictures row does not overflow at 390px', m && m.panel <= 0 && m.page <= 0, JSON.stringify(m))
+  await ctx.close()
+}
+
+// ---- 11. Meta ad pack ---------------------------------------------------------
+{
+  const { page, ctx, errors, packReqs } = await open()
+  await page.waitForTimeout(900)
+  const row = t(page, 'adpack-row')
+  ck('the ad pack row is in the actions card', await row.count() === 1)
+  const sumText = await textOf(t(page, 'adpack-summary'))
+  ck('it says how many clubs match, how many have pictures, and how many lack a location',
+     /40 clubs match/.test(sumText) && /12 have\s+pictures/.test(sumText) && /3 of those have no location/.test(sumText), sumText)
+  ck('the summary was asked for with the default 50 clubs and no skip', packReqs.length >= 1
+     && packReqs.at(-1).get('limit') === '50' && packReqs.at(-1).get('offset') === '0', JSON.stringify([...(packReqs.at(-1) || [])]))
+  const href = await attr(t(page, 'adpack-download'), 'href')
+  ck('the download link is the zip route with the pack settings', /\/club-admin\/marketing\/teaser\/ad-pack\.zip\?/.test(href || '')
+     && /limit=50/.test(href) && /radius_km=15/.test(href) && /campaign=club-season/.test(href), href)
+  ck('the button names the clubs in the pack', /Download ad pack \(12 clubs\)/.test(await textOf(t(page, 'adpack-download'))))
+  await put(t(page, 'adpack-limit'), '20')
+  await put(t(page, 'adpack-offset'), '40')
+  await put(t(page, 'adpack-radius'), '25')
+  await put(t(page, 'adpack-campaign'), 'Spring Push')
+  await page.waitForTimeout(1100)
+  const last = packReqs.at(-1)
+  ck('changing the size and skip asks the server again with those values', last?.get('limit') === '20' && last?.get('offset') === '40',
+     JSON.stringify([...(last || [])]))
+  const href2 = await attr(t(page, 'adpack-download'), 'href')
+  ck('and the link carries the radius and campaign name as typed', /radius_km=25/.test(href2 || '') && /campaign=Spring\+Push/.test(href2 || '') && /limit=20/.test(href2) && /offset=40/.test(href2), href2)
+  ck('the row says plainly that nothing goes to Meta and nothing is spent', /Nothing is sent to Meta and nothing is spent/.test(await textOf(row)))
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ pack: { matching: 9, eligible: 0, without_location: 0, in_pack: 0, limit: 50, offset: 0, max_limit: 100, default_radius_km: 15 } })
+  await page.waitForTimeout(900)
+  ck('when no matching club has a picture the button is off and the row points at Draw pictures',
+     await dis(t(page, 'adpack-download')) && !(await attr(t(page, 'adpack-download'), 'href'))
+     && /None of the matching clubs has a picture yet/.test(await textOf(t(page, 'adpack-summary'))))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ pack: { matching: 9, eligible: 4, without_location: 0, in_pack: 0, limit: 50, offset: 500, max_limit: 100, default_radius_km: 15 } })
+  await page.waitForTimeout(900)
+  ck('skipping past the end says nothing is left rather than offering an empty zip',
+     await dis(t(page, 'adpack-download')) && /Nothing left after skipping/.test(await textOf(t(page, 'adpack-summary'))))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ pack: 'error' })
+  await page.waitForTimeout(900)
+  ck('a server error is shown and the button stays off', /boom|Could not/.test(await textOf(t(page, 'adpack-error'))) && await dis(t(page, 'adpack-download')))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ width: 390 })
+  await page.waitForTimeout(900)
+  const m = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="adpack-row"]')
+    return el ? { row: el.scrollWidth - el.clientWidth, page: document.documentElement.scrollWidth - document.documentElement.clientWidth } : null
+  })
+  ck('the ad pack row does not overflow at 390px', m && m.row <= 0 && m.page <= 0, JSON.stringify(m))
   await ctx.close()
 }
 

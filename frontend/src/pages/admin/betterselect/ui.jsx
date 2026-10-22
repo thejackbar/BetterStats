@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../contexts/AuthContext'
 import { ruleBadges } from './selectionRules'
-import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availRank, weekPatterns, weekPatternOf, weekFlag, weekNameOf } from '../../../lib/availability'
+import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availSortRank, weekPatterns, weekPatternOf, weekFlag, weekNameOf } from '../../../lib/availability'
 import { useAllowMaybe, useWeekNames } from '../../../lib/useAvailabilityConfig'
 import { gameDatesLabel } from './selectionMeta'
 
@@ -711,9 +711,9 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose, d
 }
 
 /* Sort helper: available-first, then by name. Re-exported for screen use. */
-export function byAvailThenName(statusOf = (p) => p.availability ?? p.avail, nameOf = (p) => p.display_name || p.name || '') {
+export function byAvailThenName(statusOf = (p) => p.availability ?? p.avail, nameOf = (p) => p.display_name || p.name || '', daysOf = (p) => p.availability_days) {
   return (a, b) => {
-    const r = availRank(statusOf(a)) - availRank(statusOf(b))
+    const r = availSortRank(statusOf(a), daysOf(a)) - availSortRank(statusOf(b), daysOf(b))
     return r !== 0 ? r : nameOf(a).localeCompare(nameOf(b))
   }
 }

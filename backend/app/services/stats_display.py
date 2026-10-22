@@ -67,18 +67,29 @@ async def club_rate_minimums(session: AsyncSession, org_id) -> dict:
     }
 
 
-async def resolve_min_rate_innings(session: AsyncSession, org_id, asked) -> int:
+async def resolve_min_rate_innings(session: AsyncSession, org_id, asked, *, ranked_on_rate: bool = True) -> int:
     """A viewer's explicit pick wins; omitting it uses the club's own number.
 
     0 is a real answer here, not an absence — it is how a viewer switches the
     qualification off — so this tests for None rather than falsiness.
+
+    The club's number qualifies a STRIKE RATE, so it only stands in for an
+    omitted pick when the board is ranked on one (`ranked_on_rate`). On a board
+    ranked on runs it would drop a player for a rate nobody is ranking, and a
+    player whose history is a BetterImport book has no covered innings at all:
+    Kalamunda's leading run scorer fell off the Leaderboard that way.
     """
     if asked is not None:
         return clean_minimum(asked) or 0
+    if not ranked_on_rate:
+        return 0
     return (await club_rate_minimums(session, org_id))["min_rate_innings"]
 
 
-async def resolve_min_rate_spells(session: AsyncSession, org_id, asked) -> int:
+async def resolve_min_rate_spells(session: AsyncSession, org_id, asked, *, ranked_on_rate: bool = True) -> int:
+    """The bowling twin of :func:`resolve_min_rate_innings`: the club's bar is for an economy."""
     if asked is not None:
         return clean_minimum(asked) or 0
+    if not ranked_on_rate:
+        return 0
     return (await club_rate_minimums(session, org_id))["min_rate_spells"]

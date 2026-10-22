@@ -46,19 +46,23 @@ export function gameDatesLabel(playedOn, endOn) {
   if (!playedOn) return ''
   return endOn && endOn > playedOn ? `${f(playedOn)} + ${f(endOn)}` : f(playedOn)
 }
-// The board's default order, mirroring selection_pool._pool_rank: everyone who
-// says they are available and is named nowhere that day first, highest squad
+// The board's default order, mirroring selection_pool._pool_rank: first anyone
+// free one weekend of a two-day game and still open to pick (`half_open`), then
+// everyone who says they are available and is named nowhere that day, highest squad
 // first (`open_seq`: the place of their highest squad in the club). Then the
 // fixture's own squad (members, then anyone ranked level with it), players the
 // squad above has not picked, the squad below, the rest of the squad above, and
 // everyone else.
 export function poolRank(p) {
-  if (p?.open_seq != null) return p.open_seq
-  if (p?.squad_match) return 1000
-  if (p?.tier === 1) return 1001
-  if (p?.drop_in_from) return 1002
-  if (p?.tier === 2 || p?.tier === 3) return 1002 + p.tier
-  return 1099
+  const base = p?.open_seq != null ? p.open_seq
+    : p?.squad_match ? 1000
+    : p?.tier === 1 ? 1001
+    : p?.drop_in_from ? 1002
+    : (p?.tier === 2 || p?.tier === 3) ? 1002 + p.tier
+    : 1099
+  // Free one weekend of a two-day game and still open to pick: the selector has to
+  // decide, so they lead the pool (`half_open`, from the server), squad order kept.
+  return p?.half_open ? base - 10000 : base
 }
 
 // A player's gender as the filters read it: 'male', 'female', or '' when unrecorded.

@@ -26,7 +26,7 @@ import { CAP } from '../../../lib/capabilities'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { useWeekNames } from '../../../lib/useAvailabilityConfig'
 import { PbSpinner } from '../../../lib/presskit'
-import { availRank, AVAILABILITY, halfStatus, viewStatus, weekFlag } from '../../../lib/availability'
+import { availSortRank, AVAILABILITY, halfStatus, viewStatus, weekFlag } from '../../../lib/availability'
 import { useSelectConfig } from '../../../lib/useAvailabilityConfig'
 import { Icon, Avatar, Btn, Tag, RuleTags, WeekFlag, playedWithinYears, recencyOf } from './ui'
 import { DnD, useDrag } from './selectionDnd'
@@ -680,11 +680,16 @@ export default function AdminSelectionDraftTable() {
     // A name typed into search is someone being looked for, so the recency window
     // only trims the browse list.
     if (years && !q.trim()) list = list.filter((p) => playedWithinYears(recencyOf(p), years))
+    // The shared availability sort (lib/availability `availSortRank`): free ONE
+    // weekend of a two-day game and away the other leads. The pool judges the open
+    // weekend (`availability`), which would read the away weekend as OUT and sink
+    // them, so the per-weekend answers are what lead. Ordering only.
+    const rank = (p) => availSortRank(p.availability, weekByPlayer[p.id])
     return list.slice().sort((a, b) =>
-      availRank(a.availability) - availRank(b.availability)
+      rank(a) - rank(b)
       || (b.score ?? 0) - (a.score ?? 0)
       || (a.display_name || '').localeCompare(b.display_name || ''))
-  }, [unnamed, q, squad, gender, hideOut, years])
+  }, [unnamed, q, squad, gender, hideOut, years, weekByPlayer])
 
   // ── Confirm ───────────────────────────────────────────────────────────────
   const dirtyIds = order.filter((f) => cols?.[f] && isDirty(cols[f]))

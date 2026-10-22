@@ -2,10 +2,10 @@
 // API stubbed at the network layer (Gisborne round):
 //   * the player's squad shows under their name when the club allows it, and not
 //     at all when it does not
-//   * a "My page" tab shows their availability, squad, locked selections (with
-//     captain / keeper) and training, from GET /me/profile only when opened
+//   * one page shows their availability, squad, locked selections (with
+//     captain / keeper) and training, from GET /me/profile, no tabs
 //   * nothing is selected yet reads plainly
-//   * 390px: no sideways overflow on either tab
+//   * 390px: no sideways overflow
 //
 //   npx vite preview --port 5199 &    node verify_player_page_browser.mjs
 import { chromium } from 'playwright'
@@ -38,6 +38,15 @@ const profile = () => ({
 
 const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' })
+  // Every section of the player page starts closed. These checks read what is inside them,
+  // so each context starts with them opened, the way a returning player's page can be.
+  const _newContext = browser.newContext.bind(browser)
+  browser.newContext = async (o) => {
+    const c = await _newContext(o)
+    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
+    return c
+  }
+
   const ctx = await browser.newContext({ viewport: { width: 1000, height: 900 } })
   const page = await ctx.newPage()
   page.setDefaultTimeout(6000)
@@ -51,20 +60,18 @@ const run = async () => {
   await page.route(/\/api\/public\/availability\/tok$/, (r) => json(r, { club: me().club, require_pin: true, players: [{ id: 'p1', display_name: 'Jack Barendse', has_phone: true }] }))
 
   await page.goto(`${BASE}/avail/tok`)
-  await page.getByText('Signed in as').waitFor({ timeout: 20000 })
+  await page.locator('[data-hero]').waitFor({ timeout: 20000 })
 
   await safe('Squad under the name', async () => {
     console.log('\n── Squad on the availability page ──')
     const chips = await page.locator('[data-my-squads]').innerText()
     check('the squads are shown under the name', /1sts/.test(chips) && /T20/.test(chips), chips)
-    check('the profile is not fetched until My page is opened', hits.profile === 0, String(hits.profile))
   })
 
   await safe('My page', async () => {
     console.log('\n── My page ──')
-    await page.locator('[data-tab="mine"]').click()
     await page.locator('[data-my-page]').waitFor()
-    await page.getByText('Your squad').nth(1).waitFor()
+    await page.locator('[data-groups]').waitFor()
     const t = (await page.locator('[data-my-page]').innerText()).replace(/\s+/g, ' ')
     check('the profile was fetched once', hits.profile === 1, String(hits.profile))
     check('it shows their availability for the next game', /Available/i.test(t))
@@ -73,16 +80,14 @@ const run = async () => {
     check('it lists the next training', /Tuesday nets/.test(t))
     check('...and how often they have been lately', /5 sessions in the last eight weeks/.test(t), t)
     await page.screenshot({ path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/player-page.png` : '/tmp/player-page.png' })
-    await page.locator('[data-tab="weekend"]').click()
     await page.getByText('Your answers save automatically').waitFor()
-    check('the availability tab still works', true)
+    check('the availability editor is on the same page', (await page.locator('[data-availability]').count()) === 1)
   })
 
   await safe('Nothing selected yet', async () => {
     console.log('\n── Nothing selected yet ──')
     state.selected = false
-    await page.reload(); await page.getByText('Signed in as').waitFor()
-    await page.locator('[data-tab="mine"]').click()
+    await page.reload(); await page.locator('[data-hero]').waitFor()
     await page.locator('[data-no-selection]').waitFor()
     check('it says nothing yet, and when sides show', /once your selectors have locked them/.test(await page.locator('[data-no-selection]').innerText()))
   })
@@ -90,9 +95,8 @@ const run = async () => {
   await safe('Squad switched off', async () => {
     console.log('\n── The club keeps squads private ──')
     state.visible = false
-    await page.reload(); await page.getByText('Signed in as').waitFor()
+    await page.reload(); await page.locator('[data-hero]').waitFor()
     check('no squad chips under the name', (await page.locator('[data-my-squads]').count()) === 0)
-    await page.locator('[data-tab="mine"]').click()
     await page.locator('[data-my-page]').waitFor()
     await page.getByText('has not turned on squad names').waitFor()
     check('My page says squads are not shown, rather than naming one', true)
@@ -102,12 +106,11 @@ const run = async () => {
     console.log('\n── 390px ──')
     state.visible = true; state.selected = true
     await page.setViewportSize({ width: 390, height: 800 })
-    await page.reload(); await page.getByText('Signed in as').waitFor()
+    await page.reload(); await page.locator('[data-hero]').waitFor()
     let overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.screen.width)
-    check('no sideways overflow on the availability tab', overflow <= 1, String(overflow))
-    await page.locator('[data-tab="mine"]').click(); await page.locator('[data-my-page]').waitFor(); await page.waitForTimeout(300)
+    await page.locator('[data-groups]').waitFor(); await page.waitForTimeout(300)
     overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.screen.width)
-    check('no sideways overflow on My page', overflow <= 1, String(overflow))
+    check('no sideways overflow', overflow <= 1, String(overflow))
   })
 
   check('no page errors', errors.length === 0, errors.join(' | '))

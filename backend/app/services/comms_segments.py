@@ -91,7 +91,9 @@ DIR_DEAL_FIELDS = {"deal_won"}
 # contact's own marketing_club_id, so it needs no MarketingClub join and a contact
 # with no directory club simply has no snapshot.
 DIR_TEASER_FIELDS = {"teaser_snapshot"}
-TEASER_STATES = ("ok", "empty", "junior_only", "error", "none")
+# ``image_ready`` is not a status: it is a good snapshot whose picture has been
+# drawn, i.e. a club that can be sent {{teaser_image_url}} without a broken box.
+TEASER_STATES = ("ok", "empty", "junior_only", "error", "none", "image_ready")
 # Naming a club or a person outright, rather than describing them. Both are
 # ORDINARY RULES and are ANDed with everything else like any other, so "is any
 # of" NARROWS the audience to those clubs/people — it does not add them on top
@@ -282,12 +284,16 @@ def _teaser_clause(val):
     if not states:
         return None
     from sqlalchemy import table as _table, column as _column
-    t = _table("club_teaser_snapshots", _column("marketing_club_id"), _column("status"))
-    real = [s for s in states if s != "none"]
+    t = _table("club_teaser_snapshots", _column("marketing_club_id"), _column("status"),
+               _column("image_version"))
+    real = [s for s in states if s not in ("none", "image_ready")]
     parts = []
     if real:
         parts.append(exists().where(t.c.marketing_club_id == CommsContact.marketing_club_id,
                                     t.c.status.in_(real)))
+    if "image_ready" in states:
+        parts.append(exists().where(t.c.marketing_club_id == CommsContact.marketing_club_id,
+                                    t.c.status == "ok", t.c.image_version.isnot(None)))
     if "none" in states:
         parts.append(~exists().where(t.c.marketing_club_id == CommsContact.marketing_club_id))
     return or_(*parts) if len(parts) > 1 else parts[0]

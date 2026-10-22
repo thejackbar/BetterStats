@@ -511,6 +511,26 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
         <Field label="Phone" half>
           <PInput value={draft.phone} onChange={(v) => set('phone', v)} placeholder="—" />
         </Field>
+        {/* Where they live and who to call. Players can fill these in themselves from
+            their own page (Update details); the club can correct them here. */}
+        <Field label="Street address">
+          <PInput value={draft.address_line1} onChange={(v) => set('address_line1', v)} placeholder="—" />
+        </Field>
+        <Field label="Suburb" half>
+          <PInput value={draft.suburb} onChange={(v) => set('suburb', v)} placeholder="—" />
+        </Field>
+        <Field label="State and postcode" half>
+          <div className="flex gap-2">
+            <PInput value={draft.state} onChange={(v) => set('state', v)} placeholder="State" />
+            <PInput value={draft.postcode} onChange={(v) => set('postcode', v)} placeholder="Postcode" />
+          </div>
+        </Field>
+        <Field label="Emergency contact" half>
+          <PInput value={draft.emergency_contact_name} onChange={(v) => set('emergency_contact_name', v)} placeholder="Name" />
+        </Field>
+        <Field label="Emergency contact phone" half>
+          <PInput value={draft.emergency_contact_phone} onChange={(v) => set('emergency_contact_phone', v)} placeholder="—" />
+        </Field>
         {/* The number on their shirt. A playing attribute, so it lives here
             and every club has it — a team sheet, a lineup post and a
             scorecard all want it, and a club running only BetterStats has all
@@ -773,6 +793,12 @@ export function draftFromProfile(p) {
     status: p.status || 'active',
     email: p.email || '',
     phone: p.phone || '',
+    address_line1: p.address_line1 || '',
+    suburb: p.suburb || '',
+    state: p.state || '',
+    postcode: p.postcode || '',
+    emergency_contact_name: p.emergency_contact_name || '',
+    emergency_contact_phone: p.emergency_contact_phone || '',
     // A player can be in several squads at once. The array is authoritative;
     // fall back to the single primary for any payload that predates it.
     squad_team_ids: p.squad_team_ids || (p.squad_team_id ? [p.squad_team_id] : []),
@@ -811,6 +837,12 @@ export function patchFromDraft(d) {
     status: d.status || 'active',
     email: norm(d.email),
     phone: norm(d.phone),
+    address_line1: norm(d.address_line1),
+    suburb: norm(d.suburb),
+    state: norm(d.state),
+    postcode: norm(d.postcode),
+    emergency_contact_name: norm(d.emergency_contact_name),
+    emergency_contact_phone: norm(d.emergency_contact_phone),
     // The whole squad set (team_members is authoritative). [] clears every
     // squad; the server derives the primary squad_team_id from it.
     squad_team_ids: d.squad_team_ids || [],

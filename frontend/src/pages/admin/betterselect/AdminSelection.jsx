@@ -16,6 +16,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { sortByFirstName } from '../../../lib/nameFormat'
+import { availSortRank } from '../../../lib/availability'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -24,7 +25,6 @@ import { useTheme } from '../../../contexts/ThemeContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
-import { availRank } from '../../../lib/availability'
 import { Icon, Avatar, Btn, RoleChips, Tag, Empty, QuickAvailModal, playedWithinYears, recencyOf, RuleTags } from './ui'
 import { useFilters } from './filters'
 import SelectionHistory from './SelectionHistory'
@@ -383,7 +383,7 @@ export default function AdminSelection() {
   const cmp = useCallback((a, b) => {
     const at = poolRank(a), bt = poolRank(b)
     if (at !== bt) return at - bt
-    const r = availRank(a.availability) - availRank(b.availability)
+    const r = availSortRank(a.availability, a.availability_days) - availSortRank(b.availability, b.availability_days)
     if (r !== 0) return r
     const sa = a.score ?? 0, sb = b.score ?? 0
     if (sa !== sb) return sb - sa

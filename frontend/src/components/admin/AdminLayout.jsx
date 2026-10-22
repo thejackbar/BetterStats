@@ -7,7 +7,6 @@ import { moduleBrand } from '../../lib/moduleBrand'
 import BookmarkButton from './BookmarkButton'
 import { api } from '../../lib/api'
 import { SITE_VERSION } from '../../version'
-import { CHANGELOG } from '../../data/changelog'
 import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
@@ -15,17 +14,6 @@ import LinkedClubSwitcher from './LinkedClubSwitcher'
 import TrialBanner from './TrialBanner'
 import BrandLogo from '../BrandLogo'
 import { SUPER_OVERVIEW, SUPER_SECTIONS, SALES_MANAGEMENT_ITEMS, visibleSectionItems, sectionBadgeCount } from '../../lib/superNav'
-
-function compareVersions(a, b) {
-  const parse = v => (v || '').replace('v', '').split('.').map(Number)
-  const av = parse(a)
-  const bv = parse(b)
-  for (let i = 0; i < Math.max(av.length, bv.length); i++) {
-    const diff = (av[i] || 0) - (bv[i] || 0)
-    if (diff !== 0) return diff
-  }
-  return 0
-}
 
 // `cap: null` means everyone gets it (dashboard, read-only listing pages).
 // `cap: <CAP>` hides the link from users without that capability.
@@ -239,7 +227,7 @@ export default function AdminLayout({ children }) {
   }, [])
 
   // Auto-open on login if there's anything unseen (sync runs, milestones,
-  // pending requests, or a changelog entry newer than last_seen_version).
+  // or pending requests).
   //
   // STILL Super Admin only, now that the bell itself is not. Opening a panel
   // over a club admin the moment they log in is a different decision from
@@ -253,10 +241,7 @@ export default function AdminLayout({ children }) {
         try {
           const s = await api.getNotificationsSummary()
           if (cancelled) return
-          const hasNewChangelog = CHANGELOG.some(
-            e => compareVersions(e.version, s.last_seen_version) > 0
-          )
-          if ((s.unseen_count || 0) > 0 || hasNewChangelog) {
+          if ((s.unseen_count || 0) > 0) {
             setBellSummary(s)
             setBellOpen(true)
           }

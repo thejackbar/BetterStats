@@ -143,7 +143,7 @@ export const DIRECTORY_FIELD_DEFS = {
   teaser_snapshot: {
     label: 'Club has a teaser snapshot', input: 'multi', ops: [['eq', 'is any of']],
     options: [
-      ['ok', 'Snapshot ready'], ['empty', 'Pulled, no stats found'],
+      ['image_ready', 'Snapshot and picture ready'], ['ok', 'Snapshot ready'], ['empty', 'Pulled, no stats found'],
       ['junior_only', 'Junior-only club (no snapshot)'], ['error', 'Last pull failed'],
       ['none', 'No snapshot yet'],
     ],

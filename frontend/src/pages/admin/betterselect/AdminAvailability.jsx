@@ -10,13 +10,23 @@ import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useAllowMaybe, useSelectConfig, useWeekNames } from '../../../lib/useAvailabilityConfig'
+import { useMediaQuery } from '../../../hooks/useMediaQuery'
+import { useFitHeight } from './useFitHeight'
 import {
   Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
   playedWithinYears, RuleTags, Chip, RecencySelect, RECENCY_OPTIONS, RECENCY_OVER, recencyOf, monthsAgoISO,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
+import { normGender } from './selectionMeta'
 import usePersistedState from '../../../lib/usePersistedState'
 import SelfServiceLinkPanel from './SelfServiceLinkPanel'
+
+// "Not set" finds the players whose gender nobody has recorded, so they are
+// never silently dropped by Men or Women.
+const GENDER_FACET_OPTS = [
+  { value: 'male', label: 'Men' }, { value: 'female', label: 'Women' }, { value: 'unset', label: 'Not set' },
+]
+const genderKey = (g) => normGender(g) || 'unset'
 
 const ROLE_OPTS = [
   { value: 'Batter', label: 'Batter' }, { value: 'Bowler', label: 'Bowler' },
@@ -71,6 +81,7 @@ export default function AdminAvailability() {
   const toast = useToast()
   const navigate = useNavigate()
   const canEdit = canEditCap(CAP.SELECT_AVAILABILITY, CAP.MANAGE_SELECTIONS)
+  const isPhone = useMediaQuery('(max-width: 1023px)')
 
   const [data, setData] = useState(null)
   const [avail, setAvail] = useState({}) // {playerId: {date: {status, source, note, ...}}}
@@ -171,14 +182,29 @@ export default function AdminAvailability() {
   }, [years, roster, data])
   const lapsedYears = lapsedOptions.some((o) => o.value === lapsed) ? lapsed : 0
 
+  // Competitions the club has games in from here on (server: matrix `competitions`).
+  // Facet values are the names, so a remembered pick still reads as a name.
+  const competitions = useMemo(() => data?.competitions || [], [data])
+  const compNameById = useMemo(() => Object.fromEntries(competitions.map((c) => [c.id, c.name])), [competitions])
+  const compsOf = useCallback((p) => (p.competitions || []).map((id) => compNameById[id]).filter(Boolean), [compNameById])
+  // Offer Gender once anyone shown has one recorded; before that it has nothing to split.
+  const showGender = useMemo(() => (data?.players || []).some(
+    (p) => (roster !== 'current' || p.is_current) && normGender(p.gender),
+  ), [data, roster])
+
   const facets = useMemo(() => [
     { key: 'squad', label: 'Squad', type: 'multi', options: squadOptions.map((s) => ({ value: s, label: s })) },
+    ...(competitions.length ? [
+      { key: 'comp', label: 'Competition', type: 'multi', options: competitions.map((c) => ({ value: c.name, label: c.name })) },
+      { key: 'notComp', label: 'Leave out', type: 'multi', options: competitions.map((c) => ({ value: c.name, label: c.name })) },
+    ] : []),
+    ...(showGender ? [{ key: 'gender', label: 'Gender', type: 'single', options: GENDER_FACET_OPTS }] : []),
     { key: 'avail', label: 'Availability', type: 'multi', options: AVAIL_ORDER.map((s) => ({ value: s, label: AVAILABILITY[s].label, dot: AVAILABILITY[s].cssVar })) },
     { key: 'role', label: 'Role', type: 'multi', options: ROLE_OPTS },
     { key: 'selected', label: 'Selected', type: 'single', options: [
       { value: 'selected', label: 'Selected this round' }, { value: 'unselected', label: 'Not selected' },
     ] },
-  ], [squadOptions])
+  ], [squadOptions, competitions, showGender])
   const filters = useFilters(facets, { persist: 'availability' })
   const { values, search } = filters
 
@@ -239,6 +265,14 @@ export default function AdminAvailability() {
       if (roster === 'current' && !p.is_current) return false
       if (values.squad?.length && !values.squad.some((s) => (p.squads || []).includes(s))) return false
       if (values.role?.length && !values.role.includes(p.player_role)) return false
+      if (values.gender && genderKey(p.gender) !== values.gender) return false
+      if (values.comp?.length && !compsOf(p).some((c) => values.comp.includes(c))) return false
+      // Leave out hides a player only when every competition they are in is left out:
+      // someone who also plays in another competition stays. No known competition stays too.
+      if (values.notComp?.length) {
+        const cs = compsOf(p)
+        if (cs.length && cs.every((c) => values.notComp.includes(c))) return false
+      }
       if (values.selected === 'selected' && !selectedIds.has(p.id)) return false
       if (values.selected === 'unselected' && selectedIds.has(p.id)) return false
       if (!playedWithinYears(recencyOf(p), years)) return false
@@ -247,7 +281,7 @@ export default function AdminAvailability() {
       if (!matchesResponse(p)) return false
       return true
     })
-  }, [data, roster, values, years, lapsedYears, search, selectedIds, matchesResponse])
+  }, [data, roster, values, years, lapsedYears, search, selectedIds, matchesResponse, compsOf])
 
   // Per-date player list as objects carrying a flat `availability` status, so we
   // can hand the matched-player set straight to <AvailSummary statusOf=…>.
@@ -341,6 +375,12 @@ export default function AdminAvailability() {
     }
   }
 
+  // The matrix card scrolls inside itself, so the date row (sticky top-0) stays
+  // put while the players scroll. It needs a height to scroll against: measured
+  // from where the card starts to the bottom of the window, like the whiteboard.
+  // Only measured once the card exists (not on the spinner or empty screens).
+  const [matrixRef, matrixH] = useFitHeight({ enabled: !isPhone && data !== null && dates.length > 0, bottom: 20 })
+
   if (data === null) {
     return <BetterSelectLayout title="Availability"><PbSpinner message="Loading availability…" /></BetterSelectLayout>
   }
@@ -386,6 +426,19 @@ export default function AdminAvailability() {
           </button>
         </>)}
       />
+
+      {/* One-tap "leave out" for a competition (the Veterans, say). Only worth a row
+          when there is something left to show. */}
+      {competitions.length > 1 && (
+        <div data-leave-out className="flex flex-wrap items-center gap-1.5 -mt-2 mb-4">
+          <span className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faintest">Leave out</span>
+          {competitions.map((c) => (
+            <Chip key={c.id} label={c.name} active={(values.notComp || []).includes(c.name)}
+              onClick={() => filters.toggle('notComp', c.name)} />
+          ))}
+          <span className="text-[11.5px] text-pb-faint">Hides players whose only competition is that one. Anyone who also plays in another stays.</span>
+        </div>
+      )}
 
       {/* Which week(s) the Availability filter judges. Follows the selected
           column by default; pick several to match across them. */}
@@ -469,7 +522,8 @@ export default function AdminAvailability() {
       )}
 
       {/* Matrix */}
-      <div className="pb-card overflow-auto">
+      <div ref={matrixRef} data-avail-matrix data-fit={matrixH != null ? 'on' : 'off'} className="pb-card overflow-auto"
+        style={matrixH != null ? { height: matrixH } : undefined}>
         <table className="border-separate w-full" style={{ borderSpacing: 0, minWidth: 760 }}>
           <thead>
             <tr>

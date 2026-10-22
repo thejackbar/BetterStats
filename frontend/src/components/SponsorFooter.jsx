@@ -13,7 +13,7 @@ const RESERVED_ROOT_SEGMENTS = new Set([
   'login', 'admin', 'onboard', 'club-inactive',
   'games', 'match', 'scorecards', 'players',
   'features', 'pricing', 'compare', 'about', 'contact', 'faq',
-  'terms', 'privacy', 'blog', 'videos', 'trial', 'demo',
+  'terms', 'privacy', 'blog', 'videos', 'trial', 'demo', 'preview',
 ])
 // Pages that belong to a club but carry no slug in the URL (/players/:id,
 // /games/:id). The page that loaded the player or game says which club it is.

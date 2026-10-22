@@ -9,8 +9,10 @@ not list the 204 until the script has run.
 Seeded games:
 
   fixable   fall of wickets stored, no stands, scorecard fits  -> stands added
-  mismatch  fall of wickets stored, no stands, card's fall of wickets
-            disagrees with its dismissals                     -> refused, no stands
+  short     fall of wickets stored, no stands, card holds 2 of its 3
+            wickets (a scorer who recorded some)             -> the stands those settle
+  mismatch  fall of wickets stored, no stands, card holds MORE fall of
+            wickets than dismissals                           -> refused, no stands
   has       already holds stands                              -> never selected
   no_fow    no fall of wickets stored                         -> never selected
   gone      fall of wickets stored, Cricket Australia 204s    -> counted, not written
@@ -49,7 +51,26 @@ S = uuid.uuid4(); G = uuid.uuid4()
 T_US, T_OPP = uuid.uuid4(), uuid.uuid4()
 GUIDS = {k: uuid.uuid4() for k in "ABCD"}
 PIDS = {k: uuid.uuid4() for k in "ABCD"}
-GAMES = {k: uuid.uuid4() for k in ("fixable", "mismatch", "has", "no_fow", "gone", "foreign")}
+GAMES = {k: uuid.uuid4() for k in ("fixable", "short", "mismatch", "has", "no_fow", "gone", "foreign", "shared")}
+TGUIDS = {k: uuid.uuid4() for k in "XYZ"}     # THEIRS' players: they bat in innings 2 of the shared fixture
+TPIDS = {k: uuid.uuid4() for k in "XYZ"}
+
+
+def shared_card() -> dict:
+    """Ours bat first (A, B, C, D), theirs second (X, Y, Z): each side's innings gives its own stands."""
+    c = card([(1, 10, "A"), (2, 20, "B"), (3, 224, "C")])
+    c["teams"][1]["players"] = [{"participantId": str(g)} for g in TGUIDS.values()]
+
+    def tbat(k, order, runs, dt_id, dt):
+        return {"participantId": str(TGUIDS[k]), "batOrder": order, "runsScored": runs,
+                "dismissalTypeId": dt_id, "dismissalType": dt, "playerShortName": f"Player {k}"}
+    c["innings"].append({
+        "inningsOrder": 2, "battingTeamId": str(T_OPP),
+        "batting": [tbat("X", 1, 20, 2, "Bowled"), tbat("Y", 2, 25, 2, "Bowled"), tbat("Z", 3, 30, 1, "Not Out")],
+        "fallOfWickets": [{"order": 1, "runs": 30, "participantId": str(TGUIDS["X"]), "playerShortName": "Player X"},
+                          {"order": 2, "runs": 50, "participantId": str(TGUIDS["Y"]), "playerShortName": "Player Y"}],
+    })
+    return c
 
 
 def card(fow_rows: list[tuple]) -> dict:
@@ -74,7 +95,8 @@ def card(fow_rows: list[tuple]) -> dict:
 
 
 GOOD = card([(1, 10, "A"), (2, 20, "B"), (3, 224, "C")])
-BAD = card([(1, 10, "A"), (2, 20, "B")])            # 2 fall of wicket rows, 3 dismissals
+SHORT = card([(1, 10, "A"), (2, 20, "B")])          # 2 fall of wicket rows, 3 dismissals: a short card
+BAD = card([(1, 10, "A"), (2, 20, "B"), (3, 224, "C"), (4, 230, "D")])   # 4 rows, 3 dismissals: refused
 FOREIGN = card([(1, 10, "A"), (2, 20, "B"), (3, 224, "C")])
 FOREIGN["teams"][0]["owningOrganisation"] = {"id": str(THEIRS)}   # no team on the card is this club's
 
@@ -125,6 +147,8 @@ async def seed() -> None:
             await ex("INSERT INTO players (id, organisation_id, name, grassroots_id) VALUES (:i, :o, :n, :g)",
                      i=PIDS[k], o=OURS, n=f"Player {k}", g=str(GUIDS[k]))
         for n, gid in GAMES.items():
+            if n == "shared":
+                continue   # seeded later by seed_shared(), after the single-club checks
             await ex(
                 "INSERT INTO games (id, grade_id, played_at, home_team, away_team, home_club, away_club, "
                 " opp_club_name, result, home_org_id, away_org_id, venue, match_format, is_final) "
@@ -139,10 +163,41 @@ async def seed() -> None:
         await s.commit()
 
 
+async def seed_shared() -> None:
+    async with Session() as s:
+        async def ex(sql, **kw):
+            await s.execute(text(sql), kw)
+        # A fixture between two synced clubs: ONE game row, home OURS, away THEIRS. Ours bat first
+        # (A, B, C, D), theirs second (X, Y, Z). Fall of wickets for both innings are stored.
+        for k in "XYZ":
+            await ex("INSERT INTO players (id, organisation_id, name, grassroots_id) VALUES (:i, :o, :n, :g)",
+                     i=TPIDS[k], o=THEIRS, n=f"Player {k}", g=str(TGUIDS[k]))
+        await ex(
+            "INSERT INTO games (id, grade_id, played_at, home_team, away_team, home_club, away_club, "
+            " opp_club_name, result, home_org_id, away_org_id, venue, match_format, is_final) "
+            "VALUES (:i, :g, :d, 'Our Club', 'Their Club', 'Our Club', 'Their Club', 'Their Club', 'WIN', :ho, :ao, "
+            " 'Oval', 'One Day', false)", i=GAMES["shared"], g=G, d=date(2017, 12, 9), ho=OURS, ao=THEIRS)
+        for inn, rows_ in ((1, ((1, 10, "A"), (2, 20, "B"), (3, 224, "C"))),):
+            for o, r, k in rows_:
+                await ex("INSERT INTO fall_of_wickets (game_id, innings_number, wicket_number, score_at_fall, player_id) "
+                         "VALUES (:g, :n, :o, :r, :p)", g=GAMES["shared"], n=inn, o=o, r=r, p=PIDS[k])
+        for o, r, k in ((1, 30, "X"), (2, 50, "Y")):
+            await ex("INSERT INTO fall_of_wickets (game_id, innings_number, wicket_number, score_at_fall, player_id) "
+                     "VALUES (:g, 2, :o, :r, :p)", g=GAMES["shared"], o=o, r=r, p=TPIDS[k])
+        await s.commit()
+
+
 async def stands(game: str) -> list[int]:
     async with Session() as s:
         return [r[0] for r in (await s.execute(text(
             "SELECT runs FROM partnerships WHERE game_id = :g ORDER BY wicket_number"), {"g": GAMES[game]})).all()]
+
+
+async def stand_rows(game_key: str, innings: int) -> list[int]:
+    async with Session() as s:
+        return [r[0] for r in (await s.execute(text(
+            "SELECT runs FROM partnerships WHERE game_id = :g AND innings_number = :i ORDER BY wicket_number"),
+            {"g": GAMES[game_key], "i": innings})).all()]
 
 
 async def board() -> set:
@@ -154,6 +209,14 @@ async def board() -> set:
     return {r["runs"] for r in p["partnerships"]["top_partnerships"]}
 
 
+async def _refused(coro) -> bool:
+    try:
+        await coro
+    except SystemExit:
+        return True
+    return False
+
+
 async def main() -> None:
     await base.build_schema()
     await merge_logs_table()
@@ -161,7 +224,7 @@ async def main() -> None:
     bf.async_session_maker = Session
 
     asked: list[str] = []
-    by_id = {str(GAMES["fixable"]): GOOD, str(GAMES["mismatch"]): BAD, str(GAMES["gone"]): None,
+    by_id = {str(GAMES["fixable"]): GOOD, str(GAMES["short"]): SHORT, str(GAMES["mismatch"]): BAD, str(GAMES["gone"]): None,
              str(GAMES["foreign"]): FOREIGN}
 
     async def fetch(match_id: str):
@@ -174,11 +237,11 @@ async def main() -> None:
 
     # Dry run reads and reports but writes nothing.
     t = await bf.run("our-club", pause=0, apply=False, fetch=fetch)
-    check("dry run: reports the stands it would add", t["stands_added"] == 3, str(t))
+    check("dry run: reports the stands it would add", t["stands_added"] == 5, str(t))
     check("dry run: writes nothing", await stands("fixable") == [])
     check("dry run: the board is unchanged", 204 not in await board())
     check("only games with fall of wickets and no stands were asked for",
-          set(asked) == {str(GAMES[k]) for k in ("fixable", "mismatch", "gone", "foreign")}, str(asked))
+          set(asked) == {str(GAMES[k]) for k in ("fixable", "short", "mismatch", "gone", "foreign")}, str(asked))
 
     asked.clear()
     buf = io.StringIO()
@@ -187,10 +250,13 @@ async def main() -> None:
     out = buf.getvalue()
     check("apply: three stands written for the fixable game", await stands("fixable") == [10, 10, 204], str(await stands("fixable")))
     check("apply: the shipped records route now lists the 204", 204 in await board(), str(await board()))
-    check("apply: the mismatched card is refused and writes no stand", await stands("mismatch") == [])
+    check("apply: a card short of wickets gets the stands its figures settle (1st and 2nd)",
+          await stands("short") == [10, 10], str(await stands("short")))
+    check("apply: a card with more fall of wickets than dismissals is refused and writes no stand",
+          await stands("mismatch") == [])
     check("apply: the two games that got no stand are counted", t["refused"] == 2, str(t))
     check("reason: names the fall of wickets v dismissals mismatch",
-          "2 fall of wickets v 3 dismissals on the card" in out, out)
+          "4 fall of wickets v 3 dismissals on the card" in out, out)
     check("reason: names a card with no team owned by the club",
           "no team on the card is owned by this club" in out, out)
     check("--explain dumps the rows the derivation read", "fow   2" in out and "bat   3" in out, out)
@@ -215,6 +281,67 @@ async def main() -> None:
     asked.clear()
     await bf.run("our-club", pause=0, apply=False, fetch=fetch, d_from=date(2018, 1, 1))
     check("--from outside the games' date selects none", asked == [], str(asked))
+
+
+    # ── Walking on without asking twice, and every club at once ─────────────────
+    print("--resume and `all`")
+    await seed_shared()
+    by_id[str(GAMES["shared"])] = shared_card()
+
+    # Refused games stay selected, so a walk that always restarted at the top would ask for the same
+    # ones for ever. With --limit 2 and --resume the walk must move on and ask for each game once.
+    asked.clear()
+    t = await bf.run("our-club", pause=0, apply=False, fetch=fetch, limit=2)
+    first = list(asked)
+    check("a run that stops at its limit hands back a resume token", bool(t["resume"]), str(t))
+    walked = list(first)
+    token, guard = t["resume"], 0
+    while token and guard < 20:
+        asked.clear()
+        t = await bf.run("our-club", pause=0, apply=False, fetch=fetch, limit=2, resume=token)
+        check("a resumed run does not ask for a game it already asked for", not set(asked) & set(walked), str(asked))
+        walked += asked
+        token, guard = t["resume"], guard + 1
+    check("the walk ends (it does not loop on refused games)", token is None and guard < 20, str(token))
+    cands = {str(GAMES[k]) for k in ("mismatch", "gone", "foreign", "shared")}   # "short" got its stands in the apply run above
+    check("and it reached every candidate game exactly once",
+          sorted(walked) == sorted(cands) and len(walked) == len(set(walked)), str(sorted(walked)))
+    check("a malformed token is refused, not guessed at",
+          await _refused(bf.run("our-club", pause=0, fetch=fetch, resume="not-a-token")))
+
+    # The shared fixture: one game row, two synced clubs. OURS goes first and writes its own stands.
+    # The game must still be offered to THEIRS, whose innings has no stand yet.
+    asked.clear()
+    t = await bf.run("our-club", pause=0, apply=True, fetch=fetch, limit=100)
+    check("our club's innings of the shared fixture gets its stands",
+          await stand_rows("shared", 1) == [10, 10, 204], str(await stand_rows("shared", 1)))
+    check("theirs does not yet (ours was written first)", await stand_rows("shared", 2) == [])
+    asked.clear()
+    t = await bf.run("all", pause=0, apply=True, fetch=fetch, limit=100)
+    check("`all` walks more than one club", t["clubs"] >= 2, str(t))
+    check("the other club's innings of the same game is then written too (30 and 20)",
+          await stand_rows("shared", 2) == [30, 20], str(await stand_rows("shared", 2)))
+    check("and our club's stands were not touched or doubled", await stand_rows("shared", 1) == [10, 10, 204])
+
+    # One limit for the whole run, however many clubs.
+    async with Session() as s:
+        await s.execute(text("DELETE FROM partnerships WHERE game_id = :g AND innings_number = 2"),
+                        {"g": GAMES["shared"]})
+        await s.commit()
+    asked.clear()
+    t = await bf.run("all", pause=0, apply=False, fetch=fetch, limit=1)
+    check("`all` honours one limit across every club", len(asked) == 1 and t["asked"] == 1, str(asked))
+    check("and says where to carry on", bool(t["resume"]), str(t))
+    walked, token, guard = list(asked), t["resume"], 0
+    while token and guard < 30:
+        asked.clear()
+        t = await bf.run("all", pause=0, apply=False, fetch=fetch, limit=1, resume=token)
+        walked += asked
+        token, guard = t["resume"], guard + 1
+    check("walking `all` one game at a time ends, and asks nothing twice",
+          token is None and len(walked) == len(set(walked)), f"{len(walked)} asked, {len(set(walked))} distinct")
+    check("it reaches THEIRS' game (offered to the second club)",
+          str(GAMES["shared"]) in walked)
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     for f in base.FAILURES:

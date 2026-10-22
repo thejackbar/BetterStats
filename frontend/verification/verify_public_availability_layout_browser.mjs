@@ -72,7 +72,7 @@ async function stub(page, holder) {
 
 // Each date card -> its game rows as the player sees them.
 const readCards = (page) => page.evaluate(() => [...document.querySelectorAll('div.rounded-xl.border')]
-  .filter((c) => c.querySelector('[data-fixture]') || /Available/.test(c.textContent))
+  .filter((c) => !c.hasAttribute('data-tile') && (c.querySelector('[data-fixture]') || /Available/.test(c.textContent)))
   .map((c) => ({
     heading: c.querySelector('.font-display')?.textContent.trim(),
     rows: [...c.querySelectorAll('[data-fixture]')].map((r) => {
@@ -88,19 +88,35 @@ const readCards = (page) => page.evaluate(() => [...document.querySelectorAll('d
 
 const rowsOf = (c) => c?.rows ?? []
 
-const open = async (browser, me, width = 390) => {
+// Every date opens with its games folded away; the tests below that read fixture rows open them.
+const expandAll = async (page) => {
+  const closed = page.locator('[data-date-card][data-fixtures-open="no"] [data-fixtures-toggle]')
+  while ((await closed.count()) > 0) await closed.first().click()
+}
+
+const open = async (browser, me, width = 390, { expand = true } = {}) => {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 500, hasTouch: width < 500 })
   const page = await ctx.newPage()
   const holder = { me, urls: [] }
   await stub(page, holder)
   await page.goto(`${BASE}/avail/tok123`)
-  await page.waitForSelector('text=Signed in as', { timeout: 20000 })
+  await page.waitForSelector('[data-hero]', { timeout: 20000 })
   await page.waitForTimeout(300)
+  if (expand) await expandAll(page)
   return { ctx, page, holder }
 }
 
 const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' })
+
+  // Every section of the player page starts closed. These checks read what is inside them,
+  // so each context starts with them opened, the way a returning player's page can be.
+  const _newContext = browser.newContext.bind(browser)
+  browser.newContext = async (o) => {
+    const c = await _newContext(o)
+    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
+    return c
+  }
 
   // ── a player in a squad ─────────────────────────────────────────────────
   let { ctx, page, holder } = await open(browser, payload(true))
@@ -147,6 +163,7 @@ const run = async () => {
   // See more: one more week per tap; then it goes away; Show fewer returns to the first week.
   await more.click({ timeout: 2000 }).catch(() => {})
   await page.waitForTimeout(150)
+  await expandAll(page)
   cards = await readCards(page)
   check('first tap adds the second week (two more dates)', cards.length === 4, String(cards.length))
   check('the second week\'s games are on the page', (await page.locator('body').innerText()).includes('Kenwick 3s'))
@@ -154,6 +171,7 @@ const run = async () => {
   check('the button now counts one more day', /1 more day with games/.test((await more.innerText().catch(() => '')) || ''), await more.innerText().catch(() => ''))
   await more.click({ timeout: 2000 }).catch(() => {})
   await page.waitForTimeout(150)
+  await expandAll(page)
   cards = await readCards(page)
   check('second tap shows every date', cards.length === 5, String(cards.length))
   check('See more is gone when nothing is left', (await page.locator('[data-see-more]').count()) === 0)
@@ -186,11 +204,33 @@ const run = async () => {
   if (SHOT) await page.screenshot({ path: `${SHOT}/public-availability-390.png`, fullPage: true })
   await ctx.close()
 
+  // ── folded by default: the date and the answer buttons, the games on a tap ─────
+  ;({ ctx, page, holder } = await open(browser, payload(true), 390, { expand: false }))
+  const first = page.locator('[data-date-card]').first()
+  check('each date opens folded', (await page.locator('[data-date-card][data-fixtures-open="no"]').count()) === (await page.locator('[data-date-card]').count()))
+  check('no fixture row is on screen', (await page.locator('[data-fixture]:visible').count()) === 0)
+  check('the date and the three answer buttons are', (await first.locator('.font-display').first().isVisible()) && (await first.locator('button:visible', { hasText: /Available|Maybe|Unavailable/ }).count()) === 3)
+  check('the fold says how many games are behind it', /Show 5 games/.test(await first.locator('[data-fixtures-toggle]').innerText()), await first.locator('[data-fixtures-toggle]').innerText())
+  writes.length = 0
+  await first.getByRole('button', { name: /Available/ }).first().click()
+  await page.waitForTimeout(300)
+  check('an answer saves with the games still folded', writes.length === 1 && writes[0].date === SAT && writes[0].status === 'AVAILABLE' && (await first.getAttribute('data-fixtures-open')) === 'no', JSON.stringify(writes))
+  const btnBox = await first.getByRole('button', { name: /Available/ }).first().boundingBox()
+  await first.locator('[data-fixtures-toggle]').click()
+  check('opening shows the games', (await first.locator('[data-fixture]:visible').count()) >= 1 && /Hide games/.test(await first.locator('[data-fixtures-toggle]').innerText()))
+  const btnBox2 = await first.getByRole('button', { name: /Available/ }).first().boundingBox()
+  check('the answer buttons do not move when it opens (the games open below)', Math.abs(btnBox.y - btnBox2.y) < 2, JSON.stringify([btnBox, btnBox2]))
+  await first.locator('[data-fixtures-toggle]').click()
+  check('and it folds again', (await first.locator('[data-fixture]:visible').count()) === 0)
+  if (SHOT) await page.screenshot({ path: `${SHOT}/public-availability-folded-390.png`, fullPage: true })
+  await ctx.close()
+
   // ── a player in no squad: nothing emphasised, nothing hidden ───────────
   ;({ ctx, page } = await open(browser, payload(false)))
   cards = await readCards(page)
   check('no squad: every Saturday game is shown', rowsOf(cards[0]).length === 5 && cards[0]?.toggle === null, JSON.stringify(cards[0]?.toggle))
-  const text = (await page.locator('body').innerText()).toLowerCase()
+  // The games to answer, not the whole dashboard (its Your squad card explains itself).
+  const text = (await page.locator('[data-availability]').innerText()).toLowerCase()
   check('no squad: no "your squad" tag anywhere', !text.includes('your squad'))
   check('no squad: no bold team names', rowsOf(cards[0]).length === 5 && rowsOf(cards[0]).every((r) => r.teamWeight < 700))
   await ctx.close()

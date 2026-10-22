@@ -496,6 +496,12 @@ export const api = {
   // page needs to be told whose side to read it from.
   getScorecard: (gameId, org) =>
     request(`/games/${gameId}/scorecard${org ? `?org=${encodeURIComponent(org)}` : ''}`),
+  // A club types the fall of wickets Cricket Australia is missing for its own innings of a synced match.
+  getFowEditor: (gameId) => request(`/games/${gameId}/fall-of-wickets/editor`),
+  saveFow: (gameId, innings, rows) =>
+    request(`/games/${gameId}/fall-of-wickets/${innings}`, { method: 'PUT', body: JSON.stringify({ rows }) }),
+  resetFow: (gameId, innings) =>
+    request(`/games/${gameId}/fall-of-wickets/${innings}`, { method: 'DELETE' }),
 
   // Admin / merge tools
   getMergeCandidates: (orgId) => request(`/admin/merge-candidates?org_id=${orgId}`),
@@ -1581,6 +1587,8 @@ export const api = {
     request(`/club-admin/marketing/clubs/${clubId}/sales`,
       { method: 'PATCH', body: JSON.stringify(body) }),
   mktTeaserStatus: () => request('/club-admin/marketing/teaser/status'),
+  mktTeaserRender: (limit) =>
+    request('/club-admin/marketing/teaser/render', { method: 'POST', body: JSON.stringify({ limit }) }),
   mktCrawlControl: (paused) =>
     request('/club-admin/marketing/crawl/control', { method: 'POST', body: JSON.stringify({ paused }) }),
   mktCrawl: (limit) =>
@@ -1621,6 +1629,12 @@ export const api = {
     const qs = mktQS(filters)
     return `${BASE}/club-admin/marketing/export.csv${qs ? `?${qs}` : ''}`
   },
+  // The Meta ad pack for the filters on screen. The zip is opened as a link
+  // (cookie auth travels with it); the summary says what it would hold.
+  mktAdPackSummary: (filters = {}, pack = {}) =>
+    request(`/club-admin/marketing/teaser/ad-pack/summary?${mktQS({ ...filters, ...pack })}`),
+  mktAdPackUrl: (filters = {}, pack = {}) =>
+    `${BASE}/club-admin/marketing/teaser/ad-pack.zip?${mktQS({ ...filters, ...pack })}`,
   mktSetClubEmailed: (clubId, emailed, note) =>
     request(`/club-admin/marketing/clubs/${clubId}/emailed`,
       { method: 'PATCH', body: JSON.stringify({ emailed, note: note || null }) }),
@@ -2379,6 +2393,12 @@ export const api = {
   // Fire-and-forget step-transition beacon for the registration funnel
   // breakdown on the Meta Ads dashboard — callers should not await/block on
   // this (see trackFunnelStep in SelfServeTrialModal.jsx).
+  // A prospect club's teaser page (/preview/:token). Unauthenticated; the token is the credential.
+  publicTeaser: (token) => request(`/public/teaser/${encodeURIComponent(token)}`),
+  publicTeaserEvent: (token, kind, section = null, visitorId = null) =>
+    request(`/public/teaser/${encodeURIComponent(token)}/event`, {
+      method: 'POST', body: JSON.stringify({ kind, section, visitor_id: visitorId }),
+    }),
   publicSelfServeTrackStep: (step, visitorId, club = null) =>
     request('/public/self-serve/track-step', {
       method: 'POST',
@@ -2584,6 +2604,21 @@ export const api = {
     request('/club-admin/broadcasts/seen', { method: 'POST', body: JSON.stringify({ ids }) }),
   dismissAdminBroadcast: (id) =>
     request(`/club-admin/broadcasts/${id}/dismiss`, { method: 'POST' }),
+  // The posted daily updates, for the What's New page (any club admin).
+  getProductUpdates: () => request('/club-admin/product-updates'),
+  // Daily product update (routers/product_updates.py): the Stop switch, a preview
+  // of the next post, the log of every attempt, Run now, and Take down.
+  superProductUpdates: () => request('/club-admin/super/product-updates'),
+  superProductUpdatesControl: (paused) =>
+    request('/club-admin/super/product-updates/control', { method: 'POST', body: JSON.stringify({ paused }) }),
+  superProductUpdatesPreview: () =>
+    request('/club-admin/super/product-updates/preview', { method: 'POST' }),
+  superProductUpdatesRun: () =>
+    request('/club-admin/super/product-updates/run', { method: 'POST' }),
+  superProductUpdatesBackfill: () =>
+    request('/club-admin/super/product-updates/backfill', { method: 'POST' }),
+  superProductUpdatesTakeDown: (id) =>
+    request(`/club-admin/super/product-updates/${id}`, { method: 'DELETE' }),
   superListBroadcasts: () => request('/club-admin/super/broadcasts'),
   superBroadcastAudience: () => request('/club-admin/super/broadcasts/audience'),
   superCreateBroadcast: (data) =>
@@ -3409,6 +3444,11 @@ export const api = {
   availPublicLadder: (token) => request(`/public/availability/${token}/me/ladder`),
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
+  // The player's own contact details, for the Update details form. The save re-checks
+  // the PIN and sends only the fields that changed ("" clears one).
+  availPublicDetails: (token) => request(`/public/availability/${token}/me/details`),
+  availPublicUpdateDetails: (token, data) =>
+    request(`/public/availability/${token}/me/details`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   // ─── Public: net check-in (no admin auth; player cookie) ───
   // Reached by scanning the QR code on the fence or tapping the NFC tag —

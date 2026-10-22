@@ -181,6 +181,24 @@ async def main():
                                               row("Own", "NO_RESPONSE", 0.0)], key=pool_sort_key)],
           ["Own", "Below"])
 
+    def two_day(name, availability, w1, w2, score=0.0):
+        return {**row(name, availability, score),
+                "availability_days": [{"date": "d1", "status": w1}, {"date": "d2", "status": w2}]}
+    check("half-available (either way) leads its bucket: above Available, Maybe and no answer, whatever the form",
+          [r["display_name"] for r in sorted([
+              row("Silent Star", "NO_RESPONSE", 90.0),
+              two_day("W2 Only", "UNAVAILABLE", "UNAVAILABLE", "AVAILABLE", 0.0),
+              two_day("W1 Only", "UNAVAILABLE", "AVAILABLE", "UNAVAILABLE", 0.0),
+              row("Maybe Low", "MAYBE", 1.0), row("Avail Low", "AVAILABLE", 0.0)], key=pool_sort_key)],
+          ["W1 Only", "W2 Only", "Avail Low", "Maybe Low", "Silent Star"])
+
+    check("half_open leads the pool, squad order kept inside it",
+          [r["display_name"] for r in sorted([
+              {**two_day("Half Below", "UNAVAILABLE", "AVAILABLE", "UNAVAILABLE"), "half_open": True, "squad_match": False, "tier": 2},
+              {**two_day("Half Own", "UNAVAILABLE", "UNAVAILABLE", "AVAILABLE"), "half_open": True},
+              row("Own Avail", "AVAILABLE", 99.0), row("Own Silent", "NO_RESPONSE", 0.0)], key=pool_sort_key)],
+          ["Half Own", "Half Below", "Own Avail", "Own Silent"])
+
     print("\n# C. Named elsewhere that day is not open")
     check("confirmed in the 2nd XI: not open", by["Two Avail Picked"].get("open_seq"), None)
     check("in the 2nd XI's draft: not open", by["Two Avail In Draft"].get("open_seq"), None)
@@ -234,6 +252,37 @@ async def main():
     check("OD6 Gold available above OD10 Blue available (numbers read as numbers)", i6("Od Six") < i6("Od Ten"), True)
     check("every available OD player comes before any no-answer player", max(i6(n) for n in ("Od One", "Od Two", "Od Three", "Od Six", "Od Ten")) < min(i6("Od Six NoResponse"), i6("Od Three NoResponse")), True)
     check("OD6 Gold's own no-answer player sorts first of those left", i6("Od Six NoResponse") < i6("Od Three NoResponse"), True)
+
+    print("\n# F. A two-day game: free one weekend only leads the pool (real route)")
+    on_a = d + timedelta(days=35)
+    on_b = on_a + timedelta(days=7)
+    fid2 = uuid.uuid4()
+    async with Session() as db:
+        db.add(Fixture(id=fid2, organisation_id=org_id, grade_id=G["4th XI"], team_id=T["4th XI"],
+                       source="manual", played_on=on_a, end_on=on_b, start_time="13:00",
+                       status="UPCOMING", label="4th XI two-day"))
+        await db.commit()
+    w1 = await player("Half W1 Only", ["5th XI"])
+    w2 = await player("Half W2 Only", ["5th XI"])
+    w2_picked = await player("Half W2 Picked", ["5th XI"])
+    both = await player("Both Weeks", ["4th XI"])
+    silent = await player("Silent Four", ["4th XI"])
+    for pid_, a_, b_ in ((w1, "AVAILABLE", "UNAVAILABLE"), (w2, "UNAVAILABLE", "AVAILABLE"),
+                         (w2_picked, "UNAVAILABLE", "AVAILABLE"), (both, "AVAILABLE", "AVAILABLE")):
+        await avail_on(pid_, a_, on_a)
+        await avail_on(pid_, b_, on_b)
+    await name_in_xi(fid2, w2_picked)
+    rows_f = await pool(fid2)
+    of = [r["display_name"] for r in rows_f]
+    bf = {r["display_name"]: r for r in rows_f}
+    check("W1 only and W2 only are half_open", (bf["Half W1 Only"].get("half_open"), bf["Half W2 Only"].get("half_open")), (True, True))
+    check("a full yes and a silent player are not", (bf["Both Weeks"].get("half_open"), bf["Silent Four"].get("half_open")), (False, False))
+    check("one already in the XI is not half_open", bf["Half W2 Picked"].get("half_open"), False)
+    check("availability stays the combined answer", bf["Half W2 Only"].get("availability"), "UNAVAILABLE")
+    check("both half players lead, ahead of a full yes in the own squad",
+          sorted(of[:2]), ["Half W1 Only", "Half W2 Only"])
+    check("the full yes follows them, then the silent player", of.index("Both Weeks") < of.index("Silent Four"), True)
+    check("one-day game: nobody is half_open", [n for n, r in r2.items() if r.get("half_open")], [])
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     if base.FAIL:

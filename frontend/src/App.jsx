@@ -195,6 +195,7 @@ const SuperCommsLimits = lazy(() => import('./pages/admin/SuperCommsLimits'))
 const SuperMarketing = lazy(() => import('./pages/admin/SuperMarketing'))
 const SuperAnnounce = lazy(() => import('./pages/admin/SuperAnnounce'))
 const SuperBroadcasts = lazy(() => import('./pages/admin/SuperBroadcasts'))
+const SuperProductUpdates = lazy(() => import('./pages/admin/SuperProductUpdates'))
 const KlubproMigration = lazy(() => import('./pages/admin/klubpro/KlubproMigration'))
 const BetterSelectHome = lazy(() => import('./pages/admin/betterselect/BetterSelectHome'))
 const BsPlayers = lazy(() => import('./pages/admin/betterselect/BetterSelectPlayers'))
@@ -277,6 +278,8 @@ const AdminWebsite = lazy(() => import('./pages/admin/website/AdminWebsite'))
 // Public, login-free self-service availability (BetterSelect magic link + PIN)
 const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
 const PublicVoting = lazy(() => import('./pages/PublicVoting'))
+const TeaserPreview = lazy(() => import('./pages/marketing/TeaserPreview'))
+const TeaserCard = lazy(() => import('./pages/marketing/TeaserCard'))
 // Public, login-free net check-in — the QR code on the fence and the NFC tag
 // beside it hold this same URL.
 const PublicNetCheckIn = lazy(() => import('./pages/PublicNetCheckIn'))
@@ -404,6 +407,9 @@ export default function App() {
           {/* Public self-service availability (no login — magic link + PIN) */}
           <Route path="/avail/:token" element={<PublicAvailability />} />
           <Route path="/vote/:token" element={<PublicVoting />} />
+          <Route path="/preview/:token" element={<TeaserPreview />} />
+          {/* The picture the renderer screenshots; see TeaserCard.jsx. */}
+          <Route path="/preview/:token/card/:fmt" element={<TeaserCard />} />
           {/* Public net check-in (no login — QR code / NFC tag + optional PIN) */}
           <Route path="/nets-checkin/:token" element={<PublicNetCheckIn />} />
           <Route path="/room/:token" element={<PublicClubRoom />} />
@@ -585,6 +591,7 @@ export default function App() {
           <Route path="/admin/super/directory-audiences" element={<Navigate to="/admin/comms/segments" replace />} />
           <Route path="/admin/super/announce" element={<ProtectedRoute requireRole="super_admin"><SuperAnnounce /></ProtectedRoute>} />
           <Route path="/admin/super/broadcasts" element={<ProtectedRoute requireRole="super_admin"><SuperBroadcasts /></ProtectedRoute>} />
+          <Route path="/admin/super/product-updates" element={<ProtectedRoute requireRole="super_admin"><SuperProductUpdates /></ProtectedRoute>} />
           <Route path="/admin/super/migration" element={<ProtectedRoute requireRole="super_admin"><KlubproMigration /></ProtectedRoute>} />
 
           {/* BetterSelect module */}

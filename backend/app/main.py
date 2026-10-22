@@ -17,9 +17,10 @@ from app.auth.modules import require_module
 from app.routers import instructional_videos
 from app.routers import audit as audit_router
 from app.routers import admin_broadcasts
+from app.routers import product_updates
 from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
-from app.routers import card_review, auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, fines, website, comms, public_comms, public_ses, public_contact, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import card_review, auth, organisations, players, games, game_fow, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, fines, website, comms, public_comms, public_ses, public_contact, public_teaser, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours, role_programs
@@ -4580,6 +4581,32 @@ async def lifespan(app: FastAPI):
         for _stmt in _AVAIL_MAYBE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 355: the Player Page button on the club's public site.
+        # Same one-copy rule: this and alembic's 355 both run
+        # services/availability_site_link_ddl.STATEMENTS.
+        from app.services.availability_site_link_ddl import STATEMENTS as _AVAIL_SITE_DDL
+        for _stmt in _AVAIL_SITE_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 356: a player's address and emergency contact. Same one-copy
+        # rule: this and alembic's 356 both run services/player_contact_ddl.STATEMENTS.
+        from app.services.player_contact_ddl import STATEMENTS as _PLAYER_CONTACT_DDL
+        for _stmt in _PLAYER_CONTACT_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 357: fall of wickets a club typed from its own scorebook. Same
+        # one-copy rule: this and alembic's 357 both run services/fow_override_ddl.STATEMENTS.
+        from app.services.fow_override_ddl import STATEMENTS as _FOW_OVERRIDE_DDL
+        for _stmt in _FOW_OVERRIDE_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 358: the index behind the grade display-name lookup that Records,
+        # the Leaderboard grid and StatLab run per row. Same one-copy rule: this and
+        # alembic's 358 both run services/grade_name_index_ddl.STATEMENTS.
+        from app.services.grade_name_index_ddl import STATEMENTS as _GRADE_NAME_INDEX_DDL
+        for _stmt in _GRADE_NAME_INDEX_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 341: the club-chosen modules on a player's own page, and
         # BetterSelect Fines. Same one-copy rule: this and alembic's 341 both run
         # services/fines_ddl.STATEMENTS.
@@ -4663,6 +4690,13 @@ async def lifespan(app: FastAPI):
         # run services/notification_ddl.STATEMENTS.
         from app.services.notification_ddl import STATEMENTS as _NOTIFICATION_DDL
         for _stmt in _NOTIFICATION_DDL:
+            await conn.execute(text(_stmt))
+
+        # Migration 353: the daily product update — the log of each day's post
+        # and its Stop switch (which starts stopped). Same one-copy rule — this
+        # list and alembic's 353 both run services/product_blast_ddl.STATEMENTS.
+        from app.services.product_blast_ddl import STATEMENTS as _PRODUCT_BLAST_DDL
+        for _stmt in _PRODUCT_BLAST_DDL:
             await conn.execute(text(_stmt))
 
         # Migration 293: a Club Directory Rediscover re-reads a club's committee
@@ -6241,9 +6275,10 @@ async def lifespan(app: FastAPI):
     # Seed every club's BetterComms library with the built-in starter templates
     # (idempotent — ON CONFLICT DO NOTHING per org+name, so this also backfills
     # any club created since the last startup with no separate creation hook).
-    from app.routers.comms import seed_starter_templates
+    from app.routers.comms import seed_starter_templates, seed_outreach_templates
     async with engine.begin() as conn:
         seeded = await seed_starter_templates(conn)
+        seeded += await seed_outreach_templates(conn)
         if seeded:
             logger.info(f"Seeded {seeded} BetterComms starter templates across clubs")
 
@@ -6455,6 +6490,7 @@ app.include_router(discount_coupons.router)  # BetterCricket-managed discount co
 app.include_router(organisations.router)
 app.include_router(players.router)
 app.include_router(games.router)
+app.include_router(game_fow.router)  # a club types the fall of wickets for its own innings of a synced match
 app.include_router(leaderboard.router)
 app.include_router(records.router)
 app.include_router(honours.router)
@@ -6503,6 +6539,7 @@ app.include_router(sales_commissions.router)  # Sales Commissions — forecast +
 app.include_router(usage.router)
 app.include_router(login_attempts.router)
 app.include_router(admin_broadcasts.router)  # Super-admin messages on the club admin dashboard
+app.include_router(product_updates.router)  # Super-admin: daily product update (Stop switch, log)
 app.include_router(club_links_router.router)  # Super Admin: link clubs so Club Admins can switch between them
 app.include_router(privacy_requests_router.router)  # Super Admin: find a person, download the PDF of what we hold about them
 app.include_router(meta_ads.router)  # Meta Ads HQ dashboard (super-admin) — BetterCricket's own ad spend
@@ -6557,6 +6594,7 @@ app.include_router(public_net_checkin.router)                                   
 app.include_router(public_club_room.router)                                               # Club Room Mode (public)
 app.include_router(public_comms.router)                                                   # BetterComms (public unsubscribe)
 app.include_router(public_ses.router)                                                     # BetterComms (SES event webhook, SNS-signed)
+app.include_router(public_teaser.router)  # A prospect club's teaser page (unauthenticated: the token is the credential)
 app.include_router(public_contact.router)                                                 # Marketing Contact form (public intake)
 app.include_router(public_webinar.router)                                                 # Webinar registration (public intake)
 app.include_router(public_square.router)                                                  # BetterMerch (Square OAuth callback)

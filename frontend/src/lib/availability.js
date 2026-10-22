@@ -155,3 +155,11 @@ export const AVAIL_ORDER = [...AVAIL_STATUSES].sort(
 // Lowercase label, e.g. for inline sentences ("marked unavailable").
 export const availLabel = (s) => (AVAILABILITY[s]?.label ?? String(s ?? ''))
 export const availRank = (s) => (AVAILABILITY[s]?.rank ?? 99)
+// THE availability sort, used by every screen that orders people by their answer
+// (Selection board, its phone search, the Whiteboard pool, the Squads board): a
+// player free ONE weekend of a two-day game and away the other leads, because they
+// are nearly a yes and the selector has to decide; then Available, Maybe, no
+// response, Unavailable. `status` is the combined answer, `days` the per-weekend
+// answers ([{date, status}], two-day games only). Ordering only: never use it for a
+// rule, count or filter. The server mirrors it in selection_pool.pool_sort_key.
+export const availSortRank = (status, days) => (halfStatus(days) ? -1 : availRank(status))

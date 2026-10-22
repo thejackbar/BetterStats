@@ -34,6 +34,15 @@ const voteStubs = async (page, me) => {
 const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' })
 
+  // Every section of the player page starts closed. These checks read what is inside them,
+  // so each context starts with them opened, the way a returning player's page can be.
+  const _newContext = browser.newContext.bind(browser)
+  browser.newContext = async (o) => {
+    const c = await _newContext(o)
+    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
+    return c
+  }
+
   await safe('voting header', async () => {
     console.log('\n── The voting page ──')
     const ctx = await browser.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true })
@@ -161,7 +170,7 @@ const run = async () => {
     await availStubs(page, { verified: true })
     await page.goto(`${BASE}${MY}`)
     await page.locator('[data-my-page]').waitFor()
-    check('already signed in: it opens straight on My page', (await page.locator('[data-tab="mine"]').getAttribute('aria-selected')) === 'true')
+    check('already signed in: it opens on the player\'s page, whatever ?tab says', (await page.locator('[data-hero]').count()) === 1)
     await ctx.close()
   })
 
@@ -192,8 +201,8 @@ const run = async () => {
     const p2 = await ctx2.newPage(); p2.setDefaultTimeout(8000)
     await availStubs(p2, { verified: true })
     await p2.goto(`${BASE}/avail/atok`)
-    await p2.getByText('Signed in as').waitFor()
-    check('and a plain link still opens on Availability', (await p2.locator('[data-tab="weekend"]').getAttribute('aria-selected')) === 'true')
+    await p2.locator('[data-hero]').waitFor()
+    check('and a plain link opens the same page, availability editor included', (await p2.locator('[data-availability]').count()) === 1)
     await ctx2.close()
   })
 

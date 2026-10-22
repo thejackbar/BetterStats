@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Cropper } from 'react-cropper'
 import 'cropperjs/dist/cropper.css'
-import { preloadBackgroundRemoval, releaseBackgroundRemoval, removeBackgroundFromUrl } from '../lib/bgRemoval'
+import { cutOutCrashedBefore, fullQualityOffered, preloadBackgroundRemoval, releaseBackgroundRemoval, removeBackgroundFromUrl } from '../lib/bgRemoval'
 
 // Reusable crop + background-removal modal.
 //
@@ -37,6 +37,8 @@ export default function ImageEditorModal({
   const [loadError, setLoadError] = useState(null)
   const [removingBg, setRemovingBg] = useState(false)
   const [bgProgress, setBgProgress] = useState(null) // { stage: 'download' | 'compute', pct }
+  const [bgCrashed, setBgCrashed] = useState(false) // the last cut-out here never finished
+  const [bgLight, setBgLight] = useState(false) // the cut-out on show came from the light model
   const [keying, setKeying] = useState(false)
   const [showColourKey, setShowColourKey] = useState(false)
   const [tolerance, setTolerance] = useState(48)
@@ -54,6 +56,7 @@ export default function ImageEditorModal({
     }
     let cancelled = false
     setShowColourKey(false)
+    setBgLight(false)
 
     const cleanup = () => {
       if (derivedUrlRef.current) {
@@ -111,6 +114,7 @@ export default function ImageEditorModal({
   // quick when they press it (the files are cached after the first time).
   useEffect(() => {
     if (!open || !allowBackgroundRemoval) return
+    setBgCrashed(cutOutCrashedBefore())
     preloadBackgroundRemoval()
     return releaseBackgroundRemoval // frees the model when the editor closes
   }, [open, allowBackgroundRemoval])
@@ -135,13 +139,15 @@ export default function ImageEditorModal({
 
   // AI subject cut-out — good for photos (people, products). Runs on whatever
   // is currently shown.
-  const handleRemoveBg = useCallback(async () => {
-    if (!srcUrl) return
+  const runCutOut = useCallback(async (from, full) => {
+    if (!from) return
     setShowColourKey(false)
     setRemovingBg(true)
     setBgProgress(null)
     try {
-      const blob = await removeBackgroundFromUrl(srcUrl, setBgProgress)
+      const { blob, light } = await removeBackgroundFromUrl(from, setBgProgress, { full })
+      setBgCrashed(false)
+      setBgLight(light)
       setDerived(blob)
     } catch (err) {
       setLoadError(err.message || 'Background removal failed')
@@ -149,7 +155,13 @@ export default function ImageEditorModal({
       setRemovingBg(false)
       setBgProgress(null)
     }
-  }, [srcUrl, setDerived])
+  }, [setDerived])
+
+  const handleRemoveBg = useCallback(() => runCutOut(srcUrl, false), [runCutOut, srcUrl])
+
+  // On a phone the first cut-out uses the light model; this reruns the original
+  // photo through the full one when the person sees a lost arm or rough edge.
+  const handleFullQuality = useCallback(() => runCutOut(ownedBlobUrlRef.current, true), [runCutOut])
 
   // Colour keying — clears the background colour, built for logos sitting on a
   // solid or near-solid background where the AI cut-out leaves a haze (no
@@ -309,6 +321,29 @@ export default function ImageEditorModal({
               </>
             )}
           </div>
+
+          {allowBackgroundRemoval && bgLight && !removingBg && fullQualityOffered() && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <p className="font-mono text-[10px] leading-relaxed text-pb-faint">
+                Missing an arm or rough edges? That was the quick method for phones.
+              </p>
+              <button
+                type="button"
+                onClick={handleFullQuality}
+                disabled={applying || keying}
+                title="Slower and uses much more memory. On some phones the page may reload."
+                className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-text hover:bg-pb-surface2 transition disabled:opacity-40"
+              >Try full quality</button>
+            </div>
+          )}
+
+          {allowBackgroundRemoval && bgCrashed && !removingBg && (
+            <p className="mt-3 font-mono text-[10px] leading-relaxed text-pb-faint">
+              The last photo cut-out on this device did not finish, most likely because it ran out of
+              memory. This time it uses a lighter, quicker method, so edges can come out a little
+              rougher. The logo button is the other option.
+            </p>
+          )}
 
           {allowBackgroundRemoval && showColourKey && (
             <div className="mt-3 rounded border pb-hairline bg-pb-surface2 px-4 py-3">

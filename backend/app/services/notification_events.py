@@ -103,6 +103,7 @@ class EventType:
 
 
 CATEGORIES = (
+    ("product", "BetterCricket news"),
     ("stats", "Stats and milestones"),
     ("people", "People and compliance"),
     ("operations", "Club operations"),
@@ -111,6 +112,21 @@ CATEGORIES = (
 
 
 EVENT_TYPES: tuple[EventType, ...] = (
+    # ── BetterCricket news ───────────────────────────────────────────────────
+    EventType(
+        key="product_update",
+        label="What's new in BetterCricket",
+        description=(
+            "A short note on new features and fixes, posted at 9am Melbourne "
+            "time on days something changed. It is written for clubs and leaves "
+            "out the technical detail."
+        ),
+        category="product",
+        # The bell only. A club that wants it in its inbox can switch that on,
+        # but a product note emailed to every admin by default is how a
+        # notification system trains people to ignore it.
+        default_channels={CHANNEL_EMAIL: False, CHANNEL_IN_APP: True},
+    ),
     # ── Stats ────────────────────────────────────────────────────────────────
     EventType(
         key="milestone_achieved",

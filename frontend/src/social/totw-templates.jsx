@@ -13,6 +13,52 @@ import { GrainSVG as Grain, Halftone, Stripes, ClubLogo, AutoFitText, CreditMark
 import { FOOT_BUG_W } from './round-templates'
 import { aspectOf, pick, grow } from './postAspect'
 import { LayerRoot } from './postLayers'
+import { usePostLook } from './postLook'
+import { pc, pt, inkOn, registerParts, colorPart as C, textPart as T } from './layoutParts'
+
+// What the club can set on each layout (Brand, "Team Sheet elements"). Same keys
+// across the two, so a heading or a name colour carries from one to the other.
+const HEAD = 'Heading', CARD = 'Player cards', ROW = 'Player rows', FOOT = 'Footer'
+const HEADING_PARTS = [
+  T('title1', 'First word(s)', HEAD, () => 'TEAM OF'),
+  C('title1Color', 'First word colour', HEAD, (p) => p.ink),
+  T('title2', 'Second word(s)', HEAD, () => 'THE WEEK'),
+  C('title2Color', 'Second word colour', HEAD, (p) => p.accent),
+  C('roundColor', 'Round line', HEAD, (p) => p.accent),
+  C('clubColor', 'Club name', HEAD, (p) => p.ink),
+]
+const FOOTER_PARTS = [
+  C('footerBg', 'Footer bar', FOOT, (p) => p.primary),
+  C('footerRule', 'Footer line', FOOT, (p) => p.accent),
+]
+registerParts({
+  TW1: [
+    ...HEADING_PARTS,
+    C('photoBg', 'Photo backdrop', CARD, null, { autoLabel: 'Card colour' }),
+    C('cardBorder', 'Card outline', CARD, (p) => p.accent),
+    C('numColor', 'Card number', CARD, (p) => p.ink),
+    C('bandBg', 'Name band', CARD, (p) => p.accent),
+    C('nameColor', 'Surname', CARD, (p) => p.primary),
+    C('statColor', 'Score line', CARD, (p) => p.primary),
+    C('gradeColor', 'Grade line', CARD, (p) => p.primary),
+    C('pointsBg', 'Points tag', CARD, (p) => p.accent),
+    C('pointsColor', 'Points text', CARD, (p) => p.primary),
+    ...FOOTER_PARTS,
+  ],
+  TW2: [
+    ...HEADING_PARTS,
+    C('ruleColor', 'Top line', ROW, (p) => p.accent),
+    C('dividerColor', 'Row dividers', ROW, (p) => p.ink),
+    C('numColor', 'Row number', ROW, (p) => p.accent),
+    C('faceBg', 'Photo backdrop', ROW, null, { autoLabel: 'Soft tint' }),
+    C('faceBorder', 'Photo ring', ROW, (p) => p.accent),
+    C('firstColor', 'First name', ROW, (p) => p.ink),
+    C('nameColor', 'Surname', ROW, (p) => p.ink),
+    C('statColor', 'Score line', ROW, (p) => p.accent),
+    C('subColor', 'Grade and opposition', ROW, (p) => p.ink),
+    ...FOOTER_PARTS,
+  ],
+})
 
 const DISPLAY = "var(--social-display-font, 'Anton', sans-serif)"
 const MONO = "'JetBrains Mono', monospace"
@@ -112,7 +158,7 @@ function Face({ p, team, palette, fit = 'contain', pos = 'center top' }) {
 
 // Plain functions returning their root `div`, called inline: a component child of
 // the layer root only takes a z-index if it spreads `style`, and a `div` always does.
-function masthead({ pal, team, meta, width, big }) {
+function masthead({ pal, team, meta, width, big, parts }) {
   // `meta.heading` is 'JUNIOR' or 'SENIOR' on a scoped team and absent otherwise,
   // so an unscoped post stays byte for byte what it was.
   const round = [meta.heading, meta.round, meta.date].filter(Boolean).join(' · ')
@@ -123,14 +169,16 @@ function masthead({ pal, team, meta, width, big }) {
       boxSizing: 'border-box',
     }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 3, color: pal.accent, fontWeight: 600 }}>{`// ${round}`.toUpperCase()}</div>
+        <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 3, color: pc(parts, 'roundColor', pal.accent), fontWeight: 600 }}>{`// ${round}`.toUpperCase()}</div>
         <div style={{ fontFamily: DISPLAY, fontSize: big, letterSpacing: -1, lineHeight: 0.86, marginTop: 8 }}>
-          TEAM OF <span style={{ color: pal.accent }}>THE WEEK</span>
+          <span style={{ color: pc(parts, 'title1Color', pal.ink) }}>{pt(parts, 'title1', 'TEAM OF')}</span>
+          {pt(parts, 'title1', 'TEAM OF') && pt(parts, 'title2', 'THE WEEK') ? ' ' : null}
+          <span style={{ color: pc(parts, 'title2Color', pal.accent) }}>{pt(parts, 'title2', 'THE WEEK')}</span>
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 240 }}>{team.fullName || team.name}</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: 28, letterSpacing: 0.5, lineHeight: 0.95, maxWidth: 240, color: pc(parts, 'clubColor', undefined) }}>{team.fullName || team.name}</div>
           {meta.comp ? <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1.6, opacity: 0.6, marginTop: 6 }}>{meta.comp}</div> : null}
         </div>
         <ClubLogo src={team.logo || null} monogram={team.monogram} color={pal.ink} size={104} shape="shield" />
@@ -141,12 +189,12 @@ function masthead({ pal, team, meta, width, big }) {
 
 // The footer strip. The left is the sponsor slot, left empty for the grid; the
 // platform credit sits at the right.
-function footer({ pal, width, height }) {
+function footer({ pal, width, height, parts }) {
   return (
     <div data-layer="Sponsors" style={{
       position: 'absolute', left: 0, right: 0, bottom: 0, height: frame(width, height).strip, boxSizing: 'border-box',
       padding: '0 56px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-      background: pal.primary, borderTop: `2px solid ${pal.accent}`,
+      background: pc(parts, 'footerBg', pal.primary), borderTop: `2px solid ${pc(parts, 'footerRule', pal.accent)}`,
     }}>
       <CreditMark ink={pal.ink} h={40} />
     </div>
@@ -156,7 +204,8 @@ function footer({ pal, width, height }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TW1 — Team sheet: a grid of photo cards
 // ═══════════════════════════════════════════════════════════════════════════
-export function TeamOfWeekGrid({ palette: pal, width = 1080, height = 1080, team = {}, players = [], totw = {}, sponsors }) {
+export function TeamOfWeekGrid({ palette: pal, width = 1080, height = 1080, team = {}, players = [], totw = {}, sponsors, parts }) {
+  const texture = usePostLook().texture !== false
   const P = players.slice(0, TOTW_MAX)
   const n = P.length
   const F = frame(width, height)
@@ -173,6 +222,14 @@ export function TeamOfWeekGrid({ palette: pal, width = 1080, height = 1080, team
   const nameMax = Math.max(18, Math.min(38, Math.round(cardW * 0.17)))
   const lineSize = cardW < 200 ? 11 : 13
   const big = pick(F.A, { square: 78, portrait: 90, story: 104 })
+  // The name band's text follows the band's colour once the club has set one, so
+  // a white band does not keep the pale text the default red band had.
+  const bandBg = pc(parts, 'bandBg', pal.accent)
+  const nameInk = pc(parts, 'nameColor', pc(parts, 'bandBg', null) ? inkOn(bandBg) : pal.primary)
+  const statInk = pc(parts, 'statColor', nameInk)
+  const gradeInk = pc(parts, 'gradeColor', statInk)
+  const cardBorder = pc(parts, 'cardBorder', pal.accent)
+  const photoBg = pc(parts, 'photoBg', undefined)
   return (
     <LayerRoot style={{
       width, height, position: 'relative', overflow: 'hidden',
@@ -180,8 +237,8 @@ export function TeamOfWeekGrid({ palette: pal, width = 1080, height = 1080, team
     }}>
       <Halftone color={pal.ink} opacity={0.06} size={11} />
       <Stripes color={pal.accent} opacity={0.035} gap={28} angle={45} />
-      <div style={{ position: 'absolute', left: -50, bottom: F.strip + 64, fontFamily: DISPLAY, fontSize: 300, lineHeight: 0.8, color: pal.ink, opacity: 0.04, letterSpacing: -6, transform: 'rotate(-8deg)', userSelect: 'none', whiteSpace: 'nowrap' }}>TOTW</div>
-      {masthead({ pal, team, meta: totw, width, big })}
+      {texture ? <div style={{ position: 'absolute', left: -50, bottom: F.strip + 64, fontFamily: DISPLAY, fontSize: 300, lineHeight: 0.8, color: pal.ink, opacity: 0.04, letterSpacing: -6, transform: 'rotate(-8deg)', userSelect: 'none', whiteSpace: 'nowrap' }}>TOTW</div> : null}
+      {masthead({ pal, team, meta: totw, width, big, parts })}
       <div data-layer="Players" style={{
         position: 'absolute', left: 56, right: 56, top: F.top, bottom: F.bottom,
         display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'flex-start', gap,
@@ -193,27 +250,27 @@ export function TeamOfWeekGrid({ palette: pal, width = 1080, height = 1080, team
             <div key={p._id || i} style={{
               width: cardW, height: cardH, position: 'relative', overflow: 'hidden', boxSizing: 'border-box',
               background: `linear-gradient(180deg, ${pal.secondary} 0%, ${pal.primary} 100%)`,
-              border: `2px solid ${pal.accent}`, display: 'flex', flexDirection: 'column',
+              border: `2px solid ${cardBorder}`, display: 'flex', flexDirection: 'column',
             }}>
-              <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
+              <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0, background: photoBg }}>
                 <Halftone color={pal.ink} opacity={0.08} size={6} />
                 <Face p={p} team={team} palette={pal} />
-                <div style={{ position: 'absolute', top: 7, left: 9, fontFamily: MONO, fontSize: 11, color: pal.ink, opacity: 0.55, letterSpacing: 1.5 }}>#{String(i + 1).padStart(2, '0')}</div>
+                <div style={{ position: 'absolute', top: 7, left: 9, fontFamily: MONO, fontSize: 11, color: pc(parts, 'numColor', pal.ink), opacity: 0.55, letterSpacing: 1.5 }}>#{String(i + 1).padStart(2, '0')}</div>
                 {totw.showPoints && t.points != null ? (
-                  <div style={{ position: 'absolute', top: 6, right: 6, padding: '2px 7px', background: pal.accent, color: pal.primary, fontFamily: DISPLAY, fontSize: 15, letterSpacing: 1, lineHeight: 1.2 }}>{t.points} PTS</div>
+                  <div style={{ position: 'absolute', top: 6, right: 6, padding: '2px 7px', background: pc(parts, 'pointsBg', pal.accent), color: pc(parts, 'pointsColor', pal.primary), fontFamily: DISPLAY, fontSize: 15, letterSpacing: 1, lineHeight: 1.2 }}>{t.points} PTS</div>
                 ) : null}
               </div>
-              <div style={{ height: bandH, background: pal.accent, color: pal.primary, padding: '0 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3, boxSizing: 'border-box' }}>
+              <div style={{ height: bandH, background: bandBg, color: nameInk, padding: '0 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3, boxSizing: 'border-box' }}>
                 <AutoFitText text={p.last} max={nameMax} min={11} lines={1}
                   style={{ fontFamily: DISPLAY, letterSpacing: 1, lineHeight: 1, maxWidth: '100%', textAlign: 'center' }} />
-                <Line text={t.line} size={lineSize} color={pal.primary} style={{ textAlign: 'center', fontWeight: 600 }} />
-                {t.grade ? <Line text={t.grade} size={Math.max(9, lineSize - 2)} color={pal.primary} style={{ textAlign: 'center', opacity: 0.7 }} /> : null}
+                <Line text={t.line} size={lineSize} color={statInk} style={{ textAlign: 'center', fontWeight: 600 }} />
+                {t.grade ? <Line text={t.grade} size={Math.max(9, lineSize - 2)} color={gradeInk} style={{ textAlign: 'center', opacity: 0.7 }} /> : null}
               </div>
             </div>
           )
         })}
       </div>
-      {footer({ pal, width, height })}
+      {footer({ pal, width, height, parts })}
       <Grain opacity={0.32} id="tw1-g" />
     </LayerRoot>
   )
@@ -222,7 +279,8 @@ export function TeamOfWeekGrid({ palette: pal, width = 1080, height = 1080, team
 // ═══════════════════════════════════════════════════════════════════════════
 // TW2 — Ranked board: one row per player
 // ═══════════════════════════════════════════════════════════════════════════
-export function TeamOfWeekBoard({ palette: pal, width = 1080, height = 1080, team = {}, players = [], totw = {}, sponsors }) {
+export function TeamOfWeekBoard({ palette: pal, width = 1080, height = 1080, team = {}, players = [], totw = {}, sponsors, parts }) {
+  const texture = usePostLook().texture !== false
   const P = players.slice(0, TOTW_MAX)
   const n = P.length
   const F = frame(width, height)
@@ -242,11 +300,11 @@ export function TeamOfWeekBoard({ palette: pal, width = 1080, height = 1080, tea
       background: pal.primary, color: pal.ink, fontFamily: BODY,
     }}>
       <Halftone color={pal.ink} opacity={0.05} size={12} />
-      <div style={{ position: 'absolute', left: -120, top: -80, width: 640, height: Math.round(height * 1.3), background: pal.secondary, transform: 'rotate(8deg)', transformOrigin: 'top left', opacity: 0.55 }} />
-      {masthead({ pal, team, meta: totw, width, big })}
+      {texture ? <div style={{ position: 'absolute', left: -120, top: -80, width: 640, height: Math.round(height * 1.3), background: pal.secondary, transform: 'rotate(8deg)', transformOrigin: 'top left', opacity: 0.55 }} /> : null}
+      {masthead({ pal, team, meta: totw, width, big, parts })}
       <div data-layer="Players" style={{
         position: 'absolute', left: 56, right: 56, top: F.top, bottom: F.bottom,
-        display: 'flex', flexDirection: 'column', borderTop: `3px solid ${pal.accent}`,
+        display: 'flex', flexDirection: 'column', borderTop: `3px solid ${pc(parts, 'ruleColor', pal.accent)}`,
       }}>
         {n === 0 ? emptyState(pal) : null}
         {P.map((p, i) => {
@@ -254,21 +312,21 @@ export function TeamOfWeekBoard({ palette: pal, width = 1080, height = 1080, tea
           return (
             <div key={p._id || i} style={{
               flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', gap: 16,
-              borderBottom: i < n - 1 ? `1px solid ${pal.ink}1f` : 'none',
+              borderBottom: i < n - 1 ? `1px solid ${pc(parts, 'dividerColor', pal.ink)}${pc(parts, 'dividerColor', null) ? '' : '1f'}` : 'none',
             }}>
-              <div style={{ width: numSize * 1.7, flexShrink: 0, fontFamily: DISPLAY, fontSize: numSize, letterSpacing: 0.5, color: pal.accent, lineHeight: 1 }}>{String(i + 1).padStart(2, '0')}</div>
-              <div style={{ width: face, height: face, flexShrink: 0, position: 'relative', overflow: 'hidden', borderRadius: '50%', background: `${pal.ink}14`, border: `2px solid ${pal.accent}`, boxSizing: 'border-box' }}>
+              <div style={{ width: numSize * 1.7, flexShrink: 0, fontFamily: DISPLAY, fontSize: numSize, letterSpacing: 0.5, color: pc(parts, 'numColor', pal.accent), lineHeight: 1 }}>{String(i + 1).padStart(2, '0')}</div>
+              <div style={{ width: face, height: face, flexShrink: 0, position: 'relative', overflow: 'hidden', borderRadius: '50%', background: pc(parts, 'faceBg', `${pal.ink}14`), border: `2px solid ${pc(parts, 'faceBorder', pal.accent)}`, boxSizing: 'border-box' }}>
                 <Face p={p} team={team} palette={pal} pos="center 12%" />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                {p.first ? <div style={{ fontFamily: DISPLAY, fontSize: firstSize, letterSpacing: 1.5, opacity: 0.7, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(p.first).toUpperCase()}</div> : null}
-                <div style={{ fontFamily: DISPLAY, fontSize: nameSize, letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.last}</div>
+                {p.first ? <div style={{ fontFamily: DISPLAY, fontSize: firstSize, letterSpacing: 1.5, opacity: 0.7, lineHeight: 1, color: pc(parts, 'firstColor', undefined), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(p.first).toUpperCase()}</div> : null}
+                <div style={{ fontFamily: DISPLAY, fontSize: nameSize, letterSpacing: 0.5, lineHeight: 1, color: pc(parts, 'nameColor', undefined), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.last}</div>
                 {t.grade || t.opp ? (
-                  <Line text={[t.grade, t.opp ? `v ${t.opp}` : ''].filter(Boolean).join(' · ')} size={subSize} color={pal.ink} style={{ opacity: 0.6, marginTop: 2, letterSpacing: 1.2 }} />
+                  <Line text={[t.grade, t.opp ? `v ${t.opp}` : ''].filter(Boolean).join(' · ')} size={subSize} color={pc(parts, 'subColor', pal.ink)} style={{ opacity: 0.6, marginTop: 2, letterSpacing: 1.2 }} />
                 ) : null}
               </div>
               <div style={{ flexShrink: 0, textAlign: 'right', maxWidth: '38%' }}>
-                <Line text={t.line} size={lineSize} color={pal.accent} style={{ fontWeight: 700 }} />
+                <Line text={t.line} size={lineSize} color={pc(parts, 'statColor', pal.accent)} style={{ fontWeight: 700 }} />
                 {totw.showPoints && t.points != null ? (
                   <div style={{ fontFamily: MONO, fontSize: subSize, letterSpacing: 1.5, opacity: 0.6, marginTop: 2 }}>{t.points} PTS</div>
                 ) : null}
@@ -277,7 +335,7 @@ export function TeamOfWeekBoard({ palette: pal, width = 1080, height = 1080, tea
           )
         })}
       </div>
-      {footer({ pal, width, height })}
+      {footer({ pal, width, height, parts })}
       <Grain opacity={0.3} id="tw2-g" />
     </LayerRoot>
   )

@@ -8,6 +8,7 @@
 - Anything in sending limits: `comms_limits.py`, `comms_tier`, `_run_send`, `resume_deferred_campaigns`, `sync_comms_tiers`.
 - Symptoms: an email that reached everyone days late; `a[r.key] is not iterable`; a segment matching everyone; Comms reaching far fewer people than the Directory; a certificate warning raised twice or never; a bell that opens nothing; a club admin missing from the internal list.
 - Shipping a release (changelog file format).
+- Anything in the daily product update: `product_blast.py`, `product_updates.py`, `SuperProductUpdates.jsx`, `emitChangelog.js`.
 
 **Archive** (full history, verbatim, do not load whole): `docs/dev-notes/archive/comms-audiences-and-notifications.md`. Grep hints: `facetOptionsFrom`, `decides what it is told`, `Certificate stages`, `One CRUD shape`, `Design / Preview`, `Notification Centre`, `Naming a club`, `nobody at the club ever ran`, `capped club's email took ten days`, `How many clubs an audience`, `one internal list`, `trial, as an audience`, `no sync step`.
 
@@ -91,6 +92,14 @@
 45. A club's tier follows its BetterComms module: going `active` lifts Sandbox to Production, `paused`/`cancelled`/removed returns it, trial and past_due change nothing, suspended and the outreach org are never touched. The rule is `comms_limits.tier_after_comms_status`, applied inside `module_subscriptions` writers on a TRANSITION only (a renewal must not undo a hand-set Sandbox). A club that was already active before it shipped needs `app.scripts.sync_comms_tiers`.
 46. A club's daily cap counts from midnight UTC (`club_sends_today`), not a rolling 24 hours: `sent_at` is stamped when a batch finishes, so a rolling window made the 00:15 UTC resume skip every other day. The account ceiling stays rolling (it mirrors AWS). Fire time and "next batch" copy share `RESUME_HOUR_UTC` / `RESUME_MINUTE_UTC`.
 47. Anything that holds a send back must say so: `send_campaign` and `GET /comms/limits` return `sending_now`, `deferred`, `next_batch_at`; the compose screen and a sent email show them.
+
+**Daily product update (migration 353, v9.128.4)**
+
+48. The 9am Melbourne "what's new" note is written by a model and posted with NO human review, so the code is the reviewer: forced tool, `product_blast.check_output` (blocklists, structural patterns, shape), fail closed on any error (no fallback to raw release notes), and a Stop switch that starts STOPPED and that the DDL never flips. A new leak class is a one-line addition to `TECH_TERMS` / `INTERNAL_TERMS`, and needs a check that a clean line of the same shape still passes.
+49. Coverage is by VERSION, not date: `posted`/`skipped`/`blocked`/`retracted` cover their versions, `failed` does not (retry tomorrow). One `posted` row per Melbourne day (partial unique index). The release notes come from `dist/changelog.json` (`frontend/vite-plugins/emitChangelog.js`, served `no-cache`), because the backend image has no frontend source.
+50. It rides the notification engine: event `product_update` (bell on, email off by default) raised per club by `product_blast.fan_out` and caught up by the scan source, so club, channel and person switches all apply. Take down deletes only the notifications it raised. Any suite that builds the notification tables must also apply `product_blast_ddl` or the catch-up source fails and rolls the scan back.
+51. A rejected draft is retried with the reason (up to `MAX_ATTEMPTS`), never relaxed: only `check_output` decides what posts. A new limit belongs in `check_output` AND the prompt, or the model keeps tripping it.
+52. A backfilled note (`backfilled` TRUE) is history only: every notification path (fan-out, scan catch-up, staff bell, the log) must filter `NOT backfilled`, whatever its date. APScheduler jobs are in memory, so a restart across 09:00 loses the run: `run_missed_today` (start-up and hourly) is what covers it, and it needs the one-per-day rows to know the day is done.
 
 ## Traps and failure signatures
 

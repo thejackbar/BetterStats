@@ -4,8 +4,13 @@
 // headers at all. Runs before `vite build` (npm "prebuild"); output lands in
 // public/assets/bg-removal/ and is copied into dist by Vite.
 //
-// Never fails the build: if the CDN is unreachable the folder is left without a
-// resources.json and lib/bgRemoval.js falls back to the CDN at runtime.
+// Also fetches the light model phones use (silueta, a U2-Net variant at 320px,
+// from the rembg releases): the 1024px ISNet needs ~770MB of working memory,
+// which gets a phone tab killed. Pinned by sha256 and stored under a name that
+// carries it.
+//
+// Never fails the build: if a download fails the manifest for it is left out and
+// lib/bgRemoval.js falls back (ISNet to the CDN, the light model to ISNet).
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile, stat, rename } from 'node:fs/promises'
 import path from 'node:path'
@@ -21,7 +26,14 @@ const KEEP = [
   '/onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm',
   '/onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs',
   '/models/isnet_fp16',
+  '/models/isnet_quint8',
 ]
+
+const LIGHT = {
+  url: 'https://github.com/danielgatis/rembg/releases/download/v0.0.0/silueta.onnx',
+  sha256: '75da6c8d2f8096ec743d071951be73b4a8bc7b3e51d9a6625d63644f90ffeedb',
+  size: 44173029,
+}
 
 const pkg = JSON.parse(await readFile(path.join(root, 'node_modules/@imgly/background-removal/package.json'), 'utf8'))
 const CDN = `https://staticimgly.com/@imgly/background-removal-data/${pkg.version}/dist/`
@@ -43,6 +55,26 @@ async function get(url, tries = 4) {
 
 async function have(file, size) {
   try { return (await stat(file)).size === size } catch { return false }
+}
+
+async function fetchLight() {
+  const name = `silueta.${LIGHT.sha256.slice(0, 8)}.onnx`
+  const file = path.join(outDir, name)
+  try {
+    if (!(await have(file, LIGHT.size))) {
+      const buf = await get(LIGHT.url)
+      if (buf.length !== LIGHT.size || createHash('sha256').update(buf).digest('hex') !== LIGHT.sha256) {
+        throw new Error('does not match the pinned hash')
+      }
+      await mkdir(outDir, { recursive: true })
+      await writeFile(file + '.part', buf)
+      await rename(file + '.part', file)
+    }
+    await writeFile(path.join(outDir, 'light-model.json'), JSON.stringify({ name, size: LIGHT.size }))
+    console.log(`bg-removal light model ready: ${name}`)
+  } catch (e) {
+    console.warn(`bg-removal light model NOT self-hosted (${e.message}); phones will use the ISNet model`)
+  }
 }
 
 try {
@@ -84,3 +116,5 @@ try {
 } catch (e) {
   console.warn(`bg-removal assets NOT self-hosted (${e.message}); the app will use the CDN`)
 }
+
+await fetchLight()

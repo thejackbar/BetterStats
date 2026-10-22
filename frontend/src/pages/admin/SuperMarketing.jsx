@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import ClubLocationMap from '../../components/admin/ClubLocationMap'
 import TeaserCrawlPanel from '../../components/admin/TeaserCrawlPanel'
+import AdPackRow from '../../components/admin/AdPackRow'
 
 // PlayHQ stores the abbreviated state on the club (e.g. "WA", "NSW"), so the
 // filter value must be the abbreviation, not the full name.
@@ -1542,6 +1543,7 @@ export default function SuperMarketing() {
               {busy === 'supp' ? 'Syncing...' : 'Sync suppressions'}
             </button>
           </div>
+          <AdPackRow filters={filters} />
           <div className="flex flex-wrap items-center gap-2 mt-2.5 pt-2.5 border-t pb-hairline">
             <span className="text-[10px] uppercase tracking-wide text-pb-faint mr-1">Bulk update</span>
             <button className={BTN} disabled={busy === 'bulk' || !total} onClick={() => bulkEmailed(true)}>

@@ -57,7 +57,7 @@ If your change spans two areas, read both guides. If a guide and the code disagr
 ## Deploy (server, not this sandbox)
 
 - The box runs all ~26 containers as ONE systemd compose project, `bltbox_docker_app`, defined in `/srv/docker/docker-compose.yaml`. Deploy with `/srv/docker/betterstats/deploy.sh`.
-- Long form, from `/srv/docker`: `export COMPOSE_PROJECT_NAME=bltbox_docker_app`, `git -C /srv/docker/betterstats pull origin main`, `docker compose build --no-cache betterstats-frontend betterstats-backend`, then `docker compose up -d --no-deps --force-recreate betterstats-frontend betterstats-backend`.
+- Long form, from `/srv/docker`: `export COMPOSE_PROJECT_NAME=bltbox_docker_app`, `git -C /srv/docker/betterstats pull origin main`, `docker compose build betterstats-frontend betterstats-backend` (add `--no-cache`, or run `FRESH=1 deploy.sh`, about monthly so apt packages refresh), then `docker compose up -d --no-deps --force-recreate betterstats-frontend betterstats-backend`.
 - `COMPOSE_PROJECT_NAME=bltbox_docker_app` is mandatory. Without it a second betterstats stack appears on an empty data volume (the June 2026 outage).
 - Never recreate `betterstats-db`, never pass `-f`, never add `--remove-orphans`, never use bare `docker run/restart/exec/ps`. Act on containers only through `docker compose` from `/srv/docker`.
 - The frontend nginx must proxy `/api` to `betterstats-backend`, never the bare `backend` host (another app's API).

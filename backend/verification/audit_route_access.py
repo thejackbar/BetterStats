@@ -68,6 +68,7 @@ OPEN_TO_ANY_CLUB_USER: dict[tuple[str, str], str] = {
     ("POST", "/club-admin/modules/{module_key}/cancel"): PLAN_INLINE,
     ("POST", "/club-admin/modules/{module_key}/start-trial"): PLAN_INLINE,
     ("GET", "/club-admin/notifications/count"): PERSONAL,
+    ("GET", "/club-admin/product-updates"): "the daily what's-new note, the same text sent to every club admin",
     ("GET", "/club-admin/notifications/feed"): PERSONAL,
     ("POST", "/club-admin/notifications/feed/read"): PERSONAL,
     ("POST", "/club-admin/notifications/seen"): PERSONAL,

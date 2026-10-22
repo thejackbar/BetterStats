@@ -1674,3 +1674,130 @@ Asked for (Oct 2026) on the Core Players list (`pages/admin/AdminPlayers.jsx`, a
 Asked for (Oct 2026): on Selection > Pool, put the players who have answered above those who have not put in availability.
 - Within each rank bucket the sort used form score first and availability second, so a silent player with a higher score sat above an Available or Maybe one. The order is now bucket, availability (Available, Maybe, no response, Unavailable), form score, name. Server: `selection_pool.pool_sort_key`; browser: `cmp` in `AdminSelection.jsx`. The Whiteboard pool already sorted availability first.
 - Proof: `verify_selection_open_pool.py` (now 30 checks, section B2 drives `pool_sort_key`; control on the previous order fails the same-bucket check).
+
+## Overview follows squad order, not kick-off (v9.127.1)
+Asked for (Oct 2026): the Selection list should follow the Fixtures order and the squads order. A club with 12:00 OD sides and a 12:30 1st XI saw the OD sides first.
+- `selection_overview` sorted by date, start time, then team rank, so kick-off beat the squad's place. It now sorts date, team rank (ranked first), name with numbers read as numbers, start time, id. The Fixtures page already ranked before start time. The screen keeps the server's order and only groups by day.
+- Proof: `verify_squad_sides.py` section C (48 checks on real Postgres) now expects the 1pm 1st XI above the 9am 2nd XI; control on the previous `selection.py` fails that one check.
+
+## Pool order: "W2 only" above no answer (v9.128.5.1)
+Asked for (Oct 2026): players who are available for the second weekend only should go above those who have not put in availability on Selection > Pool.
+- The pool row's `availability` is the combined, least favourable answer, so a W2-only player read UNAVAILABLE and sorted last. The sort now treats `availability_days` of unavailable then available as rank 1.5 (after Maybe, before no answer), the same rank `lib/availability` gives HALF_W2. Server: `selection_pool.pool_sort_key` / `_is_w2_only`; browser: `selectionMeta.poolAvailRank` used by `cmp`. Ordering only (rule 95): `availability`, filters, rules, drop-in and open-pick logic are unchanged. W1-only is deliberately not lifted.
+- Proof: `verify_selection_open_pool.py` (31 checks; control without the half rank fails the W2 check).
+
+## Availability: gender and competition filters, one-tap leave out (v9.128.7)
+Asked for (Oct 2026): a gender filter on Availability, and an easier way to filter out the Veterans, perhaps by competition based on the current competitions. "Venetians" in the request was read as the Veterans.
+- Server (`routers/availability.py`): `_player_entry` adds `gender` and `competitions`; the matrix adds `competitions`. `_current_competitions` takes the competition of every upcoming fixture's grade (else its squad's grade) through `club_grade_competitions`, so a competition with no game coming up is not offered. A squad is in a competition when any grade of its teams is; a squad name read off appearance history resolves by the grade of that name. Nothing is stored.
+- Screen (`AdminAvailability.jsx`): Gender (Men, Women, Not set), Competition and Leave out facets in the shared Filters panel, plus a visible Leave out row of chips when there are two or more competitions. Leave out hides a player only when all their competitions are left out, so a Veteran who also plays Saturdays stays. A player whose squad is in no grouped competition stays too. Gender shows once anyone on the roster has one recorded.
+- Proof: `verify_availability_competition_gender.py` (12 checks on real Postgres; control on the previous `availability.py` fails 10, the two that pass are the paired "absent" checks) and `verify_availability_competition_gender_browser.mjs` (29 checks, 390px overflow, older-server matrix; control on the previous screen fails on the missing facets).
+
+## Availability: frozen date row (v9.128.7.1)
+Asked for (Oct 2026): keep the top row with the dates visible, like a frozen pane, as on the whiteboard.
+- The header cells were already `sticky top-0`, but the card around the table was `overflow-auto` with no height. A box with `overflow` becomes the sticky container, and with no height it never scrolls, so the PAGE scrolled and the header had nothing to stick to. Fix in `AdminAvailability.jsx`: the card gets `useFitHeight({ enabled: !isPhone && loaded, bottom: 20 })`, the same measured height the whiteboard board uses, so it scrolls inside itself. Below `lg` it is left as it was (`data-fit="off"`).
+- The hook is called above the loading and empty-screen early returns and `enabled` waits for the card to exist, so the first measure is not taken against the spinner.
+- Proof: `verify_availability_frozen_header_browser.mjs` (34 checks at 1440x900, 1280x720, 1440x600, a resize, and 390px). Control with the fitted height removed fails 16: the page scrolls 1200px and the date row ends at -925px.
+
+## Player page as one dashboard (v9.128.8)
+
+Asked for: clean up the player page so a player does not need to go elsewhere. Their photo, the season as a dashboard, availability answered on the same screen, and a link into their Fantasy (team, deadlines, scores).
+
+Read as: the page behind `/avail/:token`, which had an Availability tab and a separate My page tab, no photo, and a four-figure season block.
+
+What changed:
+- One screen, tabs removed. `PlayerHero` (photo or initials, shirt number, squads, public profile link), tiles, the answer editor extracted from the old tab into `AvailabilityEditor`, then the club's modules. Helpers moved to `frontend/src/pages/playerhome/`.
+- `availability` left the module catalogue, `DEFAULT_MODULES` and the admin list. A stored key is dropped on read.
+- `season_overview` keeps its flat keys and adds batting, bowling and fielding panels; `recent_form` adds the last five innings and spells (club games, all grades, said on the card).
+- New `fantasy` module with the privacy rules in guide rule 97a. Matched by exact email; no picks ever.
+- `/me` and `/me/profile` both carry `player` with `photo_url`, `shirt_number` and `profile_path` (null for a profile the club switched off).
+
+Not done, on purpose: a seamless sign in to Fantasy from this page (the PIN here is weaker than the fantasy login), and linking a fantasy manager to a player by stored id instead of email. Season stayed a club choice; only Fantasy was added to the default list.
+
+Checks: `backend/verification/verify_player_page_dashboard.py` (50; the control on the previous commit fails 36), browser twin `frontend/verification/verify_player_page_dashboard_browser.mjs` (39). Five older browser scripts were updated for the removed tabs.
+
+## Player page: sections and fees paid (v9.128.9)
+
+Asked for: streamline the page, add a record of fees paid, and let sections be minimised and maximised, grouped as a Selection section (availability, squad, selected side, training and so on), an admin section (fees, fines), voting, stats and so on.
+
+What changed:
+- Five sections in a fixed order (Selection, Club admin, Voting, Stats, Fantasy), each with a header summary that stays visible when closed, a chevron, and Collapse all / Expand all. Closed state is remembered in `localStorage` and every access is guarded. Hidden, not unmounted.
+- Streamlined: the tile row and the vote banner were removed, because the headers now say the same things once. Fantasy took the club's own name for the game as its section title.
+- `fees_owing` gained `payments` through `fees_paid`. A payment with a zero amount is not listed. Notes and bank references stay out.
+- `Section` became context-aware so existing module components draw as plain blocks inside a section without edits.
+
+Checks: `verify_player_page_dashboard.py` (58, section H is fees paid), `verify_player_page_dashboard_browser.mjs` (sections, minimise and remember, blocked localStorage, fees paid list). `verify_player_dashboard_fines_browser.mjs` was reworked from tiles and banner to section summaries.
+
+
+
+## Pool order: half-available players lead (v9.128.8.1)
+Asked for (Oct 2026): players free one week of a two-week game ("the Bs") should be at the top of the Selection pool because they are nearly conditional and need dealing with first. Supersedes the rank-1.5 lift of v9.128.5.1 for the players it covers.
+- Server: each pool row carries `half_open` (`selection_pool._is_half` on `availability_days`, either way round, and the fixture has a date, `gender_ok`, not manually inactive, not in this XI, not named in another XI or other side's draft). `pool_sort_key` puts `not half_open` first, then the old bucket, availability, score, name. Browser: `selectionMeta.poolRank` subtracts 10000 from the bucket when `half_open`, so squad order holds inside the group. Ordering only (rule 95): `availability`, filters, rules and `autofill_eligible` are untouched. The half-available players left out (in an XI, inactive) still get the rank-1.5 W2-only placement.
+- Proof: `verify_selection_open_pool.py` (39 checks; section F drives a real two-day fixture; control on the previous service fails 5).
+
+## Squads board: "Order: by availability" leads with half-available players (v9.128.8.2)
+Reported (Oct 2026): players out one week of a two-week game ("W1 out", "W2 out") were still not at the top when sorting by availability. The Selection pool lift (v9.128.8.1) never touched the Squads board's own sort, which ranked on the combined (least favourable) answer, so a half-available player read Unavailable and sat last.
+- `AdminTeams.SquadColumn` sort: when the squad's next game is two-day, `halfStatus` of the two weekly answers puts the player first; the rest keep `statusOf` rank, then name. Ordering only: counts, filters and the card colour logic are unchanged. Dan-style players (away one week, no answer the other) are not half-available and are not lifted. The phone Add players sheet's search sort also leads with `half_open`.
+- Proof: `frontend/verification/verify_squads_two_day_browser.mjs` (40 checks; control on the previous `AdminTeams.jsx` fails the two ordering checks with Alice and Fay last).
+
+## One availability sort for every screen (v9.128.9.1)
+Reported (Oct 2026): half-available players still not at the top on the Selection Whiteboard, and "it should sort the same way across all screens where availability is shown and filtered by". Each screen had grown its own comparator (Selection board `cmp`, phone search, Whiteboard pool on `availability` of the OPEN weekend, Squads board on `statusOf`), so each lifted the players separately and the Whiteboard never did.
+- `lib/availability.availSortRank(status, days)`: `halfStatus(days)` (free one weekend, away the other, either way) is -1, otherwise `availRank(status)`. Used by `AdminSelection.cmp`, `SelectionMobile` search, the Whiteboard pool (`weekByPlayer` days, since its `availability` is the open weekend) and the Squads board column (`statusOf` + the two weekly answers). Server mirror: `selection_pool.pool_sort_key` (`_is_half` -> -1). The Selection board's `half_open` still leads across buckets for players who are open to pick. Replaced the rank-1.5 W2-only lift (`poolAvailRank`, `_is_w2_only`) of v9.128.5.1, which only covered one direction.
+- Audited and left alone: the Availability matrix and Players list (sort by name), BetterIQ's `iq_selection` candidate order (auto-pick logic, not a display sort), and every filter (they read the combined answer; the rules and counts do too).
+- Proof: `verify_selection_open_pool.py` (39 checks), `verify_two_day_whiteboard_browser.mjs` (39; control on the previous Whiteboard fails the two pool-order checks, half-available player last), `verify_squads_two_day_browser.mjs` (40), `verify_two_day_selection_browser.mjs` (19, a regression guard), `verify_draft_table_browser.mjs` (105; its "Filters panel has a Gender group" check flakes about half the runs on the previous build as well). `verify_squads_pools_browser.mjs` fails on the previous build too (stale dates), unrelated.
+
+## Player Page button on the club site (v9.128.10)
+
+Asked for: reach the player page from the club's main dashboard, next to the Admin button (which did not show in portrait), called something like "Player Page".
+
+Found: the navbar's Admin link was `hidden sm:inline-flex` and the mobile menu had no Admin entry, so a portrait phone could not reach it at all.
+
+What changed: `player_page_path` on the public club payload (gated as in guide rule 97b); `PLAYER PAGE` beside Admin on wide screens, an icon in the phone bar, and Player Page and Admin buttons at the top of the mobile menu; a "Club website button" switch (migration 355, default on) in the self-service link panel.
+
+Decision worth knowing: the availability link was designed to be low-trust and pinned in a group chat, and the roster behind it is already public through player profiles, so a public button adds no new secret. The PIN (last four of a mobile, five tries then a lockout) stays the guard. Clubs that do not want it public flip the switch.
+
+Checks: `verify_player_page_dashboard.py` (69; section I, control fails 5), `frontend/verification/verify_player_page_nav_browser.mjs` (23; 360 and 390px, hidden and signed-in cases).
+
+## Availability dates fold by default (v9.128.11)
+
+Reported (Oct 2026, Applecross): a Saturday with ten fixtures made the player scroll past every game to reach the answer buttons. Asked for: show just the date and the buttons, with the fixtures on an expand.
+
+Done: `DateCard` shows the day and the answer buttons, with a "Show N games" toggle and the fixture list in a hidden panel under the buttons. The answer saves with the games still folded. Checks: `verify_public_availability_layout_browser.mjs` (47, including the folded default, an answer while folded, and that the buttons do not move on open); `verify_two_day_availability_browser.mjs` waited on a fixture row and now waits on the date card.
+
+## Update details and closed-by-default sections (v9.128.13)
+
+Asked for: an "Update details" button on the player dashboard that opens a pop-up where a player enters new email, phone number, address and so on, saved down; and everything collapsed to start.
+
+Found: players had email, phone and date of birth but nowhere to keep an address or an emergency contact, so six columns were added (migration 356). Nothing public reads them.
+
+Judgement calls worth knowing:
+- The signed-in page is protected by four digits, which teammates often know, so editing is a bigger risk than answering availability. Hence: PIN must be on, current PIN re-asked on each save through the same lockout as signing in, a write throttle, and an audit entry that keeps the old values. A change of mobile changes the PIN and the modal says so.
+- Not done: emailing the OLD address when an email is changed (the comms provider rules say a console send is not a send, and no live notice path exists on this page); date of birth stays admin only.
+- The fee record keeps its own email and mobile and is read first by billing. It follows the player only where it mirrored the old value.
+
+Sections now start closed. A returning player's choices persist in `bs.playerpage.open`.
+
+Checks: `verify_player_page_dashboard.py` (113; section J is the details route, control fails 41 without crashing), `verify_player_page_dashboard_browser.mjs` (93; the modal, closed-by-default, remembered choices). Eight older browser scripts now seed the sections open before reading inside them.
+
+
+## Squad team picker left out a newly synced grade (v9.128.14)
+
+Asked for: Applecross had a new team (OD6 Black 2), a squad for it and its fixtures synced, but "+ Add a team to this squad" did not list it.
+
+Found: `GET /teams/grade-options` returned grades from only the latest two seasons that have grades, ordered by year with a missing year last. A grade whose season sat third or later, or had no year, never reached the picker. The frontend only hides grades already in the squad, so nothing else was involved.
+
+Fix: the same two newest seasons, plus any season that holds a grade an upcoming or in-progress fixture of the club is in. Seasons with no fixtures coming up stay out, so the list does not grow with every old season.
+
+Check: `verify_grade_options_live_seasons.py` (6 checks; the control fails the two "live season" checks and keeps passing the two "left out" ones).
+
+## Two teams of one club in one grade (v9.129.1)
+
+Asked for: Applecross' 8th XI and 10th XI both play One Day Grade 6 Black, and both teams' fixtures landed on one squad. Not wanted: sharing a squad, or re-linking fixtures every round.
+
+Found: a fixture is put on a squad by its grade (`SquadSides.squad_for_grade`), and a grade belongs to one squad, so two teams in one grade cannot be told apart by grade. The earlier "grade missing from the picker" fix (v9.128.14) was not this problem: the grade was listed, as "(now in Applecross 8th XI)".
+
+Fix: `SquadSides.squad_for_team_name(grade_id, our_team_name)`. Cricket Australia names our own side on every fixture ("Applecross 10th XI"). When that name states an XI number, the grade's own squad does not carry it, and exactly one other ACTIVE squad does (`SquadInfo.ranks`), the fixture goes to that squad. Used by `sync_fixtures` and by `assign_fixtures`, which skips a fixture another squad owns by name. No migration. A hand pick (`team_pinned`) still wins.
+
+Needs from the club: the second squad's order (`teams.sequence`) is its XI number.
+
+Not done: a game between two of the club's own teams (Round 3, 8th XI v 10th XI) is ONE fixture, filed under the home team's squad. The away team's squad has no fixture for that day.
+
+Check: `verify_shared_grade_squads.py` (14 checks; the control fails the four that move the 10th XI's game). `verify_squad_sides.py` (48) and `verify_fixture_side.py` (25) unchanged.

@@ -24,16 +24,17 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.modules import MODULE_FEES, org_has_module
-from app.models.db import FeeMember, Organisation, Player, Season
+from app.auth.modules import MODULE_FANTASY, MODULE_FEES, org_has_module
+from app.models.db import FeeMember, FeeMemberSeason, FeePayment, Organisation, Player, Season
 from app.services import fees as fee_service
-from app.services import grade_scope
+from app.services import grade_scope, player_form
 from app.services.aggregations import get_season_by_season
 
 # key, label, one line for the admin list, and the keys on by default.
+#
+# Availability is not in this list: it is the point of the link, so the page
+# always opens with the next games and the Available / Unavailable buttons.
 CATALOGUE: list[dict] = [
-    {"key": "availability", "label": "Your availability",
-     "blurb": "Their answers for the next few games."},
     {"key": "votes", "label": "Votes",
      "blurb": "Reminds them to vote on games they played that are still open. Shows only when a vote is due."},
     {"key": "squad", "label": "Your squad",
@@ -44,8 +45,10 @@ CATALOGUE: list[dict] = [
      "blurb": "Upcoming nets and how often they have turned up lately."},
     {"key": "ladder", "label": "Ladder",
      "blurb": "Where their team sits on the competition ladder. Needs Show squad on."},
-    {"key": "season", "label": "Season overview",
-     "blurb": "Their matches, runs, wickets and catches this season."},
+    {"key": "season", "label": "Season dashboard",
+     "blurb": "Their season in batting, bowling and fielding, with their last few innings."},
+    {"key": "fantasy", "label": "Fantasy",
+     "blurb": "The next lock deadline, and their fantasy team's rank and points. Needs BetterFantasyCricket."},
     {"key": "fees", "label": "Fees owing",
      "blurb": "What they owe the club this season. Needs BetterAdmin fees and the PIN on."},
     {"key": "fines", "label": "Fines",
@@ -55,7 +58,7 @@ KEYS = [m["key"] for m in CATALOGUE]
 
 # What every club had before the club could choose: the original page, plus
 # fines (which draws nothing unless a squad switches Fines on).
-DEFAULT_MODULES = ["availability", "votes", "squad", "selected", "training", "fines"]
+DEFAULT_MODULES = ["votes", "fantasy", "squad", "selected", "training", "fines"]
 
 
 def normalise(keys) -> list[str]:
@@ -67,11 +70,12 @@ def normalise(keys) -> list[str]:
     return out
 
 
-# A module that draws nothing unless something is due. A club's saved list is
-# the modules it chose from the ones it was OFFERED, so one that arrived later
-# is switched on for it rather than silently missing: a club cannot have turned
-# off what it never saw. Saving the list records what was on offer.
-AUTO_ON_WHEN_NEW = ("votes",)
+# A module that draws nothing unless something is due (or the club runs the
+# thing it shows). A club's saved list is the modules it chose from the ones it
+# was OFFERED, so one that arrived later is switched on for it rather than
+# silently missing: a club cannot have turned off what it never saw. Saving the
+# list records what was on offer.
+AUTO_ON_WHEN_NEW = ("votes", "fantasy")
 # What a list saved before `known` was recorded had been offered.
 LEGACY_KNOWN = [k for k in KEYS if k not in AUTO_ON_WHEN_NEW]
 
@@ -93,10 +97,12 @@ def enabled_modules(club: Organisation) -> list[str]:
         on, known = normalise(raw.get("on")), normalise(raw.get("known")) or list(LEGACY_KNOWN)
     else:
         on, known = normalise(raw), list(LEGACY_KNOWN)
+    at = 0
     for key in AUTO_ON_WHEN_NEW:
         if key not in known and key not in on:
-            # Beside Availability when it is on, else first: a reminder belongs near the top.
-            on.insert(on.index("availability") + 1 if "availability" in on else 0, key)
+            # First, in the order above: a reminder belongs near the top.
+            on.insert(at, key)
+            at += 1
     return on
 
 
@@ -109,6 +115,11 @@ def blocked_reason(club: Organisation, key: str) -> Optional[str]:
             return "Turn the PIN on first. With no PIN anyone with the link could open a player's fees."
     if key == "ladder" and not club.availability_show_squad:
         return "Turn Show squad on first."
+    if key == "fantasy":
+        if not org_has_module(club, MODULE_FANTASY):
+            return "Needs the BetterFantasyCricket module."
+        if not club.fantasy_link_token:
+            return "Create the fantasy link first."
     return None
 
 
@@ -137,10 +148,23 @@ def _num(v):
     return int(f) if f.is_integer() else round(f, 2)
 
 
+def _rate(row: dict, key: str, cover_key: str) -> tuple[Optional[float], bool]:
+    """A rate and whether it rests on only some of the innings or spells. The server
+    owns the rate (services/rate_coverage.py); a short one is marked, never hidden."""
+    val = _num(row.get(key))
+    cov = row.get(cover_key) or {}
+    return val, bool(val is not None and cov.get("counted") and not cov.get("complete"))
+
+
 async def season_overview(db: AsyncSession, club: Organisation, player: Player) -> Optional[dict]:
-    """The player's most recent season in one small block, under the same grade
+    """The player's most recent season as a small dashboard, under the same grade
     scope their public profile uses (so the figures match it). None when they
-    have no recorded games."""
+    have no recorded games.
+
+    The first block of keys is what the page always had and stays as it was, so
+    a page bundle left open across a deploy still renders; the rest feed the
+    batting, bowling and fielding panels. A rate missing its balls is marked
+    partial (the page puts a dagger on it), never guessed."""
     scope, auto_shown = await grade_scope.resolve_scope_for_player(
         db, club.id, str(player.id), None,
         auto_widen=bool(club.stats_auto_show_played_grades),
@@ -151,6 +175,8 @@ async def season_overview(db: AsyncSession, club: Organisation, player: Player) 
     r = rows[0]
     if not (r.get("matches") or r.get("total_runs") or r.get("total_wickets") or r.get("total_catches")):
         return None
+    strike_rate, sr_partial = _rate(r, "strike_rate", "strike_rate_coverage")
+    economy, econ_partial = _rate(r, "economy", "economy_coverage")
     return {
         "season": r.get("season_name"),
         "matches": _num(r.get("matches")) or 0,
@@ -161,6 +187,45 @@ async def season_overview(db: AsyncSession, club: Organisation, player: Player) 
         "best_bowling": r.get("best_bowling_figures") or None,
         "catches": _num(r.get("total_catches")) or 0,
         "auto_shown": bool(auto_shown),
+        "batting": {
+            "innings": _num(r.get("batting_innings")) or 0,
+            "not_outs": _num(r.get("not_outs")) or 0,
+            "strike_rate": strike_rate,
+            "strike_rate_partial": sr_partial,
+            "fifties": _num(r.get("fifties")) or 0,
+            "hundreds": _num(r.get("hundreds")) or 0,
+            "ducks": _num(r.get("ducks")) or 0,
+            "fours": _num(r.get("total_fours")) or 0,
+            "sixes": _num(r.get("total_sixes")) or 0,
+        },
+        "bowling": {
+            "overs": _num(r.get("total_overs")) or 0,
+            "maidens": _num(r.get("total_maidens")) or 0,
+            "runs_conceded": _num(r.get("bowling_runs_conceded")) or 0,
+            "average": _num(r.get("bowling_average")),
+            "economy": economy,
+            "economy_partial": econ_partial,
+            "five_fors": _num(r.get("five_fors")) or 0,
+        },
+        "fielding": {
+            "catches": _num(r.get("total_catches")) or 0,
+            "run_outs": _num(r.get("total_run_outs")) or 0,
+            "stumpings": _num(r.get("total_stumpings")) or 0,
+        },
+    }
+
+
+async def recent_form(db: AsyncSession, club: Organisation, player: Player) -> dict:
+    """Their last five innings and last five spells for the club, newest first.
+    The same rows the admin profile's snapshot reads (did-not-bat is not an
+    innings, a hand-typed game counts, a game for another club does not), across
+    every grade, so the page says so. Game ids are left out: nothing links to a
+    scorecard from here."""
+    bat = await player_form.recent_batting(db, str(player.id), club.id)
+    bowl = await player_form.recent_bowling(db, str(player.id), club.id)
+    return {
+        "batting": [{"runs": b["runs"], "not_out": b["not_out"], "balls": b["balls"], "date": b["date"]} for b in bat],
+        "bowling": [{"wickets": w["wickets"], "runs": w["runs"], "overs": w["overs"], "date": w["date"]} for w in bowl],
     }
 
 
@@ -174,7 +239,7 @@ async def fees_owing(db: AsyncSession, club: Organisation, player: Player) -> di
     )).scalar_one_or_none()
     snap = await fee_service.member_financial_snapshot(db, club.id, member.id) if member else None
     if snap is None:
-        return {"on_record": False}
+        return {"on_record": False, "payments": []}
     fin = snap["financials"]
     season = await db.get(Season, snap["season_id"])
     return {
@@ -186,4 +251,35 @@ async def fees_owing(db: AsyncSession, club: Organisation, player: Player) -> di
         "total_outstanding": fin.get("total_outstanding", 0.0),
         "total_paid": fin.get("total_paid", 0.0),
         "credit": fin.get("credit", 0.0),
+        "payments": await fees_paid(db, club, member),
     }
+
+
+PAYMENTS_SHOWN = 30
+PAYMENT_KINDS = {"membership": "Membership", "match_day": "Match fees"}
+
+
+async def fees_paid(db: AsyncSession, club: Organisation, member: FeeMember) -> list[dict]:
+    """Every fee payment the club has recorded for this person, newest first, across
+    seasons. Date, amount, what it was for, how it was paid and the season: nothing
+    from the notes or bank reference columns, which are the treasurer's own. A zero
+    row is not a payment. Read through the member's own seasons, so another club's
+    or another person's payment cannot appear."""
+    rows = (await db.execute(
+        select(FeePayment, Season.name)
+        .join(FeeMemberSeason, FeeMemberSeason.id == FeePayment.member_season_id)
+        .join(Season, Season.id == FeeMemberSeason.season_id)
+        .where(FeeMemberSeason.member_id == member.id, FeePayment.organisation_id == club.id, FeePayment.amount > 0)
+        .order_by(FeePayment.paid_at.desc().nullslast(), FeePayment.created_at.desc())
+        .limit(PAYMENTS_SHOWN)
+    )).all()
+    return [
+        {
+            "date": p.paid_at.isoformat() if p.paid_at else None,
+            "amount": float(p.amount),
+            "kind": PAYMENT_KINDS.get(p.kind, "Fees"),
+            "method": p.method or None,
+            "season": season_name,
+        }
+        for p, season_name in rows
+    ]

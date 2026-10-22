@@ -71,6 +71,15 @@ const tryClick = async (page, sel, opts = {}) => { try { await page.locator(sel)
 const tryWait = async (page, fn, ms = 2500) => { try { await page.waitForFunction(fn, null, { timeout: ms }); return true } catch { return false } }
 
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
+  // Every section of the player page starts closed. These checks read what is inside them,
+  // so each context starts with them opened, the way a returning player's page can be.
+  const _newContext = browser.newContext.bind(browser)
+  browser.newContext = async (o) => {
+    const c = await _newContext(o)
+    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
+    return c
+  }
+
 try {
   for (const [label, vp] of [['desktop', { width: 1280, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
     console.log(`\n# ${label}`)
@@ -80,7 +89,7 @@ try {
     const page = await ctx.newPage()
     await stub(page, holder)
     await page.goto(`${BASE}/avail/tok-two-day`, { waitUntil: 'domcontentloaded' })
-    await page.waitForSelector('[data-fixture]')
+    await page.waitForSelector('[data-date-card]')
 
     const cards = await page.$$eval('[data-date-card]', (els) => els.map((e) => e.getAttribute('data-date-card')))
     check('week 1 and week 2 of the game are both open on first load', cards.includes(SAT1) && cards.includes(SAT2), JSON.stringify(cards))
@@ -132,7 +141,6 @@ try {
     failDate = null
 
     // My page names the weeks.
-    await tryClick(page, '[data-tab="mine"]')
     await page.waitForSelector('[data-my-page]')
     const mine = await textOf(page, '[data-my-page]')
     check('My page labels the two weeks', /w1 · 2-day game/i.test(mine) && /w2 · 2-day game/i.test(mine), mine.slice(0, 200))
@@ -150,7 +158,7 @@ try {
   const page = await ctx.newPage()
   await stub(page, holder)
   await page.goto(`${BASE}/avail/tok-two-day`, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('[data-fixture]')
+  await page.waitForSelector('[data-date-card]')
   check('week 2 is still answerable and tagged', /w2 · 2-day game/i.test(await textOf(page, `[data-date-card="${SAT2}"]`)))
   check('no both-weeks card when only one week is left', (await page.locator('[data-both-weeks]').count()) === 0)
   await ctx.close()

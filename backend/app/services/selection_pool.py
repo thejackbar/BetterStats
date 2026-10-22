@@ -246,13 +246,27 @@ def _pool_rank(open_seq: int | None, tier: int | None, drop_in: bool, squad_matc
 _AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2, "UNAVAILABLE": 3}
 
 
+def _is_half(days) -> bool:
+    """Plainly available one weekend of a two-day game and plainly unavailable the
+    other, either way round (lib/availability.halfStatus HALF_W1 / HALF_W2)."""
+    if not days or len(days) < 2:
+        return False
+    a, b = days[0].get("status"), days[1].get("status")
+    return (a, b) in (("AVAILABLE", "UNAVAILABLE"), ("UNAVAILABLE", "AVAILABLE"))
+
+
 def pool_sort_key(e: dict) -> tuple:
-    """The pool's default order: the rank bucket, then availability (someone who
-    has answered Available or Maybe above someone who has not answered), then
-    form score, then name. The browser mirrors it in AdminSelection's `cmp`."""
+    """The pool's default order: first the half-available players still open to
+    pick (``half_open``: free one weekend of a two-day game, so the selector has to
+    decide), then the rank bucket, then availability (half-available first, then
+    Available, Maybe, no response, Unavailable), then form score, then name. The
+    availability step is the same rule as lib/availability `availSortRank`, used by
+    every screen that sorts on an answer; the browser mirrors this function in
+    AdminSelection's `cmp` (selectionMeta.poolRank)."""
     return (
+        not e.get("half_open"),
         _pool_rank(e["open_seq"], e["tier"], bool(e["drop_in_from"]), bool(e["squad_match"])),
-        _AVAIL_RANK.get(e["availability"], 9),
+        -1 if _is_half(e.get("availability_days")) else _AVAIL_RANK.get(e["availability"], 9),
         -(e["score"] or 0.0),
         (e["display_name"] or "").lower(),
     )
@@ -862,6 +876,14 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             available=avail.get(pid) == "AVAILABLE",
             eligible=gender_ok and not manual_inactive,
         )
+        # Free one weekend of a two-day game only: nearly a yes, and the selector has
+        # to decide, so the pool leads with them. Same conditions as an open pick.
+        half_open = bool(
+            fx.played_on and gender_ok and not manual_inactive
+            and pid not in lineup
+            and not (clash.get(pid) or also_in.get(pid) or in_other_draft.get(pid))
+            and _is_half(avail_days.get(pid))
+        )
         rb, rw, ss = recent_bat.get(pid), recent_bowl.get(pid), season_stats.get(pid)
         score = _compute_score(p.skill_positions, rb, rw, ss)
 
@@ -937,6 +959,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             # their highest squad (999 = squad has no rank), else None. This is
             # what the default order puts first.
             "open_seq": open_seq,
+            "half_open": half_open,
             # The squad above that has not picked this player today, or None.
             "drop_in_from": drop_in_from,
             # Other sides' UNCONFIRMED drafts that name this player that day.
