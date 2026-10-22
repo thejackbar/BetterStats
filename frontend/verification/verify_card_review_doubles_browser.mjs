@@ -74,6 +74,19 @@ const FIND_ROWS = [
 // A real server takes time. The stub waits too: with instant answers a page that refetches in a loop
 // still looks fine (each answer lands before the next request), which is how that bug got through.
 const LATENCY = 150
+// The compare page for a club card linked to the wrong game (the page in the Shoalwater report).
+const detailMismatch = {
+  match_id: MR, game_id: GW, season: 'Summer 2003/04', grade: 'C1 Grade', date: '2003-11-22', opposition: 'Rockingham Beach', group: 'pairing',
+  headline: null, items: [], size: 0, suggested: null, current: 'ca', decided_by_hand: true, decided_at: null, note: null, club_richer: {},
+  source: { kind: 'file', label: 'Imported from file manual_games_scorecards.csv', filename: 'manual_games_scorecards.csv', at: '2026-09-29T00:00:00Z', by: 'elton' },
+  ca_holds: { balls: 0, credits: 0, fow: 6, partnerships: 0, opp_batters: 11 }, club_holds: { balls: 0, fow: 10, partnerships: 10 },
+  shared: 0, club_batters: 11, ca_batters: 11, ca_date: '2003-11-22', club_date: '2003-11-22', ca_result: 'WIN', club_result: 'WIN',
+  ca_opposition: 'Rockingham Hornets Cricket Club', club_opposition: 'Rockingham Beach',
+  innings: [{ number: 1, batting: [{ player_id: 'p1', name: 'Ritchie, Peter', ca: { runs: 16, balls: 0, how_out: 'c', position: 1, not_out: false }, club: null, differs: true },
+                                     { player_id: 'p2', name: 'Spinks, Ray', ca: null, club: { runs: 8, balls: null, how_out: 'c', position: 2, not_out: false }, differs: true }] }],
+  bowling: [], totals: { ca: [], club: [] }, effective_game_id: GW,
+  history: [{ id: 1, action: 'choice', from_choice: 'club', to_choice: 'ca', source: 'hand', note: null, batch_id: null, created_at: '2026-10-21T07:29:00Z', undone_at: null, username: 'darrenhind', reverted: false }],
+}
 const routes = (page, calls, o = {}) => page.route('**/api/**', async (route) => {
   const req = route.request(), url = req.url(), body = req.postData()
   calls.push({ url, method: req.method(), body })
@@ -84,6 +97,10 @@ const routes = (page, calls, o = {}) => page.route('**/api/**', async (route) =>
   }
   if (/card-review\/overview/.test(url)) return json(o.scanFailed ? { ...OVERVIEW, groups: { ...OVERVIEW.groups, doubles: 0 }, todo: { ...OVERVIEW.todo, doubles: 0 }, doubles: { error: 'The scan for possible doubles failed. Reload to try again.' } } : OVERVIEW)
   if (/card-review\/bulk\/batches/.test(url)) return json({ batches: [] })
+  if (/card-review\/matches\/[^/]+\/candidates/.test(url)) return json({ candidates: [{ game_id: GR, date: '2003-11-22', opposition: 'Rockingham Beach', grade: 'C1 Grade', shared: 10, ca_batters: 11, club_batters: 11, taken_by: null }] })
+  if (/card-review\/matches\/[^/]+\/(pair-ok|unlink)/.test(url) && req.method() === 'POST') return json({ ok: true })
+  if (/card-review\/matches\/[^/]+$/.test(url) && url.includes(MR)) return json(detailMismatch)
+  if (/\/games\/[0-9a-f-]{36}/.test(url) && !/card-review/.test(url)) return json({ id: MR, home_team: 'Shoalwater', away_team: 'Rockingham Beach', home_away_known: true, innings_order_known: true, played_at: '2003-11-22', result: 'WIN', winning_team: 'Shoalwater', organisation_id: 'org1', grade: { id: 'g', name: 'C1 Grade', raw_name: 'C1 Grade' }, season: { id: 's', name: 'Summer 2003/04' }, innings_totals: {}, batting: [], bowling: [], opp_batting: [], opp_bowling: [], fielding: [], fall_of_wickets: [], partnerships: [] })
   if (/card-review\/history/.test(url)) {
     const only = new URL(url).searchParams.get('only') === 'undoable'
     const all = [
@@ -335,6 +352,38 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   check('and the list is asked for again with a fresh scan', gets(calls, /card-review\/doubles\?/).some(c => new URL(c.url).searchParams.get('fresh') === 'true'))
   check('the screen raised no errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
+}
+
+// ── a mismatched pair on the compare page ──────────────────────────────────────────────────────
+{
+  console.log('\n-- the compare page for a card linked to the wrong game --')
+  const { ctx, page, calls, errors } = await open(browser, 1440, `/admin/card-review/match/${MR}`)
+  await page.waitForSelector('[data-testid="pairing-warning"]', { timeout: 15000 }).catch(async e => { console.log('PAGEERRORS', errors, (await page.locator('body').innerText()).slice(0, 400)); throw e })
+  const warn = (await page.locator('[data-testid="pairing-warning"]').innerText()).toLowerCase()
+  check('it says the two cards are probably not the same match, with the evidence', warn.includes('not the same match') && warn.includes('only 0 of 11 batters'))
+  check('and no longer claims the cards agree on every figure', (await page.locator('body').innerText()).toLowerCase().includes('agree on every figure') === false && (await page.locator('[data-testid="diff-note"]').count()) === 0)
+  await page.waitForSelector('[data-testid="candidates"]', { timeout: 8000 })
+  check('the better match is looked for at once, without a click', gets(calls, /matches\/[^/]+\/candidates/).length === 1)
+  check('and offered with its evidence', (await page.locator('[data-testid="candidates"]').innerText()).toLowerCase().includes('10 of 11 batters in common'))
+  check('choosing which card the site shows is switched off, and says why', (await page.isDisabled('[data-testid="choose-ca"]')) && (await page.isDisabled('[data-testid="choose-club"]')) && (await page.locator('[data-testid="choices-off"]').count()) === 1)
+  await page.screenshot({ path: SHOTS + 'card_review_compare_mismatch_1440.png', fullPage: true })
+  await page.locator('[data-testid="candidates"] [data-testid="relink"]').click()
+  await page.waitForTimeout(400)
+  const rl = posts(calls, /matches\/[^/]+\/relink/).filter(c => c.url.includes(MR))
+  check('Re-link is ONE POST to this card with the right game', rl.length === 1 && JSON.parse(rl[0].body).game_id === GR, JSON.stringify(rl.map(r => r.body)))
+  check('and the page loads the card again', gets(calls, /card-review\/matches\/[^/?]+$/).filter(c => c.url.includes(MR)).length >= 2)
+  await page.click('[data-testid="pair-ok"]')
+  await page.waitForTimeout(300)
+  check('Looks right is ONE POST', posts(calls, /matches\/[^/]+\/pair-ok/).length === 1)
+  await page.click('[data-testid="unlink"]')
+  await page.waitForURL(/card-review\/pairing$/, { timeout: 8000 })
+  check('Unlink is ONE POST and leaves for the pairing list, since the card is no longer paired', posts(calls, /matches\/[^/]+\/unlink/).length === 1 && page.url().endsWith('/admin/card-review/pairing'))
+  check('the screen raised no errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+  const narrow = await open(browser, 390, `/admin/card-review/match/${MR}`)
+  await narrow.page.waitForSelector('[data-testid="pairing-warning"]', { timeout: 15000 })
+  check('no horizontal overflow at 390px', (await overflow(narrow.page)) <= 0, String(await overflow(narrow.page)))
+  await narrow.ctx.close()
 }
 
 // ── recent changes ─────────────────────────────────────────────────────────────────────────────

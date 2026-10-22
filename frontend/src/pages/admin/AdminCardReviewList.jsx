@@ -8,6 +8,7 @@ import { Button, Badge, Note, Select, SegGroup, SegItem } from '../../components
 import {
   GROUPS, ChoiceControl, DifferenceTable, SizeBar, SuggestionBadge, fmtDate, matchPageUrl,
 } from '../../components/admin/cardReview/shared'
+import PairingFix from '../../components/admin/cardReview/PairingFix'
 import MatchFilters, { FindLink, HistoryLink, filterParams, useFilterParams } from '../../components/admin/cardReview/MatchFilters'
 
 const PAGE = 50
@@ -77,21 +78,8 @@ function Line({ r, open, onToggle, selected, onSelect, onChoose, busy }) {
 }
 
 // A match whose two cards do not look like the same game. The card says what each side holds
-// and what the scorecards share; "Find a better match" asks for other games of the club close
-// in date whose batters and scores really do match.
+// and what the scorecards share; the controls (`PairingFix`) look for the game that really matches.
 function PairingCard({ r, onChanged }) {
-  const toast = useToast()
-  const [cands, setCands] = useState(null)
-  const [busy, setBusy] = useState(false)
-
-  async function find() {
-    setBusy(true)
-    try { setCands((await api.cardReviewCandidates(r.match_id)).candidates) } catch (e) { toast.error(e.message) } finally { setBusy(false) }
-  }
-  async function act(fn, ok) {
-    setBusy(true)
-    try { await fn(); toast.success(ok); onChanged() } catch (e) { toast.error(e.message) } finally { setBusy(false) }
-  }
   return (
     <div className="rounded-xl border border-pb-hairline bg-pb-surface p-4" data-testid="pairing-card" data-match={r.match_id}>
       <div className="grid gap-4 md:grid-cols-[1fr_1fr]">
@@ -109,34 +97,7 @@ function PairingCard({ r, onChanged }) {
           </div>
         </div>
       </div>
-      {cands && (
-        <div className="mt-3 rounded-lg border border-pb-hairline bg-pb-bg p-3" data-testid="candidates">
-          {cands.length === 0 && <div className="text-[12.5px] text-pb-dim">No better match found. Open both cards to decide, or unlink if they are different games.</div>}
-          {cands.map(c => (
-            <div key={c.game_id} className="flex flex-wrap items-center gap-3 py-1.5">
-              <div className="min-w-0 flex-1 text-[13px] text-pb-text">
-                {c.grade} v {c.opposition} <span className="font-mono text-[12px] text-pb-dim">· {fmtDate(c.date)}</span>
-                <span className="ml-2"><Badge toneKey="ok">{c.shared} of {c.club_batters} batters in common</Badge></span>
-                {c.taken_by && <span className="ml-2"><Badge toneKey="warn">Already linked to another club scorecard</Badge></span>}
-              </div>
-              <Button size="sm" variant="primary" disabled={busy || !!c.taken_by}
-                onClick={() => act(() => api.cardReviewRelink(r.match_id, c.game_id), 'Linked to the better match')}>
-                Re-link to this match
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {!cands && <Button size="sm" variant="primary" disabled={busy} onClick={find}>Find a better match</Button>}
-        <Button size="sm" disabled={busy} onClick={() => act(() => api.cardReviewPairOk(r.match_id), 'Marked as the same match')}>Looks right: keep the link</Button>
-        <Button size="sm" disabled={busy} onClick={() => {
-          if (confirm('Say these are two different matches? The club scorecard will stand alone and Cricket Australia\'s card will count as its own match. This can be undone.')) {
-            act(() => api.cardReviewUnlink(r.match_id), 'Unlinked')
-          }
-        }}>Not the same match: unlink</Button>
-        <Button size="sm" as={Link} to={`/admin/card-review/match/${r.match_id}`} className="ml-auto">Open side by side ›</Button>
-      </div>
+      <PairingFix matchId={r.match_id} onChanged={onChanged} compareLink />
     </div>
   )
 }

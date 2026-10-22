@@ -1803,7 +1803,7 @@ Not done: a game between two of the club's own teams (Round 3, 8th XI v 10th XI)
 Check: `verify_shared_grade_squads.py` (14 checks; the control fails the four that move the 10th XI's game). `verify_squad_sides.py` (48) and `verify_fixture_side.py` (25) unchanged.
 
 
-## A squad's own name tells two teams in one grade apart (v9.129.2)
+## A squad's own name tells two teams in one grade apart (v9.129.3)
 
 Asked for: after v9.129.1 and a fixtures sync, Applecross' OD6 Black 2 squad still got none of its games. Clubs with two teams in one grade, each its own squad, need this to work.
 

@@ -3,10 +3,9 @@ export default {
   date: '2026-10-22',
   // Above v9.129.1.1's sortKey. Check origin/main at merge time.
   sortKey: '2026-11-07T15:00:00Z',
-  title: 'Squads: a team sharing a grade is found by its squad\'s name',
+  title: 'Card review: a match page that says when the two cards are not the same match',
   items: [
-    'Two squads for teams in the same grade (the 8th XI and a squad called OD6 Black 2, both in One Day Grade 6 Black) still did not split if Cricket Australia\'s name for your team has no XI number in it. Sync now also reads the squad\'s own name or short name: "Applecross OD6 Black 2" goes to the squad called "OD6 Black 2". The club name at the front is ignored.',
-    'It only steps in when exactly one active squad has that name and the grade\'s usual squad does not. Two squads with the same name, or a different team that only ends the same way ("Applecross Women OD6 Black 2"), are left to the grade.',
-    'Creating or renaming a squad now picks up its games that are already synced, so you do not have to wait for the next fixtures sync. A game you picked by hand stays where you put it.',
+    'Fixed: opening a match whose club scorecard is linked to the wrong Cricket Australia game showed "The two cards agree on every figure" and offered to switch between them. It now says the two cards are probably not the same match and how few batters they share, and looks for the game that really matches straight away.',
+    'On that page you can move the link to the right match, say the link is right after all, or say they are two different matches (which can be undone from Recent changes). Choosing which card the site shows is switched off until you do.',
   ],
 }
