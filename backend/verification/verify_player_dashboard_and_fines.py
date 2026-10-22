@@ -328,7 +328,7 @@ async def main():
     fe = prof["fees"] or {}
     check("Sam owes 60 of 100 after paying 40", (fe.get("on_record"), fe.get("total_outstanding"), fe.get("membership_outstanding")), (True, 60.0, 60.0))
     prof_ann = await profile(ids["ann"])
-    check("a player with no fee record is told so, never shown $0", prof_ann["fees"], {"on_record": False})
+    check("a player with no fee record is told so, never shown $0", prof_ann["fees"], {"on_record": False, "payments": []})
     await admin(av.update_self_service, av.SelfServiceUpdate(require_pin=False))
     prof = await profile(ids["sam"])
     check("with the PIN off, fees are not served at all (fail closed)", ("fees" in prof["modules"], prof["fees"]), (False, None))

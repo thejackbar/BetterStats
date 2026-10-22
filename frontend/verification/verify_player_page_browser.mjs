@@ -62,7 +62,7 @@ const run = async () => {
   await safe('My page', async () => {
     console.log('\n── My page ──')
     await page.locator('[data-my-page]').waitFor()
-    await page.locator('[data-modules]').waitFor()
+    await page.locator('[data-groups]').waitFor()
     const t = (await page.locator('[data-my-page]').innerText()).replace(/\s+/g, ' ')
     check('the profile was fetched once', hits.profile === 1, String(hits.profile))
     check('it shows their availability for the next game', /Available/i.test(t))
@@ -99,7 +99,7 @@ const run = async () => {
     await page.setViewportSize({ width: 390, height: 800 })
     await page.reload(); await page.locator('[data-hero]').waitFor()
     let overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.screen.width)
-    await page.locator('[data-modules]').waitFor(); await page.waitForTimeout(300)
+    await page.locator('[data-groups]').waitFor(); await page.waitForTimeout(300)
     overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.screen.width)
     check('no sideways overflow', overflow <= 1, String(overflow))
   })

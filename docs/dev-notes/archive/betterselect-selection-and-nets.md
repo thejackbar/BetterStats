@@ -1714,3 +1714,15 @@ Not done, on purpose: a seamless sign in to Fantasy from this page (the PIN here
 
 Checks: `backend/verification/verify_player_page_dashboard.py` (50; the control on the previous commit fails 36), browser twin `frontend/verification/verify_player_page_dashboard_browser.mjs` (39). Five older browser scripts were updated for the removed tabs.
 
+## Player page: sections and fees paid (v9.128.9)
+
+Asked for: streamline the page, add a record of fees paid, and let sections be minimised and maximised, grouped as a Selection section (availability, squad, selected side, training and so on), an admin section (fees, fines), voting, stats and so on.
+
+What changed:
+- Five sections in a fixed order (Selection, Club admin, Voting, Stats, Fantasy), each with a header summary that stays visible when closed, a chevron, and Collapse all / Expand all. Closed state is remembered in `localStorage` and every access is guarded. Hidden, not unmounted.
+- Streamlined: the tile row and the vote banner were removed, because the headers now say the same things once. Fantasy took the club's own name for the game as its section title.
+- `fees_owing` gained `payments` through `fees_paid`. A payment with a zero amount is not listed. Notes and bank references stay out.
+- `Section` became context-aware so existing module components draw as plain blocks inside a section without edits.
+
+Checks: `verify_player_page_dashboard.py` (58, section H is fees paid), `verify_player_page_dashboard_browser.mjs` (sections, minimise and remember, blocked localStorage, fees paid list). `verify_player_dashboard_fines_browser.mjs` was reworked from tiles and banner to section summaries.
+

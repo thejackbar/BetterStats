@@ -50,7 +50,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import verify_selection_same_day as base
 from app.models.db import (
-    BattingInnings, FantasyLeague, FantasyManager, FantasyPoolPlayer, FantasyRound, FantasySeason, FantasySquad,
+    BattingInnings, FeeMember, FeeMemberSeason, FeePayment, FeeSchedule, FantasyLeague, FantasyManager, FantasyPoolPlayer, FantasyRound, FantasySeason, FantasySquad,
     FantasySquadPlayer, Game, GameAppearance, Grade, Organisation, Player, PlayerSeasonStats, Season,
 )
 
@@ -93,7 +93,7 @@ async def main():
 
     async with Session() as db:
         # `org` runs fantasy; `bare` is a club with the select module only.
-        db.add(Organisation(id=org, name="Dash CC", slug=f"dash-{org.hex[:8]}", module_overrides=["select", "fantasy"],
+        db.add(Organisation(id=org, name="Dash CC", slug=f"dash-{org.hex[:8]}", module_overrides=["select", "fantasy", "fees"],
                             availability_link_token=tok, availability_self_service_enabled=True,
                             fantasy_link_token=fan_tok))
         db.add(Organisation(id=other_org, name="Elsewhere CC", slug=f"els-{other_org.hex[:8]}", module_overrides=["select", "fantasy"],
@@ -355,6 +355,52 @@ async def main():
     async with Session() as db:
         club = await db.get(Organisation, fan_org)
         check("and the admin list says why", pd.blocked_reason(club, "fantasy"), "Needs the BetterFantasyCricket module.")
+
+
+    print("\n# H. A record of fees paid")
+    await set_modules(["fees", "season"])
+    async with Session() as db:
+        old_season = uuid.uuid4()
+        db.add(Season(id=old_season, organisation_id=org, name="Summer 25/26", year=2025))
+        await db.flush()
+        sched = FeeSchedule(id=uuid.uuid4(), organisation_id=org, season_id=season, name="Senior", membership_amount=100, match_day_rate=0)
+        sched_old = FeeSchedule(id=uuid.uuid4(), organisation_id=org, season_id=old_season, name="Senior", membership_amount=90, match_day_rate=0)
+        db.add_all([sched, sched_old])
+        fm = FeeMember(id=uuid.uuid4(), organisation_id=org, player_id=P["sam"], full_name="Sam Sledge")
+        fm_ann = FeeMember(id=uuid.uuid4(), organisation_id=org, player_id=P["ann"], full_name="Ann Anchor")
+        db.add_all([fm, fm_ann])
+        await db.flush()
+        ms_new = FeeMemberSeason(id=uuid.uuid4(), member_id=fm.id, season_id=season, organisation_id=org, fee_schedule_id=sched.id)
+        ms_old = FeeMemberSeason(id=uuid.uuid4(), member_id=fm.id, season_id=old_season, organisation_id=org, fee_schedule_id=sched_old.id)
+        ms_ann = FeeMemberSeason(id=uuid.uuid4(), member_id=fm_ann.id, season_id=season, organisation_id=org, fee_schedule_id=sched.id)
+        db.add_all([ms_new, ms_old, ms_ann])
+        await db.flush()
+        def pay(ms, amt, days, kind="membership", method=None, notes=None, ref=None):
+            db.add(FeePayment(id=uuid.uuid4(), member_season_id=ms.id, organisation_id=org, amount=amt,
+                              paid_at=TODAY - timedelta(days=days), kind=kind, method=method, notes=notes, bank_ref=ref))
+        pay(ms_new, 40, 20, method="Bank transfer", notes="TREASURER ONLY NOTE", ref="REF-SECRET-1")
+        pay(ms_new, 15, 5, kind="match_day", method="Cash")
+        pay(ms_new, 0, 3)
+        pay(ms_old, 90, 300, method="Square")
+        pay(ms_ann, 77, 2, method="Cash")
+        await db.commit()
+    fe = (await profile("sam")).get("fees") or {}
+    pays = fe.get("payments") or []
+    check("every payment with money in it, newest first, across seasons",
+          [(p["amount"], p["kind"], p["method"], p["season"]) for p in pays],
+          [(15.0, "Match fees", "Cash", "Summer 26/27"), (40.0, "Membership", "Bank transfer", "Summer 26/27"), (90.0, "Membership", "Square", "Summer 25/26")])
+    check("a zero row is not a payment", any(p["amount"] == 0 for p in pays), False)
+    blob = json.dumps(await profile("sam"))
+    check("the treasurer's notes and bank reference never reach the page", any(w in blob for w in ("TREASURER ONLY NOTE", "REF-SECRET-1")), False)
+    check("nobody else's payment is in it", any(p["amount"] == 77 for p in pays), False)
+    check("this season's owing and paid are unchanged (60 owing, 55 paid)", (fe.get("total_outstanding"), fe.get("total_paid")), (60.0, 55.0))
+    ann_pays = ((await profile("ann")).get("fees") or {}).get("payments")
+    check("Ann sees only her own", [p["amount"] for p in ann_pays or []], [77.0])
+    none = (await profile("dup")).get("fees") or {}
+    check("a person with no fee record gets on_record false and an empty list", (none.get("on_record"), none.get("payments")), (False, []))
+    await set_org(org, availability_require_pin=False)
+    check("with the PIN off the fees module is not served at all", "fees" in (await profile("sam"))["modules"], False)
+    await set_org(org, availability_require_pin=True)
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     await engine.dispose()
