@@ -64,6 +64,7 @@ async def main():
     from app.services import card_review_find as fnd
     from app.scripts import fix_wrong_links as fwl
     from app.scripts import explain_card as xc
+    from app.scripts import audit_pairing as aud
     from app.services.card_review_ddl import STATEMENTS as REVIEW_DDL
     from app.services.superseded_ddl import STATEMENTS as SUPERSEDED_DDL
     from app.services.competition_ddl import STATEMENTS as COMP_DDL
@@ -400,6 +401,36 @@ async def main():
         random.Random(seed).shuffle(shuffled)
         stable &= sorted((p["a"], p["b"]) for p in dbl.match_pairs_club(shuffled, meta, set())) == want
     check("two club cards pair the same way whatever order they are read in", stable, True)
+
+    print("\n-- the audit: a second opinion on grade, on what the scan skipped, and on what a player sees --")
+    import contextlib as _cl
+    import io as _io3
+
+    async def audited(org):
+        buf = _io3.StringIO()
+        async with async_session_maker() as s:
+            with _cl.redirect_stdout(buf):
+                res_ = await aud.audit(s, str(org))
+        return res_, buf.getvalue()
+    snap_a = await q("SELECT id::text, superseded_by_game_id::text FROM manual_games ORDER BY id")
+    logs_a = (await q("SELECT count(*) FROM card_review_log"))[0][0]
+    a_h, txt_h = await audited(ORG)
+    check("the audit sees the match counted twice (Ritchie's 30 on 4 Feb 2006 is in the card and the game)", a_h["counted_twice"] >= 1, True)
+    check("it lists a free same-grade, same-day game the scan offered nothing for (the Kwinana card whose batters disagree)",
+          a_h["missed"] >= 1 and "Kwinana" in txt_h, True)
+    check("a card on a game its batters agree with, in the same grade, is simply 'proved'", a_h["links"].get("proved", 0) >= 1, True)
+    check("the audit wrote nothing", (await q("SELECT id::text, superseded_by_game_id::text FROM manual_games ORDER BY id"),
+                                      (await q("SELECT count(*) FROM card_review_log"))[0][0]), (snap_a, logs_a))
+    for label, got, want in (
+            ("scores in common, same grade", aud.classify_link("A Grade", "A Grade: Cup", 9, 9, 9, True, False), "proved"),
+            ("scores in common, grade names differ", aud.classify_link("B Grade", "A Grade", 9, 9, 9, True, False), "proved_grade_names_differ"),
+            ("a person confirmed it, the grades differ", aud.classify_link("B Grade", "A Grade", 0, 9, 9, False, True), "person_ok_grade_differs"),
+            ("both hold batters, none agree, the grades differ", aud.classify_link("B Grade", "A Grade", 0, 9, 9, False, False), "contradicted_grade_differs"),
+            ("both hold batters, none agree, same grade", aud.classify_link("A Grade", "A Grade", 0, 9, 9, False, False), "contradicted"),
+            ("one side empty, the grades differ", aud.classify_link("C Grade", "D Grade", 0, 11, 0, False, False), "unproven_grade_differs"),
+            ("one side empty, same grade", aud.classify_link("C Grade", "C Grade: Cup", 0, 11, 0, False, False), "unproven_same_grade"),
+            ("one side empty, a grade the test cannot read", aud.classify_link("1st XI", "1st XI", 0, 11, 0, False, False), "unproven_grade_unreadable")):
+        check(f"classify: {label}", got, want)
 
     # --- what each copy counts for today -----------------------------------------------------
     print("\n-- before linking, the match counts twice --")
@@ -1045,6 +1076,12 @@ async def main():
                 for k in ("S1_xc", "S1_yd", "S2_xc", "S2_yd", "S3_xc", "S3_ye", "S4_xc", "S4_yd", "S5_xc", "S5_yd", "S6_xc", "S6_yd")}
     gi = lambda k: str(sw[k])  # noqa: E731
     start_links = await sw_links()
+    a_sw, txt_sw = await audited(SW)
+    check("the audit calls the cross-linked cards wrong on grade, not just on batters (all twelve cards sit on a game of another grade: seven with no scores to prove it, four whose scores contradict it, one a person confirmed)",
+          (a_sw["links"].get("unproven_grade_differs", 0), a_sw["links"].get("contradicted_grade_differs", 0), a_sw["links"].get("person_ok_grade_differs", 0)),
+          (7, 4, 1))
+    check("it says how many of the club's grade names it cannot read: none here", a_sw["unreadable_grades"], 0)
+    check("the doubles list shows no row that pairs two grades", a_sw["doubles_grade_differ"], 0)
     rows_sw = (await sw_scan())["rows"]
     swaps_ = {r["a"]["id"]: r for r in rows_sw if r["kind"] == "swap"}
     check("the shape the club has (a card on the other grade's scoreless game, an empty card on its own) is a swap",

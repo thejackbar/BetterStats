@@ -12,6 +12,9 @@
 #   ops/check-imported-links.sh fix --apply      move the strong wrong links and link the strong unlinked
 #                                                pairs, as ONE batch; prints the batch id
 #   ops/check-imported-links.sh undo <batch-id>  undo that batch
+#   ops/check-imported-links.sh audit            read-only second opinion: every linked card against its game's
+#                                                grade, what Possible doubles shows, free games the scan skipped,
+#                                                and scores a player still sees twice. Run it before AND after fix.
 #
 # Run them in that order, reading each one's output. The fix only touches STRONG matches (most of the
 # smaller card is on the better game with the same scores), never a link someone confirmed with
@@ -32,7 +35,7 @@ fi
 fail() { echo "STOP: $1" >&2; exit 1; }
 
 preflight() {
-  out="$($BACKEND_CMD app.scripts.fix_wrong_links 2>&1 || true)"
+  out="$($BACKEND_CMD app.scripts.fix_wrong_links 2>&1 || true)$($BACKEND_CMD app.scripts.audit_pairing 2>&1 || true)"
   case "$out" in
     *"No module named"*) fail "the backend does not have this script yet. Run /srv/docker/betterstats/deploy.sh first." ;;
   esac
@@ -57,9 +60,12 @@ case "$step" in
       [ "$step" = "fix" ] && { echo; echo "Nothing was changed. To fix, run:  $0 fix --apply"; }
     fi
     ;;
+  audit)
+    $BACKEND_CMD app.scripts.audit_pairing "$CLUB" ${2:+--examples "$2"}
+    ;;
   undo)
     [ -n "${2:-}" ] || fail "give the batch id the fix printed:  $0 undo <batch-id>"
     $BACKEND_CMD app.scripts.fix_wrong_links "$CLUB" --undo "$2"
     ;;
-  *) fail "unknown step '$step'. Use: check | fix [--apply] | undo <batch-id>" ;;
+  *) fail "unknown step '$step'. Use: check | audit | fix [--apply] | undo <batch-id>" ;;
 esac
