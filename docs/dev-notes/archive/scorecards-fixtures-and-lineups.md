@@ -885,3 +885,16 @@ Reported from a club card: six wickets fell, Cricket Australia held four fall-of
 - Not verified: the live Cricket Australia call and a real Full Rebuild on the server (the rebuild is simulated by deleting and re-storing the game, then `apply_in_sync`); the sync hook sits in the new-game branch of `sync_grassroots_game_level_data` and is exercised only through `apply_in_sync`.
 - Open: scorebook and CricketStatz derivers still refuse a short fall of wickets; the opposition's innings is not editable; no unbroken last stand for a synced card.
 
+### Backfill for every synced club (follow-up to v9.129.0)
+
+Asked for after the first dry run on one club: backfill every synced club. Reading the script first found two defects that a platform run would have hit hard, both reproduced against the previous script before fixing:
+
+- A game the derivation REFUSES stays selected (only a game that gets stands drops out), so "run it again" re-asked the same refused games for ever and a capped walk never moved on (control: three `--limit 1` runs asked for the same game three times, 1 distinct).
+- The selection was game-level (`NOT EXISTS` any partnership row), so on a fixture between two synced clubs the first club's stands closed the game to the second club and its innings was never written (control: the second club's innings stands stayed empty and the game was never offered to it).
+
+Changes to `app/scripts/backfill_partnerships.py`: keyset walk (`played_at::date DESC, id DESC`) with a `--resume club|date|game` token printed when a run stops at its limit; per-club candidate test (no stand holding one of the club's own players); `all` walks every active club that has a candidate, in club-id order, under one `--limit` for the whole run. `--limit` is now the most games asked of Cricket Australia in a whole run, not per club.
+
+Proof: `verify_backfill_partnerships.py` (38 checks, real Postgres): a walk with `--limit 2` and `--resume` asks each candidate once and ends; a malformed token is refused; the shared fixture gets both clubs' innings (10/10/204 and 30/20) with ours untouched; `all` honours one limit across clubs and walking it one game at a time asks nothing twice. Control as above.
+
+Not verified: a real platform-wide run. At 0.4 s a game, thousands of games take hours; run it in a long-lived session and use `--resume`. Name-only stands (fill-ins with no player id) do not count as "the club has stands here", so a game whose only stands are name-only is offered again and reports no stand written.
+
