@@ -1,5 +1,6 @@
 // Small pieces shared by the player's own page (the availability link's dashboard).
 // Declared at module level, never inside a render function.
+import { createContext, useContext } from 'react'
 import { DEFAULT_WEEK_NAMES } from '../../lib/availability'
 
 export function fmtDay(d) {
@@ -44,7 +45,21 @@ export function weekLabel(d, names) {
   return `${f.role === 'day2' ? n.w2 : n.w1} · 2-day game`
 }
 
+// A card on its own, or (inside a collapsible group, which sets this context) a
+// plain block under the group's header: no second border, and no label when the
+// group's own title already says it.
+export const GroupContext = createContext(null)
+
 export function Section({ title, children, className = '' }) {
+  const group = useContext(GroupContext)
+  if (group) {
+    return (
+      <section className={`py-3 border-t pb-hairline first:border-t-0 first:pt-0 min-w-0 ${className}`}>
+        {!group.hideTitle && <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-2">{title}</div>}
+        {children}
+      </section>
+    )
+  }
   return (
     <section className={`rounded-xl border pb-hairline p-3.5 mb-3 min-w-0 break-inside-avoid ${className}`}>
       <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-2">{title}</div>

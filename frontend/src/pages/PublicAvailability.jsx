@@ -13,12 +13,12 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import { AVAILABILITY } from '../lib/availability'
-import { AvailabilityEditor, ALL_CHOICES } from './playerhome/AvailabilityEditor'
+import { AvailabilityEditor, ALL_CHOICES, unansweredNextWeek } from './playerhome/AvailabilityEditor'
+import Group, { useOpenSections } from './playerhome/Group'
 import FantasyCard, { fmtLockShort, nextDeadline, ordinal } from './playerhome/FantasyCard'
 import PlayerHero from './playerhome/PlayerHero'
 import SeasonDashboard from './playerhome/SeasonDashboard'
-import { Muted, Section, Stat, fmtShort, money } from './playerhome/ui'
+import { Muted, Section, fmtShort, money } from './playerhome/ui'
 
 
 function ClubHeader({ club }) {
@@ -104,26 +104,6 @@ function VotesModule({ data }) {
         </div>
       )}
     </Section>
-  )
-}
-
-// A reminder above everything else while a vote is due.
-function VotesBanner({ votes }) {
-  const n = votes.length
-  return (
-    <div className="rounded-xl px-4 py-3 mb-3 flex items-center gap-3" data-votes-banner
-      style={{ background: 'color-mix(in srgb, var(--pb-amber) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-amber) 40%, transparent)' }}>
-      <div className="min-w-0 flex-1 text-sm">
-        <b>{n === 1 ? 'You have a vote to cast.' : `You have ${n} votes to cast.`}</b>
-        {/* Name the game and the medal: a club can run several medals on one game, and a vote
-            already cast for one of them does not cover the others. */}
-        <span className="text-pb-dim"> {n === 1
-          ? `${votes[0].medal}: ${votes[0].round ? `${votes[0].round} · ` : ''}vs ${votes[0].opponent || 'TBC'} is still open for voting.`
-          : 'Games you played are still open for voting.'}</span>
-      </div>
-      <a href={votes[0].link} className="shrink-0 px-3.5 py-2 rounded-lg text-[13px] font-semibold"
-        style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{n === 1 ? 'Vote now' : 'Vote'}</a>
-    </div>
   )
 }
 
@@ -225,6 +205,35 @@ function LadderModule({ state }) {
   )
 }
 
+// What the player has paid, newest first, across seasons. Five show, the rest open on a tap.
+function PaymentsList({ payments }) {
+  const [all, setAll] = useState(false)
+  if (!payments || payments.length === 0) return null
+  const shown = all ? payments : payments.slice(0, 5)
+  // The season is only worth saying when the payments span more than one.
+  const manySeasons = new Set(payments.map((p) => p.season)).size > 1
+  return (
+    <div className="mt-3" data-fee-payments>
+      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Fees paid</div>
+      {shown.map((p, i) => (
+        <div key={`${p.date}-${i}`} className="flex items-baseline gap-3 py-1.5 border-t pb-hairline first:border-t-0 text-[13px]" data-fee-payment>
+          <span className="w-[84px] shrink-0 text-pb-faint">{p.date ? fmtShort(p.date) : 'No date'}</span>
+          <span className="min-w-0 flex-1 truncate">
+            {p.kind}{p.method ? ` · ${p.method}` : ''}
+            {manySeasons && p.season ? <span className="text-pb-faint"> · {p.season}</span> : null}
+          </span>
+          <span className="shrink-0 font-semibold">{money(p.amount)}</span>
+        </div>
+      ))}
+      {payments.length > 5 && (
+        <button type="button" data-fee-payments-more onClick={() => setAll((v) => !v)} className="text-[12px] text-pb-faint underline mt-1">
+          {all ? 'Show fewer' : `Show all ${payments.length} payments`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function FeesModule({ data }) {
   const f = data.fees
   return (
@@ -244,6 +253,7 @@ function FeesModule({ data }) {
           )}
           {f.credit > 0 && <div className="text-[12.5px] text-pb-dim mt-1.5">You are {money(f.credit)} in credit.</div>}
           <div className="text-[11.5px] text-pb-faintest mt-2">{f.season ? `${f.season}. ` : ''}Paid so far {money(f.total_paid)}.</div>
+          <PaymentsList payments={f.payments} />
         </>
       )}
     </Section>
@@ -327,84 +337,69 @@ function FinesModule({ data }) {
   )
 }
 
-// A headline figure at the top of the dashboard.
-function Tile({ label, value, hint, tone, id }) {
-  return (
-    <div className="rounded-xl border pb-hairline px-3 py-2.5 min-w-0" data-tile={id}>
-      <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint truncate">{label}</div>
-      <div className="font-display font-bold text-[19px] leading-tight mt-0.5 truncate" style={tone ? { color: tone } : undefined}>{value}</div>
-      {hint && <div className="text-[11.5px] text-pb-faint mt-0.5 truncate">{hint}</div>}
-    </div>
-  )
+// The sections of the page, in the order a player reads them. Each holds the club's
+// modules that belong to it, in the club's own order; a section with none drops out.
+// Selection always shows, because the answer buttons are in it.
+const GROUPS = [
+  { id: 'selection', title: 'Selection', keys: ['squad', 'selected', 'training', 'ladder'] },
+  { id: 'admin', title: 'Club admin', keys: ['fees', 'fines'] },
+  { id: 'voting', title: 'Voting', keys: ['votes'], hideTitle: true },
+  { id: 'stats', title: 'Stats', keys: ['season'] },
+  { id: 'fantasy', title: 'Fantasy', keys: ['fantasy'], hideTitle: true },
+]
+
+const AMBER = 'var(--pb-amber)'
+const GREEN = 'var(--pb-positive)'
+
+// One line per section, from data the page already holds, shown even when the
+// section is closed. Left empty rather than made up when there is nothing true to say.
+function summaryFor(id, { me, data, ladder }) {
+  if (id === 'selection') {
+    const n = unansweredNextWeek(me)
+    if (n > 0) return { text: `${n} to answer`, tone: AMBER }
+    const side = (data?.selected || [])[0]
+    if (side) return { text: `Selected ${fmtShort(side.date)} ${side.home_away === 'AWAY' ? 'at' : 'vs'} ${side.opponent_name || side.label || 'TBC'}` }
+    return (me.dates || []).length ? { text: 'All answered', tone: GREEN } : { text: 'No games to answer yet' }
+  }
+  if (!data) return {}
+  if (id === 'admin') {
+    const fees = data.fees?.on_record ? data.fees.total_outstanding : null
+    const fines = (data.fines || []).length ? data.fines.reduce((a, f) => a + Math.max(f.owing, 0), 0) : null
+    if (fees === null && fines === null) return {}
+    const owing = (fees || 0) + (fines || 0)
+    return owing > 0 ? { text: `${money(owing)} owing`, tone: AMBER } : { text: 'All square', tone: GREEN }
+  }
+  if (id === 'voting') {
+    const n = (data.votes || []).length
+    if (n > 0) return { text: n === 1 ? '1 vote to cast' : `${n} votes to cast`, tone: AMBER }
+    return (data.votes_cast || []).length ? { text: 'Up to date', tone: GREEN } : {}
+  }
+  if (id === 'stats') {
+    const s = data.season
+    return s ? { text: `${s.matches} ${s.matches === 1 ? 'match' : 'matches'} · ${s.runs} runs · ${s.wickets} wkts` } : { text: 'No games yet' }
+  }
+  if (id === 'fantasy') {
+    const f = data.fantasy
+    const next = f && nextDeadline(f.deadlines)
+    if (!next) return {}
+    const rank = f.team && f.team.built && f.team.rank ? ` · ${ordinal(f.team.rank)}` : ''
+    return next.locked
+      ? { text: `${next.name || `Round ${next.number}`} locked${rank}` }
+      : { text: `Locks ${fmtLockShort(next.lock_at)}${rank}`, tone: AMBER }
+  }
+  return {}
 }
 
-// The tiles for the modules the club has on, from data the page already holds.
-// A tile is left out rather than shown empty when it has nothing true to say.
-function dashboardTiles({ me, data, modules, ladder }) {
-  const tiles = []
-  const has = (k) => modules.includes(k)
-  const dates = (me.dates || []).slice(0, 6)
-  const side = (data.selected || [])[0]
-  if (has('selected') && side) {
-    tiles.push({ id: 'next', label: 'Next game', value: fmtShort(side.date), hint: `${side.home_away === 'AWAY' ? '@' : 'vs'} ${side.opponent_name || side.label || 'TBC'}` })
-  } else if (dates[0]) {
-    const st = me.availability?.[dates[0].date]?.status || 'NO_RESPONSE'
-    tiles.push({ id: 'next', label: 'Next game', value: fmtShort(dates[0].date), hint: st === 'NO_RESPONSE' ? 'Not answered yet' : `You said ${(AVAILABILITY[st] || AVAILABILITY.NO_RESPONSE).label}` })
-  }
-  if (dates.length) {
-    const answered = dates.filter((d) => (me.availability?.[d.date]?.status || 'NO_RESPONSE') !== 'NO_RESPONSE').length
-    tiles.push({ id: 'availability', label: 'Availability', value: `${answered} of ${dates.length}`, hint: 'next games answered', tone: answered < dates.length ? 'var(--pb-amber)' : 'var(--pb-positive)' })
-  }
-  const due = data.votes || []
-  if (has('votes') && due.length) {
-    tiles.push({ id: 'votes', label: 'Votes due', value: due.length, hint: due.length === 1 ? 'game to vote on' : 'games to vote on', tone: 'var(--pb-amber)' })
-  }
-  const first = ladder.ladders?.[0]
-  const mine = first?.rows.find((r) => r.is_club)
-  if (has('ladder') && ladder.status === 'ok' && mine && mine.rank != null) {
-    tiles.push({ id: 'ladder', label: 'Ladder', value: `#${mine.rank}`, hint: first.team })
-  }
-  if (has('season') && data.season) {
-    tiles.push({ id: 'season', label: 'Runs this season', value: data.season.runs, hint: `${data.season.wickets} wickets · ${data.season.matches} matches` })
-  }
-  const fantasy = data.fantasy
-  if (has('fantasy') && fantasy) {
-    const next = nextDeadline(fantasy.deadlines)
-    if (next) {
-      tiles.push(next.locked
-        ? { id: 'fantasy', label: 'Fantasy', value: 'Locked', hint: next.name || `Round ${next.number}` }
-        : { id: 'fantasy', label: 'Fantasy locks', value: fmtLockShort(next.lock_at), hint: next.name || `Round ${next.number}`, tone: 'var(--pb-amber)' })
-    }
-    const team = fantasy.team
-    if (team && team.built && team.rank) {
-      tiles.push({ id: 'fantasy-rank', label: 'Fantasy rank', value: ordinal(team.rank), hint: `${team.points} points${team.of ? ` of ${team.of} teams` : ''}` })
-    }
-  }
-  if (has('fines') && (data.fines || []).length) {
-    const owing = data.fines.reduce((a, f) => a + Math.max(f.owing, 0), 0)
-    tiles.push({ id: 'fines', label: 'Fines owing', value: owing > 0 ? money(owing) : 'All square', tone: owing > 0 ? 'var(--pb-amber)' : 'var(--pb-positive)' })
-  }
-  if (has('fees') && data.fees?.on_record) {
-    const owe = data.fees.total_outstanding
-    tiles.push({ id: 'fees', label: 'Fees owing', value: owe > 0 ? money(owe) : 'Nothing owing', tone: owe > 0 ? 'var(--pb-amber)' : 'var(--pb-positive)' })
-  }
-  if (has('training') && data.training) {
-    tiles.push({ id: 'training', label: 'Training', value: data.training.attended_8_weeks, hint: 'sessions in 8 weeks' })
-  }
-  return tiles
-}
-
-// The player's own page: who they are, the next games to answer, then whichever
-// cards the club has turned on, in the club's order, under a row of headline
-// tiles. Only their own data, behind the same PIN cookie as the availability
-// answers. The answers live in the page's own state (`availability` is the editor,
-// built by the parent so a tap saves from here); the rest arrives in one call. On
-// a wide screen the editor sits left and the cards right, on a phone it is one
-// column with the editor first.
+// The player's own page: who they are, then collapsible sections (Selection with the
+// answer buttons, Club admin, Voting, Stats, Fantasy). Only their own data, behind
+// the same PIN cookie as the availability answers. The answers live in the page's own
+// state (`availability` is the editor, built by the parent so a tap saves from here);
+// the rest arrives in one call. A phone gets one column, a wide screen two.
 function MyPage({ token, me, club, availability, onSwitch }) {
   const [data, setData] = useState(null)
   const [failed, setFailed] = useState(false)
   const [ladder, setLadder] = useState({ status: 'loading', ladders: [] })
+  const sections = useOpenSections()
   useEffect(() => {
     let alive = true
     const load = () => api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
@@ -443,33 +438,35 @@ function MyPage({ token, me, club, availability, onSwitch }) {
     }
   }
 
-  const tiles = data ? dashboardTiles({ me, data, modules, ladder }) : []
   // The profile call names the squads the club lets players see; until it lands the
   // availability call already carries them, so the hero does not wait.
   const squads = data ? (data.squads || []) : (me.squads || [])
+  const shown = GROUPS
+    .map((g) => ({ ...g, mods: modules.filter((m) => g.keys.includes(m)) }))
+    .filter((g) => g.id === 'selection' || g.mods.length > 0)
+  const allOpen = shown.every((g) => sections.isOpen(g.id))
 
   return (
     <div data-my-page>
       <PlayerHero club={club} player={data?.player || me.player} squads={squads} onSwitch={onSwitch} />
-      {data && modules.includes('votes') && (data.votes || []).length > 0 && <VotesBanner votes={data.votes} />}
-      {tiles.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5 mb-3" data-tiles>
-          {tiles.map((t) => <Tile key={t.id} {...t} />)}
-        </div>
-      )}
-      <div className="md:grid md:grid-cols-5 md:gap-4 md:items-start">
-        <div className="md:col-span-2 min-w-0">{availability}</div>
-        <div className="md:col-span-3 min-w-0">
-          {failed && <div className="text-sm text-pb-faint mb-3" data-profile-failed>The rest of your page could not load. Reload to try again.</div>}
-          {!data && !failed && <div className="text-sm text-pb-faint mb-3" data-profile-loading>Loading your page…</div>}
-          {data && modules.length === 0 && (
-            <div className="text-sm text-pb-faint" data-no-modules>Your club has not added anything else to this page yet.</div>
-          )}
-          {data && modules.length > 0 && (
-            // The cards differ a lot in height (Fines is tall); the club's order runs down.
-            <div data-modules>{modules.map(render)}</div>
-          )}
-        </div>
+      {failed && <div className="text-sm text-pb-faint mb-3" data-profile-failed>The rest of your page could not load. Reload to try again.</div>}
+      {!data && !failed && <div className="text-sm text-pb-faint mb-3" data-profile-loading>Loading your page…</div>}
+      <div className="flex justify-end mb-2">
+        <button type="button" data-toggle-all onClick={() => sections.setAll(shown.map((g) => g.id), !allOpen)}
+          className="text-[12px] text-pb-faint underline">{allOpen ? 'Collapse all' : 'Expand all'}</button>
+      </div>
+      <div className="md:columns-2 md:gap-3" data-groups>
+        {shown.map((g) => {
+          const { text, tone } = summaryFor(g.id, { me, data, ladder })
+          return (
+            <Group key={g.id} id={g.id} hideTitle={g.hideTitle}
+              title={g.id === 'fantasy' && data?.fantasy?.name ? data.fantasy.name : g.title}
+              summary={text} tone={tone} open={sections.isOpen(g.id)} onToggle={sections.toggle}>
+              {g.id === 'selection' && availability}
+              {g.mods.map(render)}
+            </Group>
+          )
+        })}
       </div>
     </div>
   )

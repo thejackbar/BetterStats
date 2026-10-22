@@ -191,19 +191,11 @@ export function AvailabilityEditor({ me, choices, savingDate, savedDate, onAnswe
   const weeks = useMemo(() => groupByWeek(me?.dates || []), [me?.dates])
   const pairs = useMemo(() => twoDayPairs(me?.dates || []), [me?.dates])
   const shown = weeks.slice(0, weeksOpen).flat()
-  const answered = (d) => (me.availability?.[d.date]?.status || 'NO_RESPONSE') !== 'NO_RESPONSE'
-  const toAnswer = shown.filter((d) => !answered(d)).length
 
   return (
     <section data-availability className="mb-3 min-w-0">
       <div className="flex items-baseline justify-between gap-2 mb-2">
         <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Your availability</div>
-        {shown.length > 0 && (
-          <span className="text-[12px]" data-to-answer
-            style={{ color: toAnswer ? 'var(--pb-amber)' : 'var(--pb-positive)' }}>
-            {toAnswer ? `${toAnswer} to answer` : 'All answered'}
-          </span>
-        )}
       </div>
 
       {(me.dates || []).length === 0 && (
@@ -278,4 +270,12 @@ export function AvailabilityEditor({ me, choices, savingDate, savedDate, onAnswe
       </p>
     </section>
   )
+}
+
+
+// How many of the next week's dates have no answer yet. The same week the editor
+// opens on, so the number in a header matches what is on screen.
+export function unansweredNextWeek(me) {
+  const first = groupByWeek(me?.dates || [])[0] || []
+  return first.filter((d) => (me.availability?.[d.date]?.status || 'NO_RESPONSE') === 'NO_RESPONSE').length
 }

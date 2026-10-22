@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import MODULE_FANTASY, MODULE_FEES, org_has_module
-from app.models.db import FeeMember, Organisation, Player, Season
+from app.models.db import FeeMember, FeeMemberSeason, FeePayment, Organisation, Player, Season
 from app.services import fees as fee_service
 from app.services import grade_scope, player_form
 from app.services.aggregations import get_season_by_season
@@ -239,7 +239,7 @@ async def fees_owing(db: AsyncSession, club: Organisation, player: Player) -> di
     )).scalar_one_or_none()
     snap = await fee_service.member_financial_snapshot(db, club.id, member.id) if member else None
     if snap is None:
-        return {"on_record": False}
+        return {"on_record": False, "payments": []}
     fin = snap["financials"]
     season = await db.get(Season, snap["season_id"])
     return {
@@ -251,4 +251,35 @@ async def fees_owing(db: AsyncSession, club: Organisation, player: Player) -> di
         "total_outstanding": fin.get("total_outstanding", 0.0),
         "total_paid": fin.get("total_paid", 0.0),
         "credit": fin.get("credit", 0.0),
+        "payments": await fees_paid(db, club, member),
     }
+
+
+PAYMENTS_SHOWN = 30
+PAYMENT_KINDS = {"membership": "Membership", "match_day": "Match fees"}
+
+
+async def fees_paid(db: AsyncSession, club: Organisation, member: FeeMember) -> list[dict]:
+    """Every fee payment the club has recorded for this person, newest first, across
+    seasons. Date, amount, what it was for, how it was paid and the season: nothing
+    from the notes or bank reference columns, which are the treasurer's own. A zero
+    row is not a payment. Read through the member's own seasons, so another club's
+    or another person's payment cannot appear."""
+    rows = (await db.execute(
+        select(FeePayment, Season.name)
+        .join(FeeMemberSeason, FeeMemberSeason.id == FeePayment.member_season_id)
+        .join(Season, Season.id == FeeMemberSeason.season_id)
+        .where(FeeMemberSeason.member_id == member.id, FeePayment.organisation_id == club.id, FeePayment.amount > 0)
+        .order_by(FeePayment.paid_at.desc().nullslast(), FeePayment.created_at.desc())
+        .limit(PAYMENTS_SHOWN)
+    )).all()
+    return [
+        {
+            "date": p.paid_at.isoformat() if p.paid_at else None,
+            "amount": float(p.amount),
+            "kind": PAYMENT_KINDS.get(p.kind, "Fees"),
+            "method": p.method or None,
+            "season": season_name,
+        }
+        for p, season_name in rows
+    ]
