@@ -73,7 +73,7 @@ async def main():
     await base.build_schema()
     async with engine.begin() as conn:
         for mod in ("selection_lock_ddl", "team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl", "audit_ddl",
-                    "availability_maybe_ddl", "fines_ddl", "fines_cap_ddl", "fantasy_queue_ddl"):
+                    "availability_maybe_ddl", "availability_site_link_ddl", "fines_ddl", "fines_cap_ddl", "fantasy_queue_ddl"):
             m = guarded(f"app.services.{mod}")
             for stmt in (m.STATEMENTS if m else []):
                 await conn.execute(text(stmt))
@@ -93,7 +93,7 @@ async def main():
 
     async with Session() as db:
         # `org` runs fantasy; `bare` is a club with the select module only.
-        db.add(Organisation(id=org, name="Dash CC", slug=f"dash-{org.hex[:8]}", module_overrides=["select", "fantasy", "fees"],
+        db.add(Organisation(id=org, name="Dash CC", is_active=True, slug=f"dash-{org.hex[:8]}", module_overrides=["select", "fantasy", "fees"],
                             availability_link_token=tok, availability_self_service_enabled=True,
                             fantasy_link_token=fan_tok))
         db.add(Organisation(id=other_org, name="Elsewhere CC", slug=f"els-{other_org.hex[:8]}", module_overrides=["select", "fantasy"],
@@ -401,6 +401,49 @@ async def main():
     await set_org(org, availability_require_pin=False)
     check("with the PIN off the fees module is not served at all", "fees" in (await profile("sam"))["modules"], False)
     await set_org(org, availability_require_pin=True)
+
+    print("\n# I. The Player Page button on the club's public site")
+    import app.routers.clubs as clubs_router
+    import app.routers.availability as av
+    from app.models.db import User
+
+    async def club_payload(club_id):
+        async with Session() as db:
+            club = await db.get(Organisation, club_id)
+            return await clubs_router.get_club_by_slug(club.slug, Request({"type": "http", "headers": []}), db)
+
+    async def cols():
+        async with Session() as db:
+            return (await db.execute(text("SELECT column_default FROM information_schema.columns "
+                                          "WHERE table_name='organisations' AND column_name='availability_show_on_site'"))).scalar()
+
+    check("the column exists and defaults to on", await cols(), "true")
+    pl = await club_payload(org)
+    check("a club with BetterSelect and the link on gets the path", pl.get("player_page_path"), f"/avail/{tok}")
+    await set_org(org, availability_show_on_site=False)
+    check("a club that hides it gets null", (await club_payload(org)).get("player_page_path"), None)
+    await set_org(org, availability_show_on_site=True, availability_self_service_enabled=False)
+    check("link switched off: null", (await club_payload(org)).get("player_page_path"), None)
+    await set_org(org, availability_self_service_enabled=True, availability_link_token=None)
+    check("no token yet: null", (await club_payload(org)).get("player_page_path"), None)
+    await set_org(org, availability_link_token=tok, module_overrides=["fantasy", "fees"])
+    check("a club without BetterSelect gets null even with the link set", (await club_payload(org)).get("player_page_path"), None)
+    await set_org(org, module_overrides=["select", "fantasy", "fees"])
+    check("restored, it is back", (await club_payload(org)).get("player_page_path"), f"/avail/{tok}")
+    blob = json.dumps(await club_payload(org))
+    check("the public club payload carries nothing else from the link (no PIN setting, no modules)", any(k in blob for k in ("require_pin", "dashboard_modules")), False)
+
+    async def self_service(body):
+        async with Session() as db:
+            club = await db.get(Organisation, org)
+            user = User(id=uuid.uuid4(), username=f"u{uuid.uuid4().hex[:8]}", email=f"{uuid.uuid4().hex[:6]}@x.com", password_hash="x", display_name="Admin")
+            return await av.update_self_service(body, db=db, club=club, user=user)
+    res = await self_service(av.SelfServiceUpdate(show_on_site=False))
+    check("the admin switch turns it off", (res.get("show_on_site"), (await club_payload(org)).get("player_page_path")), (False, None))
+    res = await self_service(av.SelfServiceUpdate(allow_maybe=True))
+    check("a POST that does not send it leaves it alone", res.get("show_on_site"), False)
+    res = await self_service(av.SelfServiceUpdate(show_on_site=True))
+    check("and it turns back on", (res.get("show_on_site"), (await club_payload(org)).get("player_page_path")), (True, f"/avail/{tok}"))
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     await engine.dispose()

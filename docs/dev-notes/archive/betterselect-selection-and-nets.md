@@ -1743,3 +1743,16 @@ Reported (Oct 2026): half-available players still not at the top on the Selectio
 - `lib/availability.availSortRank(status, days)`: `halfStatus(days)` (free one weekend, away the other, either way) is -1, otherwise `availRank(status)`. Used by `AdminSelection.cmp`, `SelectionMobile` search, the Whiteboard pool (`weekByPlayer` days, since its `availability` is the open weekend) and the Squads board column (`statusOf` + the two weekly answers). Server mirror: `selection_pool.pool_sort_key` (`_is_half` -> -1). The Selection board's `half_open` still leads across buckets for players who are open to pick. Replaced the rank-1.5 W2-only lift (`poolAvailRank`, `_is_w2_only`) of v9.128.5.1, which only covered one direction.
 - Audited and left alone: the Availability matrix and Players list (sort by name), BetterIQ's `iq_selection` candidate order (auto-pick logic, not a display sort), and every filter (they read the combined answer; the rules and counts do too).
 - Proof: `verify_selection_open_pool.py` (39 checks), `verify_two_day_whiteboard_browser.mjs` (39; control on the previous Whiteboard fails the two pool-order checks, half-available player last), `verify_squads_two_day_browser.mjs` (40), `verify_two_day_selection_browser.mjs` (19, a regression guard), `verify_draft_table_browser.mjs` (105; its "Filters panel has a Gender group" check flakes about half the runs on the previous build as well). `verify_squads_pools_browser.mjs` fails on the previous build too (stale dates), unrelated.
+
+## Player Page button on the club site (v9.128.10)
+
+Asked for: reach the player page from the club's main dashboard, next to the Admin button (which did not show in portrait), called something like "Player Page".
+
+Found: the navbar's Admin link was `hidden sm:inline-flex` and the mobile menu had no Admin entry, so a portrait phone could not reach it at all.
+
+What changed: `player_page_path` on the public club payload (gated as in guide rule 97b); `PLAYER PAGE` beside Admin on wide screens, an icon in the phone bar, and Player Page and Admin buttons at the top of the mobile menu; a "Club website button" switch (migration 355, default on) in the self-service link panel.
+
+Decision worth knowing: the availability link was designed to be low-trust and pinned in a group chat, and the roster behind it is already public through player profiles, so a public button adds no new secret. The PIN (last four of a mobile, five tries then a lockout) stays the guard. Clubs that do not want it public flip the switch.
+
+Checks: `verify_player_page_dashboard.py` (69; section I, control fails 5), `frontend/verification/verify_player_page_nav_browser.mjs` (23; 360 and 390px, hidden and signed-in cases).
+

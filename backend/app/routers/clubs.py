@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.models.db import ClubUnpauseRequest, Organisation, Season, Sponsor, get_db
 from app.services import sponsor_tiers, section_names
 from app.routers.organisations import _season_sort_key
-from app.auth.modules import org_core_live
+from app.auth.modules import MODULE_SELECT, org_core_live, org_has_module
 from app.services import club_lock, email_service, rate_limit
 from app.services import fonts as font_service
 from app.config.settings import settings
@@ -88,7 +88,22 @@ async def get_club_by_slug(slug: str, request: Request, db: AsyncSession = Depen
         "player_name_format": org.player_name_format or "last_first",
         "website_enabled": bool(org.website_enabled),
         "public_header_logo": bool(org.public_header_logo),
+        # The way into the player's own page, for the button beside Admin. Only when
+        # the club has BetterSelect, the self-service link is on and the club has not
+        # hidden it from its site. Otherwise null and nothing is shown.
+        "player_page_path": _player_page_path(org),
     }
+
+
+def _player_page_path(org: Organisation) -> str | None:
+    if (
+        org.availability_self_service_enabled
+        and org.availability_show_on_site is not False
+        and org.availability_link_token
+        and org_has_module(org, MODULE_SELECT)
+    ):
+        return f"/avail/{org.availability_link_token}"
+    return None
 
 
 @router.get("/{slug}/manifest")

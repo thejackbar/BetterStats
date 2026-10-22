@@ -4581,6 +4581,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _AVAIL_MAYBE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 355: the Player Page button on the club's public site.
+        # Same one-copy rule: this and alembic's 355 both run
+        # services/availability_site_link_ddl.STATEMENTS.
+        from app.services.availability_site_link_ddl import STATEMENTS as _AVAIL_SITE_DDL
+        for _stmt in _AVAIL_SITE_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 341: the club-chosen modules on a player's own page, and
         # BetterSelect Fines. Same one-copy rule: this and alembic's 341 both run
         # services/fines_ddl.STATEMENTS.

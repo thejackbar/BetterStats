@@ -174,6 +174,13 @@ export default function SelfServiceLinkPanel() {
                 options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} />
             </div>
             {enabled && (
+              <div className="flex items-center gap-2.5" data-show-on-site-setting>
+                <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Club website button</span>
+                <Segmented sm value={cfg.show_on_site === false ? 'off' : 'on'} onChange={(v) => update({ show_on_site: v === 'on' })}
+                  options={[{ value: 'on', label: 'Shown' }, { value: 'off', label: 'Hidden' }]} />
+              </div>
+            )}
+            {enabled && (
               <div className="flex items-center gap-2.5" data-show-squad-setting>
                 <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Show squad</span>
                 <Segmented sm value={cfg.show_squad ? 'on' : 'off'} onChange={(v) => update({ show_squad: v === 'on' })}
@@ -184,6 +191,13 @@ export default function SelfServiceLinkPanel() {
           {cfg.allow_maybe === false && (
             <p className="text-[11.5px] text-pb-faintest -mt-2" data-maybe-off-note>
               Maybe is off: selectors and players can record only Available or Unavailable. Answers already recorded as Maybe still show.
+            </p>
+          )}
+          {enabled && (
+            <p className="text-[11.5px] text-pb-faintest -mt-2" data-show-on-site-note>
+              {cfg.show_on_site === false
+                ? 'The Player Page button is hidden on your public site. The link still works wherever you share it.'
+                : 'Your public site shows a Player Page button beside Admin, so players can get to their page from the club site. Anyone can open it, and each player still needs their PIN.'}
             </p>
           )}
           {enabled && (

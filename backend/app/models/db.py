@@ -545,6 +545,9 @@ class Organisation(Base):
     availability_show_squad = Column(Boolean, nullable=False, server_default="false", default=False)
     # False = the club records only Available / Unavailable (migration 340).
     availability_allow_maybe = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Whether the club's public site shows a "Player Page" button to the
+    # self-service link (migration 355). On by default; only used when the link is on.
+    availability_show_on_site = Column(Boolean, nullable=False, server_default="true", default=True)
     # The ordered module keys shown on a player's own page (migration 341).
     # NULL = never chosen, which reads as services/player_dashboard.DEFAULT_MODULES.
     player_dashboard_modules = Column(JSONB, nullable=True)

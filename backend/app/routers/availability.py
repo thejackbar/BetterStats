@@ -918,6 +918,8 @@ class SelfServiceUpdate(BaseModel):
     require_pin: Optional[bool] = None
     show_squad: Optional[bool] = None
     allow_maybe: Optional[bool] = None
+    # Show a Player Page button on the club's public site.
+    show_on_site: Optional[bool] = None
     # The modules on a player's own page, in order. An empty list is a real
     # choice (everything off); only None means "not sent".
     dashboard_modules: Optional[list[str]] = None
@@ -931,6 +933,7 @@ async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
         "require_pin": bool(club.availability_require_pin),
         "show_squad": bool(club.availability_show_squad),
         "allow_maybe": allow_maybe(club),
+        "show_on_site": club.availability_show_on_site is not False,
         # Every module the page can show, with whether this club has it on and
         # why it cannot be (a missing module, or a switch it depends on).
         "dashboard_modules": player_dashboard.catalogue_for(club),
@@ -967,6 +970,8 @@ async def update_self_service(
         club.availability_show_squad = bool(body.show_squad)
     if body.allow_maybe is not None:
         club.availability_allow_maybe = bool(body.allow_maybe)
+    if body.show_on_site is not None:
+        club.availability_show_on_site = bool(body.show_on_site)
     if body.dashboard_modules is not None:
         club.player_dashboard_modules = player_dashboard.store(body.dashboard_modules)
     if body.enabled is not None:
