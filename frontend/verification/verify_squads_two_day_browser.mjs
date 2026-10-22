@@ -171,6 +171,14 @@ const run = async () => {
   check('every flag is the colour of its own dot', ['Alice, Anna', 'Fay, Fran', 'Dan, Dave', 'Eve, Ella'].every((n) => same(rowsF[n])),
     JSON.stringify(['Alice, Anna', 'Fay, Fran', 'Dan, Dave', 'Eve, Ella'].map((n) => [n, colour(rowsF[n].dot), colour(rowsF[n].flagStyle)])))
   check('Dan is red and Fay is the half colour (not the same)', colour(rowsF['Dan, Dave'].dot) === 'UNAVAILABLE' && colour(rowsF['Fay, Fran'].dot) === 'HALF_W2')
+  // "Order: by availability" (the default) leads with the players free ONE week of
+  // the two-day game: they are nearly a yes and need a decision. The rest keep the
+  // combined answer, so Dan (away week 1, no answer week 2) is not lifted.
+  const order = Object.keys(firsts.rows)
+  check('by availability: the two half-available players lead (Alice, Fay)',
+    order.slice(0, 2).sort().join('|') === 'Alice, Anna|Fay, Fran', order.join(' | '))
+  check('by availability: the rest keep the combined order (Eve maybe, Bob none, Dan out)',
+    order.slice(2).join('|') === 'Eve, Ella|Bob, Barry|Dan, Dave', order.join(' | '))
   check('control: the one-day squad has no week flags', Object.values(thirds?.rows || {}).every((r) => !r.flag))
 
   // The window: four quick answers for the two-day squad.
