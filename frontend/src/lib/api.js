@@ -3441,6 +3441,8 @@ export const api = {
   // The verified player's own page: squads, locked selections, training.
   availPublicProfile: (token) => request(`/public/availability/${token}/me/profile${tzQuery()}`),
   // The competition ladder for the player's squads (the page's Ladder module).
+  // Where the player ranks in the club this season (runs, wickets, catches). Read when Stats opens.
+  availPublicRanks: (token) => request(`/public/availability/${token}/me/ranks`),
   availPublicLadder: (token) => request(`/public/availability/${token}/me/ladder`),
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),

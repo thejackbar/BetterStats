@@ -2602,3 +2602,14 @@ Reported by the owner (22 Oct 2026): Leaderboards, Records and Partnerships "tak
 **Measured** on the `verify_records_partnership_grade_names.py` database (~31,000 grades, 30,000 partnerships, 60 seasons): picked grade 32.7s to 0.7s, default view 2.7s to 1.5s, picked season and alias grade unchanged. The payload for all four variants is byte-identical before and after (`json` dump compared with `cmp`). Control (`NO_INDEX=1 REUSE=1`): the picked-grade check fails at 26.7s and the index-exists check fails.
 
 **Not measured.** The Leaderboard routes and the grid loader were NOT run at scale in this change (the seed has no innings). They use the same lookup shape and should gain, but check `python -m app.scripts.explain_leaderboard <org>` on the box before and after, and `?debug_timing=1` on Records.
+
+## Records: a partnership row opens its scorecard (v9.129.5.1)
+
+Asked for: on the partnerships leaderboard, click a row and land on the scorecard. The records route sent no match id with a stand, so there was nothing to open.
+
+- Backend: `game_id` added to the top 25, per-wicket (base CTE and final select) and per-grade (base CTE and ranked select) partnership queries in `routers/records.py`, and to `normalise_partnership`. Hand-typed records carry `game_id: None`. The merge of typed and real stands appends game rows first, sorts and de-dups with a stable sort, so an identical typed record is the one dropped and the real stand keeps its link (checked).
+- Frontend: `GameRow` in `Records.jsx` replaces the `<tr>` of the four partnership tables. A click that did not land on a link opens `/games/{id}`; player names still go to the player; Enter opens it from the keyboard; a row with no match is a plain row.
+- Not changed: StatLab's partnership list already carries `game_id`; the Yearbook partnership block is narrative and was left alone.
+- Proof: `verify_records_partnership_game_link.py` (11 checks, real Postgres, shipped `get_records` and `get_scorecard`; control against the previous `records.py` fails 9 of 11 with `<absent>`), `verify_records_partnership_click_browser.mjs` (14 checks in Chromium, stubbed API, all four tables, name click, keyboard, typed row inert, 390px; control against the previous `Records.jsx` fails because no row is a link), `verify_club_records.py` (93) and `verify_records_partnership_grade_names.py` (9) unchanged and passing.
+- Not verified: the live Records page with real data; which table a visitor expects to click first (the all-time table lists wicket 1's best, which may be a typed record with no match).
+

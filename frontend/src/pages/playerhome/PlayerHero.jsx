@@ -2,6 +2,7 @@
 // the club they play for, and the way to their public profile. Their own details
 // only; nothing here names another player.
 import { useState } from 'react'
+import { fmtShort, fmtTime } from './ui'
 
 function initialsOf(name) {
   const parts = (name || '').trim().split(/\s+/).filter(Boolean)
@@ -30,7 +31,7 @@ function Avatar({ player }) {
   )
 }
 
-export default function PlayerHero({ club, player, squads, onSwitch, onUpdateDetails }) {
+export default function PlayerHero({ club, player, squads, selected = [], onSwitch, onUpdateDetails }) {
   const short = club?.short_name || club?.name
   return (
     <section data-hero className="rounded-2xl border pb-hairline p-4 mb-3"
@@ -60,6 +61,27 @@ export default function PlayerHero({ club, player, squads, onSwitch, onUpdateDet
                 <span key={n} className="text-[12px] font-semibold rounded-full px-2.5 py-0.5"
                   style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}>{n}</span>
               ))}
+            </div>
+          )}
+          {/* The side they are picked in, once the selectors have locked it: the thing a
+              player most wants to know, so it sits under their name and not in a section. */}
+          {selected.length > 0 && (
+            <div className="flex flex-col gap-1 mt-2" data-hero-selected>
+              {selected.slice(0, 2).map((s) => (
+                <div key={s.fixture_id || `${s.date}-${s.opponent_name}`} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]" data-hero-side>
+                  <span className="font-mono text-[10.5px] tracking-wide rounded px-1.5 py-0.5"
+                    style={{ background: 'color-mix(in srgb, var(--pb-positive) 16%, transparent)', color: 'var(--pb-positive)' }}>
+                    ✓ {s.team_name || 'Selected'}
+                  </span>
+                  <span className="min-w-0 text-pb-text">
+                    {fmtShort(s.date)} · {s.home_away === 'AWAY' ? 'at' : 'vs'} {s.opponent_name || s.label || 'TBC'}{s.start_time ? ` · ${fmtTime(s.start_time)}` : ''}
+                    {(s.is_captain || s.is_wicket_keeper) && (
+                      <span className="font-semibold" style={{ color: 'var(--pb-accent)' }}>{' · '}{[s.is_captain && 'Captain', s.is_wicket_keeper && 'Keeper'].filter(Boolean).join(' and ')}</span>
+                    )}
+                  </span>
+                </div>
+              ))}
+              {selected.length > 2 && <span className="text-[12px] text-pb-faint">+{selected.length - 2} more selected</span>}
             </div>
           )}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-2">

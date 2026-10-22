@@ -709,6 +709,25 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
     }
 
 
+@router.get("/{token}/me/ranks")
+async def get_my_ranks(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Where the player ranks in the club this season for runs, wickets and catches.
+    Read on its own when the Stats section opens, because it reads the club's
+    leaderboards, which the rest of the page does not. 404 unless the club has the
+    season module on. A failure answers with no ranks and the section still draws."""
+    club = await _club_for_token(db, token)
+    player = await _player_for_session(db, request, club)
+    if "season" not in player_dashboard.served_modules(club):
+        raise HTTPException(status_code=404, detail="Not available")
+    try:
+        out = await player_dashboard.season_ranks(db, club, player)
+    except Exception:
+        logger.exception("player page: season ranks failed for %s", player.id)
+        await rollback_keeping(db, club, player)
+        out = None
+    return {"ranks": out}
+
+
 @router.get("/{token}/me/ladder")
 async def get_my_ladder(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     """The competition ladder for each squad the player is in. Read on its own
@@ -762,6 +781,10 @@ async def _selected_sides(db: AsyncSession, club: Organisation, player: Player, 
     )).fetchall()
     return [
         {
+            # The fixture's id (already on this player's own date cards), so the
+            # page can show "selected" on the date the game is on, and on both
+            # dates of a two-day game.
+            "fixture_id": str(r[0]),
             "date": r[1].isoformat() if r[1] else None, "start_time": r[2], "venue": r[3],
             "opponent_name": r[4], "home_away": r[5], "label": r[6], "round": r[7],
             # The side's name is the squad's, so it follows the same switch.

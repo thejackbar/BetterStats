@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { RateMark, RateInfo } from '../components/RateCoverage'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { useGradeFilters } from '../hooks/useGradeCategories'
@@ -313,6 +313,26 @@ function gradeOrder(name) {
   return m ? parseInt(m[1]) : 999
 }
 
+// A partnership row that opens the match it was made in. Rows with no match (a hand-typed record
+// names none) stay plain. A click on a player's name still goes to the player: only a click that did
+// not land on a link opens the scorecard. Enter opens it from the keyboard.
+function GameRow({ gameId, className = '', children }) {
+  const navigate = useNavigate()
+  if (!gameId) return <tr className={className}>{children}</tr>
+  const open = () => navigate(`/games/${gameId}`)
+  return (
+    <tr
+      className={`${className} cursor-pointer`}
+      tabIndex={0}
+      title="Open the scorecard"
+      onClick={e => { if (!e.target.closest('a')) open() }}
+      onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) open() }}
+    >
+      {children}
+    </tr>
+  )
+}
+
 function PartnershipTable({ rows, headers, fmt }) {
   return (
     <table className="w-full text-[13px]">
@@ -377,7 +397,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
               </thead>
               <tbody>
                 {allTimeRecords.map((r, i) => (
-                  <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                  <GameRow key={i} gameId={r.game_id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 px-3 font-mono text-pb-faint">{r.ordinal}</td>
                     <td className="py-2.5 px-3">
                       <PlayerLink id={r.player1_id} name={r.player1_name} fmt={fmt} />
@@ -386,7 +406,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                     </td>
                     <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name}</td>
-                  </tr>
+                  </GameRow>
                 ))}
               </tbody>
             </table>
@@ -415,7 +435,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
               </thead>
               <tbody>
                 {(data.top_partnerships || []).map((r, i) => (
-                  <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                  <GameRow key={i} gameId={r.game_id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 px-3 font-mono text-pb-faint"><RankNum rank={i+1} /></td>
                     <td className="py-2.5 px-3">
                       <PlayerLink id={r.player1_id} name={r.player1_name} fmt={fmt} />
@@ -426,7 +446,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.wicket_number ? ORDINALS[r.wicket_number - 1] : '—'}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name || '—'}</td>
                     <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}</td>
-                  </tr>
+                  </GameRow>
                 ))}
               </tbody>
             </table>
@@ -458,7 +478,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                   </thead>
                   <tbody>
                     {[...records].sort((a, b) => (a.wicket_number ?? 0) - (b.wicket_number ?? 0)).map((r, i) => (
-                      <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                      <GameRow key={i} gameId={r.game_id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                         <td className="py-2 px-3 font-mono text-pb-faint">{ORDINALS[(r.wicket_number || 1) - 1]}</td>
                         <td className="py-2 px-3">
                           <PlayerLink id={r.player1_id} name={r.player1_name} fmt={fmt} />
@@ -467,7 +487,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                         </td>
                         <td className="py-2 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
                         <td className="py-2 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}</td>
-                      </tr>
+                      </GameRow>
                     ))}
                   </tbody>
                 </table>
@@ -502,7 +522,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                   </thead>
                   <tbody>
                     {records.map((r, i) => (
-                      <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                      <GameRow key={i} gameId={r.game_id} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                         <td className="py-2.5 px-3 font-mono text-pb-faint"><RankNum rank={i+1} /></td>
                         <td className="py-2.5 px-3">
                           <PlayerLink id={r.player1_id} name={r.player1_name} fmt={fmt} />
@@ -512,7 +532,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
                         <td className="py-2.5 px-3 font-mono font-bold text-right" style={{ color: 'var(--pb-accent)' }}>{r.runs}</td>
                         <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{r.grade_name || '—'}</td>
                         <td className="py-2.5 px-3 font-mono text-pb-faintest text-[11px] text-right">{formatSeason(r.season_name) || '—'}</td>
-                      </tr>
+                      </GameRow>
                     ))}
                   </tbody>
                 </table>

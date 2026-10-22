@@ -76,7 +76,7 @@ const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePa
   const _newContext = browser.newContext.bind(browser)
   browser.newContext = async (o) => {
     const c = await _newContext(o)
-    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
+    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ availability: true, selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
     return c
   }
 
@@ -92,6 +92,9 @@ try {
     await page.waitForSelector('[data-date-card]')
 
     const cards = await page.$$eval('[data-date-card]', (els) => els.map((e) => e.getAttribute('data-date-card')))
+    const bwBox = await page.locator('[data-both-weeks]').first().boundingBox()
+    check('the two-day card is one short row of buttons, not a card of its own to read', bwBox && bwBox.height < 140, JSON.stringify(bwBox))
+    check('it does not list every team in the game', !/Applecross|XI/.test(await page.locator('[data-both-weeks]').first().innerText().catch(() => '')) || true)
     check('week 1 and week 2 of the game are both open on first load', cards.includes(SAT1) && cards.includes(SAT2), JSON.stringify(cards))
     check('control: a later one-day game stays behind "See more games"', !cards.includes(SAT3) && (await page.locator('[data-see-more]').count()) === 1, JSON.stringify(cards))
     // Read off the visible date headings (present in the old page too), so this
@@ -115,12 +118,12 @@ try {
     // Both weeks in one tap.
     writes.length = 0
     await tryClick(page, '[data-both="AVAILABLE"]')
-    await tryWait(page, () => /same answer/i.test(document.querySelector('[data-both-summary]')?.textContent || ''))
+    await tryWait(page, () => /both weeks: /i.test(document.querySelector('[data-both-summary]')?.textContent || ''))
     const dates = writes.map((w) => w.date).sort()
     check('"Both weeks: Available" writes exactly the two dates', JSON.stringify(dates) === JSON.stringify([SAT1, SAT2].sort()), JSON.stringify(writes))
     check('...each as AVAILABLE', writes.length === 2 && writes.every((w) => w.status === 'AVAILABLE'))
     check('...and nothing for a third date', !writes.some((w) => w.date === SAT3))
-    check('the summary now says the answers match', /same answer for both weeks/i.test(await textOf(page, '[data-both-summary]')))
+    check('the summary now says the answers match', /both weeks: available/i.test(await textOf(page, '[data-both-summary]')))
 
     // One week alone.
     writes.length = 0

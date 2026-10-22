@@ -50,7 +50,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import verify_selection_same_day as base
 from app.models.db import (
-    BattingInnings, FeeMember, FeeMemberSeason, FeePayment, FeeSchedule, FantasyLeague, FantasyManager, FantasyPoolPlayer, FantasyRound, FantasySeason, FantasySquad,
+    BattingInnings, Fixture, FixtureLineup, FeeMember, FeeMemberSeason, FeePayment, FeeSchedule, FantasyLeague, FantasyManager, FantasyPoolPlayer, FantasyRound, FantasySeason, FantasySquad,
     FantasySquadPlayer, Game, GameAppearance, Grade, Organisation, Player, PlayerSeasonStats, Season,
 )
 
@@ -606,6 +606,70 @@ async def main():
         r = Request({"type": "http", "headers": [(b"cookie", f"{pa.COOKIE_NAME}={c}".encode())]})
         res, err = await call(pa.update_my_details, tok, pa.DetailsBody(pin="1234", suburb="x"), r, db) if hasattr(pa, "update_my_details") else ABSENT
     check("a player with no mobile on file cannot be verified, so cannot save", (err.status_code if err else None, str(getattr(err, "detail", ""))[:18]), (409, "There is no mobile"))
+
+    print("\n# K. A selected side names its fixture, so the date it is on can say so")
+    fx_locked, fx_open = uuid.uuid4(), uuid.uuid4()
+    async with Session() as db:
+        db.add(Fixture(id=fx_locked, organisation_id=org, source="manual", played_on=TODAY + timedelta(days=4), status="UPCOMING",
+                       opponent_name="Rovers", label="Rovers", round="5", locked_at=NOW))
+        db.add(Fixture(id=fx_open, organisation_id=org, source="manual", played_on=TODAY + timedelta(days=5), status="UPCOMING",
+                       opponent_name="Saints", label="Saints", round="5"))
+        await db.flush()
+        db.add(FixtureLineup(fixture_id=fx_locked, player_id=P["sam"], organisation_id=org, batting_order=1, is_captain=True))
+        db.add(FixtureLineup(fixture_id=fx_open, player_id=P["sam"], organisation_id=org, batting_order=1))
+        await db.commit()
+    await set_modules(["selected"])
+    sel = (await profile("sam")).get("selected") or []
+    check("only the locked side is shown, and it carries its fixture id", [(x.get("fixture_id"), x.get("opponent_name"), x.get("is_captain")) for x in sel],
+          [(str(fx_locked), "Rovers", True)])
+    check("the draft side (not locked) is not", any(x.get("opponent_name") == "Saints" for x in sel), False)
+
+    print("\n# L. Season rankings for runs, wickets and catches")
+    async with Session() as db:
+        for key, runs, wk, ct in (("ann", 500, 3, 10), ("rival", 412, 0, 0), ("dup", 100, 12, 6)):
+            db.add(PlayerSeasonStats(player_id=P[key], season_id=season, matches=8, batting_innings=8, runs=runs, not_outs=0,
+                                     balls_faced=runs, high_score=50, wickets=wk, runs_conceded=wk * 25, overs=wk * 3 if wk else 0,
+                                     bowling_balls=wk * 18, catches=ct))
+        # Another club's player on the same season row must not count.
+        db.add(PlayerSeasonStats(player_id=P["stranger"], season_id=season, matches=9, batting_innings=9, runs=9999, not_outs=0,
+                                 balls_faced=9999, high_score=200, wickets=99, runs_conceded=1, overs=50, bowling_balls=300, catches=99))
+        await db.commit()
+    await set_modules(["season"])
+    import app.services.player_dashboard as pdash
+
+    async def ranks(key):
+        getattr(pdash, "_RANK_CACHE", {}).clear()
+        if not hasattr(pa, "get_my_ranks"):
+            return None
+        async with Session() as db:
+            res, err = await call(pa.get_my_ranks, tok, req_for(org, P[key]), db)
+        return (res or {}).get("ranks")
+
+    rk = await ranks("sam")
+    r = (rk or {}).get("ranks") or {}
+    check("the season named is the one the dashboard shows", (rk or {}).get("season"), "Summer 26/27")
+    check("runs: 412 puts Sam equal second, behind Ann's 500", (r.get("runs") or {}).get("rank"), 2)
+    check("...of the four club players with runs, another club's 9999 not among them", (r.get("runs") or {}).get("of"), 4)
+    check("...and the value is his own", (r.get("runs") or {}).get("value"), 412)
+    check("wickets: 9 is second behind Dee's 12", ((r.get("wickets") or {}).get("rank"), (r.get("wickets") or {}).get("of")), (2, 3))
+    check("catches: 6 level with Dee behind Ann's 10 shares second place", ((r.get("catches") or {}).get("rank"), (r.get("catches") or {}).get("of")), (2, 3))
+    rk_ann = await ranks("ann")
+    check("Ann is first for runs and catches", (((rk_ann or {}).get("ranks") or {}).get("runs", {}).get("rank"), ((rk_ann or {}).get("ranks") or {}).get("catches", {}).get("rank")), (1, 1))
+    rk_rival = await ranks("rival")
+    check("a player with nothing on a board is left off it, not shown last", sorted(((rk_rival or {}).get("ranks") or {})), ["runs"])
+    check("a tie takes the better place for both (Rex shares second on runs)", (((rk_rival or {}).get("ranks") or {}).get("runs") or {}).get("rank"), 2)
+    rk_none = await ranks("noemail")
+    check("a player with no season games has no ranks block at all", rk_none, None)
+    check("the player's own dashboard figure and the board agree on the value", ((await profile("sam")).get("season") or {}).get("runs"), (r.get("runs") or {}).get("value"))
+    check("rank_in handles an empty board", ((getattr(pdash, "rank_in", None) or (lambda *a: "missing"))({}, "x"), (getattr(pdash, "rank_in", None) or (lambda *a: "missing"))({"x": 0.0}, "x")), (None, None))
+    check("ranks are not on the profile payload (they are read on their own)", "ranks" in await profile("sam"), False)
+    await set_modules(["fees"])
+    if hasattr(pa, "get_my_ranks"):
+        async with Session() as db:
+            res, err = await call(pa.get_my_ranks, tok, req_for(org, P["sam"]), db)
+    else:
+        res, err = None, SimpleNamespace(status_code="missing")
+    check("with the season module off the route is a 404", err.status_code if err else None, 404)
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     await engine.dispose()
