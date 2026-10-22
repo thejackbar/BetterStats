@@ -50,7 +50,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import verify_selection_same_day as base
 from app.models.db import (
-    BattingInnings, FeeMember, FeeMemberSeason, FeePayment, FeeSchedule, FantasyLeague, FantasyManager, FantasyPoolPlayer, FantasyRound, FantasySeason, FantasySquad,
+    BattingInnings, Fixture, FixtureLineup, FeeMember, FeeMemberSeason, FeePayment, FeeSchedule, FantasyLeague, FantasyManager, FantasyPoolPlayer, FantasyRound, FantasySeason, FantasySquad,
     FantasySquadPlayer, Game, GameAppearance, Grade, Organisation, Player, PlayerSeasonStats, Season,
 )
 
@@ -606,6 +606,23 @@ async def main():
         r = Request({"type": "http", "headers": [(b"cookie", f"{pa.COOKIE_NAME}={c}".encode())]})
         res, err = await call(pa.update_my_details, tok, pa.DetailsBody(pin="1234", suburb="x"), r, db) if hasattr(pa, "update_my_details") else ABSENT
     check("a player with no mobile on file cannot be verified, so cannot save", (err.status_code if err else None, str(getattr(err, "detail", ""))[:18]), (409, "There is no mobile"))
+
+    print("\n# K. A selected side names its fixture, so the date it is on can say so")
+    fx_locked, fx_open = uuid.uuid4(), uuid.uuid4()
+    async with Session() as db:
+        db.add(Fixture(id=fx_locked, organisation_id=org, source="manual", played_on=TODAY + timedelta(days=4), status="UPCOMING",
+                       opponent_name="Rovers", label="Rovers", round="5", locked_at=NOW))
+        db.add(Fixture(id=fx_open, organisation_id=org, source="manual", played_on=TODAY + timedelta(days=5), status="UPCOMING",
+                       opponent_name="Saints", label="Saints", round="5"))
+        await db.flush()
+        db.add(FixtureLineup(fixture_id=fx_locked, player_id=P["sam"], organisation_id=org, batting_order=1, is_captain=True))
+        db.add(FixtureLineup(fixture_id=fx_open, player_id=P["sam"], organisation_id=org, batting_order=1))
+        await db.commit()
+    await set_modules(["selected"])
+    sel = (await profile("sam")).get("selected") or []
+    check("only the locked side is shown, and it carries its fixture id", [(x.get("fixture_id"), x.get("opponent_name"), x.get("is_captain")) for x in sel],
+          [(str(fx_locked), "Rovers", True)])
+    check("the draft side (not locked) is not", any(x.get("opponent_name") == "Saints" for x in sel), False)
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     await engine.dispose()

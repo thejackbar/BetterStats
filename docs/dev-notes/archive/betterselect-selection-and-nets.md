@@ -1822,3 +1822,12 @@ Asked for: after v9.129.3 the OD6 Black 2 squad had its games (sync matched 11),
 Fix: `GET /teams` carries `matched_grades` (`_matched_grades`): the grade names of the squad's upcoming, non-cancelled games, only for a squad with no grade or teams of its own. The header shows them with "by team name" and keeps the amber "No grade linked" only when a squad has neither. The squad is deliberately not linked to the grade: a grade belongs to one squad, so linking would take it from the 8th XI.
 
 Check: `verify_shared_grade_squads.py` section E (29 checks; the control without the field fails both E checks).
+
+## Selected in the date header, tidier Selection and Stats (v9.129.5)
+
+Asked for (Oct 2026, from an Applecross screenshot of five date cards and a long two-day card): when selected in a team, put it in the header bar; show the page's information more concisely; stats a little cleaner.
+
+Done: the date a locked side is on carries a Selected chip and one summary line (`fixture_id` added to the selected payload); the two-day card became one row; Squad, Selected and Training became one block of short rows; the season panels dropped their per-figure boxes. The team name in the chip is kept in the club's own case.
+
+Checks: the dashboard browser script (110) and backend section K; the two-day script's summary wording changed with the new compact status line.
+

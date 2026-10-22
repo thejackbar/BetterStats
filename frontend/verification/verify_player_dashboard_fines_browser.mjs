@@ -309,7 +309,7 @@ const run = async () => {
     const { ctx, page } = await playerPage(browser, 390, legacy, { status: 200, body: LADDER })
     await page.waitForTimeout(300)
     const t = await titles(page)
-    check('squad, selected, training', JSON.stringify(t) === JSON.stringify(['your squad', 'selected', 'training']), JSON.stringify(t))
+    check('squad, selected and training are one block', JSON.stringify(t) === JSON.stringify(['at a glance']), JSON.stringify(t))
     await ctx.close()
   })
 

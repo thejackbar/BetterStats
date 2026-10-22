@@ -47,10 +47,11 @@ const me = () => ({
 })
 const profile = () => ({
   club: {}, player: player(), can_update_details: state.canUpdate, squads: ['1sts'], squads_visible: true,
-  modules: state.fantasy ? ['fantasy', 'season', 'squad', 'fees', 'votes'] : ['season', 'squad', 'fees', 'votes'],
+  modules: state.fantasy ? ['fantasy', 'season', 'squad', 'selected', 'training', 'fees', 'votes'] : ['season', 'squad', 'selected', 'training', 'fees', 'votes'],
+  selected: [{ fixture_id: 'f1', date: iso(5), start_time: '13:00', venue: 'Main Oval', opponent_name: 'Rovers', home_away: 'HOME', label: null, round: '4', team_name: '1sts', is_captain: true, is_wicket_keeper: false }],
   fees: { on_record: true, season: 'Summer 26/27', total_outstanding: 60, membership_outstanding: 60, match_fee_outstanding: 0, total_paid: 40, credit: 0, payments: PAYMENTS },
   votes: [{ medal: 'Dunslow Medal', fixture_id: 'f1', opponent: 'Rovers', round: 'Round 1', date: iso(-2), closes_on: iso(5), link: '/vote/vtok?fixture=f1&player=p1' }],
-  selected: [], training: { upcoming: [], attended_8_weeks: 0, last_attended: null }, votes_cast: [], fines: [],
+  training: { upcoming: [{ date: iso(2), label: 'Tuesday nets' }, { date: iso(9), label: 'Tuesday nets' }], attended_8_weeks: 5, last_attended: iso(-6) }, votes_cast: [], fines: [],
   season: {
     season: 'Summer 26/27', matches: 11, runs: 412, high_score: 87, batting_average: 51.5, wickets: 9, best_bowling: '4-22', catches: 6, auto_shown: false,
     batting: { innings: 10, not_outs: 2, strike_rate: 84.2, strike_rate_partial: true, fifties: 3, hundreds: 1, ducks: 1, fours: 40, sixes: 6 },
@@ -140,7 +141,7 @@ const run = async () => {
     await page.locator(`[data-date-card="${iso(5)}"] button`, { hasText: /^\S+\s+Available$/ }).click()
     await page.waitForTimeout(400)
     check('one tap sends one write with the date and status', posts.length === 1 && posts[0].date === iso(5) && posts[0].status === 'AVAILABLE', JSON.stringify(posts))
-    check('after the tap the Selection header', /All answered/.test(await page.locator('[data-group="selection"] [data-group-summary]').innerText()))
+    check('after the tap the Selection header stops saying "to answer"', !/to answer/.test(await page.locator('[data-group="selection"] [data-group-summary]').innerText()))
     await ctx.close()
   })
 
@@ -188,6 +189,55 @@ const run = async () => {
     check('a club without Fantasy has no card and no section', (await off.page.locator('[data-fantasy]').count()) === 0 && (await off.page.locator('[data-group="fantasy"]').count()) === 0)
     await off.ctx.close()
     state.fantasy = true
+  })
+
+  await safe('selected in the header', async () => {
+    console.log('\n── Selected shows in the date header ──')
+    const { ctx, page } = await open(390)
+    const card = page.locator(`[data-date-card="${iso(5)}"]`)
+    const chip = card.locator('[data-selected-chip]')
+    check('the date the player is picked on has a Selected chip in its header', (await chip.count()) === 1 && /1sts/.test(await chip.innerText()), await chip.innerText().catch(() => ''))
+    const chipBox = await chip.boundingBox(), dayBox = await card.locator('.font-display').first().boundingBox()
+    check('...in the header bar, level with the day, not down by the buttons', Math.abs(chipBox.y - dayBox.y) < 30, JSON.stringify([chipBox, dayBox]))
+    const line = (await card.locator('[data-selected-line]').innerText()).replace(/\s+/g, ' ')
+    check('one line under the day: time, opponent, captain', /1:00pm vs Rovers/.test(line) && /Captain/.test(line), line)
+    check('a date with no selection has none of this', (await page.locator(`[data-date-card="${iso(12)}"] [data-selected-chip], [data-date-card="${iso(12)}"] [data-selected-line]`).count()) === 0)
+    check('it is on screen with the games folded', await chip.isVisible() && (await card.getAttribute('data-fixtures-open')) === 'no')
+    await card.locator('[data-fixtures-toggle]').click()
+    check('opened, the game itself is tagged Selected', /selected/i.test(await card.locator('[data-fixture]').first().innerText()))
+    check('the answer buttons are still right under the header', await card.locator('button', { hasText: 'Available' }).first().isVisible())
+    await page.screenshot({ path: `${SHOT}/selected-header-390.png` })
+    await ctx.close()
+  })
+
+  await safe('glance', async () => {
+    console.log('\n── Selection facts in one block ──')
+    const { ctx, page } = await open(390)
+    const rows = await page.locator('[data-glance-row]').evaluateAll((els) => els.map((e) => e.getAttribute('data-glance-row')))
+    check('selected and training are rows of one block, no cards of their own', JSON.stringify(rows) === JSON.stringify(['selected', 'training']), JSON.stringify(rows))
+    check('the squad is not repeated: it is already under the name', (await page.locator('[data-glance-row="squad"]').count()) === 0)
+    const sel = (await page.locator('[data-glance-row="selected"]').innerText()).replace(/\s+/g, ' ')
+    check('Selected is one short line per side', /1sts vs Rovers/.test(sel) && /Captain/.test(sel), sel)
+    const tr = (await page.locator('[data-glance-row="training"]').innerText()).replace(/\s+/g, ' ')
+    check('Training: the next session, how many more, and how often they came', /Tuesday nets/.test(tr) && /\+1 more/.test(tr) && /5 sessions in the last eight weeks/.test(tr), tr)
+    const h = (await page.locator('[data-group="selection"] section[class*="border-t"]').last().boundingBox()).height
+    check('the whole block is compact (three rows, not three cards)', h < 190, String(h))
+    await ctx.close()
+  })
+
+  await safe('stats clean', async () => {
+    console.log('\n── Stats ──')
+    const { ctx, page } = await open(390)
+    const bat = await page.locator('[data-season-panel="batting"]').boundingBox()
+    check('a discipline is two short rows of figures', bat.height < 125, String(bat.height))
+    const tiles = await page.locator('[data-season-panel] [class*="bg-pb-surface2"], [data-season-panel] [style*="surface2"]').count()
+    check('the figures are not each in a box of their own', tiles <= 4, String(tiles))
+    const stats = await page.locator('[data-group="stats"]').boundingBox()
+    check('the whole Stats section is shorter than before (about 780px on a phone)', stats.height < 700, String(stats.height))
+    check('the fielding line is one line of words', /6 catches/.test(await page.locator('[data-season-panel="fielding"]').innerText()) && (await page.locator('[data-season-panel="fielding"]').boundingBox()).height < 60)
+    check('the dagger is explained once, in the foot note', (await page.locator('[data-group="stats"]').innerText()).match(/†/g).length === 2)
+    await page.locator('[data-group="stats"]').screenshot({ path: `${SHOT}/stats-390.png` })
+    await ctx.close()
   })
 
   await safe('collapsed', async () => {

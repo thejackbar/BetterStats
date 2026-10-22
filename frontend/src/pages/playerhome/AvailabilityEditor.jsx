@@ -59,16 +59,19 @@ export function twoDayPairs(dates) {
   return out
 }
 
-// The player's own games first, then by start time (untimed last), then team.
-function orderFixtures(fxs) {
+// The game they are selected in, then their squad's games, then by start time
+// (untimed last), then team.
+function orderFixtures(fxs, selectedIds) {
+  const sel = (f) => (selectedIds && selectedIds.has(f.id) ? 1 : 0)
   return [...fxs].sort((a, b) =>
-    (b.mine ? 1 : 0) - (a.mine ? 1 : 0)
+    sel(b) - sel(a)
+    || (b.mine ? 1 : 0) - (a.mine ? 1 : 0)
     || (a.start_time || '99:99').localeCompare(b.start_time || '99:99')
     || (a.team_name || '').localeCompare(b.team_name || ''))
 }
 
 // One game: when, which of our teams, home or away, against whom, where.
-function FixtureRow({ f }) {
+function FixtureRow({ f, selected }) {
   const opp = f.opponent_name || f.label || 'TBC'
   const bye = f.home_away === 'BYE'
   const where = f.home_away === 'AWAY' ? 'at' : 'vs'
@@ -88,7 +91,8 @@ function FixtureRow({ f }) {
               {f.team_name}
             </span>
           )}
-          {f.mine && <Tag tone="var(--pb-accent)">Your squad</Tag>}
+          {selected && <Tag tone="var(--pb-positive)">Selected</Tag>}
+          {f.mine && !selected && <Tag tone="var(--pb-accent)">Your squad</Tag>}
           {bye ? <Tag>Bye</Tag> : f.home_away ? <Tag>{f.home_away === 'AWAY' ? 'Away' : 'Home'}</Tag> : null}
         </div>
         {!bye && (
@@ -110,16 +114,17 @@ function FixtureRow({ f }) {
 // A date's games. The player's own come first and bold. When some are theirs and
 // the rest are other grades' games, the rest wait behind a tap; with none of
 // theirs (a fill-in, or a player in no squad) everything stays open.
-function FixtureList({ fixtures }) {
+function FixtureList({ fixtures, selectedIds }) {
   const [showAll, setShowAll] = useState(false)
-  const ordered = orderFixtures(fixtures)
-  const mine = ordered.filter((f) => f.mine)
-  const others = ordered.filter((f) => !f.mine)
+  const ordered = orderFixtures(fixtures, selectedIds)
+  const isMine = (f) => f.mine || (selectedIds && selectedIds.has(f.id))
+  const mine = ordered.filter(isMine)
+  const others = ordered.filter((f) => !isMine(f))
   const collapse = mine.length > 0 && others.length > 0 && !showAll
   const shown = collapse ? mine : ordered
   return (
     <div className="flex flex-col gap-1 mb-3">
-      {shown.map((f, i) => <FixtureRow key={`${f.id}-${f.role}-${i}`} f={f} />)}
+      {shown.map((f, i) => <FixtureRow key={`${f.id}-${f.role}-${i}`} f={f} selected={!!(selectedIds && selectedIds.has(f.id))} />)}
       {mine.length > 0 && others.length > 0 && (
         <button type="button" onClick={() => setShowAll((v) => !v)}
           className="self-start px-2.5 py-1 text-[12px] text-pb-faint underline">
@@ -132,51 +137,51 @@ function FixtureList({ fixtures }) {
 
 // One tap for a two-day game: both weeks, week 1 only, week 2 only, or neither.
 // Each week keeps its own answer underneath (a player can be free for week 1 and
-// away for week 2, or say Maybe); this is the quick way to say the usual things.
+// away for week 2, or say Maybe); this is the quick way to say the usual things, so
+// it is one short row and a one-line status, not a card of its own to read.
 function BothWeeks({ pair, me, choices, onPick, busy }) {
   const weekNames = { ...DEFAULT_WEEK_NAMES, ...(me.week_names || {}) }
   const a = me.availability?.[pair.day1]?.status || 'NO_RESPONSE'
   const b = me.availability?.[pair.day2]?.status || 'NO_RESPONSE'
   const same = a === b ? a : null
   const pattern = weekPatternOf([a, b])
-  const names = [...new Set(pair.fixtures.map((f) => f.team_name).filter(Boolean))]
   const btn = (meta, active, extra) => (active
     ? { background: meta.cssVar, color: 'var(--pb-bg)', ...extra }
     : { background: `color-mix(in srgb, ${meta.cssVar} 12%, transparent)`, color: meta.cssVar, border: `1px solid color-mix(in srgb, ${meta.cssVar} 30%, transparent)`, ...extra })
   // The data-both values keep the old same-answer names for the two that are one
   // (AVAILABLE, UNAVAILABLE); the half answers are W1 and W2.
   const attr = { both: 'AVAILABLE', w1: 'W1', w2: 'W2', none: 'UNAVAILABLE' }
+  const short = { both: 'Both', w1: `${weekNames.w1} only`, w2: `${weekNames.w2} only`, none: 'Neither' }
+  const word = (st) => (AVAILABILITY[st] || AVAILABILITY.NO_RESPONSE).label
   return (
-    <div data-both-weeks={pair.key} className="rounded-xl border p-3.5"
+    <div data-both-weeks={pair.key} className="rounded-xl border px-3.5 py-3"
       style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 45%, transparent)', background: 'color-mix(in srgb, var(--pb-amber) 6%, transparent)' }}>
-      <div className="flex items-baseline justify-between gap-2 mb-0.5">
-        <div className="font-display font-bold text-[16px]">Two-day game: which weeks?</div>
-        <Tag tone="var(--pb-amber)">2 weeks</Tag>
+      <div className="flex items-baseline justify-between gap-2 mb-2">
+        <div className="font-display font-bold text-[15px]">Two-day game</div>
+        <div className="text-[12px] text-pb-dim">{fmtShort(pair.day1)} + {fmtShort(pair.day2)}</div>
       </div>
-      <div className="text-[12.5px] text-pb-dim mb-2.5">
-        {fmtShort(pair.day1)} and {fmtShort(pair.day2)}{names.length ? ` · ${names.join(', ')}` : ''}
-      </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-4 gap-1.5">
         {weekPatterns(weekNames).map((w) => (
           <button key={w.key} type="button" data-both={attr[w.key]} data-week-pattern={w.key}
             onClick={() => onPick(pair, w.statuses)} disabled={busy}
-            className="py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
+            className="py-2 rounded-lg text-[12.5px] font-semibold leading-tight transition disabled:opacity-60"
             style={btn(AVAILABILITY[w.tone], pattern === w.key)}>
-            {w.title}
+            {short[w.key] || w.title}
           </button>
         ))}
+      </div>
+      <div className="flex items-center justify-between gap-3 mt-2 text-[12px]">
+        <span data-both-summary style={{ color: same ? 'var(--pb-faint)' : 'var(--pb-amber)' }}>
+          {same
+            ? `Both weeks: ${word(same)}`
+            : `${weekNames.w1}: ${word(a)} · ${weekNames.w2}: ${word(b)}`}
+        </span>
         {choices.includes('MAYBE') && (
           <button type="button" data-both="MAYBE" onClick={() => onPick(pair, ['MAYBE', 'MAYBE'])} disabled={busy}
-            className="col-span-2 py-2.5 rounded-lg text-sm font-semibold transition disabled:opacity-60"
-            style={btn(AVAILABILITY.MAYBE, same === 'MAYBE')}>
-            {AVAILABILITY.MAYBE.glyph} Maybe for both weeks
+            className="shrink-0 underline disabled:opacity-60" style={{ color: same === 'MAYBE' ? AVAILABILITY.MAYBE.cssVar : 'var(--pb-faint)' }}>
+            {AVAILABILITY.MAYBE.glyph} Maybe for both
           </button>
         )}
-      </div>
-      <div className="text-[12px] mt-2" data-both-summary style={{ color: same ? 'var(--pb-faint)' : 'var(--pb-amber)' }}>
-        {same
-          ? `Same answer for both weeks. You can still change one week below.`
-          : `${weekNames.w1}: ${(AVAILABILITY[a] || AVAILABILITY.NO_RESPONSE).label} · ${weekNames.w2}: ${(AVAILABILITY[b] || AVAILABILITY.NO_RESPONSE).label}`}
       </div>
     </div>
   )
@@ -186,15 +191,30 @@ function BothWeeks({ pair, me, choices, onPick, busy }) {
 // carry ten fixtures across the club; answering is the job, so they stay folded
 // until the player wants to see them. The buttons stay put when it opens (the games
 // open below them), and an answer is never blocked on looking.
-function DateCard({ d, cur, wk, choices, saving, saved, onAnswer }) {
+function DateCard({ d, cur, wk, choices, saving, saved, onAnswer, sel, selectedIds }) {
   const [open, setOpen] = useState(false)
   const n = (d.fixtures || []).length
   const panel = `fixtures-${d.date}`
   return (
     <div className="rounded-xl border pb-hairline p-3.5" data-date-card={d.date} data-fixtures-open={open ? 'yes' : 'no'}>
-      <div className="flex items-baseline justify-between gap-2 mb-2.5">
-        <div className="font-display font-bold text-[16px]">{fmtDay(d.date)}</div>
-        <div className="flex items-baseline gap-2 shrink-0">
+      <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1.5 mb-2.5">
+        <div className="min-w-0">
+          <div className="font-display font-bold text-[16px]">{fmtDay(d.date)}</div>
+          {sel && (
+            <div data-selected-line className="text-[12.5px] text-pb-dim mt-0.5">
+              {[fmtTime(sel.start_time), `${sel.home_away === 'AWAY' ? 'at' : 'vs'} ${sel.opponent_name || sel.label || 'TBC'}`].filter(Boolean).join(' ')}
+              {sel.is_captain ? ' · Captain' : ''}{sel.is_wicket_keeper ? ' · Keeper' : ''}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+          {sel && (
+            <span data-selected-chip title={sel.team_name ? `Selected for ${sel.team_name}` : 'Selected'}
+              className="font-mono text-[10.5px] tracking-wide rounded px-1.5 py-0.5"
+              style={{ background: 'color-mix(in srgb, var(--pb-positive) 16%, transparent)', color: 'var(--pb-positive)' }}>
+              ✓ {sel.team_name || 'Selected'}
+            </span>
+          )}
           {wk && <Tag tone="var(--pb-amber)">{wk}</Tag>}
           {saved && <span className="font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
         </div>
@@ -227,7 +247,7 @@ function DateCard({ d, cur, wk, choices, saving, saved, onAnswer }) {
       )}
       {/* Hidden, not unmounted: the "other club games" choice inside survives a fold. */}
       <div id={panel} hidden={!open} className="mt-1.5">
-        <FixtureList fixtures={d.fixtures || []} />
+        <FixtureList fixtures={d.fixtures || []} selectedIds={selectedIds} />
       </div>
     </div>
   )
@@ -237,11 +257,18 @@ function DateCard({ d, cur, wk, choices, saving, saved, onAnswer }) {
 // reveals one more per tap, so a long fixture list is not the first thing a player
 // sees. `onAnswer(date, status)` saves one date, `onBoth(pair, statuses)` both weeks
 // of a two-day game.
-export function AvailabilityEditor({ me, choices, savingDate, savedDate, onAnswer, onBoth }) {
+export function AvailabilityEditor({ me, choices, savingDate, savedDate, onAnswer, onBoth, selected = [] }) {
   const [weeksOpen, setWeeksOpen] = useState(1)
   const weeks = useMemo(() => groupByWeek(me?.dates || []), [me?.dates])
   const pairs = useMemo(() => twoDayPairs(me?.dates || []), [me?.dates])
   const shown = weeks.slice(0, weeksOpen).flat()
+  // Sides the selectors have locked, by fixture, so the date a game is on says so.
+  const selByFixture = useMemo(() => new Map((selected || []).filter((x) => x.fixture_id).map((x) => [x.fixture_id, x])), [selected])
+  const selectedIds = useMemo(() => new Set(selByFixture.keys()), [selByFixture])
+  const selectionFor = (d) => {
+    const hits = (d.fixtures || []).filter((f) => selByFixture.has(f.id)).map((f) => selByFixture.get(f.id))
+    return hits.sort((a, b) => (a.start_time || '99:99').localeCompare(b.start_time || '99:99'))[0] || null
+  }
 
   return (
     <section data-availability className="mb-3 min-w-0">
@@ -268,7 +295,7 @@ export function AvailabilityEditor({ me, choices, savingDate, savedDate, onAnswe
                   {savedDate === pr.key && <span className="absolute right-3 bottom-2 font-mono text-[10px]" style={{ color: 'var(--pb-positive)' }}>SAVED ✓</span>}
                 </div>
               ))}
-              <DateCard d={d} cur={cur} wk={wk} choices={choices} saving={savingDate === d.date} saved={savedDate === d.date} onAnswer={onAnswer} />
+              <DateCard d={d} cur={cur} wk={wk} choices={choices} saving={savingDate === d.date} saved={savedDate === d.date} onAnswer={onAnswer} sel={selectionFor(d)} selectedIds={selectedIds} />
             </Fragment>
           )
         })}

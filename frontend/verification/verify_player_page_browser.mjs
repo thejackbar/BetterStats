@@ -75,7 +75,7 @@ const run = async () => {
     const t = (await page.locator('[data-my-page]').innerText()).replace(/\s+/g, ' ')
     check('the profile was fetched once', hits.profile === 1, String(hits.profile))
     check('it shows their availability for the next game', /Available/i.test(t))
-    check('it shows the locked side with opponent, time and venue', /Rovers/.test(t) && /13:00/.test(t) && /Main Oval/.test(t) && /1sts/.test(t), t.slice(0, 400))
+    check('it shows the locked side with team, opponent and time', /Rovers/.test(t) && /13:00/.test(t) && /1sts/.test(t), t.slice(0, 400))
     check('...and that they are captain', /Captain/.test(t))
     check('it lists the next training', /Tuesday nets/.test(t))
     check('...and how often they have been lately', /5 sessions in the last eight weeks/.test(t), t)
@@ -89,7 +89,7 @@ const run = async () => {
     state.selected = false
     await page.reload(); await page.locator('[data-hero]').waitFor()
     await page.locator('[data-no-selection]').waitFor()
-    check('it says nothing yet, and when sides show', /once your selectors have locked them/.test(await page.locator('[data-no-selection]').innerText()))
+    check('it says nothing yet, and when sides show', /selectors lock them/.test(await page.locator('[data-no-selection]').innerText()))
   })
 
   await safe('Squad switched off', async () => {

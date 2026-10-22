@@ -762,6 +762,10 @@ async def _selected_sides(db: AsyncSession, club: Organisation, player: Player, 
     )).fetchall()
     return [
         {
+            # The fixture's id (already on this player's own date cards), so the
+            # page can show "selected" on the date the game is on, and on both
+            # dates of a two-day game.
+            "fixture_id": str(r[0]),
             "date": r[1].isoformat() if r[1] else None, "start_time": r[2], "venue": r[3],
             "opponent_name": r[4], "home_away": r[5], "label": r[6], "round": r[7],
             # The side's name is the squad's, so it follows the same switch.
