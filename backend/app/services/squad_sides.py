@@ -58,6 +58,31 @@ def ordinal(n: int) -> str:
     return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
 
 
+_CLUB_FILLER = {"cc", "club", "cricket", "c", "sc", "the", "inc"}
+
+
+def _tokens(name) -> list[str]:
+    return re.sub(r"[^a-z0-9]+", " ", str(name or "").lower()).split()
+
+
+def club_tokens(club_name) -> list[str]:
+    """The words of a club's name that CA puts in front of a team name:
+    "Applecross CC" -> ["applecross"]."""
+    return [t for t in _tokens(club_name) if t not in _CLUB_FILLER]
+
+
+def team_name_key(name, club: Iterable[str] = ()) -> str:
+    """A team name with the club's own name taken off the front and punctuation
+    and spacing flattened: "Applecross OD6 Black 2" and "OD6 Black 2" both give
+    "od6 black 2". Only a LEADING club name is dropped, so "Gisborne Women 2nd XI"
+    never reads as "2nd XI"."""
+    toks = _tokens(name)
+    for c in club:
+        if toks and toks[0] == c:
+            toks = toks[1:]
+    return " ".join(toks)
+
+
 @dataclass
 class Side:
     team_id: str
@@ -114,8 +139,9 @@ class SquadSides:
     Built once per request by :func:`load`; nothing here touches the database."""
 
     def __init__(self, squads: dict[str, SquadInfo], grade_key_by_id: dict[str, str],
-                 grade_ids_by_key: dict[str, set]):
+                 grade_ids_by_key: dict[str, set], club: Iterable[str] = ()):
         self.squads = squads
+        self.club = list(club)
         self.latest_grade_by_key: dict[str, str] = {}
         self.grade_key_by_id = grade_key_by_id
         self.grade_ids_by_key = grade_ids_by_key
@@ -149,15 +175,29 @@ class SquadSides:
         """The squad a fixture belongs to by OUR team's name, for when two of the
         club's teams play in one grade and the grade cannot tell them apart.
 
-        Only ever a correction to the grade's own squad: it answers when that squad
-        does not carry the XI number the name states and exactly one other active
-        squad does. A name with no XI number, a number nobody (or two squads) carry,
-        or a grade no squad plays all answer None and leave the grade to decide."""
-        n = xi_number(team_name)
-        if not n:
-            return None
+        Only ever a correction to the grade's own squad (or a home for a grade no
+        squad plays). Two things can name a squad, the name first:
+
+          * the squad's own name or short name IS the team's name once the club's
+            name is taken off the front ("Applecross OD6 Black 2" -> squad
+            "OD6 Black 2"), exactly one active squad answering;
+          * the name states an XI number ("Applecross 10th XI") that the grade's own
+            squad does not carry and exactly one other active squad does.
+
+        When the grade's own squad already fits the name, a name no squad carries,
+        or two squads answering, the answer is None and the grade decides."""
         owner = self.squads.get(self.key_owner.get(self.key_of_grade(grade_id) or "", ""))
-        if owner is None or n in owner.ranks:
+        key = team_name_key(team_name, self.club)
+        if key:
+            def named(sq: SquadInfo) -> bool:
+                return key in {team_name_key(sq.name, self.club), team_name_key(sq.short_name, self.club)}
+            if owner is not None and named(owner):
+                return None
+            hits = [s for s in self.squads.values() if s.is_active and named(s)]
+            if len(hits) == 1:
+                return hits[0]
+        n = xi_number(team_name)
+        if not n or owner is None or n in owner.ranks:
             return None
         hits = [s for s in self.squads.values() if s.is_active and n in s.ranks]
         return hits[0] if len(hits) == 1 else None
@@ -293,7 +333,9 @@ async def load(db: AsyncSession, club_id) -> SquadSides:
             sq.sides = [Side(team_id=sid, key=grade_key(gname), grade_name=gname, label=None, position=0,
                              rank=sq.sequence if sq.sequence > 0 else None, stored=False)]
         squads[sid] = sq
-    out = SquadSides(squads, grade_key_by_id, grade_ids_by_key)
+    club_name = (await db.execute(
+        text("SELECT name FROM organisations WHERE id = :org"), {"org": club_id})).scalar()
+    out = SquadSides(squads, grade_key_by_id, grade_ids_by_key, club_tokens(club_name))
     out.latest_grade_by_key = latest_by_key
     return out
 
@@ -380,26 +422,30 @@ async def assign_fixtures(db: AsyncSession, club_id, team_id, today: Optional[da
     typed by somebody. Past games are history and are not touched."""
     sides = await load(db, club_id)
     gids = [uuid.UUID(g) for g in sides.grade_ids(team_id)]
-    if not gids:
-        return 0
     tid = uuid.UUID(str(team_id))
     rows = (await db.execute(
         text(
             "SELECT id, grade_id, home_team, away_team, home_away FROM fixtures "
-            "WHERE organisation_id = :org AND grade_id = ANY(CAST(:gids AS uuid[])) "
+            "WHERE organisation_id = :org "
             "AND played_on >= :today AND COALESCE(status, '') <> 'CANCELLED' "
             "AND team_id IS DISTINCT FROM :tid AND NOT COALESCE(team_pinned, false) "
             "AND (source = 'grassroots' OR team_id IS NULL)"
         ),
-        {"tid": tid, "org": club_id, "gids": gids, "today": today or date.today()},
+        {"tid": tid, "org": club_id, "today": today or date.today()},
     )).fetchall()
     # A fixture whose own team's name says it is another squad's (the 10th XI in a
-    # grade the 8th XI also plays) stays with that squad.
+    # grade the 8th XI also plays) stays with that squad; one whose name says it is
+    # THIS squad's comes across even from a grade this squad does not play ("OD6
+    # Black 2" in the grade the "OD6 Black" squad plays).
+    gid_set = {str(g) for g in gids}
     mine = []
     for fid, gid, home, away, home_away in rows:
         our = home if home_away == "HOME" else away if home_away == "AWAY" else None
         named = sides.squad_for_team_name(gid, our)
-        if named is None or named.id == str(tid):
+        if named is not None:
+            if named.id == str(tid):
+                mine.append(fid)
+        elif gid is not None and str(gid) in gid_set:
             mine.append(fid)
     if not mine:
         return 0
