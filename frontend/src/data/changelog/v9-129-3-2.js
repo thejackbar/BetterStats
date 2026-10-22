@@ -1,8 +1,8 @@
 export default {
-  version: 'v9.129.1.2',
+  version: 'v9.129.3.2',
   date: '2026-10-22',
-  // Above v9.129.1.1's sortKey. Check origin/main at merge time.
-  sortKey: '2026-11-07T15:00:00Z',
+  // Above v9.129.3.1's sortKey. Check origin/main at merge time.
+  sortKey: '2026-11-07T18:00:00Z',
   title: 'A tidier top bar on your club\'s public site',
   items: [
     'On a laptop-sized screen the top bar was too crowded. The links scrolled sideways with a scroll bar underneath, and the last one, Website, was cut in half. The links now always show in full, and on narrower screens they move into the menu button.',
