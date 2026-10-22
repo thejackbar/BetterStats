@@ -1801,3 +1801,24 @@ Needs from the club: the second squad's order (`teams.sequence`) is its XI numbe
 Not done: a game between two of the club's own teams (Round 3, 8th XI v 10th XI) is ONE fixture, filed under the home team's squad. The away team's squad has no fixture for that day.
 
 Check: `verify_shared_grade_squads.py` (14 checks; the control fails the four that move the 10th XI's game). `verify_squad_sides.py` (48) and `verify_fixture_side.py` (25) unchanged.
+
+
+## A squad's own name tells two teams in one grade apart (v9.129.3)
+
+Asked for: after v9.129.1 and a fixtures sync, Applecross' OD6 Black 2 squad still got none of its games. Clubs with two teams in one grade, each its own squad, need this to work.
+
+Found: v9.129.1 only answered when CA's name for our team states an XI number ("Applecross 10th XI"). A squad called "OD6 Black 2" has no number anywhere, and its guessed order is the unranked 50, so `squad_for_team_name` returned None and the grade's squad kept every game. The v9.129.1 check even listed "Applecross OD6 Black" as a name left to the grade.
+
+Fix: `squad_for_team_name` first compares the fixture's team name with each active squad's `name` and `short_name`, both read through `team_name_key` (lowercase, punctuation flat, the club's own name taken off the FRONT only, so "Applecross Women OD6 Black 2" never reads as "OD6 Black 2"). It answers when the grade's own squad does not fit the name and exactly one active squad does. The XI-number rule stays as the second step. `assign_fixtures` now scans every upcoming unpinned synced game, so a squad with no teams picks up its named games, and `create_team` / `update_team` call it when a name, short name, order or active flag is saved. No migration.
+
+If CA spells the team differently from the squad ("Applecross OD6 Black (2)"), put CA's wording in the squad's short name.
+
+Check: `verify_shared_grade_squads.py` (27 checks; the control against the previous code fails 8: sync, second sync, assign, saving a squad and the name rule itself). `verify_squad_sides.py` (48), `verify_fixture_side.py` (25), `verify_multi_squad.py` (44), `verify_squad_next_game.py` (77) unchanged.
+
+## Squads board label for a squad found by team name (v9.129.3.1)
+
+Asked for: after v9.129.3 the OD6 Black 2 squad had its games (sync matched 11), but its column header still said "No grade linked".
+
+Fix: `GET /teams` carries `matched_grades` (`_matched_grades`): the grade names of the squad's upcoming, non-cancelled games, only for a squad with no grade or teams of its own. The header shows them with "by team name" and keeps the amber "No grade linked" only when a squad has neither. The squad is deliberately not linked to the grade: a grade belongs to one squad, so linking would take it from the 8th XI.
+
+Check: `verify_shared_grade_squads.py` section E (29 checks; the control without the field fails both E checks).

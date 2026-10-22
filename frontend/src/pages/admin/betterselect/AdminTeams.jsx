@@ -543,7 +543,11 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
             </span>
           )}
           {/* A squad with no grade has nothing to read its fixtures, ladder or women's side from. Say so, and where to fix it. */}
-          {col.team && !col.grade_name && (
+          {col.team && !col.grade_name && (col.team.matched_grades || []).length > 0 && (
+            <span data-matched-grades title="Its games are found by team name, because another squad plays this grade"
+              className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint truncate">{col.team.matched_grades.join(', ')} · by team name</span>
+          )}
+          {col.team && !col.grade_name && !(col.team.matched_grades || []).length && (
             <button type="button" onClick={onEdit} data-no-grade title="Link this squad to a grade"
               className="font-mono text-[10px] uppercase tracking-wide2 text-pb-amber truncate hover:underline">No grade linked</button>
           )}
