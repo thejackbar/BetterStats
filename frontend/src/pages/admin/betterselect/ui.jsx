@@ -506,11 +506,34 @@ export function FacetGroup({ label, children }) {
 
 
 /* ── Availability summary — stacked bar + legend over a set of players ────── */
-export function AvailSummary({ players, statusOf = (p) => p.availability ?? p.avail ?? 'NO_RESPONSE', compact = false, hideTotal = false, className = '' }) {
+export function AvailSummary({ players, statusOf = (p) => p.availability ?? p.avail ?? 'NO_RESPONSE', compact = false, inline = false, hideTotal = false, className = '' }) {
   const total = players.length
   const tally = AVAIL_ORDER.reduce((acc, s) => ({ ...acc, [s]: 0 }), {})
   players.forEach((p) => { const s = statusOf(p); tally[s] = (tally[s] || 0) + 1 })
   const segs = AVAIL_ORDER.filter((s) => tally[s] > 0)
+  // `inline`: the bar and one row of dot + count, no words (the word is the
+  // tooltip and a screen-reader label). For a header that has to stay short.
+  if (inline) {
+    return (
+      <div className={`flex flex-col gap-1 ${className}`}>
+        <div className="flex h-1 rounded-full overflow-hidden bg-pb-surface2">
+          {segs.map((s) => (
+            <div key={s} style={{ flexGrow: tally[s], background: AVAILABILITY[s].cssVar, opacity: s === 'NO_RESPONSE' ? 0.5 : 1 }} />
+          ))}
+        </div>
+        <div className="flex flex-wrap justify-center gap-x-2 gap-y-0.5">
+          {AVAIL_ORDER.map((s) => (
+            <span key={s} data-avail-count={s} title={`${tally[s]} ${AVAILABILITY[s].label.toLowerCase()}`}
+              className="inline-flex items-center gap-1 text-[11px] text-pb-dim">
+              <Dot status={s} size={7} />
+              <b className="text-pb-text font-semibold pb-num">{tally[s]}</b>
+              <span className="sr-only">{AVAILABILITY[s].label.toLowerCase()}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+    )
+  }
   return (
     <div className={`flex flex-col ${compact ? 'gap-1.5' : 'gap-2'} ${className}`}>
       <div className={`flex ${compact ? 'h-1.5' : 'h-2'} rounded-full overflow-hidden bg-pb-surface2`}>

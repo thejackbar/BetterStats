@@ -51,6 +51,10 @@ const ROLE_OPTS = [
 // simply no longer surface period CRUD here.
 // ============================================================================
 
+// The shortest the fitted matrix card may be: the date row (about 100px) plus
+// room for roughly eight players.
+const MATRIX_MIN_H = 440
+
 const STATUS_LABEL = Object.fromEntries(AVAIL_ORDER.map((s) => [s, AVAILABILITY[s].label.toLowerCase()]))
 
 function fmtDay(d) {
@@ -379,7 +383,10 @@ export default function AdminAvailability() {
   // put while the players scroll. It needs a height to scroll against: measured
   // from where the card starts to the bottom of the window, like the whiteboard.
   // Only measured once the card exists (not on the spinner or empty screens).
-  const [matrixRef, matrixH] = useFitHeight({ enabled: !isPhone && data !== null && dates.length > 0, bottom: 20 })
+  // `min` is the room the players are owed: on a short window the filter rows
+  // above can eat everything, and a card that only fits 3 players is no use, so
+  // the page scrolls a little instead (the date row still freezes in the card).
+  const [matrixRef, matrixH] = useFitHeight({ enabled: !isPhone && data !== null && dates.length > 0, bottom: 20, min: MATRIX_MIN_H })
 
   if (data === null) {
     return <BetterSelectLayout title="Availability"><PbSpinner message="Loading availability…" /></BetterSelectLayout>
@@ -409,7 +416,7 @@ export default function AdminAvailability() {
       {/* Filter bar — shared FilterBar (facets) + quiet view controls */}
       <FilterBar
         filters={filters} facets={facets} searchPlaceholder="Search players…"
-        count={players.length} total={data.players?.length} className="mb-4"
+        count={players.length} total={data.players?.length} className="mb-3"
         right={(<>
           <Segmented value={roster} onChange={setRoster} sm options={[
             { value: 'current', label: 'Current squad' },
@@ -430,7 +437,7 @@ export default function AdminAvailability() {
       {/* One-tap "leave out" for a competition (the Veterans, say). Only worth a row
           when there is something left to show. */}
       {competitions.length > 1 && (
-        <div data-leave-out className="flex flex-wrap items-center gap-1.5 -mt-2 mb-4">
+        <div data-leave-out className="flex flex-wrap items-center gap-1.5 -mt-1 mb-3">
           <span className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faintest">Leave out</span>
           {competitions.map((c) => (
             <Chip key={c.id} label={c.name} active={(values.notComp || []).includes(c.name)}
@@ -542,9 +549,9 @@ export default function AdminAvailability() {
                 const sub = fixtureSub(d, weekNames)
                 return (
                   <th key={d.date} onClick={() => { setSelDate(d.date); setFilterCols([]) }}
-                    className="sticky top-0 z-20 px-3 py-2.5 border-b border-l pb-hairline text-center cursor-pointer"
+                    className="sticky top-0 z-20 px-3 py-2 border-b border-l pb-hairline text-center cursor-pointer"
                     style={{
-                      minWidth: 120,
+                      minWidth: 140,
                       background: sel ? 'color-mix(in srgb, var(--pb-accent) 7%, var(--pb-surface2))' : 'var(--pb-surface2)',
                       borderTop: sel ? '2px solid var(--pb-accent)' : '2px solid transparent',
                     }}>
@@ -556,17 +563,19 @@ export default function AdminAvailability() {
                       }} />
                       <span className="font-display font-bold text-[13px]" style={{ color: sel ? 'var(--pb-accent)' : 'var(--pb-text)' }}>{fmtDay(d.date)}</span>
                     </div>
-                    {sub && <div className="text-[10px] text-pb-faint mt-0.5 truncate" title={sub} style={{ maxWidth: 112, margin: '2px auto 0' }}>{sub}</div>}
-                    <div className="mt-2"><AvailSummary players={colPlayers(d.date)} compact hideTotal /></div>
-                    <div className="font-mono text-[10px] text-pb-dim mt-1.5"><b className="text-pb-accent">{colInCount(d.date)}</b> in</div>
-                    {sel ? (
-                      <Btn variant="primary" sm className="mt-2 w-full justify-center"
-                        onClick={(e) => { e.stopPropagation(); navigate('/admin/betterselect/selection') }}>
-                        Pick XI <Icon name="arrow" size={13} />
-                      </Btn>
-                    ) : (
-                      <div className="mt-2 text-[10px] text-pb-faintest py-1">select week</div>
-                    )}
+                    {sub && <div className="text-[10px] text-pb-faint truncate" title={sub} style={{ maxWidth: 124, margin: '1px auto 0' }}>{sub}</div>}
+                    <div className="mt-1.5"><AvailSummary players={colPlayers(d.date)} inline hideTotal /></div>
+                    {/* The date row is frozen above the players, so it stays short:
+                        "N in" and, on the picked week, a small Pick XI beside it. */}
+                    <div className="mt-1 flex items-center justify-center gap-2 font-mono text-[10px] text-pb-dim" style={{ minHeight: 22 }}>
+                      <span><b className="text-pb-accent">{colInCount(d.date)}</b> in</span>
+                      {sel && (
+                        <Btn variant="primary" sm data-pick-xi className="!px-2 !py-1 !text-[11px] !gap-1"
+                          onClick={(e) => { e.stopPropagation(); navigate('/admin/betterselect/selection') }}>
+                          Pick XI <Icon name="arrow" size={11} />
+                        </Btn>
+                      )}
+                    </div>
                   </th>
                 )
               })}
@@ -582,7 +591,7 @@ export default function AdminAvailability() {
             )}
             {players.map((p) => (
               <tr key={p.id} style={{ background: selected.has(p.id) ? 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' : 'transparent' }}>
-                <td className="sticky left-0 z-10 px-4 py-1.5 border-b pb-hairline"
+                <td className="sticky left-0 z-10 px-4 py-1 border-b pb-hairline"
                   style={{ background: selected.has(p.id) ? 'var(--pb-surface2)' : 'var(--pb-surface)' }}>
                   <div className="flex items-center gap-2.5">
                     {canEdit && (
@@ -631,7 +640,7 @@ export default function AdminAvailability() {
                   return (
                     <td key={d.date} className="text-center border-b border-l pb-hairline"
                       style={{
-                        padding: '6px 0',
+                        padding: '3px 0',
                         background: sel ? 'color-mix(in srgb, var(--pb-accent) 4%, transparent)' : 'transparent',
                       }}>
                       <span className="relative inline-block">

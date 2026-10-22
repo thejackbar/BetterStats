@@ -131,11 +131,13 @@ export default function SelfServiceLinkPanel() {
   return (
     <div className="pb-card mb-4">
       {/* Header / summary — click to expand */}
-      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-3 px-4 py-3 text-left">
-        <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}>
-          <Icon name="availability" size={17} />
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-3 px-4 py-2 text-left">
+        <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}>
+          <Icon name="availability" size={16} />
         </span>
-        <div className="min-w-0 flex-1">
+        {/* Title and blurb share a line when there is room: this strip sits above
+            the Availability matrix, and every line here is a player row lost. */}
+        <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
           <div className="font-display font-bold text-[15px] flex items-center gap-2">
             Self-service link
             <span className="font-mono text-[10px] px-2 py-0.5 rounded-full" style={enabled
@@ -144,7 +146,7 @@ export default function SelfServiceLinkPanel() {
               {enabled ? 'ON' : 'OFF'}
             </span>
           </div>
-          <div className="text-[12.5px] text-pb-faint mt-0.5">
+          <div className="text-[12.5px] text-pb-faint">
             Let players set their own availability with a link + PIN — no logins.
           </div>
         </div>

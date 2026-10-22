@@ -32,6 +32,8 @@ const MATRIX = {
   dates: [W1, W2, W3].map((date, i) => ({ date, fixtures: [{ id: 'f' + i, opponent_name: 'Opp ' + i, home_away: 'HOME', role: 'single', two_day: false }] })),
   players,
   all_squads: [], dormancy_months: 24, rules: { active: false, applied: [] },
+  // As on a real club's screen: two competitions put the "Leave out" row above the matrix.
+  competitions: [{ id: 'c1', name: 'Perth Metro League' }, { id: 'c2', name: 'Veterans League' }],
   availability: Object.fromEntries(players.map((p, i) => [p.id, { [W1]: { status: i % 2 ? 'AVAILABLE' : 'UNAVAILABLE', source: 'admin' } }])),
 }
 const ME = {
@@ -43,6 +45,7 @@ async function stub(page) {
     const url = route.request().url()
     const json = (b) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
     if (url.includes('/auth/me')) return json(ME)
+    if (url.includes('/availability/self-service')) return json({ enabled: true, token: 'tok123', require_pin: true, phone_coverage: { with_phone: 50, total: 60 } })
     if (url.includes('/availability/matrix')) return json(MATRIX)
     if (url.includes('/selection/selected-players')) return json({ player_ids: [] })
     return json({})
@@ -60,6 +63,14 @@ const geo = (page) => page.evaluate(() => {
     has: !!card, fit: card?.getAttribute('data-fit'), card: c, th: t, corner: corner && rect(corner), topmost,
     cardScroll: card?.scrollTop ?? null, cardClient: card?.clientHeight ?? null, cardScrollH: card?.scrollHeight ?? null,
     scrollY: window.scrollY, innerH: window.innerHeight,
+    headH: th ? Math.round(th.getBoundingClientRect().height) : null,
+    // Player rows wholly inside the card under the frozen date row, as first drawn.
+    rowsShown: card ? [...card.querySelectorAll('tbody tr')].filter((tr) => {
+      const r = tr.getBoundingClientRect(), c = card.getBoundingClientRect(), h = th.getBoundingClientRect()
+      return r.top >= h.bottom - 1 && r.bottom <= c.bottom + 1 && r.bottom <= window.innerHeight + 1
+    }).length : 0,
+    pickXi: card?.querySelectorAll('thead [data-pick-xi]').length ?? 0,
+    pickXiText: [...(card?.querySelectorAll('thead button') || [])].map((b) => b.textContent.trim()),
   }
 })
 
@@ -78,11 +89,17 @@ const open = async (browser, width, height, ctxOpts = {}) => {
 const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' })
 
-  for (const [w, h] of [[1440, 900], [1280, 720], [1440, 600]]) {
+  for (const [w, h] of [[1440, 900], [1366, 768], [1280, 720], [1440, 600]]) {
     const page = await open(browser, w, h)
     let g = await geo(page)
     check(`${w}x${h}: the matrix card is found with ${N} players`, g.has && (await page.locator('tbody tr').count()) === N)
-    check(`${w}x${h}: card is fitted to the window`, g.fit === 'on' && g.card.bottom <= g.innerH + 1, JSON.stringify(g.card) + ' fit=' + g.fit)
+    // Fitted to the window, unless the filter rows above already leave less than
+    // the card's minimum: then it sits at the minimum and the page scrolls.
+    check(`${w}x${h}: card is fitted to the window (or at its minimum)`, g.fit === 'on' && (g.card.bottom <= g.innerH + 1 || g.cardClient <= 441), JSON.stringify(g.card) + ' fit=' + g.fit)
+    // Ask (Oct 2026): "you can only see 3-4 players when that's the important info".
+    check(`${w}x${h}: date row is short (${g.headH}px)`, g.headH != null && g.headH <= 125, `head=${g.headH}`)
+    if (h >= 720) check(`${w}x${h}: at least 7 players readable at first draw (${g.rowsShown})`, g.rowsShown >= 7, `rows=${g.rowsShown} head=${g.headH} card=${g.cardClient}`)
+    check(`${w}x${h}: Pick XI shown once, on the selected week`, g.pickXi === 1 && g.pickXiText.length === 1, JSON.stringify(g.pickXiText))
     check(`${w}x${h}: card scrolls inside itself (content taller than card)`, g.cardScrollH > g.cardClient + 100, `${g.cardScrollH} vs ${g.cardClient}`)
 
     // Wheel over the players, a long way, as a real scroll would.
@@ -113,7 +130,7 @@ const run = async () => {
     await page.setViewportSize({ width: 1440, height: 650 })
     await page.waitForTimeout(400)
     const g = await geo(page)
-    check('resize 900 -> 650: card still ends inside the window', g.card.bottom <= g.innerH + 1, JSON.stringify(g.card))
+    check('resize 900 -> 650: card follows the window down (or rests at its minimum)', g.card.bottom <= g.innerH + 1 || g.cardClient <= 441, JSON.stringify(g.card))
     await page.context().close()
   }
 

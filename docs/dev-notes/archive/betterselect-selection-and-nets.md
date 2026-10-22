@@ -1822,3 +1822,11 @@ Asked for: after v9.129.3 the OD6 Black 2 squad had its games (sync matched 11),
 Fix: `GET /teams` carries `matched_grades` (`_matched_grades`): the grade names of the squad's upcoming, non-cancelled games, only for a squad with no grade or teams of its own. The header shows them with "by team name" and keeps the amber "No grade linked" only when a squad has neither. The squad is deliberately not linked to the grade: a grade belongs to one squad, so linking would take it from the 8th XI.
 
 Check: `verify_shared_grade_squads.py` section E (29 checks; the control without the field fails both E checks).
+
+## v9.129.3.2: Availability grid shows more players
+
+Asked for: the Availability matrix "only shows 3-4 players when that's the important info" (about a 1366x768 laptop, Applecross, 1649 players, 29 weeks).
+
+Cause: the frozen week header was 179px (day, opponent, a four-line labelled tally, "N in", a full-width Pick XI), under about 330px of toolbar rows. `useFitHeight` gave the card what was left, so the players got about 160px. Fix: the header is 111px (`AvailSummary inline`: the bar and one dot + count row, names as tooltips and `sr-only` text; "N in" and a small Pick XI on one line, Pick XI only on the picked week); the Self-service strip is one line when collapsed; player rows are about 5px shorter; the matrix card has a floor (`MATRIX_MIN_H`, 440px), so a short window scrolls the page a little instead of squeezing the list.
+
+Check: `verify_availability_frozen_header_browser.mjs` now also asserts header height and players readable at first draw (1366x768: control 5, now 9; 1280x720: control 4, now 8), with a stub that carries the self-service strip and the Leave out row.
