@@ -13,6 +13,10 @@ Drives the SHIPPED `sync_fixtures` route body (CA stubbed at the network layer) 
   * saving a squad (assign_fixtures) does not pull the other team's game across
   * a team name with no XI number, or a number no squad carries, is left to the grade
   * a game somebody picked by hand stays where it was put
+  * a squad called "OD6 Black 2" (no XI number anywhere, the unranked default order)
+    gets the games CA names "Applecross OD6 Black 2", from sync, from saving the squad,
+    and from assign_fixtures; "Applecross Women OD6 Black 2" and a name two squads share
+    are left to the grade
 
 CONTROL MODE: against the previous commit the 10th XI's games land on the 8th XI
 squad and the "left to the grade" checks still pass.
@@ -54,7 +58,7 @@ async def main():
     from app.services import squad_sides
 
     org, season, grade = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-    T8, T10, T12 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    T8, T10, T12, TOD2, TOD2B = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     d1 = date.today() + timedelta(days=7)
     async with Session() as db:
         db.add(Organisation(id=org, name="Applecross CC", slug=f"acc-{org.hex[:8]}"))
@@ -65,6 +69,7 @@ async def main():
         db.add(Team(id=T8, organisation_id=org, name="Applecross 8th XI", sequence=8, grade_id=grade))
         db.add(Team(id=T10, organisation_id=org, name="Applecross 10th XI", sequence=10))
         db.add(Team(id=T12, organisation_id=org, name="Applecross 12th XI", sequence=12, is_active=False))
+        db.add(Team(id=TOD2, organisation_id=org, name="OD6 Black 2", sequence=50))
         await db.flush()
         # The 8th XI squad plays the grade on purpose (a stored team); the 10th XI has no claim on it.
         await db.execute(text(
@@ -79,6 +84,8 @@ async def main():
         "fname": "Applecross OD6 Black",     # no XI number: the grade decides
         "f12": "Applecross 12th XI",         # a number only an inactive squad carries: the grade decides
         "f10-hand": "Applecross 10th XI",    # picked by hand onto the 8th XI squad
+        "fod2": "Applecross OD6 Black 2",    # a squad's own name, no XI number
+        "fod2w": "Applecross Women OD6 Black 2",   # a different team: left to the grade
     }
     ids = {}
     async with Session() as db:
@@ -114,11 +121,14 @@ async def main():
     check("a name with no XI number is left to the grade (8th XI squad plays it)", await team_of("fname"), T8)
     check("a number only an inactive squad carries is left to the grade", await team_of("f12"), T8)
     check("a game picked by hand stays where it was put", await team_of("f10-hand"), T8)
+    check("OD6 Black 2: the squad's own name puts the game on it", await team_of("fod2"), TOD2)
+    check("a different team that only ends the same way stays with the grade", await team_of("fod2w"), T8)
 
     print("\n# B. Nobody has to re-link it")
     await sync()
     check("a second sync leaves the 10th XI's game on its squad", await team_of("f10"), T10)
     check("...and the 8th XI's on its own", await team_of("f8"), T8)
+    check("...and OD6 Black 2's", await team_of("fod2"), TOD2)
 
     print("\n# C. Saving a squad does not pull the other team's game across")
     async with Session() as db:
@@ -126,6 +136,19 @@ async def main():
         await db.commit()
     check("assigning the 8th XI squad's fixtures leaves the 10th XI's game alone", await team_of("f10"), T10)
     check("...and still keeps the 8th XI's", await team_of("f8"), T8)
+    check("...and OD6 Black 2's", await team_of("fod2"), TOD2)
+
+    print("\n# C2. A squad with no teams picks its games up when it is saved, not on the next sync")
+    async with Session() as db:
+        await db.execute(text("UPDATE fixtures SET team_id=:t WHERE id=:f"), {"t": T8, "f": ids["fod2"]})
+        await db.commit()
+    check("(set up) OD6 Black 2's game is back on the grade's squad", await team_of("fod2"), T8)
+    async with Session() as db:
+        n = await squad_sides.assign_fixtures(db, org, TOD2)
+        await db.commit()
+    check("assign_fixtures moves OD6 Black 2's game from the grade's squad", await team_of("fod2"), TOD2)
+    check("...and moved exactly that one", n, 1)
+    check("...the Women's game is still the grade's", await team_of("fod2w"), T8)
 
     print("\n# D. The name rule itself")
     async with Session() as db:
@@ -137,6 +160,16 @@ async def main():
     check("no XI number -> None", got("Applecross OD6 Black"), None)
     check("a number nobody carries -> None", got("Applecross 9th XI"), None)
     check("an inactive squad's number -> None", got("Applecross 12th XI"), None)
+    check("own name -> OD6 Black 2", got("Applecross OD6 Black 2"), str(TOD2))
+    check("own name, club name left off -> OD6 Black 2", got("OD6 Black 2"), str(TOD2))
+    check("own name, odd spacing and case -> OD6 Black 2", got("  applecross  od6   BLACK 2 "), str(TOD2))
+    check("a name only the end of which matches -> None", got("Applecross Women OD6 Black 2"), None)
+    async with Session() as db:
+        db.add(Team(id=TOD2B, organisation_id=org, name="Applecross OD6 Black 2", sequence=51))
+        await db.commit()
+        sides = await squad_sides.load(db, org)
+    check("two squads answering to one name -> None (the grade decides)",
+          getattr(sides.squad_for_team_name(grade, "Applecross OD6 Black 2"), "id", None), None)
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     await engine.dispose()

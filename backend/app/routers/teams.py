@@ -320,6 +320,10 @@ async def create_team(
     extra: dict = {}
     if body.sides:
         extra = await _apply_sides(db, club.id, t, body.sides, assign=True)
+    elif t.is_active:
+        # No teams picked: the squad's games are found by its name. Pick up the ones
+        # already synced, so the club does not wait for the next fixtures sync.
+        extra = {"fixtures_assigned": await squad_sides.assign_fixtures(db, club.id, t.id)}
     await player_audit.record(db, club_id=club.id, area="squads", action="squad_created",
                            summary=f"Squad {t.name} created", team_id=t.id, team_name_=t.name)
     await db.commit()
@@ -394,6 +398,9 @@ async def update_team(
     extra: dict = {}
     if sides_in is not None:
         extra = await _apply_sides(db, club.id, t, sides_in, assign)
+    elif assign and t.is_active and {"name", "short_name", "sequence", "is_active"} & set(data):
+        await db.flush()
+        extra = {"fixtures_assigned": await squad_sides.assign_fixtures(db, club.id, t.id)}
     changed = sorted(set(data) | ({"teams"} if sides_in is not None else set()))
     if changed:
         labels = {"name": "name", "short_name": "short name", "sequence": "order", "grade_id": "grade",
