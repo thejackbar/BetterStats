@@ -43,6 +43,7 @@ from _view_ddl import view_statements
 from app.models.db import Base
 from app.routers.records import get_records
 from app.services.competition_ddl import STATEMENTS as COMP_DDL
+from app.services.grade_name_index_ddl import STATEMENTS as GRADE_NAME_INDEX_DDL
 
 PASS = FAIL = 0
 FAILURES: list[str] = []
@@ -87,6 +88,10 @@ async def build_schema() -> None:
         await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         for stmt in COMP_DDL:
             await conn.execute(text(stmt))
+        # Migration 358. NO_INDEX=1 is the control: the schema as it was before.
+        if not os.environ.get("NO_INDEX"):
+            for stmt in GRADE_NAME_INDEX_DDL:
+                await conn.execute(text(stmt))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grade_merge_logs (
                 id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),
@@ -219,6 +224,7 @@ async def main() -> None:
     # same two queries (the grade filter reads merge logs and other grades inside them),
     # so each is run too and dumped for the old-vs-new comparison.
     variants = {"unfiltered": part}
+    variant_secs: dict[str, float] = {}
     async with Session() as session:
         await session.execute(text("SET enable_memoize = off"))
         season_id = (await session.execute(text(
@@ -232,7 +238,9 @@ async def main() -> None:
                         captain_only=False, gender=None, categories=None, formats=None,
                         competitions=None, debug_timing=False, viewer=None)
             args.update(kw)
+            t_variant = time.perf_counter()
             variants[label] = (await get_records(str(ORG), db=session, **args))["partnerships"]
+            variant_secs[label] = time.perf_counter() - t_variant
     check("a picked season still narrows the boards",
           variants["season"]["top_partnerships"] != part["top_partnerships"]
           or not part["top_partnerships"])
@@ -262,6 +270,27 @@ async def main() -> None:
           0 <= by_wicket_ms < limit, f"{by_wicket_ms:.0f} ms")
     check("nor does the best-per-grade board",
           0 <= by_grade_ms < limit, f"{by_grade_ms:.0f} ms")
+
+    # A picked grade adds a per-row "was it renamed" EXISTS to the same boards, and
+    # grades had no index on name: 32s here, 46s on a real long-history club. The
+    # index (migration 358) is what keeps it to the same fraction of a second.
+    print("\n-- a picked grade, and the index behind the lookup --")
+    for label in ("grade_name", "alias_grade_name"):
+        secs = variant_secs.get(label, -1)
+        print(f"  {label}: {secs:.1f} s")
+        check(f"a picked grade ({label}) comes back fast, not rows x grades",
+              0 <= secs < (10 ** 9 if os.environ.get("CONTROL") else 5), f"{secs:.1f} s")
+    async with Session() as session:
+        idx = (await session.execute(text(
+            "SELECT indexdef FROM pg_indexes WHERE tablename = 'grades' "
+            "AND indexname = 'ix_grades_name_override'"))).scalar()
+        check("the index exists and is partial on display_name_override",
+              bool(idx) and "display_name_override IS NOT NULL" in idx, str(idx))
+        # The shared list is run on every boot, so a second run must change nothing.
+        for stmt in GRADE_NAME_INDEX_DDL:
+            await session.execute(text(stmt))
+        await session.commit()
+        check("running the DDL again is a no-op", True)
 
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:

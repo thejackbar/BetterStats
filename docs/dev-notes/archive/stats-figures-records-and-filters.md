@@ -2590,3 +2590,15 @@ Reported by Kalamunda (21 Oct 2026), with a screenshot: Christopher Lewis, their
 **Not changed.** Records, yearbooks and StatLab family targets that build their own competition fragments instead of `GradeScope.clause` are not read for this; if one reads an import under All differently from the Leaderboard, that is the next suspect.
 
 **Proof.** `backend/verification/verify_competition_all_residuals.py` (18 checks, real Postgres, the shipped Leaderboard route body and `get_career_batting` on the Kalamunda book fixture with two competitions, a scorecard player in each and one in a grade with no competition). Control on the previous `grade_scope.py` and `summary_only_seasons.py`: the six checks that name All fail (Mark 1839, Tim 1187, Simon 74 and Pat 120 all absent) and the single-competition and stays-out checks pass. Stats by competition (136), junior residual scope (26), player grade filter (29), hide juniors (67), Club Room StatLab scope (10) and StatLab player filter (17) pass. Summary-only seasons has one failure, identical on the previous commit.
+
+## Picking a grade on Records and Partnerships took 30 to 45 seconds (v9.129.1.1)
+
+Reported by the owner (22 Oct 2026): Leaderboards, Records and Partnerships "taking forever to load, up to 45 seconds sometimes", on a box whose deploy build was also slow.
+
+**Found.** `grades` has no index on `name`. The "has the club renamed this grade" lookup (`gr2.name = X AND display_name_override IS NOT NULL`) therefore read every grade on the platform, once per row, in Records' `top_partnerships`, the picked-grade `_grade_match` EXISTS, the Leaderboard grade grid (`_GRID_GRADE_NAME_JOINS`), StatLab and competition stats. The v9.12x `_GRADE_NAMES_CTE` fix (rule 38c) only cut the row count for two boards; the lookup itself was still a scan, and every other copy was untouched.
+
+**Fix.** Migration 358 adds partial index `ix_grades_name_override`. No query text changed, so no figure changes. `deploy.sh` also stops forcing `--no-cache` (see the platform guide).
+
+**Measured** on the `verify_records_partnership_grade_names.py` database (~31,000 grades, 30,000 partnerships, 60 seasons): picked grade 32.7s to 0.7s, default view 2.7s to 1.5s, picked season and alias grade unchanged. The payload for all four variants is byte-identical before and after (`json` dump compared with `cmp`). Control (`NO_INDEX=1 REUSE=1`): the picked-grade check fails at 26.7s and the index-exists check fails.
+
+**Not measured.** The Leaderboard routes and the grid loader were NOT run at scale in this change (the seed has no innings). They use the same lookup shape and should gain, but check `python -m app.scripts.explain_leaderboard <org>` on the box before and after, and `?debug_timing=1` on Records.

@@ -4600,6 +4600,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _FOW_OVERRIDE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 358: the index behind the grade display-name lookup that Records,
+        # the Leaderboard grid and StatLab run per row. Same one-copy rule: this and
+        # alembic's 358 both run services/grade_name_index_ddl.STATEMENTS.
+        from app.services.grade_name_index_ddl import STATEMENTS as _GRADE_NAME_INDEX_DDL
+        for _stmt in _GRADE_NAME_INDEX_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 341: the club-chosen modules on a player's own page, and
         # BetterSelect Fines. Same one-copy rule: this and alembic's 341 both run
         # services/fines_ddl.STATEMENTS.

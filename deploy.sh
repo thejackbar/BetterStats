@@ -57,8 +57,20 @@ if docker compose config --services 2>/dev/null | grep -qx betterstats-backup-ag
   AGENT_SVC="betterstats-backup-agent"
 fi
 
-echo "==> [2/7] Rebuilding betterstats images (no cache)"
-docker compose build --no-cache betterstats-backend betterstats-frontend ${AGENT_SVC:+$AGENT_SVC}
+# Layer cache is ON by default. Docker keys each layer on the files it copies, so a changed
+# package-lock.json / requirements.txt / source file still rebuilds from that step down;
+# what a cached build skips is the unchanged `npm ci` (about 4 minutes on this box) and
+# the unchanged `apt-get install chromium` layer. The one thing the cache cannot see is a
+# newer apt package (chromium, tesseract), so run `FRESH=1 ./deploy.sh` now and then (about
+# monthly) to rebuild every layer from scratch.
+if [ "${FRESH:-}" = "1" ]; then
+  echo "==> [2/7] Rebuilding betterstats images (FRESH=1: no cache)"
+  BUILD_FLAGS="--no-cache"
+else
+  echo "==> [2/7] Rebuilding betterstats images (layer cache on; FRESH=1 to rebuild everything)"
+  BUILD_FLAGS=""
+fi
+docker compose build $BUILD_FLAGS betterstats-backend betterstats-frontend ${AGENT_SVC:+$AGENT_SVC}
 
 echo "==> [3/7] Recreating betterstats only (db + other services untouched)"
 # Why rm+up instead of `up --force-recreate`:
