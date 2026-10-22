@@ -8,6 +8,7 @@ import { Button, Badge, Note, TextArea, TONES } from '../../components/admin/ui'
 import {
   CHOICE_NAME, GROUPS, ChoiceControl, DifferenceTable, GroupBadge, fmtDate, matchPageUrl,
 } from '../../components/admin/cardReview/shared'
+import PairingFix from '../../components/admin/cardReview/PairingFix'
 import { FindLink, HistoryLink } from '../../components/admin/cardReview/MatchFilters'
 import { QUEUE_KEY } from './AdminCardReviewList'
 
@@ -214,7 +215,11 @@ export default function AdminCardReviewMatch() {
   if (error) return <BetterStatsLayout title="Card review"><Note toneKey="block">{error}</Note></BetterStatsLayout>
   if (!m) return <BetterStatsLayout title="Card review"><PbSpinner message="Opening both cards…" /></BetterStatsLayout>
 
-  const inconsistent = m.group === 'nocard'
+  // THE TWO CARDS ARE NOT KNOWN TO BE THE SAME MATCH. The comparison is skipped for them (so "the two
+  // cards agree on every figure" would be a lie), and choosing which card the site shows is
+  // meaningless until the pairing is right or someone says it is.
+  const mismatched = m.group === 'pairing'
+  const inconsistent = m.group === 'nocard' || mismatched
   const diffHeadline = m.items.length
     ? `${m.items.length} difference${m.items.length === 1 ? '' : 's'}: ${m.headline}${m.items.length > 1 ? ` and ${m.items.length - 1} more` : ''}.`
     : 'The two cards agree on every figure.'
@@ -243,14 +248,22 @@ export default function AdminCardReviewMatch() {
         </div>
       </div>
 
-      <div className="mb-4 rounded-lg px-3.5 py-3 text-[13px]" style={{ background: 'rgba(245,181,66,0.07)', border: '1px solid rgba(245,181,66,0.3)', color: '#f2d493' }} data-testid="diff-note">
+      {mismatched && (
+        <div className="mb-4 rounded-lg px-3.5 py-3 text-[13px]" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.35)', color: '#fca5a5' }} data-testid="pairing-warning">
+          <b>These two cards are probably not the same match.</b> Only {m.shared} of {Math.min(m.club_batters, m.ca_batters) || m.club_batters} batters
+          appear with the same score on both, so this club scorecard may be linked to the wrong Cricket Australia game. Fix the pairing first;
+          choosing which card to show is switched off until you do.
+          <PairingFix matchId={matchId} autoFind onChanged={load} onUnlinked={() => navigate('/admin/card-review/pairing')} />
+        </div>
+      )}
+      {!mismatched && <div className="mb-4 rounded-lg px-3.5 py-3 text-[13px]" style={{ background: 'rgba(245,181,66,0.07)', border: '1px solid rgba(245,181,66,0.3)', color: '#f2d493' }} data-testid="diff-note">
         <b>What differs:</b> {diffHeadline}
         {m.items.length > 1 && (
           <button type="button" className="ml-2 underline" onClick={() => setShowAll(s => !s)} data-testid="diff-toggle">{showAll ? 'Hide the list' : 'Show them all'}</button>
         )}
         {m.suggested && <> <b>Suggestion: {CHOICE_NAME[m.suggested]}.</b></>}
         {showAll && <div className="mt-3 rounded-lg border border-pb-hairline bg-pb-bg p-3 text-pb-dim"><DifferenceTable items={m.items} /></div>}
-      </div>
+      </div>}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card side="ca" m={m} />
@@ -258,14 +271,15 @@ export default function AdminCardReviewMatch() {
       </div>
 
       <h3 className="mt-6 mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-pb-faint">Choose what the site shows for this match</h3>
+      {mismatched && <p className="-mt-1 mb-3 text-[12.5px] text-pb-dim" data-testid="choices-off">Switched off while the two cards may be different matches. Fix the pairing above, or say it is right with "Looks right: keep the link".</p>}
       <div className="grid gap-3 lg:grid-cols-3" data-testid="choices">
         <Choice title="Cricket Australia scorecard" tone={TONES.ok.hex} active={m.current === 'ca'}>
           <p className="mt-1.5 text-[12.5px] text-pb-dim">Everything from Cricket Australia, including any numbers that differ from the club's. Use this if you think Cricket Australia is right.</p>
-          <div className="mt-3"><Button variant={m.current === 'ca' ? 'soft' : 'primary'} disabled={busy || m.current === 'ca'} onClick={() => choose('ca')} data-testid="choose-ca">Show this</Button></div>
+          <div className="mt-3"><Button variant={m.current === 'ca' ? 'soft' : 'primary'} disabled={busy || inconsistent || m.current === 'ca'} onClick={() => choose('ca')} data-testid="choose-ca">Show this</Button></div>
         </Choice>
         <Choice title="Club scorecard" tone={TONES.warn.hex} active={m.current === 'club'}>
           <p className="mt-1.5 text-[12.5px] text-pb-dim">The club's numbers only, as recorded: no opposition card and no bowler or fielder names beyond what the card already has.</p>
-          <div className="mt-3"><Button disabled={busy || m.current === 'club'} onClick={() => choose('club')} data-testid="choose-club">Show this</Button></div>
+          <div className="mt-3"><Button disabled={busy || inconsistent || m.current === 'club'} onClick={() => choose('club')} data-testid="choose-club">Show this</Button></div>
         </Choice>
         <div id="hybrid-choice">
           <Choice title="Club numbers with Cricket Australia detail" rec active={m.current === 'hybrid'}>
@@ -286,7 +300,7 @@ export default function AdminCardReviewMatch() {
                     : <p className="text-[12.5px] text-pb-dim">Nothing is left out.</p>}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="primary" disabled={busy || m.current === 'hybrid'} onClick={() => choose('hybrid')} data-testid="choose-hybrid">
+                  <Button variant="primary" disabled={busy || inconsistent || m.current === 'hybrid'} onClick={() => choose('hybrid')} data-testid="choose-hybrid">
                     {m.current === 'hybrid' ? 'Showing now' : 'Show this'}
                   </Button>
                   {m.current === 'hybrid' && <Button size="sm" disabled={busy} data-testid="refresh"
