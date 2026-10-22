@@ -533,3 +533,14 @@ Reported: Round 1 vs Hola Health WSCC 1st XI, a 3-2-1 medal. Dagg and Roach both
 - `award_weekly_points` already did countback; the medal was on 'share', the default. `VoteMedal.tie_policy` model default, its `effective_config` fallback and the column default are now 'countback'. Migration 352 sets the column default and moves every existing 'share' medal to 'countback' once (not in the lifespan mirror, which would overwrite a later choice on every boot). The old `VoteSettings` model is history and unchanged.
 - The football twin (`afl_vote_medals`, `services/afl/votes.py`) is not changed.
 - Checked by running the shipped `award_weekly_points` on the reported tallies: 'share' gives Edwards 3, Dagg 2, Roach 2 (the control, reproducing the report); 'countback' gives Edwards 3, Dagg 2, Roach 1; an exact tie after countback still shares. Not run against Postgres or in the browser: no dependencies are installed in this sandbox.
+
+## v9.129.4: player photos on the admin Votes screens
+
+Asked for: pull player photos into Votes and the places around it. Before this, the leaderboard, podium, awards night and game page drew initials only, because their payloads carried no `photo_url`. Only the "Still to vote" list did.
+
+- `services.votes.player_photos(db, org_id, ids)` returns `{player id: photo_url}` for players that have one (org scoped, empty string treated as none). `build_leaderboard` adds `photo_url` to each standing and to each `last_round.results` row. `fixture_detail` adds it to each result, to each ballot pick, and `voter_photo_url` to each ballot. A player with no photo gets `photo_url: null` with the key present.
+- Frontend: one shared `votes/VoteFace.jsx` (photo, falling back to initials when the URL is missing or fails to load). It is used on `PodiumCard`, the standings rows, the race legend, the last-round list, `AwardsNight` (leader at 112px, rows 36 to 48px) and `FixtureDetail` (count table, ballot voter and picks). It is not the BetterSelect `Avatar`, which links to the BetterSelect profile page and has no load-failure fallback.
+- Admin screens only. The public ballot keeps its own test (rule 35b: public and not privacy hidden).
+- Not changed: the football twin. `services/afl/votes.py` and `AflAdminVotes.jsx` have their own leaderboard code and still show initials. The ballot entry form's player selects are native selects, which cannot show an image.
+- Checked with `backend/scripts/verify_vote_photos.py` (22 checks against Postgres; the previous commit fails 15) and `frontend/verification/verify_vote_photos_browser.mjs` (17 checks in Chromium on the production build, with the previous frontend failing 9, including 390px). `verify_vote_medals.py` still passes 59.
+

@@ -5,7 +5,8 @@ import { Chip } from '../ui'
 import PodiumCard from './PodiumCard'
 import RaceChart from './RaceChart'
 import AwardsNight from './AwardsNight'
-import { initialsOf, seasonLabel } from './votesTokens'
+import VoteFace from './VoteFace'
+import { seasonLabel } from './votesTokens'
 
 const SERIES_COLOURS = ['var(--pb-accent)', 'var(--pb-positive)', 'var(--pb-amber)', '#a855f7', '#06b6d4']
 
@@ -49,6 +50,7 @@ export default function VotesLeaderboard({ medalId }) {
     return (board.standings || []).slice(0, 5).map((s, i) => ({
       player_id: s.player_id,
       name: s.name.split(' ').slice(-1)[0],
+      photo_url: s.photo_url,
       colour: SERIES_COLOURS[i],
       points: s.cumulative || [],
     }))
@@ -137,10 +139,7 @@ export default function VotesLeaderboard({ medalId }) {
                     </span>
                   </div>
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="w-[26px] h-[26px] rounded-full shrink-0 bg-pb-surface2 border pb-hairline2
-                                     text-pb-dim font-mono text-[9.5px] font-semibold flex items-center justify-center">
-                      {initialsOf(s.name)}
-                    </span>
+                    <VoteFace player={s} size={32} />
                     <span className="text-sm font-medium flex-1 min-w-0 truncate">{s.name}</span>
                     <span className="font-mono text-[9.5px] text-pb-faintest shrink-0">{s.grade_short || ''}</span>
                   </div>
@@ -165,7 +164,8 @@ export default function VotesLeaderboard({ medalId }) {
               <div className="flex flex-wrap gap-2.5 mt-3">
                 {series.map((s) => (
                   <span key={s.player_id} className="inline-flex items-center gap-1.5 text-xs text-pb-dim">
-                    <span className="w-2.5 h-[3px] rounded-sm" style={{ background: s.colour }} />{s.name}
+                    <span className="w-2.5 h-[3px] rounded-sm" style={{ background: s.colour }} />
+                    <VoteFace player={s} size={18} />{s.name}
                   </span>
                 ))}
               </div>
@@ -179,6 +179,7 @@ export default function VotesLeaderboard({ medalId }) {
                     <div key={r.player_id} className="flex items-center gap-2.5 py-1.5">
                       <span className="w-[22px] h-[22px] rounded-md flex items-center justify-center
                                        font-mono text-[11px] font-bold bg-pb-accent/15 text-pb-accent">{r.points}</span>
+                      <VoteFace player={r} size={24} />
                       <span className="text-[13.5px]">{r.name}</span>
                     </div>
                   ))}

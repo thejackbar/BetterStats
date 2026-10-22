@@ -17,6 +17,9 @@
 
 ## Standing rules
 
+**Public club navbar**
+0. `Navbar.jsx` shows the link row from `xl` (1280px) up and the hamburger below it: logo, seven links, search and two buttons do not fit sooner. The row has no scrollbar, and the search (`NavbarPlayerSearch`) is a magnifier that opens on focus until 1360px. A new bar item needs a width check at 1280, 1366 and 1920 (`nav.scrollWidth <= clientWidth`). The Player Dashboard and Admin buttons keep their `sm` tier (`verify_player_page_nav_browser.mjs`).
+
 **Teaser pulls**
 1. `marketing_clubs.grassroots_guid` is PlayHQ's search GUID (`playHQId`), not CA's `organisationGuid`; the seasons/participants APIs answer 204 to it. `LiveAPI.resolve_org` finds the club by name and accepts a hit only if its `playHQId` or `organisationGuid` equals the directory guid (two clubs can share a name). An unplaceable club is `empty` after that one call. The snapshot still keys on the directory guid (`org_guid`); `pull_club` calls `resolve_org` only if the API has it.
 2. A teaser is not the sync: one season only, nothing written to `organisations`, `players` or `games` (an unclaimed club must not reach the public site, sync scheduler or duplicate checks). A claim runs the normal sync and leaves the snapshot as history.

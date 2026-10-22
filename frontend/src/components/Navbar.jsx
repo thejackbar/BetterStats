@@ -179,7 +179,7 @@ export default function Navbar() {
   ] : [];
 
   const navItemClass = (isActive) =>
-    `relative px-3 py-1.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition flex items-center gap-0.5 ${
+    `relative px-2.5 py-1.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition flex items-center gap-0.5 ${
       isActive ? "text-pb-text" : "text-pb-faint hover:text-pb-dim"
     }`;
 
@@ -212,7 +212,10 @@ export default function Navbar() {
           </Link>
 
           {/* Desktop nav links — hidden on mobile */}
-          <nav className="hidden md:flex items-center gap-0 overflow-x-auto pb-scroll flex-1 min-w-0">
+          {/* Six or seven links, the search and two buttons need about 1280px. Narrower than
+              that the hamburger takes over, so the links never scroll sideways. The hidden
+              scrollbar is only a safety net for a club with long section names. */}
+          <nav className="hidden xl:flex items-center gap-0 overflow-x-auto flex-1 min-w-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {NAV.map((item) => {
               if (item.type === 'link') {
                 return (
@@ -261,7 +264,7 @@ export default function Navbar() {
           </nav>
 
           {/* Spacer pushes right-side controls to the edge on mobile */}
-          <div className="flex-1 md:hidden" />
+          <div className="flex-1 xl:hidden" />
 
           <NavbarPlayerSearch orgId={club?.id} club={club} />
           <ThemeToggle />
@@ -274,7 +277,8 @@ export default function Navbar() {
             <Link
               to={club.player_page_path}
               data-player-page-link
-              className="shrink-0 ml-2 hidden sm:inline-flex items-center font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-2.5 py-1.5"
+              style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}
+              className="shrink-0 ml-2 hidden sm:inline-flex items-center font-mono font-semibold text-[10px] tracking-wide2 rounded px-3 py-1.5 hover:opacity-90 transition-opacity"
               title="Your own dashboard: availability, stats, fees and Fantasy"
             >
               PLAYER DASHBOARD
@@ -305,10 +309,10 @@ export default function Navbar() {
           {customLogo && (
             <Link
               to="/"
-              className="hidden md:flex items-center gap-1.5 shrink-0 ml-3 group"
+              className="hidden xl:flex items-center gap-1.5 shrink-0 ml-3 group"
               title="Powered by BetterCricket"
             >
-              <span className="hidden sm:block text-pb-faint text-[9px] font-mono tracking-wide2 uppercase">
+              <span className="hidden min-[1500px]:block text-pb-faint text-[9px] font-mono tracking-wide2 uppercase">
                 Powered by
               </span>
               <BrandLogo className="w-6 h-6 object-contain opacity-75 group-hover:opacity-100 transition" />
@@ -319,7 +323,7 @@ export default function Navbar() {
           {slug && (
             <button
               type="button"
-              className="md:hidden ml-1 w-10 h-10 flex items-center justify-center rounded text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition"
+              className="xl:hidden ml-1 w-10 h-10 flex items-center justify-center rounded text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition"
               onClick={() => setMobileOpen(o => !o)}
               aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
               aria-expanded={mobileOpen}
@@ -337,7 +341,7 @@ export default function Navbar() {
 
       {/* Mobile menu panel */}
       {mobileOpen && slug && (
-        <div className="md:hidden border-t pb-hairline-t bg-pb-surface">
+        <div className="xl:hidden border-t pb-hairline-t bg-pb-surface">
           <div className="px-4 py-3 space-y-3">
             <NavbarPlayerSearch
               orgId={club?.id}

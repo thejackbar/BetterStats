@@ -31,9 +31,11 @@ const safe = async (label, fn) => { try { await fn() } catch (e) { check(`${labe
 const iso = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
 const inHours = (h) => new Date(Date.now() + h * 3600e3).toISOString()
 
-const state = { photo: '/photo-ok.svg', team: true, fantasy: true, canUpdate: true, detailsStatus: 200, patchStatus: 200 }
+const state = { photo: '/photo-ok.svg', team: true, fantasy: true, canUpdate: true, detailsStatus: 200, patchStatus: 200, noSelected: false }
 const DETAILS = { email: 'sam@dash.org', phone: '0400 000 001', address_line1: '', suburb: 'Applecross', state: 'WA', postcode: '6153', emergency_contact_name: '', emergency_contact_phone: '' }
 const patches = []
+const hits = { ranks: 0 }
+const RANKS = { season: 'Summer 26/27', ranks: { runs: { rank: 2, of: 42, value: 412 }, wickets: { rank: 7, of: 18, value: 9 } } }
 const PAYMENTS = Array.from({ length: 7 }, (_, i) => ({ date: iso(-10 - i * 20), amount: 40 + i, kind: i % 2 ? 'Match fees' : 'Membership', method: 'Cash', season: 'Summer 26/27' }))
 const player = () => ({ id: 'p1', display_name: 'Sam Sledge', photo_url: state.photo, shirt_number: '7', profile_path: '/players/p1' })
 const me = () => ({
@@ -47,10 +49,11 @@ const me = () => ({
 })
 const profile = () => ({
   club: {}, player: player(), can_update_details: state.canUpdate, squads: ['1sts'], squads_visible: true,
-  modules: state.fantasy ? ['fantasy', 'season', 'squad', 'fees', 'votes'] : ['season', 'squad', 'fees', 'votes'],
+  modules: state.fantasy ? ['fantasy', 'season', 'squad', 'selected', 'training', 'fees', 'votes'] : ['season', 'squad', 'selected', 'training', 'fees', 'votes'],
+  selected: state.noSelected ? [] : [{ fixture_id: 'f1', date: iso(5), start_time: '13:00', venue: 'Main Oval', opponent_name: 'Rovers', home_away: 'HOME', label: null, round: '4', team_name: '1sts', is_captain: true, is_wicket_keeper: false }],
   fees: { on_record: true, season: 'Summer 26/27', total_outstanding: 60, membership_outstanding: 60, match_fee_outstanding: 0, total_paid: 40, credit: 0, payments: PAYMENTS },
   votes: [{ medal: 'Dunslow Medal', fixture_id: 'f1', opponent: 'Rovers', round: 'Round 1', date: iso(-2), closes_on: iso(5), link: '/vote/vtok?fixture=f1&player=p1' }],
-  selected: [], training: { upcoming: [], attended_8_weeks: 0, last_attended: null }, votes_cast: [], fines: [],
+  training: { upcoming: [{ date: iso(2), label: 'Tuesday nets' }, { date: iso(9), label: 'Tuesday nets' }], attended_8_weeks: 5, last_attended: iso(-6) }, votes_cast: [], fines: [],
   season: {
     season: 'Summer 26/27', matches: 11, runs: 412, high_score: 87, batting_average: 51.5, wickets: 9, best_bowling: '4-22', catches: 6, auto_shown: false,
     batting: { innings: 10, not_outs: 2, strike_rate: 84.2, strike_rate_partial: true, fifties: 3, hundreds: 1, ducks: 1, fours: 40, sixes: 6 },
@@ -75,7 +78,7 @@ const run = async () => {
   const open = async (width, blockStorage = false, collapsed = false) => {
     const ctx = await browser.newContext({ viewport: { width, height: 900 } })
     // A returning player's page has sections open; a first visit has every one closed.
-    if (!collapsed) await ctx.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
+    if (!collapsed) await ctx.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ availability: true, selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
     const page = await ctx.newPage()
     page.setDefaultTimeout(6000)
     // Reads and writes of this page's own key fail (a full or locked-down store); the rest of the app is left alone.
@@ -96,6 +99,7 @@ const run = async () => {
       }
       return state.detailsStatus === 200 ? json(r, { details: DETAILS, pin_required: true }) : json(r, { detail: 'Updating your details needs the PIN switched on for this link. Ask your club.' }, state.detailsStatus)
     })
+    await page.route(/\/api\/public\/availability\/tok\/me\/ranks$/, (r) => { hits.ranks++; return json(r, { ranks: RANKS }) })
     await page.route(/\/api\/public\/availability\/tok\/me\/profile(\?.*)?$/, (r) => json(r, profile()))
     await page.route(/\/api\/public\/availability\/tok\/me(\?.*)?$/, (r) => {
       if (r.request().method() === 'POST') { posts.push(JSON.parse(r.request().postData())); return json(r, { status: 'ok' }) }
@@ -135,12 +139,12 @@ const run = async () => {
     console.log('\n── Answer without leaving ──')
     const { ctx, page } = await open(390)
     check('the editor is on the page, before the cards', (await page.locator('[data-availability]').count()) === 1)
-    check('the Selection header says what is waiting', /1 to answer/.test(await page.locator('[data-group="selection"] [data-group-summary]').innerText()))
+    check('the Availability header says what is waiting', /1 to answer/.test(await page.locator('[data-group="availability"] [data-group-summary]').innerText()))
     posts.length = 0
     await page.locator(`[data-date-card="${iso(5)}"] button`, { hasText: /^\S+\s+Available$/ }).click()
     await page.waitForTimeout(400)
     check('one tap sends one write with the date and status', posts.length === 1 && posts[0].date === iso(5) && posts[0].status === 'AVAILABLE', JSON.stringify(posts))
-    check('after the tap the Selection header', /All answered/.test(await page.locator('[data-group="selection"] [data-group-summary]').innerText()))
+    check('after the tap the Availability header stops saying "to answer"', !/to answer/.test(await page.locator('[data-group="availability"] [data-group-summary]').innerText()))
     await ctx.close()
   })
 
@@ -190,21 +194,112 @@ const run = async () => {
     state.fantasy = true
   })
 
+  await safe('hero selected', async () => {
+    console.log('\n── Selection up in the header card ──')
+    const { ctx, page } = await open(390)
+    const strip = page.locator('[data-hero] [data-hero-selected]')
+    const t = (await strip.innerText()).replace(/\s+/g, ' ')
+    check('once selected, the side is on the header card under the name', /1sts/.test(t) && /Tue/.test(t) && /vs Rovers/.test(t) && /1:00pm/.test(t) && /Captain/.test(t), t)
+    const [h, n] = [await strip.boundingBox(), await page.locator('[data-hero-name]').boundingBox()]
+    check('...close under the name, above the buttons', h.y > n.y && h.y - n.y < 80, JSON.stringify([h, n]))
+    check('it is there with every section closed or open (not inside a section)', (await page.locator('[data-group] [data-hero-selected]').count()) === 0)
+    check('the Selection section keeps squad, training and the longer list', (await page.locator('[data-group="selection"] [data-glance-row="training"]').count()) === 1)
+    check('and Availability is a section of its own with the answer buttons', (await page.locator('[data-group="availability"] [data-date-card]').count()) >= 1 && (await page.locator('[data-group="selection"] [data-date-card]').count()) === 0)
+    check('the Availability header and the Selection header each say their own thing', /to answer|All answered/.test(await page.locator('[data-group="availability"] [data-group-summary]').innerText()) && /Selected/.test(await page.locator('[data-group="selection"] [data-group-summary]').innerText()))
+    await page.screenshot({ path: `${SHOT}/hero-selected-390.png` })
+    await ctx.close()
+    state.noSelected = true
+    const none = await open(390)
+    check('not selected yet: nothing on the header card, and Selection says so', (await none.page.locator('[data-hero-selected]').count()) === 0 && /Not selected yet/.test(await none.page.locator('[data-group="selection"] [data-group-summary]').innerText()))
+    await none.ctx.close()
+    state.noSelected = false
+  })
+
+  await safe('ranks', async () => {
+    console.log('\n── Season rankings ──')
+    hits.ranks = 0
+    const closed = await open(390, false, true)
+    await closed.page.waitForTimeout(500)
+    check('while Stats is closed the rankings are not asked for (they read the club\'s leaderboards)', hits.ranks === 0, String(hits.ranks))
+    await closed.page.locator('[data-group-toggle="stats"]').click()
+    await closed.page.locator('[data-season-panel="ranks"]').waitFor()
+    check('opening Stats asks once', hits.ranks === 1, String(hits.ranks))
+    const t = (await closed.page.locator('[data-season-panel="ranks"]').innerText()).replace(/\s+/g, ' ')
+    check('runs and wickets show the place and the field', /2nd/.test(t) && /Runs/i.test(t) && /of 42/.test(t) && /7th/.test(t) && /Wickets/i.test(t) && /of 18/.test(t), t)
+    check('catches, which they have none of, are not shown as last', !/catches/i.test(t))
+    check('the rank block sits above Batting', (await closed.page.locator('[data-season-panel="ranks"]').boundingBox()).y < (await closed.page.locator('[data-season-panel="batting"]').boundingBox()).y)
+    await closed.page.locator('[data-group-toggle="stats"]').click()
+    await closed.page.locator('[data-group-toggle="stats"]').click()
+    check('closing and reopening does not ask again', hits.ranks === 1, String(hits.ranks))
+    check('390px: no sideways overflow', (await overflow(closed.page)) <= 0)
+    await closed.page.locator('[data-group="stats"]').screenshot({ path: `${SHOT}/stats-ranks-390.png` })
+    await closed.ctx.close()
+  })
+
+  await safe('selected in the header', async () => {
+    console.log('\n── Selected shows in the date header ──')
+    const { ctx, page } = await open(390)
+    const card = page.locator(`[data-date-card="${iso(5)}"]`)
+    const chip = card.locator('[data-selected-chip]')
+    check('the date the player is picked on has a Selected chip in its header', (await chip.count()) === 1 && /1sts/.test(await chip.innerText()), await chip.innerText().catch(() => ''))
+    const chipBox = await chip.boundingBox(), dayBox = await card.locator('.font-display').first().boundingBox()
+    check('...in the header bar, level with the day, not down by the buttons', Math.abs(chipBox.y - dayBox.y) < 30, JSON.stringify([chipBox, dayBox]))
+    const line = (await card.locator('[data-selected-line]').innerText()).replace(/\s+/g, ' ')
+    check('one line under the day: time, opponent, captain', /1:00pm vs Rovers/.test(line) && /Captain/.test(line), line)
+    check('a date with no selection has none of this', (await page.locator(`[data-date-card="${iso(12)}"] [data-selected-chip], [data-date-card="${iso(12)}"] [data-selected-line]`).count()) === 0)
+    check('it is on screen with the games folded', await chip.isVisible() && (await card.getAttribute('data-fixtures-open')) === 'no')
+    await card.locator('[data-fixtures-toggle]').click()
+    check('opened, the game itself is tagged Selected', /selected/i.test(await card.locator('[data-fixture]').first().innerText()))
+    check('the answer buttons are still right under the header', await card.locator('button', { hasText: 'Available' }).first().isVisible())
+    await page.screenshot({ path: `${SHOT}/selected-header-390.png` })
+    await ctx.close()
+  })
+
+  await safe('glance', async () => {
+    console.log('\n── Selection facts in one block ──')
+    const { ctx, page } = await open(390)
+    const rows = await page.locator('[data-glance-row]').evaluateAll((els) => els.map((e) => e.getAttribute('data-glance-row')))
+    check('selected and training are rows of one block, no cards of their own', JSON.stringify(rows) === JSON.stringify(['selected', 'training']), JSON.stringify(rows))
+    check('the squad is not repeated: it is already under the name', (await page.locator('[data-glance-row="squad"]').count()) === 0)
+    const sel = (await page.locator('[data-glance-row="selected"]').innerText()).replace(/\s+/g, ' ')
+    check('Selected is one short line per side', /1sts vs Rovers/.test(sel) && /Captain/.test(sel), sel)
+    const tr = (await page.locator('[data-glance-row="training"]').innerText()).replace(/\s+/g, ' ')
+    check('Training: the next session, how many more, and how often they came', /Tuesday nets/.test(tr) && /\+1 more/.test(tr) && /5 sessions in the last eight weeks/.test(tr), tr)
+    const h = (await page.locator('[data-group="selection"] section[class*="border-t"]').last().boundingBox()).height
+    check('the whole block is compact (three rows, not three cards)', h < 190, String(h))
+    await ctx.close()
+  })
+
+  await safe('stats clean', async () => {
+    console.log('\n── Stats ──')
+    const { ctx, page } = await open(390)
+    const bat = await page.locator('[data-season-panel="batting"]').boundingBox()
+    check('a discipline is two short rows of figures', bat.height < 125, String(bat.height))
+    const tiles = await page.locator('[data-season-panel] [class*="bg-pb-surface2"], [data-season-panel] [style*="surface2"]').count()
+    check('the figures are not each in a box of their own', tiles <= 4, String(tiles))
+    const stats = await page.locator('[data-group="stats"]').boundingBox()
+    check('the whole Stats section, rank block included, is still shorter than it was before the tidy (about 780px on a phone)', stats.height < 780, String(stats.height))
+    check('the fielding line is one line of words', /6 catches/.test(await page.locator('[data-season-panel="fielding"]').innerText()) && (await page.locator('[data-season-panel="fielding"]').boundingBox()).height < 60)
+    check('the dagger is explained once, in the foot note', (await page.locator('[data-group="stats"]').innerText()).match(/†/g).length === 2)
+    await page.locator('[data-group="stats"]').screenshot({ path: `${SHOT}/stats-390.png` })
+    await ctx.close()
+  })
+
   await safe('collapsed', async () => {
     console.log('\n── First visit: everything starts closed ──')
     const { ctx, page } = await open(390, false, true)
     const states = await page.evaluate(() => [...document.querySelectorAll('[data-group]')].map((e) => e.getAttribute('data-open')))
-    check('all five sections are closed', states.length === 5 && states.every((x) => x === 'no'), JSON.stringify(states))
+    check('all six sections are closed', states.length === 6 && states.every((x) => x === 'no'), JSON.stringify(states))
     check('no section content is on screen', (await page.locator('[data-date-card]:visible, [data-season-panel]:visible, [data-fee-payment]:visible, [data-vote-due]:visible, [data-fantasy]:visible').count()) === 0)
     const sums = await page.locator('[data-group-summary]').allInnerTexts()
-    check('every header still says its line (to answer, owing, votes, season, lock)', sums.length === 5 && sums.every((x) => x.trim().length > 0), JSON.stringify(sums))
+    check('every header still says its line (to answer, selected, owing, votes, season, lock)', sums.length === 6 && sums.every((x) => x.trim().length > 0), JSON.stringify(sums))
     check('the button above them offers Expand all', /Expand all/.test(await page.locator('[data-toggle-all]').innerText()))
     const h = await page.evaluate(() => document.documentElement.scrollHeight)
     check('the whole page is short enough to see without much scrolling', h < 1000, String(h))
-    await page.locator('[data-group-toggle="selection"]').click()
-    check('opening Selection shows the answer buttons', await page.locator('[data-date-card] button:visible', { hasText: 'Available' }).first().isVisible())
+    await page.locator('[data-group-toggle="availability"]').click()
+    check('opening Availability shows the answer buttons', await page.locator('[data-date-card] button:visible', { hasText: 'Available' }).first().isVisible())
     await page.reload(); await page.locator('[data-groups]').waitFor()
-    check('and the choice is remembered for next time', (await page.locator('[data-group-toggle="selection"]').getAttribute('aria-expanded')) === 'true' && (await page.locator('[data-group][data-open="yes"]').count()) === 1)
+    check('and the choice is remembered for next time', (await page.locator('[data-group-toggle="availability"]').getAttribute('aria-expanded')) === 'true' && (await page.locator('[data-group][data-open="yes"]').count()) === 1)
     await page.screenshot({ path: `${SHOT}/player-page-collapsed-390.png`, fullPage: true })
     await ctx.close()
   })
@@ -306,8 +401,8 @@ const run = async () => {
     console.log('\n── Sections ──')
     const { ctx, page } = await open(390)
     const ids = await page.evaluate(() => [...document.querySelectorAll('[data-groups] > [data-group]')].map((e) => e.getAttribute('data-group')))
-    check('Selection, Club admin, Voting, Stats, Fantasy, in that order', JSON.stringify(ids) === JSON.stringify(['selection', 'admin', 'voting', 'stats', 'fantasy']), JSON.stringify(ids))
-    check('each module is in its own section', (await page.locator('[data-group="selection"] [data-availability]').count()) === 1
+    check('Availability, Selection, Club admin, Voting, Stats, Fantasy, in that order', JSON.stringify(ids) === JSON.stringify(['availability', 'selection', 'admin', 'voting', 'stats', 'fantasy']), JSON.stringify(ids))
+    check('each module is in its own section', (await page.locator('[data-group="availability"] [data-availability]').count()) === 1
       && (await page.locator('[data-group="admin"] [data-fee-payments]').count()) === 1
       && (await page.locator('[data-group="voting"] [data-vote-due]').count()) === 1
       && (await page.locator('[data-group="stats"] [data-season-panel="batting"]').count()) === 1
@@ -323,24 +418,24 @@ const run = async () => {
     check('its one-line summary stays on the closed header', await page.locator('[data-group="stats"] [data-group-summary]').isVisible())
     await page.reload(); await page.locator('[data-groups]').waitFor()
     check('the choice is remembered after a reload', (await page.locator('[data-group-toggle="stats"]').getAttribute('aria-expanded')) === 'false')
-    check('other sections are untouched', (await page.locator('[data-group-toggle="selection"]').getAttribute('aria-expanded')) === 'true')
+    check('other sections are untouched', (await page.locator('[data-group-toggle="availability"]').getAttribute('aria-expanded')) === 'true')
     await page.locator('[data-group-toggle="stats"]').click()
     check('and it opens again', await page.locator('[data-season-panel="batting"]').isVisible())
     await page.locator('[data-toggle-all]').click()
     const states = await page.evaluate(() => [...document.querySelectorAll('[data-group]')].map((e) => e.getAttribute('data-open')))
     check('Collapse all closes every section', states.every((x) => x === 'no') && /Expand all/.test(await page.locator('[data-toggle-all]').innerText()), JSON.stringify(states))
-    check('a closed Selection still shows its summary', (await page.locator('[data-group="selection"] [data-group-summary]').innerText()).length > 0)
+    check('a closed Availability still shows its summary', (await page.locator('[data-group="availability"] [data-group-summary]').innerText()).length > 0)
     await page.locator('[data-toggle-all]').click()
-    check('Expand all opens them again', (await page.locator('[data-group][data-open="yes"]').count()) === 5)
+    check('Expand all opens them again', (await page.locator('[data-group][data-open="yes"]').count()) === 6)
     // closing keeps the answer editor mounted: the open list of weeks survives
     await page.locator('[data-see-more]').click()
     const cardsBefore = await page.locator('[data-date-card]').count()
-    await page.locator('[data-group-toggle="selection"]').click()
-    await page.locator('[data-group-toggle="selection"]').click()
-    check('closing and reopening Selection keeps the weeks you had opened', (await page.locator('[data-date-card]').count()) === cardsBefore && cardsBefore === 2, String(cardsBefore))
+    await page.locator('[data-group-toggle="availability"]').click()
+    await page.locator('[data-group-toggle="availability"]').click()
+    check('closing and reopening Availability keeps the weeks you had opened', (await page.locator('[data-date-card]').count()) === cardsBefore && cardsBefore === 2, String(cardsBefore))
     await ctx.close()
     const blocked = await open(390, true)
-    check('with the page storage blocked it still draws, every section closed', (await blocked.page.locator('[data-group][data-open="no"]').count()) === 5)
+    check('with the page storage blocked it still draws, every section closed', (await blocked.page.locator('[data-group][data-open="no"]').count()) === 6)
     await blocked.page.locator('[data-group-toggle="stats"]').click()
     check('and sections still open for the visit', (await blocked.page.locator('[data-group-toggle="stats"]').getAttribute('aria-expanded')) === 'true')
     await blocked.ctx.close()
@@ -362,16 +457,16 @@ const run = async () => {
   await safe('layout', async () => {
     console.log('\n── Layout ──')
     const wide = await open(1280)
-    const sel = await wide.page.locator('[data-group="selection"]').boundingBox()
+    const sel = await wide.page.locator('[data-group="availability"]').boundingBox()
     const stats = await wide.page.locator('[data-group="stats"]').boundingBox()
-    check('wide: Selection is the left column, the rest sit to its right', sel.x + sel.width <= stats.x + 1, JSON.stringify([sel, stats]))
+    check('wide: Availability is the left column, the rest sit to its right', sel.x + sel.width <= stats.x + 1, JSON.stringify([sel, stats]))
     check('1280px: no sideways overflow', (await overflow(wide.page)) <= 0, String(await overflow(wide.page)))
     await wide.page.screenshot({ path: `${SHOT}/player-page-1280.png`, fullPage: true })
     await wide.ctx.close()
     const phone = await open(390)
     check('390px: no sideways overflow', (await overflow(phone.page)) <= 0, String(await overflow(phone.page)))
-    const order = await phone.page.evaluate(() => ['[data-hero]', '[data-group="selection"]', '[data-group="stats"]'].map((s) => document.querySelector(s).getBoundingClientRect().top))
-    check('on a phone: who you are, then Selection, then the rest', order[0] < order[1] && order[1] < order[2], JSON.stringify(order))
+    const order = await phone.page.evaluate(() => ['[data-hero]', '[data-group="availability"]', '[data-group="stats"]'].map((s) => document.querySelector(s).getBoundingClientRect().top))
+    check('on a phone: who you are, then Availability, then the rest', order[0] < order[1] && order[1] < order[2], JSON.stringify(order))
     await phone.page.screenshot({ path: `${SHOT}/player-page-390.png`, fullPage: true })
     await phone.ctx.close()
   })

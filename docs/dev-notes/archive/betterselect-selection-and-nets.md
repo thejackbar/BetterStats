@@ -1822,3 +1822,32 @@ Asked for: after v9.129.3 the OD6 Black 2 squad had its games (sync matched 11),
 Fix: `GET /teams` carries `matched_grades` (`_matched_grades`): the grade names of the squad's upcoming, non-cancelled games, only for a squad with no grade or teams of its own. The header shows them with "by team name" and keeps the amber "No grade linked" only when a squad has neither. The squad is deliberately not linked to the grade: a grade belongs to one squad, so linking would take it from the 8th XI.
 
 Check: `verify_shared_grade_squads.py` section E (29 checks; the control without the field fails both E checks).
+
+## Whiteboard: changing a locked side (v9.129.7)
+
+Asked for: on the Selection Whiteboard a locked side was hard to move players in and out of. The board ignored the lock, so a drag appeared to work and the autosave was then refused (409 `locked`) and the column showed "Not saving".
+
+Fix: the whiteboard knows each column's `locked` (from `data.fixture.locked`; a locked side shows its confirmed XI and ignores any draft, as the board does). Every edit (drop, remove, swap, tap from the pool, captain, keeper) goes through `guarded(fids, apply)`: if a side involved is locked it asks `window.confirm("<team> is locked. Are you sure you want to change it?")`, applies the change, then sends the existing `POST /selection/{id}/unlock` (audited as `unlocked`) and only then lets autosave run. Autosave skips a locked column. A failed unlock reloads the column. A 409 `locked` on a draft save (locked by someone else since load) re-marks the column locked and keeps the change on the board; the next edit asks. Confirm still locks (`lock: true`). No backend change.
+
+Not done: an unlocked side that ends up unchanged (a move undone) stays unlocked until it is confirmed or locked from the board.
+
+Check: `frontend/verification/verify_whiteboard_locked_browser.mjs` (33 checks; the control on the previous build fails 18 of them: no prompt, the draft goes to a locked side and is refused). `verify_draft_table_browser.mjs` and `verify_two_day_whiteboard_browser.mjs` still pass.
+
+## Selected in the date header, tidier Selection and Stats (v9.129.5)
+
+Asked for (Oct 2026, from an Applecross screenshot of five date cards and a long two-day card): when selected in a team, put it in the header bar; show the page's information more concisely; stats a little cleaner.
+
+Done: the date a locked side is on carries a Selected chip and one summary line (`fixture_id` added to the selected payload); the two-day card became one row; Squad, Selected and Training became one block of short rows; the season panels dropped their per-figure boxes. The team name in the chip is kept in the club's own case.
+
+Checks: the dashboard browser script (110) and backend section K; the two-day script's summary wording changed with the new compact status line.
+
+## Availability and Selection split, selection in the header, season rankings (v9.129.6)
+
+Asked for: availability and selection should be two different things, with selection up in the header card once selected; then season rankings for runs, wickets, catches and so on.
+
+Done: a separate Availability section; the Selection section keeps squad, training, ladder and the list of sides; the header card shows up to two locked sides. Rankings are a lazy route fed by the club's own leaderboards, with a two minute cache; a figure the player has nothing on is omitted.
+
+Not done, on purpose: rankings for averages, strike rate or economy (they need minimums, and the club's qualification setting would have to be applied), and a rank for a past season. "And so on" can add fifties or sixes by adding a row to `RANK_KINDS` and a label on the page.
+
+Checks: backend 129 (section L, control fails 12 without crashing), browser 124.
+

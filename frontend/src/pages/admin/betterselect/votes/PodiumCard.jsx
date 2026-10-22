@@ -1,4 +1,4 @@
-import { initialsOf } from './votesTokens'
+import VoteFace from './VoteFace'
 
 // Gold / silver / bronze come from the existing token family: amber is
 // --pb-amber, silver is --pb-dim, bronze is a single warm hex. No new
@@ -28,11 +28,7 @@ export default function PodiumCard({ standing, index, ballotValues = [3, 2, 1] }
       </div>
 
       <div className="flex items-end gap-3 mt-3.5">
-        <span className="w-11 h-11 rounded-full flex items-center justify-center shrink-0
-                         bg-pb-surface2 font-mono text-sm font-bold"
-          style={{ border: `1.5px solid ${border}`, color: p.accent }}>
-          {initialsOf(standing.name)}
-        </span>
+        <VoteFace player={standing} size={52} accent={p.accent} />
         <div className="min-w-0">
           <div className="text-[19px] font-bold tracking-tight truncate">{standing.name}</div>
           <div className="text-xs text-pb-faint">{standing.grade || 'Club'}</div>

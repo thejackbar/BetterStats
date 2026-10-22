@@ -1060,6 +1060,7 @@ async def get_records(
             p2.id::text AS batter2_id,
             COALESCE(p2.display_name_override, p2.name) AS batter2_name,
             pt.runs, pt.wicket_number,
+            pt.game_id::text AS game_id,
             g.played_at::text,
             COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
             s.name AS season_name,
@@ -1101,6 +1102,7 @@ async def get_records(
                 p2.id::text AS batter2_id,
                 COALESCE(p2.display_name_override, p2.name) AS batter2_name,
                 pt.runs, pt.wicket_number,
+                pt.game_id::text AS game_id,
                 g.played_at::text AS played_at,
                 gr.id AS grade_id, gr.name AS grade_raw,
                 s.name AS season_name,
@@ -1118,7 +1120,7 @@ async def get_records(
         ), {_GRADE_NAMES_CTE}
         SELECT
             b.batter1_id, b.batter1_name, b.batter2_id, b.batter2_name,
-            b.runs, b.wicket_number, b.played_at,
+            b.runs, b.wicket_number, b.game_id, b.played_at,
             n.grade_name, b.season_name, b.season_year,
             false AS is_manual,
             ROW_NUMBER() OVER (PARTITION BY b.wicket_number ORDER BY b.runs DESC) AS rn
@@ -1145,6 +1147,7 @@ async def get_records(
                 p2.id::text AS batter2_id,
                 COALESCE(p2.display_name_override, p2.name) AS batter2_name,
                 pt.runs,
+                pt.game_id::text AS game_id,
                 g.played_at::text AS played_at,
                 EXTRACT(YEAR FROM g.played_at)::int AS season_year
             FROM v_effective_partnerships pt
@@ -1163,7 +1166,7 @@ async def get_records(
                 b.season_name,
                 b.wicket_number,
                 b.batter1_id, b.batter1_name, b.batter2_id, b.batter2_name,
-                b.runs, b.played_at, b.season_year,
+                b.runs, b.game_id, b.played_at, b.season_year,
                 ROW_NUMBER() OVER (
                     PARTITION BY n.grade_name, b.wicket_number
                     ORDER BY b.runs DESC
@@ -1585,6 +1588,9 @@ async def get_records(
             "player2_name":  r.get("batter2_name"),
             "runs":          r.get("runs"),
             "wicket_number": r.get("wicket_number"),
+            # The match the stand was made in, so a row can open its scorecard. None for a hand-typed
+            # record (manual_partnership_records), which names no match.
+            "game_id":       r.get("game_id"),
             "grade_name":    r.get("grade_name"),
             "season_name":   r.get("season_name") or (str(r["season_year"]) if r.get("season_year") else None),
             "is_manual":     r.get("is_manual", False),
@@ -1607,6 +1613,7 @@ async def get_records(
             "player2_name":  mr.get("batter2_name"),
             "runs":          mr.get("runs"),
             "wicket_number": mr.get("wicket_number"),
+            "game_id":       None,   # a hand-typed record names no match
             "grade_name":    mr.get("grade_name"),
             "season_name":   str(mr["season_year"]) if mr.get("season_year") else None,
             "is_manual":     True,

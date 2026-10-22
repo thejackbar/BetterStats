@@ -108,63 +108,66 @@ function VotesModule({ data }) {
   )
 }
 
-function SquadModule({ data }) {
+// The three small Selection facts (squad, the side you are picked in, training) as
+// one block of short rows instead of three cards. The squad row only speaks when
+// there is something to explain: your squads are already under your name at the top.
+function GlanceRow({ id, label, children }) {
   return (
-    <Section title="Your squad">
-      {!data.squads_visible
-        ? <Muted>Your club has not turned on squad names for this page.</Muted>
-        : data.squads.length
-        ? <div className="flex flex-wrap gap-1.5">{data.squads.map((n) => <span key={n} className="text-[13px] font-semibold rounded-full px-3 py-1" style={{ background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)', color: 'var(--pb-accent)' }}>{n}</span>)}</div>
-        : <Muted>You are not in a squad yet. Your club will add you.</Muted>}
-    </Section>
+    <div className="flex gap-3 py-1.5 text-[13px]" data-glance-row={id}>
+      <div className="w-[74px] shrink-0 font-mono text-[10px] uppercase tracking-wide2 text-pb-faint pt-[3px]">{label}</div>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
   )
 }
 
-function SelectedModule({ data }) {
+function SelectionGlance({ data, modules }) {
+  const has = (k) => modules.includes(k)
   const selected = data.selected || []
-  return (
-    <Section title="Selected">
-      {selected.length === 0
-        ? <Muted data-no-selection>Nothing yet. Sides show here once your selectors have locked them in.</Muted>
-        : (
-          <div className="flex flex-col gap-2.5">
-            {selected.map((s) => (
-              <div key={`${s.date}-${s.opponent_name}`} className="rounded-lg px-3 py-2.5" style={{ background: 'color-mix(in srgb, var(--pb-positive) 10%, transparent)' }}>
-                <div className="font-display font-bold text-[15px]">
-                  {fmtShort(s.date)}{s.team_name ? ` · ${s.team_name}` : ''}
-                </div>
-                <div className="text-[13px] text-pb-dim">
-                  {s.home_away === 'AWAY' ? '@ ' : 'vs '}{s.opponent_name || s.label || 'TBC'}{s.start_time ? ` · ${s.start_time}` : ''}{s.venue ? ` · ${s.venue}` : ''}
-                </div>
-                {(s.is_captain || s.is_wicket_keeper) && (
-                  <div className="text-[12px] font-semibold mt-0.5" style={{ color: 'var(--pb-accent)' }}>
-                    {[s.is_captain && 'Captain', s.is_wicket_keeper && 'Keeper'].filter(Boolean).join(' and ')}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-    </Section>
-  )
-}
-
-function TrainingModule({ data }) {
   const t = data.training || { upcoming: [], attended_8_weeks: 0 }
+  const squadNote = !data.squads_visible
+    ? 'Your club has not turned on squad names for this page.'
+    : (data.squads || []).length === 0 ? 'You are not in a squad yet. Your club will add you.' : null
+  const side = (s) => [
+    fmtShort(s.date),
+    `${s.team_name ? `${s.team_name} ` : ''}${s.home_away === 'AWAY' ? 'at' : 'vs'} ${s.opponent_name || s.label || 'TBC'}`,
+    s.start_time || null,
+  ].filter(Boolean).join(' · ')
   return (
-    <Section title="Training">
-      {t.upcoming.length === 0
-        ? <Muted>No nets listed for you yet.</Muted>
-        : t.upcoming.map((n) => (
-          <div key={`${n.date}-${n.label}`} className="flex justify-between gap-3 text-sm py-0.5">
-            <span>{fmtShort(n.date)}</span><span className="text-pb-dim truncate">{n.label || 'Nets'}</span>
+    <Section title="At a glance">
+      {has('squad') && squadNote && <GlanceRow id="squad" label="Squad"><span className="text-pb-faint">{squadNote}</span></GlanceRow>}
+      {has('selected') && (
+        <GlanceRow id="selected" label="Selected">
+          {selected.length === 0
+            ? <span className="text-pb-faint" data-no-selection>Not selected yet. Sides show once your selectors lock them.</span>
+            : (
+              <div className="flex flex-col gap-0.5">
+                {selected.slice(0, 3).map((s) => (
+                  <div key={s.fixture_id || `${s.date}-${s.opponent_name}`} data-selected-side>
+                    {side(s)}
+                    {(s.is_captain || s.is_wicket_keeper) && (
+                      <span className="font-semibold" style={{ color: 'var(--pb-accent)' }}>
+                        {' · '}{[s.is_captain && 'Captain', s.is_wicket_keeper && 'Keeper'].filter(Boolean).join(' and ')}
+                      </span>
+                    )}
+                  </div>
+                ))}
+                {selected.length > 3 && <span className="text-pb-faint">+{selected.length - 3} more</span>}
+              </div>
+            )}
+        </GlanceRow>
+      )}
+      {has('training') && (
+        <GlanceRow id="training" label="Training">
+          {t.upcoming.length === 0
+            ? <span className="text-pb-faint">No nets listed for you yet.</span>
+            : <div>{fmtShort(t.upcoming[0].date)} · {t.upcoming[0].label || 'Nets'}{t.upcoming.length > 1 ? <span className="text-pb-faint"> · +{t.upcoming.length - 1} more</span> : null}</div>}
+          <div className="text-[12px] text-pb-faint">
+            {t.attended_8_weeks > 0
+              ? `${t.attended_8_weeks} session${t.attended_8_weeks === 1 ? '' : 's'} in the last eight weeks${t.last_attended ? `, last ${fmtShort(t.last_attended)}` : ''}`
+              : 'None in the last eight weeks'}
           </div>
-        ))}
-      <div className="text-[12.5px] text-pb-faint mt-2">
-        {t.attended_8_weeks > 0
-          ? `You were at ${t.attended_8_weeks} session${t.attended_8_weeks === 1 ? '' : 's'} in the last eight weeks${t.last_attended ? `, most recently ${fmtShort(t.last_attended)}` : ''}.`
-          : 'No nets recorded for you in the last eight weeks.'}
-      </div>
+        </GlanceRow>
+      )}
     </Section>
   )
 }
@@ -340,8 +343,9 @@ function FinesModule({ data }) {
 
 // The sections of the page, in the order a player reads them. Each holds the club's
 // modules that belong to it, in the club's own order; a section with none drops out.
-// Selection always shows, because the answer buttons are in it.
+// Availability always shows, because the answer buttons are in it.
 const GROUPS = [
+  { id: 'availability', title: 'Availability', keys: [] },
   { id: 'selection', title: 'Selection', keys: ['squad', 'selected', 'training', 'ladder'] },
   { id: 'admin', title: 'Club admin', keys: ['fees', 'fines'] },
   { id: 'voting', title: 'Voting', keys: ['votes'], hideTitle: true },
@@ -349,20 +353,26 @@ const GROUPS = [
   { id: 'fantasy', title: 'Fantasy', keys: ['fantasy'], hideTitle: true },
 ]
 
+// The Selection modules drawn together as one block of short rows.
+const GLANCE = ['squad', 'selected', 'training']
+
 const AMBER = 'var(--pb-amber)'
 const GREEN = 'var(--pb-positive)'
 
 // One line per section, from data the page already holds, shown even when the
 // section is closed. Left empty rather than made up when there is nothing true to say.
 function summaryFor(id, { me, data, ladder }) {
-  if (id === 'selection') {
+  if (id === 'availability') {
     const n = unansweredNextWeek(me)
     if (n > 0) return { text: `${n} to answer`, tone: AMBER }
-    const side = (data?.selected || [])[0]
-    if (side) return { text: `Selected ${fmtShort(side.date)} ${side.home_away === 'AWAY' ? 'at' : 'vs'} ${side.opponent_name || side.label || 'TBC'}` }
     return (me.dates || []).length ? { text: 'All answered', tone: GREEN } : { text: 'No games to answer yet' }
   }
   if (!data) return {}
+  if (id === 'selection') {
+    const side = (data.selected || [])[0]
+    if (side) return { text: `Selected ${fmtShort(side.date)} ${side.home_away === 'AWAY' ? 'at' : 'vs'} ${side.opponent_name || side.label || 'TBC'}`, tone: GREEN }
+    return (data.modules || []).includes('selected') ? { text: 'Not selected yet' } : {}
+  }
   if (id === 'admin') {
     const fees = data.fees?.on_record ? data.fees.total_outstanding : null
     const fines = (data.fines || []).length ? data.fines.reduce((a, f) => a + Math.max(f.owing, 0), 0) : null
@@ -403,6 +413,7 @@ function MyPage({ token, me, club, availability, onSwitch }) {
   const sections = useOpenSections()
   const [showDetails, setShowDetails] = useState(false)
   const [notice, setNotice] = useState(null) // {text, tone} after a save
+  const [ranks, setRanks] = useState(null) // club ranks for the season shown; read once, when Stats opens
   useEffect(() => {
     let alive = true
     const load = () => api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
@@ -426,14 +437,22 @@ function MyPage({ token, me, club, availability, onSwitch }) {
     return () => { alive = false }
   }, [token, wantsLadder])
 
+  // Rankings read the club's leaderboards, so they are fetched only once Stats is open.
+  const wantsRanks = modules.includes('season') && !!data?.season && sections.isOpen('stats')
+  useEffect(() => {
+    if (!wantsRanks || ranks) return undefined
+    let alive = true
+    api.availPublicRanks(token)
+      .then((d) => { if (alive) setRanks(d.ranks || { ranks: {} }) })
+      .catch(() => { if (alive) setRanks({ ranks: {} }) })
+    return () => { alive = false }
+  }, [token, wantsRanks, ranks])
+
   const render = (key) => {
     switch (key) {
       case 'votes': return <VotesModule key={key} data={data} />
-      case 'squad': return <SquadModule key={key} data={data} />
-      case 'selected': return <SelectedModule key={key} data={data} />
-      case 'training': return <TrainingModule key={key} data={data} />
       case 'ladder': return <LadderModule key={key} state={ladder} />
-      case 'season': return <SeasonDashboard key={key} data={data} />
+      case 'season': return <SeasonDashboard key={key} data={data} ranks={ranks} />
       case 'fantasy': return <FantasyCard key={key} data={data} />
       case 'fees': return <FeesModule key={key} data={data} />
       case 'fines': return <FinesModule key={key} data={data} />
@@ -446,12 +465,12 @@ function MyPage({ token, me, club, availability, onSwitch }) {
   const squads = data ? (data.squads || []) : (me.squads || [])
   const shown = GROUPS
     .map((g) => ({ ...g, mods: modules.filter((m) => g.keys.includes(m)) }))
-    .filter((g) => g.id === 'selection' || g.mods.length > 0)
+    .filter((g) => g.id === 'availability' || g.mods.length > 0)
   const allOpen = shown.every((g) => sections.isOpen(g.id))
 
   return (
     <div data-my-page>
-      <PlayerHero club={club} player={data?.player || me.player} squads={squads} onSwitch={onSwitch}
+      <PlayerHero club={club} player={data?.player || me.player} squads={squads} selected={data?.selected || []} onSwitch={onSwitch}
         onUpdateDetails={data?.can_update_details ? () => { setNotice(null); setShowDetails(true) } : null} />
       {notice && (
         <div role="status" data-details-notice className="rounded-lg px-3.5 py-2.5 mb-3 text-sm flex items-start gap-3"
@@ -482,8 +501,9 @@ function MyPage({ token, me, club, availability, onSwitch }) {
             <Group key={g.id} id={g.id} hideTitle={g.hideTitle}
               title={g.id === 'fantasy' && data?.fantasy?.name ? data.fantasy.name : g.title}
               summary={text} tone={tone} open={sections.isOpen(g.id)} onToggle={sections.toggle}>
-              {g.id === 'selection' && availability}
-              {g.mods.map(render)}
+              {g.id === 'availability' && availability({ selected: data?.selected || [] })}
+              {g.id === 'selection' && data && g.mods.some((m) => GLANCE.includes(m)) && <SelectionGlance data={data} modules={modules} />}
+              {g.mods.filter((m) => !GLANCE.includes(m)).map(render)}
             </Group>
           )
         })}
@@ -770,7 +790,7 @@ export default function PublicAvailability() {
               me={me}
               club={club}
               onSwitch={switchPlayer}
-              availability={(
+              availability={(extra) => (
                 <AvailabilityEditor
                   me={me}
                   choices={choices}
@@ -778,6 +798,7 @@ export default function PublicAvailability() {
                   savedDate={savedDate}
                   onAnswer={setAnswer}
                   onBoth={setBoth}
+                  {...extra}
                 />
               )}
             />

@@ -12,6 +12,9 @@
 //   • Confirm writes one team (PUT /selection/:id). Confirm all writes every
 //     team that changed, retrying a team the server refused for a clash until the
 //     team the player left has confirmed first.
+//   • A locked side can still be changed here: the first change to it (or into
+//     it) asks "this side is locked, are you sure?", then unlocks it exactly as
+//     the Selection board's Unlock does. Confirm locks it again.
 //   • Clash, call-up and rule checks stay where they were: the server judges them
 //     at Confirm. The table only stops one player being dropped on a team twice.
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
@@ -76,7 +79,9 @@ function buildCol(f, d, dr, fallbackSize) {
   const baseSig = confirmSig(slots.filter(Boolean), cap, wk, [])
   let demo = {}
   let fromDraft = null
-  const dd = dr?.draft
+  // A locked side shows the confirmed XI whatever draft is behind it, as the board does.
+  const locked = !!(d.fixture?.locked ?? f.locked)
+  const dd = locked ? null : dr?.draft
   if (dd && Array.isArray(dd.slots)) {
     const r = restoreDraft(dd, d.pool, size)
     slots = r.slots; cap = r.cap; wk = r.wk; demo = r.demo
@@ -85,7 +90,7 @@ function buildCol(f, d, dr, fallbackSize) {
   slots = tidySlots(slots, size)
   const poolById = {}
   ;(d.pool || []).forEach((p) => { poolById[p.id] = p })
-  return { fid: f.id, fx: f, data: d, poolById, size, min: d.team_min || 0, slots, cap, wk, demo, baseSig, fromDraft }
+  return { fid: f.id, fx: f, data: d, poolById, size, min: d.team_min || 0, slots, cap, wk, demo, baseSig, fromDraft, locked }
 }
 
 // ── Which weekend ───────────────────────────────────────────────────────────
@@ -231,7 +236,9 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
                 className="px-2 py-0.5 rounded-md font-display font-semibold text-[11.5px] bg-pb-accent text-[#08110b] disabled:opacity-40">Confirm</button>
             </>
           )}
-          {!dirty && filled.length > 0 && <span className="text-[10.5px] font-semibold text-pb-faint inline-flex items-center gap-1"><Icon name="check" size={11} />Confirmed</span>}
+          {c.locked && !dirty && filled.length > 0
+            ? <span className="text-[10.5px] font-semibold text-pb-faint inline-flex items-center gap-1" data-locked-col={col} title="Locked. Change anyone and you will be asked to unlock it."><Icon name="lock" size={11} />Locked</span>
+            : !dirty && filled.length > 0 && <span className="text-[10.5px] font-semibold text-pb-faint inline-flex items-center gap-1"><Icon name="check" size={11} />Confirmed</span>}
           <Link to={`/admin/betterselect/select/${fx.id}`} onClick={(e) => e.stopPropagation()} title="Open this team in the full Selection board" aria-label={`Open ${ctx.shortTeam(fx)}`}
             className="w-[22px] h-[22px] rounded inline-flex items-center justify-center text-pb-faint hover:text-pb-accent hover:bg-pb-surface2"><Icon name="arrow" size={12} /></Link>
         </div>
@@ -428,6 +435,13 @@ export default function AdminSelectionDraftTable() {
           setConflicts((m) => ({ ...m, [fid]: { theirs: t.draft ? { draft: t.draft, version: t.version, by: t.updated_by } : null } }))
           return
         }
+        if (e.status === 409 && e.detail?.code === 'locked') {
+          // Locked by someone else since this board loaded. The change stays on the
+          // board; the next edit asks to unlock, then it saves.
+          setStatus(fid, 'idle')
+          setCols((prev) => (prev?.[fid] ? { ...prev, [fid]: { ...prev[fid], locked: true } } : prev))
+          return
+        }
         setStatus(fid, 'error')
         if ((!e.status || e.status >= 500) && !s.pending) {
           s.pending = p
@@ -467,7 +481,7 @@ export default function AdminSelectionDraftTable() {
     if (!canEdit || !cols) return
     order.forEach((fid) => {
       const c = cols[fid]
-      if (!c || conflicts[fid]) return
+      if (!c || conflicts[fid] || c.locked) return
       const s = saver(fid)
       const dirty = isDirty(c)
       const sig = sigOf(c)
@@ -519,6 +533,32 @@ export default function AdminSelectionDraftTable() {
     if (t.availability === 'UNAVAILABLE') toastRef.current.info(`${p.display_name} is marked unavailable${unavailableWeeksText(t.availability_days, weekNames)}. Adding anyway.`)
   }
 
+  // A locked side is changed only after the selector says yes. The prompt comes
+  // first, then the change goes on the board, then the side is unlocked (the same
+  // POST the Selection board's Unlock sends); autosave skips a locked column, so
+  // nothing is sent to it until the unlock has landed.
+  const unlocking = useRef({})
+  const unlockCols = async (fids) => {
+    fids.forEach((f) => { unlocking.current[f] = true })
+    try {
+      await Promise.all(fids.map((f) => api.bsUnlockSelection(f)))
+      setCols((prev) => (prev ? fids.reduce((acc, f) => (acc[f] ? put(acc, f, { locked: false }) : acc), prev) : prev))
+    } catch (e) {
+      toastRef.current.error('Could not unlock: ' + e.message)
+      await Promise.all(fids.map((f) => reloadCol(f).catch(() => {})))
+    } finally { fids.forEach((f) => { delete unlocking.current[f] }) }
+  }
+  const guarded = (fids, apply) => {
+    const cur = colsRef.current
+    const locked = [...new Set(fids)].filter((f) => cur?.[f]?.locked && !unlocking.current[f])
+    if (!locked.length) { apply(); return }
+    const names = locked.map((f) => ctxShort(cur[f].fx))
+    const one = names.length === 1
+    if (!window.confirm(`${names.join(' and ')} ${one ? 'is' : 'are'} locked. Are you sure you want to change ${one ? 'it' : 'them'}?\n\nThe side will be unlocked until you confirm it again.`)) return
+    apply()
+    unlockCols(locked)
+  }
+
   const placeIn = (fid, idx, id) => {
     const p = merged[id]
     if (!p) return
@@ -527,26 +567,32 @@ export default function AdminSelectionDraftTable() {
       toastRef.current.error(`${p.display_name} is not in the pool for ${ctxShort(target?.fx)}`)
       return
     }
-    edit((prev) => {
-      const c = prev[fid]
-      if (!c || idx < 0 || idx >= c.slots.length) return prev
-      if (c.slots.includes(id)) return prev
-      const slots = c.slots.slice()
-      const displaced = slots[idx]
-      slots[idx] = id
-      return put(prev, fid, { slots: tidySlots(slots, c.size), ...(displaced ? leave(c, displaced) : {}) })
+    if (target.slots.includes(id) || idx < 0 || idx >= target.slots.length) return
+    guarded([fid], () => {
+      edit((prev) => {
+        const c = prev[fid]
+        if (!c || idx < 0 || idx >= c.slots.length) return prev
+        if (c.slots.includes(id)) return prev
+        const slots = c.slots.slice()
+        const displaced = slots[idx]
+        slots[idx] = id
+        return put(prev, fid, { slots: tidySlots(slots, c.size), ...(displaced ? leave(c, displaced) : {}) })
+      })
+      warnPick(p, fid)
     })
-    warnPick(p, fid)
   }
 
-  const removeAt = (fid, idx) => edit((prev) => {
-    const c = prev[fid]
-    const id = c?.slots[idx]
-    if (!id) return prev
-    const slots = c.slots.slice()
-    slots[idx] = null
-    return put(prev, fid, { slots: tidySlots(slots, c.size), ...leave(c, id) })
-  })
+  const removeAt = (fid, idx) => {
+    if (!colsRef.current?.[fid]?.slots[idx]) return
+    guarded([fid], () => edit((prev) => {
+      const c = prev[fid]
+      const id = c?.slots[idx]
+      if (!id) return prev
+      const slots = c.slots.slice()
+      slots[idx] = null
+      return put(prev, fid, { slots: tidySlots(slots, c.size), ...leave(c, id) })
+    }))
+  }
 
   // Move a player from one slot to another, in the same team or across. An
   // occupied target swaps. A player can sit in a team once, so a move that would
@@ -564,22 +610,24 @@ export default function AdminSelectionDraftTable() {
       if (b.slots.includes(x)) { toastRef.current.error(`${nameOf(x)} is already in ${ctxShort(b.fx)}`); return }
       if (y && a.slots.includes(y)) { toastRef.current.error(`${nameOf(y)} is already in ${ctxShort(a.fx)}`); return }
     }
-    edit((prev) => {
-      const pa = prev[fromFid], pb = prev[toFid]
-      if (fromFid === toFid) {
-        const slots = pa.slots.slice()
-        ;[slots[fromIdx], slots[toIdx]] = [slots[toIdx], slots[fromIdx]]
-        return put(prev, fromFid, { slots })
-      }
-      const sa = pa.slots.slice(), sb = pb.slots.slice()
-      sa[fromIdx] = y || null
-      sb[toIdx] = x
-      let next = put(prev, fromFid, { slots: tidySlots(sa, pa.size), ...leave(pa, x) })
-      next = put(next, toFid, { slots: tidySlots(sb, pb.size), ...(y ? leave(pb, y) : {}) })
-      return next
+    guarded([fromFid, toFid], () => {
+      edit((prev) => {
+        const pa = prev[fromFid], pb = prev[toFid]
+        if (fromFid === toFid) {
+          const slots = pa.slots.slice()
+          ;[slots[fromIdx], slots[toIdx]] = [slots[toIdx], slots[fromIdx]]
+          return put(prev, fromFid, { slots })
+        }
+        const sa = pa.slots.slice(), sb = pb.slots.slice()
+        sa[fromIdx] = y || null
+        sb[toIdx] = x
+        let next = put(prev, fromFid, { slots: tidySlots(sa, pa.size), ...leave(pa, x) })
+        next = put(next, toFid, { slots: tidySlots(sb, pb.size), ...(y ? leave(pb, y) : {}) })
+        return next
+      })
+      const p = merged[x]
+      if (p && fromFid !== toFid) warnPick(p, toFid)
     })
-    const p = merged[x]
-    if (p && fromFid !== toFid) warnPick(p, toFid)
   }
 
   const firstOpen = (fid) => {
@@ -615,8 +663,8 @@ export default function AdminSelectionDraftTable() {
     } else moveSlot(item.col, item.idx, fid, idx)
   }
 
-  const toggleCap = (fid, id) => edit((prev) => put(prev, fid, { cap: prev[fid].cap === id ? null : id }))
-  const toggleWk = (fid, id) => edit((prev) => put(prev, fid, { wk: prev[fid].wk === id ? null : id }))
+  const toggleCap = (fid, id) => guarded([fid], () => edit((prev) => put(prev, fid, { cap: prev[fid].cap === id ? null : id })))
+  const toggleWk = (fid, id) => guarded([fid], () => edit((prev) => put(prev, fid, { wk: prev[fid].wk === id ? null : id })))
 
   // ── Names ─────────────────────────────────────────────────────────────────
   const teamPrefix = useMemo(
