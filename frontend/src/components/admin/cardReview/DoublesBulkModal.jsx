@@ -5,7 +5,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { Button, Note } from '../ui'
 import { fmtDate, matchPageUrl } from './shared'
 
-const WHAT = { relink: 'Move to the right match', ca: 'Link' }
+const WHAT = { relink: 'Move to the right match', ca: 'Link', swap: 'Swap two links' }
 
 // The confirmation before fixing every strong double at once: what it will do, a sample to look at,
 // and one batch that can be undone from the Card review overview.
@@ -21,11 +21,11 @@ export default function DoublesBulkModal({ onClose, onDone }) {
     setBusy(true)
     try {
       const r = await api.cardReviewDoublesBulk()
-      toast.success(`${r.relinked} links moved to the right match, ${r.linked} pairs linked${r.skipped?.length ? `, ${r.skipped.length} skipped` : ''}`)
+      toast.success(`${r.relinked} links moved to the right match, ${r.swapped || 0} pairs swapped, ${r.linked} pairs linked${r.skipped?.length ? `, ${r.skipped.length} skipped` : ''}`)
       onDone()
     } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
-  const total = preview ? preview.relink + preview.ca : 0
+  const total = preview ? preview.relink + (preview.swap || 0) + preview.ca : 0
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/65 p-4 sm:pt-16" role="dialog" aria-modal="true" aria-label="Fix the strong doubles" data-testid="doubles-bulk-modal">
       <div className="w-full max-w-[860px] rounded-xl border border-pb-hairline2 bg-pb-surface p-5 sm:p-6 shadow-2xl">
@@ -37,10 +37,14 @@ export default function DoublesBulkModal({ onClose, onDone }) {
             <p className="mt-1.5 text-[13px] text-pb-dim">
               Only strong matches are included: the cards agree on most of their batters. Likely and possible matches are left for you to look at one by one.
             </p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border border-pb-hairline bg-pb-surface2 p-4" data-testid="bulk-relink">
                 <div className="text-[22px] font-semibold text-pb-text">{preview.relink.toLocaleString()}</div>
                 <div className="text-[13px] text-pb-dim">club scorecards linked to the wrong game. Each link moves to the game that matches the card.</div>
+              </div>
+              <div className="rounded-lg border border-pb-hairline bg-pb-surface2 p-4" data-testid="bulk-swap">
+                <div className="text-[22px] font-semibold text-pb-text">{(preview.swap || 0).toLocaleString()}</div>
+                <div className="text-[13px] text-pb-dim">pairs of club scorecards each sitting on the other's game. The two links swap places.</div>
               </div>
               <div className="rounded-lg border border-pb-hairline bg-pb-surface2 p-4" data-testid="bulk-link">
                 <div className="text-[22px] font-semibold text-pb-text">{preview.ca.toLocaleString()}</div>

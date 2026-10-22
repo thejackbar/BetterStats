@@ -19,6 +19,8 @@ Mutations (each must make the suite FAIL, which is what proves the checks bite):
   MUTATE=halfpair   find a match only searches the club cards, so a pair found by its synced half is missed
   MUTATE=dryapplies the repair script's dry run writes (a dry run that is not one)
   MUTATE=blindlink  the scan only looks at unlinked cards (how the first release missed a card linked to the wrong game)
+  MUTATE=noswap     the scan does not know a swap (how the first repair left nine cards 'pairing looks wrong')
+  MUTATE=anygrade   a card of another grade passes as the grade of the game it would move to
 """
 from __future__ import annotations
 
@@ -114,6 +116,11 @@ async def main():
         def unlinked_only(manuals, synced, banned, linked_ids=frozenset()):
             return real_pairs([m for m in manuals if m.id not in linked_ids], synced, banned, frozenset())
         dbl.match_pairs_ca = unlinked_only
+    if mutate == "noswap":
+        dbl.match_swaps = lambda *a, **k: []
+    if mutate == "anygrade":
+        real_gk = dbl.grade_key
+        dbl.grade_key = lambda name: real_gk("D Grade" if "E Grade" in (name or "") else name)  # E counts as D
     if mutate == "halfpair":
         fnd._SYNCED_HITS = fnd._SYNCED_HITS.replace("WHERE (", "WHERE FALSE AND (")
 
@@ -943,6 +950,160 @@ async def main():
           ("LINKED NOW" in free, "FREE and matches this card" in free), (True, True))
     check("an id that matches nothing is said plainly", "no card starts with that" in await explained("zzzzzzzz"), True)
     check("explaining writes nothing: no link moved, no history line added", (await snap(), await logs()), (snap_before, logs_before))
+
+    print("\n-- two cards on each other's games: found as a swap, and swapped back in one undoable batch --")
+    SW, SWS, SWC, SWD, SWE = u(), u(), u(), u(), u()
+    sw_players = {k: u() for k in "abcdefghijklmnopqrstuvwxyz"}
+    async with async_session_maker() as s:
+        await s.execute(text("INSERT INTO organisations (id, name, slug, is_active) VALUES (:a, 'Bayside CC', 'bayside', true)"), {"a": SW})
+        await s.execute(text("INSERT INTO seasons (id, organisation_id, name, year) VALUES (:i, :o, 'Summer 2004/05', 2004)"), {"i": SWS, "o": SW})
+        for gid, nm in ((SWC, "C Grade: Jeffrey Cup"), (SWD, "D Grade"), (SWE, "E Grade")):
+            await s.execute(text("INSERT INTO grades (id, season_id, name) VALUES (:i, :s, :n)"), {"i": gid, "s": SWS, "n": nm})
+        for k, pid in sw_players.items():
+            await s.execute(text("INSERT INTO players (id, organisation_id, name, grassroots_id) VALUES (:i, :o, :n, :g)"),
+                            {"i": pid, "o": SW, "n": f"{k}, {k}", "g": str(pid)})
+        await s.commit()
+    sw: dict = {}
+
+    async def sw_game(key, day, opp, grade, bat=()):
+        gid = sw[key] = u()
+        async with async_session_maker() as s:
+            await s.execute(text("""
+                INSERT INTO games (id, grade_id, played_at, home_team, away_team, home_org_id, opp_club_name, status, result,
+                                   winning_team, match_format)
+                VALUES (:g, :gr, :d, 'Bayside CC', :opp, :o, :opp, 'COMPLETED', 'WIN', 'Bayside CC', 'One Day')"""),
+                {"g": gid, "gr": grade, "d": day, "opp": opp, "o": SW})
+            for who, runs in bat:
+                await s.execute(text("""
+                    INSERT INTO batting_innings (game_id, player_id, innings_number, batting_position, runs, balls, fours, sixes,
+                        dismissal_type, not_out, did_not_bat) VALUES (:g, :p, 1, 1, :r, 10, 0, 0, 'bowled', FALSE, FALSE)"""),
+                    {"g": gid, "p": sw_players[who], "r": runs})
+            await s.commit()
+
+    async def sw_card(key, day, opp, grade, link, bat=(), ok=False):
+        mid = sw[key] = u()
+        async with async_session_maker() as s:
+            await s.execute(text("""
+                INSERT INTO manual_games (id, organisation_id, season_id, grade_id, played_at, opposition, result, match_format,
+                                          superseded_by_game_id, pair_prefers_import, pairing_locked, review_pair_ok)
+                VALUES (:m, :o, :s, :gr, :d, :opp, 'WIN', 'One Day', CAST(:lk AS UUID), TRUE, TRUE, :ok)"""),
+                {"m": mid, "o": SW, "s": SWS, "gr": grade, "d": day, "opp": opp, "lk": sw[link], "ok": ok})
+            for who, runs in bat:
+                await s.execute(text("""
+                    INSERT INTO manual_batting_innings (manual_game_id, player_id, innings_number, batting_position, runs, balls,
+                        dismissal_type, not_out, did_not_bat) VALUES (:m, :p, 1, 1, :r, NULL, 'bowled', FALSE, FALSE)"""),
+                    {"m": mid, "p": sw_players[who], "r": runs})
+            await s.commit()
+
+    def sw_bat(first, n=10, base=20):
+        letters = "abcdefghijklmnopqrstuvwxyz"
+        return [(letters[(first + i) % 26], base + i * 7) for i in range(n)]
+
+    # S1, the Shoalwater shape: the C card (11 batters) sits on the D game, which has no scores; the
+    # empty D card sits on the C game, where the ten scores are.
+    d1 = date(2005, 1, 22)
+    await sw_game("S1_c", d1, "Safety Bay", SWC, sw_bat(0, 10, 20))
+    await sw_game("S1_d", d1, "Safety Bay", SWD)
+    await sw_card("S1_xc", d1, "Safety Bay", SWC, "S1_d", sw_bat(0, 10, 20) + [("k", 3)])
+    await sw_card("S1_yd", d1, "Safety Bay", SWD, "S1_c")
+    # S2: both cards have scores and each matches the other's game
+    d2 = date(2005, 2, 26)
+    await sw_game("S2_c", d2, "Lakes", SWC, sw_bat(3, 8, 31))
+    await sw_game("S2_d", d2, "Lakes", SWD, sw_bat(12, 8, 52))
+    await sw_card("S2_xc", d2, "Lakes", SWC, "S2_d", sw_bat(3, 8, 31))
+    await sw_card("S2_yd", d2, "Lakes", SWD, "S2_c", sw_bat(12, 8, 52))
+    # S3: the card on the real game is a different grade from the game the first one sits on: no swap
+    d3 = date(2005, 3, 5)
+    await sw_game("S3_c", d3, "Rivers", SWC, sw_bat(5, 9, 17))
+    await sw_game("S3_d", d3, "Rivers", SWD)
+    await sw_card("S3_xc", d3, "Rivers", SWC, "S3_d", sw_bat(5, 9, 17))
+    await sw_card("S3_ye", d3, "Rivers", SWE, "S3_c")
+    # S4: the other card has scores of its own that agree with neither game: not a fit
+    d4 = date(2005, 3, 12)
+    await sw_game("S4_c", d4, "Hills", SWC, sw_bat(7, 9, 13))
+    await sw_game("S4_d", d4, "Hills", SWD, sw_bat(14, 9, 90))
+    await sw_card("S4_xc", d4, "Hills", SWC, "S4_d", sw_bat(7, 9, 13))
+    await sw_card("S4_yd", d4, "Hills", SWD, "S4_c", sw_bat(19, 6, 140))
+    # S5: a person confirmed the other card's link
+    d5 = date(2005, 3, 19)
+    await sw_game("S5_c", d5, "Dunes", SWC, sw_bat(2, 9, 66))
+    await sw_game("S5_d", d5, "Dunes", SWD)
+    await sw_card("S5_xc", d5, "Dunes", SWC, "S5_d", sw_bat(2, 9, 66))
+    await sw_card("S5_yd", d5, "Dunes", SWD, "S5_c", ok=True)
+    # S6: the same shape as S1 on a different day, which a person says is not a double
+    d6 = date(2005, 3, 26)
+    await sw_game("S6_c", d6, "Reef", SWC, sw_bat(9, 10, 71))
+    await sw_game("S6_d", d6, "Reef", SWD)
+    await sw_card("S6_xc", d6, "Reef", SWC, "S6_d", sw_bat(9, 10, 71))
+    await sw_card("S6_yd", d6, "Reef", SWD, "S6_c")
+
+    async def sw_scan():
+        async with async_session_maker() as s:
+            return await dbl.find_doubles(s, SW)
+    async def sw_links():
+        return {k: (await q("SELECT superseded_by_game_id::text FROM manual_games WHERE id = :m", m=sw[k]))[0][0]
+                for k in ("S1_xc", "S1_yd", "S2_xc", "S2_yd", "S3_xc", "S3_ye", "S4_xc", "S4_yd", "S5_xc", "S5_yd", "S6_xc", "S6_yd")}
+    gi = lambda k: str(sw[k])  # noqa: E731
+    start_links = await sw_links()
+    rows_sw = (await sw_scan())["rows"]
+    swaps_ = {r["a"]["id"]: r for r in rows_sw if r["kind"] == "swap"}
+    check("the shape the club has (a card on the other grade's scoreless game, an empty card on its own) is a swap",
+          gi("S1_xc") in swaps_, True)
+    r1 = swaps_.get(gi("S1_xc")) or {"b": {}, "partner": {"match": {}, "moves_to": {}, "from_game": {}}, "current": {}}
+    check("the card moves to the game it matches", r1["b"].get("id"), gi("S1_c"))
+    check("the partner is the card that is on that game, and goes to the game this one leaves",
+          (r1["partner"]["match"].get("id"), r1["partner"]["moves_to"].get("id"), r1["partner"]["from_game"].get("id")),
+          (gi("S1_yd"), gi("S1_d"), gi("S1_c")))
+    check("it is called strong and says the card shares nothing with the game it is on now",
+          (r1.get("strength"), (r1.get("current") or {}).get("shared_with_club")), ("strong", 0))
+    check("two cards that each match the other's game are one swap, not two",
+          (len([r for r in rows_sw if r["kind"] == "swap" and gi("S2_xc") in (r["a"]["id"], r["partner"]["match"]["id"])])), 1)
+    check("a different-grade partner is not a swap (nothing says it belongs on the other game)",
+          any(gi("S3_xc") in (r["a"]["id"], (r["partner"] or {}).get("match", {}).get("id")) for r in rows_sw), False)
+    check("a partner with scores that agree with neither game is not a swap",
+          any(gi("S4_xc") in (r["a"]["id"], (r["partner"] or {}).get("match", {}).get("id")) for r in rows_sw), False)
+    check("a partner a person confirmed is never moved",
+          any(gi("S5_xc") in (r["a"]["id"], (r["partner"] or {}).get("match", {}).get("id")) for r in rows_sw), False)
+    check("swap rows are counted in the totals", dbl.counts({"rows": rows_sw, "dismissed": []})["total"] >= 3, True)
+    check("and a swap is not also offered as a relink or a link",
+          any(r["kind"] != "swap" and (gi("S1_xc") in (r["a"]["id"], r["b"]["id"])) for r in rows_sw), False)
+    async with async_session_maker() as s:
+        await act.dismiss_double(s, SW, sw["S6_xc"], sw["S6_c"], "relink", USER)
+    check("a swap a person said is not right is no longer offered",
+          any(r["kind"] == "swap" and gi("S6_xc") in (r["a"]["id"],) for r in (await sw_scan())["rows"]), False)
+    async with async_session_maker() as s:
+        pvw = act.bulk_doubles_preview((await dbl.find_doubles(s, SW))["rows"])
+    check("the bulk preview counts swaps", pvw.get("swap"), 2)
+    log_before = (await q("SELECT count(*) FROM card_review_log WHERE org_id = :o", o=SW))[0][0]
+    async with async_session_maker() as s:
+        out_sw = await act.bulk_fix_doubles(s, SW, USER)
+    links = await sw_links()
+    check("the fix put each card on its own game",
+          (links["S1_xc"], links["S1_yd"], links["S2_xc"], links["S2_yd"]),
+          (gi("S1_c"), gi("S1_d"), gi("S2_c"), gi("S2_d")))
+    check("it reports the swaps", out_sw["swapped"], 2)
+    check("cards the scan did not find a swap for were not touched",
+          [links[k] for k in ("S3_xc", "S3_ye", "S4_xc", "S4_yd", "S5_xc", "S5_yd", "S6_xc", "S6_yd")],
+          [start_links[k] for k in ("S3_xc", "S3_ye", "S4_xc", "S4_yd", "S5_xc", "S5_yd", "S6_xc", "S6_yd")])
+    check("every step of a swap is in the history, in one batch",
+          (await q("SELECT count(DISTINCT batch_id), count(*) FROM card_review_log WHERE org_id = :o AND batch_id IS NOT NULL "
+                   "AND id > :n", o=SW, n=log_before))[0][0] >= 1, True)
+    check("the scan finds no swap afterwards for the ones it fixed",
+          any(r["kind"] == "swap" and r["a"]["id"] in (gi("S1_xc"), gi("S2_xc"), gi("S2_yd")) for r in (await sw_scan())["rows"]), False)
+    async with async_session_maker() as s:
+        un_sw = await act.bulk_undo(s, SW, USER, out_sw["batch_id"])
+    links = await sw_links()
+    check("the whole batch undoes, newest step first, and every card is back where it was",
+          ([links[k] for k in ("S1_xc", "S1_yd", "S2_xc", "S2_yd")], un_sw["undone"] >= 6),
+          ([start_links[k] for k in ("S1_xc", "S1_yd", "S2_xc", "S2_yd")], True))
+    async with async_session_maker() as s:
+        try:
+            await act.swap_links(s, SW, sw["S1_xc"], sw["S3_ye"], sw["S1_c"], USER)
+            stale = None
+        except act.ReviewError as e:
+            stale = str(e)
+    check("a swap request that no longer matches the cards is refused", bool(stale), True)
+    check("a refused swap changed nothing", await sw_links(), start_links)
 
     print("\n-- nothing was deleted by any of it --")
     check("every card is still there",

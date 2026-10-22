@@ -55,6 +55,16 @@ ROWS.push({ key: `relink:${MR}:${GR}`, kind: 'relink', strength: 'strong', a: si
   opposition_agrees: true, both_cards: true, confirmed: true, formats_differ: true, date: '2006-02-04',
   current: side('ca', GW, { date: '2006-02-04', grade: 'A Grade', opposition: 'Safety Bay Cricket Club', batters: 0, shared_with_club: 0 }) })
 const COUNTS = { total: 4, dismissed: 1, by_strength: { strong: 3, likely: 0, possible: 1 }, by_kind: { ca: 2, club: 1, relink: 1 }, formats_differ: 3 }
+// Two cards that each sit on the other's game: the C grade card is on the D grade game.
+const MS = 'aaaaaaaa-0000-4000-8000-000000000020', MT = 'aaaaaaaa-0000-4000-8000-000000000021'
+const GS = 'bbbbbbbb-0000-4000-8000-000000000020', GT = 'bbbbbbbb-0000-4000-8000-000000000021'
+const SWAP_ROW = { key: `swap:${MS}:${GS}`, kind: 'swap', strength: 'strong', a: side('club', MS, { linked: true, date: '2005-01-22', grade: 'C grade', opposition: 'Safety Bay', batters: 11 }),
+  b: side('ca', GS, { date: '2005-01-22', grade: 'C Grade: Jeffrey Cup', opposition: 'Safety Bay Cricket Club', batters: 10 }), shared: 10, gap_days: 0, same_day: true,
+  opposition_agrees: true, both_cards: true, confirmed: true, formats_differ: false, date: '2005-01-22',
+  current: side('ca', GT, { date: '2005-01-22', grade: 'D Grade', opposition: 'Safety Bay Cricket Club', batters: 0, shared_with_club: 0 }),
+  partner: { match: side('club', MT, { linked: true, date: '2005-01-22', grade: 'D grade', opposition: 'Safety Bay', batters: 0 }),
+    moves_to: side('ca', GT, { date: '2005-01-22', grade: 'D Grade', opposition: 'Safety Bay Cricket Club', batters: 0 }),
+    from_game: side('ca', GS, { date: '2005-01-22', grade: 'C Grade: Jeffrey Cup', batters: 10 }) } }
 const DISMISSED = [{ key: `ca:${MA}:${GB}`, kind: 'ca', a: side('club', MA), b: side('ca', GB), date: '2006-02-04', dismissed_by: 'jack' }]
 const OVERVIEW = {
   total: 3328, groups: { agree: 2112, small: 533, differ: 222, pairing: 233, nocard: 228, doubles: 3 },
@@ -115,9 +125,10 @@ const routes = (page, calls, o = {}) => page.route('**/api/**', async (route) =>
   if (/card-review\/matches\/[^/]+\/undo/.test(url) && req.method() === 'POST') return json({ ok: true, match: null })
   if (/card-review\/find\/options/.test(url)) return json({ seasons: ['Summer 2005/06', 'Summer 2004/05'], competitions: ['Reserves League'], players: ['Ritchie, Peter', 'Ritchie, Rod', 'Hind, Darren', 'Smith, John'], oppositions: ['Warnbro Knights', 'Old Irwinians', 'Hillman'], grades: ['A Grade', 'B Grade', 'C1 Grade'] })
   if (/card-review\/find\?/.test(url)) return json({ total: FIND_ROWS.length, offset: 0, limit: 25, capped: false, rows: FIND_ROWS })
-  if (/card-review\/doubles\/bulk\/preview/.test(url)) return json({ relink: 1, ca: 2, sample: [ROWS[3], ROWS[0]] })
+  if (/card-review\/doubles\/bulk\/preview/.test(url)) return json({ relink: 1, ca: 2, swap: o.swap ? 2 : 0, sample: o.swap ? [SWAP_ROW, ROWS[3]] : [ROWS[3], ROWS[0]] })
   if (/card-review\/doubles\/bulk/.test(url) && req.method() === 'POST') return json({ batch_id: 'bt9', relinked: 1, linked: 2, skipped: [] })
   if (/card-review\/matches\/[^/]+\/relink/.test(url) && req.method() === 'POST') return json({ ok: true })
+  if (/card-review\/doubles\/swap/.test(url) && req.method() === 'POST') return json({ match_id: MS, partner_id: MT, batch_id: 'bt1' })
   if (/card-review\/doubles\/(link|dismiss|restore)/.test(url) && req.method() === 'POST') return json({ ok: true, shows: 'ca' })
   if (/card-review\/doubles\?/.test(url)) {
     const sp = new URL(url).searchParams
@@ -125,8 +136,10 @@ const routes = (page, calls, o = {}) => page.route('**/api/**', async (route) =>
     if (dis && sp.get('player') === 'Unlinked') return json({ total: 1, offset: 0, limit: 25, seasons: [], counts: COUNTS, rows: [{ ...DISMISSED[0], via: 'unlink' }] })
     if (sp.get('player') === 'Nobody') return json({ total: 0, offset: 0, limit: 25, seasons: [], counts: COUNTS, rows: [], player_note: { query: 'Nobody', matched: [], fuzzy: false } })
     if (sp.get('player') === 'peter richie') return json({ total: 1, offset: 0, limit: 25, seasons: [], counts: COUNTS, rows: [ROWS[0]], player_note: { query: 'peter richie', matched: ['Ritchie, Peter'], fuzzy: true } })
-    const rows = dis ? DISMISSED : ROWS.filter(r => !sp.get('kind') || r.kind === sp.get('kind'))
-    return json({ total: rows.length, offset: 0, limit: 25, seasons: ['Summer 2005/06'], counts: COUNTS, rows })
+    const all = o.swap ? [SWAP_ROW, ...ROWS] : ROWS
+    const rows = dis ? DISMISSED : all.filter(r => !sp.get('kind') || r.kind === sp.get('kind'))
+    const counts = o.swap ? { ...COUNTS, total: 5, by_kind: { ...COUNTS.by_kind, swap: 1 }, by_strength: { ...COUNTS.by_strength, strong: 4 } } : COUNTS
+    return json({ total: rows.length, offset: 0, limit: 25, seasons: ['Summer 2005/06'], counts, rows })
   }
   if (/card-review\/matches\?/.test(url)) return json({ total: 0, offset: 0, limit: 50, sources: [], rows: [] })
   if (/manual-entries\/games\/[0-9a-f-]{36}$/.test(url) && req.method() === 'DELETE') return json({ deleted: true })
@@ -485,6 +498,42 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   await fnd.page.waitForTimeout(1500)
   check('Find a match loads once and stays quiet', gets(fnd.calls, /card-review\/find\?/).length === f1 && f1 <= 2, String(f1))
   await fnd.ctx.close()
+}
+
+// ── two cards on each other's games ────────────────────────────────────────────────────────────
+{
+  console.log('\n-- a swap: two cards each on the other\'s game --')
+  const { ctx, page, calls, errors } = await open(browser, 1440, '/admin/card-review/doubles', { swap: true })
+  await page.waitForSelector('[data-testid="double-card"][data-kind="swap"]', { timeout: 15000 })
+  const card = page.locator('[data-testid="double-card"][data-kind="swap"]')
+  check('the filter offers swapped links with their count', (await page.locator('[data-testid="k-swap"]').innerText()).includes('1'))
+  check('the card says where it is now and that none of its batters are there', (await card.locator('[data-testid="current-link"]').innerText()).includes("0 of this card's 11 batters"))
+  const part = await card.locator('[data-testid="swap-partner"]').innerText()
+  check('it names the other card and the game that card would move to', part.includes('D grade v Safety Bay') && part.includes('D Grade v Safety Bay Cricket Club'), part)
+  check('it offers a swap, not a link or a move', (await card.locator('[data-testid="swap"]').count()) === 1 && (await card.locator('[data-testid="link"]').count()) === 0 && (await card.locator('[data-testid="relink"]').count()) === 0)
+  await page.screenshot({ path: SHOTS + 'card_review_doubles_swap_1440.png', fullPage: true })
+  await card.locator('[data-testid="swap"]').click()
+  await page.waitForTimeout(400)
+  const sw = posts(calls, /doubles\/swap/)
+  check('Swap is ONE POST naming the card, the other card and the game', sw.length === 1 && JSON.parse(sw[0].body).match_id === MS && JSON.parse(sw[0].body).partner_id === MT && JSON.parse(sw[0].body).game_id === GS, JSON.stringify(sw.map(c => c.body)))
+  check('and nothing else was written', posts(calls, /doubles\/(link|dismiss)|relink/).length === 0)
+  check('the list is asked for again with a fresh scan', gets(calls, /card-review\/doubles\?/).some(c => new URL(c.url).searchParams.get('fresh') === 'true'))
+  await card.locator('[data-testid="dismiss"]').click()
+  await page.waitForTimeout(300)
+  const dis = posts(calls, /doubles\/dismiss/)
+  check('Different matches on a swap is recorded against the game it would move to', dis.length === 1 && JSON.parse(dis[0].body).kind === 'relink' && JSON.parse(dis[0].body).other_id === GS, JSON.stringify(dis.map(c => c.body)))
+  await page.click('[data-testid="bulk-fix"]')
+  await page.waitForSelector('[data-testid="bulk-swap"]')
+  check('the bulk preview counts the swaps', (await page.locator('[data-testid="bulk-swap"]').innerText()).startsWith('2'))
+  check('and the sample says what it would do to a swap', (await page.locator('[data-testid="doubles-bulk-modal"]').innerText()).includes('Swap two links'))
+  check('the button counts all three', (await page.locator('[data-testid="doubles-bulk-apply"]').innerText()).includes('5'))
+  check('the screen raised no errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+  const n = await open(browser, 390, '/admin/card-review/doubles', { swap: true })
+  await n.page.waitForSelector('[data-testid="double-card"][data-kind="swap"]', { timeout: 15000 })
+  check('no horizontal overflow at 390px', (await overflow(n.page)) <= 1, String(await overflow(n.page)))
+  await n.page.screenshot({ path: SHOTS + 'card_review_doubles_swap_390.png', fullPage: true })
+  await n.ctx.close()
 }
 
 await browser.close()

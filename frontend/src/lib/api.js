@@ -2072,6 +2072,8 @@ export const api = {
   cardReviewDoublesBulk: () => request('/club-admin/card-review/doubles/bulk', { method: 'POST' }),
   cardReviewDoubleLink: (matchId, gameId) =>
     request('/club-admin/card-review/doubles/link', { method: 'POST', body: JSON.stringify({ match_id: matchId, game_id: gameId }) }),
+  cardReviewDoubleSwap: (matchId, partnerId, gameId) =>
+    request('/club-admin/card-review/doubles/swap', { method: 'POST', body: JSON.stringify({ match_id: matchId, partner_id: partnerId, game_id: gameId }) }),
   cardReviewDoubleDismiss: (matchId, otherId, kind) =>
     request('/club-admin/card-review/doubles/dismiss', { method: 'POST', body: JSON.stringify({ match_id: matchId, other_id: otherId, kind }) }),
   cardReviewDoubleRestore: (matchId, otherId, kind) =>

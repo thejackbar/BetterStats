@@ -291,29 +291,59 @@ async def relink(db, org_id, mid, game_id, user_id, *, batch_id=None, commit: bo
     return {"match_id": str(mid), "game_id": gid, "log_id": log_id, "players": list(players)}
 
 
-async def unlink(db, org_id, mid, user_id) -> dict:
-    """Say these are two different matches: the club card stands alone."""
+async def unlink(db, org_id, mid, user_id, *, quiet: bool = False, batch_id=None, commit: bool = True) -> dict:
+    """Say these are two different matches: the club card stands alone.
+
+    `quiet` is for a swap, where the card is unlinked only for an instant on its way to another
+    game: it writes no "different matches" answer (the pair is not being declared different)."""
     row = await _row(db, org_id, mid)
     if not row["gid"]:
         raise ReviewError("This match is already not linked.")
     before = _snapshot(row)
-    players = await _players_of(db, mid, org_id)
+    players = set(await _players_of(db, mid, org_id))
     await _revert_inserted(db, mid)
     await db.execute(text("""
         UPDATE manual_games SET superseded_by_game_id = NULL, review_choice = NULL,
                review_detail = NULL, review_pair_ok = FALSE, updated_at = NOW()
          WHERE id = CAST(:m AS UUID)"""), {"m": str(mid)})
-    log_id = await _log(db, org_id, mid, action="unlink", from_choice=None, to_choice=None, source="hand",
-                        user_id=user_id, note=None, batch_id=None, before=before, detail={})
-    # Saying these are two matches is also the answer to "possible doubles", so that step does
-    # not offer the same pair straight back.
-    await _log(db, org_id, mid, action="not_double", from_choice=None, to_choice=None, source="hand",
-               user_id=user_id, note=None, batch_id=None, before=before,
-               detail={"other_id": row["gid"], "other_kind": "ca", "via": "unlink"})
-    await db.commit()
-    await recompute(db, org_id, players)
-    await db.commit()
-    return {"match_id": str(mid), "log_id": log_id}
+    log_id = await _log(db, org_id, mid, action="unlink", from_choice=None, to_choice=None,
+                        source="bulk" if batch_id else "hand", user_id=user_id, note=None, batch_id=batch_id,
+                        before=before, detail={"swap": True, "from_game": row["gid"]} if quiet else {})
+    if not quiet:
+        # Saying these are two matches is also the answer to "possible doubles", so that step does
+        # not offer the same pair straight back.
+        await _log(db, org_id, mid, action="not_double", from_choice=None, to_choice=None, source="hand",
+                   user_id=user_id, note=None, batch_id=None, before=before,
+                   detail={"other_id": row["gid"], "other_kind": "ca", "via": "unlink"})
+    if commit:
+        await db.commit()
+        await recompute(db, org_id, players)
+        await db.commit()
+    return {"match_id": str(mid), "log_id": log_id, "players": list(players)}
+
+
+async def swap_links(db, org_id, mid_x, mid_y, game_y, user_id, *, batch_id=None, commit: bool = True) -> dict:
+    """Two club cards each sit on the other's game: put each on its own.
+
+    Card X moves to `game_y` (the game it matches, which card Y is on) and card Y moves to the game
+    X was on. The unique index allows one card per game, so it is done in three logged steps in one
+    transaction (unlink Y, move X, move Y), all in one batch: undone newest first, each step puts its
+    card back to a game that is free by then. Refuses if the cards are no longer as the scan saw them."""
+    x, y = await _row(db, org_id, mid_x), await _row(db, org_id, mid_y)
+    game_y = str(uuid.UUID(str(game_y)))
+    if not x["gid"] or y["gid"] != game_y or x["gid"] == game_y:
+        raise ReviewError("These two cards are no longer linked as the scan saw them. Reload the list.")
+    game_x = x["gid"]
+    batch = batch_id or uuid.uuid4()
+    res_y = await unlink(db, org_id, mid_y, user_id, quiet=True, batch_id=batch, commit=False)
+    res_x = await relink(db, org_id, mid_x, game_y, user_id, batch_id=batch, commit=False)
+    res_y2 = await relink(db, org_id, mid_y, game_x, user_id, batch_id=batch, commit=False)
+    players = set(res_y["players"]) | set(res_x["players"]) | set(res_y2["players"])
+    if commit:
+        await db.commit()
+        await recompute(db, org_id, players)
+        await db.commit()
+    return {"match_id": str(mid_x), "partner_id": str(mid_y), "batch_id": str(batch), "players": list(players)}
 
 
 async def history(db, org_id, mid) -> list:
@@ -390,7 +420,7 @@ async def bulk_undo(db, org_id, user_id, batch_id) -> dict:
     entries = (await db.execute(text("""
         SELECT l.id, l.manual_game_id::text AS mid FROM card_review_log l
          WHERE l.org_id = CAST(:o AS UUID) AND l.batch_id = CAST(:b AS UUID)
-           AND l.undone_at IS NULL AND l.action IN ('choice', 'relink', 'link') ORDER BY l.id DESC"""),
+           AND l.undone_at IS NULL AND l.action IN ('choice', 'relink', 'link', 'unlink') ORDER BY l.id DESC"""),
         {"o": str(org_id), "b": str(batch_id)})).mappings().all()
     undone, changed = 0, []
     for e in entries:
@@ -545,10 +575,10 @@ def bulk_doubles_preview(rows: list, *, sample: int = 8) -> dict:
     """What a bulk fix would do on its first pass: the strong wrong links it would move and the
     strong unlinked pairs it would link. A later pass can find more (a game freed by a moved link
     may now match its own card), so the numbers are a floor."""
-    strong = [r for r in rows if r["strength"] == "strong" and r["kind"] in ("relink", "ca")]
-    pick = sorted(strong, key=lambda r: (r["kind"] != "relink", r["date"] or ""))[:sample]
+    strong = [r for r in rows if r["strength"] == "strong" and r["kind"] in ("relink", "ca", "swap")]
+    pick = sorted(strong, key=lambda r: ({"relink": 0, "swap": 1}.get(r["kind"], 2), r["date"] or ""))[:sample]
     return {"relink": sum(1 for r in strong if r["kind"] == "relink"), "ca": sum(1 for r in strong if r["kind"] == "ca"),
-            "sample": pick}
+            "swap": sum(1 for r in strong if r["kind"] == "swap"), "sample": pick}
 
 
 async def bulk_fix_doubles(db, org_id, user_id, *, max_rounds: int = 3) -> dict:
@@ -556,12 +586,12 @@ async def bulk_fix_doubles(db, org_id, user_id, *, max_rounds: int = 3) -> dict:
     batch that can be undone. Moving a link frees a game, and that game's own card may then match
     it, so the scan is repeated (up to `max_rounds`) until a pass finds nothing."""
     batch = uuid.uuid4()
-    done = {"relink": 0, "ca": 0}
+    done = {"relink": 0, "ca": 0, "swap": 0}
     skipped, players = [], set()
     for _ in range(max_rounds):
         found = await dbl.find_doubles(db, org_id)
         todo = [r for r in found["rows"] if r["strength"] == "strong" and r["kind"] in done]
-        todo.sort(key=lambda r: (r["kind"] != "relink", r["date"] or "", r["key"]))
+        todo.sort(key=lambda r: ({"relink": 0, "swap": 1}.get(r["kind"], 2), r["date"] or "", r["key"]))
         todo = todo[:BULK_DOUBLE_CAP - sum(done.values())]
         if not todo:
             break
@@ -570,6 +600,9 @@ async def bulk_fix_doubles(db, org_id, user_id, *, max_rounds: int = 3) -> dict:
             try:
                 if r["kind"] == "relink":
                     res = await relink(db, org_id, r["a"]["id"], r["b"]["id"], user_id, batch_id=batch, commit=False)
+                elif r["kind"] == "swap":
+                    res = await swap_links(db, org_id, r["a"]["id"], r["partner"]["match"]["id"], r["b"]["id"], user_id,
+                                           batch_id=batch, commit=False)
                 else:
                     res = await link_double(db, org_id, r["a"]["id"], r["b"]["id"], user_id, batch_id=batch, commit=False)
                 players.update(res["players"])
@@ -589,9 +622,11 @@ async def bulk_fix_doubles(db, org_id, user_id, *, max_rounds: int = 3) -> dict:
             "o": str(org_id), "t": str(batch),
             "d": json.dumps({"why": "Strong possible doubles fixed: wrong links moved to the right game and unlinked pairs linked.",
                              "kind": "doubles", "batch_id": str(batch), "matches": total,
-                             "relinked": done["relink"], "linked": done["ca"], "skipped": len(skipped)})})
+                             "relinked": done["relink"], "linked": done["ca"], "swapped": done["swap"],
+                             "skipped": len(skipped)})})
         await db.commit()
-    return {"batch_id": str(batch), "relinked": done["relink"], "linked": done["ca"], "skipped": skipped}
+    return {"batch_id": str(batch), "relinked": done["relink"], "linked": done["ca"], "swapped": done["swap"],
+            "skipped": skipped}
 
 
 # --- recent changes: every change anyone has made, with its undo -----------------------------------
@@ -638,6 +673,8 @@ def describe_change(r: dict) -> str:
     if a == "relink":
         return "Moved the link to a different Cricket Australia match"
     if a == "unlink":
+        if d.get("swap"):
+            return "Unlinked for a moment, to swap two cards onto each other's games"
         return "Unlinked: said these are two different matches"
     if a == "not_double":
         if d.get("via") == "unlink":

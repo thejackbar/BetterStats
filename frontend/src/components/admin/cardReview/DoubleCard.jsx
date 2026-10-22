@@ -72,7 +72,7 @@ export default function DoubleCard({ row, onChanged, dismissed = false }) {
       <Evidence row={row} />
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <SideBox side={a} label={a.kind === 'club' && row.kind === 'club' ? 'Club scorecard (earlier)' : undefined} />
-        <SideBox side={b} label={row.kind === 'relink' ? 'The right Cricket Australia match' : b.kind === 'club' && row.kind === 'club' ? 'Club scorecard (later)' : undefined} />
+        <SideBox side={b} label={row.kind === 'relink' || row.kind === 'swap' ? 'The right Cricket Australia match' : b.kind === 'club' && row.kind === 'club' ? 'Club scorecard (later)' : undefined} />
       </div>
       {row.current && (
         <p className="mt-2.5 text-[12.5px] text-pb-dim" data-testid="current-link">
@@ -80,6 +80,18 @@ export default function DoubleCard({ row, onChanged, dismissed = false }) {
           {row.current.format ? ` (${row.current.format})` : ''}, where {row.current.shared_with_club} of this card's {a.batters} batters appear with the same score.{' '}
           <a className="text-pb-accent-ink hover:underline" href={matchPageUrl(row.current.id)} target="_blank" rel="noreferrer">Open that game</a>
         </p>
+      )}
+      {row.kind === 'swap' && row.partner && (
+        <div className="mt-3 rounded-lg border border-pb-hairline bg-pb-surface2 p-3.5" data-testid="swap-partner">
+          <p className="text-[12.5px] text-pb-dim">
+            That game is held by another club scorecard, which sits on the wrong game too. The two swap places:
+            this card goes to the game on the right, and the card below goes to the game this one is on now.
+          </p>
+          <div className="mt-2.5 grid gap-3 md:grid-cols-2">
+            <SideBox side={row.partner.match} label="The other club scorecard" />
+            <SideBox side={row.partner.moves_to} label="The game it would move to" />
+          </div>
+        </div>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {dismissed ? (
@@ -105,6 +117,12 @@ export default function DoubleCard({ row, onChanged, dismissed = false }) {
                 Move the link to the right match
               </Button>
             )}
+            {row.kind === 'swap' && (
+              <Button size="sm" variant="primary" disabled={busy} data-testid="swap"
+                onClick={() => run(() => api.cardReviewDoubleSwap(a.id, row.partner.match.id, b.id), 'Swapped. Each card is on its own game now.')}>
+                Swap the two links
+              </Button>
+            )}
             {row.kind === 'club' && (
               <>
                 <Button size="sm" variant="danger" disabled={busy} onClick={() => remove(a)} data-testid="remove-a">Remove the earlier copy</Button>
@@ -112,12 +130,12 @@ export default function DoubleCard({ row, onChanged, dismissed = false }) {
               </>
             )}
             <Button size="sm" disabled={busy} data-testid="dismiss"
-              onClick={() => run(() => api.cardReviewDoubleDismiss(a.id, b.id, row.kind), 'Marked as different matches. This can be put back.')}>
+              onClick={() => run(() => api.cardReviewDoubleDismiss(a.id, b.id, row.kind === 'swap' ? 'relink' : row.kind), 'Marked as different matches. This can be put back.')}>
               Different matches
             </Button>
           </>
         )}
-        {row.kind === 'relink' && !dismissed && (
+        {(row.kind === 'relink' || row.kind === 'swap') && !dismissed && (
           <span className="ml-auto text-[11.5px] text-pb-faint">Nothing is deleted. The link can be moved back from the match.</span>
         )}
         {row.kind === 'ca' && !dismissed && (

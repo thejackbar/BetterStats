@@ -57,7 +57,7 @@ export default function AdminCardReviewDoubles() {
       caption={counts ? `${counts.total.toLocaleString()} to look at` : undefined}
       actions={
         <div className="flex flex-wrap gap-2">
-          {(counts?.by_kind?.relink > 0 || counts?.by_kind?.ca > 0) && counts?.by_strength?.strong > 0 && (
+          {(counts?.by_kind?.relink > 0 || counts?.by_kind?.ca > 0 || counts?.by_kind?.swap > 0) && counts?.by_strength?.strong > 0 && (
             <Button size="sm" variant="primary" onClick={() => setBulk(true)} data-testid="bulk-fix">Fix the strong ones…</Button>
           )}
           <FindLink filters={filters} />
@@ -92,8 +92,11 @@ export default function AdminCardReviewDoubles() {
               <SegItem active={strength === 'possible'} onClick={() => setStrength('possible')}>Possible ({by.possible || 0})</SegItem>
             </SegGroup>
             <SegGroup>
-              <SegItem active={!kind} onClick={() => setKind('')}>Both kinds</SegItem>
+              <SegItem active={!kind} onClick={() => setKind('')}>All kinds</SegItem>
               <SegItem active={kind === 'relink'} onClick={() => setKind('relink')} data-testid="k-relink">Wrong link ({counts?.by_kind?.relink || 0})</SegItem>
+              {counts?.by_kind?.swap > 0 && (
+                <SegItem active={kind === 'swap'} onClick={() => setKind('swap')} data-testid="k-swap">Swapped links ({counts.by_kind.swap})</SegItem>
+              )}
               <SegItem active={kind === 'ca'} onClick={() => setKind('ca')} data-testid="k-ca">Not linked ({counts?.by_kind?.ca || 0})</SegItem>
               <SegItem active={kind === 'club'} onClick={() => setKind('club')} data-testid="k-club">Two club scorecards</SegItem>
             </SegGroup>

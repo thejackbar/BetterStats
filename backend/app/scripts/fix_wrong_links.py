@@ -41,12 +41,17 @@ from app.services import card_review as cr
 from app.services import card_review_actions as act
 from app.services import card_review_doubles as dbl
 
-KIND_WORDS = {"relink": "wrong link", "ca": "not linked", "club": "two club cards"}
+KIND_WORDS = {"relink": "wrong link", "ca": "not linked", "club": "two club cards", "swap": "swap"}
 
 
 def _line(r: dict) -> str:
     a, b = r["a"], r["b"]
     base = f"{r['date'] or '?'}  {a.get('grade') or '?'} v {a.get('opposition') or '?'}"
+    if r["kind"] == "swap":
+        cur, pt = r.get("current") or {}, (r.get("partner") or {}).get("match") or {}
+        return (f"{base}\\n      now on:  {cur.get('grade')} v {cur.get('opposition')} ({cur.get('shared_with_club', 0)} of {a['batters']} batters agree)"
+                f"\\n      move to: {b.get('grade')} v {b.get('opposition')} ({r['shared']} of {min(a['batters'], b['batters'])} agree)"
+                f"\\n      and the card {pt.get('grade')} v {pt.get('opposition')} ({pt.get('batters', 0)} batters) moves onto {cur.get('grade')} v {cur.get('opposition')}")
     if r["kind"] == "relink":
         cur = r.get("current") or {}
         return (f"{base}\\n      now on:  {cur.get('grade')} v {cur.get('opposition')} "
@@ -57,8 +62,8 @@ def _line(r: dict) -> str:
 
 def tally(found: dict) -> dict:
     c = Counter((r["kind"], r["strength"]) for r in found["rows"])
-    return {"strong_relink": c[("relink", "strong")], "strong_link": c[("ca", "strong")],
-            "other": sum(n for (k, s), n in c.items() if not (s == "strong" and k in ("relink", "ca"))),
+    return {"strong_relink": c[("relink", "strong")], "strong_link": c[("ca", "strong")], "strong_swap": c[("swap", "strong")],
+            "other": sum(n for (k, s), n in c.items() if not (s == "strong" and k in ("relink", "ca", "swap"))),
             "by": {f"{KIND_WORDS[k]} / {s}": n for (k, s), n in sorted(c.items())}}
 
 
@@ -82,11 +87,12 @@ def _print_report(name: str, rep: dict, apply: bool) -> None:
     b = rep["before"]
     print(f"\n=== {name}")
     print("  found: " + (", ".join(f"{n} {k}" for k, n in b["by"].items()) or "nothing"))
-    strong = [r for r in rep["rows"] if r["strength"] == "strong" and r["kind"] in ("relink", "ca")]
-    print(f"  the fix would move {b['strong_relink']} wrong link(s) and link {b['strong_link']} unlinked pair(s) now"
+    strong = [r for r in rep["rows"] if r["strength"] == "strong" and r["kind"] in ("relink", "ca", "swap")]
+    print(f"  the fix would move {b['strong_relink']} wrong link(s), swap {b['strong_swap']} pair(s) of cards and link {b['strong_link']} unlinked pair(s) now"
           f" (a game freed by a move can add more on a later pass)")
-    for r in sorted(strong, key=lambda r: (r["kind"] != "relink", r["date"] or ""))[:12]:
-        print(f"    {'MOVE' if r['kind'] == 'relink' else 'LINK'}  " + _line(r).replace("\\n", "\n"))
+    for r in sorted(strong, key=lambda r: ({"relink": 0, "swap": 1}.get(r["kind"], 2), r["date"] or ""))[:12]:
+        kind_word = {"relink": "MOVE", "swap": "SWAP"}.get(r["kind"], "LINK")
+        print(f"    {kind_word}  " + _line(r).replace("\\n", "\n"))
     if len(strong) > 12:
         print(f"    ... and {len(strong) - 12} more")
     print(f"  left for a person: {b['other']} weaker match(es) in Possible doubles")
@@ -101,14 +107,14 @@ def _print_report(name: str, rep: dict, apply: bool) -> None:
             print(f"    ... and {len(left) - 40} more")
     if apply and rep["applied"]:
         a = rep["applied"]
-        if not (a["relinked"] or a["linked"]):
+        if not (a["relinked"] or a["linked"] or a["swapped"]):
             print(f"  Nothing to fix: no strong wrong link or strong unlinked pair. No batch was written (skipped {len(a['skipped'])}).")
             return
-        print(f"  APPLIED: moved {a['relinked']} link(s), linked {a['linked']} pair(s), skipped {len(a['skipped'])}.")
+        print(f"  APPLIED: moved {a['relinked']} link(s), swapped {a['swapped']} pair(s), linked {a['linked']} pair(s), skipped {len(a['skipped'])}.")
         print(f"  BATCH {a['batch_id']}  (undo: --undo {a['batch_id']}, or the Card review overview)")
         for s in a["skipped"][:10]:
             print(f"    skipped {s['match_id'][:8]}: {s['reason']}")
-        print(f"  after: {rep['after']['strong_relink']} strong wrong link(s) and {rep['after']['strong_link']} strong unlinked pair(s) remain")
+        print(f"  after: {rep['after']['strong_relink']} strong wrong link(s), {rep['after']['strong_swap']} strong swap(s) and {rep['after']['strong_link']} strong unlinked pair(s) remain")
 
 
 async def _orgs(db, target: str) -> list:

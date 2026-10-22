@@ -172,6 +172,12 @@ class LinkIn(BaseModel):
     game_id: str
 
 
+class SwapIn(BaseModel):
+    match_id: str
+    partner_id: str
+    game_id: str
+
+
 class DoubleAnswerIn(BaseModel):
     match_id: str
     other_id: str
@@ -406,7 +412,7 @@ async def card_review_batches(club: Organisation = Depends(get_current_club),
         SELECT a.target_id AS batch_id, a.created_at, (a.details->>'matches')::int AS matches,
                COALESCE(a.details->>'kind', 'switch') AS kind,
                (SELECT count(*) FROM card_review_log l WHERE l.batch_id = CAST(a.target_id AS UUID)
-                   AND l.undone_at IS NULL AND l.action IN ('choice', 'relink', 'link')) AS still_switched
+                   AND l.undone_at IS NULL AND l.action IN ('choice', 'relink', 'link', 'unlink')) AS still_switched
           FROM audit_logs a
          WHERE a.org_id = CAST(:o AS UUID) AND a.action = 'card_review_bulk'
          ORDER BY a.created_at DESC LIMIT 20"""), {"o": str(club.id)})).mappings().all()
@@ -509,6 +515,16 @@ async def card_review_double_link(data: LinkIn, user: User = Depends(require_cap
                                   db: AsyncSession = Depends(get_db)):
     """Say a club card and a Cricket Australia game are one match. Both stay stored."""
     res = await _do(club, act.link_double(db, club.id, _id(data.match_id), _id(data.game_id), user.id))
+    res.pop("players", None)
+    return res
+
+
+@router.post("/doubles/swap")
+async def card_review_double_swap(data: SwapIn, user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+                                  club: Organisation = Depends(get_current_club),
+                                  db: AsyncSession = Depends(get_db)):
+    """Two cards each on the other's game: put each on its own, as one undoable batch."""
+    res = await _do(club, act.swap_links(db, club.id, _id(data.match_id), _id(data.partner_id), _id(data.game_id), user.id))
     res.pop("players", None)
     return res
 

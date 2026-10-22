@@ -19,6 +19,15 @@ TWO KINDS OF DOUBLE.
             the game it leaves is free again and, if its own card is unlinked, shows up as a ``ca`` pair
             on the next scan. A link a person decided (`review_source = 'hand'`, or confirmed with
             `review_pair_ok`) is never second-guessed, and only a strong match is offered.
+* ``swap``   two club cards each sitting on the OTHER's game, where only one side can be proved. The
+            C grade card (11 batters) is on the D Grade game (no scorecard), and the D grade card is on
+            the C Grade game that the C card matches (10 of 10 batters). Neither card has a free game to
+            move to, and the D card's own game has no scores to prove it "better", so neither the wrong-link
+            scan nor `repair_crossed_pairs` (which needs every card to gain shared scores) will move them.
+            It is offered when one card matches the other's game STRONGLY, and the other card is a
+            consistent fit for the first card's game: the same day, the opposition names agree, the grade
+            names agree (D grade on a D Grade game), and if both have batters they agree. Applied as one
+            swap (`card_review_actions.swap_links`), undoable as a batch.
 * ``club``  two club scorecards that look like one match, at least one of them unlinked (a file
             imported twice, or an import beside a hand-typed or photographed card). The other may
             already be linked to its Cricket Australia game: that is what a second import of a
@@ -60,6 +69,7 @@ Two cards that both hold batters and are neither are two different matches and a
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import timedelta
 from typing import Optional
 
@@ -68,7 +78,7 @@ from sqlalchemy import text
 from app.services import card_review as cr
 from app.services import match_pairing as mp
 
-KINDS = ("ca", "club", "relink")
+KINDS = ("ca", "club", "relink", "swap")
 STRENGTHS = ("strong", "likely", "possible")
 
 _MANUALS = """
@@ -250,7 +260,7 @@ def _synced_side(g: dict, card: frozenset, bowlers: int, org: str) -> dict:
     }
 
 
-def _line(kind, pair, side_a, side_b, current=None) -> dict:
+def _line(kind, pair, side_a, side_b, current=None, partner=None) -> dict:
     ev = pair["evidence"]
     fa, fb = (side_a["format"] or "").strip().lower(), (side_b["format"] or "").strip().lower()
     return {
@@ -265,7 +275,74 @@ def _line(kind, pair, side_a, side_b, current=None) -> dict:
         "date": side_a["date"] or side_b["date"],
         # for a wrong link: the game the card is on now
         "current": current,
+        # for a swap: the other card, and the game it would move to (the one this card is on now)
+        "partner": partner,
     }
+
+
+_GRADE = re.compile(r"^\s*([a-z]\d?)\s+grade\b")
+_UNDER = re.compile(r"\bunder\s*(\d{1,2})\b")
+
+
+def grade_key(name: Optional[str]) -> Optional[str]:
+    """"D grade" and "D Grade Ritchie Cup" are the same grade; "Under 14" is its own. None where the
+    name says neither, so an unfamiliar grade name never agrees with anything."""
+    low = (name or "").lower()
+    m = _GRADE.match(low)
+    if m:
+        return m.group(1)
+    m = _UNDER.search(low)
+    return f"u{m.group(1)}" if m else None
+
+
+def match_swaps(candidates: list, meta: dict, manual_by: dict, game_rows: dict, game_grade: dict,
+                holder_of: dict, banned: set) -> list:
+    """Pairs of cards that should swap games. Pure: rows in, pairs out.
+
+    `candidates` are the linked cards whose game does not match them and that no free game fits.
+    `holder_of` maps a game to the card sitting on it (any card, empty or not, not one a person
+    confirmed). For each candidate X on game Gx, look for a game Gy that X matches strongly and that
+    a card Y is sitting on, then check Y is a consistent fit for Gx: same day, the opposition agrees,
+    the same grade, and where both have batters the batters agree. Y is allowed to be an empty card,
+    which is the usual shape: the import linked an empty card across by date and opposition and the
+    real card went to the other game. Each card is used at most once."""
+    out, used = [], set()
+    for x in sorted(candidates, key=lambda m: (str(m.played_at), m.id)):
+        if x.id in used:
+            continue
+        gx = meta[x.id]["linked_to"]
+        gx_row = game_rows.get(gx)
+        if gx_row is None:
+            continue
+        best = None
+        for gy, y_id in holder_of.items():
+            if gy == gx or y_id in used or y_id == x.id:
+                continue
+            gy_row = game_rows.get(gy)
+            if gy_row is None or (x.id, gy) in banned:
+                continue
+            ev = _evidence(x, gy_row)
+            if not ev["confirmed"] or (ev["gap_days"] is not None and ev["gap_days"] > mp.NEAR_DAYS):
+                continue
+            y = manual_by[y_id]
+            ev2 = _evidence(y, gx_row)
+            ky, kg, ky_now = grade_key(meta[y_id]["grade_name"]), grade_key(game_grade.get(gx)), grade_key(game_grade.get(gy))
+            if not (ev2["same_day"] and ev2["opposition_agrees"] and ky and ky == kg):
+                continue
+            if ev2["both_cards"] and not ev2["confirmed"]:
+                continue  # both have batters and they do not agree: not a fit
+            if y.has_card and cr.confirms_pair(y.signature, gy_row.signature):
+                continue  # Y belongs where it is: X is a second copy of Gy's match, not half of a swap
+            if ky_now and ky_now == ky:
+                continue  # Y is the same grade as the game it is on: nothing says it is misplaced
+            if best is None or ev["shared"] > best[1]["shared"]:
+                best = (y_id, ev, ev2, gy)
+        if best:
+            y_id, ev, ev2, gy = best
+            used |= {x.id, y_id}
+            out.append({"a": x.id, "b": gy, "partner": y_id, "evidence": ev, "partner_evidence": ev2,
+                        "strength": "strong", "key": (ev["shared"],)})
+    return out
 
 
 async def find_doubles(db, org_id) -> dict:
@@ -309,6 +386,25 @@ async def find_doubles(db, org_id) -> dict:
 
     manual_by = {m.id: m for m in manuals}
     synced_by = {m.id: m for m in synced}
+    # Linked cards no free game fits may be half of a swap with the card on the game they match.
+    unpaired_wrong = [m for m in wrong if m.id not in {p["a"] for p in pairs_ca}]
+    swaps, game_rows, game_grade, g_all = [], {}, {}, {}
+    if unpaired_wrong:
+        # Any unconfirmed card near a candidate's day may be the one sitting on the game it matches.
+        days = {m.played_at for m in unpaired_wrong if m.played_at is not None}
+        near = timedelta(days=mp.NEAR_DAYS)
+        holder_of = {meta[m.id]["linked_to"]: m.id for m in manuals
+                     if meta[m.id]["linked"] and not meta[m.id]["review_pair_ok"] and m.played_at is not None
+                     and any(abs(m.played_at - d) <= near for d in days)}
+        holder_of.update({meta[m.id]["linked_to"]: m.id for m in unpaired_wrong})
+        need = sorted(set(holder_of) | {meta[m.id]["linked_to"] for m in unpaired_wrong})
+        g_all = {g["gid"]: g for g in await _all(db, _SYNCED_DETAIL, org=org, ids=need)}
+        for gid, g in g_all.items():
+            game_rows[gid] = mp.MatchRow(gid, g["played_at"], g["opposition"] or "",
+                                         frozenset(cur_cards.get(gid, ())), "")
+            game_grade[gid] = g["grade_name"]
+        swaps = await asyncio.to_thread(match_swaps, unpaired_wrong, meta, manual_by, game_rows, game_grade,
+                                        holder_of, ban_ca)
     cur_of = {p["a"]: meta[p["a"]]["linked_to"] for p in pairs_ca if p["a"] in wrong_ids}
     gids = sorted({p["b"] for p in pairs_ca} | set(cur_of.values()))
     gdet = {g["gid"]: g for g in (await _all(db, _SYNCED_DETAIL, org=org, ids=gids))} if gids else {}
@@ -334,6 +430,15 @@ async def find_doubles(db, org_id) -> dict:
                        "shared_with_club": len(manual_by[p["a"]].signature & csig)}
         rows.append(_line("relink" if current else "ca", p, m_side(p["a"]),
                           _synced_side(g, synced_by[p["b"]].signature, gbow.get(p["b"], 0), org), current))
+    for p in swaps:
+        gy, gx = g_all.get(p["b"]), g_all.get(meta[p["a"]]["linked_to"])
+        if not gy or not gx:
+            continue
+        sig_y, sig_x = game_rows[p["b"]].signature, game_rows[gx["gid"]].signature
+        current = {**_synced_side(gx, sig_x, 0, org), "shared_with_club": len(manual_by[p["a"]].signature & sig_x)}
+        partner = {"match": m_side(p["partner"]), "moves_to": _synced_side(gx, sig_x, 0, org),
+                   "from_game": _synced_side(gy, sig_y, 0, org)}
+        rows.append(_line("swap", p, m_side(p["a"]), _synced_side(gy, sig_y, 0, org), current, partner))
     for p in pairs_club:
         rows.append(_line("club", p, m_side(p["a"]), m_side(p["b"])))
     order = {s: i for i, s in enumerate(STRENGTHS)}
