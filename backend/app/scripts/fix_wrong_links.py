@@ -21,6 +21,11 @@ line, so it can be undone from the Card review overview or here with `--undo BAT
     python -m app.scripts.fix_wrong_links <org-id-or-slug|all>                   # dry run
     python -m app.scripts.fix_wrong_links <org-id-or-slug|all> --apply
     python -m app.scripts.fix_wrong_links <org-id-or-slug> --undo <batch-id>
+    python -m app.scripts.fix_wrong_links <org-id-or-slug> --unlink-wrong-grade [--apply]
+
+`--unlink-wrong-grade` is the step AFTER the fix: a card still linked to a game of another grade (an A
+grade card on a B grade game, with no A grade game to move to) is unlinked so it stands alone and the
+game counts on its own. Dry run by default; one undoable batch; a link a person confirmed is not touched.
 
 What it does NOT fix, and says so: weaker matches (left for a person in Possible doubles), cards
 that already sit on a game that matches them, two cards each on the other's game (a swap with no
@@ -117,6 +122,24 @@ def _print_report(name: str, rep: dict, apply: bool) -> None:
         print(f"  after: {rep['after']['strong_relink']} strong wrong link(s), {rep['after']['strong_swap']} strong swap(s) and {rep['after']['strong_link']} strong unlinked pair(s) remain")
 
 
+async def _unlink_report(db, name: str, org_id, apply: bool) -> None:
+    """Cards on a game of another grade that no move or swap fixes: list them, and with --apply unlink them."""
+    rows = await act.wrong_grade_links(db, org_id)
+    print(f"\n=== {name}: {len(rows)} card(s) linked to a game of another grade, with no game of their own grade to move to")
+    print("    (run the move and swap fix first: a card it can move is not listed here)")
+    for r in sorted(rows, key=lambda r: str(r["played_at"])):
+        why = "its batters do not appear on that game" if r["verdict"] == "contradicted_grade_differs" else "that game has no batters, or the card has none, to prove it"
+        print(f"    [{r['mid'][:8]}] {r['played_at']}  {r['grade']} v {r['opposition']}  is on  {r['g_grade']} v {r['g_opp']}  "
+              f"({r['shared']} shared; {r['club_n']} v {r['game_n']} batters): {why}")
+    if not rows:
+        return
+    if not apply:
+        print("    DRY RUN: nothing written. With --apply each card is unlinked (one undoable batch) and stands alone; the game counts on its own.")
+        return
+    res = await act.bulk_unlink_wrong_grade(db, org_id, None)
+    print(f"    unlinked {res['unlinked']} card(s), skipped {len(res['skipped'])}.  Undo the whole batch:  --undo {res['batch_id']}")
+
+
 async def _orgs(db, target: str) -> list:
     if target == "all":
         rows = (await db.execute(text("SELECT o.id::text, o.name FROM organisations o WHERE EXISTS "
@@ -127,7 +150,7 @@ async def _orgs(db, target: str) -> list:
     return [(r[0], r[1]) for r in rows]
 
 
-async def main(target: str, apply: bool, undo: str | None, max_rounds: int) -> int:
+async def main(target: str, apply: bool, undo: str | None, max_rounds: int, unlink_wrong_grade: bool = False) -> int:
     async with async_session_maker() as db:
         orgs = await _orgs(db, target)
         if not orgs:
@@ -138,6 +161,9 @@ async def main(target: str, apply: bool, undo: str | None, max_rounds: int) -> i
             if undo:
                 res = await act.bulk_undo(db, org_id, None, uuid.UUID(undo))
                 print(f"\n=== {name}: undid {res['undone']} change(s); left alone (changed since): {len(res['left_alone'])}")
+                continue
+            if unlink_wrong_grade:
+                await _unlink_report(db, name, org_id, apply)
                 continue
             _print_report(name, await run_org(db, org_id, apply=apply, max_rounds=max_rounds), apply)
     return 0
@@ -151,4 +177,5 @@ if __name__ == "__main__":
 
     def opt(name, default=None):
         return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
-    sys.exit(asyncio.run(main(args[0], "--apply" in sys.argv, opt("--undo"), int(opt("--max-rounds", 3)))))
+    sys.exit(asyncio.run(main(args[0], "--apply" in sys.argv, opt("--undo"), int(opt("--max-rounds", 3)),
+                              "--unlink-wrong-grade" in sys.argv)))

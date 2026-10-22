@@ -26,23 +26,11 @@ from sqlalchemy import text
 from app.models.db import async_session_maker
 from app.services import card_review as cr
 from app.services import card_review_doubles as dbl
+from app.services import link_audit as la
 from app.services import match_pairing as mp
+from app.services.link_audit import classify_link  # noqa: F401  (the suite drives it from here)
 
 EXAMPLES = 8
-
-_LINKED = """
-    SELECT m.id::text AS mid, m.played_at, COALESCE(m.opposition, '') AS opposition, m.review_pair_ok,
-           m.superseded_by_game_id::text AS gid, COALESCE(gr.display_name_override, gr.name) AS grade,
-           g.played_at AS g_day, COALESCE(gg.display_name_override, gg.name) AS g_grade,
-           CASE WHEN g.home_org_id = CAST(:org AS UUID) THEN g.away_team
-                WHEN g.away_org_id = CAST(:org AS UUID) THEN g.home_team
-                ELSE COALESCE(g.opp_club_name, g.home_team || ' v ' || g.away_team) END AS g_opp
-      FROM manual_games m
-      JOIN games g ON g.id = m.superseded_by_game_id
-      LEFT JOIN grades gr ON gr.id = m.grade_id
-      LEFT JOIN grades gg ON gg.id = g.grade_id
-     WHERE m.organisation_id = CAST(:org AS UUID)
-"""
 
 _ALL_GRADES = """
     SELECT COALESCE(gr.display_name_override, gr.name) AS name, 'club cards' AS src, count(*) AS n
@@ -52,6 +40,15 @@ _ALL_GRADES = """
     SELECT COALESCE(gr.display_name_override, gr.name), 'synced games', count(*)
       FROM grades gr JOIN seasons s ON s.id = gr.season_id JOIN games g ON g.grade_id = gr.id
      WHERE s.organisation_id = CAST(:org AS UUID) GROUP BY 1
+"""
+
+_DESCRIBE = """
+    SELECT g.id::text AS id, 'synced ' || COALESCE(gr.display_name_override, gr.name, '?') || ' v '
+           || COALESCE(g.opp_club_name, g.away_team, '?') AS what
+      FROM games g LEFT JOIN grades gr ON gr.id = g.grade_id WHERE g.id = ANY(CAST(:ids AS UUID[]))
+    UNION ALL
+    SELECT m.id::text, 'club card ' || COALESCE(gr.display_name_override, gr.name, '?') || ' v ' || COALESCE(m.opposition, '?')
+      FROM manual_games m LEFT JOIN grades gr ON gr.id = m.grade_id WHERE m.id = ANY(CAST(:ids AS UUID[]))
 """
 
 _TWICE = """
@@ -78,41 +75,16 @@ def _show(items: list, limit: int, fmt) -> None:
         print(f"      ... and {len(items) - limit} more")
 
 
-def classify_link(card_grade, game_grade, shared: int, club_n: int, game_n: int, confirmed: bool, person_ok: bool) -> str:
-    """One word for a linked pair. Pure, so the suite can drive every branch."""
-    gk, hk = dbl.grade_key(card_grade), dbl.grade_key(game_grade)
-    differs = bool(gk and hk and gk != hk)
-    unreadable = not (gk and hk)
-    if person_ok:
-        return "person_ok_grade_differs" if differs else "person_ok"
-    if confirmed:
-        if differs:
-            return "proved_grade_names_differ"
-        return "proved_grade_unreadable" if unreadable else "proved"
-    if club_n and game_n:  # both hold batters and they do not agree
-        return "contradicted_grade_differs" if differs else "contradicted"
-    if differs:
-        return "unproven_grade_differs"
-    return "unproven_grade_unreadable" if unreadable else "unproven_same_grade"
-
-
 async def audit(db, org_id: str, *, examples: int = EXAMPLES) -> dict:
     out: dict = {}
     # 1. linked pairs
-    rows = [dict(r) for r in (await db.execute(text(_LINKED), {"org": org_id})).mappings().all()]
-    mine = await mp._cards(db, mp._IMPORTED_CARD_SQL, {"ids": [r["mid"] for r in rows]}) if rows else {}
-    theirs = await mp._cards(db, mp._SYNCED_CARD_SQL, {"org": org_id, "ids": sorted({r["gid"] for r in rows})}) if rows else {}
+    rows = await la.linked_verdicts(db, org_id)
     by: dict = defaultdict(list)
     day_off = opp_off = 0
     for r in rows:
-        a, b = set(mine.get(r["mid"], ())), set(theirs.get(r["gid"], ()))
-        r["shared"], r["club_n"], r["game_n"] = len(a & b), len(a), len(b)
-        v = classify_link(r["grade"], r["g_grade"], r["shared"], len(a), len(b), cr.confirms_pair(a, b), bool(r["review_pair_ok"]))
-        by[v].append(r)
-        if mp._day_gap(r["played_at"], r["g_day"]) not in (0, None):
-            day_off += 1
-        if not mp.teams_agree(r["opposition"], r["g_opp"] or ""):
-            opp_off += 1
+        by[r["verdict"]].append(r)
+        day_off += r["day_gap"] not in (0, None)
+        opp_off += not r["opposition_agrees"]
     out["links"] = {k: len(v) for k, v in by.items()} | {"total": len(rows), "day_off": day_off, "opp_off": opp_off}
     bad = ["contradicted_grade_differs", "unproven_grade_differs", "person_ok_grade_differs"]
     weak = ["contradicted", "unproven_same_grade", "unproven_grade_unreadable"]
@@ -136,15 +108,29 @@ async def audit(db, org_id: str, *, examples: int = EXAMPLES) -> dict:
     print("   " + _verdict(out["links_bad"]) + ("" if not by.get("contradicted") and not by.get("unproven_same_grade") else
                                               f"   (plus {len(by.get('contradicted', [])) + len(by.get('unproven_same_grade', []))} same-grade links nothing proves)"))
 
+    # 1b. same-grade links nothing proves whose opposition or day disagrees: the import's "one shared word" rule
+    odd = [r for k in ("unproven_same_grade", "unproven_grade_unreadable", "contradicted") for r in by.get(k, ())
+           if not r["opposition_agrees"] or r["day_gap"] not in (0, None)]
+    out["links_unproven_odd"] = len(odd)
+    print(f"\n1b. Links nothing proves where the opposition name or the day ALSO disagrees ({len(odd)}): the import linked on one shared word")
+    _show(odd, examples, lambda r: f"[{r['mid'][:8]}] {r['played_at']} {r['grade']} v {r['opposition']}  ->  {r['g_day']} {r['g_grade']} v {r['g_opp']}"
+                                   f"  ({r['club_n']} v {r['game_n']} batters)")
+    print("   " + _verdict(len(odd)))
+
     # 2. grade names the test cannot read
     names = Counter()
     for r in (await db.execute(text(_ALL_GRADES), {"org": org_id})).mappings().all():
         if r["name"] and not dbl.grade_key(r["name"]):
             names[(r["name"], r["src"])] += r["n"]
-    out["unreadable_grades"] = len(names)
-    print(f"\n2. Grade names the grade test cannot read ({len(names)}): cards and games in them are never swapped, and are compared on batters alone")
-    _show(sorted(names.items(), key=lambda kv: -kv[1]), examples * 2, lambda kv: f"{kv[1]:>5}  {kv[0][0]!r}  ({kv[0][1]})")
-    print("   " + _verdict(len(names)))
+    on_cards = {k: v for k, v in names.items() if k[1] == "club cards"}
+    out["unreadable_grades"] = len(on_cards)
+    out["unreadable_grades_synced_only"] = len(names) - len(on_cards)
+    print(f"\n2. Grade names the grade test cannot read: {len(on_cards)} on club cards, {len(names) - len(on_cards)} on synced games only")
+    print("   (a card in an unreadable grade is compared on batters alone and is never swapped; a synced-only grade, such as a junior or women's competition, has no historic card to pair)")
+    _show(sorted(on_cards.items(), key=lambda kv: -kv[1]), examples * 2, lambda kv: f"{kv[1]:>5}  {kv[0][0]!r}  ({kv[0][1]})")
+    if names and len(names) > len(on_cards):
+        _show(sorted((k, v) for k, v in names.items() if k[1] != "club cards"), 3, lambda kv: f"{kv[1]:>5}  {kv[0][0]!r}  ({kv[0][1]}), for example")
+    print("   " + _verdict(len(on_cards)))
 
     # 3. the doubles list, by grade agreement
     found = await dbl.find_doubles(db, org_id)
@@ -197,10 +183,18 @@ async def audit(db, org_id: str, *, examples: int = EXAMPLES) -> dict:
 
     # 5. what a player still sees twice
     twice = [dict(r) for r in (await db.execute(text(_TWICE), {"org": org_id})).mappings().all()]
+    pairs: dict = defaultdict(list)
+    for r in twice:
+        pairs[tuple(sorted(r["ids"]))].append(r)
+    desc = {r["id"]: r["what"] for r in (await db.execute(text(_DESCRIBE), {"ids": sorted({i for k in pairs for i in k})})).mappings().all()} if pairs else {}
     out["counted_twice"] = len(twice)
-    print(f"\n5. The same score by the same player on the same day in two games (counted twice on a profile) ({len(twice)})")
-    _show(twice, examples, lambda r: f"{r['day']}  {r['name']}  {r['runs']} runs in {r['games']} games ({', '.join(i[:8] for i in r['ids'])})")
-    print("   " + _verdict(len(twice)) + ("   (a player can score the same in two games on one day only if the club played two matches: check the dates)" if twice else ""))
+    out["double_pairs"] = len(pairs)
+    print(f"\n5. The same score by the same player on the same day in two games (counted twice on a profile): {len(twice)} score(s) in {len(pairs)} pair(s) of games")
+    ranked = sorted(pairs.items(), key=lambda kv: (-len(kv[1]), str(kv[1][0]["day"])))
+    _show(ranked, examples, lambda kv: f"{kv[1][0]['day']}  {len(kv[1])} player(s) have an identical score in BOTH:  "
+                                       + "  /  ".join(f"[{i[:8]}] {desc.get(i, '?')}" for i in kv[0])
+                                       + "   e.g. " + ", ".join(f"{r['name']} {r['runs']}" for r in kv[1][:3]))
+    print("   " + _verdict(len(pairs)) + ("   (several players sharing the same two games is a double; one low score by one player may just be two real matches)" if pairs else ""))
 
     print("\nWhat this cannot prove: a pair with no batters on either side and a readable, matching grade is accepted"
           " on grade, day and opposition alone. Section 1 counts those as 'unproven_same_grade'.")

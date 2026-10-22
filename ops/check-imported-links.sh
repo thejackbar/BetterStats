@@ -11,6 +11,10 @@
 #   ops/check-imported-links.sh fix              the same; changes nothing
 #   ops/check-imported-links.sh fix --apply      move the strong wrong links and link the strong unlinked
 #                                                pairs, as ONE batch; prints the batch id
+#   ops/check-imported-links.sh unlink-grade [--apply]
+#                                                run AFTER fix: cards still linked to a game of another grade
+#                                                (nothing to move them to) are unlinked and stand alone. Dry run
+#                                                by default; one undoable batch.
 #   ops/check-imported-links.sh undo <batch-id>  undo that batch
 #   ops/check-imported-links.sh audit            read-only second opinion: every linked card against its game's
 #                                                grade, what Possible doubles shows, free games the scan skipped,
@@ -60,6 +64,13 @@ case "$step" in
       [ "$step" = "fix" ] && { echo; echo "Nothing was changed. To fix, run:  $0 fix --apply"; }
     fi
     ;;
+  unlink-grade)
+    if [ "${2:-}" = "--apply" ]; then
+      $BACKEND_CMD app.scripts.fix_wrong_links "$CLUB" --unlink-wrong-grade --apply
+    else
+      $BACKEND_CMD app.scripts.fix_wrong_links "$CLUB" --unlink-wrong-grade
+    fi
+    ;;
   audit)
     $BACKEND_CMD app.scripts.audit_pairing "$CLUB" ${2:+--examples "$2"}
     ;;
@@ -67,5 +78,5 @@ case "$step" in
     [ -n "${2:-}" ] || fail "give the batch id the fix printed:  $0 undo <batch-id>"
     $BACKEND_CMD app.scripts.fix_wrong_links "$CLUB" --undo "$2"
     ;;
-  *) fail "unknown step '$step'. Use: check | audit | fix [--apply] | undo <batch-id>" ;;
+  *) fail "unknown step '$step'. Use: check | audit | fix [--apply] | unlink-grade [--apply] | undo <batch-id>" ;;
 esac

@@ -20,6 +20,7 @@ from sqlalchemy import text
 
 from app.services import card_review as cr
 from app.services import card_review_doubles as dbl
+from app.services import link_audit as la
 from app.services import card_review_hybrid as hy
 
 _STATE_COLS = ("pair_prefers_import", "pairing_locked", "review_choice", "review_source",
@@ -627,6 +628,51 @@ async def bulk_fix_doubles(db, org_id, user_id, *, max_rounds: int = 3) -> dict:
         await db.commit()
     return {"batch_id": str(batch), "relinked": done["relink"], "linked": done["ca"], "swapped": done["swap"],
             "skipped": skipped}
+
+
+async def wrong_grade_links(db, org_id) -> list:
+    """Linked cards that sit on a game of ANOTHER grade, with nothing a person decided keeping them there.
+
+    The CSV import linked on a date and one shared opposition word and ignored grade. A card whose
+    real game the scan can find (a move or a swap) is left to that fix, so this runs after it: what
+    is left has no game of its own grade to go to, and the honest state is a card that stands alone.
+    A card with an unreadable grade name is never listed (nothing says the grades differ)."""
+    found = await dbl.find_doubles(db, org_id)
+    offered = set()
+    for r in found["rows"]:
+        if r["kind"] in ("relink", "swap"):
+            offered.add(r["a"]["id"])
+            if r.get("partner"):
+                offered.add(r["partner"]["match"]["id"])
+    return [r for r in await la.linked_verdicts(db, org_id) if r["verdict"] in la.WRONG_GRADE and r["mid"] not in offered]
+
+
+async def bulk_unlink_wrong_grade(db, org_id, user_id) -> dict:
+    """Unlink every card `wrong_grade_links` lists, as one batch that can be undone.
+
+    Unlinking says "these are two different matches": the card stands alone and the game counts on
+    its own, so neither is lost, and the pair is not offered again. Nothing is deleted."""
+    todo = (await wrong_grade_links(db, org_id))[:BULK_DOUBLE_CAP]
+    batch, players, done, skipped = uuid.uuid4(), set(), 0, []
+    for r in todo:
+        try:
+            res = await unlink(db, org_id, r["mid"], user_id, batch_id=batch, commit=False)
+            players.update(res["players"])
+            done += 1
+        except ReviewError as e:
+            skipped.append({"match_id": r["mid"], "reason": str(e)})
+    await db.commit()
+    await recompute(db, org_id, players)
+    if done:
+        await db.execute(text("""
+            INSERT INTO audit_logs (org_id, action, target_type, target_id, details)
+            VALUES (CAST(:o AS UUID), 'card_review_bulk', 'manual_games', :t, CAST(:d AS JSONB))"""), {
+            "o": str(org_id), "t": str(batch),
+            "d": json.dumps({"why": "Cards linked to a game of another grade were unlinked and stand alone.",
+                             "kind": "unlink_wrong_grade", "batch_id": str(batch), "matches": done,
+                             "skipped": len(skipped)})})
+    await db.commit()
+    return {"batch_id": str(batch), "unlinked": done, "skipped": skipped}
 
 
 # --- recent changes: every change anyone has made, with its undo -----------------------------------
