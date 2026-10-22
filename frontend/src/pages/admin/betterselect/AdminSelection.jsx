@@ -16,6 +16,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { sortByFirstName } from '../../../lib/nameFormat'
+import { availSortRank } from '../../../lib/availability'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -36,7 +37,7 @@ import { DualRailView, TeamSheetView } from './SelectionViews'
 import { AddPlayersSheet, SlotSheet, MobileBar } from './SelectionMobile'
 import SendSide from './SendSide'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
-import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank, poolAvailRank, normGender, gameDatesLabel } from './selectionMeta'
+import { classifyBowl, formBucket, matchesAge, inAnotherXI, alsoIn, alsoInLine, nameMatches, poolRank, normGender, gameDatesLabel } from './selectionMeta'
 import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
 import { teamSeq, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
 import { confirmSig, restoreDraft } from './selectionDraft'
@@ -382,7 +383,7 @@ export default function AdminSelection() {
   const cmp = useCallback((a, b) => {
     const at = poolRank(a), bt = poolRank(b)
     if (at !== bt) return at - bt
-    const r = poolAvailRank(a) - poolAvailRank(b)
+    const r = availSortRank(a.availability, a.availability_days) - availSortRank(b.availability, b.availability_days)
     if (r !== 0) return r
     const sa = a.score ?? 0, sb = b.score ?? 0
     if (sa !== sb) return sb - sa

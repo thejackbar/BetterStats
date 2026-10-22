@@ -184,13 +184,13 @@ async def main():
     def two_day(name, availability, w1, w2, score=0.0):
         return {**row(name, availability, score),
                 "availability_days": [{"date": "d1", "status": w1}, {"date": "d2", "status": w2}]}
-    check("W2 only: above no answer, below Maybe, whatever the form",
+    check("half-available (either way) leads its bucket: above Available, Maybe and no answer, whatever the form",
           [r["display_name"] for r in sorted([
               row("Silent Star", "NO_RESPONSE", 90.0),
               two_day("W2 Only", "UNAVAILABLE", "UNAVAILABLE", "AVAILABLE", 0.0),
               two_day("W1 Only", "UNAVAILABLE", "AVAILABLE", "UNAVAILABLE", 0.0),
               row("Maybe Low", "MAYBE", 1.0), row("Avail Low", "AVAILABLE", 0.0)], key=pool_sort_key)],
-          ["Avail Low", "Maybe Low", "W2 Only", "Silent Star", "W1 Only"])
+          ["W1 Only", "W2 Only", "Avail Low", "Maybe Low", "Silent Star"])
 
     check("half_open leads the pool, squad order kept inside it",
           [r["display_name"] for r in sorted([

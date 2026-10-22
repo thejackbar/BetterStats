@@ -36,7 +36,7 @@ const payloadFor = (twoDay) => {
   p.pool = p.pool.map((x) => {
     if (x.display_name === 'Cara Free') {
       return twoDay
-        ? { ...x, availability: 'UNAVAILABLE', availability_days: [{ date: WK1, status: 'AVAILABLE' }, { date: WK2, status: 'UNAVAILABLE' }] }
+        ? { ...x, availability: 'UNAVAILABLE', half_open: true, availability_days: [{ date: WK1, status: 'AVAILABLE' }, { date: WK2, status: 'UNAVAILABLE' }] }
         : { ...x, availability: 'AVAILABLE', availability_days: null }
     }
     if (x.display_name === 'Alex Backtoback') {
@@ -85,6 +85,12 @@ const run = async () => {
       ok('header says it is a two-day game', /two days/i.test(b0))
       ok('the card for the player away in week 2 says which week (W1 ONLY)', /W1 ONLY/.test(b0), b0.slice(0, 400))
       ok('a player free both weeks shows no split line', (await page.locator('[data-week-split]').count()) === 1)
+      // The shared availability sort: free ONE week of the two (Cara) leads the pool, ahead
+      // of a player free both weeks (Alex), though the combined answer reads her OUT.
+      const poolTxt = (await page.locator('[data-drop-kind="pool"]').first().innerText()).replace(/\s+/g, ' ')
+      const iCara = poolTxt.indexOf('Cara Free'), iAlex = poolTxt.indexOf('Alex Backtoback')
+      ok('the pool lists both players', iCara >= 0 && iAlex >= 0, poolTxt.slice(0, 200))
+      ok('the pool leads with the player free one week only (Cara) ahead of one free both (Alex)', iCara >= 0 && iCara < iAlex, `cara at ${iCara}, alex at ${iAlex}`)
     } else {
       ok('control: header does not say two days', !/two days/i.test(b0))
       ok('control: no split line anywhere', (await page.locator('[data-week-split]').count()) === 0)

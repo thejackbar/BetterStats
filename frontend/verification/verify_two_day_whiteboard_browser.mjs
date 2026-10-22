@@ -139,6 +139,11 @@ const run = async () => {
   ok('only the three players with something to say are flagged', (await page.locator('[data-week-flag]').count()) === 3, String(await page.locator('[data-week-flag]').count()))
   ok('no pill-shaped W1/W2 chips remain', (await page.locator('[data-week-chip]').count()) === 0)
   await page.screenshot({ path: join(SHOTS, 'whiteboard_two_day.png') })
+  // The pool leads with the player free one weekend only (Player G: away W1, free
+  // W2), who the open weekend reads as OUT. The rest keep the open-weekend order.
+  const poolIds = await page.locator('[data-pool-col] [data-player-card]').evaluateAll((els) => els.map((e) => e.getAttribute('data-player-card')))
+  ok('the pool leads with the half-available player, not last', poolIds[0] === pid(W1OUT), poolIds.map((i) => Number(i.slice(-12))).join(','))
+  ok('...and the rest keep the usual order (all free this weekend, best form first)', poolIds.slice(1).map((i) => Number(i.slice(-12))).join(',') === '4,6,8,11,12', poolIds.map((i) => Number(i.slice(-12))).join(','))
 
   console.log('\n# the shared pool judges today')
   // Take Jack out of the one-day team: he lands in the pool. The first team's own

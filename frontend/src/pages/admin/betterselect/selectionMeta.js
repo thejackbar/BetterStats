@@ -7,7 +7,6 @@
 // never drift. Form is a quiet last-4 trend computed server-side
 // (selection_pool.py) — `form` is the word, `recent` is the sparkline series.
 import { bowlingLabel, battingHandShort } from '../../../lib/playerAttributes'
-import { availRank, halfStatus } from '../../../lib/availability'
 
 // A player named in another XI on the same date comes back in one of two ways.
 // `clash` is a real clash (refused, or a call-up). `also_in` is a game that can
@@ -64,13 +63,6 @@ export function poolRank(p) {
   // Free one weekend of a two-day game and still open to pick: the selector has to
   // decide, so they lead the pool (`half_open`, from the server), squad order kept.
   return p?.half_open ? base - 10000 : base
-}
-
-// Where an answer sorts inside a pool bucket: Available, Maybe, then someone free
-// the second weekend only (HALF_W2, rank 1.5), then no answer, then Unavailable.
-// Ordering only: `availability` stays the combined answer for rules and filters.
-export function poolAvailRank(p) {
-  return halfStatus(p?.availability_days) === 'HALF_W2' ? availRank('HALF_W2') : availRank(p?.availability)
 }
 
 // A player's gender as the filters read it: 'male', 'female', or '' when unrecorded.

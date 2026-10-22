@@ -36,7 +36,7 @@ import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner, Field, Input, Select } from '../../../lib/presskit'
 import { formatSeason } from '../../../lib/cricketFormat'
-import { AVAILABILITY, AVAIL_ORDER, combineStatus, halfStatus } from '../../../lib/availability'
+import { AVAILABILITY, AVAIL_ORDER, availSortRank, combineStatus, halfStatus } from '../../../lib/availability'
 import {
   Icon, Avatar, Dot, AvailDot, RoleChips, Btn, Search, Chip, Empty, AvailSummary, QuickAvailModal, WeekFlag,
   RecencySelect, playedWithinYears, monthsAgoISO, recencyOf,
@@ -506,13 +506,12 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
   const { onCardDragStart, onCardDragEnd, ...columnDrag } = dragHandlers
   const sorted = useMemo(() => {
     if (sortMode === 'first' || sortMode === 'last') return orderPlayers(members, sortMode)
-    // A player free one week of the next two-day game and away the other is nearly
-    // a yes and needs a decision, so they lead; the rest keep the combined answer.
-    // Ordering only: `statusOf` still gives the least favourable week.
-    const half = (id) => (next.endDate && halfStatus([next.date, next.endDate].map((date) => ({ date, status: statusAt(id, date) }))) ? 0 : 1)
+    // The shared availability sort (lib/availability `availSortRank`): a player free
+    // one week of the next two-day game and away the other leads; the rest keep the
+    // combined answer (`statusOf`, the least favourable week). Ordering only.
+    const rank = (id) => availSortRank(statusOf(id), next.endDate ? [next.date, next.endDate].map((date) => ({ date, status: statusAt(id, date) })) : null)
     return [...members].sort((a, b) =>
-      half(a.id) - half(b.id)
-      || (AVAILABILITY[statusOf(a.id)]?.rank ?? 9) - (AVAILABILITY[statusOf(b.id)]?.rank ?? 9)
+      rank(a.id) - rank(b.id)
       || (a.display_name || a.name || '').localeCompare(b.display_name || b.name || ''))
   }, [members, statusOf, statusAt, next.date, next.endDate, sortMode])
 

@@ -16,7 +16,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { useAdminNameFormat } from '../../../lib/useAdminNameFormat'
-import { AVAILABILITY, availRank, viewStatus, weekFlag } from '../../../lib/availability'
+import { AVAILABILITY, availSortRank, viewStatus, weekFlag } from '../../../lib/availability'
 import { Icon, Avatar, Dot, Tag, WeekFlag } from './ui'
 import { roleLine, nameMatches, alsoInLine, dropInLine, inDraftLine } from './selectionMeta'
 import { FlagTags, RuleNotes, AgeTag } from './SelectionViews'
@@ -139,7 +139,7 @@ export function AddPlayersSheet({ vm, onClose }) {
   const list = useMemo(() => {
     let rows = q.trim()
       ? vm.available.filter((p) => nameMatches(p.display_name, q))
-        .sort((a, b) => (b.half_open ? 1 : 0) - (a.half_open ? 1 : 0) || availRank(a.availability) - availRank(b.availability) || (a.display_name || '').localeCompare(b.display_name || ''))
+        .sort((a, b) => availSortRank(a.availability, a.availability_days) - availSortRank(b.availability, b.availability_days) || (a.display_name || '').localeCompare(b.display_name || ''))
       : vm.pool
     if (hideUnavail) rows = rows.filter((p) => p.availability !== 'UNAVAILABLE')
     return rows
