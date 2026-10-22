@@ -1777,3 +1777,13 @@ Sections now start closed. A returning player's choices persist in `bs.playerpag
 
 Checks: `verify_player_page_dashboard.py` (113; section J is the details route, control fails 41 without crashing), `verify_player_page_dashboard_browser.mjs` (93; the modal, closed-by-default, remembered choices). Eight older browser scripts now seed the sections open before reading inside them.
 
+
+## Squad team picker left out a newly synced grade (v9.128.14)
+
+Asked for: Applecross had a new team (OD6 Black 2), a squad for it and its fixtures synced, but "+ Add a team to this squad" did not list it.
+
+Found: `GET /teams/grade-options` returned grades from only the latest two seasons that have grades, ordered by year with a missing year last. A grade whose season sat third or later, or had no year, never reached the picker. The frontend only hides grades already in the squad, so nothing else was involved.
+
+Fix: the same two newest seasons, plus any season that holds a grade an upcoming or in-progress fixture of the club is in. Seasons with no fixtures coming up stay out, so the list does not grow with every old season.
+
+Check: `verify_grade_options_live_seasons.py` (6 checks; the control fails the two "live season" checks and keeps passing the two "left out" ones).
