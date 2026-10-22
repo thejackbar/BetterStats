@@ -171,6 +171,17 @@ async def main():
     check("two squads answering to one name -> None (the grade decides)",
           getattr(sides.squad_for_team_name(grade, "Applecross OD6 Black 2"), "id", None), None)
 
+    print("\n# E. The Squads board says which grade a name-matched squad is in")
+    import app.routers.teams as teams_r
+    async with Session() as db:
+        listed = await teams_r.list_teams(include_inactive=False, db=db, club=await db.get(Organisation, org))
+        await db.rollback()
+    by_id = {t["id"]: t for t in listed}
+    check("OD6 Black 2 (no grade of its own) names the grade its games are in",
+          (by_id.get(str(TOD2)) or {}).get("matched_grades"), ["One Day Grade 6 Black"])
+    check("the 8th XI squad (it plays the grade) carries none",
+          (by_id.get(str(T8)) or {}).get("matched_grades"), [])
+
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     await engine.dispose()
     sys.exit(1 if base.FAIL else 0)

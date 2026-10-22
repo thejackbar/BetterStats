@@ -1814,3 +1814,11 @@ Fix: `squad_for_team_name` first compares the fixture's team name with each acti
 If CA spells the team differently from the squad ("Applecross OD6 Black (2)"), put CA's wording in the squad's short name.
 
 Check: `verify_shared_grade_squads.py` (27 checks; the control against the previous code fails 8: sync, second sync, assign, saving a squad and the name rule itself). `verify_squad_sides.py` (48), `verify_fixture_side.py` (25), `verify_multi_squad.py` (44), `verify_squad_next_game.py` (77) unchanged.
+
+## Squads board label for a squad found by team name (v9.129.3.1)
+
+Asked for: after v9.129.3 the OD6 Black 2 squad had its games (sync matched 11), but its column header still said "No grade linked".
+
+Fix: `GET /teams` carries `matched_grades` (`_matched_grades`): the grade names of the squad's upcoming, non-cancelled games, only for a squad with no grade or teams of its own. The header shows them with "by team name" and keeps the amber "No grade linked" only when a squad has neither. The squad is deliberately not linked to the grade: a grade belongs to one squad, so linking would take it from the 8th XI.
+
+Check: `verify_shared_grade_squads.py` section E (29 checks; the control without the field fails both E checks).

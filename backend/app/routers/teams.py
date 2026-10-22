@@ -52,7 +52,26 @@ router = APIRouter(prefix="/teams", tags=["teams"])
 DEFAULT_DORMANCY_MONTHS = 24
 
 
-def _serialize(t: Team, grades: Optional[dict] = None, sq: Optional["squad_sides.SquadInfo"] = None) -> dict:
+async def _matched_grades(db: AsyncSession, club_id) -> dict:
+    """{team_id_str: [grade names]} of the grades a squad's upcoming games are in.
+
+    Only meaningful for a squad with no grade or teams of its own, whose games are
+    found by team name (two squads in one grade): the board says which grade they
+    are in instead of "No grade linked"."""
+    res = await db.execute(text(
+        "SELECT DISTINCT f.team_id, COALESCE(g.display_name_override, g.name) FROM fixtures f "
+        "JOIN grades g ON g.id = f.grade_id "
+        "WHERE f.organisation_id = :org AND f.team_id IS NOT NULL AND f.played_on >= :today "
+        "AND COALESCE(f.status, '') <> 'CANCELLED'"),
+        {"org": club_id, "today": date.today()})
+    out: dict = {}
+    for tid, gname in res.fetchall():
+        out.setdefault(str(tid), []).append(gname)
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def _serialize(t: Team, grades: Optional[dict] = None, sq: Optional["squad_sides.SquadInfo"] = None,
+               matched: Optional[dict] = None) -> dict:
     # A squad can cover several teams (migration 336): its teams, in order, each
     # with its XI number. `grade_name` reads as all of them so the old caption
     # still tells the truth.
@@ -69,6 +88,8 @@ def _serialize(t: Team, grades: Optional[dict] = None, sq: Optional["squad_sides
         "grade_id": str(t.grade_id) if t.grade_id else None,
         "grade_name": grade_name,
         "sides": sides,
+        # Grades the squad's games are in, for a squad with no grade or teams of its own.
+        "matched_grades": (matched or {}).get(str(t.id), []) if not grade_name else [],
         "default_formation": t.default_formation,
         "default_team_size": t.default_team_size,
         "min_team_size": t.min_team_size,
@@ -248,7 +269,8 @@ async def list_teams(
     res = await db.execute(stmt)
     grades = await _grade_name_map(db, club.id)
     sides = await squad_sides.load(db, club.id)
-    return [_serialize(t, grades, sides.squads.get(str(t.id))) for t in res.scalars().all()]
+    matched = await _matched_grades(db, club.id)
+    return [_serialize(t, grades, sides.squads.get(str(t.id)), matched) for t in res.scalars().all()]
 
 
 @router.get("/grade-options", dependencies=[Depends(require_any_cap(*SELECT_ANY))])
@@ -349,7 +371,8 @@ async def _apply_sides(db: AsyncSession, club_id, t: Team, sides_in: list, assig
 
 async def _squad_response(db: AsyncSession, club_id, t: Team, extra: Optional[dict] = None) -> dict:
     sides = await squad_sides.load(db, club_id)
-    out = _serialize(t, await _grade_name_map(db, club_id), sides.squads.get(str(t.id)))
+    out = _serialize(t, await _grade_name_map(db, club_id), sides.squads.get(str(t.id)),
+                     await _matched_grades(db, club_id))
     out.update(extra or {})
     return out
 
