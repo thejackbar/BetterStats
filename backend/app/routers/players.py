@@ -1093,6 +1093,13 @@ class PlayerProfileUpdate(BaseModel):
     # null clears it — the PATCH reads exclude_unset, so a present blank IS the
     # intent.
     shirt_number: Optional[str] = None
+    # Where they live and who to call (migration 356). Plain text, "" or null clears.
+    address_line1: Optional[str] = None
+    suburb: Optional[str] = None
+    state: Optional[str] = None
+    postcode: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
 
 
 def _profile_fields(player: Player) -> dict:
@@ -1120,6 +1127,12 @@ def _profile_fields(player: Player) -> dict:
         "status": player.status,
         "email": player.email,
         "phone": player.phone,
+        "address_line1": player.address_line1,
+        "suburb": player.suburb,
+        "state": player.state,
+        "postcode": player.postcode,
+        "emergency_contact_name": player.emergency_contact_name,
+        "emergency_contact_phone": player.emergency_contact_phone,
         "photo_url": player.photo_url,
         "hero_photo_url": player.hero_photo_url,
         "playhq_id": player.playhq_id,

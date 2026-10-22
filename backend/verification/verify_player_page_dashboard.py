@@ -73,7 +73,7 @@ async def main():
     await base.build_schema()
     async with engine.begin() as conn:
         for mod in ("selection_lock_ddl", "team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl", "audit_ddl",
-                    "availability_maybe_ddl", "availability_site_link_ddl", "fines_ddl", "fines_cap_ddl", "fantasy_queue_ddl"):
+                    "availability_maybe_ddl", "availability_site_link_ddl", "player_contact_ddl", "fines_ddl", "fines_cap_ddl", "fantasy_queue_ddl"):
             m = guarded(f"app.services.{mod}")
             for stmt in (m.STATEMENTS if m else []):
                 await conn.execute(text(stmt))
@@ -444,6 +444,168 @@ async def main():
     check("a POST that does not send it leaves it alone", res.get("show_on_site"), False)
     res = await self_service(av.SelfServiceUpdate(show_on_site=True))
     check("and it turns back on", (res.get("show_on_site"), (await club_payload(org)).get("player_page_path")), (True, f"/avail/{tok}"))
+
+    print("\n# J. Update my details")
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from app.services import merge_profile, rate_limit
+    import app.routers.players as players_router
+
+    async def call(fn, *a, **k):
+        try:
+            return await fn(*a, **k), None
+        except HTTPException as e:
+            return None, e
+
+    ABSENT = (None, SimpleNamespace(status_code="route missing"))
+
+    async def get_details(key):
+        if not hasattr(pa, "get_my_details"):
+            return ABSENT
+        async with Session() as db:
+            return await call(pa.get_my_details, tok, req_for(org, P[key]), db)
+
+    def reset_limits():
+        rate_limit._limiter._buckets.clear()
+        rate_limit._failures._failures.clear()
+
+    async def patch_details(key, _keep_limits=False, **fields):
+        if not _keep_limits:
+            reset_limits()
+        if not hasattr(pa, "update_my_details"):
+            return ABSENT
+        async with Session() as db:
+            return await call(pa.update_my_details, tok, pa.DetailsBody(**fields), req_for(org, P[key]), db)
+
+    async def player_row(key):
+        async with Session() as db:
+            return await db.get(Player, P[key])
+
+    async def audit_rows(key):
+        async with Session() as db:
+            return (await db.execute(text("SELECT area, action, via, user_name, summary, detail FROM audit_events "
+                                          "WHERE player_id = :p AND action = 'details_updated' ORDER BY created_at"), {"p": P[key]})).fetchall()
+
+    pr = await profile("sam")
+    check("the page says the Update details button may be offered (PIN on)", pr.get("can_update_details"), True)
+    res, err = await get_details("sam")
+    check("the form is filled from their own record", (res or {}).get("details", {}).get("email"), "sam@dash.org")
+    check("...with every field present, empty ones as blank text", sorted((res or {}).get("details", {})) == sorted(getattr(pa, "DETAIL_FIELDS", ["missing"])), True)
+
+    print("  - the PIN")
+    res, err = await patch_details("sam", email="new.sam@dash.org")
+    check("no PIN sent is refused", err.status_code if err else None, 401)
+    res, err = await patch_details("sam", pin="9999", email="new.sam@dash.org")
+    check("a wrong PIN is refused", err.status_code if err else None, 401)
+    check("and nothing was written", (await player_row("sam")).email, "sam@dash.org")
+    reset_limits()
+    for _ in range(5):
+        await patch_details("sam", _keep_limits=True, pin="9999", email="x@y.com")
+    res, err = await patch_details("sam", _keep_limits=True, pin="0001", email="new.sam@dash.org")
+    check("repeated misses lock it out, even for the right PIN (the same lockout as signing in)", err.status_code if err else None, 429)
+    reset_limits()
+    for i in range(10):
+        await patch_details("dup", _keep_limits=True, pin="0003", suburb=f"S{i}")
+    res, err = await patch_details("dup", _keep_limits=True, pin="0003", suburb="one too many")
+    check("an 11th change inside ten minutes is throttled", err.status_code if err else None, 429)
+    reset_limits()
+
+    print("  - saving")
+    res, err = await patch_details("sam", pin="0001", email="  New.Sam@Dash.org ", address_line1="12 Wicket Way", suburb="Applecross",
+                                   state="WA", postcode="6153", emergency_contact_name="Pat Sledge", emergency_contact_phone="0412 345 678")
+    check("the right PIN saves", (res or {}).get("status"), "ok")
+    row = await player_row("sam")
+    check("every field is stored (email trimmed, address and emergency contact)",
+          tuple(getattr(row, n, "absent") for n in ("email", "address_line1", "suburb", "state", "postcode", "emergency_contact_name", "emergency_contact_phone")),
+          ("New.Sam@Dash.org", "12 Wicket Way", "Applecross", "WA", "6153", "Pat Sledge", "0412 345 678"))
+    check("the response says which fields changed", sorted((res or {}).get("changed", [])),
+          sorted(["email", "address_line1", "suburb", "state", "postcode", "emergency_contact_name", "emergency_contact_phone"]))
+    res, _ = await patch_details("sam", pin="0001", suburb="Mount Pleasant")
+    row = await player_row("sam")
+    check("a field that is not sent is left alone", tuple(getattr(row, n, "absent") for n in ("suburb", "address_line1", "email")), ("Mount Pleasant", "12 Wicket Way", "New.Sam@Dash.org"))
+    res, _ = await patch_details("sam", pin="0001", address_line1="")
+    check("an explicit blank clears it", getattr(await player_row("sam"), "address_line1", "absent"), None)
+    res, _ = await patch_details("sam", pin="0001", suburb="Mount Pleasant")
+    check("saving what is already there changes nothing and says so", (res or {}).get("changed"), [])
+
+    print("  - what is refused")
+    for label, fields in (("an email with no @", {"email": "nope"}), ("an email with spaces inside", {"email": "a b@c.com"}),
+                          ("a phone with letters", {"phone": "04ab5678"}), ("a phone that is too short", {"phone": "12345"}),
+                          ("an emergency phone with letters", {"emergency_contact_phone": "call mum"}),
+                          ("an over-long address", {"address_line1": "x" * 500}), ("a postcode with symbols", {"postcode": "61;53"})):
+        res, err = await patch_details("sam", pin="0001", **fields)
+        check(f"{label} is a 422", err.status_code if err else None, 422)
+    res, err = await patch_details("sam", pin="0001", phone="")
+    check("the mobile cannot be cleared (it is the PIN)", err.status_code if err else None, 422)
+    check("and nothing from any refused save was kept", (await player_row("sam")).email, "New.Sam@Dash.org")
+
+    print("  - changing the mobile changes the PIN")
+    res, _ = await patch_details("sam", pin="0001", phone="0411 222 777")
+    check("a new mobile saves", (await player_row("sam")).phone, "0411 222 777")
+    res, err = await patch_details("sam", pin="0001", suburb="Elsewhere")
+    check("the old PIN no longer works", err.status_code if err else None, 401)
+    res, err = await patch_details("sam", pin="2777", suburb="Elsewhere")
+    check("the new one does", (res or {}).get("status"), "ok")
+
+    print("  - the fee record moves with the player only where it mirrored them")
+    async with Session() as db:
+        fm_sam = (await db.execute(text("SELECT id FROM fee_members WHERE player_id = :p"), {"p": P["sam"]})).scalar()
+        await db.execute(text("UPDATE fee_members SET email = 'new.sam@dash.org', mobile = NULL WHERE id = :i"), {"i": fm_sam})
+        await db.execute(text("UPDATE fee_members SET email = 'parent@dash.org', mobile = '0499 111 222' WHERE player_id = :p"), {"p": P["ann"]})
+        await db.commit()
+    async def fee(key):
+        async with Session() as db:
+            return tuple((await db.execute(text("SELECT email, mobile FROM fee_members WHERE player_id = :p"), {"p": P[key]})).first())
+    res, _ = await patch_details("sam", pin="2777", email="sam.again@dash.org", phone="0411 222 888")
+    check("a fee email that was the player's old one follows, and an empty mobile is filled", await fee("sam"), ("sam.again@dash.org", "0411 222 888"))
+    res, _ = await patch_details("ann", pin="0002", email="ann.new@dash.org", phone="0400 000 902")
+    check("a different email (a parent's) and mobile on the fee record are the club's own and are left alone", await fee("ann"), ("parent@dash.org", "0499 111 222"))
+    check("the player's own record did change", ((await player_row("ann")).email, (await player_row("ann")).phone), ("ann.new@dash.org", "0400 000 902"))
+
+    print("  - the trail")
+    rows = await audit_rows("sam")
+    check("every real change wrote one entry, under the Player details area, by the player, via their link",
+          (len(rows) >= 3, {r[0] for r in rows}, {r[1] for r in rows}, {r[2] for r in rows}, {r[3] for r in rows}),
+          (True, {"details"}, {"details_updated"}, {"player link"}, {"Sam Sledge"}))
+    first = rows[0] if rows else ("", "", "", "", "", {})
+    check("the first entry names what changed in words, not values", ("email" in first[4], "address" in first[4], "@" in first[4]), (True, True, False))
+    check("and keeps the old and new values so the club can put it back", json.dumps(first[5]).count("sam@dash.org") >= 1 and "New.Sam@Dash.org" in json.dumps(first[5]), True)
+    check("an entry says when the fee record moved too", any("email" in (r[5].get("fee_record_also_updated") or []) for r in rows if isinstance(r[5], dict)), True)
+    check("a save that changed nothing wrote nothing extra", len([r for r in rows if "Mount Pleasant" in json.dumps(r[5]) and "Mount Pleasant" == r[5]["fields"].get("suburb", {}).get("to")]), 1)
+
+    print("  - who can see it")
+    blob = json.dumps(await profile("sam")) + json.dumps(await me("sam"))
+    check("the profile and availability payloads carry none of the new details", any(w in blob for w in ("Wicket Way", "Pat Sledge", "0412 345 678", "sam.again@dash.org")), False)
+    check("a player cannot read or write anyone else's: the route takes no player id and uses the cookie's",
+          ((await get_details("ann"))[0] or {}).get("details", {}).get("email"), "ann.new@dash.org")
+    pl_fields = players_router._profile_fields(await player_row("sam"))  # the row has the attributes only once the model maps them
+    check("the club's admin profile carries them", (pl_fields.get("suburb"), pl_fields.get("emergency_contact_name")), ("Elsewhere", "Pat Sledge"))
+    check("the admin PATCH model accepts them", {"address_line1", "suburb", "state", "postcode", "emergency_contact_name", "emergency_contact_phone"} <= set(players_router.PlayerProfileUpdate.model_fields), True)
+    keep = SimpleNamespace(**{c: None for c in merge_profile.FIELDS}, id=uuid.uuid4(), photo_url=None, photo_data=None, photo_mime=None, hero_photo_url=None, hero_photo_data=None, hero_photo_mime=None)
+    gone = SimpleNamespace(**{c: ("x" if c not in ("is_overseas", "date_of_birth") else None) for c in merge_profile.FIELDS}, id=uuid.uuid4(), photo_url=None, photo_data=None, photo_mime=None, hero_photo_url=None, hero_photo_data=None, hero_photo_mime=None)
+    filled = merge_profile.carry_profile(keep, gone)
+    check("a merge carries the new fields onto the keeper where it had none", {"address_line1", "postcode", "emergency_contact_phone"} <= set(filled), True)
+
+    print("  - PIN off")
+    await set_org(org, availability_require_pin=False)
+    pr = await profile("ann")
+    check("the button is not offered", pr.get("can_update_details"), False)
+    res, err = await get_details("ann")
+    check("reading the form is refused", err.status_code if err else None, 403)
+    res, err = await patch_details("ann", pin="0002", suburb="Nowhere")
+    check("saving is refused", err.status_code if err else None, 403)
+    check("and nothing was written", getattr(await player_row("ann"), "suburb", "absent"), None)
+    await set_org(org, availability_require_pin=True)
+    async with Session() as db:
+        nophone = uuid.uuid4()
+        db.add(Player(id=nophone, organisation_id=org, name="Phil Phoneless", gender="male", is_player=True, status="active"))
+        await db.commit()
+    async with Session() as db:
+        c = jose_jwt.encode({"club": str(org), "pid": str(nophone), "typ": "avail", "exp": datetime.now(timezone.utc) + timedelta(days=1)},
+                            settings.secret_key, algorithm=settings.algorithm)
+        r = Request({"type": "http", "headers": [(b"cookie", f"{pa.COOKIE_NAME}={c}".encode())]})
+        res, err = await call(pa.update_my_details, tok, pa.DetailsBody(pin="1234", suburb="x"), r, db) if hasattr(pa, "update_my_details") else ABSENT
+    check("a player with no mobile on file cannot be verified, so cannot save", (err.status_code if err else None, str(getattr(err, "detail", ""))[:18]), (409, "There is no mobile"))
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     await engine.dispose()

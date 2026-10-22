@@ -12,6 +12,9 @@
 //   * sections (Selection, Club admin, Voting, Stats, Fantasy) with a one-line summary each
 //   * a section minimises and maximises, the choice is remembered, and a blocked
 //     localStorage does not break the page
+//   * every section starts closed on a first visit, each header still saying its line
+//   * Update details: a pop-up prefilled from the player's own record, the save sends
+//     only what changed plus the PIN, errors stay in the pop-up, Escape closes it
 //   * fees paid are listed, five at a time
 //   * 390px and 1280px: no sideways overflow
 //
@@ -28,7 +31,9 @@ const safe = async (label, fn) => { try { await fn() } catch (e) { check(`${labe
 const iso = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
 const inHours = (h) => new Date(Date.now() + h * 3600e3).toISOString()
 
-const state = { photo: '/photo-ok.svg', team: true, fantasy: true }
+const state = { photo: '/photo-ok.svg', team: true, fantasy: true, canUpdate: true, detailsStatus: 200, patchStatus: 200 }
+const DETAILS = { email: 'sam@dash.org', phone: '0400 000 001', address_line1: '', suburb: 'Applecross', state: 'WA', postcode: '6153', emergency_contact_name: '', emergency_contact_phone: '' }
+const patches = []
 const PAYMENTS = Array.from({ length: 7 }, (_, i) => ({ date: iso(-10 - i * 20), amount: 40 + i, kind: i % 2 ? 'Match fees' : 'Membership', method: 'Cash', season: 'Summer 26/27' }))
 const player = () => ({ id: 'p1', display_name: 'Sam Sledge', photo_url: state.photo, shirt_number: '7', profile_path: '/players/p1' })
 const me = () => ({
@@ -41,7 +46,7 @@ const me = () => ({
   availability: {},
 })
 const profile = () => ({
-  club: {}, player: player(), squads: ['1sts'], squads_visible: true,
+  club: {}, player: player(), can_update_details: state.canUpdate, squads: ['1sts'], squads_visible: true,
   modules: state.fantasy ? ['fantasy', 'season', 'squad', 'fees', 'votes'] : ['season', 'squad', 'fees', 'votes'],
   fees: { on_record: true, season: 'Summer 26/27', total_outstanding: 60, membership_outstanding: 60, match_fee_outstanding: 0, total_paid: 40, credit: 0, payments: PAYMENTS },
   votes: [{ medal: 'Dunslow Medal', fixture_id: 'f1', opponent: 'Rovers', round: 'Round 1', date: iso(-2), closes_on: iso(5), link: '/vote/vtok?fixture=f1&player=p1' }],
@@ -67,8 +72,10 @@ const run = async () => {
   const errors = []
   const posts = []
   const json = (r, body, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
-  const open = async (width, blockStorage = false) => {
+  const open = async (width, blockStorage = false, collapsed = false) => {
     const ctx = await browser.newContext({ viewport: { width, height: 900 } })
+    // A returning player's page has sections open; a first visit has every one closed.
+    if (!collapsed) await ctx.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
     const page = await ctx.newPage()
     page.setDefaultTimeout(6000)
     // Reads and writes of this page's own key fail (a full or locked-down store); the rest of the app is left alone.
@@ -82,6 +89,13 @@ const run = async () => {
     await page.route('**/photo-ok.svg', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="red"/></svg>' }))
     await page.route('**/photo-bad.png', (r) => r.fulfill({ status: 404, body: '' }))
     await page.route('**/api/**', (r) => json(r, {}))
+    await page.route(/\/api\/public\/availability\/tok\/me\/details$/, (r) => {
+      if (r.request().method() === 'PATCH') {
+        patches.push(JSON.parse(r.request().postData()))
+        return state.patchStatus === 200 ? json(r, { status: 'ok', changed: Object.keys(patches.at(-1)).filter((k) => k !== 'pin'), details: DETAILS }) : json(r, { detail: 'That email address does not look right.' }, state.patchStatus)
+      }
+      return state.detailsStatus === 200 ? json(r, { details: DETAILS, pin_required: true }) : json(r, { detail: 'Updating your details needs the PIN switched on for this link. Ask your club.' }, state.detailsStatus)
+    })
     await page.route(/\/api\/public\/availability\/tok\/me\/profile(\?.*)?$/, (r) => json(r, profile()))
     await page.route(/\/api\/public\/availability\/tok\/me(\?.*)?$/, (r) => {
       if (r.request().method() === 'POST') { posts.push(JSON.parse(r.request().postData())); return json(r, { status: 'ok' }) }
@@ -91,7 +105,7 @@ const run = async () => {
     await page.goto(`${BASE}/avail/tok`)
     await page.locator('[data-hero]').waitFor({ timeout: 20000 })
     await page.locator('[data-groups]').waitFor()
-    await page.locator('[data-vote-due]').waitFor()
+    await page.locator('[data-vote-due]').waitFor({ state: 'attached' })
     return { ctx, page }
   }
   const overflow = (page) => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
@@ -176,6 +190,118 @@ const run = async () => {
     state.fantasy = true
   })
 
+  await safe('collapsed', async () => {
+    console.log('\n── First visit: everything starts closed ──')
+    const { ctx, page } = await open(390, false, true)
+    const states = await page.evaluate(() => [...document.querySelectorAll('[data-group]')].map((e) => e.getAttribute('data-open')))
+    check('all five sections are closed', states.length === 5 && states.every((x) => x === 'no'), JSON.stringify(states))
+    check('no section content is on screen', (await page.locator('[data-date-card]:visible, [data-season-panel]:visible, [data-fee-payment]:visible, [data-vote-due]:visible, [data-fantasy]:visible').count()) === 0)
+    const sums = await page.locator('[data-group-summary]').allInnerTexts()
+    check('every header still says its line (to answer, owing, votes, season, lock)', sums.length === 5 && sums.every((x) => x.trim().length > 0), JSON.stringify(sums))
+    check('the button above them offers Expand all', /Expand all/.test(await page.locator('[data-toggle-all]').innerText()))
+    const h = await page.evaluate(() => document.documentElement.scrollHeight)
+    check('the whole page is short enough to see without much scrolling', h < 1000, String(h))
+    await page.locator('[data-group-toggle="selection"]').click()
+    check('opening Selection shows the answer buttons', await page.locator('[data-date-card] button:visible', { hasText: 'Available' }).first().isVisible())
+    await page.reload(); await page.locator('[data-groups]').waitFor()
+    check('and the choice is remembered for next time', (await page.locator('[data-group-toggle="selection"]').getAttribute('aria-expanded')) === 'true' && (await page.locator('[data-group][data-open="yes"]').count()) === 1)
+    await page.screenshot({ path: `${SHOT}/player-page-collapsed-390.png`, fullPage: true })
+    await ctx.close()
+  })
+
+  await safe('update details', async () => {
+    console.log('\n── Update details ──')
+    state.canUpdate = false
+    const off = await open(390)
+    check('no Update details button when the club has the PIN off', (await off.page.locator('[data-update-details]').count()) === 0)
+    await off.ctx.close()
+    state.canUpdate = true
+    const { ctx, page } = await open(390)
+    patches.length = 0
+    check('the button is on the page', (await page.locator('[data-update-details]').count()) === 1)
+    await page.locator('[data-update-details]').click()
+    const dlg = page.getByRole('dialog')
+    await dlg.waitFor()
+    check('a dialog opens with a title', /Update your details/.test(await dlg.innerText()))
+    check('it is prefilled from the player\'s own record', (await dlg.locator('input[name="email"]').inputValue()) === 'sam@dash.org' && (await dlg.locator('input[name="suburb"]').inputValue()) === 'Applecross')
+    check('all eight fields are there', (await dlg.locator('input:not([name="pin"])').count()) === 8)
+    check('focus starts in the first field', await page.evaluate(() => document.activeElement?.getAttribute('name')) === 'email')
+    check('Save is off until something changes and the PIN is typed', await dlg.locator('[data-details-save]').isDisabled())
+    await dlg.locator('input[name="email"]').fill('new.sam@dash.org')
+    check('a change alone is not enough', await dlg.locator('[data-details-save]').isDisabled())
+    await dlg.locator('input[name="pin"]').fill('00a01')
+    check('the PIN box takes digits only, four at most', (await dlg.locator('input[name="pin"]').inputValue()) === '0001')
+    check('now it can be saved', await dlg.locator('[data-details-save]').isEnabled())
+    check('390px: the dialog does not overflow sideways', (await overflow(page)) <= 0)
+    await dlg.locator('input[name="address_line1"]').fill('12 Wicket Way')
+    await dlg.locator('input[name="suburb"]').fill('')
+    await dlg.locator('[data-details-save]').click()
+    await page.locator('[data-details-notice]').waitFor()
+    check('exactly one PATCH went out', patches.length === 1, JSON.stringify(patches))
+    check('it carries the PIN and only the fields that changed, a cleared one as a blank', JSON.stringify(patches[0]) === JSON.stringify({ pin: '0001', email: 'new.sam@dash.org', address_line1: '12 Wicket Way', suburb: '' }), JSON.stringify(patches[0]))
+    check('the dialog closes and the page says it is saved', (await page.getByRole('dialog').count()) === 0 && /saved/.test(await page.locator('[data-details-notice]').innerText()))
+    check('without a mobile change it does not mention the PIN', !/PIN/.test(await page.locator('[data-details-notice]').innerText()))
+    // a mobile change
+    await page.locator('[data-update-details]').click()
+    await page.getByRole('dialog').waitFor()
+    await page.locator('input[name="phone"]').fill('0411 222 333')
+    check('changing the mobile warns that the PIN changes with it', /last 4 digits of the new number/.test(await page.locator('[data-details-pin-note]').innerText()))
+    await page.locator('input[name="pin"]').fill('0001')
+    patches.length = 0
+    await page.locator('[data-details-save]').click()
+    await page.locator('[data-details-notice]').waitFor()
+    check('and the page repeats it after saving', /Your PIN is now the last 4 digits of your new mobile/.test(await page.locator('[data-details-notice]').innerText()))
+    check('only the mobile was sent', JSON.stringify(patches[0]) === JSON.stringify({ pin: '0001', phone: '0411 222 333' }), JSON.stringify(patches[0]))
+    // a server refusal stays in the dialog
+    state.patchStatus = 422
+    await page.locator('[data-update-details]').click()
+    await page.getByRole('dialog').waitFor()
+    await page.locator('input[name="email"]').fill('nope')
+    await page.locator('input[name="pin"]').fill('0001')
+    await page.locator('[data-details-save]').click()
+    await page.locator('[data-details-error]').waitFor()
+    check('a refusal is shown in the dialog, in the server\'s words', /does not look right/.test(await page.locator('[data-details-error]').innerText()))
+    check('the dialog stays open with what they typed', (await page.getByRole('dialog').count()) === 1 && (await page.locator('input[name="email"]').inputValue()) === 'nope')
+    state.patchStatus = 200
+    patches.length = 0
+    await page.keyboard.press('Escape')
+    check('Escape closes it without saving', (await page.getByRole('dialog').count()) === 0 && patches.length === 0)
+    await page.locator('[data-update-details]').click()
+    await page.getByRole('dialog').waitFor()
+    await page.locator('[data-details-cancel]').click()
+    check('Cancel closes it too', (await page.getByRole('dialog').count()) === 0)
+    await page.locator('[data-update-details]').click()
+    await page.getByRole('dialog').waitFor()
+    await page.mouse.click(5, 5)
+    check('and a tap outside it', (await page.getByRole('dialog').count()) === 0)
+    check('the page scrolls again once it is shut', (await page.evaluate(() => getComputedStyle(document.body).overflow)) !== 'hidden')
+    await ctx.close()
+    // the form cannot load
+    state.detailsStatus = 403
+    const bad = await open(390)
+    await bad.page.locator('[data-update-details]').click()
+    await bad.page.locator('[data-details-load-error]').waitFor()
+    check('if the details cannot be read, the dialog says why and offers no Save', /needs the PIN/.test(await bad.page.locator('[data-details-load-error]').innerText()) && (await bad.page.locator('[data-details-save]').count()) === 0)
+    await bad.ctx.close()
+    state.detailsStatus = 200
+    // a short phone, landscape: the dialog scrolls inside itself
+    const short = await browser.newContext({ viewport: { width: 640, height: 360 } })
+    const sp = await short.newPage()
+    await sp.addInitScript(() => { try { localStorage.setItem('bs.playerpage.open', '{}') } catch (e) { /* none */ } })
+    await sp.route('**/api/**', (r) => json(r, []))
+    await sp.route(/\/api\/public\/availability\/tok\/me\/details$/, (r) => json(r, { details: DETAILS }))
+    await sp.route(/\/api\/public\/availability\/tok\/me\/profile(\?.*)?$/, (r) => json(r, profile()))
+    await sp.route(/\/api\/public\/availability\/tok\/me(\?.*)?$/, (r) => json(r, me()))
+    await sp.route(/\/api\/public\/availability\/tok$/, (r) => json(r, { club: me().club, require_pin: true, players: [] }))
+    await sp.goto(`${BASE}/avail/tok`)
+    await sp.locator('[data-update-details]').click()
+    await sp.getByRole('dialog').waitFor()
+    const box = await sp.getByRole('dialog').boundingBox()
+    check('a short landscape phone: the dialog fits the screen and scrolls inside', box.height <= 360 && (await sp.getByRole('dialog').evaluate((e) => e.scrollHeight > e.clientHeight)), JSON.stringify(box))
+    await sp.screenshot({ path: `${SHOT}/details-modal-640x360.png` })
+    await short.close()
+  })
+
   await safe('sections', async () => {
     console.log('\n── Sections ──')
     const { ctx, page } = await open(390)
@@ -191,7 +317,7 @@ const run = async () => {
     check('Stats says the season in a line', /11 matches · 412 runs · 9 wkts/.test(await page.locator('[data-group="stats"] [data-group-summary]').innerText()))
     // minimise and maximise
     const toggle = page.locator('[data-group-toggle="stats"]')
-    check('open to begin with', (await toggle.getAttribute('aria-expanded')) === 'true' && await page.locator('[data-season-panel="batting"]').isVisible())
+    check('open for a returning player', (await toggle.getAttribute('aria-expanded')) === 'true' && await page.locator('[data-season-panel="batting"]').isVisible())
     await toggle.click()
     check('a tap minimises it', (await toggle.getAttribute('aria-expanded')) === 'false' && !(await page.locator('[data-season-panel="batting"]').isVisible()))
     check('its one-line summary stays on the closed header', await page.locator('[data-group="stats"] [data-group-summary]').isVisible())
@@ -214,9 +340,9 @@ const run = async () => {
     check('closing and reopening Selection keeps the weeks you had opened', (await page.locator('[data-date-card]').count()) === cardsBefore && cardsBefore === 2, String(cardsBefore))
     await ctx.close()
     const blocked = await open(390, true)
-    check('with the page storage blocked it still draws, all open', (await blocked.page.locator('[data-group][data-open="yes"]').count()) === 5)
+    check('with the page storage blocked it still draws, every section closed', (await blocked.page.locator('[data-group][data-open="no"]').count()) === 5)
     await blocked.page.locator('[data-group-toggle="stats"]').click()
-    check('and sections still minimise for the visit', (await blocked.page.locator('[data-group-toggle="stats"]').getAttribute('aria-expanded')) === 'false')
+    check('and sections still open for the visit', (await blocked.page.locator('[data-group-toggle="stats"]').getAttribute('aria-expanded')) === 'true')
     await blocked.ctx.close()
   })
 

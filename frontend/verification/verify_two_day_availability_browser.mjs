@@ -71,6 +71,15 @@ const tryClick = async (page, sel, opts = {}) => { try { await page.locator(sel)
 const tryWait = async (page, fn, ms = 2500) => { try { await page.waitForFunction(fn, null, { timeout: ms }); return true } catch { return false } }
 
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
+  // Every section of the player page starts closed. These checks read what is inside them,
+  // so each context starts with them opened, the way a returning player's page can be.
+  const _newContext = browser.newContext.bind(browser)
+  browser.newContext = async (o) => {
+    const c = await _newContext(o)
+    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
+    return c
+  }
+
 try {
   for (const [label, vp] of [['desktop', { width: 1280, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
     console.log(`\n# ${label}`)

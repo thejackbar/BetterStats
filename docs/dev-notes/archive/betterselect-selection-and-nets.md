@@ -1762,3 +1762,18 @@ Reported (Oct 2026, Applecross): a Saturday with ten fixtures made the player sc
 
 Done: `DateCard` shows the day and the answer buttons, with a "Show N games" toggle and the fixture list in a hidden panel under the buttons. The answer saves with the games still folded. Checks: `verify_public_availability_layout_browser.mjs` (47, including the folded default, an answer while folded, and that the buttons do not move on open); `verify_two_day_availability_browser.mjs` waited on a fixture row and now waits on the date card.
 
+## Update details and closed-by-default sections (v9.128.13)
+
+Asked for: an "Update details" button on the player dashboard that opens a pop-up where a player enters new email, phone number, address and so on, saved down; and everything collapsed to start.
+
+Found: players had email, phone and date of birth but nowhere to keep an address or an emergency contact, so six columns were added (migration 356). Nothing public reads them.
+
+Judgement calls worth knowing:
+- The signed-in page is protected by four digits, which teammates often know, so editing is a bigger risk than answering availability. Hence: PIN must be on, current PIN re-asked on each save through the same lockout as signing in, a write throttle, and an audit entry that keeps the old values. A change of mobile changes the PIN and the modal says so.
+- Not done: emailing the OLD address when an email is changed (the comms provider rules say a console send is not a send, and no live notice path exists on this page); date of birth stays admin only.
+- The fee record keeps its own email and mobile and is read first by billing. It follows the player only where it mirrored the old value.
+
+Sections now start closed. A returning player's choices persist in `bs.playerpage.open`.
+
+Checks: `verify_player_page_dashboard.py` (113; section J is the details route, control fails 41 without crashing), `verify_player_page_dashboard_browser.mjs` (93; the modal, closed-by-default, remembered choices). Eight older browser scripts now seed the sections open before reading inside them.
+

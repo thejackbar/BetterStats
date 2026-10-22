@@ -3438,6 +3438,11 @@ export const api = {
   availPublicLadder: (token) => request(`/public/availability/${token}/me/ladder`),
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
+  // The player's own contact details, for the Update details form. The save re-checks
+  // the PIN and sends only the fields that changed ("" clears one).
+  availPublicDetails: (token) => request(`/public/availability/${token}/me/details`),
+  availPublicUpdateDetails: (token, data) =>
+    request(`/public/availability/${token}/me/details`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   // ─── Public: net check-in (no admin auth; player cookie) ───
   // Reached by scanning the QR code on the fence or tapping the NFC tag —

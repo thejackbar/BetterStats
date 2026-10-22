@@ -11,8 +11,8 @@ import usePersistedState from '../../../lib/usePersistedState'
 import { Icon, Btn, Search, Chip, Empty } from './ui'
 
 const PAGE = 100
-const AREAS = [['selection', 'Selection'], ['availability', 'Availability'], ['squads', 'Squads']]
-const TONE = { selection: 'var(--pb-accent)', availability: 'var(--pb-amber)', squads: 'var(--pb-positive)' }
+const AREAS = [['selection', 'Selection'], ['availability', 'Availability'], ['squads', 'Squads'], ['details', 'Player details']]
+const TONE = { selection: 'var(--pb-accent)', availability: 'var(--pb-amber)', squads: 'var(--pb-positive)', details: 'var(--pb-dim)' }
 const tz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return undefined } }
 
 const fmtDate = (iso) => {
@@ -198,4 +198,5 @@ const ACTION_AREA = {
   side_locked: 'selection', side_unlocked: 'selection', called_up_out: 'selection', restored_to_board: 'selection',
   availability_set: 'availability', availability_period_added: 'availability', availability_period_removed: 'availability',
   added_to_squad: 'squads', removed_from_squad: 'squads', moved_squad: 'squads', squad_created: 'squads', squad_updated: 'squads', squad_deleted: 'squads',
+  details_updated: 'details',
 }

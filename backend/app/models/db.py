@@ -1500,6 +1500,14 @@ class Player(Base):
     # payload; every other surface gets the derived age instead, and only
     # when the club's own BetterSelect setting allows it.
     date_of_birth = Column(Date, nullable=True)
+    # Where they live and who to call (migration 356). Typed by the player on
+    # their own page or by the club; never read by a public route.
+    address_line1 = Column(Text, nullable=True)
+    suburb = Column(Text, nullable=True)
+    state = Column(Text, nullable=True)
+    postcode = Column(Text, nullable=True)
+    emergency_contact_name = Column(Text, nullable=True)
+    emergency_contact_phone = Column(Text, nullable=True)
     # The number on their shirt (migration 289). A PLAYING attribute, so it
     # lives here and is Core: a team sheet, a lineup post and a scorecard all
     # want it, and a club running only BetterStats has all three. TEXT rather

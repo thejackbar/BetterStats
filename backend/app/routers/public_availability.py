@@ -24,6 +24,7 @@ downgraded club's link simply 404s.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -37,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.modules import MODULE_SELECT, org_has_module
 from app.config.settings import settings
 from app.models.db import (
-    FantasyManager, FantasyPoolPlayer, FantasyRound, FantasySquad, Grade, Organisation, Player, PlayerAvailability,
+    FeeMember, FantasyManager, FantasyPoolPlayer, FantasyRound, FantasySquad, Grade, Organisation, Player, PlayerAvailability,
     Sponsor, VoteBallot, VoteMedal, get_db,
 )
 from app.routers.ladders import _compute_team_ladders
@@ -692,6 +693,8 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
     return {
         "club": _club_branding(club),
         "player": _player_card(player),
+        # The Update details button: only offered where the PIN guards the page.
+        "can_update_details": bool(club.availability_require_pin),
         "modules": modules,
         "squads": squad_names,
         "squads_visible": squads_visible,
@@ -853,3 +856,152 @@ async def set_me(token: str, body: SetBody, request: Request, db: AsyncSession =
         ))
     await db.commit()
     return {"status": "ok"}
+
+
+# ─── Update my details ───────────────────────────────────────────────────────
+# A player corrects their own email, mobile, address and emergency contact from
+# their page. The page's only proof of who is typing is the last four digits of a
+# mobile, which teammates often know, so the write is held to a higher bar than an
+# availability tap: the PIN must be on (with it off anyone holding the link could
+# edit anybody), the current PIN is asked for again on every save and counts
+# against the same lockout as signing in, the writes are throttled, and every
+# change leaves an audit entry that keeps the old values so the club can put them
+# back.
+
+DETAIL_FIELDS = (
+    "email", "phone", "address_line1", "suburb", "state", "postcode",
+    "emergency_contact_name", "emergency_contact_phone",
+)
+DETAIL_MAX = {
+    "email": 254, "phone": 30, "address_line1": 120, "suburb": 60, "state": 40, "postcode": 10,
+    "emergency_contact_name": 100, "emergency_contact_phone": 30,
+}
+DETAILS_WRITE_LIMIT = 10
+DETAILS_WRITE_WINDOW = 10 * 60
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_PHONE_RE = re.compile(r"^\+?[0-9 ()\-]+$")
+DETAILS_NEED_PIN = "Updating your details needs the PIN switched on for this link. Ask your club."
+
+
+class DetailsBody(BaseModel):
+    """Only the fields sent are touched; "" clears one (an absent key is not a clear)."""
+    pin: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address_line1: Optional[str] = None
+    suburb: Optional[str] = None
+    state: Optional[str] = None
+    postcode: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+
+
+def _details_of(player: Player) -> dict:
+    return {f: getattr(player, f) or "" for f in DETAIL_FIELDS}
+
+
+def _clean_detail(field: str, raw: Optional[str]) -> Optional[str]:
+    """The value to store (None clears), or a 422 saying what is wrong."""
+    v = (raw or "").strip()
+    if not v:
+        return None
+    if len(v) > DETAIL_MAX[field]:
+        raise HTTPException(status_code=422, detail=f"That is too long ({DETAIL_MAX[field]} characters at most).")
+    if field == "email" and not _EMAIL_RE.match(v):
+        raise HTTPException(status_code=422, detail="That email address does not look right.")
+    if field in ("phone", "emergency_contact_phone"):
+        digits = re.sub(r"\D", "", v)
+        if not _PHONE_RE.match(v) or not 8 <= len(digits) <= 15:
+            raise HTTPException(status_code=422, detail="That phone number does not look right. Use digits, spaces, + and brackets only.")
+    if field == "postcode" and not re.match(r"^[A-Za-z0-9 \-]+$", v):
+        raise HTTPException(status_code=422, detail="That postcode does not look right.")
+    return v
+
+
+def _same_contact(a: Optional[str], b: Optional[str], digits: bool) -> bool:
+    norm = (lambda x: re.sub(r"\D", "", x or "")) if digits else (lambda x: (x or "").strip().lower())
+    return norm(a) == norm(b)
+
+
+@router.get("/{token}/me/details")
+async def get_my_details(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The verified player's own contact details, for the Update details form. Their
+    own record only. Refused with the PIN off, like fees."""
+    club = await _club_for_token(db, token)
+    player = await _player_for_session(db, request, club)
+    if not club.availability_require_pin:
+        raise HTTPException(status_code=403, detail=DETAILS_NEED_PIN)
+    return {"details": _details_of(player), "pin_required": True}
+
+
+@router.patch("/{token}/me/details")
+async def update_my_details(token: str, body: DetailsBody, request: Request, db: AsyncSession = Depends(get_db)):
+    club = await _club_for_token(db, token)
+    player = await _player_for_session(db, request, club)
+    if not club.availability_require_pin:
+        raise HTTPException(status_code=403, detail=DETAILS_NEED_PIN)
+    rate_limit.enforce(f"avail-details:{player.id}", DETAILS_WRITE_LIMIT, DETAILS_WRITE_WINDOW,
+                       detail="Too many changes just now. Try again in a few minutes.")
+
+    # Prove it again, against their CURRENT mobile (read before this write changes it).
+    lock_key = f"avail-verify:{token}:{player.id}:{_client_ip(request)}"
+    rate_limit.assert_not_locked(
+        lock_key, PIN_MAX_FAILURES, PIN_LOCKOUT_SECONDS,
+        detail="Too many incorrect attempts. Please wait a few minutes and try again.",
+    )
+    want = phone_last4(player.phone)
+    if want is None:
+        raise HTTPException(status_code=409, detail="There is no mobile number on file for you, so your details cannot be changed here. Ask your club.")
+    if phone_last4(body.pin) != want:
+        rate_limit.record_failure(lock_key, PIN_LOCKOUT_SECONDS)
+        raise HTTPException(status_code=401, detail="That PIN did not match. Use the last 4 digits of your current mobile.")
+    rate_limit.clear_failures(lock_key)
+
+    sent = [f for f in DETAIL_FIELDS if f in body.model_fields_set]
+    new: dict[str, Optional[str]] = {f: _clean_detail(f, getattr(body, f)) for f in sent}
+    # The mobile is the PIN: clearing it would lock them out of this page.
+    if "phone" in new and new["phone"] is None:
+        raise HTTPException(status_code=422, detail="Your mobile is your PIN, so it cannot be cleared. Replace it with the new number instead.")
+    if "phone" in new and phone_last4(new["phone"]) is None:
+        raise HTTPException(status_code=422, detail="That phone number does not look right.")
+
+    old = _details_of(player)
+    changed = {f: (old[f] or None, new[f]) for f in sent if (old[f] or None) != new[f]}
+    if not changed:
+        return {"status": "ok", "changed": [], "details": old}
+
+    for f, (_was, now) in changed.items():
+        setattr(player, f, now)
+
+    # The club's fee/membership record keeps its own email and mobile and is read
+    # first by billing and comms. Move it with the player only where it was just
+    # mirroring their old value (or was empty): a different address there (a
+    # parent's, for a junior) is the club's own entry and is left alone.
+    mirrored: list[str] = []
+    member = (await db.execute(
+        select(FeeMember).where(FeeMember.organisation_id == club.id, FeeMember.player_id == player.id)
+    )).scalars().first()
+    if member is not None:
+        for f, col, digits in (("email", "email", False), ("phone", "mobile", True)):
+            if f in changed:
+                cur = getattr(member, col)
+                if not (cur or "").strip() or _same_contact(cur, changed[f][0], digits):
+                    setattr(member, col, changed[f][1])
+                    mirrored.append(col)
+
+    from app.services import player_audit
+    pname = await player_audit.player_name(db, player.id)
+    labels = {"email": "email", "phone": "mobile", "address_line1": "address", "suburb": "address", "state": "address",
+              "postcode": "address", "emergency_contact_name": "emergency contact", "emergency_contact_phone": "emergency contact"}
+    said = sorted({labels[f] for f in changed})
+    await player_audit.record(
+        db, club_id=club.id, area="details", action="details_updated",
+        summary=f"{pname} updated their own details: {', '.join(said)}",
+        player_id=player.id, player_name_=pname,
+        # The old values are kept so the club can put a change back.
+        detail={"fields": {f: {"from": was, "to": now} for f, (was, now) in changed.items()}, "fee_record_also_updated": mirrored},
+        user=None, via="player link", by=pname,
+    )
+    await db.commit()
+    await db.refresh(player)
+    return {"status": "ok", "changed": sorted(changed), "details": _details_of(player)}

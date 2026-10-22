@@ -4588,6 +4588,12 @@ async def lifespan(app: FastAPI):
         for _stmt in _AVAIL_SITE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 356: a player's address and emergency contact. Same one-copy
+        # rule: this and alembic's 356 both run services/player_contact_ddl.STATEMENTS.
+        from app.services.player_contact_ddl import STATEMENTS as _PLAYER_CONTACT_DDL
+        for _stmt in _PLAYER_CONTACT_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 341: the club-chosen modules on a player's own page, and
         # BetterSelect Fines. Same one-copy rule: this and alembic's 341 both run
         # services/fines_ddl.STATEMENTS.

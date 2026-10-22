@@ -15,6 +15,7 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { AvailabilityEditor, ALL_CHOICES, unansweredNextWeek } from './playerhome/AvailabilityEditor'
 import Group, { useOpenSections } from './playerhome/Group'
+import DetailsModal from './playerhome/DetailsModal'
 import FantasyCard, { fmtLockShort, nextDeadline, ordinal } from './playerhome/FantasyCard'
 import PlayerHero from './playerhome/PlayerHero'
 import SeasonDashboard from './playerhome/SeasonDashboard'
@@ -400,6 +401,8 @@ function MyPage({ token, me, club, availability, onSwitch }) {
   const [failed, setFailed] = useState(false)
   const [ladder, setLadder] = useState({ status: 'loading', ladders: [] })
   const sections = useOpenSections()
+  const [showDetails, setShowDetails] = useState(false)
+  const [notice, setNotice] = useState(null) // {text, tone} after a save
   useEffect(() => {
     let alive = true
     const load = () => api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
@@ -448,7 +451,24 @@ function MyPage({ token, me, club, availability, onSwitch }) {
 
   return (
     <div data-my-page>
-      <PlayerHero club={club} player={data?.player || me.player} squads={squads} onSwitch={onSwitch} />
+      <PlayerHero club={club} player={data?.player || me.player} squads={squads} onSwitch={onSwitch}
+        onUpdateDetails={data?.can_update_details ? () => { setNotice(null); setShowDetails(true) } : null} />
+      {notice && (
+        <div role="status" data-details-notice className="rounded-lg px-3.5 py-2.5 mb-3 text-sm flex items-start gap-3"
+          style={{ background: 'color-mix(in srgb, var(--pb-positive) 12%, transparent)', color: 'var(--pb-positive)', border: '1px solid color-mix(in srgb, var(--pb-positive) 35%, transparent)' }}>
+          <span className="min-w-0 flex-1">{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="shrink-0 opacity-70 hover:opacity-100">✕</button>
+        </div>
+      )}
+      {showDetails && (
+        <DetailsModal token={token} onClose={() => setShowDetails(false)}
+          onSaved={({ phoneChanged }) => {
+            setShowDetails(false)
+            setNotice(phoneChanged
+              ? 'Your details are saved. Your PIN is now the last 4 digits of your new mobile.'
+              : 'Your details are saved. Your club will see the change.')
+          }} />
+      )}
       {failed && <div className="text-sm text-pb-faint mb-3" data-profile-failed>The rest of your page could not load. Reload to try again.</div>}
       {!data && !failed && <div className="text-sm text-pb-faint mb-3" data-profile-loading>Loading your page…</div>}
       <div className="flex justify-end mb-2">

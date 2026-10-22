@@ -30,7 +30,7 @@ function Avatar({ player }) {
   )
 }
 
-export default function PlayerHero({ club, player, squads, onSwitch }) {
+export default function PlayerHero({ club, player, squads, onSwitch, onUpdateDetails }) {
   const short = club?.short_name || club?.name
   return (
     <section data-hero className="rounded-2xl border pb-hairline p-4 mb-3"
@@ -62,12 +62,20 @@ export default function PlayerHero({ club, player, squads, onSwitch }) {
               ))}
             </div>
           )}
-          {player?.profile_path && (
-            <a href={player.profile_path} data-profile-link className="inline-block mt-2 text-[12.5px] font-semibold"
-              style={{ color: 'var(--pb-accent)' }}>
-              Your public profile →
-            </a>
-          )}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-2">
+            {onUpdateDetails && (
+              <button type="button" onClick={onUpdateDetails} data-update-details
+                className="px-3 py-1.5 rounded-lg border pb-hairline text-[12.5px] font-semibold text-pb-text hover:bg-pb-surface2">
+                Update details
+              </button>
+            )}
+            {player?.profile_path && (
+              <a href={player.profile_path} data-profile-link className="text-[12.5px] font-semibold"
+                style={{ color: 'var(--pb-accent)' }}>
+                Your public profile →
+              </a>
+            )}
+          </div>
         </div>
       </div>
     </section>

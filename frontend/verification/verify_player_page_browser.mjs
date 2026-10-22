@@ -38,6 +38,15 @@ const profile = () => ({
 
 const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' })
+  // Every section of the player page starts closed. These checks read what is inside them,
+  // so each context starts with them opened, the way a returning player's page can be.
+  const _newContext = browser.newContext.bind(browser)
+  browser.newContext = async (o) => {
+    const c = await _newContext(o)
+    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
+    return c
+  }
+
   const ctx = await browser.newContext({ viewport: { width: 1000, height: 900 } })
   const page = await ctx.newPage()
   page.setDefaultTimeout(6000)

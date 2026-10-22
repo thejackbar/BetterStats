@@ -1,29 +1,31 @@
 // A section of the player's page that can be minimised: a header with the title, a
 // one-line summary that stays visible when it is closed (so a closed section still
-// says "2 to answer" or "$60 owing"), and a chevron. Which sections a player has
-// closed is remembered on their device only; it is a convenience, never needed, so
+// says "2 to answer" or "$60 owing"), and a chevron. Every section starts closed, so
+// the page opens as five short lines; which ones a player has opened is remembered on
+// their device only; it is a convenience, never needed, so
 // every read and write of it is guarded.
 import { useCallback, useEffect, useState } from 'react'
 import { GroupContext } from './ui'
 
-const STORE = 'bs.playerpage.closed'
+const STORE = 'bs.playerpage.open'
 
-function readClosed() {
+function readOpen() {
   try {
     const v = JSON.parse(window.localStorage.getItem(STORE) || '{}')
     return v && typeof v === 'object' ? v : {}
   } catch { return {} }
 }
 
-// { closed, isOpen(id), toggle(id), setAll(ids, open) } over the remembered choices.
+// { isOpen(id), toggle(id), setAll(ids, open) } over the remembered choices. A section
+// nobody has opened is closed.
 export function useOpenSections() {
-  const [closed, setClosed] = useState(readClosed)
+  const [open, setOpen] = useState(readOpen)
   useEffect(() => {
-    try { window.localStorage.setItem(STORE, JSON.stringify(closed)) } catch { /* private window: it just will not be remembered */ }
-  }, [closed])
-  const isOpen = useCallback((id) => !closed[id], [closed])
-  const toggle = useCallback((id) => setClosed((c) => ({ ...c, [id]: !c[id] })), [])
-  const setAll = useCallback((ids, open) => setClosed((c) => ({ ...c, ...Object.fromEntries(ids.map((i) => [i, !open])) })), [])
+    try { window.localStorage.setItem(STORE, JSON.stringify(open)) } catch { /* private window: it just will not be remembered */ }
+  }, [open])
+  const isOpen = useCallback((id) => open[id] === true, [open])
+  const toggle = useCallback((id) => setOpen((c) => ({ ...c, [id]: c[id] !== true })), [])
+  const setAll = useCallback((ids, value) => setOpen((c) => ({ ...c, ...Object.fromEntries(ids.map((i) => [i, value])) })), [])
   return { isOpen, toggle, setAll }
 }
 
