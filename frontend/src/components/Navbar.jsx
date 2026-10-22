@@ -266,7 +266,7 @@ export default function Navbar() {
           <NavbarPlayerSearch orgId={club?.id} club={club} />
           <ThemeToggle />
 
-          {/* Player Page + Admin entries — players/visitors on the public site can jump
+          {/* Player Dashboard + Admin entries — players/visitors on the public site can jump
               to their own page or to the club admin. Admin shows "Admin" once you're
               signed in, else "Admin Login". Both live in the mobile menu too, because a
               portrait phone has no room for them in the bar. */}
@@ -275,9 +275,9 @@ export default function Navbar() {
               to={club.player_page_path}
               data-player-page-link
               className="shrink-0 ml-2 hidden sm:inline-flex items-center font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-2.5 py-1.5"
-              title="Your own page: availability, stats, fees and Fantasy"
+              title="Your own dashboard: availability, stats, fees and Fantasy"
             >
-              PLAYER PAGE
+              PLAYER DASHBOARD
             </Link>
           )}
           {/* On a portrait phone the bar has room for an icon, not a word. */}
@@ -285,8 +285,8 @@ export default function Navbar() {
             <Link
               to={club.player_page_path}
               data-player-page-icon
-              aria-label="Player page"
-              title="Player page"
+              aria-label="Player dashboard"
+              title="Player dashboard"
               className="sm:hidden shrink-0 ml-1 w-9 h-9 flex items-center justify-center rounded text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -355,7 +355,7 @@ export default function Navbar() {
                   className="flex items-center justify-center py-3 rounded-lg text-[12px] font-mono font-semibold tracking-wide2"
                   style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}
                 >
-                  PLAYER PAGE
+                  PLAYER DASHBOARD
                 </Link>
               )}
               <Link

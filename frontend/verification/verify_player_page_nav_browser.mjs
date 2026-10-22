@@ -1,11 +1,11 @@
 // Drives a club's public site in Chromium with the API stubbed at the network layer:
-// the Player Page button next to Admin, and both reachable on a portrait phone.
-//   * wide: PLAYER PAGE sits beside ADMIN LOGIN and goes to the club's /avail link
+// the Player Dashboard button next to Admin, and both reachable on a portrait phone.
+//   * wide: PLAYER DASHBOARD sits beside ADMIN LOGIN and goes to the club's /avail link
 //   * portrait phone: the bar has a person icon (no sideways overflow at 360 and
-//     390px) and the menu has two big buttons, Player Page and Admin Login
+//     390px) and the menu has two big buttons, Player Dashboard and Admin Login
 //   * Admin used to be unreachable on a phone; it is in the menu whether or not the
-//     club shows the Player Page button
-//   * a club that hides the button, or has no link, shows no Player Page anywhere
+//     club shows the Player Dashboard button
+//   * a club that hides the button, or has no link, shows no Player Dashboard anywhere
 //   * signed in, the Admin entry reads ADMIN
 //
 //   npx vite preview --port 5199 &    node verify_player_page_nav_browser.mjs
@@ -51,7 +51,7 @@ const run = async () => {
     console.log('\n── Wide screen ──')
     const { ctx, page, errors } = await open(browser, 1280)
     const pp = page.locator('[data-player-page-link]')
-    check('PLAYER PAGE is shown', (await pp.count()) === 1 && /PLAYER PAGE/.test(await pp.innerText()))
+    check('PLAYER DASHBOARD is shown', (await pp.count()) === 1 && /PLAYER DASHBOARD/.test(await pp.innerText()))
     check('it goes to the club\'s own link', (await pp.getAttribute('href')) === '/avail/tok123')
     const adm = page.locator('header a', { hasText: 'ADMIN LOGIN' })
     const [a, b] = [await pp.boundingBox(), await adm.boundingBox()]
@@ -64,13 +64,24 @@ const run = async () => {
     await ctx.close()
   })
 
+  await safe('tablet', async () => {
+    console.log('\n── In between (640 to 767px): both words in the bar ──')
+    for (const w of [640, 700, 767, 800]) {
+      const { ctx, page } = await open(browser, w)
+      const pp = await page.locator('[data-player-page-link]').boundingBox()
+      const adm = await page.locator('header a', { hasText: 'ADMIN LOGIN' }).boundingBox()
+      check(`${w}px: no sideways overflow and both buttons are on screen`, (await overflow(page)) <= 0 && pp && adm && adm.x + adm.width <= w, JSON.stringify([await overflow(page), pp, adm]))
+      await ctx.close()
+    }
+  })
+
   await safe('portrait', async () => {
     console.log('\n── Portrait phone ──')
     for (const w of [360, 390]) {
       const { ctx, page } = await open(browser, w)
       check(`${w}px: no sideways overflow with the button on`, (await overflow(page)) <= 0, String(await overflow(page)))
       check(`${w}px: the wide-screen words are not squeezed into the bar`, !(await page.locator('[data-player-page-link]').isVisible()))
-      check(`${w}px: the person icon is visible and labelled`, (await page.locator('[data-player-page-icon]').isVisible()) && (await page.locator('[data-player-page-icon]').getAttribute('aria-label')) === 'Player page')
+      check(`${w}px: the person icon is visible and labelled`, (await page.locator('[data-player-page-icon]').isVisible()) && (await page.locator('[data-player-page-icon]').getAttribute('aria-label')) === 'Player dashboard')
       const icon = await page.locator('[data-player-page-icon]').boundingBox()
       check(`${w}px: the icon is a real touch target`, icon.width >= 32 && icon.height >= 32, JSON.stringify(icon))
       await ctx.close()
@@ -78,14 +89,14 @@ const run = async () => {
     const { ctx, page } = await open(browser, 390)
     await page.getByRole('button', { name: 'Open menu' }).click()
     await page.locator('[data-mobile-entries]').waitFor()
-    check('the menu leads with Player Page and Admin Login', (await page.locator('[data-mobile-player-page]').isVisible()) && (await page.locator('[data-mobile-admin]').isVisible()))
+    check('the menu leads with Player Dashboard and Admin Login', (await page.locator('[data-mobile-player-page]').isVisible()) && (await page.locator('[data-mobile-admin]').isVisible()))
     const [pb, ab] = [await page.locator('[data-mobile-player-page]').boundingBox(), await page.locator('[data-mobile-admin]').boundingBox()]
     check('both are tall enough to tap and side by side', pb.height >= 40 && ab.height >= 40 && Math.abs(pb.y - ab.y) < 4, JSON.stringify([pb, ab]))
     check('Admin Login goes to the login page', (await page.locator('[data-mobile-admin]').getAttribute('href')) === '/login')
     await page.screenshot({ path: `${SHOT}/nav-390-menu.png` })
     await page.locator('[data-mobile-player-page]').click()
     await page.waitForURL('**/avail/tok123')
-    check('Player Page opens the player page and the menu closes behind it', /\/avail\/tok123$/.test(page.url()))
+    check('Player Dashboard opens the player page and the menu closes behind it', /\/avail\/tok123$/.test(page.url()))
     await ctx.close()
   })
 
@@ -95,11 +106,11 @@ const run = async () => {
     check('no icon in the bar', (await page.locator('[data-player-page-icon]').count()) === 0)
     await page.getByRole('button', { name: 'Open menu' }).click()
     await page.locator('[data-mobile-entries]').waitFor()
-    check('no Player Page in the menu', (await page.locator('[data-mobile-player-page]').count()) === 0)
+    check('no Player Dashboard in the menu', (await page.locator('[data-mobile-player-page]').count()) === 0)
     check('but Admin Login is still reachable on a phone', (await page.locator('[data-mobile-admin]').isVisible()))
     await ctx.close()
     const wide = await open(browser, 1280, { path: null })
-    check('wide: no PLAYER PAGE button either', (await wide.page.locator('[data-player-page-link]').count()) === 0)
+    check('wide: no PLAYER DASHBOARD button either', (await wide.page.locator('[data-player-page-link]').count()) === 0)
     await wide.ctx.close()
   })
 

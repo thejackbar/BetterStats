@@ -53,9 +53,9 @@ function PageModules({ modules, canEdit, busy, onChange }) {
   )
   return (
     <div data-page-modules>
-      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Player page</div>
+      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Player dashboard</div>
       <p className="text-[12px] text-pb-faintest mb-1.5">
-        What players see on the My page tab after they sign in. Tick what you want and use the arrows to set the order. It is the same for every player.
+        What players see on their dashboard after they sign in, below their availability. Tick what you want and use the arrows to set the order. It is the same for every player.
       </p>
       {on.map(row)}
       {off.map((m) => row(m, -1))}
@@ -196,8 +196,8 @@ export default function SelfServiceLinkPanel() {
           {enabled && (
             <p className="text-[11.5px] text-pb-faintest -mt-2" data-show-on-site-note>
               {cfg.show_on_site === false
-                ? 'The Player Page button is hidden on your public site. The link still works wherever you share it.'
-                : 'Your public site shows a Player Page button beside Admin, so players can get to their page from the club site. Anyone can open it, and each player still needs their PIN.'}
+                ? 'The Player Dashboard button is hidden on your public site. The link still works wherever you share it.'
+                : 'Your public site shows a Player Dashboard button beside Admin, so players can get to their page from the club site. Anyone can open it, and each player still needs their PIN.'}
             </p>
           )}
           {enabled && (
