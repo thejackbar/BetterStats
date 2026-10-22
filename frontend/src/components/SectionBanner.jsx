@@ -31,11 +31,11 @@ export default function SectionBanner() {
   if (!sponsor || !sponsor.logo_url) return null
   const label = sec.name(key)
   const logo = (
-    <img src={sponsor.logo_url} alt={sponsor.name} className="max-h-7 max-w-[140px] object-contain" />
+    <img src={sponsor.logo_url} alt={sponsor.name} className="max-h-6 max-w-[130px] object-contain" />
   )
   return (
     <div className="bg-pb-surface pb-hairline-b" data-testid="section-banner">
-      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-1.5 flex items-center justify-center gap-3 min-w-0">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-2 flex items-center justify-center gap-2.5 min-w-0">
         {label && <span className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase truncate">{label}</span>}
         <span className="font-mono text-[10px] tracking-wide2 text-pb-faintest uppercase shrink-0">Presented by</span>
         {sponsor.website_url ? (
