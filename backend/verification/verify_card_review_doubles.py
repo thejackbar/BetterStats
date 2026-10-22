@@ -17,6 +17,7 @@ Mutations (each must make the suite FAIL, which is what proves the checks bite):
   MUTATE=forget     a "different matches" answer is not remembered
   MUTATE=noundo     undo does not know about a link
   MUTATE=halfpair   find a match only searches the club cards, so a pair found by its synced half is missed
+  MUTATE=dryapplies the repair script's dry run writes (a dry run that is not one)
   MUTATE=blindlink  the scan only looks at unlinked cards (how the first release missed a card linked to the wrong game)
 """
 from __future__ import annotations
@@ -59,6 +60,7 @@ async def main():
     from app.services import card_review_actions as act
     from app.services import card_review_doubles as dbl
     from app.services import card_review_find as fnd
+    from app.scripts import fix_wrong_links as fwl
     from app.services.card_review_ddl import STATEMENTS as REVIEW_DDL
     from app.services.superseded_ddl import STATEMENTS as SUPERSEDED_DDL
     from app.services.competition_ddl import STATEMENTS as COMP_DDL
@@ -99,6 +101,12 @@ async def main():
             return []
         dbl.dismissed_pairs = forget
 
+    if mutate == "dryapplies":
+        real_run = fwl.run_org
+
+        async def always_apply(db, org_id, *, apply, max_rounds=3):
+            return await real_run(db, org_id, apply=True, max_rounds=max_rounds)
+        fwl.run_org = always_apply
     if mutate == "blindlink":
         real_pairs = dbl.match_pairs_ca
 
@@ -891,6 +899,29 @@ async def main():
         undone = await act.bulk_undo(s, ORG, USER, res["batch_id"])
     check("the whole batch can be undone", (undone["undone"] >= 2, (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0],
                                             (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wA"]))[0][0]), (True, ids["g_wA"], None))
+
+    print("\n-- the command-line repair: dry run by default, one batch when applied, undoable --")
+    snap = lambda: q("SELECT id::text, superseded_by_game_id::text FROM manual_games ORDER BY id")  # noqa: E731
+    logs = lambda: q("SELECT count(*) FROM card_review_log")  # noqa: E731
+    before_links, before_logs = await snap(), await logs()
+    async with async_session_maker() as s:
+        dry = await fwl.run_org(s, ORG, apply=False)
+    check("a dry run finds the wrong links", dry["before"]["strong_relink"] >= 1, True)
+    check("and writes nothing: no link moved, no history line added", (await snap(), await logs()), (before_links, before_logs))
+    check("it says how many 'pairing looks wrong' cards it cannot offer a move for",
+          isinstance(dry["pairing_without_a_move"], int) and dry["pairing_total"] >= dry["pairing_without_a_move"], True)
+    async with async_session_maker() as s:
+        done = await fwl.run_org(s, ORG, apply=True)
+    check("applying moves the wrong link to the game that matches",
+          ((await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0], done["applied"]["relinked"] >= 1),
+          (ids["g_wB"], True))
+    check("the scan afterwards has no strong wrong link left", done["after"]["strong_relink"], 0)
+    check("a link a person confirmed is left alone",
+          (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_hand"]))[0][0], ids["g_hw"])
+    async with async_session_maker() as s:
+        un = await act.bulk_undo(s, ORG, None, done["applied"]["batch_id"])
+    check("the batch is undone by its id, with no user needed",
+          (un["undone"] >= 1, (await q("SELECT superseded_by_game_id FROM manual_games WHERE id = :m", m=ids["m_wB"]))[0][0]), (True, ids["g_wA"]))
 
     print("\n-- nothing was deleted by any of it --")
     check("every card is still there",
