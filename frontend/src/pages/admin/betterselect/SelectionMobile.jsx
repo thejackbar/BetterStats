@@ -139,7 +139,7 @@ export function AddPlayersSheet({ vm, onClose }) {
   const list = useMemo(() => {
     let rows = q.trim()
       ? vm.available.filter((p) => nameMatches(p.display_name, q))
-        .sort((a, b) => availRank(a.availability) - availRank(b.availability) || (a.display_name || '').localeCompare(b.display_name || ''))
+        .sort((a, b) => (b.half_open ? 1 : 0) - (a.half_open ? 1 : 0) || availRank(a.availability) - availRank(b.availability) || (a.display_name || '').localeCompare(b.display_name || ''))
       : vm.pool
     if (hideUnavail) rows = rows.filter((p) => p.availability !== 'UNAVAILABLE')
     return rows

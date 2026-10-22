@@ -506,10 +506,15 @@ function SquadColumn({ col, next, members, dormantCutoff, statusOf: statusAt, ca
   const { onCardDragStart, onCardDragEnd, ...columnDrag } = dragHandlers
   const sorted = useMemo(() => {
     if (sortMode === 'first' || sortMode === 'last') return orderPlayers(members, sortMode)
+    // A player free one week of the next two-day game and away the other is nearly
+    // a yes and needs a decision, so they lead; the rest keep the combined answer.
+    // Ordering only: `statusOf` still gives the least favourable week.
+    const half = (id) => (next.endDate && halfStatus([next.date, next.endDate].map((date) => ({ date, status: statusAt(id, date) }))) ? 0 : 1)
     return [...members].sort((a, b) =>
-      (AVAILABILITY[statusOf(a.id)]?.rank ?? 9) - (AVAILABILITY[statusOf(b.id)]?.rank ?? 9)
+      half(a.id) - half(b.id)
+      || (AVAILABILITY[statusOf(a.id)]?.rank ?? 9) - (AVAILABILITY[statusOf(b.id)]?.rank ?? 9)
       || (a.display_name || a.name || '').localeCompare(b.display_name || b.name || ''))
-  }, [members, statusOf, sortMode])
+  }, [members, statusOf, statusAt, next.date, next.endDate, sortMode])
 
   return (
     <div {...columnDrag} className="pb-card flex flex-col min-h-0 transition-colors self-start"
