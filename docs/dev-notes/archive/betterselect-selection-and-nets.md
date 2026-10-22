@@ -1787,3 +1787,17 @@ Found: `GET /teams/grade-options` returned grades from only the latest two seaso
 Fix: the same two newest seasons, plus any season that holds a grade an upcoming or in-progress fixture of the club is in. Seasons with no fixtures coming up stay out, so the list does not grow with every old season.
 
 Check: `verify_grade_options_live_seasons.py` (6 checks; the control fails the two "live season" checks and keeps passing the two "left out" ones).
+
+## Two teams of one club in one grade (v9.129.1)
+
+Asked for: Applecross' 8th XI and 10th XI both play One Day Grade 6 Black, and both teams' fixtures landed on one squad. Not wanted: sharing a squad, or re-linking fixtures every round.
+
+Found: a fixture is put on a squad by its grade (`SquadSides.squad_for_grade`), and a grade belongs to one squad, so two teams in one grade cannot be told apart by grade. The earlier "grade missing from the picker" fix (v9.128.14) was not this problem: the grade was listed, as "(now in Applecross 8th XI)".
+
+Fix: `SquadSides.squad_for_team_name(grade_id, our_team_name)`. Cricket Australia names our own side on every fixture ("Applecross 10th XI"). When that name states an XI number, the grade's own squad does not carry it, and exactly one other ACTIVE squad does (`SquadInfo.ranks`), the fixture goes to that squad. Used by `sync_fixtures` and by `assign_fixtures`, which skips a fixture another squad owns by name. No migration. A hand pick (`team_pinned`) still wins.
+
+Needs from the club: the second squad's order (`teams.sequence`) is its XI number.
+
+Not done: a game between two of the club's own teams (Round 3, 8th XI v 10th XI) is ONE fixture, filed under the home team's squad. The away team's squad has no fixture for that day.
+
+Check: `verify_shared_grade_squads.py` (14 checks; the control fails the four that move the 10th XI's game). `verify_squad_sides.py` (48) and `verify_fixture_side.py` (25) unchanged.

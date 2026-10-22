@@ -474,17 +474,22 @@ async def sync_fixtures(
         # A synced fixture that sits on a squad which does not play its grade (an
         # earlier name match guessed wrong, say a women's grade on the men's squad)
         # moves to the squad that does, unless someone picked it by hand.
+        our_name = target.home_team if home_away == "HOME" else target.away_team if home_away == "AWAY" else None
         if target.grade_id is not None and not target.team_pinned:
             current = sides.squads.get(str(target.team_id)) if target.team_id else None
             key = sides.key_of_grade(target.grade_id)
             plays_it = current is not None and key is not None and current.side_for_key(key) is not None
-            claimed = sides.squad_for_grade(target.grade_id) if (target.team_id is None or not plays_it) else None
+            # Two of the club's teams can play in one grade (Applecross 8th and
+            # 10th XI both in One Day Grade 6 Black). The grade alone cannot tell
+            # them apart, so our own team's name ("Applecross 10th XI") does.
+            named = sides.squad_for_team_name(target.grade_id, our_name)
+            claimed = named if named is not None else (
+                sides.squad_for_grade(target.grade_id) if (target.team_id is None or not plays_it) else None)
             if claimed is not None and claimed.id != str(target.team_id):
                 target.team_id = uuid.UUID(claimed.id)
                 target.side_key = None
                 teams_assigned += 1
         if teams and target.team_id is None:
-            our_name = target.home_team if home_away == "HOME" else target.away_team if home_away == "AWAY" else None
             fx_women = grade_is_women(None, g.get("grade_name"), grade_cats) if g.get("grade_name") else None
             matched = _match_team(our_name, teams, fx_women)
             if matched:

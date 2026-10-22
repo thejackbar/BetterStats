@@ -27,6 +27,7 @@ by grade id, so the link survives the season rolling over and CA issuing new row
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import date
@@ -38,6 +39,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.grade_labels import grade_key
 
 MAX_LABEL = 40
+
+
+_XI_NUMBER = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)\s+xi\b", re.I)
+
+
+def xi_number(name) -> Optional[int]:
+    """The XI number in a Cricket Australia team name: "Applecross 10th XI" -> 10.
+    None when the name does not say one ("Applecross OD6 Black")."""
+    m = _XI_NUMBER.search(str(name or ""))
+    return int(m.group(1)) if m else None
 
 
 def ordinal(n: int) -> str:
@@ -133,6 +144,23 @@ class SquadSides:
     def squad_for_stored_grade(self, grade_id) -> Optional[SquadInfo]:
         owner = self.stored_owner.get(self.key_of_grade(grade_id) or "")
         return self.squads.get(owner) if owner else None
+
+    def squad_for_team_name(self, grade_id, team_name) -> Optional[SquadInfo]:
+        """The squad a fixture belongs to by OUR team's name, for when two of the
+        club's teams play in one grade and the grade cannot tell them apart.
+
+        Only ever a correction to the grade's own squad: it answers when that squad
+        does not carry the XI number the name states and exactly one other active
+        squad does. A name with no XI number, a number nobody (or two squads) carry,
+        or a grade no squad plays all answer None and leave the grade to decide."""
+        n = xi_number(team_name)
+        if not n:
+            return None
+        owner = self.squads.get(self.key_owner.get(self.key_of_grade(grade_id) or "", ""))
+        if owner is None or n in owner.ranks:
+            return None
+        hits = [s for s in self.squads.values() if s.is_active and n in s.ranks]
+        return hits[0] if len(hits) == 1 else None
 
     def resolve(self, team_id, grade_id, side_key=None) -> tuple[Optional[SquadInfo], Optional[Side]]:
         """The squad and team a fixture (its ``team_id``, ``grade_id`` and
@@ -354,16 +382,31 @@ async def assign_fixtures(db: AsyncSession, club_id, team_id, today: Optional[da
     gids = [uuid.UUID(g) for g in sides.grade_ids(team_id)]
     if not gids:
         return 0
-    res = await db.execute(
+    tid = uuid.UUID(str(team_id))
+    rows = (await db.execute(
         text(
-            "UPDATE fixtures SET team_id = :tid, updated_at = NOW() "
+            "SELECT id, grade_id, home_team, away_team, home_away FROM fixtures "
             "WHERE organisation_id = :org AND grade_id = ANY(CAST(:gids AS uuid[])) "
             "AND played_on >= :today AND COALESCE(status, '') <> 'CANCELLED' "
             "AND team_id IS DISTINCT FROM :tid AND NOT COALESCE(team_pinned, false) "
-            "AND (source = 'grassroots' OR team_id IS NULL) "
-            "RETURNING id"
+            "AND (source = 'grassroots' OR team_id IS NULL)"
         ),
-        {"tid": uuid.UUID(str(team_id)), "org": club_id, "gids": gids, "today": today or date.today()},
+        {"tid": tid, "org": club_id, "gids": gids, "today": today or date.today()},
+    )).fetchall()
+    # A fixture whose own team's name says it is another squad's (the 10th XI in a
+    # grade the 8th XI also plays) stays with that squad.
+    mine = []
+    for fid, gid, home, away, home_away in rows:
+        our = home if home_away == "HOME" else away if home_away == "AWAY" else None
+        named = sides.squad_for_team_name(gid, our)
+        if named is None or named.id == str(tid):
+            mine.append(fid)
+    if not mine:
+        return 0
+    res = await db.execute(
+        text("UPDATE fixtures SET team_id = :tid, updated_at = NOW() "
+             "WHERE id = ANY(CAST(:ids AS uuid[])) RETURNING id"),
+        {"tid": tid, "ids": mine},
     )
     return len(res.fetchall())
 
