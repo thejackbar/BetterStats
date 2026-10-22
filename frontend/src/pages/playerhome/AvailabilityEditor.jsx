@@ -272,10 +272,6 @@ export function AvailabilityEditor({ me, choices, savingDate, savedDate, onAnswe
 
   return (
     <section data-availability className="mb-3 min-w-0">
-      <div className="flex items-baseline justify-between gap-2 mb-2">
-        <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Your availability</div>
-      </div>
-
       {(me.dates || []).length === 0 && (
         <div className="rounded-xl border pb-hairline px-4 py-10 text-center text-pb-faint text-sm">
           No upcoming fixtures to set availability for yet. Check back soon.

@@ -709,6 +709,25 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
     }
 
 
+@router.get("/{token}/me/ranks")
+async def get_my_ranks(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Where the player ranks in the club this season for runs, wickets and catches.
+    Read on its own when the Stats section opens, because it reads the club's
+    leaderboards, which the rest of the page does not. 404 unless the club has the
+    season module on. A failure answers with no ranks and the section still draws."""
+    club = await _club_for_token(db, token)
+    player = await _player_for_session(db, request, club)
+    if "season" not in player_dashboard.served_modules(club):
+        raise HTTPException(status_code=404, detail="Not available")
+    try:
+        out = await player_dashboard.season_ranks(db, club, player)
+    except Exception:
+        logger.exception("player page: season ranks failed for %s", player.id)
+        await rollback_keeping(db, club, player)
+        out = None
+    return {"ranks": out}
+
+
 @router.get("/{token}/me/ladder")
 async def get_my_ladder(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     """The competition ladder for each squad the player is in. Read on its own

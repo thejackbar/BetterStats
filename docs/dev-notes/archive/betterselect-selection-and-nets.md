@@ -1831,3 +1831,13 @@ Done: the date a locked side is on carries a Selected chip and one summary line 
 
 Checks: the dashboard browser script (110) and backend section K; the two-day script's summary wording changed with the new compact status line.
 
+## Availability and Selection split, selection in the header, season rankings (v9.129.6)
+
+Asked for: availability and selection should be two different things, with selection up in the header card once selected; then season rankings for runs, wickets, catches and so on.
+
+Done: a separate Availability section; the Selection section keeps squad, training, ladder and the list of sides; the header card shows up to two locked sides. Rankings are a lazy route fed by the club's own leaderboards, with a two minute cache; a figure the player has nothing on is omitted.
+
+Not done, on purpose: rankings for averages, strike rate or economy (they need minimums, and the club's qualification setting would have to be applied), and a rank for a past season. "And so on" can add fifties or sixes by adding a row to `RANK_KINDS` and a label on the page.
+
+Checks: backend 129 (section L, control fails 12 without crashing), browser 124.
+

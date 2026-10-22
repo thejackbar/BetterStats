@@ -624,6 +624,53 @@ async def main():
           [(str(fx_locked), "Rovers", True)])
     check("the draft side (not locked) is not", any(x.get("opponent_name") == "Saints" for x in sel), False)
 
+    print("\n# L. Season rankings for runs, wickets and catches")
+    async with Session() as db:
+        for key, runs, wk, ct in (("ann", 500, 3, 10), ("rival", 412, 0, 0), ("dup", 100, 12, 6)):
+            db.add(PlayerSeasonStats(player_id=P[key], season_id=season, matches=8, batting_innings=8, runs=runs, not_outs=0,
+                                     balls_faced=runs, high_score=50, wickets=wk, runs_conceded=wk * 25, overs=wk * 3 if wk else 0,
+                                     bowling_balls=wk * 18, catches=ct))
+        # Another club's player on the same season row must not count.
+        db.add(PlayerSeasonStats(player_id=P["stranger"], season_id=season, matches=9, batting_innings=9, runs=9999, not_outs=0,
+                                 balls_faced=9999, high_score=200, wickets=99, runs_conceded=1, overs=50, bowling_balls=300, catches=99))
+        await db.commit()
+    await set_modules(["season"])
+    import app.services.player_dashboard as pdash
+
+    async def ranks(key):
+        getattr(pdash, "_RANK_CACHE", {}).clear()
+        if not hasattr(pa, "get_my_ranks"):
+            return None
+        async with Session() as db:
+            res, err = await call(pa.get_my_ranks, tok, req_for(org, P[key]), db)
+        return (res or {}).get("ranks")
+
+    rk = await ranks("sam")
+    r = (rk or {}).get("ranks") or {}
+    check("the season named is the one the dashboard shows", (rk or {}).get("season"), "Summer 26/27")
+    check("runs: 412 puts Sam equal second, behind Ann's 500", (r.get("runs") or {}).get("rank"), 2)
+    check("...of the four club players with runs, another club's 9999 not among them", (r.get("runs") or {}).get("of"), 4)
+    check("...and the value is his own", (r.get("runs") or {}).get("value"), 412)
+    check("wickets: 9 is second behind Dee's 12", ((r.get("wickets") or {}).get("rank"), (r.get("wickets") or {}).get("of")), (2, 3))
+    check("catches: 6 level with Dee behind Ann's 10 shares second place", ((r.get("catches") or {}).get("rank"), (r.get("catches") or {}).get("of")), (2, 3))
+    rk_ann = await ranks("ann")
+    check("Ann is first for runs and catches", (((rk_ann or {}).get("ranks") or {}).get("runs", {}).get("rank"), ((rk_ann or {}).get("ranks") or {}).get("catches", {}).get("rank")), (1, 1))
+    rk_rival = await ranks("rival")
+    check("a player with nothing on a board is left off it, not shown last", sorted(((rk_rival or {}).get("ranks") or {})), ["runs"])
+    check("a tie takes the better place for both (Rex shares second on runs)", (((rk_rival or {}).get("ranks") or {}).get("runs") or {}).get("rank"), 2)
+    rk_none = await ranks("noemail")
+    check("a player with no season games has no ranks block at all", rk_none, None)
+    check("the player's own dashboard figure and the board agree on the value", ((await profile("sam")).get("season") or {}).get("runs"), (r.get("runs") or {}).get("value"))
+    check("rank_in handles an empty board", ((getattr(pdash, "rank_in", None) or (lambda *a: "missing"))({}, "x"), (getattr(pdash, "rank_in", None) or (lambda *a: "missing"))({"x": 0.0}, "x")), (None, None))
+    check("ranks are not on the profile payload (they are read on their own)", "ranks" in await profile("sam"), False)
+    await set_modules(["fees"])
+    if hasattr(pa, "get_my_ranks"):
+        async with Session() as db:
+            res, err = await call(pa.get_my_ranks, tok, req_for(org, P["sam"]), db)
+    else:
+        res, err = None, SimpleNamespace(status_code="missing")
+    check("with the season module off the route is a 404", err.status_code if err else None, 404)
+
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     await engine.dispose()
     sys.exit(1 if base.FAIL else 0)

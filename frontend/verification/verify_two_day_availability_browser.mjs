@@ -76,7 +76,7 @@ const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePa
   const _newContext = browser.newContext.bind(browser)
   browser.newContext = async (o) => {
     const c = await _newContext(o)
-    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
+    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ availability: true, selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
     return c
   }
 

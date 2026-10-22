@@ -161,7 +161,7 @@ const run = async () => {
   const _newContext = browser.newContext.bind(browser)
   browser.newContext = async (o) => {
     const c = await _newContext(o)
-    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
+    await c.addInitScript(() => { try { if (!localStorage.getItem('bs.playerpage.open')) localStorage.setItem('bs.playerpage.open', JSON.stringify({ availability: true, selection: true, admin: true, voting: true, stats: true, fantasy: true })) } catch (e) { /* no storage */ } })
     return c
   }
 
@@ -171,7 +171,7 @@ const run = async () => {
     const { ctx, page, hits, errors } = await playerPage(browser, 390, profileFor(), { status: 200, body: LADDER })
     await page.locator('[data-ladder]').waitFor()
     const t = await titles(page)
-    check('sections come in a fixed order: Selection, Club admin, Stats', JSON.stringify(await groupIds(page)) === JSON.stringify(['selection', 'admin', 'stats']), JSON.stringify(await groupIds(page)))
+    check('sections come in a fixed order: Availability, Selection (the ladder), Club admin, Stats', JSON.stringify(await groupIds(page)) === JSON.stringify(['availability', 'selection', 'admin', 'stats']), JSON.stringify(await groupIds(page)))
     check('inside a section the club\'s own order holds (fines before fees)', t.indexOf('fines') !== -1 && t.indexOf('fines') < t.findIndex((x) => x === 'fees'), JSON.stringify(t))
     check('the profile was fetched once, the ladder once', hits.profile === 1 && hits.ladder === 1, JSON.stringify(hits))
     const body = norm(await page.locator('[data-my-page]').innerText())
@@ -186,7 +186,7 @@ const run = async () => {
     check('fees: what they owe', /You owe\s*\$60\.00/.test(body) && /Membership \$60\.00/.test(body), body)
     check('390px: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
     check('no script errors', errors.length === 0, errors.join('; '))
-    check('Selection says everything is answered', /All answered/.test(await summary(page, 'selection')), await summary(page, 'selection'))
+    check('Availability says everything is answered', /All answered/.test(await summary(page, 'availability')), await summary(page, 'availability'))
     check('Club admin sums fees and fines owing', /\$67\.00 owing/.test(await summary(page, 'admin')), await summary(page, 'admin'))
     check('Stats says matches, runs and wickets', /11 matches · 412 runs · 9 wkts/.test(await summary(page, 'stats')), await summary(page, 'stats'))
     check('there are no headline tiles any more', (await page.locator('[data-tile], [data-tiles]').count()) === 0)
@@ -248,9 +248,9 @@ const run = async () => {
     await page.locator('[data-ladder]').waitFor()
     const box = await page.locator('[data-my-page]').boundingBox()
     check('the page opens out past the phone column', box.width > 700, String(box.width))
-    const selBox = await page.locator('[data-group="selection"]').boundingBox()
+    const selBox = await page.locator('[data-group="availability"]').boundingBox()
     const statsBox = await page.locator('[data-group="stats"]').boundingBox()
-    check('Selection sits left of the other sections', selBox.x + selBox.width <= statsBox.x + 1, JSON.stringify([selBox, statsBox]))
+    check('Availability sits left of the other sections', selBox.x + selBox.width <= statsBox.x + 1, JSON.stringify([selBox, statsBox]))
     check('1280px: no sideways overflow', (await overflow(page)) <= 0, String(await overflow(page)))
     check('there is no tab switch any more', (await page.locator('[role=tablist]').count()) === 0)
     await page.screenshot({ path: `${SHOT}/player-dashboard-1280.png`, fullPage: true })
@@ -273,9 +273,9 @@ const run = async () => {
   await safe('A. empty modules', async () => {
     console.log('\n── A. A club that turned everything off says so ──')
     const { ctx, page } = await playerPage(browser, 390, profileFor({ modules: [], fines: null }), { status: 200, body: LADDER })
-    await page.locator('[data-group="selection"]').waitFor()
+    await page.locator('[data-group="availability"]').waitFor()
     await page.waitForTimeout(300)
-    check('with every module off only Selection is left, and it still has the answer buttons', JSON.stringify(await groupIds(page)) === JSON.stringify(['selection']) && (await page.locator('[data-availability]').count()) === 1, JSON.stringify(await groupIds(page)))
+    check('with every module off only Availability is left, and it still has the answer buttons', JSON.stringify(await groupIds(page)) === JSON.stringify(['availability']) && (await page.locator('[data-availability]').count()) === 1, JSON.stringify(await groupIds(page)))
     await ctx.close()
   })
 

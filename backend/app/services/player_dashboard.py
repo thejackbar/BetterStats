@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.modules import MODULE_FANTASY, MODULE_FEES, org_has_module
 from app.models.db import FeeMember, FeeMemberSeason, FeePayment, Organisation, Player, Season
 from app.services import fees as fee_service
-from app.services import grade_scope, player_form
+from app.services import grade_scope, player_form, session_safety
 from app.services.aggregations import get_season_by_season
 
 # key, label, one line for the admin list, and the keys on by default.
@@ -156,6 +156,23 @@ def _rate(row: dict, key: str, cover_key: str) -> tuple[Optional[float], bool]:
     return val, bool(val is not None and cov.get("counted") and not cov.get("complete"))
 
 
+async def _latest_season(db: AsyncSession, club: Organisation, player: Player):
+    """``(season row, scope, auto_shown)`` for the player's most recent season under
+    the grade scope their public profile uses (so the figures match it). The row is
+    None when they have no recorded games."""
+    scope, auto_shown = await grade_scope.resolve_scope_for_player(
+        db, club.id, str(player.id), None,
+        auto_widen=bool(club.stats_auto_show_played_grades),
+    )
+    rows = await get_season_by_season(db, str(player.id), include_prior=False, scope=scope)
+    if not rows:
+        return None, scope, auto_shown
+    r = rows[0]
+    if not (r.get("matches") or r.get("total_runs") or r.get("total_wickets") or r.get("total_catches")):
+        return None, scope, auto_shown
+    return r, scope, auto_shown
+
+
 async def season_overview(db: AsyncSession, club: Organisation, player: Player) -> Optional[dict]:
     """The player's most recent season as a small dashboard, under the same grade
     scope their public profile uses (so the figures match it). None when they
@@ -165,15 +182,8 @@ async def season_overview(db: AsyncSession, club: Organisation, player: Player) 
     a page bundle left open across a deploy still renders; the rest feed the
     batting, bowling and fielding panels. A rate missing its balls is marked
     partial (the page puts a dagger on it), never guessed."""
-    scope, auto_shown = await grade_scope.resolve_scope_for_player(
-        db, club.id, str(player.id), None,
-        auto_widen=bool(club.stats_auto_show_played_grades),
-    )
-    rows = await get_season_by_season(db, str(player.id), include_prior=False, scope=scope)
-    if not rows:
-        return None
-    r = rows[0]
-    if not (r.get("matches") or r.get("total_runs") or r.get("total_wickets") or r.get("total_catches")):
+    r, scope, auto_shown = await _latest_season(db, club, player)
+    if r is None:
         return None
     strike_rate, sr_partial = _rate(r, "strike_rate", "strike_rate_coverage")
     economy, econ_partial = _rate(r, "economy", "economy_coverage")
@@ -283,3 +293,80 @@ async def fees_paid(db: AsyncSession, club: Organisation, member: FeeMember) -> 
         }
         for p, season_name in rows
     ]
+
+
+# ── Where they rank in the club this season ──────────────────────────────────
+# Runs, wickets and catches, as a position among the club's players for the season
+# the dashboard is showing, under the same grade scope as the figures beside it. It
+# is read from the club's own leaderboards (the same functions the public boards
+# use), so a rank here and the board cannot disagree, and it is derived on read,
+# never stored. A leaderboard is a heavy read, so the page asks for this only when
+# the Stats section is opened, and a club's three boards are kept for two minutes.
+RANK_KINDS = (
+    ("runs", "total_runs"),
+    ("wickets", "total_wickets"),
+    ("catches", "total_catches"),
+)
+RANK_LIMIT = 2000
+RANK_TTL = 120.0
+RANK_MAX_KEYS = 40
+_RANK_CACHE: dict = {}
+
+
+async def _season_boards(db: AsyncSession, club: Organisation, season_id: str, scope) -> dict:
+    """``{metric: {player_id: value}}`` for the club's season. A board that fails is
+    left out, not guessed, and the others still draw."""
+    import logging
+    import time
+    from app.services import aggregations as agg
+
+    key = (str(club.id), season_id, agg._scope_cache_key(scope))
+    hit = _RANK_CACHE.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < RANK_TTL:
+        return hit[1]
+    fetch = {
+        "runs": lambda: agg.get_batting_leaderboard_extended(
+            db, str(club.id), season_id=season_id, sort_by="total_runs", limit=RANK_LIMIT, scope=scope),
+        "wickets": lambda: agg.get_bowling_leaderboard_extended(
+            db, str(club.id), season_id=season_id, sort_by="total_wickets", limit=RANK_LIMIT, scope=scope),
+        "catches": lambda: agg.get_fielding_leaderboard(
+            db, str(club.id), season_id=season_id, sort_by="total_catches", limit=RANK_LIMIT, scope=scope),
+    }
+    boards: dict = {}
+    for metric, field in RANK_KINDS:
+        try:
+            rows = await fetch[metric]()
+        except Exception:  # noqa: BLE001 - one board failing must not take the others down
+            logging.getLogger(__name__).exception("player page: %s board failed", metric)
+            await session_safety.rollback_keeping(db, club)
+            continue
+        boards[metric] = {str(r["player_id"]): float(r.get(field) or 0) for r in rows if r.get("player_id") is not None}
+    if len(boards) == len(RANK_KINDS):
+        if len(_RANK_CACHE) >= RANK_MAX_KEYS:
+            _RANK_CACHE.clear()
+        _RANK_CACHE[key] = (now, boards)
+    return boards
+
+
+def rank_in(board: dict, player_id: str) -> Optional[dict]:
+    """``{rank, of, value}`` for a player on a board, or None when they have nothing
+    on it. Ties share the better place (two on 400 are both 2nd, the next is 4th);
+    `of` counts the players with something on the board, not the whole roster."""
+    mine = board.get(str(player_id)) or 0
+    if mine <= 0:
+        return None
+    ahead = sum(1 for v in board.values() if v > mine)
+    return {"rank": ahead + 1, "of": sum(1 for v in board.values() if v > 0), "value": _num(mine)}
+
+
+async def season_ranks(db: AsyncSession, club: Organisation, player: Player) -> Optional[dict]:
+    """The player's club rank for runs, wickets and catches in the season shown on
+    their dashboard. None when they have no season; a metric they have nothing on,
+    or whose board could not be read, is absent from ``ranks``."""
+    r, scope, _auto = await _latest_season(db, club, player)
+    if r is None or r.get("season_id") is None:
+        return None
+    boards = await _season_boards(db, club, str(r["season_id"]), scope)
+    ranks = {m: rank_in(b, str(player.id)) for m, b in boards.items()}
+    return {"season": r.get("season_name"), "ranks": {m: v for m, v in ranks.items() if v}}

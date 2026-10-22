@@ -343,8 +343,9 @@ function FinesModule({ data }) {
 
 // The sections of the page, in the order a player reads them. Each holds the club's
 // modules that belong to it, in the club's own order; a section with none drops out.
-// Selection always shows, because the answer buttons are in it.
+// Availability always shows, because the answer buttons are in it.
 const GROUPS = [
+  { id: 'availability', title: 'Availability', keys: [] },
   { id: 'selection', title: 'Selection', keys: ['squad', 'selected', 'training', 'ladder'] },
   { id: 'admin', title: 'Club admin', keys: ['fees', 'fines'] },
   { id: 'voting', title: 'Voting', keys: ['votes'], hideTitle: true },
@@ -361,14 +362,17 @@ const GREEN = 'var(--pb-positive)'
 // One line per section, from data the page already holds, shown even when the
 // section is closed. Left empty rather than made up when there is nothing true to say.
 function summaryFor(id, { me, data, ladder }) {
-  if (id === 'selection') {
+  if (id === 'availability') {
     const n = unansweredNextWeek(me)
     if (n > 0) return { text: `${n} to answer`, tone: AMBER }
-    const side = (data?.selected || [])[0]
-    if (side) return { text: `Selected ${fmtShort(side.date)} ${side.home_away === 'AWAY' ? 'at' : 'vs'} ${side.opponent_name || side.label || 'TBC'}` }
     return (me.dates || []).length ? { text: 'All answered', tone: GREEN } : { text: 'No games to answer yet' }
   }
   if (!data) return {}
+  if (id === 'selection') {
+    const side = (data.selected || [])[0]
+    if (side) return { text: `Selected ${fmtShort(side.date)} ${side.home_away === 'AWAY' ? 'at' : 'vs'} ${side.opponent_name || side.label || 'TBC'}`, tone: GREEN }
+    return (data.modules || []).includes('selected') ? { text: 'Not selected yet' } : {}
+  }
   if (id === 'admin') {
     const fees = data.fees?.on_record ? data.fees.total_outstanding : null
     const fines = (data.fines || []).length ? data.fines.reduce((a, f) => a + Math.max(f.owing, 0), 0) : null
@@ -409,6 +413,7 @@ function MyPage({ token, me, club, availability, onSwitch }) {
   const sections = useOpenSections()
   const [showDetails, setShowDetails] = useState(false)
   const [notice, setNotice] = useState(null) // {text, tone} after a save
+  const [ranks, setRanks] = useState(null) // club ranks for the season shown; read once, when Stats opens
   useEffect(() => {
     let alive = true
     const load = () => api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
@@ -432,11 +437,22 @@ function MyPage({ token, me, club, availability, onSwitch }) {
     return () => { alive = false }
   }, [token, wantsLadder])
 
+  // Rankings read the club's leaderboards, so they are fetched only once Stats is open.
+  const wantsRanks = modules.includes('season') && !!data?.season && sections.isOpen('stats')
+  useEffect(() => {
+    if (!wantsRanks || ranks) return undefined
+    let alive = true
+    api.availPublicRanks(token)
+      .then((d) => { if (alive) setRanks(d.ranks || { ranks: {} }) })
+      .catch(() => { if (alive) setRanks({ ranks: {} }) })
+    return () => { alive = false }
+  }, [token, wantsRanks, ranks])
+
   const render = (key) => {
     switch (key) {
       case 'votes': return <VotesModule key={key} data={data} />
       case 'ladder': return <LadderModule key={key} state={ladder} />
-      case 'season': return <SeasonDashboard key={key} data={data} />
+      case 'season': return <SeasonDashboard key={key} data={data} ranks={ranks} />
       case 'fantasy': return <FantasyCard key={key} data={data} />
       case 'fees': return <FeesModule key={key} data={data} />
       case 'fines': return <FinesModule key={key} data={data} />
@@ -449,12 +465,12 @@ function MyPage({ token, me, club, availability, onSwitch }) {
   const squads = data ? (data.squads || []) : (me.squads || [])
   const shown = GROUPS
     .map((g) => ({ ...g, mods: modules.filter((m) => g.keys.includes(m)) }))
-    .filter((g) => g.id === 'selection' || g.mods.length > 0)
+    .filter((g) => g.id === 'availability' || g.mods.length > 0)
   const allOpen = shown.every((g) => sections.isOpen(g.id))
 
   return (
     <div data-my-page>
-      <PlayerHero club={club} player={data?.player || me.player} squads={squads} onSwitch={onSwitch}
+      <PlayerHero club={club} player={data?.player || me.player} squads={squads} selected={data?.selected || []} onSwitch={onSwitch}
         onUpdateDetails={data?.can_update_details ? () => { setNotice(null); setShowDetails(true) } : null} />
       {notice && (
         <div role="status" data-details-notice className="rounded-lg px-3.5 py-2.5 mb-3 text-sm flex items-start gap-3"
@@ -485,7 +501,7 @@ function MyPage({ token, me, club, availability, onSwitch }) {
             <Group key={g.id} id={g.id} hideTitle={g.hideTitle}
               title={g.id === 'fantasy' && data?.fantasy?.name ? data.fantasy.name : g.title}
               summary={text} tone={tone} open={sections.isOpen(g.id)} onToggle={sections.toggle}>
-              {g.id === 'selection' && availability({ selected: data?.selected || [] })}
+              {g.id === 'availability' && availability({ selected: data?.selected || [] })}
               {g.id === 'selection' && data && g.mods.some((m) => GLANCE.includes(m)) && <SelectionGlance data={data} modules={modules} />}
               {g.mods.filter((m) => !GLANCE.includes(m)).map(render)}
             </Group>

@@ -2,6 +2,7 @@
 // bowling, fielding) and the form of their last few innings. Same grade scope and
 // rate rules as their public profile; a rate that rests on only some of the
 // innings carries a dagger, as it does there.
+import { ordinal } from './FantasyCard'
 import { Muted, Section, fmtShort } from './ui'
 
 const dash = (v) => (v === null || v === undefined ? '-' : v)
@@ -14,12 +15,13 @@ function Rate({ value, partial }) {
 
 // One figure over its label. No box of its own: the panel is the grouping, so the
 // numbers read as a table rather than a wall of tiles.
-function Fig({ label, children, lead = false }) {
+function Fig({ label, children, lead = false, sub = null }) {
   return (
     <div className="min-w-0">
       <div className={`font-display font-bold leading-none ${lead ? 'text-[24px]' : 'text-[17px]'}`}
         style={lead ? { color: 'var(--pb-accent)' } : undefined}>{children ?? '-'}</div>
       <div className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint mt-1 truncate">{label}</div>
+      {sub && <div className="text-[11px] text-pb-faint mt-0.5 truncate">{sub}</div>}
     </div>
   )
 }
@@ -76,7 +78,9 @@ function BowlingForm({ spells }) {
   )
 }
 
-export default function SeasonDashboard({ data }) {
+const RANK_LABELS = [['runs', 'Runs'], ['wickets', 'Wickets'], ['catches', 'Catches']]
+
+export default function SeasonDashboard({ data, ranks = null }) {
   const s = data.season
   if (!s) {
     return (
@@ -94,6 +98,8 @@ export default function SeasonDashboard({ data }) {
   const bowled = (bowl.overs || 0) > 0 || s.wickets > 0
   const fielded = (field.catches || 0) + (field.run_outs || 0) + (field.stumpings || 0) > 0
   const partial = bat.strike_rate_partial || bowl.economy_partial
+  // Only the boards they are on; a board they have nothing on is not shown as last.
+  const rankRows = ranks && ranks.ranks ? RANK_LABELS.filter(([k]) => ranks.ranks[k]) : []
   return (
     <Section title={s.season ? `Your season: ${s.season}` : 'Your season'}>
       <div className="flex items-baseline gap-2 mb-3">
@@ -103,6 +109,16 @@ export default function SeasonDashboard({ data }) {
           <a href={data.player.profile_path} className="ml-auto text-[12.5px] font-semibold shrink-0" style={{ color: 'var(--pb-accent)' }}>Full stats →</a>
         )}
       </div>
+
+      {rankRows.length > 0 && (
+        <Panel title="Club rank" id="ranks">
+          <div className={FIGS}>
+            {rankRows.map(([k, label]) => (
+              <Fig key={k} label={label} sub={`of ${ranks.ranks[k].of}`} lead>{ordinal(ranks.ranks[k].rank)}</Fig>
+            ))}
+          </div>
+        </Panel>
+      )}
 
       {batted && (
         <Panel title="Batting" id="batting">
@@ -154,7 +170,7 @@ export default function SeasonDashboard({ data }) {
       )}
 
       <div className="text-[11px] text-pb-faintest mt-1 pt-2 border-t pb-hairline">
-        {s.auto_shown ? 'Grades you have played' : 'Grade types your club shows publicly'}. Latest season with games. Form counts every grade.{partial ? ' † only innings with balls recorded.' : ''}
+        {s.auto_shown ? 'Grades you have played' : 'Grade types your club shows publicly'}. Latest season with games. Form counts every grade.{rankRows.length ? ' Rank is among the club\'s players with a figure, under the same grades.' : ''}{partial ? ' † only innings with balls recorded.' : ''}
       </div>
     </Section>
   )
