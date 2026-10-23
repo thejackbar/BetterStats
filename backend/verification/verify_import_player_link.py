@@ -54,7 +54,7 @@ async def main():
     from verify_merge_carry import EXTRA_DDL
 
     if os.environ.get("CONTROL"):
-        async def _nothing(org_id, *, apply=False, min_evidence=1, limit=None):
+        async def _nothing(org_id, *, apply=False, min_evidence=1, limit=None, skip=None):
             return {"initial_only": 0, "found": 0, "merged": 0, "failed": 0, "pairs": [], "held": []}
         ipl.link_players = _nothing
     if os.environ.get("MUTATE") == "bowl":
@@ -265,6 +265,10 @@ async def main():
     got_merge = {p["remove"]: p["keep"] for p in dry["pairs"]}
     check("a dry run lists exactly the pairs the evidence proves",
           got_merge, {str(P[k]): str(P[v]) for k, v in want_merge.items()})
+    skipped = await ipl.link_players(org, apply=False, skip={"milne, sa"})
+    check("a name the club says is not that person is left out of the plan, case aside, and nothing else is",
+          ({p["remove_name"] for p in skipped["pairs"]} == {p["remove_name"] for p in dry["pairs"]} - {"Milne, SA"},
+           skipped["found"] == dry["found"] - 1), (True, True))
     check("a dry run changes nothing",
           [await exists(k) for k in want_merge], [True] * len(want_merge))
     check("the evidence count is the number of agreeing matches (the unpaired match is not one)",

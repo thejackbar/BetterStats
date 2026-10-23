@@ -16,6 +16,8 @@ log, where it can be undone.
         [--min-evidence N]   matches that must agree per player (default 1)
         [--limit N]          merge at most N pairs this run (try 20 first)
         [--report PATH]      also write every pair and every held player as CSV
+        [--skip "A, B|C, D"] import player names (as listed) the club says are not the same
+                             person; they are left out of the plan and not merged
 
 After it, run app.scripts.repair_overwrite_pairs: with one player id per person the
 scorecard pairing can finally see the matches the override missed.
@@ -41,7 +43,7 @@ def _opt(name: str, default=None, cast=str):
     return cast(sys.argv[i + 1])
 
 
-async def run(target: str, apply: bool, min_evidence: int, limit, report) -> int:
+async def run(target: str, apply: bool, min_evidence: int, limit, report, skip=None) -> int:
     async with async_session_maker() as db:
         club = (await db.execute(text(
             "SELECT id, name FROM organisations WHERE id::text = :o OR slug = :o"),
@@ -50,7 +52,7 @@ async def run(target: str, apply: bool, min_evidence: int, limit, report) -> int
         print(f"No club matching {target!r}.")
         return 1
     res = await import_player_link.link_players(
-        club[0], apply=apply, min_evidence=min_evidence, limit=limit)
+        club[0], apply=apply, min_evidence=min_evidence, limit=limit, skip=skip)
 
     print(f"{club[1]}: {res['initial_only']} initial-only import player(s); "
           f"{res['found']} can be joined to a synced player, {len(res['held'])} left.")
@@ -101,7 +103,8 @@ def main() -> int:
         return 2
     return asyncio.run(run(
         args[0], "--apply" in sys.argv, _opt("--min-evidence", 1, int),
-        _opt("--limit", None, int), _opt("--report")))
+        _opt("--limit", None, int), _opt("--report"),
+        [n for n in (_opt("--skip", "") or "").split("|") if n.strip()]))
 
 
 if __name__ == "__main__":

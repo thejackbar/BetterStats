@@ -318,8 +318,11 @@ async def _merge_one(org_id, pair: dict) -> None:
 
 
 async def link_players(org_id, *, apply: bool = False, min_evidence: int = 1,
-                       limit: Optional[int] = None) -> dict:
+                       limit: Optional[int] = None, skip=None) -> dict:
     """Find the pairs for one club and, with ``apply``, merge them.
+
+    ``skip`` is a set of import player names (case-insensitive, e.g. ``{"Ashwood, MS"}``) the club
+    says are not the person the evidence names: they are left out of the plan and never merged.
 
     One session and transaction per pair, so a merge the core refuses leaves the
     others, and itself, untouched. Dry run unless ``apply``.
@@ -331,8 +334,10 @@ async def link_players(org_id, *, apply: bool = False, min_evidence: int = 1,
     org_id = org_id if isinstance(org_id, uuid.UUID) else uuid.UUID(str(org_id))
     async with async_session_maker() as db:
         plan = await find_pairs(db, org_id, min_evidence=min_evidence)
-    pairs = plan["merge"][:limit] if limit else plan["merge"]
-    summary = {"initial_only": plan["initial_only"], "found": len(plan["merge"]),
+    skip_l = {(n or "").strip().lower() for n in (skip or ())}
+    merge = [p for p in plan["merge"] if (p["remove_name"] or "").strip().lower() not in skip_l]
+    pairs = merge[:limit] if limit else merge
+    summary = {"initial_only": plan["initial_only"], "found": len(merge),
                "merged": 0, "failed": 0, "pairs": pairs, "held": plan["held"]}
     if not apply:
         return summary
