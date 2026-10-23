@@ -92,7 +92,7 @@ export function buildBattingDna(intel, dismissals) {
     const top = ds.slice().sort((a, b) => (b.count ?? b.pct ?? 0) - (a.count ?? a.pct ?? 0))[0]
     const share = total ? (top.count ?? top.pct ?? 0) / total : 0
     const tell = _DISM_TELL[_norm(top.type)]
-    if (tell && share >= 0.33) out.push({ tone: 'data', text: `${top.type[0].toUpperCase()}${top.type.slice(1)} is his most common dismissal (${Math.round(share * 100)}%) — ${tell}.` })
+    if (tell && share >= 0.33) out.push({ tone: 'data', text: `${top.type[0].toUpperCase()}${top.type.slice(1)} is their most common dismissal (${Math.round(share * 100)}%) — ${tell}.` })
   }
   const vuln = labelList(i.vuln_bowling, BOWLING_KINDS)
   if (vuln.length) out.push({ tone: 'scout', text: `Vulnerable to ${vuln.join(', ').toLowerCase()}.` })
@@ -101,7 +101,7 @@ export function buildBattingDna(intel, dismissals) {
   const zone = topZonePhrase(i.zones)
   if (zone) out.push({ tone: 'scout', text: `Struggles with ${zone}.` })
   // A pre-split blob only ever carried one combined "shots" list — read it as
-  // risky (the card's framing was "how to get him out") when neither new list
+  // risky (the card's framing was "how to get them out") when neither new list
   // has been entered yet, so already-saved intel isn't silently dropped.
   const riskyShots = labelList(i.risky_shots, BAT_SHOTS)
   const favShots = labelList(i.fav_shots, BAT_SHOTS)
@@ -113,7 +113,7 @@ export function buildBattingDna(intel, dismissals) {
   return { bullets: out, plan: i.plan || null, strengths: i.strengths || null }
 }
 
-/* Build the bowling "DNA". `wicketMethods` = [{type, count}] of how he takes
+/* Build the bowling "DNA". `wicketMethods` = [{type, count}] of how they take
    wickets (opponent deep scan / own bowling-deep), optional. */
 export function buildBowlingDna(intel, wicketMethods) {
   const out = []
@@ -129,7 +129,7 @@ export function buildBowlingDna(intel, wicketMethods) {
     const total = wm.reduce((s, d) => s + (d.count ?? d.pct ?? 0), 0)
     const top = wm.slice().sort((a, b) => (b.count ?? b.pct ?? 0) - (a.count ?? a.pct ?? 0))[0]
     const share = total ? (top.count ?? top.pct ?? 0) / total : 0
-    if (share >= 0.4) out.push({ tone: 'data', text: `Most of his wickets come ${_norm(top.type) === 'bowled' ? 'bowled' : top.type} (${Math.round(share * 100)}%).` })
+    if (share >= 0.4) out.push({ tone: 'data', text: `Most of their wickets come ${_norm(top.type) === 'bowled' ? 'bowled' : top.type} (${Math.round(share * 100)}%).` })
   }
   const zone = topZonePhrase(i.zones)
   if (zone) out.push({ tone: 'scout', text: `Attacks ${zone}.` })

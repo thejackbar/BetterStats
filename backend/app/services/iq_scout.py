@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 # Payload schema versions — bump on shape changes so stale caches rebuild.
 CAREER_VERSION = 4     # bumped: payload now carries grades across the whole window, not just the latest season
-DEEP_VERSION = 3       # bumped: added batting reliability + style (floor/ceiling, boundary profile)
+DEEP_VERSION = 4       # bumped: neutral pronouns in the notes (was: added batting reliability + style)
 # The per-grade, per-season table behind the opposition's named XI ("what has he
 # done in this grade or the one beside it, over the last three seasons").
 GRADE_CAREER_VERSION = 1
@@ -1024,10 +1024,11 @@ def _assemble_deep(
         if outs >= 3 and dismissals:
             top = dismissals[0]
             if top["count"] / outs >= 0.4 and top["type"] in _DEEP_DISMISSAL_NOTE:
-                bits.append(f"He {_DEEP_DISMISSAL_NOTE[top['type']]}.")
+                note = _DEEP_DISMISSAL_NOTE[top['type']]
+                bits.append(f"{note[0].upper()}{note[1:]}.")
         c = conversion
         if c["start_pct"] is not None and c["start_pct"] >= 40 and (c["fifty_conv_pct"] or 0) < 35 and reached25 >= 4:
-            bits.append("Gets a start more often than not but rarely converts it, so stay patient once he's in.")
+            bits.append("Gets a start more often than not but rarely converts it, so stay patient once they're in.")
         if by_position:
             best_pos = max((p for p in by_position if p["innings"] >= 3 and p["average"] is not None),
                            key=lambda p: p["average"], default=None)
@@ -1039,12 +1040,12 @@ def _assemble_deep(
         if bowling.get("dismissals") and total_w >= 4:
             top_m = bowling["dismissals"][0]
             if top_m["pct"] >= 40:
-                bits.append(f"Most of his wickets are {top_m['type']} ({top_m['pct']}%).")
+                bits.append(f"Most of their wickets are {top_m['type']} ({top_m['pct']}%).")
         if wicket_quality and wicket_quality.get("set_pct", 0) >= 40 and len(runs_at) >= 4:
             bits.append("Strikes against set batters — a genuine wicket-taker, not just a mop-up bowler.")
 
     notes = [
-        f"Scanned {scanned} scorecards across {len(located)} of their team-seasons; he appeared in {played} of those games.",
+        f"Scanned {scanned} scorecards across {len(located)} of their team-seasons; the player appeared in {played} of those games.",
         "Career numbers above come from CA's season totals; these per-innings reads come only from the scorecards we scanned, so they can undercount a long career.",
     ]
 

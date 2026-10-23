@@ -135,6 +135,32 @@ function CheatSheetPicker({ onPick }) {
   )
 }
 
+/* One row per player. A batter who is also in the bowling list (an all-rounder)
+   used to appear twice, once for runs and once for wickets; the second record
+   now rides in the note. Up to two batters and two bowlers are taken, then merged
+   by player id (name when an id is missing), batters first. */
+export function ourEdgeRows(bat, bowl) {
+  const rows = []
+  const byKey = new Map()
+  const keyOf = (p, i, pre) => p.player_id || (p.name ? `n:${String(p.name).toLowerCase()}` : `${pre}${i}`)
+  bat.slice(0, 2).forEach((p, i) => {
+    const key = keyOf(p, i, 'b')
+    const row = { key, name: surname(p.name), line: runsPhrase(p.runs ?? 0, p.average), note: 'Scores heavily against them' }
+    byKey.set(key, row); rows.push(row)
+  })
+  bowl.slice(0, 2).forEach((p, i) => {
+    const key = keyOf(p, i, 'w')
+    const hit = byKey.get(key)
+    if (hit) {
+      hit.note = `Scores heavily against them, and has their number with the ball (${wktsPhrase(p.wickets ?? 0, p.average)})`
+      return
+    }
+    const row = { key, name: surname(p.name), line: wktsPhrase(p.wickets ?? 0, p.average), note: 'Has their number, so give them the ball' }
+    byKey.set(key, row); rows.push(row)
+  })
+  return rows
+}
+
 export default function CheatSheet() {
   const navigate = useNavigate()
   const [params, setSearchParams] = useSearchParams()
@@ -182,6 +208,7 @@ export default function CheatSheet() {
   const ourBat = report?.our_performers?.batting || []
   const ourBowl = report?.our_performers?.bowling || []
   const dominance = report?.matchups?.bowler_dominance || []
+  const edgeRows = ourEdgeRows(ourBat, ourBowl)
 
   // "Save bowler X for batter Y" — strongest stored match-up for a danger batter.
   // Full-name match first; a bare-surname fallback only when it's unambiguous on
@@ -199,7 +226,7 @@ export default function CheatSheet() {
     }
     if (!rows.length) return null
     const best = [...rows].sort((a, b) => b.dismissals - a.dismissals)[0]
-    return `${surname(best.bowler)} has him ${best.dismissals}× — save him for this match-up`
+    return `${surname(best.bowler)} has dismissed ${surname(name)} ${best.dismissals}×, so save ${surname(best.bowler)} for this match-up`
   }
 
   const wins = h?.wins ?? 0
@@ -373,17 +400,8 @@ export default function CheatSheet() {
             <div className="iq-cs-divider" />
 
             <Column title={xi?.status === 'draft' ? 'Our edge (draft XI)' : xi?.status === 'confirmed' ? 'Our edge (picked XI)' : 'Our edge'} accent="var(--pb-brand)">
-              {(ourBat.length || ourBowl.length)
-                ? <>
-                  {ourBat.slice(0, 2).map((p, i) => (
-                    <PlayerRow key={p.player_id || `b${i}`} name={surname(p.name)}
-                      line={runsPhrase(p.runs ?? 0, p.average)} note="Scores heavily against them" />
-                  ))}
-                  {ourBowl.slice(0, 2).map((p, i) => (
-                    <PlayerRow key={p.player_id || `w${i}`} name={surname(p.name)}
-                      line={wktsPhrase(p.wickets ?? 0, p.average)} note="Has their number — bowl him long" />
-                  ))}
-                </>
+              {edgeRows.length
+                ? edgeRows.map(r => <PlayerRow key={r.key} name={r.name} line={r.line} note={r.note} />)
                 : <Empty className="text-pb-faint text-[11.5px]">
                   {xi?.status === 'none'
                     ? 'No XI picked for this fixture yet. Pick one on BetterSelect to see who in it has the edge.'

@@ -55,9 +55,9 @@ function synthesise({ report, ladder, team }) {
   const db = report?.their_danger_batters?.[0]
   if (db?.name) bits.push(`Watch ${db.name}${db.runs ? ` (${runsPhrase(db.runs, db.average)})` : ''} — their main threat.`)
   const dom = report?.matchups?.bowler_dominance?.[0]
-  if (dom?.bowler && dom?.batter) bits.push(`Save ${dom.bowler} for ${dom.batter} — he's dismissed him ${dom.dismissals}×.`)
+  if (dom?.bowler && dom?.batter) bits.push(`Save ${dom.bowler} for ${dom.batter}: ${dom.dismissals} dismissal${dom.dismissals === 1 ? '' : 's'} so far.`)
   const ob = report?.our_performers?.batting?.[0]
-  if (ob?.name) bits.push(`${ob.name} is our man with the bat against them (${runsPhrase(ob.runs, ob.average)}).`)
+  if (ob?.name) bits.push(`${ob.name} is our best with the bat against them (${runsPhrase(ob.runs, ob.average)}).`)
   if (ladder?.available && ladder.our_row?.rank && ladder.opponent_row?.rank) {
     bits.push(`Ladder: you're ${ord(ladder.our_row.rank)}, they're ${ord(ladder.opponent_row.rank)}.`)
   }

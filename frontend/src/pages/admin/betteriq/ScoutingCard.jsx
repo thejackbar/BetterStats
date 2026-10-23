@@ -105,7 +105,7 @@ function IntelSide({ side, keyId, intel, stats, onSave }) {
     ? { vuln_bowling: [], fav_bowling: [], zones: [], fav_shots: [], risky_shots: [], strengths: '', weaknesses: '', plan: '' }
     : { stock: null, variations: [], zones: [], danger: [], strengths: '', weaknesses: '', plan: '' }
   // A pre-split blob only ever carried one combined "shots" list — seed it into
-  // risky_shots (the card's original framing was "how to get him out") when the
+  // risky_shots (the card's original framing was "how to get them out") when the
   // new split fields are still empty, so opening the editor on already-saved
   // intel doesn't silently blank out what was there before.
   const seed = () => {
@@ -124,7 +124,7 @@ function IntelSide({ side, keyId, intel, stats, onSave }) {
   const dna = isBat ? buildBattingDna(intel, stats?.dismissals) : buildBowlingDna(intel, stats?.wicketMethods)
   const present = hasIntel(intel)
   const title = isBat ? 'Batting scouting' : 'Bowling scouting'
-  const eyebrow = isBat ? 'how to get him out · scout-entered' : 'how to play him · scout-entered'
+  const eyebrow = isBat ? 'how to get them out · scout-entered' : 'how to play them · scout-entered'
 
   const save = async () => {
     setSaving(true)
@@ -161,7 +161,7 @@ function IntelSide({ side, keyId, intel, stats, onSave }) {
                 <Field label="Risky shots"><Chips options={entries(BAT_SHOTS)} value={f.risky_shots} onChange={v => set('risky_shots', v)} /></Field>
                 <Field label="Favoured shots"><Chips options={entries(BAT_SHOTS)} value={f.fav_shots} onChange={v => set('fav_shots', v)} /></Field>
               </div>
-              <Field label="Where he's vulnerable (length × line)">
+              <Field label="Where they're vulnerable (length × line)">
                 <div className="flex justify-center py-1"><ZoneGrid cells={f.zones} onChange={v => set('zones', v)} color="var(--pb-red)" /></div>
               </Field>
             </>
@@ -170,16 +170,16 @@ function IntelSide({ side, keyId, intel, stats, onSave }) {
               <Field label="Stock delivery"><Chips options={entries(BOWLING_KINDS)} value={f.stock} onChange={v => set('stock', v)} single /></Field>
               <Field label="Variations"><Chips options={entries(BOWL_VARIATIONS)} value={f.variations} onChange={v => set('variations', v)} /></Field>
               <Field label="Most dangerous"><Chips options={entries(BOWL_DANGER)} value={f.danger} onChange={v => set('danger', v)} /></Field>
-              <Field label="Where he attacks (length × line)">
+              <Field label="Where they attack (length × line)">
                 <div className="flex justify-center py-1"><ZoneGrid cells={f.zones} onChange={v => set('zones', v)} color="var(--pb-accent)" /></div>
               </Field>
             </>
           )}
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={isBat ? 'Weaknesses' : 'Weaknesses (how to attack him)'}><TextArea value={f.weaknesses} onChange={v => set('weaknesses', v)} placeholder={isBat ? 'e.g. impatient early, chases width…' : 'e.g. leaks runs when driven, short of a length…'} /></Field>
+            <Field label={isBat ? 'Weaknesses' : 'Weaknesses (how to attack them)'}><TextArea value={f.weaknesses} onChange={v => set('weaknesses', v)} placeholder={isBat ? 'e.g. impatient early, chases width…' : 'e.g. leaks runs when driven, short of a length…'} /></Field>
             <Field label={isBat ? 'Strengths (watch for)' : 'Strengths'}><TextArea value={f.strengths} onChange={v => set('strengths', v)} placeholder={isBat ? 'e.g. strong square of the wicket…' : 'e.g. nagging line, great yorker…'} /></Field>
           </div>
-          <Field label={isBat ? 'Plan — how to get him out' : 'Plan — how to play him'}><TextArea value={f.plan} onChange={v => set('plan', v)} placeholder={isBat ? 'e.g. bowl full and straight, save the short ball' : 'e.g. take him down early before he settles'} rows={1} /></Field>
+          <Field label={isBat ? 'Plan — how to get them out' : 'Plan — how to play them'}><TextArea value={f.plan} onChange={v => set('plan', v)} placeholder={isBat ? 'e.g. bowl full and straight, save the short ball' : 'e.g. take them down early before they settle'} rows={1} /></Field>
           <div className="flex items-center gap-3">
             <Btn variant="primary" sm icon="check" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Btn>
             <Btn variant="ghost" sm onClick={() => { setF(seed()); setOpen(false) }}>Cancel</Btn>

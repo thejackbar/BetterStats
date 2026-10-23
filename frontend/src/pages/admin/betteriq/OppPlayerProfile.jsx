@@ -6,7 +6,7 @@
  *   • Batting  — current form, scoring zones, dismissal patterns, conversion,
  *                reliability (floor/ceiling), style (accumulator vs hitter),
  *                by-position, season history + the manual batting scouting card
- *   • Bowling  — current form, how he takes wickets, wicket quality, season
+ *   • Bowling  — current form, how they take wickets, wicket quality, season
  *                history, recent spells + the manual bowling scouting card
  *   • Fielding — catches (outfield / keeper split), stumpings, run-outs, by season
  *   • Notes    — editable scouting tags (hand / type / role / keeper / danger)
@@ -78,7 +78,7 @@ function TagBadges({ tag }) {
 
 /* ── Radar (built from the dossier squad — opponents have no /radar endpoint) ─
    Batting + bowling radars are built independently so a bowler isn't forced into
-   a batting radar just because he's batted once down the order. The card shows a
+   a batting radar just because they've batted once down the order. The card shows a
    Bat/Bowl toggle when both exist, defaulting to the player's stronger side. */
 function batRadarFor(bat, batPeers) {
   if (!(bat && bat.innings > 0 && (batPeers || []).length >= 2)) return null
@@ -161,7 +161,7 @@ function ZonesEditor({ playerId, name, tag, battingHand, onSave }) {
   const wheelHand = (hand || tag?.batting_hand) === 'LEFT' ? 'LH' : 'RH'
 
   return (
-    <Card eyebrow="where he scores · scout-entered" title="Scoring zones"
+    <Card eyebrow="where they score · scout-entered" title="Scoring zones"
       right={<Btn variant={open ? 'ghost' : 'soft'} sm icon={open ? undefined : 'edit'} onClick={() => setOpen(o => !o)}>{open ? 'Close' : (hasZones ? 'Edit' : 'Add zones')}</Btn>}>
       {hasZones && !open && (
         <div className="flex justify-center">
@@ -419,7 +419,7 @@ function OverviewTab({ entry, deep, career, dossierBatting, dossierBowling, isBo
   return (
     <div className="space-y-5">
       {deep?.status === 'ready' && deep.summary && (
-        <Card accent eyebrow="scouting read · recent seasons" title="How he plays">
+        <Card accent eyebrow="scouting read · recent seasons" title="How they play">
           <div className="text-[14px] leading-relaxed" style={{ color: 'var(--pb-accent)' }}>{deep.summary}</div>
         </Card>
       )}
@@ -475,7 +475,7 @@ function BattingTab({ entry, bat, deep, career, tag, playerId, onSaveTag, formCo
         )}
       </div>
 
-      {/* Manual batting intel — how to get him out, blended with the held mix. */}
+      {/* Manual batting intel — how to get them out, blended with the held mix. */}
       {showCard && (
         <ScoutingCard only="bat" keyId={playerId}
           batting={tag?.batting_intel} stats={scoutStats}
@@ -486,7 +486,7 @@ function BattingTab({ entry, bat, deep, career, tag, playerId, onSaveTag, formCo
       {deepGate(deep) || (db ? (
         <div className="grid gap-5 lg:grid-cols-2 items-start">
           {dismData.length > 0 && (
-            <Card eyebrow="recent seasons" title="How he gets out">
+            <Card eyebrow="recent seasons" title="How they get out">
               <StackedBar data={dismData} />
             </Card>
           )}
@@ -522,7 +522,7 @@ function BattingTab({ entry, bat, deep, career, tag, playerId, onSaveTag, formCo
                 <Stat label="Fails (<10)" value={rel.failure_rate != null ? `${rel.failure_rate}%` : '—'} count={false} tone="loss" />
                 <Stat label="20+ contributions" value={rel.contribution_rate != null ? `${rel.contribution_rate}%` : '—'} count={false} tone="win" />
               </div>
-              <Note>How dependable his score is, from the spread of his innings: floor to ceiling, how often he fails, and how often he makes 20+.</Note>
+              <Note>How dependable their score is, from the spread of their innings: floor to ceiling, how often they fail, and how often they make 20+.</Note>
             </Card>
           )}
           {sty && (
@@ -633,9 +633,9 @@ function BowlingTab({ entry, bowl, deep, career, tag, playerId, onSaveTag, bowlS
             )}
           </Card>
         )}
-        {/* How he takes wickets + wicket quality (deep scan) */}
+        {/* How they take wickets + wicket quality (deep scan) */}
         {dbw && (dbw.dismissals?.length > 0 || q) && (
-          <Card eyebrow="recent seasons" title="How he takes wickets">
+          <Card eyebrow="recent seasons" title="How they take wickets">
             {dbw.dismissals?.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {dbw.dismissals.map((d, i) => (
@@ -660,7 +660,7 @@ function BowlingTab({ entry, bowl, deep, career, tag, playerId, onSaveTag, bowlS
         )}
       </div>
 
-      {/* Manual bowling intel — how to play him, blended with the held mix. */}
+      {/* Manual bowling intel — how to play them, blended with the held mix. */}
       {showCard && (
         <ScoutingCard only="bowl" keyId={playerId}
           bowling={tag?.bowling_intel} stats={scoutStats}

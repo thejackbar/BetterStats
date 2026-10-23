@@ -75,7 +75,7 @@ export function ConversionCard({ deep }) {
     { label: '50+', value: fiftyPlus, color: ACCENT },
   ]
   return (
-    <Card eyebrow="how he scores" title="Starts & conversion" right={<span className="text-pb-faint text-[12px]">{c.innings} innings</span>}>
+    <Card eyebrow="how they score" title="Starts & conversion" right={<span className="text-pb-faint text-[12px]">{c.innings} innings</span>}>
       <SplitBar h={12} segments={segs} />
       <div className="grid grid-cols-3 gap-3 text-center mt-4">
         <div><div className="iq-headline iq-num" style={{ fontSize: 22 }}>{pct(c.start_pct)}</div><div className="iq-eyebrow mt-1" style={{ fontSize: 8.5 }}>reach 25</div></div>
@@ -84,7 +84,7 @@ export function ConversionCard({ deep }) {
       </div>
       {deep.dismissals?.length > 0 && (
         <>
-          <div className="iq-eyebrow mt-5 mb-3">How he gets out</div>
+          <div className="iq-eyebrow mt-5 mb-3">How they get out</div>
           <StackedBar data={deep.dismissals.map(d => ({ type: d.type, count: d.pct, pct: d.pct }))} />
         </>
       )}
@@ -117,7 +117,7 @@ export function SelectionValueCard({ deep }) {
   return (
     <Card eyebrow="impact" title="Selection value & match-ups">
       <div className="flex items-end gap-6 mb-4">
-        <div><div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-brand)' }}>{fmtPct(sv.with?.win_pct)}</div><div className="iq-eyebrow mt-1">With him <span className="text-pb-faintest">· {sv.with?.games ?? 0} {sv.with?.games === 1 ? 'game' : 'games'}</span></div></div>
+        <div><div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-brand)' }}>{fmtPct(sv.with?.win_pct)}</div><div className="iq-eyebrow mt-1">With <span className="text-pb-faintest">· {sv.with?.games ?? 0} {sv.with?.games === 1 ? 'game' : 'games'}</span></div></div>
         <div><div className="iq-headline iq-num" style={{ fontSize: 30, color: 'var(--pb-red)' }}>{fmtPct(sv.without?.win_pct)}</div><div className="iq-eyebrow mt-1">Without <span className="text-pb-faintest">· {sv.without?.games ?? 0} {sv.without?.games === 1 ? 'game' : 'games'}</span></div></div>
         {sv.swing != null && <div className="ml-auto"><Delta value={sv.swing} suffix=" pts" /></div>}
       </div>
@@ -136,7 +136,7 @@ export function SelectionValueCard({ deep }) {
           </div>
         </>
       )}
-      <Note>Win % is the team's record in games he played vs games he missed. Similarity compares career batting/bowling average, strike rate and economy across the squad.</Note>
+      <Note>Win % is the team's record in games they played vs games they missed. Similarity compares career batting/bowling average, strike rate and economy across the squad.</Note>
     </Card>
   )
 }
@@ -257,7 +257,7 @@ export function BowlingDeepDive({ deep, bdeep }) {
               )}
               {deep.bowling_dismissals?.length > 0 && (
                 <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
-                  <div className="iq-eyebrow mb-2">How he takes wickets</div>
+                  <div className="iq-eyebrow mb-2">How they take wickets</div>
                   <div className="flex flex-wrap gap-2">
                     {deep.bowling_dismissals.map((d, i) => (
                       <span key={i} className="text-[12px] px-2.5 py-1 capitalize" style={{ background: 'var(--pb-surface2)', borderRadius: 99 }}>{d.dismissal_type} <span className="iq-num text-pb-faint">{d.count}</span></span>
@@ -270,7 +270,7 @@ export function BowlingDeepDive({ deep, bdeep }) {
         })()}
 
         {bdeep?.quality && (
-          <Card eyebrow="who he dismisses" title="Wicket quality">
+          <Card eyebrow="who they dismiss" title="Wicket quality">
             <SplitBar h={12} segments={[
               { label: 'New (<10)', value: bdeep.quality.new, color: ACCENT },
               { label: 'Started (10–29)', value: bdeep.quality.started, color: 'var(--iq-c-amber)' },
@@ -281,7 +281,7 @@ export function BowlingDeepDive({ deep, bdeep }) {
               <div><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{fmtPct(bdeep.quality.set_pct)}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>removed set</div></div>
               <div><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{a2(bdeep.quality.scalp_value)}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>avg scalp</div></div>
             </div>
-            <Note>"Set" = the batter had 30+ when dismissed; "new" = under 10. Avg scalp is the mean score of the batters he removed{bdeep.quality.ducks ? ` · ${bdeep.quality.ducks} duck${bdeep.quality.ducks === 1 ? '' : 's'} inflicted` : ''}.</Note>
+            <Note>"Set" = the batter had 30+ when dismissed; "new" = under 10. Avg scalp is the mean score of the batters they removed{bdeep.quality.ducks ? ` · ${bdeep.quality.ducks} duck${bdeep.quality.ducks === 1 ? '' : 's'} inflicted` : ''}.</Note>
           </Card>
         )}
       </div>
@@ -289,7 +289,7 @@ export function BowlingDeepDive({ deep, bdeep }) {
       {(bdeep?.fielders?.length > 0 || bdeep?.discipline) && (
         <div className="grid gap-5 lg:grid-cols-2 items-start">
           {bdeep?.fielders?.length > 0 && (
-            <Card eyebrow="caught · stumped · run out" title="Who catches for him">
+            <Card eyebrow="caught · stumped · run out" title="Who catches for them">
               <div className="flex flex-wrap gap-2">
                 {bdeep.fielders.map((f, i) => (
                   <span key={i} className="text-[12px] px-2.5 py-1" style={{ background: 'var(--pb-surface2)', borderRadius: 99 }}>{f.name} <span className="iq-num text-pb-faint">×{f.count}</span></span>
@@ -304,7 +304,7 @@ export function BowlingDeepDive({ deep, bdeep }) {
                   <div key={l} className="text-center"><div className="iq-headline iq-num" style={{ fontSize: 20 }}>{v}</div><div className="iq-eyebrow mt-0.5" style={{ fontSize: 8.5 }}>{l}</div></div>
                 ))}
               </div>
-              <Note>Extras (wides + no-balls) per over across his spells. Only shown where the scorecards record extras.</Note>
+              <Note>Extras (wides + no-balls) per over across their spells. Only shown where the scorecards record extras.</Note>
             </Card>
           )}
         </div>

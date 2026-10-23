@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 # rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
 # notes, …) pulls through for EVERY cache key — whole-club AND each team — without
 # waiting on the TTL or a manual refresh.
-DOSSIER_VERSION = 12
+DOSSIER_VERSION = 13   # 13: player notes use "they", not "he" (history: see archive)
 
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
@@ -1283,10 +1283,10 @@ def _confidence(samples: int) -> str:
 _DISMISSAL_NOTE = {
     "bowled": "Gets bowled more than most — beaten through the gate.",
     "lbw": "Falls lbw regularly — vulnerable playing across the line.",
-    "caught": "Tends to hole out — he finds the fielder with the big shot.",
+    "caught": "Tends to hole out, finding the fielder with the big shot.",
     "caught behind": "Nicks off more often than most — feels for the ball outside off.",
     "c&b": "Has a habit of driving it straight back to the bowler.",
-    "stumped": "Can be drawn out of his crease and stumped.",
+    "stumped": "Can be drawn out of the crease and stumped.",
     "run out": "Has been run out a few times — suspect between the wickets.",
     "hit wicket": "Has been hit-wicket — gets cramped on the back foot.",
 }
@@ -1308,7 +1308,7 @@ def _enrich_batter(b: dict, rank: int) -> None:
         stat += ", though out of touch lately"
     bits = [iq_phrases.batter_note(arch, seed), stat + "."]
 
-    # Dismissal pattern → a NOTE (how he gets out) + the matching tactical PLAN.
+    # Dismissal pattern → a NOTE (how they get out) + the matching tactical PLAN.
     dism = b.get("dismissals") or {}
     dominant = None
     if outs >= 3 and dism:
@@ -1429,7 +1429,7 @@ def _how_they_win_lose(batters, bowlers, danger_bowlers, partnerships, mixed_gra
                 lose.append(f"Fragile at the {_ordinal(weak['wicket'])} wicket (avg {weak['avg_partnership']}) — get in there and the innings can unravel.")
     real_threats = [b for b in bowlers if (b.get("wickets") or 0) >= 4]
     if len(real_threats) <= 1 and danger_bowlers:
-        lose.append(f"Thin attack — {danger_bowlers[0]['name']} is their one real threat; see him off and cash in on the rest.")
+        lose.append(f"Thin attack — {danger_bowlers[0]['name']} is their one real threat; see them off and cash in on the rest.")
     elif len(real_threats) >= 3:
         win.append("Multiple wicket-taking options through the innings.")
     return win, lose
@@ -1461,7 +1461,7 @@ def _game_plan(danger_batters, danger_bowlers, bowlers):
                 and (remove.get("average") is None or vs["average"] >= remove["average"])):
             warning = f"{remove['name']} averages {vs['average']:.2f} against us ({vs['innings']} inns)."
         else:
-            warning = f"{remove['name']} is their danger man."
+            warning = f"{remove['name']} is their danger player."
     return {
         "remove_early": {"name": remove["name"], "why": remove.get("key_note")} if remove else None,
         "see_off": {"name": see_off["name"], "why": see_off.get("key_note")} if see_off else None,

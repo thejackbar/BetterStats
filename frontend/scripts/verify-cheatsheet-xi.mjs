@@ -13,6 +13,8 @@
  * Run against a dev or served build:  node scripts/verify-cheatsheet-xi.mjs [baseUrl]
  */
 import { chromium } from 'playwright'
+import { readdirSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 const BASE = process.argv[2] || 'http://localhost:5199'
 const FID = 'fef8eb7c-e1a1-4ec6-98ff-e928cef46c0f'
@@ -28,13 +30,16 @@ let xiStatus = 'confirmed'
 const reportCalls = []
 const report = () => ({
   fixture: { fixture_id: FID, grade_name: 'One Day Grade 4', team_name: 'OD4s', played_on: '2026-10-24' },
-  selected_xi: xiStatus ? { status: xiStatus, count: xiStatus === 'none' ? 0 : 2 } : null,
+  selected_xi: xiStatus ? { status: xiStatus === 'allrounder' ? 'confirmed' : xiStatus, count: xiStatus === 'none' ? 0 : 3 } : null,
   opponent: { opp_key: 'k', name: 'North Perth 4th XI' },
   coverage: { level: 'limited', note: '' },
   head_to_head: { wins: 112, losses: 84, draws: 2, ties: 0, win_pct: 57, recent_form: ['L', 'L', 'W', 'W', 'L'] },
   last_meeting: { grade: 'Twenty20 Div 1', result: 'loss', our_runs: 121, opp_runs: 175 },
   our_performers: xiStatus === 'none' || xiStatus === 'empty'
     ? { batting: [], bowling: [] }
+    : xiStatus === 'allrounder'
+    ? { batting: [{ player_id: 'p1', name: 'Pat Picked', runs: 378, average: 34.36 }, { player_id: 'p3', name: 'Cam Cooper', runs: 90, average: 30 }],
+        bowling: [{ player_id: 'p1', name: 'Pat Picked', wickets: 19, average: 15.11 }, { player_id: 'p2', name: 'Wes Wicket', wickets: 3, average: 23.67 }] }
     : { batting: [{ player_id: 'p1', name: 'Pat Picked', runs: 33, average: 16.5 }], bowling: [{ player_id: 'p2', name: 'Wes Wicket', wickets: 3, average: 23.67 }] },
   their_danger_batters: [], matchups: { bowler_dominance: [] }, venues: [],
 })
@@ -99,6 +104,17 @@ const emptyEdge = await columnText('Our edge')
 check('picked XI with no record: says that, not "no XI picked"',
   emptyEdge?.includes('Nobody in the picked XI has a record') && !emptyEdge.includes('No XI picked'), true)
 
+// 4b. an all-rounder is one row, not two
+xiStatus = 'allrounder'
+await page.goto(`${BASE}/admin/betteriq/opposition/cheatsheet?fixture=${FID}`)
+await page.waitForSelector('text=Cam Cooper', { timeout: 10000 })
+const edgeText = await columnText('Our edge')
+const picked = (edgeText.match(/Picked/g) || []).length
+check('an all-rounder in both lists appears once in Our edge', picked, 1)
+check('and that row carries both records', edgeText.includes('378 runs') && edgeText.includes('19 wickets'), true)
+check('the other batter and the other bowler are still listed', edgeText.includes('Cooper') && edgeText.includes('Wicket'), true)
+check('no he, him or his in the rendered sheet', /\b(he|him|his|himself)\b/i.test(await page.innerText('.iq-print-area')), false)
+
 // 5. opponent-only sheet (no fixture): old wording and request
 xiStatus = null
 reportCalls.length = 0
@@ -114,6 +130,16 @@ await page.goto(`${BASE}/admin/betteriq/opposition/cheatsheet?fixture=${FID}`)
 await page.waitForSelector('text=Pat Picked', { timeout: 10000 })
 check('no horizontal overflow at 390px', (await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) <= 0, true)
 check('no page errors', errors, [])
+
+// The BetterIQ screens never call a player he, him or his (static text).
+const dir = fileURLToPath(new URL('../src/pages/admin/betteriq/', import.meta.url))
+const hits = []
+for (const f of readdirSync(dir).filter(n => /\.(jsx?|mjs)$/.test(n))) {
+  readFileSync(dir + f, 'utf8').split('\n').forEach((line, i) => {
+    if (/\b(he|him|his|himself|she|her|batsman|batsmen)\b|\b(he|she)'(s|ll|d)\b/i.test(line)) hits.push(`${f}:${i + 1}: ${line.trim().slice(0, 80)}`)
+  })
+}
+check('no gendered pronoun in the BetterIQ screens', hits, [])
 
 await browser.close()
 console.log(`\n${pass.length} passed, ${fail.length} failed`)

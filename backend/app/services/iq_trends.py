@@ -1297,7 +1297,7 @@ async def bowler_deep_dive(
                 "bowled": "bowls them", "lbw": "traps them lbw",
                 "caught": "finds the edge or catcher", "stumped": "beats them in the air",
                 "caught behind": "nicks them off to the keeper",
-                "caught & bowled": "catches them off his own bowling",
+                "caught & bowled": "catches the batter off their own bowling",
             }.get(topd[0], f"takes {topd[0]} wickets")
             bits.append(f"Mostly {how} ({round(100 * topd[1] / n)}%).")
     if discipline and discipline["extras_per_over"] is not None:
