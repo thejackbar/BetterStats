@@ -3795,10 +3795,12 @@ export const api = {
   // Instant report from data we already hold (head-to-head, our record vs them).
   // `grade` (a grade name) and `seasonIds` (array of season ids) scope the
   // historical sections to match the record card's All-time/Season/Grade toggle.
-  iqOppositionReport: ({ opponent, fixtureId, grade, seasonIds, name } = {}) => {
+  iqOppositionReport: ({ opponent, fixtureId, grade, seasonIds, name, selectedOnly } = {}) => {
     const qs = _iqQs(opponent, fixtureId, null, name)
     const extra = new URLSearchParams()
     if (grade) extra.set('grade', grade)
+    // The printed cheat sheet lists only the XI picked for the fixture.
+    if (selectedOnly && fixtureId) extra.set('selected_only', 'true')
     if (seasonIds && seasonIds.length) extra.set('season_ids', seasonIds.join(','))
     const tail = extra.toString()
     return request(`/iq/opposition/report?${qs}${tail ? `&${tail}` : ''}`)

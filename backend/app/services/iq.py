@@ -811,6 +811,7 @@ async def _head_to_head(
 async def _our_performers_vs(
     session: AsyncSession, org_id: str, opp_key: str,
     *, grade: str | None = None, season_ids: list[str] | None = None,
+    player_ids: list[str] | None = None,
 ) -> dict:
     """Our players' batting + bowling record against this opponent.
 
@@ -826,9 +827,17 @@ async def _our_performers_vs(
     juniors / stale fill-in records) are excluded too: unactionable in a
     selection-intel list. Each row carries the player's current BetterSelect
     ``squad`` so callers (Ask IQ, the UI) can judge team relevance.
+
+    ``player_ids`` (the picked XI, for the cheat sheet) restricts both lists to
+    those players BEFORE the top-10 cut, so a pick who ranks 11th club-wide is
+    not dropped. ``[]`` means "nobody", never "no restriction": pass ``None``
+    for the whole squad.
     """
     params = {"org_id": org_id, "opp_key": opp_key}
     scope = _opp_scope(grade, season_ids, params)
+    if player_ids is not None:
+        params["pids"] = list(player_ids)
+        scope += " AND p.id = ANY(CAST(:pids AS uuid[]))"
     batting = await session.execute(
         text(
             f"""
@@ -1414,6 +1423,70 @@ async def opponent_ladder(session: AsyncSession, org_id: str, *, opponent: str |
     }
 
 
+async def _fixture_header(session: AsyncSession, org_id: str, fixture_id: str | None) -> dict | None:
+    """The fixture's OWN grade, team and date. The report's history sections
+    (head to head, last meeting) span every grade we have met this club in, so a
+    caller printing "which game is this" must not borrow the last meeting's grade."""
+    if not fixture_id:
+        return None
+    try:
+        uuid.UUID(str(fixture_id))
+    except (ValueError, TypeError):
+        return None
+    row = (await session.execute(
+        text(
+            "SELECT f.played_on, gr.name AS grade_name, t.name AS team_name"
+            " FROM fixtures f LEFT JOIN grades gr ON gr.id = f.grade_id"
+            " LEFT JOIN teams t ON t.id = f.team_id"
+            " WHERE f.id = CAST(:fid AS UUID) AND f.organisation_id = CAST(:org_id AS UUID)"
+        ),
+        {"fid": fixture_id, "org_id": org_id},
+    )).mappings().first()
+    if not row:
+        return None
+    return {
+        "fixture_id": fixture_id,
+        "grade_name": row["grade_name"],
+        "team_name": row["team_name"],
+        "played_on": row["played_on"].isoformat() if row["played_on"] else None,
+    }
+
+
+async def _selected_xi_ids(session: AsyncSession, org_id: str, fixture_id: str) -> tuple[str, list[str]]:
+    """Who is picked for a fixture: ``confirmed`` (fixture_lineups), else
+    ``draft`` (the board's autosaved working side), else ``none``. Our own
+    players only, by organisation."""
+    rows = (await session.execute(
+        text(
+            "SELECT player_id::text AS id FROM fixture_lineups"
+            " WHERE fixture_id = CAST(:fid AS UUID) AND organisation_id = CAST(:org_id AS UUID)"
+        ),
+        {"fid": fixture_id, "org_id": org_id},
+    )).mappings().all()
+    if rows:
+        return "confirmed", [r["id"] for r in rows]
+    draft = (await session.execute(
+        text(
+            "SELECT draft FROM selection_drafts"
+            " WHERE fixture_id = CAST(:fid AS UUID) AND organisation_id = CAST(:org_id AS UUID)"
+        ),
+        {"fid": fixture_id, "org_id": org_id},
+    )).scalar()
+    slots = [str(x) for x in ((draft or {}).get("slots") or []) if x]
+    if slots:
+        ok = (await session.execute(
+            text(
+                "SELECT id::text AS id FROM players"
+                " WHERE id = ANY(CAST(:ids AS uuid[])) AND organisation_id = CAST(:org_id AS UUID)"
+            ),
+            {"ids": slots, "org_id": org_id},
+        )).mappings().all()
+        ids = [r["id"] for r in ok]
+        if ids:
+            return "draft", ids
+    return "none", []
+
+
 async def opposition_report(
     session: AsyncSession,
     org_id: str,
@@ -1423,8 +1496,15 @@ async def opposition_report(
     grade: str | None = None,
     season_ids: list[str] | None = None,
     display_name: str | None = None,
+    selected_only: bool = False,
 ) -> dict:
     """Assemble the full opposition scouting report for one opponent.
+
+    ``selected_only`` (with a ``fixture_id``) narrows ``our_performers`` to the XI
+    picked for that fixture, for the printed cheat sheet; ``selected_xi`` says
+    whether that XI is ``confirmed``, a ``draft`` or ``none`` (then
+    ``our_performers`` is empty rather than the whole squad). Every other caller
+    keeps the whole-squad list, which is selection intel for PICKING the side.
 
     Coverage tiers (see module docstring) are reflected in the ``coverage`` block
     so the UI can be honest about what's known. ``grade`` (a grade name) and
@@ -1438,9 +1518,12 @@ async def opposition_report(
     if display_name and (not name or name == opp_key):
         name = display_name
 
+    fixture_header = await _fixture_header(session, org_id, fixture_id)
+
     if not opp_key:
         # A named-but-unplayed opponent (e.g. from a fixture) — honest empty state.
         return {
+            "fixture": fixture_header,
             "opponent": {"opp_key": None, "name": name},
             "coverage": {
                 "level": "none",
@@ -1460,7 +1543,16 @@ async def opposition_report(
         }
 
     head_to_head = await _head_to_head(session, org_id, opp_key, grade=grade, season_ids=season_ids)
-    our_performers = await _our_performers_vs(session, org_id, opp_key, grade=grade, season_ids=season_ids)
+    selected_xi = None
+    xi_ids: list[str] | None = None
+    if selected_only and fixture_header:
+        status, ids = await _selected_xi_ids(session, org_id, fixture_id)
+        selected_xi = {"status": status, "count": len(ids)}
+        # No XI picked: an empty list, not the whole squad (the caller says so).
+        xi_ids = ids
+    our_performers = await _our_performers_vs(
+        session, org_id, opp_key, grade=grade, season_ids=season_ids, player_ids=xi_ids,
+    )
     danger = await _their_danger_batters(session, org_id, opp_key, grade=grade, season_ids=season_ids)
     venues = await _venues_vs(session, org_id, opp_key, grade=grade, season_ids=season_ids)
     bowler_dominance = await _our_bowler_dominance(session, org_id, opp_key, grade=grade, season_ids=season_ids)
@@ -1496,6 +1588,8 @@ async def opposition_report(
         )
 
     return {
+        "fixture": fixture_header,
+        "selected_xi": selected_xi,
         "opponent": {"opp_key": opp_key, "name": name},
         "coverage": {"level": coverage_level, "note": note},
         "head_to_head": head_to_head,

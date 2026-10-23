@@ -124,6 +124,7 @@ async def opposition_report(
     grade: str | None = Query(None, description="scope the record to one grade (by name) — the card's Grade toggle"),
     season_ids: str | None = Query(None, description="comma-separated season ids to scope the record — the card's Season toggle"),
     name: str | None = Query(None, description="display name for a club outside our history (CA-wide search)"),
+    selected_only: bool = Query(False, description="with fixture_id: our_performers covers only the XI picked for that fixture (the cheat sheet)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
@@ -136,7 +137,7 @@ async def opposition_report(
     seasons = [s for s in (season_ids.split(",") if season_ids else []) if s.strip()]
     return await iq_service.opposition_report(
         db, str(club.id), opponent=opponent, fixture_id=fixture_id,
-        grade=grade, season_ids=seasons or None, display_name=name,
+        grade=grade, season_ids=seasons or None, display_name=name, selected_only=selected_only,
     )
 
 

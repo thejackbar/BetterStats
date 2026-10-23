@@ -155,7 +155,7 @@ export default function CheatSheet() {
 
   useEffect(() => {
     if (!hasSelection) return
-    api.iqOppositionReport({ opponent, fixtureId, grade }).then(setReport).catch(() => setReport({ error: true }))
+    api.iqOppositionReport({ opponent, fixtureId, grade, selectedOnly: true }).then(setReport).catch(() => setReport({ error: true }))
     let tries = 0
     const poll = () => {
       api.iqOppositionDossier({ opponent, fixtureId, team, grade }).then(d => {
@@ -174,6 +174,8 @@ export default function CheatSheet() {
 
   const h = report?.head_to_head
   const lm = report?.last_meeting
+  const fx = report?.fixture
+  const xi = report?.selected_xi
   const gp = ready ? dossier.game_plan : null
   const dangerBat = (ready && dossier.danger_batters) || []
   const dangerBowl = (ready && dossier.danger_bowlers) || []
@@ -252,7 +254,9 @@ export default function CheatSheet() {
             </div>
             <div className="sm:text-right shrink-0">
               {team && <div className="text-pb-dim" style={{ fontSize: 12 }}>{dossier?.selected_team_name || team}</div>}
-              {lm?.grade && <div className="iq-mono text-pb-faint" style={{ fontSize: 11, marginTop: 3 }}>{lm.grade}</div>}
+              {/* This fixture's own grade. The last meeting's grade is a different game
+                  (often another format) and is captioned under "Last meeting". */}
+              {fx?.grade_name && <div className="iq-mono text-pb-faint" style={{ fontSize: 11, marginTop: 3 }}>{fx.grade_name}</div>}
               <div className="iq-display font-bold" style={{ fontSize: 13, marginTop: 6 }}>Better<span className="text-pb-accent">IQ</span></div>
               <div className="text-pb-faint" style={{ fontSize: 10.5, marginTop: 1 }}>{new Date().toLocaleDateString()}</div>
             </div>
@@ -260,7 +264,7 @@ export default function CheatSheet() {
 
           {/* H2H strip */}
           <div className="flex flex-wrap items-end border-b border-pb-hairline" style={{ gap: 26, padding: '14px 0' }}>
-            <StatCell label="Head to head" value={h2hLine} />
+            <StatCell label="Head to head, all grades" value={h2hLine} />
             <StatCell label="Win rate" value={h?.win_pct != null ? h.win_pct : '—'} color="var(--pb-accent)" count decimals={0} suffix="%" />
             {h && (wins + losses + draws) > 0 && (
               <div style={{ minWidth: 150, flex: 1, maxWidth: 230 }}>
@@ -282,7 +286,12 @@ export default function CheatSheet() {
                   : <span className="text-pb-faintest" style={{ fontSize: 12 }}>—</span>}
               </div>
             </div>
-            {lmResult && <StatCell label="Last meeting" value={lmResult} color={lmColor} />}
+            {lmResult && (
+              <div>
+                <StatCell label="Last meeting" value={lmResult} color={lmColor} />
+                {lm?.grade && <div className="iq-mono text-pb-faint" style={{ fontSize: 9.5, marginTop: 3 }}>{lm.grade}</div>}
+              </div>
+            )}
             {lm && (lm.our_runs != null || lm.opp_runs != null) && (
               <div>
                 <Eyebrow>Last scoreline</Eyebrow>
@@ -363,7 +372,7 @@ export default function CheatSheet() {
 
             <div className="iq-cs-divider" />
 
-            <Column title="Our edge" accent="var(--pb-brand)">
+            <Column title={xi?.status === 'draft' ? 'Our edge (draft XI)' : xi?.status === 'confirmed' ? 'Our edge (picked XI)' : 'Our edge'} accent="var(--pb-brand)">
               {(ourBat.length || ourBowl.length)
                 ? <>
                   {ourBat.slice(0, 2).map((p, i) => (
@@ -375,7 +384,11 @@ export default function CheatSheet() {
                       line={wktsPhrase(p.wickets ?? 0, p.average)} note="Has their number — bowl him long" />
                   ))}
                 </>
-                : <Empty className="text-pb-faint text-[11.5px]">No prior record against them.</Empty>}
+                : <Empty className="text-pb-faint text-[11.5px]">
+                  {xi?.status === 'none'
+                    ? 'No XI picked for this fixture yet. Pick one on BetterSelect to see who in it has the edge.'
+                    : xi ? 'Nobody in the picked XI has a record against them.' : 'No prior record against them.'}
+                </Empty>}
             </Column>
           </div>
 
