@@ -50,6 +50,7 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
     ;(squad?.players || []).forEach(p => { init[p.player_id] = { ...p, price: p.price ?? p.purchase_price } })
     return init
   })
+  const poolById = useMemo(() => Object.fromEntries((pool || []).map(pp => [pp.player_id, pp])), [pool])
   const [teamName, setTeamName] = useState(squad?.team_name || '')
   const [filter, setFilter] = useState('batter')
   const [search, setSearch] = useState('')
@@ -58,7 +59,13 @@ function Builder({ token, pool, rules, squad, joinPoints, onSaved, fail, nav, de
   const [poolOpen, setPoolOpen] = useState(true)
   const [busy, setBusy] = useState(false)
 
-  const chosen = Object.values(picked)
+  // The server checks the squad against the pool's role and price today, not the ones saved when the
+  // squad was first picked (a rebuild or an admin can move a player's role since). Read both from the
+  // pool so the counts here are the counts the save is judged on.
+  const chosen = Object.values(picked).map(p => {
+    const pp = poolById[p.player_id]
+    return pp ? { ...p, role: pp.role, price: pp.price, price_change: pp.price_change } : p
+  })
   const chosenByRole = ROLE_ORDER.flatMap(r => chosen.filter(p => p.role === r))
   const spend = chosen.reduce((s, p) => s + Number(p.price || p.current_price || 0), 0)
   const left = budget - spend
