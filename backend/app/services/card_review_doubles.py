@@ -299,6 +299,12 @@ def grade_key(name: Optional[str]) -> Optional[str]:
     return f"u{int(m.group(1))}" if m else None
 
 
+def _grades_clash(name_a: Optional[str], name_b: Optional[str]) -> bool:
+    """Both names read as a grade and they are different grades."""
+    ka, kb = grade_key(name_a), grade_key(name_b)
+    return bool(ka and kb and ka != kb)
+
+
 def match_swaps(candidates: list, meta: dict, manual_by: dict, game_rows: dict, game_grade: dict,
                 holder_of: dict, banned: set) -> list:
     """Pairs of cards that should swap games. Pure: rows in, pairs out.
@@ -432,6 +438,10 @@ async def find_doubles(db, org_id) -> dict:
             csig = frozenset(cur_cards.get(cg["gid"], ()))
             current = {**_synced_side(cg, csig, gbow.get(cg["gid"], 0), org),
                        "shared_with_club": len(manual_by[p["a"]].signature & csig)}
+        # "possible" rests on a date and an opposition alone (one card has no batters), so two clearly
+        # different grades are not offered: a club plays several grades against one opposition on a day
+        if not current and p["strength"] == "possible" and _grades_clash(meta[p["a"]]["grade_name"], g["grade_name"]):
+            continue
         rows.append(_line("relink" if current else "ca", p, m_side(p["a"]),
                           _synced_side(g, synced_by[p["b"]].signature, gbow.get(p["b"], 0), org), current))
     for p in swaps:

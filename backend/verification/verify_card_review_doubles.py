@@ -21,6 +21,7 @@ Mutations (each must make the suite FAIL, which is what proves the checks bite):
   MUTATE=blindlink  the scan only looks at unlinked cards (how the first release missed a card linked to the wrong game)
   MUTATE=unlinkall  the grade step also unlinks a confirmed link, a same-grade link and a renamed grade
   MUTATE=noalias    a renamed grade (proved by the club's own links) is still called wrong when a link has no scores
+  MUTATE=gradeblind the 'possible' tier offers a card and a game of two different grades again
   MUTATE=noswap     the scan does not know a swap (how the first repair left nine cards 'pairing looks wrong')
   MUTATE=anygrade   a card of another grade passes as the grade of the game it would move to
 """
@@ -125,6 +126,8 @@ async def main():
     if mutate == "noalias":
         from app.services import link_audit as _la2
         _la2.ALIAS_MIN = 10**6
+    if mutate == "gradeblind":
+        dbl._grades_clash = lambda a, b: False
     if mutate == "noswap":
         dbl.match_swaps = lambda *a, **k: []
     if mutate == "anygrade":
@@ -1104,11 +1107,22 @@ async def main():
         return {k: (await q("SELECT superseded_by_game_id::text FROM manual_games WHERE id = :m", m=sw[k]))[0][0]
                 for k in ("S1_xc", "S1_yd", "S2_xc", "S2_yd", "S3_xc", "S3_ye", "S4_xc", "S4_yd", "S5_xc", "S5_yd", "S6_xc", "S6_yd")}
     gi = lambda k: str(sw[k])  # noqa: E731
+    # S7: no batters on either side, same day and opposition, but a C grade card and a D grade game: not offered
+    d7 = date(2005, 4, 2)
+    await sw_game("S7_d", d7, "Dunes", SWD)
+    sw["S7_c"] = u()
+    async with async_session_maker() as s:
+        await s.execute(text("""INSERT INTO manual_games (id, organisation_id, season_id, grade_id, played_at, opposition, result,
+            match_format, pair_prefers_import, pairing_locked) VALUES (:m, :o, :s, :gr, :d, 'Dunes', 'WIN', 'One Day', FALSE, FALSE)"""),
+                        {"m": sw["S7_c"], "o": SW, "s": SWS, "gr": SWC, "d": d7})
+        await s.commit()
     start_links = await sw_links()
     a_sw, txt_sw = await audited(SW)
     check("the audit calls the cross-linked cards wrong on grade, not just on batters (all twelve cards sit on a game of another grade: seven with no scores to prove it, four whose scores contradict it, one a person confirmed)",
           (a_sw["links"].get("unproven_grade_differs", 0), a_sw["links"].get("contradicted_grade_differs", 0), a_sw["links"].get("person_ok_grade_differs", 0)),
           (7, 4, 1))
+    check("a card and a game with no batters on either side are not offered as a double when they are different grades",
+          any(r["kind"] == "ca" and r["a"]["id"] == gi("S7_c") for r in (await sw_scan())["rows"]), False)
     check("it says how many of the club's grade names it cannot read: none here", a_sw["unreadable_grades"], 0)
     check("the doubles list shows no row that pairs two grades", a_sw["doubles_grade_differ"], 0)
     rows_sw = (await sw_scan())["rows"]
