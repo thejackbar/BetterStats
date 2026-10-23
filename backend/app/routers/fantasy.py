@@ -1074,6 +1074,7 @@ async def list_rounds(season_id: str, club=Depends(get_current_club), db: AsyncS
     rows = (await db.execute(
         select(FantasyRound).where(FantasyRound.fantasy_season_id == fs.id).order_by(FantasyRound.round_number)
     )).scalars().all()
+    state = await fantasy_engine.club_state(db, fs.organisation_id)
     # A round scored in the last fortnight whose scorecards have changed since: who now
     # scores differently, so the admin can see why a player who played is on 0.
     cutoff = date.today() - timedelta(days=fantasy_engine.RECENT_ROUND_DAYS)
@@ -1091,7 +1092,7 @@ async def list_rounds(season_id: str, club=Depends(get_current_club), db: AsyncS
                 "id": str(r.id), "round_number": r.round_number, "name": r.name,
                 "lock_at": r.lock_at.isoformat() if r.lock_at else None,
                 "lock_manual": bool(r.lock_manual),
-                "default_lock_at": fantasy_engine.default_lock_at(r.start_date, fs.rules).isoformat() if r.start_date else None,
+                "default_lock_at": fantasy_engine.default_lock_at(r.start_date, fs.rules, r.first_start, state).isoformat() if r.start_date else None,
                 "start_date": r.start_date.isoformat() if r.start_date else None,
                 "end_date": r.end_date.isoformat() if r.end_date else None,
                 "status": r.status,
@@ -1124,7 +1125,8 @@ async def set_round_lock(round_id: str, body: RoundLock, club=Depends(get_curren
     if body.lock_at is None:
         if rnd.start_date is None:
             raise HTTPException(status_code=400, detail="This round has no start date to default from.")
-        rnd.lock_at, rnd.lock_manual = fantasy_engine.default_lock_at(rnd.start_date, fs.rules), False
+        state = await fantasy_engine.club_state(db, club.id)
+        rnd.lock_at, rnd.lock_manual = fantasy_engine.default_lock_at(rnd.start_date, fs.rules, rnd.first_start, state), False
     else:
         try:
             at = datetime.fromisoformat(body.lock_at.replace("Z", "+00:00"))

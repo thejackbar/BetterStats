@@ -4502,6 +4502,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _FANTASY_QUEUE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 360: the kick-off of a Fantasy round's first match, which the
+        # default lock time is set from. Same one-copy rule: this list and
+        # alembic's 360 both run services/fantasy_first_start_ddl.STATEMENTS.
+        from app.services.fantasy_first_start_ddl import STATEMENTS as _FANTASY_FIRST_START_DDL
+        for _stmt in _FANTASY_FIRST_START_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 328: a historical summary that stops at a season. Same
         # one-copy rule: this list and alembic's 328 both run
         # services/import_through_ddl.STATEMENTS.
