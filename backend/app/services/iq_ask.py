@@ -11,6 +11,7 @@ rate-limited at the route. Degrades gracefully when the key/package is absent.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -36,6 +37,7 @@ MAX_TOKENS = 1500
 MAX_STEPS = 8          # tool-call round trips before we force a final answer
                        # (fixture questions chain upcoming_fixtures → report →
                        # squad → danger players, so they need more room than 6)
+ANSWER_DEADLINE_SEC = 240  # whole question, kept under nginx's 300s read limit on /api/iq/ask
 MAX_HISTORY_TURNS = 8  # prior Q&A pairs carried in so follow-ups keep their subject
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-", re.I)
 
@@ -1140,6 +1142,27 @@ async def _run_tool(org_id: str, name: str, args: dict) -> dict:
 
 
 async def answer(
+    session: AsyncSession,
+    org_id: str,
+    club_name: str,
+    question: str,
+    history: list | None = None,
+) -> dict:
+    """Run the question under a wall-clock deadline. The proxy in front gives up
+    on a slow reply and the page then reads "System refreshing", which says the
+    site is down when it was one long question; ending it here returns a message
+    the user can act on while the connection is still open."""
+    try:
+        return await asyncio.wait_for(
+            _answer(session, org_id, club_name, question, history=history),
+            timeout=ANSWER_DEADLINE_SEC,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("iq_ask: no answer inside %ss for org %s", ANSWER_DEADLINE_SEC, org_id)
+        return {"available": False, "message": "That question took too long to work out. Try it again, or ask something more specific (one grade, one opponent or one player)."}
+
+
+async def _answer(
     session: AsyncSession,
     org_id: str,
     club_name: str,
