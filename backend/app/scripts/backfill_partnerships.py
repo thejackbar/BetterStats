@@ -39,6 +39,21 @@ stays selected, so asking again from the top would fetch the same refused games 
 A run that stops at its limit therefore prints a `--resume` token (club, date, game):
 pass it back and the walk carries on from the next older game. Nothing is asked twice.
 
+UNDO
+----
+Every game an `--apply` run writes to is logged (`partnership_backfill_log`, migration 359):
+the ids of the partnership and fall-of-wicket rows it inserted, in the SAME transaction as
+the rows, so a run that is killed half way can still be rolled back. A club that wants to try
+it and may want it gone:
+
+    python -m app.scripts.backfill_partnerships <club> --undo [--since 2026-10-23]          (dry run)
+    python -m app.scripts.backfill_partnerships <club> --undo [--since 2026-10-23] --apply
+
+It deletes exactly the rows the club's runs inserted and nothing else: stands the normal sync
+wrote, and wickets a person typed in the editor (those are written again under new ids), are
+never touched. Rows already gone are skipped. A second undo finds nothing. Runs made BEFORE
+this log existed were not recorded and cannot be undone this way.
+
 ALL CLUBS
 ---------
 `all` walks every active club that has a candidate game, in club-id order, newest game
@@ -57,6 +72,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import uuid
 from datetime import date
 from typing import Awaitable, Callable, Optional
@@ -195,8 +211,41 @@ def resume_token(club_id, played, game_id) -> str:
     return f"{club_id}|{played}|{game_id}"
 
 
+_AUDIT_AREA = "scorecard"
+_SCRIPT_USER = "backfill_partnerships script"
+
+
+async def _game_ids(db, table: str, game_id) -> set:
+    """Ids already in `partnerships` or `fall_of_wickets` for one game (table name is ours, never input)."""
+    assert table in ("partnerships", "fall_of_wickets")
+    return {r[0] for r in (await db.execute(text(f"SELECT id FROM {table} WHERE game_id = :g"), {"g": game_id})).all()}
+
+
+async def _log_game(db, run_id, club_id, game_id, p_ids: list, f_ids: list) -> None:
+    """Record what this game's write inserted. In the caller's transaction: rows and log commit together."""
+    await db.execute(text("""
+        INSERT INTO partnership_backfill_log (run_id, organisation_id, game_id, partnership_ids, fow_ids)
+        VALUES (:r, :o, :g, CAST(:p AS INTEGER[]), CAST(:f AS INTEGER[]))"""),
+        {"r": run_id, "o": club_id, "g": game_id, "p": sorted(p_ids), "f": sorted(f_ids)})
+
+
+async def _audit(club_id, action: str, summary: str, detail: dict) -> None:
+    """One `audit_events` row so the club's audit trail shows it. Never raises: the trail must not
+    take down the work it describes."""
+    try:
+        async with async_session_maker() as db:
+            await db.execute(text("""
+                INSERT INTO audit_events (organisation_id, user_name, via, area, action, summary, detail)
+                VALUES (:o, :u, 'script', :area, :a, :s, CAST(:d AS JSONB))"""),
+                {"o": club_id, "u": _SCRIPT_USER, "area": _AUDIT_AREA, "a": action, "s": summary,
+                 "d": json.dumps(detail, default=str)})
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  (could not write the audit entry: {exc})")
+
+
 async def backfill_club(club_id, name, *, d_from, d_to, budget: int, pause: float, apply: bool,
-                        explain: bool, fetch, after, tally: dict) -> dict:
+                        explain: bool, fetch, after, tally: dict, run_id=None) -> dict:
     """Walk one club's candidate games, newest first, asking Cricket Australia for at most `budget`.
 
     Returns {"used": games asked, "last": (date, game id) of the last one tried, "done": True when
@@ -240,8 +289,13 @@ async def backfill_club(club_id, name, *, d_from, d_to, budget: int, pause: floa
                 continue
             async with async_session_maker() as db:
                 try:
+                    before_p = await _game_ids(db, "partnerships", g["id"])
+                    before_f = await _game_ids(db, "fall_of_wickets", g["id"])
                     n = await relink.attach_innings_detail(db, club_id, g["id"], card, resolve)
                     if apply and (n["partnerships"] or n["fow"]):
+                        new_p = (await _game_ids(db, "partnerships", g["id"])) - before_p
+                        new_f = (await _game_ids(db, "fall_of_wickets", g["id"])) - before_f
+                        await _log_game(db, run_id, club_id, g["id"], list(new_p), list(new_f))
                         await db.commit()
                     else:
                         await db.rollback()
@@ -292,12 +346,21 @@ async def run(org: str, *, d_from: Optional[date] = None, d_to: Optional[date] =
         print("DRY RUN: nothing will be written. Add --apply to write the stands.")
 
     remaining = limit
+    run_id = uuid.uuid4()
     for club_id, name in clubs:
         if remaining <= 0:
             break
         after = (cursor[1], cursor[2]) if cursor and cursor[0] == club_id else None
+        stands_before, games_before = tally["stands_added"], tally["games"]
         res = await backfill_club(club_id, name, d_from=d_from, d_to=d_to, budget=remaining, pause=pause,
-                                  apply=apply, explain=explain, fetch=fetch, after=after, tally=tally)
+                                  apply=apply, explain=explain, fetch=fetch, after=after, tally=tally,
+                                  run_id=run_id)
+        if apply and tally["stands_added"] > stands_before:
+            added = tally["stands_added"] - stands_before
+            await _audit(club_id, "backfill_partnerships",
+                         f"Partnership backfill: {added} stand(s) added from {tally['games'] - games_before} game(s). "
+                         "Undo with the script's --undo.",
+                         {"run_id": str(run_id), "stands": added, "games_read": tally["games"] - games_before})
         if res["used"]:
             tally["clubs"] += 1
         remaining -= res["used"]
@@ -316,6 +379,76 @@ async def run(org: str, *, d_from: Optional[date] = None, d_to: Optional[date] =
     return tally
 
 
+async def undo_club(org: str, *, since: Optional[date] = None, apply: bool = False) -> dict:
+    """Take back what this club's backfill runs wrote: exactly the logged ids, nothing else.
+
+    Dry run unless `apply`. Returns the counts so a verification can read them without parsing output."""
+    tally = {"runs": 0, "games": 0, "stands": 0, "fow": 0, "gone": 0}
+    async with async_session_maker() as db:
+        row = (await db.execute(text(
+            "SELECT id, name FROM organisations WHERE id::text = :o OR slug = :o"), {"o": org})).first()
+        if row is None:
+            raise SystemExit(f"no club matches {org!r}")
+        club_id, name = row
+        logs = (await db.execute(text("""
+            SELECT id, run_id, game_id, partnership_ids, fow_ids, created_at
+            FROM partnership_backfill_log
+            WHERE organisation_id = :o AND undone_at IS NULL
+              AND (CAST(:since AS date) IS NULL OR created_at::date >= CAST(:since AS date))
+            ORDER BY id"""), {"o": club_id, "since": since})).mappings().all()
+        await db.rollback()
+
+    print(f"\n{name}: {len(logs)} game(s) written to by the backfill and not yet undone"
+          + (f" (since {since})" if since else ""))
+    if not logs:
+        print("Nothing to undo. (A run made before the undo log existed was not recorded.)")
+        return tally
+    if not apply:
+        print("DRY RUN: nothing will be deleted. Add --apply to remove these rows.")
+
+    runs: dict = {}
+    for lg in logs:
+        async with async_session_maker() as db:
+            p_ids, f_ids = list(lg["partnership_ids"] or []), list(lg["fow_ids"] or [])
+            have_p = (await db.execute(text(
+                "SELECT count(*) FROM partnerships WHERE id = ANY(CAST(:i AS INTEGER[])) AND game_id = :g"),
+                {"i": p_ids, "g": lg["game_id"]})).scalar() or 0
+            have_f = (await db.execute(text(
+                "SELECT count(*) FROM fall_of_wickets WHERE id = ANY(CAST(:i AS INTEGER[])) AND game_id = :g"),
+                {"i": f_ids, "g": lg["game_id"]})).scalar() or 0
+            if apply:
+                await db.execute(text(
+                    "DELETE FROM partnerships WHERE id = ANY(CAST(:i AS INTEGER[])) AND game_id = :g"),
+                    {"i": p_ids, "g": lg["game_id"]})
+                await db.execute(text(
+                    "DELETE FROM fall_of_wickets WHERE id = ANY(CAST(:i AS INTEGER[])) AND game_id = :g"),
+                    {"i": f_ids, "g": lg["game_id"]})
+                await db.execute(text("UPDATE partnership_backfill_log SET undone_at = NOW() WHERE id = :i"),
+                                 {"i": lg["id"]})
+                await db.commit()
+            else:
+                await db.rollback()
+        tally["games"] += 1
+        tally["stands"] += have_p
+        tally["fow"] += have_f
+        tally["gone"] += (len(p_ids) - have_p) + (len(f_ids) - have_f)
+        r = runs.setdefault(str(lg["run_id"]), {"at": lg["created_at"], "games": 0, "stands": 0})
+        r["games"] += 1
+        r["stands"] += have_p
+    tally["runs"] = len(runs)
+    for rid, r in runs.items():
+        print(f"  run {rid[:8]}  {r['at']:%Y-%m-%d %H:%M}  {r['games']} game(s), {r['stands']} stand(s)")
+    verb = "Removed" if apply else "Would remove"
+    print(f"\n{verb} {tally['stands']} stand(s) and {tally['fow']} fall-of-wicket row(s) across {tally['games']} game(s) "
+          f"from {tally['runs']} run(s). {tally['gone']} recorded row(s) were already gone "
+          "(changed since, for example by typing the wickets in the editor) and were left alone.")
+    if apply:
+        await _audit(club_id, "backfill_partnerships_undo",
+                     f"Partnership backfill undone: {tally['stands']} stand(s) removed from {tally['games']} game(s).",
+                     {"stands": tally["stands"], "fow": tally["fow"], "games": tally["games"], "runs": list(runs)})
+    return tally
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("org", help="club id (UUID), club slug, or 'all' for every active club")
@@ -327,8 +460,17 @@ def main() -> None:
     ap.add_argument("--explain", action="store_true",
                     help="for a game that gets no stand, also print the batting and fall of wickets the derivation read")
     ap.add_argument("--resume", default=None, help="the token a previous run printed when it stopped at its limit")
+    ap.add_argument("--undo", action="store_true",
+                    help="take back what this club's earlier --apply runs wrote (dry run unless --apply)")
+    ap.add_argument("--since", dest="since", type=date.fromisoformat, default=None,
+                    help="with --undo: only runs made on or after this date")
     ap.add_argument("--apply", action="store_true", help="write the stands (default is a dry run)")
     a = ap.parse_args()
+    if a.undo:
+        if a.org == "all":
+            raise SystemExit("--undo takes one club, not 'all'.")
+        asyncio.run(undo_club(a.org, since=a.since, apply=a.apply))
+        return
     asyncio.run(run(a.org, d_from=a.d_from, d_to=a.d_to, limit=a.limit, pause=a.pause, apply=a.apply,
                     explain=a.explain, resume=a.resume))
 
