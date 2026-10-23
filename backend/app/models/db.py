@@ -5760,6 +5760,9 @@ class FantasyRound(Base):
     scored_at = Column(TIMESTAMP(timezone=True), nullable=True)
     # An admin set `lock_at` by hand: the nightly round refresh keeps it.
     lock_manual = Column(Boolean, nullable=False, server_default="false")
+    # Club-local "HH:MM" of the earliest match on the first day (migration 360); the
+    # default lock is an hour before it. NULL = the draw gave no time.
+    first_start = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

@@ -355,8 +355,8 @@ async def main() -> int:
     print("2b. Lock time: an early default on the round's first day; one an admin sets survives a refresh")
     mel = ZoneInfo("Australia/Melbourne")
     rs2 = await rounds_of(fs.id)
-    check("a round locks at 09:00 Melbourne time on its first day by default",
-          rs2[2].lock_at == datetime(2026, 10, 17, 9, 0, tzinfo=mel), repr(rs2[2].lock_at))
+    check("a round locks one hour before its first match (13:00 in the draw) by default, Melbourne time for a club with no state",
+          rs2[2].lock_at == datetime(2026, 10, 17, 12, 0, tzinfo=mel), repr(rs2[2].lock_at))
     org_lock = SimpleNamespace(id=ORG)
     async with Session() as s:
         res_l = await fantasy_router.set_round_lock(str(rs2[3].id), fantasy_router.RoundLock(lock_at="2026-10-24T11:30:00+11:00"),
@@ -368,11 +368,11 @@ async def main() -> int:
         await s.commit()
     rs3 = await rounds_of(fs.id)
     check("a hand-set lock time survives the nightly refresh", rs3[3].lock_at == datetime(2026, 10, 24, 0, 30, tzinfo=timezone.utc) and rs3[3].lock_manual is True, repr(rs3[3].lock_at))
-    check("a round nobody set is still on the default after the refresh", rs3[2].lock_at == datetime(2026, 10, 17, 9, 0, tzinfo=mel) and not rs3[2].lock_manual)
+    check("a round nobody set is still on the default after the refresh", rs3[2].lock_at == datetime(2026, 10, 17, 12, 0, tzinfo=mel) and not rs3[2].lock_manual)
     async with Session() as s:
         await fantasy_router.set_round_lock(str(rs3[3].id), fantasy_router.RoundLock(lock_at=None), club=org_lock, db=s, _=None)
     rs4 = await rounds_of(fs.id)
-    check("null hands the round back to the default", rs4[3].lock_at == datetime(2026, 10, 24, 9, 0, tzinfo=mel) and not rs4[3].lock_manual, repr(rs4[3].lock_at))
+    check("null hands the round back to the default", rs4[3].lock_at == datetime(2026, 10, 24, 12, 0, tzinfo=mel) and not rs4[3].lock_manual, repr(rs4[3].lock_at))
     try:
         async with Session() as s:
             await fantasy_router.set_round_lock(str(rs4[0].id), fantasy_router.RoundLock(lock_at="2026-10-03T09:00:00+11:00"), club=org_lock, db=s, _=None)

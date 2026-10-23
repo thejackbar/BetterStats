@@ -25,7 +25,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
@@ -51,30 +51,93 @@ MAX_MATCH_SPAN_DAYS = 10
 PRICE_MIN, PRICE_MAX, PRICE_FLOOR, PRICE_K = (
     fantasy_pricing.PRICE_MIN, fantasy_pricing.PRICE_MAX, fantasy_pricing.PRICE_FLOOR, fantasy_pricing.PRICE_K)
 
-# When a round locks if an admin has not set the time: this local time on the first day
-# the round has games. We hold match DATES only (no kick-off times), so the default has
-# to be early enough to beat any start; an admin sets the exact time per round. A club
-# can change the defaults with the season rules ``lock_time`` ("HH:MM") and
-# ``lock_timezone`` (an IANA name).
+# When a round locks if an admin has not set the time: LOCK_LEAD_MINUTES before the first
+# match of the round, in the club's own timezone. The Play-Cricket draw gives each match a
+# start time, read in generate_rounds and kept on ``fantasy_rounds.first_start`` as the
+# club's local wall-clock "HH:MM". Where the draw gives no time for the first day (or the
+# round comes from stored games, which hold dates only) the fallback is DEFAULT_LOCK_TIME
+# on that day. A club can change the fallback with the season rules ``lock_time`` ("HH:MM")
+# and force a timezone with ``lock_timezone`` (an IANA name); an admin sets an exact time
+# per round (``lock_manual``) and that always wins.
+LOCK_LEAD_MINUTES = 60
 DEFAULT_LOCK_TIME = "09:00"
 DEFAULT_LOCK_TZ = "Australia/Melbourne"
 
+# A club's timezone from its state. Used when the season rules name none. A club with no
+# state on file keeps DEFAULT_LOCK_TZ.
+_STATE_TZ = {
+    "WA": "Australia/Perth", "SA": "Australia/Adelaide", "NT": "Australia/Darwin",
+    "QLD": "Australia/Brisbane", "NSW": "Australia/Sydney", "ACT": "Australia/Sydney",
+    "VIC": "Australia/Melbourne", "TAS": "Australia/Hobart",
+}
+_STATE_NAMES = {
+    "WESTERN AUSTRALIA": "WA", "SOUTH AUSTRALIA": "SA", "NORTHERN TERRITORY": "NT",
+    "QUEENSLAND": "QLD", "NEW SOUTH WALES": "NSW", "AUSTRALIAN CAPITAL TERRITORY": "ACT",
+    "VICTORIA": "VIC", "TASMANIA": "TAS",
+}
 
-def default_lock_at(first_day: date, rules: dict | None = None) -> datetime:
-    """The lock time for a round whose first game day is ``first_day``, as an aware
-    datetime. A bad rule value falls back to the default rather than failing the
-    round refresh."""
+
+def lock_timezone_name(rules: dict | None = None, state: str | None = None) -> str:
+    """The IANA timezone a club's round times are read in: the season rule
+    ``lock_timezone`` if it names a real zone, else the one for the club's state, else
+    DEFAULT_LOCK_TZ."""
     rules = rules or {}
+    forced = rules.get("lock_timezone")
+    if forced:
+        try:
+            ZoneInfo(str(forced))
+            return str(forced)
+        except Exception:
+            pass
+    key = (state or "").strip().upper()
+    key = _STATE_NAMES.get(key, key)
+    return _STATE_TZ.get(key, DEFAULT_LOCK_TZ)
+
+
+def parse_first_start(value: str | None) -> time | None:
+    """``fantasy_rounds.first_start`` ("HH:MM") as a time, or None when it is unset or
+    unreadable."""
     try:
-        tz = ZoneInfo(str(rules.get("lock_timezone") or DEFAULT_LOCK_TZ))
-    except Exception:
-        tz = ZoneInfo(DEFAULT_LOCK_TZ)
+        hh, mm = (int(x) for x in str(value).split(":")[:2])
+        return time(hh, mm)
+    except (TypeError, ValueError):
+        return None
+
+
+def default_lock_at(first_day: date, rules: dict | None = None, first_start: str | None = None,
+                    state: str | None = None) -> datetime:
+    """The lock time for a round whose first game day is ``first_day``, as an aware
+    datetime: LOCK_LEAD_MINUTES before ``first_start`` (the first match's local
+    kick-off, "HH:MM") in the club's timezone, or DEFAULT_LOCK_TIME that day when the
+    draw gave no start. A bad rule value falls back rather than failing the round
+    refresh."""
+    rules = rules or {}
+    tz = ZoneInfo(lock_timezone_name(rules, state))
+    kick = parse_first_start(first_start)
+    if kick is not None:
+        start = datetime.combine(first_day, kick, tzinfo=tz)
+        # Subtract in UTC, so the hour is a real hour across a daylight-saving change.
+        return (start.astimezone(timezone.utc) - timedelta(minutes=LOCK_LEAD_MINUTES)).astimezone(tz)
     try:
         hh, mm = (int(x) for x in str(rules.get("lock_time") or DEFAULT_LOCK_TIME).split(":")[:2])
         at = time(hh, mm)
     except Exception:
         at = time(9, 0)
     return datetime.combine(first_day, at, tzinfo=tz)
+
+
+async def club_state(session: AsyncSession, org_id) -> str | None:
+    """The club's state: its own, else the directory record linked to it."""
+    row = (await session.execute(
+        text("""
+            SELECT COALESCE(NULLIF(TRIM(o.state), ''),
+                            (SELECT NULLIF(TRIM(mc.state), '') FROM marketing_clubs mc
+                             WHERE mc.existing_org_id = o.id AND mc.state IS NOT NULL LIMIT 1))
+            FROM organisations o WHERE o.id = CAST(:org AS UUID)
+        """),
+        {"org": str(org_id)},
+    )).first()
+    return row[0] if row else None
 
 
 # A round an admin has taken back out of settlement. It reads as not scored
@@ -154,7 +217,9 @@ async def _discover_grade_guids(org_guid: str, year: int) -> list[str]:
     return found
 
 
-async def _live_calendar_spans(session: AsyncSession, fs, refresh: bool) -> tuple[list[tuple[date, date]], int]:
+async def _live_calendar_spans(
+    session: AsyncSession, fs, refresh: bool,
+) -> tuple[list[tuple[date, date]], int, dict[date, str]]:
     """Spans (first day, last day) of the club's matches in the fantasy season-year, read straight from the
     Play-Cricket (Grassroots) season calendar: every match in each of the
     season's grades that involves the club, whatever its status.
@@ -167,7 +232,9 @@ async def _live_calendar_spans(session: AsyncSession, fs, refresh: bool) -> tupl
     entry per day (``matchDay`` 1 and 2, a week apart) and the entries are not
     reliably in day order. Reading only the first one split one match across two
     rounds, or put it on day 2 in one grade and day 1 in another. Returns
-    ``(spans, grades_checked)``. A grade whose fetch fails contributes nothing
+    ``(spans, grades_checked, starts)``; ``starts`` maps a match day to the earliest start
+    ("HH:MM", club-local as the draw gives it) of any club match playing that day. A
+    midnight time is a date with no time and is left out. A grade whose fetch fails contributes nothing
     (the client already swallows and logs), so a Play-Cricket blip degrades to
     "fewer dates", never an error. ``refresh`` bypasses the in-process cache so
     an admin pressing the button sees a newly published draw."""
@@ -201,13 +268,14 @@ async def _live_calendar_spans(session: AsyncSession, fs, refresh: bool) -> tupl
         except Exception:
             logger.exception("fantasy: grade discovery failed for season %s", fs.id)
     if not guids:
-        return [], 0
+        return [], 0, {}
 
     org = await session.get(Organisation, fs.organisation_id)
     batches = await asyncio.gather(
         *[gr.get_grade_matches(g, force=refresh) for g in guids], return_exceptions=True,
     )
     spans: list[tuple[date, date]] = []
+    starts: dict[date, str] = {}
     for matches in batches:
         if not isinstance(matches, list):
             continue
@@ -218,13 +286,19 @@ async def _live_calendar_spans(session: AsyncSession, fs, refresh: bool) -> tupl
                 continue
             days: list[date] = []
             for entry in m.get("matchSchedule") or []:
+                stamp = ((entry or {}).get("startDateTime") or "").strip()
                 try:
-                    days.append(date.fromisoformat(((entry or {}).get("startDateTime") or "")[:10]))
+                    day = date.fromisoformat(stamp[:10])
                 except ValueError:
                     continue   # a bye has no schedule at all
+                days.append(day)
+                hhmm = stamp[11:16]
+                if len(hhmm) == 5 and hhmm[2] == ":" and hhmm != "00:00":
+                    if day not in starts or hhmm < starts[day]:
+                        starts[day] = hhmm
             if days:
                 spans.append((min(days), max(days)))
-    return spans, len(guids)
+    return spans, len(guids), starts
 
 
 def _group_rounds(spans: list[tuple[date, date]]) -> list[tuple[date, date]]:
@@ -299,10 +373,10 @@ async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> d
     )
     game_dates = {r[0] for r in rows.all()}
     try:
-        cal_spans, grades_checked = await _live_calendar_spans(session, fs, refresh)
+        cal_spans, grades_checked, cal_starts = await _live_calendar_spans(session, fs, refresh)
     except Exception:
         logger.exception("fantasy: live calendar read failed for season %s", fs.id)
-        cal_spans, grades_checked = [], 0
+        cal_spans, grades_checked, cal_starts = [], 0, {}
 
     cal_days = {d for a, b in cal_spans for d in (a, b)}
     windows = _group_rounds(cal_spans + [(d, d) for d in game_dates])
@@ -325,33 +399,43 @@ async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> d
         return result
 
     existing = await session.execute(
-        text("SELECT round_number, status FROM fantasy_rounds WHERE fantasy_season_id = CAST(:fs AS UUID)"),
+        text("SELECT round_number, status, start_date, first_start FROM fantasy_rounds WHERE fantasy_season_id = CAST(:fs AS UUID)"),
         {"fs": str(fs.id)},
     )
-    scored = {r["round_number"] for r in existing.mappings() if r["status"] == "scored"}
+    existing_rows = existing.mappings().all()
+    scored = {r["round_number"] for r in existing_rows if r["status"] == "scored"}
+    stored_start = {r["round_number"]: (r["start_date"], r["first_start"]) for r in existing_rows}
 
+    state = await club_state(session, fs.organisation_id)
     for n, (first, last) in enumerate(windows, start=1):
         if n in scored:
             continue  # leave settled rounds untouched
-        # games.played_at is a DATE, so the round window is date-keyed. We don't hold
-        # kick-off times, so the lock is a set time on the round's first day
-        # (``default_lock_at``) unless an admin has set it (``lock_manual``).
+        # Stored games hold dates only, so the first match's kick-off comes from the draw
+        # (``cal_starts``). The lock is ``LOCK_LEAD_MINUTES`` before it, or a set time on
+        # the round's first day when the draw gave none (``default_lock_at``), unless an
+        # admin has set it (``lock_manual``). A time already stored for the same first
+        # day is kept when the draw gives none this run, so a Play-Cricket blip does not
+        # push the lock back to the fallback.
+        first_start = cal_starts.get(first)
+        if first_start is None and stored_start.get(n, (None, None))[0] == first:
+            first_start = stored_start[n][1]
         await session.execute(
             text("""
                 INSERT INTO fantasy_rounds
-                    (fantasy_season_id, organisation_id, round_number, name, lock_at, start_date, end_date, status)
-                VALUES (CAST(:fs AS UUID), CAST(:org AS UUID), :n, :name, :lock_at, :start, :end, 'upcoming')
+                    (fantasy_season_id, organisation_id, round_number, name, lock_at, first_start, start_date, end_date, status)
+                VALUES (CAST(:fs AS UUID), CAST(:org AS UUID), :n, :name, :lock_at, :first_start, :start, :end, 'upcoming')
                 ON CONFLICT (fantasy_season_id, round_number) DO UPDATE
                 SET name = EXCLUDED.name,
                     lock_at = CASE WHEN fantasy_rounds.lock_manual THEN fantasy_rounds.lock_at
                                    ELSE EXCLUDED.lock_at END,
+                    first_start = EXCLUDED.first_start,
                     start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
                     updated_at = NOW()
             """),
             {
                 "fs": str(fs.id), "org": str(fs.organisation_id), "n": n,
-                "name": f"Round {n}", "lock_at": default_lock_at(first, fs.rules),
-                "start": first, "end": last,
+                "name": f"Round {n}", "lock_at": default_lock_at(first, fs.rules, first_start, state),
+                "first_start": first_start, "start": first, "end": last,
             },
         )
     # Merging weeks can leave fewer rounds than an earlier run made. Drop the
