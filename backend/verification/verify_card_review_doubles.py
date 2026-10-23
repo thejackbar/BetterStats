@@ -20,6 +20,7 @@ Mutations (each must make the suite FAIL, which is what proves the checks bite):
   MUTATE=dryapplies the repair script's dry run writes (a dry run that is not one)
   MUTATE=blindlink  the scan only looks at unlinked cards (how the first release missed a card linked to the wrong game)
   MUTATE=unlinkall  the grade step also unlinks a confirmed link, a same-grade link and a renamed grade
+  MUTATE=noalias    a renamed grade (proved by the club's own links) is still called wrong when a link has no scores
   MUTATE=noswap     the scan does not know a swap (how the first repair left nine cards 'pairing looks wrong')
   MUTATE=anygrade   a card of another grade passes as the grade of the game it would move to
 """
@@ -121,6 +122,9 @@ async def main():
     if mutate == "unlinkall":
         from app.services import link_audit as _la
         _la.WRONG_GRADE = _la.WRONG_GRADE + ("person_ok_grade_differs", "unproven_same_grade", "unproven_grade_unreadable", "proved_grade_names_differ")
+    if mutate == "noalias":
+        from app.services import link_audit as _la2
+        _la2.ALIAS_MIN = 10**6
     if mutate == "noswap":
         dbl.match_swaps = lambda *a, **k: []
     if mutate == "anygrade":
@@ -1169,11 +1173,12 @@ async def main():
 
     print("\n-- a card on a game of another grade that nothing can move: unlink it, once, undoably --")
     UW, UWS, UWA, UWB, UWD, UW1, UW2 = u(), u(), u(), u(), u(), u(), u()
+    UWU16, UWU17, UWU9 = u(), u(), u()
     uw_pl = {k: u() for k in "abcdefghijklmnopqrstuvwxyz"}
     async with async_session_maker() as s:
         await s.execute(text("INSERT INTO organisations (id, name, slug, is_active) VALUES (:a, 'Coast CC', 'coast', true)"), {"a": UW})
         await s.execute(text("INSERT INTO seasons (id, organisation_id, name, year) VALUES (:i, :o, 'Summer 2002/03', 2002)"), {"i": UWS, "o": UW})
-        for gid, nm in ((UWA, "A Grade"), (UWB, "B Grade: McIntosh Cup"), (UWD, "D Grade Ritchie Cup"), (UW1, "1st XI"), (UW2, "2nd XI")):
+        for gid, nm in ((UWA, "A Grade"), (UWB, "B Grade: McIntosh Cup"), (UWD, "D Grade Ritchie Cup"), (UW1, "1st XI"), (UW2, "2nd XI"), (UWU16, "Under 16"), (UWU17, "Under 17 Division 2"), (UWU9, "Under 9")):
             await s.execute(text("INSERT INTO grades (id, season_id, name) VALUES (:i, :s, :n)"), {"i": gid, "s": UWS, "n": nm})
         for k, pid in uw_pl.items():
             await s.execute(text("INSERT INTO players (id, organisation_id, name, grassroots_id) VALUES (:i, :o, :n, :g)"),
@@ -1235,16 +1240,28 @@ async def main():
     d = date(2003, 1, 18)
     await uw_game("U9_b", d, "Pinjarra Rovers", UWB); await uw_card("U9_c", d, "Rockingham Beach", UWB, "U9_b", sb(7, 9, 44))
 
+    # U10: the club's "Under 16" is Cricket Australia's "Under 17 Division 2" this season (two links proved by batters),
+    # so a third link between the same two names with no scores is NOT wrong. U12: the same card name on an Under 9 game is.
+    for i, dd in enumerate((date(2003, 2, 1), date(2003, 2, 8))):
+        await uw_game(f"U10_g{i}", dd, f"Hills{i}", UWU17, sb(3 + i, 9, 30 + i)); await uw_card(f"U10_c{i}", dd, f"Hills{i}", UWU16, f"U10_g{i}", sb(3 + i, 9, 30 + i))
+    d = date(2003, 2, 15)
+    await uw_game("U11_g", d, "Dunes", UWU17); await uw_card("U11_c", d, "Dunes", UWU16, "U11_g")
+    d = date(2003, 2, 22)
+    await uw_game("U12_g", d, "Reef", UWU9); await uw_card("U12_c", d, "Reef", UWU16, "U12_g")
+
     async def uw_links():
         return {k: (await q("SELECT superseded_by_game_id::text FROM manual_games WHERE id = :m", m=uw[k]))[0][0]
-                for k in ("U1_a", "U2_a", "U3_a", "U4_a", "U5_a_card", "U6_c", "U7_xa", "U7_yd", "U8_a", "U9_c")}
+                for k in ("U1_a", "U2_a", "U3_a", "U4_a", "U5_a_card", "U6_c", "U7_xa", "U7_yd", "U8_a", "U9_c", "U10_c0", "U10_c1", "U11_c", "U12_c")}
     uw_start = await uw_links()
     async with async_session_maker() as s:
         listed = {r["mid"] for r in await act.wrong_grade_links(s, UW)}
     check("the step lists a card whose batters are not on a game of another grade, one with no batters, and a card on a scoreless game",
           (str(uw["U1_a"]) in listed, str(uw["U2_a"]) in listed, str(uw["U3_a"]) in listed), (True, True, True))
+    check("a card on a game of another age group is listed too (Under 16 on an Under 9 game)", str(uw["U12_c"]) in listed, True)
+    check("but Under 16 on 'Under 17 Division 2', the name this club's own proved links show is the same grade this season, is not",
+          (str(uw["U11_c"]) in listed, str(uw["U10_c0"]) in listed), (False, False))
     check("and nothing else: not a confirmed link, a same-grade link, an unreadable grade, a swap's cards or a renamed grade",
-          sorted(listed), sorted({str(uw["U1_a"]), str(uw["U2_a"]), str(uw["U3_a"])}))
+          sorted(listed), sorted({str(uw["U1_a"]), str(uw["U2_a"]), str(uw["U3_a"]), str(uw["U12_c"])}))
     snap_u, logs_u = await q("SELECT id::text, superseded_by_game_id::text FROM manual_games ORDER BY id"), (await q("SELECT count(*) FROM card_review_log"))[0][0]
     await fwl.main(str(UW), False, None, 3, True)
     check("the dry run writes nothing", (await q("SELECT id::text, superseded_by_game_id::text FROM manual_games ORDER BY id"),
@@ -1253,9 +1270,9 @@ async def main():
     async with async_session_maker() as s:
         res_u = await act.bulk_unlink_wrong_grade(s, UW, USER)
     links_u = await uw_links()
-    check("it unlinked exactly those three, in one batch", (res_u["unlinked"], links_u["U1_a"], links_u["U2_a"], links_u["U3_a"]), (3, None, None, None))
-    check("every other card is where it was", {k: links_u[k] for k in links_u if k not in ("U1_a", "U2_a", "U3_a")},
-          {k: uw_start[k] for k in uw_start if k not in ("U1_a", "U2_a", "U3_a")})
+    check("it unlinked exactly those four, in one batch", (res_u["unlinked"], links_u["U1_a"], links_u["U2_a"], links_u["U3_a"], links_u["U12_c"]), (4, None, None, None, None))
+    check("every other card is where it was", {k: links_u[k] for k in links_u if k not in ("U1_a", "U2_a", "U3_a", "U12_c")},
+          {k: uw_start[k] for k in uw_start if k not in ("U1_a", "U2_a", "U3_a", "U12_c")})
     check("the B grade game counts on its own again, and the A grade card counts as its own match",
           ((await q("SELECT count(*) FROM v_effective_batting_innings WHERE game_id = :g", g=uw["U1_b"]))[0][0],
            (await q("SELECT count(*) FROM v_effective_batting_innings WHERE game_id = :g", g=uw["U1_a"]))[0][0]), (7, 6))
@@ -1266,11 +1283,11 @@ async def main():
           (len(again), any(str(uw["U1_a"]) in (r["a"]["id"], r["b"]["id"]) for r in offered_back)), (0, False))
     async with async_session_maker() as s:
         un_u = await act.bulk_undo(s, UW, USER, res_u["batch_id"])
-    check("the batch undoes and every card is back on its game", (un_u["undone"], await uw_links()), (3, uw_start))
+    check("the batch undoes and every card is back on its game", (un_u["undone"], await uw_links()), (4, uw_start))
     async with async_session_maker() as s:
         a_uw = await aud.audit(s, str(UW))
     check("the audit agrees with the repair about which links are wrong on grade",
-          (a_uw["links"].get("unproven_grade_differs", 0) + a_uw["links"].get("contradicted_grade_differs", 0)), 5)  # U1 U2 U3 + the swap pair
+          (a_uw["links"].get("unproven_grade_differs", 0) + a_uw["links"].get("contradicted_grade_differs", 0)), 6)  # U1 U2 U3 U12 + the swap pair
     check("and lists a same-grade link nothing proves whose opposition is a different club (and not the ones whose opposition agrees)", a_uw["links_unproven_odd"], 1)  # U9 only
 
     print("\n-- nothing was deleted by any of it --")

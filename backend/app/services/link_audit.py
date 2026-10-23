@@ -6,6 +6,8 @@ which links are wrong. The import that made these links ignored grade; this is t
 """
 from __future__ import annotations
 
+from collections import Counter
+
 from sqlalchemy import text
 
 from app.services import card_review as cr
@@ -13,7 +15,7 @@ from app.services import card_review_doubles as dbl
 from app.services import match_pairing as mp
 
 LINKED = """
-    SELECT m.id::text AS mid, m.played_at, COALESCE(m.opposition, '') AS opposition, m.review_pair_ok,
+    SELECT m.id::text AS mid, m.season_id::text AS season_id, m.played_at, COALESCE(m.opposition, '') AS opposition, m.review_pair_ok,
            m.superseded_by_game_id::text AS gid, COALESCE(gr.display_name_override, gr.name) AS grade,
            g.played_at AS g_day, COALESCE(gg.display_name_override, gg.name) AS g_grade,
            CASE WHEN g.home_org_id = CAST(:org AS UUID) THEN g.away_team
@@ -25,6 +27,11 @@ LINKED = """
       LEFT JOIN grades gg ON gg.id = g.grade_id
      WHERE m.organisation_id = CAST(:org AS UUID)
 """
+
+# Clubs and Cricket Australia name an age group differently from season to season (Payneham's "Under 16"
+# is Cricket Australia's "Under 17 Division 2" in 2019/20). When a club's OWN links, proved by batters,
+# show two names are one grade in a season, an unproven link between the same two names is not called wrong.
+ALIAS_MIN = 2
 
 # the verdicts that say the card is on a game of another grade and nothing a person decided keeps it there
 WRONG_GRADE = ("contradicted_grade_differs", "unproven_grade_differs")
@@ -63,4 +70,13 @@ async def linked_verdicts(db, org_id) -> list[dict]:
                                      cr.confirms_pair(a, b), bool(r["review_pair_ok"]))
         r["day_gap"] = mp._day_gap(r["played_at"], r["g_day"])
         r["opposition_agrees"] = mp.teams_agree(r["opposition"], r["g_opp"] or "")
+    pair = lambda r: (r["season_id"], dbl.grade_key(r["grade"]), dbl.grade_key(r["g_grade"]))  # noqa: E731
+    seen = Counter(pair(r) for r in rows if r["verdict"] == "proved_grade_names_differ")
+    aliases = {k for k, n in seen.items() if n >= ALIAS_MIN}
+    for r in rows:
+        r["alias"] = pair(r) in aliases
+        if r["alias"] and r["verdict"] == "contradicted_grade_differs":
+            r["verdict"] = "contradicted"
+        elif r["alias"] and r["verdict"] == "unproven_grade_differs":
+            r["verdict"] = "unproven_same_grade"
     return rows
