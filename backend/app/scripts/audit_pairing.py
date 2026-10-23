@@ -14,7 +14,9 @@ Sections (each ends with OK or LOOK; LOOK lists the cards, 8-character ids, to r
   3. What Possible doubles shows now, split by whether the two copies agree on grade.
   4. Free games the scan offered nothing for: an unlinked card with a free game the same day,
      opposition and grade, which a person would pair by eye.
-  5. What a player still sees twice: the same score on the same day in two games.
+  5. What a player still sees twice: the same score on the same day in two games. The innings number is
+     NOT compared: a club card of a Two Day match numbers a player's innings differently from the
+     synced game (Peter Ritchie's 28* is innings 1 on the card and innings 1 or 2 on the game).
 """
 import argparse
 import asyncio
@@ -58,7 +60,7 @@ _TWICE = """
       JOIN players p ON p.id = b.player_id AND p.organisation_id = CAST(:org AS UUID)
       JOIN v_effective_games e ON e.id = b.game_id
      WHERE COALESCE(b.did_not_bat, FALSE) = FALSE AND b.runs IS NOT NULL
-     GROUP BY p.id, p.name, e.played_at::date, b.runs, b.innings_number
+     GROUP BY p.id, p.name, e.played_at::date, b.runs
     HAVING count(DISTINCT b.game_id) > 1
      ORDER BY e.played_at::date DESC, p.name
 """

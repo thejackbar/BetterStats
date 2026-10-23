@@ -423,6 +423,15 @@ async def main():
     check("it lists a free same-grade, same-day game the scan offered nothing for (the Kwinana card whose batters disagree)",
           a_h["missed"] >= 1 and "Kwinana" in txt_h, True)
     check("a card on a game its batters agree with, in the same grade, is simply 'proved'", a_h["links"].get("proved", 0) >= 1, True)
+    async with async_session_maker() as s_:
+        await s_.execute(text("UPDATE batting_innings SET innings_number = 2 WHERE game_id = :g"), {"g": ids["g_strong"]})
+        await s_.commit()
+    a_h2, _ = await audited(ORG)
+    async with async_session_maker() as s_:
+        await s_.execute(text("UPDATE batting_innings SET innings_number = 1 WHERE game_id = :g"), {"g": ids["g_strong"]})
+        await s_.commit()
+    check("the same score is found twice even when the card and the game number the innings differently (Two Day cards and games do)",
+          a_h2["counted_twice"], a_h["counted_twice"])
     check("the audit wrote nothing", (await q("SELECT id::text, superseded_by_game_id::text FROM manual_games ORDER BY id"),
                                       (await q("SELECT count(*) FROM card_review_log"))[0][0]), (snap_a, logs_a))
     for label, got, want in (

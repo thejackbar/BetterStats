@@ -126,7 +126,8 @@ async def _unlink_report(db, name: str, org_id, apply: bool) -> None:
     """Cards on a game of another grade that no move or swap fixes: list them, and with --apply unlink them."""
     rows = await act.wrong_grade_links(db, org_id)
     print(f"\n=== {name}: {len(rows)} card(s) linked to a game of another grade, with no game of their own grade to move to")
-    print("    (run the move and swap fix first: a card it can move is not listed here)")
+    print("    (run the move and swap fix first: a card it can move is not listed here. After applying this, run that fix AGAIN:")
+    print("     the game each card leaves may have its own card, which then needs linking to it.)")
     for r in sorted(rows, key=lambda r: str(r["played_at"])):
         why = "its batters do not appear on that game" if r["verdict"] == "contradicted_grade_differs" else "that game has no batters, or the card has none, to prove it"
         print(f"    [{r['mid'][:8]}] {r['played_at']}  {r['grade']} v {r['opposition']}  is on  {r['g_grade']} v {r['g_opp']}  "
@@ -138,6 +139,8 @@ async def _unlink_report(db, name: str, org_id, apply: bool) -> None:
         return
     res = await act.bulk_unlink_wrong_grade(db, org_id, None)
     print(f"    unlinked {res['unlinked']} card(s), skipped {len(res['skipped'])}.  Undo the whole batch:  --undo {res['batch_id']}")
+    print("    NOW RUN THE FIX AGAIN (fix_wrong_links <club>, then --apply): a game freed by this step may have its own card, which now")
+    print("    matches it and counts beside it until linked. Until then that match is counted twice.")
 
 
 async def _orgs(db, target: str) -> list:
