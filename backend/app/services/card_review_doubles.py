@@ -280,23 +280,9 @@ def _line(kind, pair, side_a, side_b, current=None, partner=None) -> dict:
     }
 
 
-_GRADE = re.compile(r"^\s*([a-z]\d?)\s+grade\b")
-# an age group in any of the spellings clubs and Cricket Australia use: "Under 12", "U12", "U 12",
-# "U/12", "U/14 Division 3", "16 & Under - Central"
-_UNDER = re.compile(r"\b(?:under|u)\s*/?\s*(\d{1,2})\b")
-_UNDER_AFTER = re.compile(r"\b(\d{1,2})\s*(?:&|and)\s*under\b")
-
-
-def grade_key(name: Optional[str]) -> Optional[str]:
-    """"D grade" and "D Grade Ritchie Cup" are the same grade; "Under 12", "U12 Dukes" and "NEJCA - U/12
-    Division 3" are the same age group. None where the name says neither ("1st XI", "Women's 1st
-    Grade"), so an unfamiliar grade name never agrees or disagrees with anything."""
-    low = (name or "").lower()
-    m = _GRADE.match(low)
-    if m:
-        return m.group(1)
-    m = _UNDER.search(low) or _UNDER_AFTER.search(low)
-    return f"u{int(m.group(1))}" if m else None
+# Reading a grade out of a name lives with the pairing rules (`match_pairing.grade_key`), so the
+# scan, the audit and the imports cannot disagree about it.
+grade_key = mp.grade_key
 
 
 def _grades_clash(name_a: Optional[str], name_b: Optional[str]) -> bool:
@@ -369,7 +355,8 @@ async def find_doubles(db, org_id) -> dict:
     manuals = []
     for m in club_cards:
         ours, opp = mp.split_sides(m["home_team"], m["away_team"], m["opposition"], club_tokens)
-        manuals.append(mp.MatchRow(m["mid"], m["played_at"], opp, frozenset(cards.get(m["mid"], ())), ours))
+        manuals.append(mp.MatchRow(m["mid"], m["played_at"], opp, frozenset(cards.get(m["mid"], ())), ours,
+                                   m["grade_name"] or ""))
     open_manuals = [m for m in manuals if not meta[m.id]["linked"]]
     # Linked cards whose game does not match them are offered a better game too.
     linked_to = sorted({m["linked_to"] for m in club_cards if m["linked_to"]})

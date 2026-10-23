@@ -1763,6 +1763,55 @@ async def main() -> None:
               "not 301'd into losing its body",
               "location /api/club-admin/manual-entries/games/import/ {" not in conf)
 
+        print("\n-- GRADE DECIDES WHICH GAME A SHEET MATCH IS, WHEN SEVERAL GRADES PLAY ONE CLUB ON ONE DAY --")
+        # The reported fault (Shoalwater Bay, Payneham): the date-and-opponent rule took the FIRST game that
+        # fitted, so on a day the club played two grades against one opposition the B grade card landed on
+        # the A grade game and the real B grade game stayed unpaired and counted beside it.
+        G_AA, G_BB = uuid.uuid4(), uuid.uuid4()
+        GAME_B1, GAME_A1, GAME_A2 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+        async def seed_grades(session):
+            session.add_all([Grade(id=G_AA, season_id=S_HELD, name="A Grade"),
+                             Grade(id=G_BB, season_id=S_HELD, name="B Grade")])
+            await session.flush()
+            # the B grade game is inserted FIRST, so an index that takes the first fit takes it for the A card
+            session.add(Game(id=GAME_B1, grade_id=G_BB, played_at=date(2011, 3, 5), opp_club_name="Rivals Cricket Club"))
+            await session.flush()
+            session.add(Game(id=GAME_A1, grade_id=G_AA, played_at=date(2011, 3, 5), opp_club_name="Rivals Cricket Club"))
+            # a day on which only the A grade game exists
+            session.add(Game(id=GAME_A2, grade_id=G_AA, played_at=date(2011, 3, 12), opp_club_name="Rivals Cricket Club"))
+            await session.commit()
+
+        def _gr(key, day, opp, grade, name):
+            return [game_row(game_key=key, played_at=day, opposition=opp, season_name="Summer 2010/11",
+                             grade_name=grade, player_name=name, innings_number="1", batting_runs="21", did_not_bat="false")]
+        GRADES = (_gr("A_DAY1", "2011-03-05", "Rivals", "A Grade", "Held, Harry")
+                  + _gr("B_DAY1", "2011-03-05", "Rivals", "B Grade", "Craig Barlow")
+                  + _gr("B_DAY2", "2011-03-12", "Rivals", "B Grade", "Held, Harry"))
+        async with Session() as session:
+            await reset(session); await seed(session); await seed_grades(session)
+            c = await club(session); u = await user(session)
+            prev = await preview(file=FakeUpload(csv_text(GRADES)), current_user=u, club=c, db=session)
+            res = await resolve_manual_games(req=GameResolveRequest(token=prev["token"]), current_user=u, club=c, db=session)
+            dups = res.get("duplicates") or {}
+            check("the review pairs the two matches whose grade has a game that day, and not the third",
+                  dups.get("synced") == 2, str(dups))
+            out = await commit_manual_games(req=GameResolveRequest(token=prev["token"], duplicate_mode="overwrite"),
+                                            current_user=u, club=c, db=session)
+            check("the commit supersedes those two and brings the B grade match with no B grade game in as new",
+                  out.get("games_superseded") == 2 and out.get("games_created") == 1, str(out))
+        async with Session() as session:
+            got = dict((await session.execute(text(
+                "SELECT gr.name || ':' || to_char(mg.played_at, 'MMDD'), mg.superseded_by_game_id::text FROM manual_games mg "
+                "JOIN grades gr ON gr.id = mg.grade_id WHERE mg.organisation_id = :o AND mg.opposition = 'Rivals'"),
+                {"o": str(ORG)})).all())
+            check("the A grade card is paired to the A grade game even though the B grade game is listed first",
+                  got.get("A Grade:0305") == str(GAME_A1), str(got))
+            check("the B grade card is paired to the B grade game, not the A grade one",
+                  got.get("B Grade:0305") == str(GAME_B1), str(got))
+            check("a B grade card is NOT paired to an A grade game on a date and an opposition word alone",
+                  got.get("B Grade:0312") is None, str(got))
+
     await engine.dispose()
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:

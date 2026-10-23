@@ -453,6 +453,25 @@ async def main():
           aud.classify_link("U12 Dukes", "NEJCA - U/14 Division 3", 0, 11, 10, False, False), "contradicted_grade_differs")
     check("an age-group card on a game with no batters of another age group is unproven on grade",
           aud.classify_link("U13 Blue", "Under 9", 0, 12, 0, False, False), "unproven_grade_differs")
+    # the shared pairing rule: grade vetoes a date-and-opposition pairing, batters in common override it
+    from app.services import match_pairing as mpr
+    d0 = date(2011, 3, 5)
+    def mrow(i, grade, sig=(), day=d0): return mpr.MatchRow(i, day, "Rivals", frozenset(sig), "", grade)  # noqa: E704
+    check("the same day and opposition, a B grade card and an A grade game, no scores: not a pair",
+          mpr.score_pair(mrow("c", "B Grade"), mrow("g", "A Grade")), None)
+    check("the same two with the same grade are a pair", mpr.score_pair(mrow("c", "B Grade"), mrow("g", "B Grade: Cup")) is not None, True)
+    check("a grade neither source names is not a veto (senior 'XI' names read as no grade)",
+          mpr.score_pair(mrow("c", "2nd XI"), mrow("g", "B1 Grade")) is not None, True)
+    three = [("p1", 10), ("p2", 20), ("p3", 30)]
+    check("three batters with the same scores pair two records whose grades are named differently (a rename)",
+          mpr.score_pair(mrow("c", "Under 16", three), mrow("g", "Under 17 Division 2", three)) is not None, True)
+    check("with the same batters in common, the same grade ranks ahead of a different one",
+          mpr.score_pair(mrow("c", "B Grade", three), mrow("g", "B Grade", three)) > mpr.score_pair(mrow("c", "B Grade", three), mrow("g", "A Grade", three)), True)
+    paired = mpr.assign([mrow("ca", "A Grade"), mrow("cb", "B Grade")], [mrow("gb", "B Grade"), mrow("ga", "A Grade")])
+    check("a day with an A and a B grade game pairs each card to its own grade whatever order the games are in",
+          {k: v[0] for k, v in paired.items()}, {"ca": "ga", "cb": "gb"})
+    check("a card whose grade has no game that day is left unpaired rather than taken by another grade's game",
+          mpr.assign([mrow("cb", "B Grade")], [mrow("ga", "A Grade")]), {})
     for label, got, want in (
             ("scores in common, same grade", aud.classify_link("A Grade", "A Grade: Cup", 9, 9, 9, True, False), "proved"),
             ("scores in common, grade names differ", aud.classify_link("B Grade", "A Grade", 9, 9, 9, True, False), "proved_grade_names_differ"),

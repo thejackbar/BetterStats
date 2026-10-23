@@ -3329,8 +3329,10 @@ async def _existing_game_index(db: AsyncSession, org_id: uuid.UUID) -> dict:
         SELECT g.id::text AS id, g.played_at, g.source,
                g.opp_club_name, g.home_team, g.away_team,
                pm.superseded_by_game_id::text AS paired_to,
-               pm.pair_prefers_import, pm.pairing_locked
+               pm.pair_prefers_import, pm.pairing_locked,
+               COALESCE(gg.display_name_override, gg.name, '') AS grade_name
         FROM v_effective_games g
+        LEFT JOIN grades gg ON gg.id = g.grade_id
         LEFT JOIN manual_games pm ON g.source = 'manual' AND pm.id = g.id
         WHERE (g.organisation_id = :org
                OR g.home_org_id = :org OR g.away_org_id = :org)
@@ -3341,6 +3343,7 @@ async def _existing_game_index(db: AsyncSession, org_id: uuid.UUID) -> dict:
         index.setdefault(r["played_at"], []).append({
             "id": r["id"], "source": r["source"],
             "tokens": _opp_tokens(r["opp_club_name"], r["home_team"], r["away_team"]),
+            "grade": r["grade_name"] or "",
             "paired_to": r["paired_to"],
             "pair_prefers_import": bool(r["pair_prefers_import"]),
             "pairing_locked": bool(r["pairing_locked"]),
@@ -3348,12 +3351,19 @@ async def _existing_game_index(db: AsyncSession, org_id: uuid.UUID) -> dict:
     return index
 
 
-def _match_existing(index: dict, played_at: str, opp_vals: tuple, consumed: set):
+def _match_existing(index: dict, played_at: str, opp_vals: tuple, consumed: set, grade: str = ""):
     """The existing game this sheet game is the same match as, or None.
 
     Each existing game is matched at most once (a `consumed` set), so two sheet
     games landing on the same date and opposition as one existing record do not
     both claim it — the second reads as new.
+
+    GRADE DECIDES BETWEEN GAMES ON ONE DAY. A club plays several grades against one opposition on one
+    Saturday, and a date and one shared opposition word cannot say which grade's game a sheet row is:
+    this rule used to take the first game that fitted, which put the B grade card on the A grade game
+    and left the real B grade game counted beside it (Shoalwater Bay: 36 cards; Payneham: about 280).
+    A game of a clearly different grade (`match_pairing.grade_clash`) is never taken; of the rest the
+    same grade is taken before one whose grade cannot be read.
     """
     if not played_at:
         return None
@@ -3364,16 +3374,26 @@ def _match_existing(index: dict, played_at: str, opp_vals: tuple, consumed: set)
     toks = _opp_tokens(*opp_vals)
     if not toks:
         return None
+    from app.services import match_pairing as _mp
+    sheet_key = _mp.grade_key(grade)
+    best = None
     for ex in index.get(d, []):
-        if ex["id"] in consumed:
+        if ex["id"] in consumed or not (toks & ex["tokens"]):
             continue
-        if toks & ex["tokens"]:
-            consumed.add(ex["id"])
-            return {"id": ex["id"], "source": ex["source"], "matched_on": "date",
-                    "paired_to": ex.get("paired_to"),
-                    "pair_prefers_import": ex.get("pair_prefers_import", False),
-                    "pairing_locked": ex.get("pairing_locked", False)}
-    return None
+        if _mp.grade_clash(grade, ex.get("grade")):
+            continue
+        # 0: the same readable grade, 1: a grade one side does not name
+        rank = 0 if (sheet_key and sheet_key == _mp.grade_key(ex.get("grade"))) else 1
+        if best is None or rank < best[0]:
+            best = (rank, ex)
+    if best is None:
+        return None
+    ex = best[1]
+    consumed.add(ex["id"])
+    return {"id": ex["id"], "source": ex["source"], "matched_on": "date",
+            "paired_to": ex.get("paired_to"),
+            "pair_prefers_import": ex.get("pair_prefers_import", False),
+            "pairing_locked": ex.get("pairing_locked", False)}
 
 
 def _sheet_signature(group: list, pmatch: dict) -> frozenset:
@@ -3395,9 +3415,16 @@ def _sheet_signature(group: list, pmatch: dict) -> frozenset:
     return frozenset(sig)
 
 
+def _sheet_grade_name(first: dict, gmatch: Optional[dict]) -> str:
+    """The grade a sheet row names, as the club's own grade where the review resolved it."""
+    label = (first.get("grade_name") or "").strip()
+    resolved = ((gmatch or {}).get(label) or {}).get("grade_name")
+    return (resolved or label or "").strip()
+
+
 async def _match_unmatched_by_scores(
     db: AsyncSession, club: Organisation, by_game: dict, pmatch: dict,
-    existing_by_game: dict, consumed: set,
+    existing_by_game: dict, consumed: set, gmatch: Optional[dict] = None,
 ) -> int:
     """The second look: pair the sheet matches the date-and-opponent rule
     left unmatched against the club's synced games on their scorecards.
@@ -3441,7 +3468,8 @@ async def _match_unmatched_by_scores(
         ours, opp = mp.split_sides(first.get("home_team") or "",
                                    first.get("away_team") or "",
                                    first.get("opposition") or "", club_tokens)
-        sheet_rows.append(mp.MatchRow(game_key, played_at, opp, sig, ours))
+        sheet_rows.append(mp.MatchRow(game_key, played_at, opp, sig, ours,
+                                      _sheet_grade_name(first, gmatch)))
 
     dates = [r.played_at for r in sheet_rows if r.played_at is not None]
     from_day = to_day = None
@@ -3639,7 +3667,7 @@ async def _resolve_games(
         dup = _match_existing(
             existing_index, (first.get("played_at") or "").strip(),
             (first.get("opposition"), first.get("home_team"), first.get("away_team")),
-            consumed)
+            consumed, _sheet_grade_name(first, gmatch))
         if not dup:
             continue
         existing_by_game[game_key] = dup
@@ -3648,7 +3676,7 @@ async def _resolve_games(
         else:
             dup_synced += 1
     dup_scores = await _match_unmatched_by_scores(
-        db, club, by_game, pmatch, existing_by_game, consumed)
+        db, club, by_game, pmatch, existing_by_game, consumed, gmatch)
     dup_synced += dup_scores
 
     warnings = []

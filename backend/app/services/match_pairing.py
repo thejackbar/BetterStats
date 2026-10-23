@@ -184,6 +184,32 @@ def teams_agree(a: str, b: str) -> bool:
     return ta <= tb or tb <= ta or len(ta & tb) >= 2
 
 
+# ── grade ────────────────────────────────────────────────────────────────────
+# A grade or age group read out of a name, so two names can be told apart without
+# a table of every club's spelling: "D grade" and "D Grade Ritchie Cup" are one
+# grade; "Under 12", "U12 Dukes" and "NEJCA - U/12 Division 3" are one age group.
+# None where the name says neither ("1st XI", "Women's 1st Grade", "Colts"), so an
+# unfamiliar name never agrees or disagrees with anything.
+_GRADE = re.compile(r"^\s*([a-z]\d?)\s+grade\b")
+_UNDER = re.compile(r"\b(?:under|u)\s*/?\s*(\d{1,2})\b")
+_UNDER_AFTER = re.compile(r"\b(\d{1,2})\s*(?:&|and)\s*under\b")
+
+
+def grade_key(name: Optional[str]) -> Optional[str]:
+    low = (name or "").lower()
+    m = _GRADE.match(low)
+    if m:
+        return m.group(1)
+    m = _UNDER.search(low) or _UNDER_AFTER.search(low)
+    return f"u{int(m.group(1))}" if m else None
+
+
+def grade_clash(a: Optional[str], b: Optional[str]) -> bool:
+    """Both names read as a grade and they are different grades."""
+    ka, kb = grade_key(a), grade_key(b)
+    return bool(ka and kb and ka != kb)
+
+
 @dataclass
 class MatchRow:
     """One match on either side, with what identifies it."""
@@ -197,6 +223,9 @@ class MatchRow:
     # club's name on it, so comparing it would agree with everything — but a
     # real tiebreaker when a Saturday has five of our teams out at once.
     ours: str = ""
+    # The grade or age group, as named by whichever source holds this record. Used only to
+    # refuse a pairing that rests on a date and an opposition alone (see `score_pair`).
+    grade: str = ""
 
     @property
     def has_card(self) -> bool:
@@ -234,17 +263,25 @@ def score_pair(imported: MatchRow, synced: MatchRow) -> Optional[tuple]:
         return None
     same_side = bool(mine and theirs and mine == theirs)
 
-    ok = (
+    # GRADE IS A VETO ON THE ROUTES THAT HAVE NO SCORECARD BEHIND THEM. A club plays several
+    # grades against one opposition on one day, so a date and an opposition word cannot say
+    # which grade's game this is: the scorebook import linked B grade cards to A grade games
+    # this way and counted the real B grade game twice. Batters in common still pair two
+    # records whose grades are named differently (a grade renamed between sources).
+    clash = grade_clash(imported.grade, synced.grade)
+    card_route = (
         # Three batters with the same scores. Not a coincidence.
         shared >= 3
         # One shared score, the same opposition, within a week or so.
         or (shared >= 1 and opp and near)
-        # The same day against the same club. What carries a season Cricket
-        # Australia holds no scorecards for.
-        or (same_day and opp)
         # Two shared scores close together. The two sources name a grade and an
         # opposition differently often enough that this has to stand alone.
         or (shared >= 2 and near)
+    )
+    date_route = (
+        # The same day against the same club. What carries a season Cricket
+        # Australia holds no scorecards for.
+        (same_day and opp)
         # THE SAME CLUB, DAYS APART, WHERE NO CARD COMPARISON IS POSSIBLE.
         # A synced fixture whose scorecard was never pulled has nothing to
         # compare, so the date and the opposition are all there is — and a
@@ -258,9 +295,12 @@ def score_pair(imported: MatchRow, synced: MatchRow) -> Optional[tuple]:
         # against the same club.
         or (opp and near and not (imported.has_card and synced.has_card))
     )
+    ok = card_route or (date_route and not clash)
     if not ok:
         return None
-    return (shared, 1 if opp else 0, 1 if same_side else 0,
+    # the same grade ranks ahead of a closer date: on one Saturday against one club it is
+    # the grade that says which game this is
+    return (shared, 1 if opp else 0, 0 if clash else 1, 1 if same_side else 0,
             1 if same_day else 0, -(gap if gap is not None else 999))
 
 
@@ -359,7 +399,8 @@ _SYNCED_SQL = """
     SELECT g.id::text AS id, g.played_at,
            COALESCE(g.opp_club_name, '') AS opposition,
            COALESCE(g.home_team, '') AS home_team,
-           COALESCE(g.away_team, '') AS away_team
+           COALESCE(g.away_team, '') AS away_team,
+           COALESCE(gr.display_name_override, gr.name, '') AS grade_name
       FROM games g
       LEFT JOIN grades gr ON gr.id = g.grade_id
       LEFT JOIN seasons s ON s.id = gr.season_id
@@ -398,8 +439,10 @@ _IMPORTED_SQL = """
     SELECT mg.id::text AS id, mg.played_at,
            COALESCE(mg.opposition, '') AS opposition,
            COALESCE(mg.home_team, '') AS home_team,
-           COALESCE(mg.away_team, '') AS away_team
+           COALESCE(mg.away_team, '') AS away_team,
+           COALESCE(mgr.display_name_override, mgr.name, '') AS grade_name
       FROM manual_games mg
+      LEFT JOIN grades mgr ON mgr.id = mg.grade_id
      WHERE mg.organisation_id = :org
        AND mg.cricketstatz_import_id IS NOT NULL
        -- A locked pairing is a human's decision; the automatic matcher leaves
@@ -451,7 +494,7 @@ async def load_sides(db: AsyncSession, org_id, season_ids=None
         ours, opp = split_sides(row["home_team"], row["away_team"],
                                 row["opposition"], club_tokens)
         imported.append(MatchRow(row["id"], row["played_at"], opp,
-                                 frozenset(imp_cards.get(row["id"], ())), ours))
+                                 frozenset(imp_cards.get(row["id"], ())), ours, row["grade_name"]))
 
     from_day = to_day = None
     if season_ids:
@@ -505,7 +548,7 @@ async def load_synced(db: AsyncSession, org_id, *, club_tokens=None,
         ours, opp = split_sides(row["home_team"], row["away_team"],
                                 row["opposition"], club_tokens)
         synced.append(MatchRow(row["id"], row["played_at"], opp,
-                               frozenset(syn_cards.get(row["id"], ())), ours))
+                               frozenset(syn_cards.get(row["id"], ())), ours, row["grade_name"]))
     return synced
 
 
