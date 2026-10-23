@@ -220,6 +220,11 @@ async def _refused(coro) -> bool:
 async def main() -> None:
     await base.build_schema()
     await merge_logs_table()
+    from app.services.audit_ddl import STATEMENTS as AUDIT_DDL
+    from app.services.partnership_backfill_ddl import STATEMENTS as PBF_LOG_DDL   # migration 359
+    async with engine.begin() as conn:
+        for stmt in AUDIT_DDL + PBF_LOG_DDL:
+            await conn.execute(text(stmt))
     await seed()
     bf.async_session_maker = Session
 
@@ -342,6 +347,84 @@ async def main() -> None:
           token is None and len(walked) == len(set(walked)), f"{len(walked)} asked, {len(set(walked))} distinct")
     check("it reaches THEIRS' game (offered to the second club)",
           str(GAMES["shared"]) in walked)
+
+
+    # ── Undo: a club tries it and wants it gone ─────────────────────────────────
+    print("Undo")
+    if not hasattr(bf, "undo_club"):
+        check("the backfill can be undone", False, "the script has no --undo")
+    else:
+        async def log_rows(org, undone=False):
+            async with Session() as s:
+                return (await s.execute(text(
+                    "SELECT game_id::text, partnership_ids, fow_ids FROM partnership_backfill_log "
+                    "WHERE organisation_id = :o AND (undone_at IS NOT NULL) = :u"), {"o": org, "u": undone})).all()
+
+        async def count_stands() -> int:
+            async with Session() as s:
+                return (await s.execute(text("SELECT count(*) FROM partnerships"))).scalar()
+
+        logged = await log_rows(OURS)
+        logged_games = {r[0] for r in logged}
+        check("every game an --apply run wrote to is in the log",
+              {str(GAMES[k]) for k in ("fixable", "short", "shared")} <= logged_games, str(sorted(logged_games)))
+        check("a game that already held stands (the normal sync's) is not logged", str(GAMES["has"]) not in logged_games)
+        async with Session() as s:
+            fixable_ids = sorted(r[0] for r in (await s.execute(text(
+                "SELECT id FROM partnerships WHERE game_id = :g"), {"g": GAMES["fixable"]})).all())
+        check("the logged ids are exactly the stands that were written",
+              sorted(i for r in logged if r[0] == str(GAMES["fixable"]) for i in r[1]) == fixable_ids, str(fixable_ids))
+
+        # A stand somebody put there afterwards (typing wickets in the editor rewrites the innings under new ids).
+        async with Session() as s:
+            await s.execute(text("DELETE FROM partnerships WHERE game_id = :g"), {"g": GAMES["short"]})
+            await s.execute(text(
+                "INSERT INTO partnerships (game_id, innings_number, wicket_number, batter1_id, batter2_id, runs, is_club_innings) "
+                "VALUES (:g, 1, 1, :a, :b, 77, true)"), {"g": GAMES["short"], "a": PIDS["A"], "b": PIDS["B"]})
+            await s.commit()
+        their_logged_before = len(await log_rows(THEIRS))
+        total_before = await count_stands()
+
+        t = await bf.undo_club("our-club", apply=False)
+        check("dry run: deletes nothing", await count_stands() == total_before)
+        check("dry run: says how many stands it would remove", t["stands"] > 0, str(t))
+        check("dry run: leaves the log alone", len(await log_rows(OURS)) == len(logged) and not await log_rows(OURS, True))
+
+        t = await bf.undo_club("our-club", apply=True)
+        check("undo removes the stands the runs wrote", await stands("fixable") == [], str(await stands("fixable")))
+        check("...including our innings of the shared fixture", await stand_rows("shared", 1) == [], str(await stand_rows("shared", 1)))
+        check("a stand typed in afterwards is left alone", await stands("short") == [77], str(await stands("short")))
+        check("and the undo says some recorded rows were already gone", t["gone"] > 0, str(t))
+        check("a stand the normal sync wrote is untouched", await stands("has") == [10], str(await stands("has")))
+        check("another club's log is untouched", len(await log_rows(THEIRS)) == their_logged_before and not await log_rows(THEIRS, True))
+        check("the undone games are marked, not deleted", len(await log_rows(OURS, True)) == len(logged) and not await log_rows(OURS))
+        async with Session() as s:
+            audits = dict((await s.execute(text(
+                "SELECT action, count(*) FROM audit_events WHERE area = 'scorecard' GROUP BY 1"))).all())
+        check("the backfill and the undo are both on the audit trail",
+              audits.get("backfill_partnerships", 0) >= 1 and audits.get("backfill_partnerships_undo") == 1, str(audits))
+
+        t2 = await bf.undo_club("our-club", apply=True)
+        check("a second undo finds nothing", t2["games"] == 0 and t2["stands"] == 0, str(t2))
+        check("an unknown club is refused", await _refused(bf.undo_club("no-such-club")))
+
+        # A run that dies half way must leave no stands without a log: rows and log commit together.
+        real_log = bf._log_game
+        async def boom(*a, **k):
+            raise RuntimeError("simulated failure writing the log")
+        bf._log_game = boom
+        logs_before = len(await log_rows(OURS)) + len(await log_rows(OURS, True))
+        t = await bf.run("our-club", pause=0, apply=True, fetch=fetch, limit=100)
+        bf._log_game = real_log
+        check("if the log cannot be written the game's stands are not written either",
+              await stands("fixable") == [] and t["failed"] >= 1, f"{await stands('fixable')} {t}")
+        check("and nothing half-logged is left behind",
+              len(await log_rows(OURS)) + len(await log_rows(OURS, True)) == logs_before)
+
+        # Trying it again after a rollback works, and is undoable again.
+        t = await bf.run("our-club", pause=0, apply=True, fetch=fetch, limit=100)
+        check("after an undo the club can try it again", await stands("fixable") == [10, 10, 204], str(await stands("fixable")))
+        check("and that new run is logged", any(r[0] == str(GAMES["fixable"]) for r in await log_rows(OURS)))
 
     print(f"\n{base.PASS} passed, {base.FAIL} failed")
     for f in base.FAILURES:

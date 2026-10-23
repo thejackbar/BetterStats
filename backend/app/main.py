@@ -4594,6 +4594,12 @@ async def lifespan(app: FastAPI):
         for _stmt in _PLAYER_CONTACT_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 359: the partnership backfill's undo log. Same one-copy rule: this and
+        # alembic's 359 both run services/partnership_backfill_ddl.STATEMENTS.
+        from app.services.partnership_backfill_ddl import STATEMENTS as _PBF_LOG_DDL
+        for _stmt in _PBF_LOG_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 357: fall of wickets a club typed from its own scorebook. Same
         # one-copy rule: this and alembic's 357 both run services/fow_override_ddl.STATEMENTS.
         from app.services.fow_override_ddl import STATEMENTS as _FOW_OVERRIDE_DDL
