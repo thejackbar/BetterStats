@@ -281,18 +281,22 @@ def _line(kind, pair, side_a, side_b, current=None, partner=None) -> dict:
 
 
 _GRADE = re.compile(r"^\s*([a-z]\d?)\s+grade\b")
-_UNDER = re.compile(r"\bunder\s*(\d{1,2})\b")
+# an age group in any of the spellings clubs and Cricket Australia use: "Under 12", "U12", "U 12",
+# "U/12", "U/14 Division 3", "16 & Under - Central"
+_UNDER = re.compile(r"\b(?:under|u)\s*/?\s*(\d{1,2})\b")
+_UNDER_AFTER = re.compile(r"\b(\d{1,2})\s*(?:&|and)\s*under\b")
 
 
 def grade_key(name: Optional[str]) -> Optional[str]:
-    """"D grade" and "D Grade Ritchie Cup" are the same grade; "Under 14" is its own. None where the
-    name says neither, so an unfamiliar grade name never agrees with anything."""
+    """"D grade" and "D Grade Ritchie Cup" are the same grade; "Under 12", "U12 Dukes" and "NEJCA - U/12
+    Division 3" are the same age group. None where the name says neither ("1st XI", "Women's 1st
+    Grade"), so an unfamiliar grade name never agrees or disagrees with anything."""
     low = (name or "").lower()
     m = _GRADE.match(low)
     if m:
         return m.group(1)
-    m = _UNDER.search(low)
-    return f"u{m.group(1)}" if m else None
+    m = _UNDER.search(low) or _UNDER_AFTER.search(low)
+    return f"u{int(m.group(1))}" if m else None
 
 
 def match_swaps(candidates: list, meta: dict, manual_by: dict, game_rows: dict, game_grade: dict,

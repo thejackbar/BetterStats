@@ -434,6 +434,18 @@ async def main():
           a_h2["counted_twice"], a_h["counted_twice"])
     check("the audit wrote nothing", (await q("SELECT id::text, superseded_by_game_id::text FROM manual_games ORDER BY id"),
                                       (await q("SELECT count(*) FROM card_review_log"))[0][0]), (snap_a, logs_a))
+    for nm, want in (("Under 12 East", "u12"), ("U12 Dukes", "u12"), ("U 12 Knights", "u12"), ("U/12 Division 2", "u12"),
+                     ("NEJCA - U/14 Division 3", "u14"), ("16 & Under - Central", "u16"), ("Under 17's Community Cup", "u17"),
+                     ("Mega Courts Under 10 Continued", "u10"), ("U9 Blue", "u9"), ("D Grade Ritchie Cup", "d"),
+                     ("B Grade: McIntosh Cup", "b"), ("C1 Grade", "c1"), ("1st XI", None), ("Women's 1st XI", None),
+                     ("Womens 1st Grade", None), ("Colts", None), ("Grade (unknown)", None), (None, None)):
+        check(f"grade_key({nm!r})", dbl.grade_key(nm), want)
+    check("an age group the club spells one way and Cricket Australia another is the same grade",
+          aud.classify_link("U12 Dukes", "NEJCA - U/12 Division 3", 9, 11, 11, True, False), "proved")
+    check("a U12 card on a U14 game whose batters are not on it is wrong on grade, as on batters",
+          aud.classify_link("U12 Dukes", "NEJCA - U/14 Division 3", 0, 11, 10, False, False), "contradicted_grade_differs")
+    check("an age-group card on a game with no batters of another age group is unproven on grade",
+          aud.classify_link("U13 Blue", "Under 9", 0, 12, 0, False, False), "unproven_grade_differs")
     for label, got, want in (
             ("scores in common, same grade", aud.classify_link("A Grade", "A Grade: Cup", 9, 9, 9, True, False), "proved"),
             ("scores in common, grade names differ", aud.classify_link("B Grade", "A Grade", 9, 9, 9, True, False), "proved_grade_names_differ"),
