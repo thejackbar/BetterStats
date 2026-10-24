@@ -1949,6 +1949,22 @@ def _grid_appearances(rels: dict) -> str:
             )"""
 
 
+# A club card that is the SHOWN copy of a linked pair stands in for the Cricket
+# Australia game it is linked to, and CA's per-grade claim is filed under that
+# game's grade. Filing the card under its own grade name (a renamed or
+# age-group grade) put the same match in two cells and the totals added.
+# Only a twin in one of THIS club's own seasons is followed.
+_GRID_TWIN_JOINS = """
+            LEFT JOIN manual_games pm_tw ON g.source = 'manual' AND pm_tw.id = g.id
+            LEFT JOIN games sg_tw ON sg_tw.id = pm_tw.superseded_by_game_id
+            LEFT JOIN grades tg_tw ON tg_tw.id = sg_tw.grade_id
+            LEFT JOIN seasons ts_tw ON ts_tw.id = tg_tw.season_id
+                                   AND ts_tw.organisation_id = CAST(:org_id AS UUID)"""
+_GRID_GR_JOIN = (_GRID_TWIN_JOINS
+                 + "\n            JOIN grades gr ON gr.id = CASE WHEN ts_tw.id IS NOT NULL"
+                 " THEN tg_tw.id ELSE g.grade_id END")
+
+
 # The canonical grade name: the club's merge, then its own display name.
 _GRID_GRADE_NAME_JOINS = """
             LEFT JOIN LATERAL (
@@ -2033,8 +2049,7 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
                 {_GRID_GRADE_NAME} AS grade_name,
                 COUNT(DISTINCT ap.game_id) AS games
             FROM appearances ap
-            JOIN {rels['games']} g  ON g.id = ap.game_id
-            JOIN grades gr ON gr.id = g.grade_id{_GRID_GRADE_NAME_JOINS}
+            JOIN {rels['games']} g  ON g.id = ap.game_id{_GRID_GR_JOIN}{_GRID_GRADE_NAME_JOINS}
             WHERE TRUE {club_games_clause}{season_clause_gr}{game_scope_clause}
             GROUP BY ap.player_id, gr.season_id, {_GRID_GRADE_NAME}
         """),
@@ -2098,8 +2113,7 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
             text(f"""{appearances}
                 SELECT ap.player_id, gr.season_id AS season_id, COUNT(DISTINCT ap.game_id) AS games
                 FROM appearances ap
-                JOIN {rels['games']} g  ON g.id = ap.game_id
-                JOIN grades gr ON gr.id = g.grade_id
+                JOIN {rels['games']} g  ON g.id = ap.game_id{_GRID_GR_JOIN}
                 WHERE TRUE {club_games_clause}{season_clause_gr}
                 GROUP BY ap.player_id, gr.season_id
             """),
@@ -2170,8 +2184,7 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
                    COUNT(DISTINCT ga.game_id) AS games
             FROM {rels['ga']} ga
             LEFT JOIN rows ON rows.player_id = ga.player_id AND rows.game_id = ga.game_id
-            JOIN {rels['games']} g ON g.id = ga.game_id
-            JOIN grades gr ON gr.id = g.grade_id{_GRID_GRADE_NAME_JOINS}
+            JOIN {rels['games']} g ON g.id = ga.game_id{_GRID_GR_JOIN}{_GRID_GRADE_NAME_JOINS}
             WHERE ga.player_id = ANY(CAST(:pids AS uuid[]))
               AND rows.game_id IS NULL
               AND (ga.is_reserve IS TRUE OR {called_off_sql('g')})
@@ -2505,8 +2518,7 @@ async def get_player_team_breakdown(
                 COUNT(*) FILTER (WHERE g.result = 'LOSS') AS lost,
                 COUNT(*) FILTER (WHERE g.result IN ('DRAW', 'TIE')) AS drawn
             FROM appearances ap
-            JOIN v_effective_games g  ON g.id = ap.game_id
-            JOIN grades gr ON gr.id = g.grade_id
+            JOIN v_effective_games g  ON g.id = ap.game_id{_GRID_GR_JOIN}
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
                 WHERE gml.org_id = CAST(:org_id AS UUID)
