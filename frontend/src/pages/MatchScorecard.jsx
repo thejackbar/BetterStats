@@ -294,7 +294,12 @@ function MatchHeader({ game, innings }) {
   const awayTeam = game.away_team || ''
   const { a: sideA, b: sideB } = splitSides(inningsData)
   let homeInns = sideA, awayInns = sideB
-  if (sideB.length && (homeTeam || awayTeam) && sidesSwapped(sideA[0]?.battingTeam, sideB[0]?.battingTeam, homeTeam, awayTeam)) {
+  // `sideA.length`, NOT `sideB.length`: a match where only ONE side batted (a drawn two-day game, a
+  // forfeit, a rain-shortened card) still has to say WHICH side it was. The check used to be skipped
+  // unless both sides had an innings, which filed the lone innings under the home team whoever batted:
+  // Payneham 3 v Eastern Suburbs 2 showed Eastern Suburbs' 320 and crest against Payneham 3. A name
+  // that fits neither team leaves it as it was (sidesSwapped needs the away team to fit better).
+  if (sideA.length && (homeTeam || awayTeam) && sidesSwapped(sideA[0]?.battingTeam, sideB[0]?.battingTeam, homeTeam, awayTeam)) {
     homeInns = sideB
     awayInns = sideA
   }

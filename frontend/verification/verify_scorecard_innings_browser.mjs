@@ -64,6 +64,27 @@ const ONE_DAY = {
   fielding: [], fall_of_wickets: [], partnerships: [],
 }
 
+// A match where only ONE side batted. Reported off Payneham (2 Feb 2014): "Payneham 3 v Eastern Suburbs 2",
+// a drawn two-day game in which only Eastern Suburbs 2 batted (320), came up with that 320 and Eastern
+// Suburbs' crest under Payneham 3. The header's home/away check ran only when both sides had an innings.
+const ONE_SIDE_BATTED = {
+  id: 'aaaaaaaa-0000-0000-0000-000000000002',
+  home_team: 'Payneham 3', away_team: 'Eastern Suburbs 2',
+  played_at: '2014-02-09', result: 'DRAW', winning_team: null,
+  organisation_id: null,
+  grade: { id: 'g2', name: 'Under 15 North Division 2', raw_name: 'Under 15 North Division 2' },
+  season: { id: 's2', name: 'Summer 2013/14' },
+  innings_totals: { 1: { runs: 320, wickets: 10, extras: 0, batting_team: 'Eastern Suburbs 2', overs: '64.3' } },
+  batting: [],
+  bowling: [{ innings_number: 1, player_id: 'p9', player_name: 'Harry Edmonds', overs: 8.3, maidens: 0, runs: 32, wickets: 3, wides: 0, no_balls: 0 }],
+  opp_batting: [
+    { innings_number: 1, player_id: null, player_name: 'A McFarlane', runs: 160, balls: 0, dismissal_type: 'b:', not_out: false, batting_position: 1, did_not_bat: false },
+    { innings_number: 1, player_id: null, player_name: 'S Elliott', runs: 160, balls: 0, dismissal_type: 'c: b:', not_out: false, batting_position: 2, did_not_bat: false },
+  ],
+  opp_bowling: [],
+  fielding: [], fall_of_wickets: [], partnerships: [],
+}
+
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
 async function openCard(card, { width = 1440 } = {}) {
@@ -170,6 +191,22 @@ const headerText = (page) => page.evaluate(() => {
   ck('partnerships cover both of our innings',
     /Innings 1/i.test(sections.pt) && /Innings 3/i.test(sections.pt), sections.pt.slice(0, 120))
 
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ------------------------------------------------------------ only one side batted
+
+{
+  console.log('\nA match where only one side batted files that innings under the side that batted')
+  const { page, ctx, errors } = await openCard(ONE_SIDE_BATTED)
+  const sides = await page.evaluate(() => {
+    const grid = document.querySelector('main > .pb-card .grid')
+    const kids = grid ? [...grid.children] : []
+    return { home: kids[0]?.innerText.replace(/\s+/g, ' ') || '', away: kids[2]?.innerText.replace(/\s+/g, ' ') || '' }
+  })
+  ck('the 320 is under Eastern Suburbs 2, the side that batted', /Eastern Suburbs 2/.test(sides.away) && /320/.test(sides.away), sides.away)
+  ck('and not under Payneham 3', /Payneham 3/.test(sides.home) && !/320/.test(sides.home), sides.home)
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }
