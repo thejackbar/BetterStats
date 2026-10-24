@@ -684,6 +684,8 @@ async def teaser_progress(session: AsyncSession, *, now: Optional[datetime] = No
                AVG(t.api_calls) FILTER (WHERE t.status IN ('ok', 'empty', 'junior_only')
                                           AND t.api_calls > 0) AS avg_calls,
                MAX(t.pulled_at) AS last_pulled_at,
+               MAX(t.pulled_at) FILTER (WHERE t.last_error IS NULL) AS last_retrieved_at,
+               MIN(t.next_pull_at) FILTER (WHERE t.next_pull_at > :now) AS next_due_at,
                COUNT(*) FILTER (WHERE t.pulled_at > :hour_ago) AS clubs_last_hour,
                COALESCE(SUM(t.api_calls) FILTER (WHERE t.pulled_at > :hour_ago), 0) AS calls_last_hour
         FROM marketing_clubs mc
@@ -695,7 +697,12 @@ async def teaser_progress(session: AsyncSession, *, now: Optional[datetime] = No
                                          "empty", "junior_only", "error", "clubs_last_hour",
                                          "calls_last_hour")}
     out["avg_calls"] = round(float(row["avg_calls"] or 0), 1)
-    out["last_pulled_at"] = row["last_pulled_at"].isoformat() if row["last_pulled_at"] else None
+    # last_pulled_at is the newest ATTEMPT (a failed pull stamps it too);
+    # last_retrieved_at is the newest pull CA actually answered, which is the
+    # one the panel quotes. next_due_at is when the earliest not-yet-due club
+    # comes due, so a "caught up" crawl can say when it will next fetch.
+    for k in ("last_pulled_at", "last_retrieved_at", "next_due_at"):
+        out[k] = row[k].isoformat() if row[k] else None
     return out
 
 
@@ -933,6 +940,12 @@ TROUBLE_SECONDS = 900          # a whole cycle of errors: leave the upstream alo
 TROUBLE_MIN_CLUBS = 3
 
 
+# What the worker loop last did, for the panel. The loop runs in this process
+# (one API process is assumed, see above), so this is plain memory: it reads
+# empty after a restart until the first cycle finishes, which is seconds.
+WORKER_STATE: dict = {"last_cycle_at": None, "last_status": None}
+
+
 @dataclass(frozen=True)
 class PacedConfig:
     rate: float          # calls a second on average; 0 = off
@@ -1044,6 +1057,7 @@ async def run_forever(*, pacer=None, session_maker=None, config_fn=None, api_fac
         except Exception:  # noqa: BLE001 - a marketing crawl must never take the app down
             logger.exception("Club teaser crawl cycle failed")
             out = {"status": "error", "wait": ERROR_SECONDS}
+        WORKER_STATE.update(last_cycle_at=datetime.now(timezone.utc).isoformat(), last_status=out["status"])
         if out["status"] != last:
             logger.info("Club teaser crawl: %s", out["status"])
             last = out["status"]

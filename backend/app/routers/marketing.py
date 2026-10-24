@@ -78,6 +78,7 @@ async def teaser_status(db: AsyncSession = Depends(get_db), _=Depends(require_su
             "stopped": stopped, "in_hours": in_hours,
             "max_rate": ps.TEASER_MAX_RATE, "min_rate": ps._FLOAT_KEYS["club_teaser_calls_per_second"][0],
             "progress": progress,
+            "worker": dict(ct.WORKER_STATE),
             "estimate": ct.crawl_estimate(progress["due"], progress["avg_calls"], rate, start, end),
             "images": await _images_block(db)}
 

@@ -24,12 +24,35 @@ const STATE = {
                    why: 'Pulling the next clubs due.' },
 }
 
+// What the worker's last pass found, in the words the panel uses.
+const WORKER_SAID = {
+  worked: 'pulled clubs', idle: 'nothing due', off: 'switched off', stopped: 'stopped',
+  outside_window: 'outside its hours', trouble: 'Cricket Australia errors, backing off', error: 'the pass failed',
+}
+
 const INPUT = 'bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 text-xs text-pb-text w-20 focus:outline-none focus:border-pb-accent'
 const BTN = 'px-3 py-1.5 rounded text-xs font-semibold border border-pb-hairline bg-pb-surface2 text-pb-text hover:border-pb-accent disabled:opacity-50'
 const BTN_ACCENT = 'px-3 py-1.5 rounded text-xs font-semibold bg-accent/15 text-accent border border-accent/40 hover:bg-accent/25 disabled:opacity-50'
 
 const hh = (h) => `${String(h).padStart(2, '0')}:00`
 const num = (n) => Number(n || 0).toLocaleString()
+
+// A moment in Perth time, the clock the crawl's hours are set in: "Sat 24 Oct, 14:32".
+export const perthWhen = (iso) => new Date(iso).toLocaleString('en-AU', {
+  timeZone: 'Australia/Perth', weekday: 'short', day: 'numeric', month: 'short',
+  hour: '2-digit', minute: '2-digit', hour12: false,
+})
+
+export function agoText(iso, now = Date.now()) {
+  const secs = Math.round((now - new Date(iso).getTime()) / 1000)
+  if (secs < 0) return 'in the future'
+  if (secs < 90) return 'just now'
+  const mins = Math.round(secs / 60)
+  if (mins < 90) return `${mins} minutes ago`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 48) return `${hrs} hours ago`
+  return `${Math.round(hrs / 24)} days ago`
+}
 
 // The error a bad value would come back with, checked here first so a typo does
 // not need a round trip. The server checks the same bounds again.
@@ -173,6 +196,18 @@ export default function TeaserCrawlPanel() {
           <span className="text-pb-text font-semibold">{num(p.with_snapshot)}</span> of {num(p.targets)} clubs pulled
           {' · '}<span className="text-pb-text font-semibold">{num(p.due)}</span> due
           {' · '}{num(p.ok)} ok, {num(p.empty)} empty, {num(p.junior_only)} junior only, {num(p.error)} errors
+        </p>
+        <p data-testid="teaser-last-retrieved">
+          Last club retrieved:{' '}
+          {p.last_retrieved_at
+            ? <><span className="text-pb-text font-semibold">{perthWhen(p.last_retrieved_at)}</span> Perth ({agoText(p.last_retrieved_at)})</>
+            : 'none yet'}
+          {p.next_due_at && p.due === 0 ? <> · next club due <span className="text-pb-text font-semibold">{perthWhen(p.next_due_at)}</span> Perth</> : null}
+        </p>
+        <p data-testid="teaser-worker">
+          {st.worker?.last_cycle_at
+            ? <>Crawler last looked for work {agoText(st.worker.last_cycle_at)} ({WORKER_SAID[st.worker.last_status] || st.worker.last_status}).</>
+            : 'The crawler has not reported since the server last restarted.'}
         </p>
         <p>
           Last hour: {num(p.clubs_last_hour)} clubs, {num(p.calls_last_hour)} calls

@@ -181,6 +181,31 @@ async def main() -> None:
         check("the last hour holds the three clubs pulled 10 minutes ago that made calls or not (4 clubs, 36 calls)",
               p["clubs_last_hour"] == 4 and p["calls_last_hour"] == 36, str(p))
         check("the newest pull is reported", p["last_pulled_at"] is not None)
+        # last_retrieved_at skips a pull that failed (a failed pull stamps pulled_at too).
+        retrieved = (await s.execute(text(
+            "SELECT MAX(t.pulled_at) FROM club_teaser_snapshots t JOIN marketing_clubs mc ON mc.id = t.marketing_club_id "
+            "WHERE t.last_error IS NULL AND mc.name LIKE 'Panel Club%'"))).scalar()
+        check("the last RETRIEVED time is the newest pull without an error",
+              p.get("last_retrieved_at") == (retrieved.isoformat() if retrieved else None), str(p.get("last_retrieved_at")))
+        check("and it is never newer than the newest attempt",
+              p.get("last_retrieved_at") is not None and p["last_retrieved_at"] <= p["last_pulled_at"])
+        # Make a FAILED pull the newest row: the attempt moves, the retrieved time must not.
+        await s.execute(text("UPDATE club_teaser_snapshots SET pulled_at = :t, last_error = 'boom' "
+                             "WHERE id = (SELECT t.id FROM club_teaser_snapshots t JOIN marketing_clubs mc ON mc.id = t.marketing_club_id "
+                             "WHERE mc.name LIKE 'Panel Club%' AND t.status = 'error' LIMIT 1)"),
+                        {"t": now + timedelta(minutes=5)})
+        await s.commit()
+        pe = await ct.teaser_progress(s, now=now + timedelta(minutes=6), type_modes={})
+        check("a failed pull newer than every success moves the attempt but not the retrieved time",
+              pe["last_pulled_at"] > pe["last_retrieved_at"] and pe["last_retrieved_at"] == p["last_retrieved_at"],
+              f"{pe['last_pulled_at']} {pe['last_retrieved_at']} {p['last_retrieved_at']}")
+        await s.execute(text("UPDATE club_teaser_snapshots SET pulled_at = :t WHERE last_error = 'boom'"), {"t": now - timedelta(days=3)})
+        await s.commit()
+        nxt = (await s.execute(text(
+            "SELECT MIN(t.next_pull_at) FROM club_teaser_snapshots t JOIN marketing_clubs mc ON mc.id = t.marketing_club_id "
+            "WHERE t.next_pull_at > :now AND mc.name LIKE 'Panel Club%'"), {"now": now})).scalar()
+        check("next_due_at is the soonest club that is not yet due",
+              p.get("next_due_at") == (nxt.isoformat() if nxt else None), str(p.get("next_due_at")))
         due = await ct.due_clubs(s, 100, now=now, type_modes={})
         check("DUE MATCHES WHAT THE WORKER WOULD PULL: the count equals due_clubs' rows",
               len(due) == p["due"], f"{len(due)} vs {p['due']}")
@@ -212,6 +237,8 @@ async def main() -> None:
         check("the payload carries the bounds the box validates against",
               st["min_rate"] == 0.05 and st["max_rate"] == 10.0)
         check("off gives no estimate", st["estimate"] is None)
+        check("the payload carries the worker's heartbeat (last_cycle_at, last_status), present even when empty",
+              isinstance(st.get("worker"), dict) and {"last_cycle_at", "last_status"} <= set(st["worker"]), str(st.get("worker")))
         await ps.update_settings(s, {"club_teaser_calls_per_second": 2})
         st = await call_status(s, 12)
         check("rate set, inside the hours, clubs due: RUNNING", st["state"] == "running", st["state"])

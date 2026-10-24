@@ -589,6 +589,9 @@ async def main() -> None:
                          batch=3, max_cycles=4)
     check("while there is work it never sleeps between cycles (3 + 3 + 1 clubs), then idles",
           sleeps == [ct.IDLE_SECONDS] and await snapshot_count() == 7, f"{sleeps} {await snapshot_count()}")
+    ws = getattr(ct, "WORKER_STATE", {}) or {}
+    check("the loop leaves a heartbeat: when it last looked and what it found (idle)",
+          bool(ws.get("last_cycle_at")) and ws.get("last_status") == "idle", str(ws))
 
     sleeps.clear()
     clockL["t"] = perth(23)
