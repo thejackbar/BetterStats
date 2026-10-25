@@ -640,6 +640,45 @@ async def due_clubs(session: AsyncSession, limit: int, *, now: Optional[datetime
     return [dict(r) for r in rows]
 
 
+async def refresh_now(session: AsyncSession, *, limit: Optional[int] = None,
+                      now: Optional[datetime] = None, type_modes: Optional[dict] = None) -> dict:
+    """Make pulled clubs due now, so the paced worker takes them at its own
+    rate and hours. Nothing is fetched here and no snapshot is touched: only
+    ``next_pull_at`` moves, so a club whose re-pull fails keeps its last good
+    snapshot (``save_result``) and the Stop switch still halts the lot. The
+    clubs picked are the ones pulled longest ago, from the same target set
+    ``teaser_progress`` counts; ``limit`` None means every one. Clubs already
+    due, and clubs never pulled, are left alone (the worker has them).
+    Commits. Returns ``{marked, eligible}``."""
+    now = now or datetime.now(timezone.utc)
+    allowed = await type_filtered_ids(session, type_modes)
+    only = " AND mc.id = ANY(CAST(:allowed AS uuid[]))" if allowed is not None else ""
+    params: dict = {"now": now, "schema": SCHEMA_VERSION,
+                    "limit": int(limit) if limit else None}
+    if allowed is not None:
+        params["allowed"] = allowed
+    eligible = f"""
+        SELECT t.id, t.pulled_at
+        FROM marketing_clubs mc
+        JOIN club_teaser_snapshots t ON t.marketing_club_id = mc.id
+        WHERE {_TARGET_WHERE} AND jsonb_array_length(COALESCE(mc.trial_modules, '[]'::jsonb)) = 0
+              {only}
+          AND t.next_pull_at > :now
+          AND NOT (t.status = 'ok' AND COALESCE((t.snapshot->>'schema')::int, 0) < :schema)"""
+    n_eligible = int((await session.execute(text(f"SELECT COUNT(*) FROM ({eligible}) e"),
+                                            params)).scalar() or 0)
+    res = await session.execute(text(f"""
+        UPDATE club_teaser_snapshots SET next_pull_at = :now
+        WHERE id IN (SELECT id FROM ({eligible}) e
+                     ORDER BY pulled_at ASC NULLS FIRST
+                     LIMIT CAST(:limit AS int))"""), params)
+    await session.commit()
+    marked = res.rowcount or 0
+    if marked:
+        WAKE.set()
+    return {"marked": marked, "eligible": n_eligible}
+
+
 def crawl_estimate(due: int, avg_calls: float, rate: float, start_hour: int, end_hour: int) -> Optional[dict]:
     """How long the clubs still due take at ``rate`` calls a second, in hours
     of crawling and in days of the daily window. None when there is nothing to
@@ -684,6 +723,8 @@ async def teaser_progress(session: AsyncSession, *, now: Optional[datetime] = No
                AVG(t.api_calls) FILTER (WHERE t.status IN ('ok', 'empty', 'junior_only')
                                           AND t.api_calls > 0) AS avg_calls,
                MAX(t.pulled_at) AS last_pulled_at,
+               MAX(t.pulled_at) FILTER (WHERE t.last_error IS NULL) AS last_retrieved_at,
+               MIN(t.next_pull_at) FILTER (WHERE t.next_pull_at > :now) AS next_due_at,
                COUNT(*) FILTER (WHERE t.pulled_at > :hour_ago) AS clubs_last_hour,
                COALESCE(SUM(t.api_calls) FILTER (WHERE t.pulled_at > :hour_ago), 0) AS calls_last_hour
         FROM marketing_clubs mc
@@ -695,7 +736,12 @@ async def teaser_progress(session: AsyncSession, *, now: Optional[datetime] = No
                                          "empty", "junior_only", "error", "clubs_last_hour",
                                          "calls_last_hour")}
     out["avg_calls"] = round(float(row["avg_calls"] or 0), 1)
-    out["last_pulled_at"] = row["last_pulled_at"].isoformat() if row["last_pulled_at"] else None
+    # last_pulled_at is the newest ATTEMPT (a failed pull stamps it too);
+    # last_retrieved_at is the newest pull CA actually answered, which is the
+    # one the panel quotes. next_due_at is when the earliest not-yet-due club
+    # comes due, so a "caught up" crawl can say when it will next fetch.
+    for k in ("last_pulled_at", "last_retrieved_at", "next_due_at"):
+        out[k] = row[k].isoformat() if row[k] else None
     return out
 
 
@@ -933,6 +979,29 @@ TROUBLE_SECONDS = 900          # a whole cycle of errors: leave the upstream alo
 TROUBLE_MIN_CLUBS = 3
 
 
+# What the worker loop last did, for the panel. The loop runs in this process
+# (one API process is assumed, see above), so this is plain memory: it reads
+# empty after a restart until the first cycle finishes, which is seconds.
+WORKER_STATE: dict = {"last_cycle_at": None, "last_status": None}
+
+# Set by ``refresh_now`` so an idle worker looks again at once instead of
+# finishing its nap (up to IDLE_SECONDS). Same one-process assumption.
+WAKE = asyncio.Event()
+
+
+async def _nap(seconds: float, sleep) -> None:
+    """Sleep ``seconds``, or less if ``refresh_now`` sets ``WAKE``. A caller
+    that injects its own ``sleep`` (the suites) gets exactly that sleep."""
+    if sleep is not asyncio.sleep:
+        await sleep(seconds)
+        return
+    try:
+        await asyncio.wait_for(WAKE.wait(), timeout=seconds)
+    except asyncio.TimeoutError:
+        pass
+    WAKE.clear()
+
+
 @dataclass(frozen=True)
 class PacedConfig:
     rate: float          # calls a second on average; 0 = off
@@ -1044,6 +1113,7 @@ async def run_forever(*, pacer=None, session_maker=None, config_fn=None, api_fac
         except Exception:  # noqa: BLE001 - a marketing crawl must never take the app down
             logger.exception("Club teaser crawl cycle failed")
             out = {"status": "error", "wait": ERROR_SECONDS}
+        WORKER_STATE.update(last_cycle_at=datetime.now(timezone.utc).isoformat(), last_status=out["status"])
         if out["status"] != last:
             logger.info("Club teaser crawl: %s", out["status"])
             last = out["status"]
@@ -1052,4 +1122,4 @@ async def run_forever(*, pacer=None, session_maker=None, config_fn=None, api_fac
             logger.info("Club teaser crawl: %d club(s), %d call(s): %d ok, %d empty, %d junior_only, %d error",
                         s["due"], s["calls"], s["ok"], s["empty"], s["junior_only"], s["error"])
         if out["wait"]:
-            await sleep(out["wait"])
+            await _nap(out["wait"], sleep)

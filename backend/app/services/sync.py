@@ -1866,13 +1866,55 @@ def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
     return result
 
 
+# The most fixtures one live pass reads (see `_live_candidates`).
+LIVE_MAX_GAMES = 40
+
+
+async def _live_candidates(discovered: set, match_to_status: dict, first_day: dict,
+                           unfinished_ids: set, today: date) -> set:
+    """The fixtures a live pass reads: started by ``today``, and either one we stored while CA did not
+    call it COMPLETED (``unfinished_ids``; this includes a game CA has just called COMPLETED, which is
+    read once more so its final figures land), one CA lists as LIVE, or one we hold no row for."""
+    started = {m for m in discovered if m in unfinished_ids or (first_day.get(m) or "9999") <= today.isoformat()}
+    if not started:
+        return set()
+    ids = []
+    for m in started:
+        try:
+            ids.append(uuid.UUID(m))
+        except ValueError:
+            pass
+    async with async_session_maker() as s:
+        held = {str(r[0]) for r in (await s.execute(
+            text("SELECT id FROM games WHERE id = ANY(CAST(:ids AS uuid[]))"), {"ids": ids})).all()}
+    wanted = [m for m in started
+              if m in unfinished_ids or m not in held
+              or (match_to_status.get(m) or "").upper() == "LIVE"]
+    if len(wanted) > LIVE_MAX_GAMES:
+        # A bound on what one pass asks CA for. Games already followed come first, so a burst of
+        # new fixtures cannot starve a running one; the rest are picked up by the next pass.
+        wanted.sort(key=lambda m: (m not in unfinished_ids, m))
+        logger.warning("GR-sync live: %d fixtures to read, taking the first %d", len(wanted), LIVE_MAX_GAMES)
+        wanted = wanted[:LIVE_MAX_GAMES]
+    return set(wanted)
+
+
 async def sync_grassroots_game_level_data(
     org_id_str: str,
     run_id: Optional[uuid.UUID] = None,
     since: Optional[date] = None,
     season_ids: Optional[list] = None,
+    live: bool = False,
+    live_today: Optional[date] = None,
 ) -> dict:
     """Pull game-level scorecards from the Grassroots /scores/* API.
+
+    ``live`` is the Fantasy running-score pass (``services/fantasy_live``). It is the same code with
+    narrower inputs: of the fixtures in the window it reads only those CA has not finished with (a
+    game we stored while it was in play, one CA lists as LIVE, one we do not hold yet and that has
+    started by ``live_today``), reads their scorecards fresh instead of from the 15 minute cache, and
+    puts a stored game's figures right from a card that is still in play. A game CA calls COMPLETED
+    and we hold as COMPLETED is never read. Needs ``since``.
 
     ``since`` and ``season_ids`` scope an INCREMENTAL run (see
     ``_sync_organisation_impl``): only grades belonging to ``season_ids`` are
@@ -2063,6 +2105,7 @@ async def sync_grassroots_game_level_data(
     match_to_format: dict[str, str] = {}  # match_id → CA's own matchType string
     match_to_status: dict[str, str] = {}  # match_id → CA's own status string
     match_to_opp: dict[str, tuple[str | None, str]] = {}  # match_id → (opp_org_id, opp_club_name)
+    match_first_day: dict[str, str] = {}  # match_id → earliest scheduled day, for the live pass
     for grade_idx, (grade_guid, season_id, grade_name, _our_grade_id) in enumerate(grades, start=1):
         stats["gr_teams_scanned"] += 1  # reuse existing stat key for continuity
         try:
@@ -2095,6 +2138,10 @@ async def sync_grassroots_game_level_data(
                 continue
             seen_match_ids.add(mid)
             match_to_season[mid] = season_id
+            if live:
+                _days = gr.schedule_days(m)
+                if _days:
+                    match_first_day[mid] = _days[0][0]
             round_name = (m.get("round") or {}).get("name", "")
             match_to_is_final[mid] = "final" in round_name.lower()
             # The match list carries the format ("One Day" / "Two Day" / "T20")
@@ -2152,6 +2199,12 @@ async def sync_grassroots_game_level_data(
                       grade_idx, len(grades))
             await update_sync_run(run_id, stats)
 
+    if live:
+        # Only what CA has not finished with. The statuses and formats of everything discovered are
+        # still written by the bulk passes below, so a game turning COMPLETED is recorded.
+        seen_match_ids = await _live_candidates(seen_match_ids, match_to_status, match_first_day,
+                                                reread_ids, live_today or date_cls.today())
+        stats["gr_live_candidates"] = len(seen_match_ids)
     stats["gr_matches_seen"] = len(seen_match_ids)
     logger.info(f"GR-sync: discovered {len(seen_match_ids)} unique match IDs across {stats['gr_teams_scanned']} grades")
     if run_id:
@@ -2282,7 +2335,7 @@ async def sync_grassroots_game_level_data(
             continue
 
         # Fetch first (no session needed). 204 → not in Grassroots, skip.
-        scorecard = await gr.get_match_scorecard(match_id_str)
+        scorecard = await gr.get_match_scorecard(match_id_str, force=live)
         if not scorecard:
             stats["gr_games_skipped_no_data"] += 1
             continue
@@ -2459,6 +2512,14 @@ async def sync_grassroots_game_level_data(
                         _winner = winning_team_name(scorecard)
                         if _winner:
                             updates["winning_team"] = _winner
+                    if live and existing_innings_totals is not None:
+                        # Stored once, so a game followed live would show the totals it was first
+                        # read with beside batting rows that moved on.
+                        _live_totals = _extract_innings_totals(scorecard)
+                        _held_totals = (json.loads(existing_innings_totals)
+                                        if isinstance(existing_innings_totals, str) else existing_innings_totals)
+                        if _live_totals is not None and _live_totals != _held_totals:
+                            updates["innings_totals"] = json.dumps(_live_totals)
                     if existing_innings_totals is None:
                         # Prospective-only self-heal, same idiom as venue/result
                         # above: a pre-migration-230 game has no stored totals,
@@ -2505,7 +2566,7 @@ async def sync_grassroots_game_level_data(
                             if participant_relink.played_within(scorecard):
                                 _changed = await card_figures_refresh.refresh_stored_figures(
                                     session, org_uuid, match_uuid, scorecard,
-                                    lambda g: _team_pid(_parse_uuid(g)))
+                                    lambda g: _team_pid(_parse_uuid(g)), in_play_ok=live)
                                 if _changed:
                                     stats["gr_figures_refreshed"] = (
                                         stats.get("gr_figures_refreshed", 0) + len(_changed))

@@ -27,9 +27,16 @@ REVOKE_URL = "https://identity.xero.com/connect/revocation"
 CONNECTIONS_URL = "https://api.xero.com/connections"
 API_BASE = "https://api.xero.com/api.xro/2.0"
 
-# Read-only: identify the user, list connected orgs, read bank transactions.
-# offline_access is required to get a refresh token back.
-SCOPES = ["openid", "profile", "email", "offline_access", "accounting.transactions.read"]
+# Read-only: identify the user, list connected orgs, read bank transactions
+# and the chart of accounts (bank account picker). offline_access is required
+# to get a refresh token back. Xero apps created on or after 2 March 2026 are
+# refused the broad `accounting.transactions` scope with `invalid_scope`, so
+# bank transactions use the granular `accounting.banktransactions.read`.
+SCOPES = [
+    "openid", "profile", "email", "offline_access",
+    "accounting.banktransactions.read",
+    "accounting.settings.read",
+]
 
 
 class XeroError(Exception):

@@ -78,21 +78,38 @@ def normalise_team(team: dict) -> dict:
     }
 
 
-def our_team_index(teams: list[dict], org) -> Optional[int]:
-    """Which of the two teams is the club's own.
-
-    Owning-organisation id first (our ``organisations.id`` IS the CA org GUID
-    for synced clubs), then the club's own name keys against the team's club
-    and team name. Returns None when neither side matches, so a caller can fall
-    back rather than guess wrong.
-    """
+def _club_id_hits(teams: list[dict], org) -> list[int]:
+    """Indexes of the teams that carry the club's own owning-organisation id
+    (our ``organisations.id`` IS the CA org GUID for synced clubs)."""
     org_ids = {str(org.id).lower()}
     if getattr(org, "playhq_id", None):
         org_ids.add(str(org.playhq_id).lower())
-    for i, t in enumerate(teams):
-        oid = str((t.get("club_id") or "")).lower()
-        if oid and oid in org_ids:
-            return i
+    return [
+        i for i, t in enumerate(teams)
+        if str((t.get("club_id") or "")).lower() in org_ids and (t.get("club_id") or "")
+    ]
+
+
+def our_team_index(teams: list[dict], org, home_away: Optional[str] = None) -> Optional[int]:
+    """Which of the two teams is the club's own.
+
+    Owning-organisation id first, then the club's own name keys against the
+    team's club and team name. Returns None when neither side matches, so a
+    caller can fall back rather than guess wrong.
+
+    When BOTH teams are the club's (Applecross 8th XI v 10th XI) the id cannot
+    tell them apart: ``home_away`` (``"HOME"``/``"AWAY"``, the side of the fixture
+    being asked about) picks by each team's ``is_home``; with none given the
+    first listed stands, as it always has.
+    """
+    hits = _club_id_hits(teams, org)
+    if hits:
+        if home_away and len(hits) > 1:
+            want_home = str(home_away).upper() == "HOME"
+            for i in hits:
+                if bool(teams[i].get("is_home")) == want_home:
+                    return i
+        return hits[0]
     # No side carried our id. A side that names ANOTHER club by id is not ours
     # whatever its name shares with ours ("North Beach" for "North Perth"), so
     # only a side with no organisation id at all is judged on its name.
@@ -185,8 +202,15 @@ async def resolve_participants(db: AsyncSession, org_id, participants: list[dict
     return out
 
 
-async def match_lineups(db: AsyncSession, org, match_id: str, detail: Optional[dict] = None) -> Optional[dict]:
+async def match_lineups(
+    db: AsyncSession, org, match_id: str, detail: Optional[dict] = None, home_away: Optional[str] = None,
+) -> Optional[dict]:
     """Both teams' published lineups for one match, ours flagged and linked.
+
+    ``is_ours`` is exactly one team. ``is_club`` is every team the club owns: both,
+    in a game between two of its own teams, whose players then all link to their
+    profiles. ``home_away`` says which of those two ``is_ours`` is (see
+    ``our_team_index``).
 
     Returns None when Grassroots has no such match (a manual fixture, or a
     PlayHQ-namespace id that 204s). ``published`` is False for a side whose club
@@ -197,34 +221,42 @@ async def match_lineups(db: AsyncSession, org, match_id: str, detail: Optional[d
     if not detail:
         return None
     teams = [normalise_team(t) for t in (detail.get("teams") or [])]
-    ours = our_team_index(teams, org)
-
-    if ours is not None:
-        known = await resolve_participants(db, org.id, teams[ours]["players"])
-        for p in teams[ours]["players"]:
-            hit = known.get(p["participant_id"])
-            p["player_id"] = hit["player_id"] if hit else None
-            # Our own players get their club photo; everyone else falls back to
-            # the team crest on the frontend.
-            p["photo_url"] = hit.get("photo_url") if hit else None
-            # A redacted junior still has a real name on our side if we hold
-            # the player — CA only withholds it in this feed.
-            if hit and p["redacted"]:
-                p["name"] = hit["name"]
-                p["redacted"] = False
 
     # isHome / the score live on matchSummary.teams, NOT the top-level teams
     # array (the same gotcha the scorecard parser documents in CLAUDE.md).
     summary = detail.get("matchSummary") or {}
     by_id = {str(s.get("id")): s for s in (summary.get("teams") or []) if s.get("id")}
     by_name = {(s.get("displayName") or "").lower(): s for s in (summary.get("teams") or [])}
-    for i, t in enumerate(teams):
+    for t in teams:
         s = by_id.get(str(t.get("id"))) or by_name.get((t.get("name") or "").lower()) or {}
-        t["is_ours"] = (i == ours)
         t["published"] = bool(t["players"])
         t["is_home"] = bool(s.get("isHome"))
         t["is_winner"] = bool(s.get("isWinner"))
         t["score_text"] = s.get("scoreText")
+
+    ours = our_team_index(teams, org, home_away)
+    club_sides = set(_club_id_hits(teams, org))
+    if ours is not None:
+        club_sides.add(ours)
+    for i, t in enumerate(teams):
+        t["is_ours"] = (i == ours)
+        t["is_club"] = (i in club_sides)
+
+    if club_sides:
+        participants = [p for i in sorted(club_sides) for p in teams[i]["players"]]
+        known = await resolve_participants(db, org.id, participants)
+        for i in sorted(club_sides):
+            for p in teams[i]["players"]:
+                hit = known.get(p["participant_id"])
+                p["player_id"] = hit["player_id"] if hit else None
+                # Our own players get their club photo; everyone else falls back to
+                # the team crest on the frontend.
+                p["photo_url"] = hit.get("photo_url") if hit else None
+                # A redacted junior still has a real name on our side if we hold
+                # the player: CA only withholds it in this feed.
+                if hit and p["redacted"]:
+                    p["name"] = hit["name"]
+                    p["redacted"] = False
 
     sched = (detail.get("matchSchedule") or [{}])
     start = (sched[0].get("startDateTime") if sched else "") or ""
@@ -260,8 +292,13 @@ async def org_lineups(db: AsyncSession, org, match_ids: list[str]) -> list[dict]
     return out
 
 
-async def our_lineup_players(db: AsyncSession, org, match_id: str) -> tuple[list[dict], list[str]]:
+async def our_lineup_players(
+    db: AsyncSession, org, match_id: str, home_away: Optional[str] = None,
+) -> tuple[list[dict], list[str]]:
     """The club's own published XI for a match, as ``(players, unmatched)``.
+
+    ``home_away`` is the side of the fixture being asked about. It only matters in
+    a game between two of the club's own teams, where it picks which XI is meant.
 
     ``players`` are the ones we could resolve to a real player row (the shape
     the vote engine needs: ``{id, name, is_captain}``); ``unmatched`` are the
@@ -269,7 +306,7 @@ async def our_lineup_players(db: AsyncSession, org, match_id: str) -> tuple[list
     redacted. Surfaced rather than silently dropped so an admin can see why the
     votable list is short.
     """
-    data = await match_lineups(db, org, match_id)
+    data = await match_lineups(db, org, match_id, home_away=home_away)
     if not data:
         return [], []
     team = next((t for t in data["teams"] if t["is_ours"]), None)

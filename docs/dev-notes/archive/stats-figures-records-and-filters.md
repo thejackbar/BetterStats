@@ -2624,7 +2624,7 @@ Asked for: on the partnerships leaderboard, click a row and land on the scorecar
 - Not verified: live figures. Other clubs with linked pairs under different grade names (Shoalwater included) will see Matches fall to the true count after deploy; nothing stored changes.
 
 
-## v9.129.17: a same-club fixture counted once in the by-grade grid
+## v9.129.27: a same-club fixture counted once in the by-grade grid
 
 - Report: after v9.129.16 Pavara's grid read 84 against 82 expected (CA per-grade claims 17, 18, 18, 9, 15, 1; he holds 13 in 2024/25 against CA's 9). Two cells of 1 were left over: `U10 Blue` in 2021/22 and `Women 1st Grade` in 2022/23.
 - Cause: both are Payneham v Payneham fixtures. `inspect_player_matches` showed one synced game (his figures identical to his own card) linked to the OTHER side's card, so it is hidden; his side's card was either unlinked (2022-03-04) or linked to an unrelated Women 1st Grade game with no batters in common (2022-12-04). The card kept its own grade name, so it sat beside CA's claim instead of inside it.

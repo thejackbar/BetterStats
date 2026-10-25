@@ -181,6 +181,31 @@ async def main() -> None:
         check("the last hour holds the three clubs pulled 10 minutes ago that made calls or not (4 clubs, 36 calls)",
               p["clubs_last_hour"] == 4 and p["calls_last_hour"] == 36, str(p))
         check("the newest pull is reported", p["last_pulled_at"] is not None)
+        # last_retrieved_at skips a pull that failed (a failed pull stamps pulled_at too).
+        retrieved = (await s.execute(text(
+            "SELECT MAX(t.pulled_at) FROM club_teaser_snapshots t JOIN marketing_clubs mc ON mc.id = t.marketing_club_id "
+            "WHERE t.last_error IS NULL AND mc.name LIKE 'Panel Club%'"))).scalar()
+        check("the last RETRIEVED time is the newest pull without an error",
+              p.get("last_retrieved_at") == (retrieved.isoformat() if retrieved else None), str(p.get("last_retrieved_at")))
+        check("and it is never newer than the newest attempt",
+              p.get("last_retrieved_at") is not None and p["last_retrieved_at"] <= p["last_pulled_at"])
+        # Make a FAILED pull the newest row: the attempt moves, the retrieved time must not.
+        await s.execute(text("UPDATE club_teaser_snapshots SET pulled_at = :t, last_error = 'boom' "
+                             "WHERE id = (SELECT t.id FROM club_teaser_snapshots t JOIN marketing_clubs mc ON mc.id = t.marketing_club_id "
+                             "WHERE mc.name LIKE 'Panel Club%' AND t.status = 'error' LIMIT 1)"),
+                        {"t": now + timedelta(minutes=5)})
+        await s.commit()
+        pe = await ct.teaser_progress(s, now=now + timedelta(minutes=6), type_modes={})
+        check("a failed pull newer than every success moves the attempt but not the retrieved time",
+              pe["last_pulled_at"] > pe["last_retrieved_at"] and pe["last_retrieved_at"] == p["last_retrieved_at"],
+              f"{pe['last_pulled_at']} {pe['last_retrieved_at']} {p['last_retrieved_at']}")
+        await s.execute(text("UPDATE club_teaser_snapshots SET pulled_at = :t WHERE last_error = 'boom'"), {"t": now - timedelta(days=3)})
+        await s.commit()
+        nxt = (await s.execute(text(
+            "SELECT MIN(t.next_pull_at) FROM club_teaser_snapshots t JOIN marketing_clubs mc ON mc.id = t.marketing_club_id "
+            "WHERE t.next_pull_at > :now AND mc.name LIKE 'Panel Club%'"), {"now": now})).scalar()
+        check("next_due_at is the soonest club that is not yet due",
+              p.get("next_due_at") == (nxt.isoformat() if nxt else None), str(p.get("next_due_at")))
         due = await ct.due_clubs(s, 100, now=now, type_modes={})
         check("DUE MATCHES WHAT THE WORKER WOULD PULL: the count equals due_clubs' rows",
               len(due) == p["due"], f"{len(due)} vs {p['due']}")
@@ -192,6 +217,84 @@ async def main() -> None:
               len(due2) == p2["due"] == 4, f"{len(due2)} vs {p2['due']}")
         await s.execute(text("UPDATE marketing_clubs SET trial_modules = '[]'::jsonb WHERE name = 'Panel Club 06'"))
         await s.commit()
+
+    print("pull now (refresh_now)")
+    if not (hasattr(ct, "refresh_now") and hasattr(ct, "WAKE") and hasattr(ct, "_nap") and hasattr(mk, "teaser_refresh")):
+        check("the pull-now backend is present (refresh_now, WAKE, _nap, teaser_refresh)", False, "missing")
+    else:
+        async with Session() as s:
+            before = {r["id"]: dict(r) for r in (await s.execute(text(
+                "SELECT t.* FROM club_teaser_snapshots t"))).mappings().all()}
+            oldest = (await s.execute(text(
+                "SELECT t.id FROM club_teaser_snapshots t WHERE t.next_pull_at > :now ORDER BY t.pulled_at ASC LIMIT 1"),
+                {"now": now})).scalar()
+            due_before = (await ct.teaser_progress(s, now=now, type_modes={}))["due"]
+            ct.WAKE.clear()
+            r1 = await ct.refresh_now(s, limit=1, now=now, type_modes={})
+            check("one club asked for: one marked, out of the 5 pulled clubs that are not due yet",
+                  r1 == {"marked": 1, "eligible": 5}, str(r1))
+            after = {r["id"]: dict(r) for r in (await s.execute(text("SELECT t.* FROM club_teaser_snapshots t"))).mappings().all()}
+            moved = [i for i in after if after[i]["next_pull_at"] != before[i]["next_pull_at"]]
+            check("it is the club pulled longest ago", moved == [oldest], f"{moved} vs {oldest}")
+            keep = ("status", "snapshot", "version", "data_hash", "api_calls", "pulled_at", "token", "attempts", "last_error")
+            check("nothing but next_pull_at moved on it: snapshot, version, calls, pulled_at and token are as they were",
+                  all(after[oldest][k] == before[oldest][k] for k in keep))
+            check("an already-due club and the never-pulled clubs were left alone",
+                  all(after[i]["next_pull_at"] == before[i]["next_pull_at"] for i in after if i != oldest))
+            check("marking clubs wakes the worker", ct.WAKE.is_set())
+            p1 = await ct.teaser_progress(s, now=now, type_modes={})
+            due1 = await ct.due_clubs(s, 100, now=now, type_modes={})
+            check("due goes up by one, and still equals what the worker would pull",
+                  p1["due"] == due_before + 1 == len(due1), f"{due_before} {p1['due']} {len(due1)}")
+            ct.WAKE.clear()
+            r2 = await ct.refresh_now(s, limit=None, now=now, type_modes={})
+            check("no limit marks every remaining pulled club (4)", r2["marked"] == 4 and r2["eligible"] == 4, str(r2))
+            p2 = await ct.teaser_progress(s, now=now, type_modes={})
+            check("then all 10 targets are due", p2["due"] == 10, str(p2["due"]))
+            ct.WAKE.clear()
+            r3 = await ct.refresh_now(s, limit=None, now=now, type_modes={})
+            check("pressing it again marks nothing and does not wake the worker",
+                  r3 == {"marked": 0, "eligible": 0} and not ct.WAKE.is_set(), str(r3))
+            # Put the fixture back for the sections below.
+            for i, row in before.items():
+                await s.execute(text("UPDATE club_teaser_snapshots SET next_pull_at = :n WHERE id = :i"),
+                                {"n": row["next_pull_at"], "i": i})
+            await s.commit()
+
+            await s.execute(text("UPDATE platform_settings SET settings = '{}'")); await s.commit()
+            refused = None
+            try:
+                await mk.teaser_refresh(mk.RefreshBody(limit=None), db=s, _=None)
+            except Exception as e:  # noqa: BLE001
+                refused = getattr(e, "status_code", repr(e))
+            check("the route refuses with 409 while the crawl is off (nothing would take the clubs)", refused == 409, str(refused))
+            await ps.update_settings(s, {"club_teaser_calls_per_second": 2})
+            bad = None
+            try:
+                await mk.teaser_refresh(mk.RefreshBody(limit=0), db=s, _=None)
+            except Exception as e:  # noqa: BLE001
+                bad = getattr(e, "status_code", repr(e))
+            check("a limit of 0 is refused with 422", bad == 422, str(bad))
+            out = await mk.teaser_refresh(mk.RefreshBody(limit=2), db=s, _=None)
+            check("with the crawl on, the route marks 2 and says whether the crawler is stopped",
+                  out["marked"] == 2 and out["stopped"] is False, str(out))
+            for i, row in before.items():
+                await s.execute(text("UPDATE club_teaser_snapshots SET next_pull_at = :n WHERE id = :i"),
+                                {"n": row["next_pull_at"], "i": i})
+            await s.execute(text("UPDATE platform_settings SET settings = '{}'")); await s.commit()
+
+        ct.WAKE.clear()
+        loop = asyncio.get_running_loop()
+        loop.call_later(0.1, ct.WAKE.set)
+        t0 = loop.time()
+        await asyncio.wait_for(ct._nap(30, asyncio.sleep), 5)
+        check("an idle worker's nap ends when it is woken (not after 30 seconds)", loop.time() - t0 < 3, f"{loop.time() - t0:.2f}s")
+        slept = []
+        async def fake(sec): slept.append(sec)
+        ct.WAKE.set()
+        await ct._nap(7, fake)
+        check("a caller that supplies its own sleep gets exactly that sleep", slept == [7], str(slept))
+        ct.WAKE.clear()
 
     print("estimate")
     e = ct.crawl_estimate(3651, 27.8, 2.0, 5, 22)
@@ -212,6 +315,8 @@ async def main() -> None:
         check("the payload carries the bounds the box validates against",
               st["min_rate"] == 0.05 and st["max_rate"] == 10.0)
         check("off gives no estimate", st["estimate"] is None)
+        check("the payload carries the worker's heartbeat (last_cycle_at, last_status), present even when empty",
+              isinstance(st.get("worker"), dict) and {"last_cycle_at", "last_status"} <= set(st["worker"]), str(st.get("worker")))
         await ps.update_settings(s, {"club_teaser_calls_per_second": 2})
         st = await call_status(s, 12)
         check("rate set, inside the hours, clubs due: RUNNING", st["state"] == "running", st["state"])

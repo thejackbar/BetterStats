@@ -24,12 +24,35 @@ const STATE = {
                    why: 'Pulling the next clubs due.' },
 }
 
+// What the worker's last pass found, in the words the panel uses.
+const WORKER_SAID = {
+  worked: 'pulled clubs', idle: 'nothing due', off: 'switched off', stopped: 'stopped',
+  outside_window: 'outside its hours', trouble: 'Cricket Australia errors, backing off', error: 'the pass failed',
+}
+
 const INPUT = 'bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 text-xs text-pb-text w-20 focus:outline-none focus:border-pb-accent'
 const BTN = 'px-3 py-1.5 rounded text-xs font-semibold border border-pb-hairline bg-pb-surface2 text-pb-text hover:border-pb-accent disabled:opacity-50'
 const BTN_ACCENT = 'px-3 py-1.5 rounded text-xs font-semibold bg-accent/15 text-accent border border-accent/40 hover:bg-accent/25 disabled:opacity-50'
 
 const hh = (h) => `${String(h).padStart(2, '0')}:00`
 const num = (n) => Number(n || 0).toLocaleString()
+
+// A moment in Perth time, the clock the crawl's hours are set in: "Sat 24 Oct, 14:32".
+export const perthWhen = (iso) => new Date(iso).toLocaleString('en-AU', {
+  timeZone: 'Australia/Perth', weekday: 'short', day: 'numeric', month: 'short',
+  hour: '2-digit', minute: '2-digit', hour12: false,
+})
+
+export function agoText(iso, now = Date.now()) {
+  const secs = Math.round((now - new Date(iso).getTime()) / 1000)
+  if (secs < 0) return 'in the future'
+  if (secs < 90) return 'just now'
+  const mins = Math.round(secs / 60)
+  if (mins < 90) return `${mins} minutes ago`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 48) return `${hrs} hours ago`
+  return `${Math.round(hrs / 24)} days ago`
+}
 
 // The error a bad value would come back with, checked here first so a typo does
 // not need a round trip. The server checks the same bounds again.
@@ -51,6 +74,7 @@ export default function TeaserCrawlPanel() {
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [loadErr, setLoadErr] = useState('')
+  const [pullCount, setPullCount] = useState('100')   // 'all' or a number
 
   const load = useCallback(async () => {
     try {
@@ -108,6 +132,29 @@ export default function TeaserCrawlPanel() {
       setMsg('Switched off. Nothing more is pulled once the club in flight finishes.')
       await load()
     } catch (e) { setErr(e.message || 'Could not switch it off.') } finally { setBusy('') }
+  }
+
+  // Pulled clubs that are not due yet: the ones "Pull now" can bring forward.
+  const pullable = Math.max(0, (p.with_snapshot || 0) - Math.max(0, (p.due || 0) - (p.never_pulled || 0)))
+  const pullN = pullCount === 'all' ? pullable : Math.min(Number(pullCount), pullable)
+  const pull = async () => {
+    if (!pullN) return
+    const calls = Math.round(pullN * (p.avg_calls || 0))
+    const hrs = st.rate > 0 && calls ? (calls / st.rate / 3600).toFixed(1) : null
+    if (!window.confirm(
+      `Pull ${num(pullN)} club${pullN === 1 ? '' : 's'} from Cricket Australia again now`
+      + (calls ? `? That is about ${num(calls)} calls` : '?')
+      + (hrs ? `, roughly ${hrs} hours at ${st.rate} a second.` : '.')
+      + ' Clubs pulled longest ago go first. Press Stop crawling above to halt it.')) return
+    setBusy('pull'); setMsg(''); setErr('')
+    try {
+      const r = await api.mktTeaserRefresh(pullCount === 'all' ? null : Number(pullCount))
+      setMsg(`${num(r.marked)} club${r.marked === 1 ? '' : 's'} marked due. `
+        + (r.stopped ? 'The crawler is stopped, so they start when you press Start crawling.'
+           : !st.in_hours ? 'They start when the crawl hours open.'
+           : 'The crawler picks them up within seconds.'))
+      await load()
+    } catch (e) { setErr(e.message || 'Could not start the pull.') } finally { setBusy('') }
   }
 
   const img = st.images
@@ -174,6 +221,18 @@ export default function TeaserCrawlPanel() {
           {' · '}<span className="text-pb-text font-semibold">{num(p.due)}</span> due
           {' · '}{num(p.ok)} ok, {num(p.empty)} empty, {num(p.junior_only)} junior only, {num(p.error)} errors
         </p>
+        <p data-testid="teaser-last-retrieved">
+          Last club retrieved:{' '}
+          {p.last_retrieved_at
+            ? <><span className="text-pb-text font-semibold">{perthWhen(p.last_retrieved_at)}</span> Perth ({agoText(p.last_retrieved_at)})</>
+            : 'none yet'}
+          {p.next_due_at && p.due === 0 ? <> · next club due <span className="text-pb-text font-semibold">{perthWhen(p.next_due_at)}</span> Perth</> : null}
+        </p>
+        <p data-testid="teaser-worker">
+          {st.worker?.last_cycle_at
+            ? <>Crawler last looked for work {agoText(st.worker.last_cycle_at)} ({WORKER_SAID[st.worker.last_status] || st.worker.last_status}).</>
+            : 'The crawler has not reported since the server last restarted.'}
+        </p>
         <p>
           Last hour: {num(p.clubs_last_hour)} clubs, {num(p.calls_last_hour)} calls
           {achieved ? ` (${achieved} a second on average)` : ''}
@@ -186,6 +245,21 @@ export default function TeaserCrawlPanel() {
             {' '}{est.rate_to_finish_in_one_window} a second would finish it inside one window.
           </p>
         ) : (st.rate > 0 && p.due > 0 ? <p>No estimate until at least one club has been pulled.</p> : null)}
+        {st.rate > 0 && (
+          <div className="flex flex-wrap items-center gap-2 pt-1" data-testid="teaser-pull">
+            <span>Pull again now:</span>
+            <select className={`${INPUT} !w-auto`} data-testid="teaser-pull-count" value={pullCount}
+                    onChange={(e) => setPullCount(e.target.value)}>
+              {[100, 500, 1000].filter((n) => n < pullable).map((n) => (
+                <option key={n} value={String(n)}>{`${num(n)} oldest`}</option>
+              ))}
+              <option value="all">{`All ${num(pullable)} pulled`}</option>
+            </select>
+            <button className={BTN} data-testid="teaser-pull-go" disabled={busy !== '' || !pullN} onClick={pull}>
+              {busy === 'pull' ? '...' : 'Pull now'}
+            </button>
+          </div>
+        )}
         {img && (
           <div className="flex flex-wrap items-center gap-2 pt-1" data-testid="teaser-images">
             <p>

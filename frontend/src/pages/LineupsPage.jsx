@@ -117,13 +117,16 @@ function PlayerRow({ p, logoUrl, linkable }) {
 /* ── One side's team list ───────────────────────────────────────────────── */
 
 function TeamLineup({ team }) {
+  // `is_club` is every side the club owns (both, in a game between two of its own
+  // teams); `is_ours` is exactly one. An older payload only has `is_ours`.
+  const isClub = team.is_club ?? team.is_ours
   return (
-    <div className={`rounded-xl border px-3.5 py-3 ${team.is_ours ? 'border-pb-accent/40' : 'pb-hairline'}`}>
+    <div className={`rounded-xl border px-3.5 py-3 ${isClub ? 'border-pb-accent/40' : 'pb-hairline'}`}>
       <div className="flex items-center gap-2 mb-2 pb-2 border-b pb-hairline">
         <TeamBadge name={team.name} logoUrl={team.logo_url} size={24} />
         <div className="min-w-0 flex-1">
           <div className="font-display font-bold text-[13px] truncate leading-tight">{team.name}</div>
-          {team.is_ours && <div className="font-mono text-[8.5px] text-pb-accent tracking-wide2">OUR SIDE</div>}
+          {isClub && <div className="font-mono text-[8.5px] text-pb-accent tracking-wide2">OUR SIDE</div>}
         </div>
         {team.published && (
           <span className="font-mono text-[10px] text-pb-faint shrink-0">{team.players.length}</span>
@@ -134,7 +137,7 @@ function TeamLineup({ team }) {
         // Two columns on wider cards so an XI reads in one glance.
         <div className="grid gap-x-4 sm:grid-cols-2">
           {team.players.map((p, i) => (
-            <PlayerRow key={p.participant_id || i} p={p} logoUrl={team.logo_url} linkable={team.is_ours} />
+            <PlayerRow key={p.participant_id || i} p={p} logoUrl={team.logo_url} linkable={isClub} />
           ))}
         </div>
       ) : (

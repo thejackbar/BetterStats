@@ -11,8 +11,10 @@ in play.
 This is the missing half: for a game CA now calls COMPLETED, replace a stored figure the card
 disagrees with, in place. Rules:
 
-* Only a card CA calls COMPLETED is believed. A card still in play plans nothing, so a later read of
-  an unfinished game can never overwrite a finished figure.
+* Only a card CA calls COMPLETED is believed, unless the caller says the game is being followed live
+  (`in_play_ok`, used only by the Fantasy live pass). A card still in play plans nothing by default, so a
+  later read of an unfinished game can never overwrite a finished figure; the live pass only reads games
+  CA has not called COMPLETED, and the pass that sees the COMPLETED card puts the final figure right.
 * Only the club's own players (the roster of the club's team on the card), matched on the game,
   player and innings the way sync stores them. A shared fixture's other club is never touched.
 * Figures only: a row is UPDATED where it is, so its id, its merge history and anything that points at
@@ -35,6 +37,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import dismissal
+from app.services.game_status import NOT_PLAYED_STATUSES
 from app.services.boundary_counts import clean as _bounds
 from app.services.sync import _GR_DISMISSAL_SHORT, _caught_by_keeper, _innings_keeper_names
 
@@ -51,6 +54,15 @@ FIELDING_FIELDS = ("catches", "catches_wk", "run_outs", "stumpings")
 def is_final(scorecard: Optional[dict]) -> bool:
     """CA calls this card COMPLETED. Nothing else is believed over a stored figure."""
     return bool(scorecard) and str(scorecard.get("status") or "").strip().upper() == "COMPLETED"
+
+
+def is_in_play(scorecard: Optional[dict]) -> bool:
+    """A card that has been started and not called off: LIVE, or whatever CA calls a game between
+    its two days. COMPLETED is `is_final`; a called-off or not-yet-started card has no figures."""
+    if not scorecard:
+        return False
+    status = str(scorecard.get("status") or "").strip().upper()
+    return bool(status) and status not in ("COMPLETED", "UPCOMING") and status not in NOT_PLAYED_STATUSES
 
 
 def _our_team(scorecard: dict, org_id) -> Optional[dict]:
@@ -83,13 +95,15 @@ def _shown(v):
     return float(v) if isinstance(v, Decimal) else v
 
 
-async def plan_game(db: AsyncSession, org_id, game_id, scorecard: Optional[dict], resolve: Resolve) -> list[dict]:
+async def plan_game(db: AsyncSession, org_id, game_id, scorecard: Optional[dict], resolve: Resolve,
+                    in_play_ok: bool = False) -> list[dict]:
     """The figure changes a COMPLETED card asks for in one stored game. Read only.
+    With ``in_play_ok`` a card still in play is believed too (the running score of a live game).
 
     Each change is ``{op, table, id, game_id, player_id, innings, field, old, new}`` where ``op`` is
     ``update`` (``id`` is the stored row) or ``insert`` (a fielding row, ``field`` is ``row``).
     An empty list means the game is as the card says, or the card is not final."""
-    if not is_final(scorecard):
+    if not (is_final(scorecard) or (in_play_ok and is_in_play(scorecard))):
         return []
     team = _our_team(scorecard, org_id)
     if not team:
@@ -229,17 +243,18 @@ async def apply_changes(db: AsyncSession, changes: list[dict]) -> int:
 
 
 async def refresh_stored_figures(db: AsyncSession, org_id, game_id, scorecard: Optional[dict],
-                                 resolve: Resolve) -> list[dict]:
+                                 resolve: Resolve, in_play_ok: bool = False) -> list[dict]:
     """Plan and write one game's figure changes, and commit. Returns the changes (empty when the game
-    already matches its card, or the card is not COMPLETED). The caller catches anything this raises:
-    a refresh must never fail a sync."""
-    changes = await plan_game(db, org_id, game_id, scorecard, resolve)
+    already matches its card, or the card is not COMPLETED and ``in_play_ok`` is off). The caller
+    catches anything this raises: a refresh must never fail a sync."""
+    changes = await plan_game(db, org_id, game_id, scorecard, resolve, in_play_ok=in_play_ok)
     if not changes:
         return []
     await apply_changes(db, changes)
     await db.commit()
-    logger.info("GR-sync: refreshed %s from its COMPLETED card: %d change(s)", game_id, len(changes))
+    logger.info("GR-sync: refreshed %s from its %s card: %d change(s)", game_id,
+                "COMPLETED" if is_final(scorecard) else "in-play", len(changes))
     return changes
 
 
-__all__ = ["is_final", "plan_game", "apply_changes", "refresh_stored_figures"]
+__all__ = ["is_final", "is_in_play", "plan_game", "apply_changes", "refresh_stored_figures"]

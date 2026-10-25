@@ -28,7 +28,7 @@ from app.auth.capabilities import MANAGE_FIXTURES, require_cap
 from app.models.db import Fixture, Grade, Organisation, Season, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.services.side_size import effective_min
-from app.services.club_match import fixture_side
+from app.services.club_match import fixture_is_in_house, fixture_side
 from app.services.fixtures_reconcile import reconcile
 from app.services.fixtures_source import org_grassroots_fixtures_checked
 from app.services import squad_sides
@@ -124,6 +124,17 @@ def _derive_sides(g: dict, club: Organisation) -> tuple[Optional[str], Optional[
     if side == "away":
         return "AWAY", home
     return None, None
+
+
+def _derive_all_sides(g: dict, club: Organisation) -> list[tuple[Optional[str], Optional[str]]]:
+    """Every ``(home_away, opponent)`` row a match gives the club.
+
+    Two when both teams are the club's own (Applecross 8th XI v 10th XI in One
+    Day Grade 6 Black): one match, but two sides to pick an XI for, so a row each,
+    sharing the match GUID and told apart by ``home_away``. One otherwise."""
+    if fixture_is_in_house(club, g):
+        return [("HOME", g.get("away_team") or ""), ("AWAY", g.get("home_team") or "")]
+    return [_derive_sides(g, club)]
 
 
 async def _assert_grade_in_club(db: AsyncSession, grade_id: Optional[uuid.UUID], club_id) -> None:
@@ -428,8 +439,14 @@ async def sync_fixtures(
         listing=listing,
         today=today,
         derive_sides=lambda g: _derive_sides(g, club),
+        derive_all_sides=lambda g: _derive_all_sides(g, club),
     )
-    by_gid = {f.playhq_id: f for f in existing_rows if f.playhq_id and f.source == "grassroots"}
+    # A match can hold two rows for the club, one per side, when both teams are
+    # its own (``_derive_all_sides``); every other match holds one.
+    by_gid: dict[str, list[Fixture]] = {}
+    for f in existing_rows:
+        if f.playhq_id and f.source == "grassroots":
+            by_gid.setdefault(f.playhq_id, []).append(f)
 
     synced = 0
     teams_assigned = 0
@@ -438,69 +455,74 @@ async def sync_fixtures(
         played = g.get("played_at")
         if not gid or not played:
             continue
-        existing = by_gid.get(str(gid))
-        home_away, opponent = _derive_sides(g, club)
-        target = existing or Fixture(id=uuid.uuid4(), organisation_id=club.id)
-        target.source = "grassroots"
-        target.playhq_id = str(gid)
-        # Was never set here before — every synced fixture read grade_id=NULL,
-        # starving any grade/team filter (e.g. BetterSelect Votes) of options.
-        # See services.votes.effective_grade_ids for the read-side fallback
-        # covering fixtures synced before this line existed.
-        if g.get("db_grade_id"):
-            try:
-                target.grade_id = uuid.UUID(g["db_grade_id"])
-            except ValueError:
-                pass
-        target.round = g.get("round")
-        target.played_on = _parse_date(played)
-        # A two-day game: the feed lists both days. Only a later second day is
-        # written; a one-day entry leaves `end_on` alone so an end date a person
-        # typed on a synced game is not wiped by the next sync.
-        _end = _parse_date(g.get("end_at"))
-        if _end and target.played_on and _end > target.played_on:
-            target.end_on = _end
-        target.start_time = g.get("time")
-        target.home_team = g.get("home_team")
-        target.away_team = g.get("away_team")
-        target.home_away = home_away
-        target.opponent_name = opponent
-        target.venue = g.get("venue")
-        target.status = g.get("status") or "UPCOMING"
-        # Auto-attribute our team by name — only when unset, so a manual
-        # assignment is never overwritten by a later sync.
-        # A squad the club has set up to cover this grade claims the fixture first:
-        # "MACs plays the 1st and 2nd XI grades" says more than any team name.
-        # A synced fixture that sits on a squad which does not play its grade (an
-        # earlier name match guessed wrong, say a women's grade on the men's squad)
-        # moves to the squad that does, unless someone picked it by hand.
-        our_name = target.home_team if home_away == "HOME" else target.away_team if home_away == "AWAY" else None
-        if target.grade_id is not None and not target.team_pinned:
-            current = sides.squads.get(str(target.team_id)) if target.team_id else None
-            key = sides.key_of_grade(target.grade_id)
-            plays_it = current is not None and key is not None and current.side_for_key(key) is not None
-            # Two of the club's teams can play in one grade (Applecross 8th and
-            # 10th XI both in One Day Grade 6 Black). The grade alone cannot tell
-            # them apart, so our own team's name ("Applecross 10th XI") does.
-            named = sides.squad_for_team_name(target.grade_id, our_name)
-            claimed = named if named is not None else (
-                sides.squad_for_grade(target.grade_id) if (target.team_id is None or not plays_it) else None)
-            if claimed is not None and claimed.id != str(target.team_id):
-                target.team_id = uuid.UUID(claimed.id)
-                target.side_key = None
-                teams_assigned += 1
-        if teams and target.team_id is None:
-            fx_women = grade_is_women(None, g.get("grade_name"), grade_cats) if g.get("grade_name") else None
-            matched = _match_team(our_name, teams, fx_women)
-            if matched:
-                target.team_id = matched
-                teams_assigned += 1
-        if existing:
-            target.updated_at = datetime.now(timezone.utc)
-        else:
-            db.add(target)
-            by_gid[str(gid)] = target
-        synced += 1
+        game_sides = _derive_all_sides(g, club)
+        for home_away, opponent in game_sides:
+            held = by_gid.get(str(gid), [])
+            if len(game_sides) > 1:
+                existing = next((r for r in held if r.home_away == home_away), None)
+            else:
+                existing = held[0] if held else None
+            target = existing or Fixture(id=uuid.uuid4(), organisation_id=club.id)
+            target.source = "grassroots"
+            target.playhq_id = str(gid)
+            # Was never set here before — every synced fixture read grade_id=NULL,
+            # starving any grade/team filter (e.g. BetterSelect Votes) of options.
+            # See services.votes.effective_grade_ids for the read-side fallback
+            # covering fixtures synced before this line existed.
+            if g.get("db_grade_id"):
+                try:
+                    target.grade_id = uuid.UUID(g["db_grade_id"])
+                except ValueError:
+                    pass
+            target.round = g.get("round")
+            target.played_on = _parse_date(played)
+            # A two-day game: the feed lists both days. Only a later second day is
+            # written; a one-day entry leaves `end_on` alone so an end date a person
+            # typed on a synced game is not wiped by the next sync.
+            _end = _parse_date(g.get("end_at"))
+            if _end and target.played_on and _end > target.played_on:
+                target.end_on = _end
+            target.start_time = g.get("time")
+            target.home_team = g.get("home_team")
+            target.away_team = g.get("away_team")
+            target.home_away = home_away
+            target.opponent_name = opponent
+            target.venue = g.get("venue")
+            target.status = g.get("status") or "UPCOMING"
+            # Auto-attribute our team by name — only when unset, so a manual
+            # assignment is never overwritten by a later sync.
+            # A squad the club has set up to cover this grade claims the fixture first:
+            # "MACs plays the 1st and 2nd XI grades" says more than any team name.
+            # A synced fixture that sits on a squad which does not play its grade (an
+            # earlier name match guessed wrong, say a women's grade on the men's squad)
+            # moves to the squad that does, unless someone picked it by hand.
+            our_name = target.home_team if home_away == "HOME" else target.away_team if home_away == "AWAY" else None
+            if target.grade_id is not None and not target.team_pinned:
+                current = sides.squads.get(str(target.team_id)) if target.team_id else None
+                key = sides.key_of_grade(target.grade_id)
+                plays_it = current is not None and key is not None and current.side_for_key(key) is not None
+                # Two of the club's teams can play in one grade (Applecross 8th and
+                # 10th XI both in One Day Grade 6 Black). The grade alone cannot tell
+                # them apart, so our own team's name ("Applecross 10th XI") does.
+                named = sides.squad_for_team_name(target.grade_id, our_name)
+                claimed = named if named is not None else (
+                    sides.squad_for_grade(target.grade_id) if (target.team_id is None or not plays_it) else None)
+                if claimed is not None and claimed.id != str(target.team_id):
+                    target.team_id = uuid.UUID(claimed.id)
+                    target.side_key = None
+                    teams_assigned += 1
+            if teams and target.team_id is None:
+                fx_women = grade_is_women(None, g.get("grade_name"), grade_cats) if g.get("grade_name") else None
+                matched = _match_team(our_name, teams, fx_women)
+                if matched:
+                    target.team_id = matched
+                    teams_assigned += 1
+            if existing:
+                target.updated_at = datetime.now(timezone.utc)
+            else:
+                db.add(target)
+                by_gid.setdefault(str(gid), []).append(target)
+            synced += 1
 
     await db.commit()
 

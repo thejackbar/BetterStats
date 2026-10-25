@@ -1589,6 +1589,8 @@ export const api = {
   mktTeaserStatus: () => request('/club-admin/marketing/teaser/status'),
   mktTeaserRender: (limit) =>
     request('/club-admin/marketing/teaser/render', { method: 'POST', body: JSON.stringify({ limit }) }),
+  mktTeaserRefresh: (limit) =>
+    request('/club-admin/marketing/teaser/refresh', { method: 'POST', body: JSON.stringify({ limit }) }),
   mktCrawlControl: (paused) =>
     request('/club-admin/marketing/crawl/control', { method: 'POST', body: JSON.stringify({ paused }) }),
   mktCrawl: (limit) =>
@@ -3568,6 +3570,7 @@ export const api = {
   fanChip: (token, chip) => request(`/public/fantasy/${token}/chip`, { method: 'POST', body: JSON.stringify({ chip }) }),
   fanCancelChip: (token, chip) => request(`/public/fantasy/${token}/chip/cancel`, { method: 'POST', body: JSON.stringify({ chip }) }),
   fanLadder: (token) => request(`/public/fantasy/${token}/ladder`),
+  fanTeam: (token, squadId) => request(`/public/fantasy/${token}/team/${squadId}`),
   fanLeagues: (token) => request(`/public/fantasy/${token}/leagues`),
   fanLeague: (token, leagueId) => request(`/public/fantasy/${token}/leagues/${leagueId}`),
   fanLeaveLeague: (token, leagueId) => request(`/public/fantasy/${token}/leagues/${leagueId}/leave`, { method: 'POST' }),
@@ -4102,6 +4105,12 @@ export const api = {
   fantasyViewAs: (managerId) =>
     request('/club-admin/fantasy/view-as', { method: 'POST', body: JSON.stringify({ manager_id: managerId }) }),
   superFantasyCompetitions: () => request('/club-admin/fantasy/super/competitions'),
+  fantasyRealignPlan: (seasonId, refresh = false) =>
+    request(`/club-admin/fantasy/season/${seasonId}/rounds/realign${refresh ? '?refresh=true' : ''}`),
+  fantasyRealignApply: (seasonId) =>
+    request(`/club-admin/fantasy/season/${seasonId}/rounds/realign`, { method: 'POST' }),
+  fantasySyncScores: (seasonId) =>
+    request(`/club-admin/fantasy/season/${seasonId}/sync-scores`, { method: 'POST' }),
   fantasySettleDue: (seasonId) =>
     request(`/club-admin/fantasy/season/${seasonId}/settle-due`, { method: 'POST' }),
   fantasyDeleteSeason: (seasonId) =>
