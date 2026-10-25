@@ -336,6 +336,77 @@ async function openTeam({ live }) {
   await u.ctx.close()
 }
 
+// ── 6. The ladder follows the round, and a locked team can be opened ─────────
+async function openLadder({ visible = true, tab = 'Ladder' } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  const page = await ctx.newPage()
+  const errors = [], reqs = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
+  const rows = [
+    { rank: 1, squad_id: 's-a', team_name: 'Team A', manager: 'Manager A', points: 35, gw: 30, rank_delta: 1, you: true },
+    { rank: 2, squad_id: 's-b', team_name: 'Team B', manager: 'Manager B', points: 30, gw: 10, rank_delta: -1, you: false },
+  ]
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api/, '')
+    if (path === '/public/fantasy/tok') return json(route, { club: { name: 'Applecross CC' }, season: { name: 'Fantasy', status: 'active', rules: {} }, me: { id: 'm1', display_name: 'Xavier' } })
+    if (path === '/public/fantasy/tok/me') return json(route, { manager: { id: 'm1', display_name: 'Xavier' }, squad: { id: 's-a', team_name: 'Team A', players: [], chips: [], total_points: 35, value: 0, budget_remaining: 0, free_transfers: 1, queued_transfers: [] }, round: null })
+    if (path === '/public/fantasy/tok/pool') return json(route, { players: [], rules: {} })
+    if (path === '/public/fantasy/tok/notifications') return json(route, { notifications: [] })
+    if (path === '/public/fantasy/tok/live') return json(route, { live: false, round: null, mine: null })
+    if (path === '/public/fantasy/tok/round') return json(route, { round: null, mine: null, rounds: [] })
+    if (path === '/public/fantasy/tok/ladder') return json(route, { ladder: rows, my_squad_id: 's-a', live: { number: 3, checked_at: checkedAt }, teams_visible: visible })
+    if (path === '/public/fantasy/tok/leagues') return json(route, { leagues: [{ id: 'L1', name: 'Mates', members: 2, join_code: 'ABC123', ladder: rows }] })
+    if (path === '/public/fantasy/tok/leagues/L1') return json(route, { id: 'L1', name: 'Mates', join_code: 'ABC123', members: 2, is_member: true, my_squad_id: 's-a', ladder: rows, teams_visible: visible })
+    if (path === '/public/fantasy/tok/team/s-b') {
+      reqs.push(path)
+      return json(route, { squad_id: 's-b', team_name: 'Team B', manager: 'Manager B', you: false, total_points: 30,
+        round: { number: 3, name: 'Round 3', status: 'live' }, points: 10, chip_used: 'wildcard',
+        lineup: [{ player_id: 'p1', name: 'Alice Opener', role: 'batter', points: 6, eff_points: 12, counted: true, captained: true },
+                 { player_id: 'p2', name: 'Bob Spinner', role: 'batter', points: 4, eff_points: 4, counted: true, captained: false }] })
+    }
+    return json(route, {})
+  })
+  await page.goto(`${BASE}/fantasy/tok`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: tab, exact: true }).first().click({ timeout: 15000 })
+  return { page, ctx, errors, reqs }
+}
+{
+  const l = await openLadder()
+  await l.page.waitForSelector('text=Team B', { timeout: 15000 })
+  const body = await l.page.locator('body').innerText()
+  ck('the ladder says a round is live, with its running points', /Live · Round 3/i.test(body) && /Running points, checked/.test(body), body.slice(0, 400))
+  ck('and shows the running GW points (30 and 10)', /\b30\b/.test(body) && /\b10\b/.test(body))
+  ck('rows can be opened when teams are visible', (await l.page.getByRole('button', { name: "See Team B's team" }).count()) === 1)
+  await l.page.getByRole('button', { name: "See Team B's team" }).click()
+  await l.page.waitForSelector('text=Alice Opener', { timeout: 15000 })
+  const t = await l.page.locator('body').innerText()
+  ck('opening a row requests exactly that team once', l.reqs.length === 1 && l.reqs[0] === '/public/fantasy/tok/team/s-b', l.reqs.join(','))
+  ck('it shows the team, round, chip, running points and the locked XI',
+     /TEAM B/i.test(t) && /Live · Round 3/i.test(t) && /Wildcard/.test(t) && /Alice Opener/.test(t) && /Bob Spinner/.test(t) && /locked for round 3/.test(t), t.slice(0, 500))
+  ck('and says later changes stay private', /stays private until the next round locks/.test(t))
+  ck('it shows nothing about transfers, prices or the bank', !/transfer/i.test(t.replace(/Transfers/g, '')) && !/bank/i.test(t.replace(/In the bank/gi, '')) )
+  if (SHOTS) await l.page.screenshot({ path: `${SHOTS}/fantasy_team_view.png` })
+  await l.page.getByRole('button', { name: 'Back' }).click()
+  await l.page.waitForSelector('text=Team A')
+  ck('Back returns to the ladder', /Club ladder/i.test(await l.page.locator('body').innerText()))
+  ck('no page errors', l.errors.length === 0, l.errors.join(' | '))
+  await l.ctx.close()
+  const n = await openLadder({ visible: false })
+  await n.page.waitForSelector('text=Team B', { timeout: 15000 })
+  ck('before any round has locked the rows are not openable', (await n.page.getByRole('button', { name: "See Team B's team" }).count()) === 0)
+  await n.ctx.close()
+  const g = await openLadder({ tab: 'Leagues' })
+  await g.page.getByRole('button').filter({ hasText: "You're 1st of 2" }).click()
+  await g.page.getByRole('button', { name: 'Standings' }).waitFor({ timeout: 15000 })
+  await g.page.getByRole('button', { name: "See Team B's team" }).click()
+  await g.page.waitForSelector('text=Alice Opener', { timeout: 15000 })
+  await g.page.getByRole('button', { name: 'Back' }).click()
+  await g.page.getByRole('button', { name: 'Standings' }).waitFor({ timeout: 15000 })
+  ck('from a league, Back returns to that league\'s standings', /ABC123/.test(await g.page.locator('body').innerText()) && g.reqs.length === 1, await g.page.locator('body').innerText().then(x => x.slice(0, 200)))
+  await g.ctx.close()
+}
+
 await browser.close()
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

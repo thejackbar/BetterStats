@@ -324,6 +324,26 @@ def _chip_states(season: FantasySeason, squad: Optional[FantasySquad], rnd: Opti
     return out
 
 
+async def _live_round(db: AsyncSession, season_id) -> Optional[FantasyRound]:
+    """The round being played now: the first round not yet scored, once it has locked."""
+    rnd = (await db.execute(
+        select(FantasyRound).where(FantasyRound.fantasy_season_id == season_id, FantasyRound.status != "scored")
+        .order_by(FantasyRound.round_number).limit(1)
+    )).scalar_one_or_none()
+    return rnd if _round_locked(rnd) else None
+
+
+async def _last_locked_round(db: AsyncSession, season_id) -> Optional[FantasyRound]:
+    """The most recent round that has locked, scored or not. Other managers' teams are shown as they
+    were locked for this round and never any later (see ``team_view``)."""
+    return (await db.execute(
+        select(FantasyRound).where(
+            FantasyRound.fantasy_season_id == season_id, FantasyRound.lock_at.isnot(None),
+            FantasyRound.lock_at <= datetime.now(timezone.utc),
+        ).order_by(FantasyRound.round_number.desc()).limit(1)
+    )).scalar_one_or_none()
+
+
 async def _league_standings(db: AsyncSession, *, league_id=None, squad_ids: Optional[list] = None) -> list[dict]:
     """Ranked standings with a per-round movement delta. Select the squads either by
     the league they sit in (``league_id``, used for the global ladder) or by an
@@ -334,7 +354,7 @@ async def _league_standings(db: AsyncSession, *, league_id=None, squad_ids: Opti
     q = (
         select(
             FantasySquad.id, FantasySquad.team_name, FantasyManager.display_name,
-            FantasySquad.total_points,
+            FantasySquad.total_points, FantasySquad.fantasy_season_id,
         )
         .join(FantasyManager, FantasyManager.id == FantasySquad.manager_id)
     )
@@ -361,6 +381,16 @@ async def _league_standings(db: AsyncSession, *, league_id=None, squad_ids: Opti
     )).all()
     last_pts = {str(sid): float(pts or 0) for sid, pts, _rn in last_rows}
     last_gw = {str(sid): float(pts or 0) for sid, pts, _rn in last_rows}
+    # While a round is locked and being played, its running points ARE this round's: the GW column
+    # shows them, and the arrow compares with the table before them. Without this the column showed the
+    # previous round and the arrow took THAT round off a total that already held the running points.
+    live_rnd = await _live_round(db, rows[0][4])
+    if live_rnd is not None:
+        live_pts = {str(sid): float(pts or 0) for sid, pts in (await db.execute(
+            text("""SELECT squad_id, points FROM fantasy_squad_round_scores
+                    WHERE round_id = CAST(:rid AS UUID) AND squad_id = ANY(:ids)"""),
+            {"rid": str(live_rnd.id), "ids": ids})).all()}
+        last_pts = last_gw = {str(r[0]): live_pts.get(str(r[0]), 0.0) for r in rows}
 
     now_order = sorted(rows, key=lambda r: float(r[3]), reverse=True)
     prev_order = sorted(rows, key=lambda r: float(r[3]) - last_pts.get(str(r[0]), 0.0), reverse=True)
@@ -904,7 +934,15 @@ async def ladder(token: str, request: Request, db: AsyncSession = Depends(get_db
     rows = await _league_standings(db, league_id=league.id)
     for r in rows:
         r["you"] = r["squad_id"] == my_squad_id
-    return {"ladder": rows, "my_squad_id": my_squad_id}
+    live_rnd = await _live_round(db, season.id)
+    return {
+        "ladder": rows, "my_squad_id": my_squad_id,
+        # Set while a round is being played: the GW column and the arrows are that round's running points.
+        "live": {"number": live_rnd.round_number,
+                 "checked_at": live_rnd.live_checked_at.isoformat() if live_rnd.live_checked_at else None} if live_rnd else None,
+        # Once a round has locked, a team can be opened (see team_view).
+        "teams_visible": (await _last_locked_round(db, season.id)) is not None and my_squad_id is not None,
+    }
 
 
 # ── transfers, captain, chips ────────────────────────────────────────────────
@@ -1372,6 +1410,7 @@ async def league_detail(token: str, league_id: str, request: Request, db: AsyncS
         "created_by": creator.display_name if creator else None,
         "my_squad_id": my_squad_id,
         "ladder": rows,
+        "teams_visible": (await _last_locked_round(db, season.id)) is not None and my_squad_id is not None,
     }
 
 
@@ -1527,6 +1566,77 @@ async def rounds_list(token: str, request: Request, db: AsyncSession = Depends(g
     return {"rounds": out}
 
 
+async def _score_squad_live(db: AsyncSession, season: FantasySeason, rnd: FantasyRound, squad: FantasySquad):
+    """One squad scored read-only for a round in progress from the games read so far, with its picks as they
+    are (frozen while the round is locked). Returns ``(result, chip_used, {player_id: (points, games)})``."""
+    by_player = await fantasy_engine._round_player_scores(db, season, rnd)
+    score_by_player = {pid: (sc["total"], sc["games"]) for pid, sc in by_player.items()}
+    picks = (await db.execute(
+        select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
+    )).scalars().all()
+    cur_chip = (await db.execute(
+        text("SELECT chip_used FROM fantasy_squad_round_scores WHERE squad_id = CAST(:sid AS UUID) AND round_id = CAST(:rid AS UUID)"),
+        {"sid": str(squad.id), "rid": str(rnd.id)},
+    )).scalar_one_or_none()
+    rules = season.rules or DEFAULT_RULES
+    best_n = rules.get("squad_size", 12) if cur_chip == "bench_boost" else rules.get("count_best_n", 11)
+    res = score_squad_round(picks, score_by_player, best_n, season.scoring or DEFAULT_SCORING,
+                            is_triple=(cur_chip == "triple_captain"))
+    return res, cur_chip, score_by_player
+
+
+@router.get("/{token}/team/{squad_id}")
+async def team_view(token: str, squad_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Another manager's team as it was LOCKED for the most recently locked round, with the points it has
+    scored. Nothing later is shown: not the transfers they have queued, not a change applied after the round
+    settled, not their bank, prices or chips for the next round. Only managers in the league can look, and
+    only once a round has locked (before that every XI is still being decided).
+
+    The lineup is the one stored with the squad's round row, which is written from the picks while the round
+    is locked (they are frozen) and kept as it was when the round was settled; picks held now are read only
+    for a round that is locked and has no row yet."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None:
+        raise HTTPException(status_code=404, detail="No fantasy season")
+    me = await _global_squad(db, season, mgr)
+    if me is None:
+        raise HTTPException(status_code=403, detail="Build your squad to see how other managers lined up.")
+    try:
+        target = await db.get(FantasySquad, uuid.UUID(squad_id))
+    except ValueError:
+        target = None
+    if target is None or target.fantasy_season_id != season.id or target.league_id != me.league_id:
+        raise HTTPException(status_code=404, detail="That team isn't in your league.")
+    rnd = await _last_locked_round(db, season.id)
+    if rnd is None:
+        raise HTTPException(status_code=403, detail="Teams are shown once the first round has locked.")
+
+    owner = await db.get(FantasyManager, target.manager_id)
+    head = {
+        "squad_id": str(target.id), "team_name": target.team_name, "manager": owner.display_name if owner else "",
+        "you": target.id == me.id, "total_points": float(target.total_points),
+        "round": {"number": rnd.round_number, "name": rnd.name, "status": "scored" if rnd.status == "scored" else "live"},
+    }
+    if target.joined_round is not None and target.joined_round > rnd.round_number:
+        return {**head, "lineup": None, "points": None, "chip_used": None,
+                "note": "This team joined after that round locked, so it has no locked team to show."}
+    srs = (await db.execute(
+        select(FantasySquadRoundScore).where(
+            FantasySquadRoundScore.squad_id == target.id, FantasySquadRoundScore.round_id == rnd.id)
+    )).scalar_one_or_none()
+    if srs is not None and srs.lineup:
+        lineup, points, chip = srs.lineup, float(srs.points), srs.chip_used
+    elif rnd.status != "scored":
+        res, chip, _ = await _score_squad_live(db, season, rnd, target)
+        lineup, points = res["lineup"], res["points"]
+    else:
+        return {**head, "lineup": None, "points": None, "chip_used": None,
+                "note": "There is no locked team on record for this round."}
+    return {**head, "lineup": await _enrich_lineup(db, lineup), "points": points, "chip_used": chip}
+
+
 @router.get("/{token}/live")
 async def live(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Provisional points for the round in progress, computed live from whatever
@@ -1549,19 +1659,7 @@ async def live(token: str, request: Request, db: AsyncSession = Depends(get_db))
                 "overall_rank": await _overall_rank(db, squad.league_id, squad.id)}
 
     # Provisional: score the in-progress round read-only and roll the best-11.
-    by_player = await fantasy_engine._round_player_scores(db, season, rnd)
-    score_by_player = {pid: (sc["total"], sc["games"]) for pid, sc in by_player.items()}
-    picks = (await db.execute(
-        select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
-    )).scalars().all()
-    cur_chip = (await db.execute(
-        text("SELECT chip_used FROM fantasy_squad_round_scores WHERE squad_id = CAST(:sid AS UUID) AND round_id = CAST(:rid AS UUID)"),
-        {"sid": str(squad.id), "rid": str(rnd.id)},
-    )).scalar_one_or_none()
-    rules = season.rules or DEFAULT_RULES
-    best_n = rules.get("squad_size", 12) if cur_chip == "bench_boost" else rules.get("count_best_n", 11)
-    res = score_squad_round(picks, score_by_player, best_n, season.scoring or DEFAULT_SCORING,
-                            is_triple=(cur_chip == "triple_captain"))
+    res, cur_chip, score_by_player = await _score_squad_live(db, season, rnd, squad)
     # Provisional rank: where this live total would sit among current totals.
     others = (await db.execute(
         text("""SELECT total_points FROM fantasy_squads

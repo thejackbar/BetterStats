@@ -6,11 +6,11 @@ import { DISP, tintBg, pts, Btn, Field } from './ui'
 import { ScreenTitle } from './shell'
 import { LadderRow } from './Ladder'
 
-export default function Leagues({ token, flash, fail, desktop }) {
-  const [open, setOpen] = useState(null)   // league id
+export default function Leagues({ token, flash, fail, desktop, nav, initialLeague }) {
+  const [open, setOpen] = useState(initialLeague || null)   // league id
   if (open) return (
     <div style={desktop ? { maxWidth: 820, margin: '0 auto' } : undefined}>
-      <LeagueDetail token={token} leagueId={open} onBack={() => setOpen(null)} flash={flash} fail={fail} />
+      <LeagueDetail token={token} leagueId={open} onBack={() => setOpen(null)} flash={flash} fail={fail} nav={nav} />
     </div>
   )
   return <LeaguesHome token={token} onOpen={setOpen} flash={flash} fail={fail} desktop={desktop} />
@@ -85,7 +85,7 @@ function MiniRow({ r }) {
   )
 }
 
-function LeagueDetail({ token, leagueId, onBack, flash, fail }) {
+function LeagueDetail({ token, leagueId, onBack, flash, fail, nav }) {
   const [data, setData] = useState(null)
   const [tab, setTab] = useState('standings')
   const load = useCallback(() => api.fanLeague(token, leagueId).then(setData).catch(() => fail(new Error('Could not load league'))), [token, leagueId, fail])
@@ -120,7 +120,10 @@ function LeagueDetail({ token, leagueId, onBack, flash, fail }) {
       </div>
 
       <div style={{ paddingTop: 14 }}>
-        {tab === 'standings' && (data.ladder || []).map(r => <LadderRow key={r.rank} r={r} />)}
+        {tab === 'standings' && (data.ladder || []).map(r => (
+          <LadderRow key={r.rank} r={r}
+            onOpen={data.teams_visible && nav ? (row) => nav('teamview', { squadId: row.squad_id, from: 'leagues', leagueId }) : undefined} />
+        ))}
         {tab === 'matchups' && <H2H token={token} leagueId={leagueId} members={data.ladder || []} mySquadId={data.my_squad_id} />}
         {tab === 'about' && (
           <div>
