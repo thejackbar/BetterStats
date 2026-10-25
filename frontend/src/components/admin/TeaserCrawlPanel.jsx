@@ -74,6 +74,7 @@ export default function TeaserCrawlPanel() {
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [loadErr, setLoadErr] = useState('')
+  const [pullCount, setPullCount] = useState('100')   // 'all' or a number
 
   const load = useCallback(async () => {
     try {
@@ -131,6 +132,29 @@ export default function TeaserCrawlPanel() {
       setMsg('Switched off. Nothing more is pulled once the club in flight finishes.')
       await load()
     } catch (e) { setErr(e.message || 'Could not switch it off.') } finally { setBusy('') }
+  }
+
+  // Pulled clubs that are not due yet: the ones "Pull now" can bring forward.
+  const pullable = Math.max(0, (p.with_snapshot || 0) - Math.max(0, (p.due || 0) - (p.never_pulled || 0)))
+  const pullN = pullCount === 'all' ? pullable : Math.min(Number(pullCount), pullable)
+  const pull = async () => {
+    if (!pullN) return
+    const calls = Math.round(pullN * (p.avg_calls || 0))
+    const hrs = st.rate > 0 && calls ? (calls / st.rate / 3600).toFixed(1) : null
+    if (!window.confirm(
+      `Pull ${num(pullN)} club${pullN === 1 ? '' : 's'} from Cricket Australia again now`
+      + (calls ? `? That is about ${num(calls)} calls` : '?')
+      + (hrs ? `, roughly ${hrs} hours at ${st.rate} a second.` : '.')
+      + ' Clubs pulled longest ago go first. Press Stop crawling above to halt it.')) return
+    setBusy('pull'); setMsg(''); setErr('')
+    try {
+      const r = await api.mktTeaserRefresh(pullCount === 'all' ? null : Number(pullCount))
+      setMsg(`${num(r.marked)} club${r.marked === 1 ? '' : 's'} marked due. `
+        + (r.stopped ? 'The crawler is stopped, so they start when you press Start crawling.'
+           : !st.in_hours ? 'They start when the crawl hours open.'
+           : 'The crawler picks them up within seconds.'))
+      await load()
+    } catch (e) { setErr(e.message || 'Could not start the pull.') } finally { setBusy('') }
   }
 
   const img = st.images
@@ -221,6 +245,21 @@ export default function TeaserCrawlPanel() {
             {' '}{est.rate_to_finish_in_one_window} a second would finish it inside one window.
           </p>
         ) : (st.rate > 0 && p.due > 0 ? <p>No estimate until at least one club has been pulled.</p> : null)}
+        {st.rate > 0 && (
+          <div className="flex flex-wrap items-center gap-2 pt-1" data-testid="teaser-pull">
+            <span>Pull again now:</span>
+            <select className={`${INPUT} !w-auto`} data-testid="teaser-pull-count" value={pullCount}
+                    onChange={(e) => setPullCount(e.target.value)}>
+              {[100, 500, 1000].filter((n) => n < pullable).map((n) => (
+                <option key={n} value={String(n)}>{`${num(n)} oldest`}</option>
+              ))}
+              <option value="all">{`All ${num(pullable)} pulled`}</option>
+            </select>
+            <button className={BTN} data-testid="teaser-pull-go" disabled={busy !== '' || !pullN} onClick={pull}>
+              {busy === 'pull' ? '...' : 'Pull now'}
+            </button>
+          </div>
+        )}
         {img && (
           <div className="flex flex-wrap items-center gap-2 pt-1" data-testid="teaser-images">
             <p>

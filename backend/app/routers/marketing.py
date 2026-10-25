@@ -93,6 +93,27 @@ async def _images_block(db: AsyncSession) -> dict:
                      if last else None)}
 
 
+class RefreshBody(BaseModel):
+    limit: Optional[int] = None    # None = every pulled club; else the oldest N
+
+
+@router.post("/teaser/refresh")
+async def teaser_refresh(body: RefreshBody, db: AsyncSession = Depends(get_db),
+                         _=Depends(require_super_admin)):
+    """Pull pulled clubs again now: marks them due so the paced worker takes
+    them at its own rate and hours (an ad hoc crawl, not a second unpaced
+    one). Refused while the crawl is off, since nothing would take them."""
+    from app.services import club_teaser as ct
+    from app.services import platform_settings as ps
+    if body.limit is not None and not (1 <= body.limit <= 10000):
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 10000, or left out for every club")
+    if await ps.get_club_teaser_rate(db) <= 0:
+        raise HTTPException(status_code=409, detail="The crawl is off. Set a rate and save before pulling clubs.")
+    modes = await ps.get_club_teaser_type_modes(db)
+    out = await ct.refresh_now(db, limit=body.limit, type_modes=modes)
+    return {**out, "stopped": await cd.is_crawl_paused(db)}
+
+
 class RenderBody(BaseModel):
     limit: int = 50
 

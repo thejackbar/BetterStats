@@ -1589,6 +1589,8 @@ export const api = {
   mktTeaserStatus: () => request('/club-admin/marketing/teaser/status'),
   mktTeaserRender: (limit) =>
     request('/club-admin/marketing/teaser/render', { method: 'POST', body: JSON.stringify({ limit }) }),
+  mktTeaserRefresh: (limit) =>
+    request('/club-admin/marketing/teaser/refresh', { method: 'POST', body: JSON.stringify({ limit }) }),
   mktCrawlControl: (paused) =>
     request('/club-admin/marketing/crawl/control', { method: 'POST', body: JSON.stringify({ paused }) }),
   mktCrawl: (limit) =>

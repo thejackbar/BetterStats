@@ -37,7 +37,7 @@ const RUNNING = status({ state: 'running', rate: 2, estimate: { calls: 101500, h
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
 async function open({ initial = status(), width = 1400, refuse = null, pack = null } = {}) {
-  const renders = [], packReqs = []
+  const renders = [], packReqs = [], refreshes = []
   const ctx = await browser.newContext({ viewport: { width, height: 1400 } })
   const page = await ctx.newPage()
   const errors = [], patches = []
@@ -67,6 +67,13 @@ async function open({ initial = status(), width = 1400, refuse = null, pack = nu
                estimate: rate ? RUNNING.estimate : null }
       return json({})
     }
+    if (/marketing\/teaser\/refresh/.test(p) && req.method() === 'POST') {
+      const body = JSON.parse(req.postData() || '{}')
+      refreshes.push(body)
+      const marked = body.limit ?? 3653
+      live = { ...live, progress: { ...live.progress, due: marked } }
+      return json({ marked, eligible: 3653, stopped: !!live.stopped })
+    }
     if (/marketing\/teaser\/render/.test(p) && req.method() === 'POST') {
       renders.push(JSON.parse(req.postData() || '{}'))
       live = { ...live, images: { ...live.images, running: true } }
@@ -94,7 +101,7 @@ async function open({ initial = status(), width = 1400, refuse = null, pack = nu
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
   await panel(page).waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
   await page.waitForTimeout(500)
-  return { page, ctx, errors, patches, renders, packReqs, dialogs, setLive: (s) => { live = s },
+  return { page, ctx, errors, patches, renders, refreshes, packReqs, dialogs, setLive: (s) => { live = s },
            setAccept: (v) => { acceptDialog = v } }
 }
 
@@ -157,6 +164,52 @@ const attr = async (l, a) => (await l.count() ? await l.first().getAttribute(a) 
   const { page, ctx } = await open({ initial: NONE })
   ck('no pull yet reads "none yet", not a date', /Last club retrieved:\s*none yet/.test(await textOf(t(page, 'teaser-last-retrieved'))))
   ck('a crawler that has not reported says so', /has not reported since the server last restarted/.test(await textOf(t(page, 'teaser-worker'))))
+  await ctx.close()
+}
+
+// ---- 1c. Pull now: an ad hoc crawl, by marking pulled clubs due ------------------
+{
+  const CAUGHT = status({
+    state: 'idle', rate: 5.05,
+    progress: { ...PROGRESS, targets: 3653, with_snapshot: 3653, never_pulled: 0, due: 0, avg_calls: 24.5 },
+  })
+  const { page, ctx, refreshes, dialogs, setAccept, errors } = await open({ initial: CAUGHT })
+  setAccept(false)
+  const sel = t(page, 'teaser-pull-count')
+  ck('there is a Pull now control while the crawl is on', await t(page, 'teaser-pull-go').count() === 1)
+  ck('it offers the oldest 100, 500 and 1,000, and all 3,653',
+     (await sel.locator('option').allInnerTexts()).join('|') === '100 oldest|500 oldest|1,000 oldest|All 3,653 pulled')
+  await press(t(page, 'teaser-pull-go'))
+  await page.waitForTimeout(300)
+  ck('it asks first, with the calls and hours, and sends nothing when declined',
+     dialogs.length === 1 && /Pull 100 clubs/.test(dialogs[0]) && /about 2,450 calls/.test(dialogs[0]) && refreshes.length === 0, dialogs.join(' | '))
+  setAccept(true)
+  await press(t(page, 'teaser-pull-go'))
+  await page.waitForTimeout(400)
+  ck('accepting sends exactly one request, for 100 clubs', refreshes.length === 1 && refreshes[0].limit === 100, JSON.stringify(refreshes))
+  ck('and the panel says 100 clubs were marked and the crawler picks them up',
+     /100 clubs marked due\. The crawler picks them up within seconds/.test(await textOf(t(page, 'teaser-msg'))), await textOf(t(page, 'teaser-msg')))
+  if (await sel.count()) await sel.selectOption('all')
+  await press(t(page, 'teaser-pull-go'))
+  await page.waitForTimeout(400)
+  ck('choosing All sends a null limit (every club), not a number', refreshes.length === 2 && refreshes[1].limit === null, JSON.stringify(refreshes))
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+{
+  const OFF = status({ state: 'off', rate: 0 })
+  const { page, ctx } = await open({ initial: OFF })
+  ck('while the crawl is off there is no Pull now control (nothing would take the clubs)', await t(page, 'teaser-pull-go').count() === 0)
+  await ctx.close()
+}
+{
+  const STOPPED = status({ state: 'stopped', rate: 2, stopped: true,
+    progress: { ...PROGRESS, with_snapshot: 3653, targets: 3653, never_pulled: 0, due: 0 } })
+  const { page, ctx } = await open({ initial: STOPPED })
+  await press(t(page, 'teaser-pull-go'))
+  await page.waitForTimeout(400)
+  ck('when the crawler is stopped the message says it starts on Start crawling',
+     /start when you press Start crawling/.test(await textOf(t(page, 'teaser-msg'))), await textOf(t(page, 'teaser-msg')))
   await ctx.close()
 }
 
