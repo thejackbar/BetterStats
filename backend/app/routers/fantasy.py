@@ -35,7 +35,7 @@ from app.models.db import (
     FantasySeason, FantasyLeague, FantasyLeagueMember, FantasyRound, FantasyPoolPlayer,
     FantasyManager, FantasySquad, FantasySquadPlayer, FantasyDraft, FANTASY_ROLES,
 )
-from app.services import fantasy_engine, fantasy_draft, fantasy_pool_check, fantasy_grades, fantasy_pricing, fantasy_live
+from app.services import fantasy_engine, fantasy_draft, fantasy_pool_check, fantasy_grades, fantasy_pricing, fantasy_live, fantasy_realign
 from app.routers import public_fantasy
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
 from app.services.session_safety import rollback_keeping
@@ -1113,6 +1113,38 @@ async def list_rounds(season_id: str, club=Depends(get_current_club), db: AsyncS
             for r in rows
         ]
     }
+
+
+@router.get("/season/{season_id}/rounds/realign")
+async def realign_plan(season_id: str, refresh: bool = False, club=Depends(get_current_club),
+                       db: AsyncSession = Depends(get_db), _=_require):
+    """Scored rounds whose stored dates differ from what the draw now gives for that round, and whether
+    they can be put right automatically (read only). ``refresh`` reads the draw fresh."""
+    fs = await _load_season(db, club, season_id)
+    return await fantasy_realign.plan(db, fs, refresh=refresh)
+
+
+@router.post("/season/{season_id}/rounds/realign")
+async def realign_apply(season_id: str, club=Depends(get_current_club), user=Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db), _=_require):
+    """Put those rounds on the draw's dates: unsettle, move, settle again. All or nothing, and refused
+    while any manager activity hangs off a round that would change."""
+    fs = await _load_season(db, club, season_id)
+    try:
+        res = await fantasy_realign.apply(db, fs, by=getattr(user, "username", None))
+        await db.commit()
+    except fantasy_realign.NothingToRealign:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Every scored round already matches the draw.")
+    except fantasy_realign.RealignBlocked as e:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail={"message": "A round that would change has manager activity on it, so it was left alone.",
+                                                      "plan": e.plan})
+    except Exception as e:
+        await db.rollback()
+        logger.error("Fantasy realign failed for season %s: %s", season_id, e)
+        raise HTTPException(status_code=500, detail="Couldn't realign the rounds. Nothing was changed.")
+    return res
 
 
 class RoundLock(BaseModel):

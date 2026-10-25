@@ -4102,6 +4102,10 @@ export const api = {
   fantasyViewAs: (managerId) =>
     request('/club-admin/fantasy/view-as', { method: 'POST', body: JSON.stringify({ manager_id: managerId }) }),
   superFantasyCompetitions: () => request('/club-admin/fantasy/super/competitions'),
+  fantasyRealignPlan: (seasonId, refresh = false) =>
+    request(`/club-admin/fantasy/season/${seasonId}/rounds/realign${refresh ? '?refresh=true' : ''}`),
+  fantasyRealignApply: (seasonId) =>
+    request(`/club-admin/fantasy/season/${seasonId}/rounds/realign`, { method: 'POST' }),
   fantasySyncScores: (seasonId) =>
     request(`/club-admin/fantasy/season/${seasonId}/sync-scores`, { method: 'POST' }),
   fantasySettleDue: (seasonId) =>

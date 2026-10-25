@@ -345,19 +345,11 @@ def _group_rounds(spans: list[tuple[date, date]]) -> list[tuple[date, date]]:
     return rounds
 
 
-async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> dict:
-    """Group the season-year's matches into rounds (a club weekend = one ISO
-    week; a two-day match spanning two weeks is ONE round, see ``_group_rounds``)
-    and upsert ``fantasy_rounds``. Idempotent on round_number; never rewrites a
-    round already marked ``scored``. Rounds beyond the new count that nobody has
-    scored, picked for or drawn against are removed, so a regenerate that merges
-    weeks does not leave stale rounds behind.
-
-    Dates come from two places, merged: games already stored (played, synced,
-    manual) and the live Play-Cricket calendar for the season's grades (upcoming
-    and just-played matches not synced yet). Returns ``{rounds, from_games,
-    from_calendar, grades_checked, detail}``; ``detail`` is a plain sentence the
-    admin screen shows, and explains a zero."""
+async def draw_windows(session: AsyncSession, fs, refresh: bool = False):
+    """What the club's games and the live Play-Cricket draw say the rounds are, read only:
+    ``(windows, game_dates, cal_days, grades_checked, cal_starts)`` where ``windows`` is
+    ``[(first_day, last_day)]`` in order (see ``_group_rounds``). Shared by ``generate_rounds`` and
+    the realign plan (``services/fantasy_realign``), so the two cannot disagree."""
     grades = await _grade_scope(session, fs)
     rows = await session.execute(
         text(f"""
@@ -377,9 +369,25 @@ async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> d
     except Exception:
         logger.exception("fantasy: live calendar read failed for season %s", fs.id)
         cal_spans, grades_checked, cal_starts = [], 0, {}
-
     cal_days = {d for a, b in cal_spans for d in (a, b)}
     windows = _group_rounds(cal_spans + [(d, d) for d in game_dates])
+    return windows, game_dates, cal_days, grades_checked, cal_starts
+
+
+async def generate_rounds(session: AsyncSession, fs, refresh: bool = False) -> dict:
+    """Group the season-year's matches into rounds (a club weekend = one ISO
+    week; a two-day match spanning two weeks is ONE round, see ``_group_rounds``)
+    and upsert ``fantasy_rounds``. Idempotent on round_number; never rewrites a
+    round already marked ``scored``. Rounds beyond the new count that nobody has
+    scored, picked for or drawn against are removed, so a regenerate that merges
+    weeks does not leave stale rounds behind.
+
+    Dates come from two places, merged: games already stored (played, synced,
+    manual) and the live Play-Cricket calendar for the season's grades (upcoming
+    and just-played matches not synced yet). Returns ``{rounds, from_games,
+    from_calendar, grades_checked, detail}``; ``detail`` is a plain sentence the
+    admin screen shows, and explains a zero."""
+    windows, game_dates, cal_days, grades_checked, cal_starts = await draw_windows(session, fs, refresh)
     result = {
         "rounds": len(windows), "from_games": len(game_dates),
         "from_calendar": len(cal_days), "grades_checked": grades_checked,

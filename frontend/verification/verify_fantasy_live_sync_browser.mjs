@@ -41,7 +41,7 @@ const ROUNDS = (live_sync, ended = false) => ({
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function openPage({ width = 1440, syncReply, liveSync = true, ended = false } = {}) {
+async function openPage({ width = 1440, syncReply, liveSync = true, ended = false, realignPlan = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1100 } })
   const page = await ctx.newPage()
   const errors = [], calls = []
@@ -66,6 +66,15 @@ async function openPage({ width = 1440, syncReply, liveSync = true, ended = fals
       })
     }
     if (path === '/club-admin/fantasy/season/s1/rounds') return json(route, ROUNDS(liveOn, ended))
+    if (path === '/club-admin/fantasy/season/s1/rounds/realign' && method === 'GET') {
+      calls.push('GET realign')
+      return json(route, realignPlan || { changes: [], can_apply: false, draw_rounds: 3 })
+    }
+    if (path === '/club-admin/fantasy/season/s1/rounds/realign' && method === 'POST') {
+      calls.push('POST realign')
+      realignPlan = null
+      return json(route, { realigned: [{ round_number: 2 }, { round_number: 3 }] })
+    }
     if (path === '/club-admin/fantasy/season/s1/sync-scores' && method === 'POST') {
       calls.push('POST sync-scores')
       return json(route, syncReply)
@@ -137,11 +146,11 @@ const flashText = async (page) => (await page.locator('div.rounded.bg-pb-accent\
   calls.length = 0
   await page.getByRole('button', { name: 'Turn off' }).click()
   await page.waitForSelector('text=Live scoring off')
-  ck('Turn off sends exactly {live_sync:false} to the rules route', calls.length === 1 && calls[0] === 'PATCH rules {"live_sync":false}', calls.join(' | '))
+  ck('Turn off sends exactly {live_sync:false} to the rules route', calls.filter(c => c.startsWith('PATCH')).join('|') === 'PATCH rules {"live_sync":false}', calls.join(' | '))
   calls.length = 0
   await page.getByRole('button', { name: 'Turn on' }).click()
   await page.waitForSelector('text=Live scoring on')
-  ck('Turn on sends {live_sync:true}', calls[0] === 'PATCH rules {"live_sync":true}', calls.join(' | '))
+  ck('Turn on sends {live_sync:true}', calls.filter(c => c.startsWith('PATCH')).join('|') === 'PATCH rules {"live_sync":true}', calls.join(' | '))
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }
@@ -175,6 +184,49 @@ const flashText = async (page) => (await page.locator('div.rounded.bg-pb-accent\
   await page.waitForSelector('text=Checked 2 games in play')
   ck('which sends the same sync request', /Checked 2 games in play\. 4 players moved/.test(await flashText(page)))
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/fantasy_live_admin_between_rounds.png`, fullPage: true })
+  await ctx.close()
+}
+
+// ── 2c. Rounds that disagree with the draw ────────────────────────────────────
+const PLAN = (blockers = []) => ({
+  draw_rounds: 12, can_apply: blockers.length === 0,
+  changes: [
+    { round_id: 'r2', round_number: 2, kind: 'widen', status: 'scored', stored: ['2026-10-10', '2026-10-11'], draw: ['2026-10-10', '2026-10-18'], blockers: [] },
+    { round_id: 'r3', round_number: 3, kind: 'replace', status: 'scored', stored: ['2026-10-17', '2026-10-18'], draw: ['2026-10-24', '2026-11-01'], blockers },
+  ],
+})
+{
+  const { page, ctx, calls } = await openPage({ realignPlan: PLAN(), syncReply: {} })
+  const box = page.getByTestId('realign')
+  await box.waitFor({ timeout: 15000 })
+  const t = await box.innerText()
+  ck('the screen says the draw has changed and what each round is stored as against the draw',
+     /draw has changed since these rounds were scored/.test(t) && /Round 3 is stored as 17 Oct to 18 Oct\. The draw has it as 24 Oct to 1 Nov\./.test(t)
+     && /Round 2 is stored as 10 Oct to 11 Oct\. The draw has it as 10 Oct to 18 Oct\./.test(t), t)
+  ck('it offers Fix round dates', (await box.getByRole('button', { name: 'Fix round dates' }).count()) === 1)
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/fantasy_realign_notice_before.png`, fullPage: true })
+  calls.length = 0
+  await box.getByRole('button', { name: 'Fix round dates' }).click()
+  await page.waitForSelector('text=Moved 2 rounds to the draw')
+  ck('pressing it asks first, describing both rounds, then sends exactly one POST',
+     calls[0]?.startsWith('dialog:Move these rounds to the draw') && calls.filter(c => c === 'POST realign').length === 1, calls.join(' | '))
+  await page.waitForTimeout(300)
+  ck('and once fixed the notice is gone', (await page.getByTestId('realign').count()) === 0)
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/fantasy_realign_notice.png`, fullPage: true })
+  await ctx.close()
+}
+{
+  const { page, ctx, calls } = await openPage({ realignPlan: PLAN(['2 teams played a chip or made transfers for it']), syncReply: {} })
+  const box = page.getByTestId('realign')
+  await box.waitFor({ timeout: 15000 })
+  const t = await box.innerText()
+  ck('a round with manager activity is left alone, with the reason, and no button',
+     /Left alone, because 2 teams played a chip or made transfers for it/.test(t) && (await box.getByRole('button').count()) === 0, t)
+  await ctx.close()
+}
+{
+  const { page, ctx } = await openPage({ syncReply: {} })
+  ck('when the rounds match the draw there is no notice', (await page.getByTestId('realign').count()) === 0)
   await ctx.close()
 }
 

@@ -19,6 +19,8 @@ const toInput = (iso) => {
 
 const fmtTime = (iso) => new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+const fmtDay = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
+const fmtSpan = ([a, b]) => (!b || a === b ? fmtDay(a) : `${fmtDay(a)} to ${fmtDay(b)}`)
 
 function LockCell({ r, onChanged, flash, fail }) {
   const [editing, setEditing] = useState(false)
@@ -63,6 +65,7 @@ export default function FantasyHome() {
   const [msg, setMsg] = useState(null)
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState('')
+  const [realign, setRealign] = useState(null)   // scored rounds whose dates disagree with the draw
   const [year, setYear] = useState(new Date().getFullYear())
 
   const flash = (m) => { setMsg(m); setErr(null); setTimeout(() => setMsg(null), Math.max(4000, String(m).length * 90)) }
@@ -76,7 +79,8 @@ export default function FantasyHome() {
       if (d.season) {
         const r = await api.fantasyListRounds(d.season.id).catch(() => ({ rounds: [] }))
         setRounds(r.rounds)
-      }
+        setRealign(await api.fantasyRealignPlan(d.season.id).catch(() => null))
+      } else setRealign(null)
     } catch (e) { fail(e) } finally { setLoading(false) }
   }, [])
 
@@ -97,6 +101,13 @@ export default function FantasyHome() {
     if (!r.players_moved) return `Checked ${plural(r.games_checked, 'game')} in play. No scores have changed since the last look.`
     return `Checked ${plural(r.games_checked, 'game')} in play. ${plural(r.players_moved, 'player')} moved. These points are running scores until the round is confirmed.`
   })
+  const fixDates = async () => {
+    const lines = realign.changes.map(c => `Round ${c.round_number}: ${fmtSpan(c.stored)} becomes ${fmtSpan(c.draw)}`).join('\n')
+    if (!window.confirm(`Move these rounds to the draw's dates?\n\n${lines}\n\nA round that only gets longer is scored again with its extra games. A round that moves to different games is taken back out of settlement first and shows running points. Nothing a manager did is changed.`)) return
+    setBusy('realign'); setErr(null)
+    try { const r = await api.fantasyRealignApply(season.id); flash(`Moved ${plural(r.realigned.length, 'round')} to the draw's dates.`); await load() }
+    catch (e) { fail(e) } finally { setBusy('') }
+  }
   const toggleLive = async () => {
     setBusy('live'); try { await api.fantasyUpdateRules(season.id, { live_sync: !(season.rules?.live_sync !== false) }); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
@@ -217,6 +228,23 @@ export default function FantasyHome() {
           {/* Rounds */}
           <div className="pb-card p-5">
             <h3 className="font-display font-bold mb-3">Rounds {rounds ? `(${rounds.length})` : ''}</h3>
+            {realign?.changes?.length > 0 && (
+              <div className="mb-4 rounded bg-amber-500/10 text-amber-400 px-4 py-3 text-sm space-y-2" data-testid="realign">
+                <p className="font-medium">The draw has changed since these rounds were scored.</p>
+                <p className="text-xs">A game outside every round's dates scores for nobody, and Sync scores can't help it.</p>
+                <ul className="text-xs space-y-1">
+                  {realign.changes.map(c => (
+                    <li key={c.round_id}>
+                      Round {c.round_number} is stored as {fmtSpan(c.stored)}. The draw has it as {fmtSpan(c.draw)}.
+                      {c.blockers?.length > 0 && <span className="block text-pb-faint">Left alone, because {c.blockers.join(', and ')}.</span>}
+                    </li>
+                  ))}
+                </ul>
+                {realign.can_apply
+                  ? <div><Btn onClick={fixDates} busy={busy === 'realign'}>Fix round dates</Btn></div>
+                  : <p className="text-xs text-pb-faint">These can't be moved automatically while managers' choices hang off them.</p>}
+              </div>
+            )}
             {!rounds?.length ? (
               <p className="text-sm text-pb-faint">No rounds yet. Click “Generate rounds”.</p>
             ) : (
