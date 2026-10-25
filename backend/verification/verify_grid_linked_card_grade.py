@@ -56,8 +56,10 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 ORG, OPP = uuid.uuid4(), uuid.uuid4()
 SEASON = uuid.uuid4()
 CA_GRADE, CLUB_GRADE = uuid.uuid4(), uuid.uuid4()
-P = {k: uuid.uuid4() for k in ("LINKED", "CARDONLY", "UNLINKED", "MIXED")}
-NAMES = {"LINKED": "Linked, Lee", "CARDONLY": "Cardonly, Cam", "UNLINKED": "Unlinked, Uma", "MIXED": "Mixed, Max"}
+P = {k: uuid.uuid4() for k in ("LINKED", "CARDONLY", "UNLINKED", "MIXED", "SHADOW", "WRONG", "OTHER", "STRANGER")}
+WOMEN_GRADE = uuid.uuid4()
+NAMES = {"LINKED": "Linked, Lee", "CARDONLY": "Cardonly, Cam", "UNLINKED": "Unlinked, Uma", "MIXED": "Mixed, Max",
+         "SHADOW": "Shadow, Sam", "WRONG": "Wrong, Wes", "OTHER": "Other, Ola", "STRANGER": "Stranger, Stu"}
 CA_NAME, CLUB_NAME = "NEJCA - U/14 Division 3", "U14 Knights"
 _day = 0
 
@@ -71,20 +73,21 @@ async def seed() -> None:
         for oid, nm, slug in ((ORG, "Linked Club", "linked"), (OPP, "Opposition CC", "opp")):
             await ex("INSERT INTO organisations (id, name, slug, is_active) VALUES (:i, :n, :s, true)", i=oid, n=nm, s=slug)
         await ex("INSERT INTO seasons (id, organisation_id, name, year) VALUES (:i, :o, 'Summer 2025/26', 2025)", i=SEASON, o=ORG)
-        for gid, nm in ((CA_GRADE, CA_NAME), (CLUB_GRADE, CLUB_NAME)):
+        for gid, nm in ((CA_GRADE, CA_NAME), (CLUB_GRADE, CLUB_NAME), (WOMEN_GRADE, "Women 1st Grade")):
             await ex("INSERT INTO grades (id, season_id, name, grassroots_id, category, categories) "
                      "VALUES (:i, :s, :n, :g, 'junior', ARRAY['junior'])", i=gid, s=SEASON, n=nm, g=str(gid))
         for k, pid in P.items():
             await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, status) VALUES (:i, :o, :n, :g, 'active')",
                      i=pid, o=ORG, n=NAMES[k], g=str(pid))
 
-        async def synced_game() -> uuid.UUID:
+        async def synced_game(grade=CA_GRADE, day=None) -> uuid.UUID:
             global _day
             _day += 7
             gid = uuid.uuid4()
+            day = _day if day is None else day
             await ex("INSERT INTO games (id, grade_id, played_at, result, home_org_id, away_org_id, match_format, status) "
                      "VALUES (:i, :g, :d, 'WIN', :o, :x, 'One Day', 'COMPLETED')",
-                     i=gid, g=CA_GRADE, d=date(2025, 10, 4) + timedelta(days=_day), o=ORG, x=OPP)
+                     i=gid, g=grade, d=date(2025, 10, 4) + timedelta(days=day), o=ORG, x=OPP)
             return gid
 
         async def card(key, link=None, played_at=None) -> uuid.UUID:
@@ -133,6 +136,35 @@ async def seed() -> None:
             await card("MIXED", link=g)
         await card("MIXED")
         await ca_claim("MIXED", 2)
+
+        # A fixture between two sides of the same club: ONE synced game, the club holds a card for each side. Only one
+        # card can link to it, so the other side's player has no game to link to.
+        async def same_club_fixture(key, d_link_to=None):
+            g = await synced_game()
+            day = _day
+            await named("OTHER", g)
+            await named(key, g)
+            await card("OTHER", link=g, played_at=date(2025, 10, 4) + timedelta(days=day))
+            return await card(key, link=d_link_to, played_at=date(2025, 10, 4) + timedelta(days=day + 1))
+
+        # SHADOW: 2 ordinary linked matches and the player's side of a same-club fixture, left with no link.
+        for _ in range(2):
+            g = await synced_game()
+            await named("SHADOW", g)
+            await card("SHADOW", link=g)
+        await same_club_fixture("SHADOW")
+        await ca_claim("SHADOW", 3)
+        # WRONG: the same, but the side's card was linked to an unrelated Women's game.
+        for _ in range(2):
+            g = await synced_game()
+            await named("WRONG", g)
+            await card("WRONG", link=g)
+        wrong = await synced_game(grade=WOMEN_GRADE)
+        await named("WRONG", wrong)
+        await same_club_fixture("WRONG", d_link_to=wrong)
+        await ca_claim("WRONG", 3)
+        # STRANGER: an unlinked card on the same day, but not named in the hidden game. Nothing ties it to it.
+        await card("STRANGER", played_at=date(2025, 10, 4) + timedelta(days=_day))
         await s.commit()
 
 
@@ -188,6 +220,24 @@ async def main() -> None:
     print("\n-- AN UNLINKED PAIR IS STILL TWO COPIES, until a person links it --")
     g = await grid("UNLINKED")
     check("a card and a CA game nothing links count twice (Card review's Possible doubles finds them)", g["grid_matches"] == 2, str(g["grid_matches"]))
+
+    print("\n-- A SAME-CLUB FIXTURE: THE SIDE WITHOUT A LINK IS THE GAME THE OTHER SIDE'S CARD HIDES --")
+    for key, what in (("SHADOW", "no link"), ("WRONG", "a link to an unrelated Women's game")):
+        g = await grid(key)
+        check(f"{key} ({what}): 3 matches in one CA cell, not 4", g["grid_matches"] == 3
+              and g["season_rows"][0]["grades"] == {CA_NAME: 3}, f"{g['grid_matches']} {g['season_rows'][0]['grades']}")
+        # The profile header's own base also adds a card nothing links onto the season total CA gave (the view's
+        # `manual_game` branch), which is a separate rule this suite leaves alone, so only the linked-to-wrong
+        # case is read through the header here.
+        check(f"{key}: the board reads the same 3", await board(key) == 3, str(await board(key)))
+        if key == "WRONG":
+            check("WRONG: the profile header reads 3", await header(key) == 3, str(await header(key)))
+    g = await grid("OTHER")
+    check("the other side's player (the card that hides the game holds them) reads 2 (one per fixture) under CA's grade",
+          g["grid_matches"] == 2 and g["season_rows"][0]["grades"] == {CA_NAME: 2}, str(g["season_rows"][0]["grades"]))
+    g = await grid("STRANGER")
+    check("a card on that day for a player the hidden game does not name keeps its own grade",
+          g["grid_matches"] == 1 and g["season_rows"][0]["grades"] == {CLUB_NAME: 1}, str(g["season_rows"][0]["grades"]))
 
     await engine.dispose()
     print(f"\n{PASS} passed, {FAIL} failed")

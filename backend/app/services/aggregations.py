@@ -1946,6 +1946,29 @@ def _grid_appearances(rels: dict) -> str:
                 SELECT ga.player_id, ga.game_id FROM {rels['ga']} ga
                 WHERE ga.player_id = ANY(CAST(:pids AS uuid[]))
                   AND """ + _APPEARANCE_PLAYED + """
+            )""" + _grid_shadow_cte("= ANY(CAST(:pids AS uuid[]))")
+
+
+def _grid_shadow_cte(player_cond: str) -> str:
+    """Games a player is named in that a card without them has displaced.
+
+    A fixture between two sides of the same club is ONE synced game holding one side, and
+    the club holds a card for each side. Only one card can link to the game, so the other
+    side's players lose it from the views and their own side's card is left with no twin.
+    `shadow` lists, per player, the hidden game, its grade and the card that hides it, only
+    where that card does not contain the player. A card of the player's within a few days
+    is then the same match (see `_GRID_SHADOW_JOIN`). Small: only displaced games.
+    Needs the `appearances` CTE ahead of it."""
+    return f""",
+            shadow AS (
+                SELECT DISTINCT gas.player_id, sh.id AS game_id, sh.grade_id,
+                       sh.played_at::date AS d, sc.id AS card_id
+                FROM games sh
+                JOIN manual_games sc ON sc.superseded_by_game_id = sh.id AND sc.pair_prefers_import
+                JOIN game_appearances gas ON gas.game_id = sh.id AND gas.player_id {player_cond}
+                                         AND gas.is_reserve IS NOT TRUE
+                WHERE NOT EXISTS (SELECT 1 FROM appearances a2
+                                  WHERE a2.player_id = gas.player_id AND a2.game_id = sc.id)
             )"""
 
 
@@ -1963,6 +1986,25 @@ _GRID_TWIN_JOINS = """
 _GRID_GR_JOIN = (_GRID_TWIN_JOINS
                  + "\n            JOIN grades gr ON gr.id = CASE WHEN ts_tw.id IS NOT NULL"
                  " THEN tg_tw.id ELSE g.grade_id END")
+
+# Where the player's own side of a same-club fixture has no link (its game is hidden behind
+# the other side's card), the card is still that game: a card of theirs within three days of a
+# game in `shadow` is filed under that game's grade, ahead of its own link. Reads `ap` and
+# `shadow`, so only the queries built on the appearances CTE use it.
+_GRID_SHADOW_JOIN = """
+            LEFT JOIN LATERAL (
+                SELECT sd.grade_id FROM shadow sd
+                JOIN grades sdg ON sdg.id = sd.grade_id
+                JOIN seasons sds ON sds.id = sdg.season_id
+                                AND sds.organisation_id = CAST(:org_id AS UUID)
+                WHERE g.source = 'manual' AND sd.player_id = ap.player_id AND sd.card_id <> g.id
+                  AND ABS(sd.d - g.played_at::date) <= 3
+                ORDER BY ABS(sd.d - g.played_at::date), sd.game_id
+                LIMIT 1
+            ) sh_tw ON TRUE"""
+_GRID_GR_JOIN_AP = (_GRID_TWIN_JOINS + _GRID_SHADOW_JOIN
+                    + "\n            JOIN grades gr ON gr.id = CASE WHEN sh_tw.grade_id IS NOT NULL"
+                    " THEN sh_tw.grade_id WHEN ts_tw.id IS NOT NULL THEN tg_tw.id ELSE g.grade_id END")
 
 
 # The canonical grade name: the club's merge, then its own display name.
@@ -2049,7 +2091,7 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
                 {_GRID_GRADE_NAME} AS grade_name,
                 COUNT(DISTINCT ap.game_id) AS games
             FROM appearances ap
-            JOIN {rels['games']} g  ON g.id = ap.game_id{_GRID_GR_JOIN}{_GRID_GRADE_NAME_JOINS}
+            JOIN {rels['games']} g  ON g.id = ap.game_id{_GRID_GR_JOIN_AP}{_GRID_GRADE_NAME_JOINS}
             WHERE TRUE {club_games_clause}{season_clause_gr}{game_scope_clause}
             GROUP BY ap.player_id, gr.season_id, {_GRID_GRADE_NAME}
         """),
@@ -2113,7 +2155,7 @@ async def _grid_inputs(session: AsyncSession, player_ids: list, org_id, gc: dict
             text(f"""{appearances}
                 SELECT ap.player_id, gr.season_id AS season_id, COUNT(DISTINCT ap.game_id) AS games
                 FROM appearances ap
-                JOIN {rels['games']} g  ON g.id = ap.game_id{_GRID_GR_JOIN}
+                JOIN {rels['games']} g  ON g.id = ap.game_id{_GRID_GR_JOIN_AP}
                 WHERE TRUE {club_games_clause}{season_clause_gr}
                 GROUP BY ap.player_id, gr.season_id
             """),
@@ -2509,7 +2551,7 @@ async def get_player_team_breakdown(
                 SELECT ga.player_id, ga.game_id FROM game_appearances ga
                 WHERE ga.player_id = CAST(:pid AS UUID)
                   AND {_APPEARANCE_PLAYED}
-            )
+            ){_grid_shadow_cte("= CAST(:pid AS UUID)")}
             SELECT
                 COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
                 COUNT(DISTINCT ap.game_id) AS matches,
@@ -2518,7 +2560,7 @@ async def get_player_team_breakdown(
                 COUNT(*) FILTER (WHERE g.result = 'LOSS') AS lost,
                 COUNT(*) FILTER (WHERE g.result IN ('DRAW', 'TIE')) AS drawn
             FROM appearances ap
-            JOIN v_effective_games g  ON g.id = ap.game_id{_GRID_GR_JOIN}
+            JOIN v_effective_games g  ON g.id = ap.game_id{_GRID_GR_JOIN_AP}
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
                 WHERE gml.org_id = CAST(:org_id AS UUID)
