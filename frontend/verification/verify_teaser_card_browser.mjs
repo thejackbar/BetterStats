@@ -153,6 +153,58 @@ await section('long name', async () => {
   }
 })
 
+// Real clubs have long associations, long player names and long grade names, in
+// any combination. Every one of these must still produce a card that fits its
+// frame; a card that cannot fit is refused by the renderer, so the club ends up
+// with no picture (two clubs did on the first real batch).
+const STRESS = {
+  'a very long association': { club: { ...DATA.club, association: 'Melbourne Metropolitan Cricket Association Premier Competition Southern Region Division' } },
+  'a long lead detail': { hero: { ...DATA.hero, detail: 'average 51.4, highest score 100*, 1 hundred, 12 fifties, 3 ducks, 612 balls faced' } },
+  'long player and record names': { bowling: [{ name: 'Bartholomew Montgomery-Featherstonehaugh', wickets: 20 }, ...DATA.bowling.slice(1)],
+                                   records: [{ label: 'Most Individual Runs in a Single Innings', value: '100*', player: 'Bartholomew Montgomery-Featherstonehaugh' }] },
+  'a long grade name and a big ladder': { ladders_shown: [{ grade: "Women's Social T20 North East Georgie McElligott Shield", rank: 10, teams: 12, place: '10th' }] },
+  'everything long at once': {
+    club: { ...DATA.club, name: 'Joondalup-Kinross Cricket Club', association: 'Western Australian Suburban Cricket Association Metropolitan Competition' },
+    hero: { ...DATA.hero, value: 1234, detail: 'average 51.4, highest score 100*, 1 hundred, 12 fifties' },
+    bowling: [{ name: 'Bartholomew Montgomery-Featherstonehaugh', wickets: 20 }],
+    ladders_shown: [{ grade: "Women's Social T20 North East Georgie McElligott Shield", rank: 10, teams: 12, place: '10th' }],
+    records: [{ label: 'Most Individual Runs in a Single Innings', value: '100*', player: 'Bartholomew Montgomery-Featherstonehaugh' }] },
+}
+await section('long text in every place', async () => {
+  for (const [what, patch] of Object.entries(STRESS)) {
+    for (const fmt of Object.keys(SIZES)) {
+      const { page, ctx } = await open(fmt, { data: { ...DATA, ...patch } })
+      await ready(page)
+      const f = await fits(page)
+      ck(`${fmt}: ${what} still fits the frame`, !f.over, JSON.stringify(f))
+      await ctx.close()
+    }
+  }
+})
+
+await section('the fit', async () => {
+  const fitOf = (page) => page.locator('[data-card]').getAttribute('data-card-fit')
+  for (const fmt of Object.keys(SIZES)) {
+    const { page, ctx } = await open(fmt)
+    await ready(page)
+    ck(`${fmt}: an ordinary club is not shrunk at all (the design is unchanged for it)`, (await fitOf(page)) === '1', await fitOf(page))
+    await ctx.close()
+  }
+  const { page, ctx } = await open('feed', { data: { ...DATA, ...STRESS['a very long association'] } })
+  await ready(page)
+  const k = Number(await fitOf(page))
+  ck('a card with too much text is shrunk, a little and no further than the floor', k < 1 && k >= 0.6, String(k))
+  ck('and it is not marked ready until it has been fitted', (await page.locator('[data-card-ready="1"]').count()) === 1)
+  await ctx.close()
+  const absurd = { ...DATA, club: { ...DATA.club, name: 'X'.repeat(4000), association: 'Y'.repeat(6000) } }
+  const r = await open('feed', { data: absurd })
+  await ready(r.page)
+  const f = await fits(r.page)
+  ck('text no amount of shrinking can fit (4,000 characters) still overflows at the floor, so the renderer refuses it rather than saving a clipped card',
+     f.over && Number(await fitOf(r.page)) === 0.6, JSON.stringify(f) + ' ' + await fitOf(r.page))
+  await r.ctx.close()
+})
+
 await section('nothing flattering', async () => {
   const bare = { ...DATA, record: null, ladders_shown: [], records: [], bowling: [{ name: 'X', wickets: 2 }] }
   for (const fmt of Object.keys(SIZES)) {
