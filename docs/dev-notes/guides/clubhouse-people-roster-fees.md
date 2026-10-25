@@ -132,3 +132,4 @@
 
 - `ModuleLayout` is phone-aware (v9.109.0): below `md` a slim sticky bar plus a scrolling header, and `twoRow` actions wrap. Accounts draws cards below `md`. A new wide table on a Clubhouse screen needs the same (`hidden md:block` table plus a `md:hidden` card list).
 - Password reset: Super Users "Reset password" sets a typed password and sends no email; "Email reset link" (both screens) awaits the send and returns 502 with a reason if nothing went. The console provider counts as a failure there. Never return the reset link to the caller.
+- Xero scopes (`xero_client.SCOPES`) must be granular (`accounting.banktransactions.read`, `accounting.settings.read`); the broad `accounting.transactions*` scopes give `invalid_scope` for apps created from 2 March 2026. The error shows on Xero's page, not in our logs.

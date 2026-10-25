@@ -4,8 +4,8 @@ import { api } from '../../../lib/api'
 import { Btn } from './shared'
 
 // BetterFantasyCricket admin Overview — create the season, mint and share the
-// public link, run the engine (build pool, generate rounds, settle) and see the
-// rounds. The other tools (team make-up, scoring, the pool, registered players)
+// public link, run the engine (build pool, generate rounds, sync running scores,
+// confirm final scores) and see the rounds. The other tools (team make-up, scoring, the pool, registered players)
 // each have their own side-menu page.
 
 // Casual date-time for a round's lock time, and an editor for it. After the lock
@@ -16,6 +16,11 @@ const toInput = (iso) => {
   const d = new Date(iso), p = (n) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
 }
+
+const fmtTime = (iso) => new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+const fmtDay = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
+const fmtSpan = ([a, b]) => (!b || a === b ? fmtDay(a) : `${fmtDay(a)} to ${fmtDay(b)}`)
 
 function LockCell({ r, onChanged, flash, fail }) {
   const [editing, setEditing] = useState(false)
@@ -60,6 +65,7 @@ export default function FantasyHome() {
   const [msg, setMsg] = useState(null)
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState('')
+  const [realign, setRealign] = useState(null)   // scored rounds whose dates disagree with the draw
   const [year, setYear] = useState(new Date().getFullYear())
 
   const flash = (m) => { setMsg(m); setErr(null); setTimeout(() => setMsg(null), Math.max(4000, String(m).length * 90)) }
@@ -73,7 +79,8 @@ export default function FantasyHome() {
       if (d.season) {
         const r = await api.fantasyListRounds(d.season.id).catch(() => ({ rounds: [] }))
         setRounds(r.rounds)
-      }
+        setRealign(await api.fantasyRealignPlan(d.season.id).catch(() => null))
+      } else setRealign(null)
     } catch (e) { fail(e) } finally { setLoading(false) }
   }, [])
 
@@ -89,7 +96,23 @@ export default function FantasyHome() {
   const createSeason = run('create', () => api.fantasyCreateSeason(Number(year)), () => 'Season created.')
   const buildPool = run('pool', () => api.fantasyBuildPool(season.id), (r) => `Pool built: ${r.pool} players.`)
   const genRounds = run('rounds', () => api.fantasyGenerateRounds(season.id), (r) => r.detail || `Generated ${r.rounds} rounds.`)
-  const settleDue = run('settle', () => api.fantasySettleDue(season.id), (r) => `Settled ${r.rounds_settled} rounds` + (r.rounds_refreshed ? `, updated points for ${r.rounds_refreshed} in progress` : '') + (r.rounds_refreshed_late ? `, brought ${r.rounds_refreshed_late} recent round(s) up to date with late scorecards` : '') + '.')
+  const syncScores = run('sync', () => api.fantasySyncScores(season.id), (r) => {
+    if (!r.ran) return r.message || 'Nothing to sync right now.'
+    if (!r.players_moved) return `Checked ${plural(r.games_checked, 'game')} in play. No scores have changed since the last look.`
+    return `Checked ${plural(r.games_checked, 'game')} in play. ${plural(r.players_moved, 'player')} moved. These points are running scores until the round is confirmed.`
+  })
+  const fixDates = async () => {
+    const lines = realign.changes.map(c => `Round ${c.round_number}: ${fmtSpan(c.stored)} becomes ${fmtSpan(c.draw)}`).join('\n')
+    if (!window.confirm(`Move these rounds to the draw's dates?\n\n${lines}\n\nA round that only gets longer is scored again with its extra games. A round that moves to different games is taken back out of settlement first and shows running points. Nothing a manager did is changed.`)) return
+    setBusy('realign'); setErr(null)
+    try { const r = await api.fantasyRealignApply(season.id); flash(`Moved ${plural(r.realigned.length, 'round')} to the draw's dates.`); await load() }
+    catch (e) { fail(e) } finally { setBusy('') }
+  }
+  const toggleLive = async () => {
+    setBusy('live'); try { await api.fantasyUpdateRules(season.id, { live_sync: !(season.rules?.live_sync !== false) }); await load() }
+    catch (e) { fail(e) } finally { setBusy('') }
+  }
+  const settleDue = run('settle', () => api.fantasySettleDue(season.id), (r) => `Confirmed ${plural(r.rounds_settled, 'finished round')}` + (r.rounds_refreshed ? `, updated points for ${r.rounds_refreshed} in progress` : '') + (r.rounds_refreshed_late ? `, brought ${r.rounds_refreshed_late} recent round(s) up to date with late scorecards` : '') + '.')
   const deleteSeason = async () => {
     if (!window.confirm('Delete this fantasy season and its pool and rounds? This cannot be undone.')) return
     setBusy('delete'); setErr(null)
@@ -114,8 +137,10 @@ export default function FantasyHome() {
     try { await api.fantasyUnsettleRound(r.id); flash('Round unsettled.'); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
   }
-  const settleOne = async (rid) => {
-    setBusy(`r:${rid}`); try { const r = await api.fantasySettleRound(rid); flash(`Scored ${r.players_scored} players.`); await load() }
+  const settleOne = async (r) => {
+    const rid = r.id
+    if (r.playing && r.status !== 'scored' && !window.confirm('Games are still being played in this round. Confirm the final scores now? You can unsettle it again, and running scores carry on until then.')) return
+    setBusy(`r:${rid}`); try { const r = await api.fantasySettleRound(rid); flash(`Confirmed scores for ${plural(r.players_scored, 'player')}.`); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
   }
 
@@ -157,9 +182,21 @@ export default function FantasyHome() {
               <div className="flex flex-wrap gap-2">
                 <Btn kind="ghost" onClick={buildPool} busy={busy === 'pool'}>Build pool</Btn>
                 <Btn kind="ghost" onClick={genRounds} busy={busy === 'rounds'}>Generate rounds</Btn>
-                <Btn onClick={settleDue} busy={busy === 'settle'}>Settle due rounds</Btn>
+                <Btn onClick={syncScores} busy={busy === 'sync'}>Sync scores</Btn>
+                <Btn kind="ghost" onClick={settleDue} busy={busy === 'settle'}>Confirm finished rounds</Btn>
                 <Btn kind="ghost" onClick={deleteSeason} busy={busy === 'delete'}>Delete season</Btn>
               </div>
+            </div>
+            <div className="mt-4 border-t pb-hairline pt-3 flex flex-wrap items-center gap-2 text-xs">
+              <span className={`px-2 py-0.5 rounded ${season.rules?.live_sync !== false ? 'bg-green-500/15 text-green-400' : 'bg-pb-surface2 text-pb-faint'}`}>
+                Live scoring {season.rules?.live_sync !== false ? 'on' : 'off'}
+              </span>
+              <button onClick={toggleLive} disabled={busy === 'live'} className="px-2 py-1 rounded bg-pb-surface2 text-pb-text">
+                {season.rules?.live_sync !== false ? 'Turn off' : 'Turn on'}
+              </button>
+              <span className="text-pb-faint basis-full sm:basis-auto">
+                While a round is being played, scores refresh every 10 minutes, so managers see running points. They stay provisional until you confirm the round.
+              </span>
             </div>
             {data.link_token && (
               <div className="mt-4 border-t pb-hairline pt-3 space-y-2">
@@ -191,6 +228,23 @@ export default function FantasyHome() {
           {/* Rounds */}
           <div className="pb-card p-5">
             <h3 className="font-display font-bold mb-3">Rounds {rounds ? `(${rounds.length})` : ''}</h3>
+            {realign?.changes?.length > 0 && (
+              <div className="mb-4 rounded bg-amber-500/10 text-amber-400 px-4 py-3 text-sm space-y-2" data-testid="realign">
+                <p className="font-medium">The draw has changed since these rounds were scored.</p>
+                <p className="text-xs">A game outside every round's dates scores for nobody, and Sync scores can't help it.</p>
+                <ul className="text-xs space-y-1">
+                  {realign.changes.map(c => (
+                    <li key={c.round_id}>
+                      Round {c.round_number} is stored as {fmtSpan(c.stored)}. The draw has it as {fmtSpan(c.draw)}.
+                      {c.blockers?.length > 0 && <span className="block text-pb-faint">Left alone, because {c.blockers.join(', and ')}.</span>}
+                    </li>
+                  ))}
+                </ul>
+                {realign.can_apply
+                  ? <div><Btn onClick={fixDates} busy={busy === 'realign'}>Fix round dates</Btn></div>
+                  : <p className="text-xs text-pb-faint">These can't be moved automatically while managers' choices hang off them.</p>}
+              </div>
+            )}
             {!rounds?.length ? (
               <p className="text-sm text-pb-faint">No rounds yet. Click “Generate rounds”.</p>
             ) : (
@@ -214,11 +268,20 @@ export default function FantasyHome() {
                           <LockCell r={r} onChanged={load} flash={flash} fail={fail} />
                         </td>
                         <td className="py-1.5 pr-3">
-                          <span className={r.status === 'scored' ? 'text-pb-accent' : r.status === 'unsettled' ? 'text-amber-400' : 'text-pb-faint'}>{r.status}</span>
+                          <span className={r.status === 'scored' ? 'text-pb-accent' : r.status === 'unsettled' ? 'text-amber-400' : r.playing ? 'text-green-400' : 'text-pb-faint'}>
+                            {r.playing && r.status !== 'scored' && r.status !== 'unsettled' ? 'live' : r.syncable && r.status === 'upcoming' ? 'ended, not confirmed' : r.status}
+                          </span>
+                          {r.syncable && r.status !== 'unsettled' && (
+                            <div className="text-[11px] text-pb-faint mt-0.5 max-w-xs">
+                              {r.playing ? 'Being played now.' : 'Games are over, and the next round has not started.'}
+                              {' '}{r.live_checked_at ? `Scores last checked ${fmtTime(r.live_checked_at)}.` : 'Scores not checked yet.'}
+                              {r.status === 'scored' ? ' Confirmed already, and still follows late scorecards.' : ' Running scores until you confirm the round.'}
+                            </div>
+                          )}
                           {r.drift && (
                             <div className="text-[11px] text-amber-400 mt-0.5 max-w-xs">
                               Scorecards have changed since this was settled: {r.drift.count} player{r.drift.count === 1 ? '' : 's'} score differently now
-                              ({r.drift.players.join(', ')}{r.drift.count > r.drift.players.length ? ', …' : ''}). Press Settle to bring it up to date; it also happens overnight.
+                              ({r.drift.players.join(', ')}{r.drift.count > r.drift.players.length ? ', …' : ''}). Press Confirm final scores to bring it up to date; it also happens overnight.
                             </div>
                           )}
                         </td>
@@ -229,9 +292,15 @@ export default function FantasyHome() {
                               Unsettle
                             </button>
                           )}
-                          <button onClick={() => settleOne(r.id)} disabled={busy === `r:${r.id}`}
+                          {r.syncable && r.status !== 'unsettled' && (
+                            <button onClick={syncScores} disabled={busy === 'sync'}
+                              className="text-xs underline text-pb-accent hover:text-pb-text disabled:opacity-50 mr-3">
+                              {busy === 'sync' ? '…' : 'Sync scores'}
+                            </button>
+                          )}
+                          <button onClick={() => settleOne(r)} disabled={busy === `r:${r.id}`}
                             className="text-xs underline text-pb-faint hover:text-pb-text disabled:opacity-50">
-                            {busy === `r:${r.id}` ? '…' : 'Settle'}
+                            {busy === `r:${r.id}` ? '…' : 'Confirm final scores'}
                           </button>
                         </td>
                       </tr>

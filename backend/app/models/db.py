@@ -5763,6 +5763,9 @@ class FantasyRound(Base):
     # Club-local "HH:MM" of the earliest match on the first day (migration 360); the
     # default lock is an hour before it. NULL = the draw gave no time.
     first_start = Column(Text, nullable=True)
+    # When the live pass last read this round's games and brought its provisional points in line
+    # (migration 361). Display only; see services/fantasy_live_ddl.py.
+    live_checked_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

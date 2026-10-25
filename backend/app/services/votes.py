@@ -675,7 +675,7 @@ async def eligible_from_source(db: AsyncSession, club, fixture, source: str) -> 
     if source == "playhq":
         from app.services.lineups import our_lineup_players
         try:
-            return await our_lineup_players(db, club, str(game_id))
+            return await our_lineup_players(db, club, str(game_id), home_away=fixture.home_away)
         except Exception:
             # A live upstream fetch must never take the vote page down.
             logger.warning("vote eligibility: Play.Cricket lineup fetch failed for %s", fixture.id)

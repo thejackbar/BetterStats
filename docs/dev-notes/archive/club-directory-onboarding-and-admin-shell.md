@@ -995,7 +995,7 @@ First real run on the box: `find ... -name "*.png"` showed 116 files, and the ne
 At about 1370px the desktop link row (Home to Website) sat inside `overflow-x-auto pb-scroll`, so it grew a visible scrollbar and Website was clipped. The row needs about 535px, the logo block 230px, and the right side (220px search, theme toggle, two buttons, Powered by) about 550px, against a 1232 to 1322px container. The breakpoint for the link row moved from `md` to `xl`, the scrollbar is hidden (safety net only), search collapses to a 36px magnifier under 1360px (width 220px on focus or while it holds text), the Powered by label shows only from 1500px, and Player Dashboard became the accent-filled button. Checked in Chromium at 1024, 1180, 1280, 1366, 1440 and 1920 with the API stubbed: no link-row or page overflow at any of them; `verify_player_page_nav_browser.mjs` 27 of 27.
 
 
-## Club teaser crawl panel: last retrieved time, next due, worker heartbeat (v9.129.17, Oct 2026)
+## Club teaser crawl panel: last retrieved time, next due, worker heartbeat (v9.129.25, Oct 2026)
 
 The panel could not answer "is it running?". A crawl with nothing due reads "Caught up" and "Last hour: 0 clubs, 0 calls", which looks the same as a dead worker. After a Stop and Start it gave no sign the loop had picked up again. `teaser_progress` already returned `last_pulled_at`, but the panel never drew it, and that field is `MAX(pulled_at)`, which a failed pull also stamps.
 

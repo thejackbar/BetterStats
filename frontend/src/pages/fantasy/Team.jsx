@@ -68,22 +68,35 @@ export function Onboarding({ manager, season, startPoints, onBuild }) {
 
 export default function MyTeam({ token, manager, squad, season, round, startPoints, onChange, flash, fail, nav, desktop }) {
   const [openId, setOpenId] = useState(null)
-  const [gwPts, setGwPts] = useState(null)   // player_id -> last-round base points
+  const [gwPts, setGwPts] = useState(null)   // player_id -> points in the round shown (running while one is being played)
+  const [liveRound, setLiveRound] = useState(null)   // { number, points } while the current round is being played
   const [snapshot, setSnapshot] = useState(null)   // club-ladder snapshot for the desktop rail
   const active = season?.status === 'active'
   const locked = !!round?.locked
 
+  // Points per player: the round being played while there is one (it refreshes as the games are
+  // read), otherwise the last scored round.
   useEffect(() => {
     if (!squad) return
-    let on = true
-    api.fanRound(token).then(d => {
-      if (!on || !d?.mine?.lineup) return
+    let on = true, timer = null
+    const fromLineup = (lineup) => {
       const m = {}
-      d.mine.lineup.forEach(e => { m[e.player_id] = e.points })
-      setGwPts(m)
+      lineup.forEach(e => { m[e.player_id] = e.points })
+      return m
+    }
+    const loadScored = () => api.fanRound(token).then(d => {
+      if (!on || !d?.mine?.lineup) return
+      setGwPts(fromLineup(d.mine.lineup)); setLiveRound(null)
     }).catch(() => {})
-    return () => { on = false }
-  }, [token, squad])
+    const loadLive = () => api.fanLive(token).then(d => {
+      if (!on) return
+      if (d?.live && d.mine?.lineup) {
+        setGwPts(fromLineup(d.mine.lineup)); setLiveRound({ number: d.round?.number, points: d.mine.points })
+      } else { if (timer) { clearInterval(timer); timer = null } return loadScored() }
+    }).catch(() => {})
+    if (locked) { loadLive(); timer = setInterval(loadLive, 60000) } else loadScored()
+    return () => { on = false; if (timer) clearInterval(timer) }
+  }, [token, squad, locked])
 
   useEffect(() => {
     if (!desktop || !squad) return
@@ -99,7 +112,9 @@ export default function MyTeam({ token, manager, squad, season, round, startPoin
   const transfersOnly = active && !squad.can_rebuild
   const stats = [
     ['Total points', pts(squad.total_points)],
-    [squad.last_round ? `GW${squad.last_round.number} pts` : 'GW pts', squad.last_round ? pts(squad.last_round.points) : '—'],
+    liveRound
+      ? [`GW${liveRound.number} live`, pts(liveRound.points)]
+      : [squad.last_round ? `GW${squad.last_round.number} pts` : 'GW pts', squad.last_round ? pts(squad.last_round.points) : '—'],
     ['Overall rank', rank ? `${rank}${ord(rank)}` : '—'],
     ['Squad value', squad.value != null ? money(squad.value) : '—'],
     ['In the bank', squad.budget_remaining != null ? money(squad.budget_remaining) : '—'],

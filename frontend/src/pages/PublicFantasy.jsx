@@ -23,6 +23,7 @@ import Points from './fantasy/Points'
 import Live from './fantasy/Live'
 import Fixtures from './fantasy/Fixtures'
 import Ladder from './fantasy/Ladder'
+import TeamView from './fantasy/TeamView'
 import Leagues from './fantasy/Leagues'
 import Draft from './fantasy/Draft'
 import { PlayerProfile, Compare, StatsExplorer } from './fantasy/Players'
@@ -132,8 +133,9 @@ export default function PublicFantasy() {
       case 'points': return <Points token={token} nav={nav} desktop={desktop} />
       case 'live': return <Live token={token} nav={nav} />
       case 'fixtures': return <Fixtures token={token} season={season} nav={nav} desktop={desktop} />
-      case 'ladder': return <Ladder token={token} season={season} desktop={desktop} />
-      case 'leagues': return <Leagues token={token} flash={flash} fail={fail} desktop={desktop} />
+      case 'ladder': return <Ladder token={token} season={season} desktop={desktop} nav={nav} />
+      case 'leagues': return <Leagues token={token} flash={flash} fail={fail} desktop={desktop} nav={nav} initialLeague={params.leagueId} />
+      case 'teamview': return <TeamView token={token} squadId={params.squadId} onBack={() => nav(params.from || 'ladder', params.leagueId ? { leagueId: params.leagueId } : {})} />
       case 'draft': return <Draft token={token} flash={flash} fail={fail} />
       case 'player': return <PlayerProfile token={token} playerId={params.playerId} season={season} onBack={() => nav(params.from || 'team')} nav={nav} desktop={desktop} />
       case 'compare': return <Compare token={token} pool={pool} nav={nav} />
