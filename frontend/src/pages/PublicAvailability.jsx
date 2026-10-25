@@ -37,6 +37,28 @@ function ClubHeader({ club }) {
   )
 }
 
+// The PIN step's answer to "who is this trying to log in as?". Players who typed
+// their own mobile and were refused had very often tapped somebody else's name
+// (or arrived on a link that had someone else picked), so the name is the
+// biggest thing on the screen and the label names whose mobile is wanted.
+function SigningInAs({ player, onSwitch }) {
+  const initials = (player?.display_name || '?').trim().split(/\s+/).filter(Boolean)
+    .map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
+  return (
+    <div data-signing-in-as className="rounded-2xl border-2 p-4 mb-4 text-center"
+      style={{ borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' }}>
+      <div className="font-mono text-[11px] tracking-wide2 text-pb-faint uppercase mb-3">You are logging in as</div>
+      <span aria-hidden="true" className="mx-auto mb-2 w-14 h-14 rounded-2xl flex items-center justify-center font-display font-bold text-xl"
+        style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{initials}</span>
+      <div data-signing-in-name className="font-display font-bold text-3xl leading-tight break-words">{player?.display_name}</div>
+      <button type="button" onClick={onSwitch} data-not-you
+        className="mt-4 w-full py-2.5 rounded-xl border pb-hairline bg-pb-surface2 text-sm font-semibold hover:text-pb-accent transition-colors">
+        This isn’t me. Pick a different name
+      </button>
+    </div>
+  )
+}
+
 function Banner({ tone = 'error', children }) {
   if (!children) return null
   const color = tone === 'error' ? 'var(--pb-red)' : tone === 'ok' ? 'var(--pb-positive)' : 'var(--pb-amber)'
@@ -708,6 +730,8 @@ export default function PublicAvailability() {
         {/* Step 1 — pick your name */}
         {step === 'pick' && (
           <div>
+            <h1 className="font-display font-bold text-xl text-center mb-1">Who are you?</h1>
+            <p className="text-center text-pb-faint text-sm mb-4">Tap your own name in the list. Your mobile number is checked against that name, so it has to be yours.</p>
             <input
               autoFocus
               value={search}
@@ -741,20 +765,23 @@ export default function PublicAvailability() {
         {/* Step 2 — prove it's you */}
         {step === 'pin' && chosen && (
           <form onSubmit={submitPin}>
-            <div className="text-center mb-5">
-              <div className="text-sm text-pb-faint">Hi</div>
-              <div className="font-display font-bold text-2xl">{chosen.display_name}</div>
-            </div>
-            <Banner>{error}</Banner>
+            <SigningInAs player={chosen} onSwitch={switchPlayer} />
+            {error && (
+              <Banner>
+                <div>{error}</div>
+                <div className="mt-1.5 font-semibold">
+                  You are logging in as {chosen.display_name}. If that is not you, pick your own name.
+                </div>
+              </Banner>
+            )}
             {!chosen.has_phone ? (
               <div className="text-center text-pb-faint text-sm py-4">
-                There’s no mobile number on file for you yet. Ask your club admin to add it, or to set your availability for you.
-                <div className="mt-5"><button type="button" onClick={switchPlayer} className="text-pb-accent text-sm underline">← Pick a different name</button></div>
+                There’s no mobile number on file for {chosen.display_name} yet. Ask your club admin to add it, or to set your availability for you.
               </div>
             ) : (
               <>
-                <label className="block text-center font-mono text-[11px] tracking-wide2 text-pb-faint uppercase mb-2">
-                  Last 4 digits of your mobile
+                <label className="block text-center text-sm font-semibold mb-2">
+                  Enter the last 4 digits of <span style={{ color: 'var(--pb-accent)' }}>{chosen.display_name}’s</span> mobile
                 </label>
                 <input
                   ref={pinRef}
@@ -771,10 +798,7 @@ export default function PublicAvailability() {
                   className="w-full mt-4 py-3.5 rounded-xl font-semibold text-pb-bg transition disabled:opacity-50"
                   style={{ background: 'var(--pb-accent)' }}
                 >
-                  {verifying ? 'Checking…' : 'Continue'}
-                </button>
-                <button type="button" onClick={switchPlayer} className="block mx-auto mt-4 text-pb-faint text-sm hover:text-pb-text">
-                  ← Not you? Pick a different name
+                  {verifying ? 'Checking…' : `Log in as ${chosen.display_name}`}
                 </button>
               </>
             )}
