@@ -19,7 +19,7 @@ no free transfer is banked twice. A ``replace`` is a different round, so it is t
 and left ``upcoming``. That is refused unless NOTHING recorded by a manager hangs off it: no chip,
 transfer, hit, points, queued transfer, head-to-head result, transaction or hand-typed score, because
 re-dating it would rewrite what somebody decided. A team that joined after the round was settled never
-received the free transfer unsettling takes back, so theirs is put back. Then ``generate_rounds`` runs
+received the free transfer unsettling takes back, so theirs is put back, and a team stamped as joining in the round AFTER the replaced one (``joined_round``, the first round it scores in, set when that round was the open one) is moved back onto the replaced round, which is open again: otherwise every such team is silently skipped for it and shows 0 (``repair_joined_rounds``). Then ``generate_rounds`` runs
 for the rounds that are not scored, widened rounds are settled again, and a replaced round is settled if
 it is over or given its provisional points if it is being played. One audit entry holds the before and
 after. Nothing is committed here: the caller commits, or rolls back, as one unit.
@@ -182,5 +182,44 @@ async def apply(session: AsyncSession, fs, by: str | None = None) -> dict:
              {k: c[k] for k in ("round_number", "kind", "stored", "draw")} for c in p["changes"]],
           "undo": "Set each round's start_date and end_date back to its 'stored' dates and settle it again."})},
     )
+    # After the audit entry exists: the repair reads it, and only teams created before it.
+    fixed = await repair_joined_rounds(session, fs)
+    if fixed:
+        for rnd in replaced:
+            await session.refresh(rnd)
+            if rnd.start_date and rnd.start_date <= today and rnd.status != "scored":
+                await fantasy_engine.refresh_live_round(session, fs, rnd)
     return {"realigned": [{"round_number": c["round_number"], "from": c["stored"], "to": c["draw"]}
-                          for c in p["changes"]]}
+                          for c in p["changes"]], "teams_rejoined": fixed}
+
+
+async def repair_joined_rounds(session: AsyncSession, fs) -> int:
+    """Put teams that joined before a realignment back on the round it re-opened. Returns how many.
+
+    A team joining mid-season is stamped ``joined_round`` = the open round at the time and is never scored
+    for an earlier round. Those that joined while round N+1 was open because round N was scored have
+    ``joined_round`` N+1; when round N is replaced (a different round now, not scored) they must score
+    from N. Read from the ``fantasy_realign_rounds`` audit entries (round numbers replaced, and when), so
+    it also heals a season realigned before this existed. Only teams created BEFORE that entry (a team
+    that joined afterwards really did join at N+1), and only while round N is still not scored, so an
+    admin unsettling an older round later never re-credits a late joiner. Idempotent."""
+    entries = (await session.execute(
+        text("""SELECT created_at, details FROM audit_logs
+                WHERE action = :a AND target_id = :t ORDER BY created_at"""),
+        {"a": AUDIT_ACTION, "t": str(fs.id)})).all()
+    fixed = 0
+    for at, details in entries:
+        if isinstance(details, str):
+            details = json.loads(details)
+        for ch in (details or {}).get("changes", []):
+            if ch.get("kind") != "replace":
+                continue
+            n = int(ch["round_number"])
+            res = await session.execute(
+                text("""UPDATE fantasy_squads SET joined_round = :n
+                        WHERE fantasy_season_id = CAST(:fs AS UUID) AND joined_round = :n1 AND created_at < :at
+                          AND EXISTS (SELECT 1 FROM fantasy_rounds r WHERE r.fantasy_season_id = CAST(:fs AS UUID)
+                                      AND r.round_number = :n AND r.status <> 'scored')"""),
+                {"n": n, "n1": n + 1, "fs": str(fs.id), "at": at})
+            fixed += res.rowcount or 0
+    return fixed

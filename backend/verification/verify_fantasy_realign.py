@@ -181,8 +181,9 @@ async def seed() -> None:
         lg = FantasyLeague(id=uuid.uuid4(), fantasy_season_id=FS_ID, organisation_id=ORG, kind="global_salary_cap", name="Club ladder")
         s.add(lg)
         await s.flush()
+        # Joined while round 4 was the open round (round 3 already scored), as every Applecross manager did.
         s.add(FantasySquad(id=SQ, fantasy_season_id=FS_ID, league_id=lg.id, manager_id=MGR, organisation_id=ORG,
-                           team_name="X Team", free_transfers=1))
+                           team_name="X Team", free_transfers=1, joined_round=4))
         await s.flush()
         s.add_all([FantasySquadPlayer(squad_id=SQ, player_id=SUSH, role="batter", is_captain=True),
                    FantasySquadPlayer(squad_id=SQ, player_id=MATE, role="batter")])
@@ -337,6 +338,14 @@ async def main() -> None:
     check("a team that joined after round 3 was settled keeps its free transfer",
           (await val("SELECT free_transfers FROM fantasy_squads WHERE id=:i", i=SQ))[0] == ft0)
     check("rounds are still 1 to 4, no stray round", (await val("SELECT COUNT(*) FROM fantasy_rounds"))[0] == 4)
+    jr = (await val("SELECT joined_round FROM fantasy_squads WHERE id=:i", i=SQ))[0]
+    check("a team that joined when round 4 was open now scores from round 3, which is open again (REPORTED: it was skipped)",
+          jr == 3, str(jr))
+    srow = await val("SELECT points FROM fantasy_squad_round_scores WHERE squad_id=:s AND round_id=:r", s=SQ, r=R3)
+    check("so it has running points for round 3: captain Sushruth doubled (48) plus Mick 19 = 67",
+          srow is not None and float(srow[0]) == 67.0, str(srow))
+    tot = (await val("SELECT total_points FROM fantasy_squads WHERE id=:i", i=SQ))[0]
+    check("and its total and the ladder show them", float(tot) == 67.0, str(tot))
     audit = await val("SELECT details FROM audit_logs WHERE action = 'fantasy_realign_rounds'")
     check("one audit entry records both changes and how to undo", audit is not None and len(audit[0]["changes"]) == 2
           and "undo" in audit[0], str(audit))
@@ -353,6 +362,55 @@ async def main() -> None:
                 again = e.status_code
         check("applying again says there is nothing to do (409)", again == 409, str(again))
     check("and moved nothing", (await row(R3))[:3] == (SAT0, SUN1, "upcoming"))
+
+    print("\n-- 8. A season that was ALREADY realigned (v9.129.21) before this fix, with the stale stamp --")
+    LATE = uuid.uuid4()
+    async with Session() as s:
+        s.add(FantasyManager(id=uuid.uuid4(), organisation_id=ORG, display_name="Late"))
+        await s.flush()
+        mid = (await s.execute(text("SELECT id FROM fantasy_managers WHERE display_name='Late'"))).scalar()
+        lg = (await s.execute(text("SELECT id FROM fantasy_leagues LIMIT 1"))).scalar()
+        s.add(FantasySquad(id=LATE, fantasy_season_id=FS_ID, league_id=lg, manager_id=mid, organisation_id=ORG,
+                           team_name="Late XI", free_transfers=1, joined_round=4))
+        await s.commit()
+        # created AFTER the realign: it really did join when round 4 was open, so it keeps 4
+        await s.execute(text("UPDATE fantasy_squads SET created_at = NOW() + INTERVAL '1 minute' WHERE id=:i"), {"i": LATE})
+        await s.execute(text("UPDATE fantasy_squads SET joined_round = 4 WHERE id=:i"), {"i": SQ})
+        await s.commit()
+    if fantasy_realign is not None and hasattr(fantasy_realign, "repair_joined_rounds"):
+        async with Session() as s:
+            fs = await s.get(FantasySeason, FS_ID)
+            n = await fantasy_realign.repair_joined_rounds(s, fs)
+            await s.commit()
+        check("the repair moves the team that joined before the realign", n == 1 and (await val(
+            "SELECT joined_round FROM fantasy_squads WHERE id=:i", i=SQ))[0] == 3, str(n))
+        check("and leaves a team that joined after it", (await val("SELECT joined_round FROM fantasy_squads WHERE id=:i", i=LATE))[0] == 4)
+        async with Session() as s:
+            fs = await s.get(FantasySeason, FS_ID)
+            again = await fantasy_realign.repair_joined_rounds(s, fs)
+        check("a second run changes nothing", again == 0, str(again))
+    else:
+        check("the repair exists", False, "repair_joined_rounds missing")
+
+    print("\n-- 9. Pressing Sync scores on that already-realigned season heals it and shows the running points --")
+    async def no_card(*a, **k):
+        return None
+    gr.get_match_scorecard = no_card          # the draw's matches have no card here: nothing to read
+    async with Session() as s:
+        await s.execute(text("UPDATE fantasy_squads SET joined_round = 4, total_points = 0 WHERE id=:i"), {"i": SQ})
+        await s.execute(text("DELETE FROM fantasy_squad_round_scores WHERE squad_id=:i"), {"i": SQ})
+        await s.commit()
+    from app.services import fantasy_live
+    async with Session() as s:
+        fs = await s.get(FantasySeason, FS_ID)
+        res = await fantasy_live.live_pass(s, fs, manual=True,
+                                           now=datetime.combine(T0, datetime.min.time(), tzinfo=ZoneInfo("Australia/Perth")).replace(hour=14))
+        await s.commit()
+    check("the pass ran and says it re-stamped one team", res.get("ran") is True and res.get("teams_rejoined") == 1, str(res))
+    check("the team now scores from round 3", (await val("SELECT joined_round FROM fantasy_squads WHERE id=:i", i=SQ))[0] == 3)
+    srow = await val("SELECT points FROM fantasy_squad_round_scores WHERE squad_id=:s AND round_id=:r", s=SQ, r=R3)
+    check("and has its running points for round 3 straight away (67)", srow is not None and float(srow[0]) == 67.0, str(srow))
+    check("the free transfer round stayed unscored", (await row(R3))[2] == "upcoming")
 
     print(f"\n{PASS} passed, {FAIL} failed")
     await engine.dispose()

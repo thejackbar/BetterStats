@@ -282,6 +282,60 @@ async function openLive(livePayload, width = 390) {
   await b.ctx.close()
 }
 
+// ── 5. My Team shows the running round, not only the last scored one ─────────
+async function openTeam({ live }) {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  const page = await ctx.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  const json = (route, body) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+  const players = [
+    { player_id: 'p1', name: 'Sushruth Menon', role: 'batter', price: 10, purchase_price: 10, is_captain: true, is_vice_captain: false },
+    { player_id: 'p2', name: 'Mick Mate', role: 'batter', price: 8, purchase_price: 8, is_captain: false, is_vice_captain: true },
+  ]
+  const calls = []
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api/, '')
+    if (path === '/public/fantasy/tok') return json(route, { club: { name: 'Applecross CC' }, season: { name: 'Fantasy', status: 'active', rules: {} }, me: { id: 'm1', display_name: 'Xavier' } })
+    if (path === '/public/fantasy/tok/me') return json(route, {
+      manager: { id: 'm1', display_name: 'Xavier' },
+      squad: { id: 'sq1', team_name: 'X Team', players, chips: [], total_points: live ? 67 : 0, value: 18, budget_remaining: 1, free_transfers: 1, queued_transfers: [], can_rebuild: false, overall_rank: 1 },
+      round: { number: 3, locked: true, lock_at: new Date(Date.now() - 864e5).toISOString() } })
+    if (path === '/public/fantasy/tok/pool') return json(route, { players: [], rules: {} })
+    if (path === '/public/fantasy/tok/notifications') return json(route, { notifications: [] })
+    if (path === '/public/fantasy/tok/live') {
+      calls.push('live')
+      return json(route, live
+        ? { live: true, round: { number: 3, name: 'Round 3', status: 'live' }, mine: { points: 67, lineup: [
+            { player_id: 'p1', name: 'Sushruth Menon', role: 'batter', points: 24, eff_points: 48, counted: true, captained: true },
+            { player_id: 'p2', name: 'Mick Mate', role: 'batter', points: 19, eff_points: 19, counted: true, captained: false }] }, checked_at: checkedAt }
+        : { live: false, round: null, mine: null })
+    }
+    if (path === '/public/fantasy/tok/round') { calls.push('round'); return json(route, { round: null, mine: null, rounds: [] }) }
+    if (path === '/public/fantasy/tok/ladder') return json(route, { ladder: [] })
+    return json(route, {})
+  })
+  await page.goto(`${BASE}/fantasy/tok`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('text=Sushruth Menon', { timeout: 15000 })
+  await page.waitForTimeout(500)
+  return { page, ctx, errors, calls }
+}
+{
+  const t = await openTeam({ live: true })
+  const body = await t.page.locator('body').innerText()
+  ck('My Team shows the round being played as GW3 live with its points', /GW3 LIVE/i.test(body) && /67/.test(body), body.slice(0, 500))
+  ck('and each player\'s running points (24 and 19), not dashes', />\s*24\s*</.test(await t.page.locator('body').innerHTML()) || /\b24\b/.test(body))
+  ck('it read the live view, not the last scored round', t.calls.includes('live') && !t.calls.includes('round'), t.calls.join(','))
+  if (SHOTS) await t.page.screenshot({ path: `${SHOTS}/fantasy_myteam_live.png` })
+  ck('no page errors on My Team', t.errors.length === 0, t.errors.join(' | '))
+  await t.ctx.close()
+  const u = await openTeam({ live: false })
+  const b2 = await u.page.locator('body').innerText()
+  ck('when the live view says nothing is live it falls back to the last scored round and shows no live tile',
+     u.calls.includes('round') && !/GW3 LIVE/i.test(b2), u.calls.join(','))
+  await u.ctx.close()
+}
+
 await browser.close()
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

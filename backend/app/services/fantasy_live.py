@@ -44,7 +44,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config.settings import settings
 from app.models.db import FantasyRound, FantasySeason, Organisation
-from app.services import auto_sync, fantasy_engine
+from app.services import auto_sync, fantasy_engine, fantasy_realign
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +206,14 @@ async def _live_pass(session: AsyncSession, fs, *, manual: bool = False, now: da
         if stats.get("gr_games_failed"):
             out["games_failed"] = int(stats["gr_games_failed"])
 
+        # A team stamped as joining in the round after one a realignment re-opened is skipped for it.
+        try:
+            rejoined = await fantasy_realign.repair_joined_rounds(session, fs)
+        except Exception:
+            logger.exception("Fantasy live: re-stamping joined rounds failed for season %s", fs.id)
+            rejoined = 0
+        out["teams_rejoined"] = rejoined
+
         moved: set[str] = set()
         for rnd in rounds:
             drift = await fantasy_engine.round_drift(session, fs, rnd)
@@ -215,7 +223,7 @@ async def _live_pass(session: AsyncSession, fs, *, manual: bool = False, now: da
                 if drift:
                     await fantasy_engine.settle_round(session, fs, rnd)
                     out["rounds"].append({"number": rnd.round_number, "action": "settled_again"})
-            elif drift or manual:
+            elif drift or manual or rejoined:
                 await fantasy_engine.refresh_live_round(session, fs, rnd)
                 out["rounds"].append({"number": rnd.round_number, "action": "refreshed"})
         out["players_moved"] = len(moved)
