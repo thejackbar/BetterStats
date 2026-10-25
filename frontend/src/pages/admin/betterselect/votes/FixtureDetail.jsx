@@ -25,15 +25,16 @@ function BallotEntryForm({ detail, medalId, onSaved }) {
   const toast = useToast()
   const eligible = detail.eligible || []
   const values = detail.settings?.ballot_values || [3, 2, 1]
-  const captainOnly = detail.settings?.voter_mode === 'captain'
-  const captains = eligible.filter((p) => p.is_captain)
-  // The person the captain handed this team's counting to. They may not be in
-  // the side, so they are not in `eligible`.
-  const counter = captainOnly ? detail.settings?.vote_counter : null
-  const [showAllVoters, setShowAllVoters] = useState(!captainOnly)
-  const voterOptions = (captainOnly && !showAllVoters && (counter || captains.length > 0))
-    ? (counter ? [{ id: counter.id, name: counter.name }] : captains)
-    : eligible
+  const mode = detail.settings?.voter_mode
+  const restricted = mode === 'captain' || mode === 'chosen'
+  // On a 'chosen' team the voters are the people the club listed. They may not
+  // be in the side, so they are not in `eligible`.
+  const restrictedVoters = mode === 'chosen'
+    ? (detail.settings?.vote_chosen || [])
+    : eligible.filter((p) => p.is_captain)
+  const restrictedLabel = mode === 'chosen' ? 'the chosen people' : 'the captain'
+  const [showAllVoters, setShowAllVoters] = useState(!restricted)
+  const voterOptions = (restricted && !showAllVoters && restrictedVoters.length > 0) ? restrictedVoters : eligible
   const [voterId, setVoterId] = useState('')
   const [voterName, setVoterName] = useState('')
   const [picks, setPicks] = useState(values.map(() => ''))
@@ -64,9 +65,10 @@ function BallotEntryForm({ detail, medalId, onSaved }) {
       <div className="font-display font-bold text-[15px] mb-1">Enter a ballot</div>
       <p className="text-xs text-pb-faint mb-3">
         Paper votes, or the captain texting theirs in. Entering again for the same voter replaces their ballot.
-        {captainOnly && (counter
-          ? ` This team's votes are counted by ${counter.name}, in place of the captain.`
-          : " This club only counts the captain's votes.")}
+        {mode === 'captain' && " This team only counts the captain's votes."}
+        {mode === 'chosen' && (restrictedVoters.length
+          ? ` This team's votes come from ${restrictedVoters.map((p) => p.name).join(', ')}.`
+          : ' Nobody is chosen to vote for this team yet.')}
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <div>
@@ -77,10 +79,10 @@ function BallotEntryForm({ detail, medalId, onSaved }) {
             {voterOptions.map((p) => <option key={p.id} value={p.id}>{p.name}{p.is_captain ? ' (c)' : ''}</option>)}
             <option value="__other__">Someone else (coach, supporter…)</option>
           </select>
-          {captainOnly && (counter || captains.length > 0) && (
+          {restricted && restrictedVoters.length > 0 && (
             <button type="button" onClick={() => setShowAllVoters((v) => !v)}
               className="block mt-1 font-mono text-[10px] text-pb-faint hover:text-pb-text underline">
-              {showAllVoters ? (counter ? `Only show ${counter.name}` : 'Only show the captain') : 'Show all players'}
+              {showAllVoters ? `Only show ${restrictedLabel}` : 'Show all players'}
             </button>
           )}
         </div>

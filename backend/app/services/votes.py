@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BALLOT = [3, 2, 1]
 VOTER_MODES = {"players", "captain"}
+# A team can also be on "chosen": only the people the club listed for that team
+# vote (``vote_medals.grade_vote_counters``). Not a medal-wide default, since the
+# list is per team, and not a football mode, so ``VOTER_MODES`` stays as it was.
+TEAM_VOTER_MODES = VOTER_MODES | {"chosen"}
+MAX_CHOSEN_VOTERS = 12
 # How a medal weights its grades: not at all, from fixture counts against the
 # top grade, or by hand. A multiplier outside this range is a typo, not a plan.
 WEIGHT_MODES = ("off", "auto", "manual")
@@ -300,28 +305,39 @@ def clean_grade_voter_modes(raw) -> dict[str, str]:
         if not isinstance(name, str):
             continue
         key = name.strip()[:120]
-        if key and mode in VOTER_MODES:
+        if key and mode in TEAM_VOTER_MODES:
             out[key] = mode
     return out
 
 
-def clean_grade_vote_counters(raw) -> dict[str, str]:
-    """A per-team vote counter map (team name to player id), with anything
-    unusable dropped: a blank team name or an id that is not a uuid. A dropped
-    entry leaves the captain voting, the safe direction."""
-    out: dict[str, str] = {}
+def clean_grade_vote_counters(raw) -> dict[str, list[str]]:
+    """The people chosen to vote for each team (team name to a list of player
+    ids), with anything unusable dropped: a blank team name, an id that is not a
+    uuid, a repeat, and anything past ``MAX_CHOSEN_VOTERS``. A single id is read
+    as a list of one (the shape this column had in its first release). A team
+    left with nobody is dropped; a team on 'chosen' with nobody chosen lets
+    nobody vote, which fails closed."""
+    out: dict[str, list[str]] = {}
     if not isinstance(raw, dict):
         return out
-    for name, pid in raw.items():
-        if not isinstance(name, str) or not isinstance(pid, str):
+    for name, ids in raw.items():
+        if not isinstance(name, str):
             continue
         key = name.strip()[:120]
-        try:
-            pid = str(uuid.UUID(pid))
-        except ValueError:
+        if isinstance(ids, str):
+            ids = [ids]
+        if not key or not isinstance(ids, (list, tuple)):
             continue
-        if key:
-            out[key] = pid
+        clean: list[str] = []
+        for pid in ids:
+            try:
+                pid = str(uuid.UUID(pid)) if isinstance(pid, str) else None
+            except ValueError:
+                pid = None
+            if pid and pid not in clean:
+                clean.append(pid)
+        if clean:
+            out[key] = clean[:MAX_CHOSEN_VOTERS]
     return out
 
 
@@ -329,19 +345,19 @@ def voter_mode_for_grade(cfg: dict, grade_name: Optional[str]) -> str:
     """Who votes on a game in this team: the team's own setting, else the medal's."""
     if grade_name:
         mode = (cfg.get("grade_voter_modes") or {}).get(grade_name)
-        if mode in VOTER_MODES:
+        if mode in TEAM_VOTER_MODES:
             return mode
     return cfg["voter_mode"]
 
 
 async def cfg_for_fixture(db: AsyncSession, cfg: dict, fixture: Fixture) -> dict:
     """``cfg`` with ``voter_mode`` resolved for this fixture's team, and
-    ``vote_counter`` (a player id) set when that team counts the captain only and
-    the captain has handed the counting to someone else. A copy, so the medal's
-    own config is untouched. Costs nothing when no team has its own setting,
-    which is every club until one is set. Read ``cfg.get("vote_counter")``: a
-    config that never went through here has no such key."""
-    if not cfg.get("grade_voter_modes") and not cfg.get("grade_vote_counters"):
+    ``vote_chosen`` (a list of player ids) set when that team is on 'chosen'. A
+    copy, so the medal's own config is untouched. Costs nothing when no team has
+    its own setting, which is every club until one is set. Read
+    ``cfg.get("vote_chosen")``: a config that never went through here has no
+    such key."""
+    if not cfg.get("grade_voter_modes"):
         return cfg
     gid = (await effective_grade_ids(db, [fixture])).get(str(fixture.id))
     name = None
@@ -350,17 +366,18 @@ async def cfg_for_fixture(db: AsyncSession, cfg: dict, fixture: Fixture) -> dict
             text("SELECT name FROM grades WHERE id = :id"), {"id": gid},
         )).scalar_one_or_none()
     voter_mode = voter_mode_for_grade(cfg, name)
-    counter = (cfg.get("grade_vote_counters") or {}).get(name) if name else None
+    chosen = list((cfg.get("grade_vote_counters") or {}).get(name) or []) if name else []
     return {**cfg, "voter_mode": voter_mode,
-            "vote_counter": counter if voter_mode == "captain" else None}
+            "vote_chosen": chosen if voter_mode == "chosen" else []}
 
 
-async def counter_fixture_ids(db: AsyncSession, cfg: dict, player_id, fixtures: list[Fixture]) -> set[uuid.UUID]:
-    """``Fixture.id``s among ``fixtures`` whose team counts the captain only and
-    names this player to submit its votes. They need not be in the side, so the
-    player's own-games lookups never find these. One grade read for the lot, and
-    nothing at all when this player is nobody's nominee."""
-    names = {n for n, pid in (cfg.get("grade_vote_counters") or {}).items() if pid == str(player_id)}
+async def chosen_fixture_ids(db: AsyncSession, cfg: dict, player_id, fixtures: list[Fixture]) -> set[uuid.UUID]:
+    """``Fixture.id``s among ``fixtures`` whose team is on 'chosen' and lists
+    this player. They need not be in the side, so the player's own-games lookups
+    never find these. One grade read for the lot, and nothing at all when this
+    player is on nobody's list."""
+    pid = str(player_id)
+    names = {n for n, ids in (cfg.get("grade_vote_counters") or {}).items() if pid in ids}
     if not names or not fixtures:
         return set()
     grade_by_fixture = await effective_grade_ids(db, fixtures)
@@ -374,7 +391,7 @@ async def counter_fixture_ids(db: AsyncSession, cfg: dict, player_id, fixtures: 
     out: set[uuid.UUID] = set()
     for f in fixtures:
         nm = name_by_gid.get(grade_by_fixture.get(str(f.id)))
-        if nm in names and voter_mode_for_grade(cfg, nm) == "captain":
+        if nm in names and voter_mode_for_grade(cfg, nm) == "chosen":
             out.add(f.id)
     return out
 
@@ -762,6 +779,19 @@ def voters_expected_for(source: str, match_id, fixture_id, scorecard_counts: dic
     if source == "lineup":
         return lineup_counts.get(str(fixture_id), 0)
     return 0
+
+
+async def voters_for_game(db: AsyncSession, org_id, fx_cfg: dict, eligible: list[dict]) -> list[dict]:
+    """The people owed a ballot on one game: the team list, except on a team set
+    to 'chosen', where it is the people listed for that team, in the order they
+    were listed. ``fx_cfg`` is the config through ``cfg_for_fixture``. A chosen
+    person's name is read from the club's players, so a removed player shows as
+    'Unknown player' rather than disappearing."""
+    if fx_cfg.get("voter_mode") != "chosen":
+        return eligible
+    ids = list(fx_cfg.get("vote_chosen") or [])
+    names = await player_names(db, org_id, set(ids)) if ids else {}
+    return [{"id": pid, "name": names.get(pid, "Unknown player")} for pid in ids]
 
 
 async def outstanding_voters(db: AsyncSession, org_id, eligible: list[dict], ballots: list[VoteBallot]) -> list[dict]:

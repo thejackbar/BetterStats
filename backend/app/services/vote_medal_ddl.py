@@ -155,10 +155,10 @@ VOTE_GRADE_MODE_DOWNGRADE = [
 ]
 
 
-# A captain-only team can name someone else to submit its votes (migration 347):
-# grade NAME -> player id. Keyed by name like ``grade_voter_modes``. Empty = the
-# captain votes, so nothing changes for a club until it nominates someone. Run
-# by migration 347 and the lifespan mirror.
+# The people chosen to vote for a team (migration 347, widened in 362): grade
+# NAME -> list of player ids, used when the team's voter mode is 'chosen'. Keyed
+# by name like ``grade_voter_modes``. Empty = nobody chosen, so nothing changes
+# for a club until it picks people. Run by migration 347 and the lifespan mirror.
 VOTE_GRADE_COUNTER_STATEMENTS = [
     "ALTER TABLE vote_medals ADD COLUMN IF NOT EXISTS grade_vote_counters "
     "JSONB NOT NULL DEFAULT '{}'::jsonb",
@@ -167,6 +167,41 @@ VOTE_GRADE_COUNTER_STATEMENTS = [
 VOTE_GRADE_COUNTER_DOWNGRADE = [
     "ALTER TABLE vote_medals DROP COLUMN IF EXISTS grade_vote_counters",
 ]
+
+
+# Migration 362. The first release stored ONE player id per captain-only team
+# ("the captain handed the counting to this person"). A team now votes through a
+# list of chosen people on a 'chosen' mode, so each single id becomes a list of
+# one and its team moves to 'chosen' (a captain-only team, by its own setting or
+# the medal's default, whose captain nominated someone is exactly that). Only
+# entries still holding a bare string are touched, so a second run, and every
+# boot after, changes nothing. A team on 'players' keeps its list unchanged apart
+# from the shape, and is not switched.
+VOTE_CHOSEN_VOTER_STATEMENTS = [
+    """
+    UPDATE vote_medals m SET
+      grade_voter_modes = m.grade_voter_modes || COALESCE((
+        SELECT jsonb_object_agg(c.key, 'chosen'::text)
+        FROM jsonb_each(m.grade_vote_counters) c
+        WHERE jsonb_typeof(c.value) = 'string'
+          AND COALESCE(m.grade_voter_modes ->> c.key, m.voter_mode) = 'captain'
+      ), '{}'::jsonb),
+      grade_vote_counters = (
+        SELECT COALESCE(jsonb_object_agg(
+          c.key,
+          CASE WHEN jsonb_typeof(c.value) = 'string' THEN jsonb_build_array(c.value) ELSE c.value END
+        ), '{}'::jsonb)
+        FROM jsonb_each(m.grade_vote_counters) c
+      )
+    WHERE EXISTS (
+      SELECT 1 FROM jsonb_each(m.grade_vote_counters) c WHERE jsonb_typeof(c.value) = 'string'
+    )
+    """,
+]
+
+# The shape change has no downgrade: a list of one reads back as one id, and a
+# team on 'chosen' is simply ignored by code that does not know the mode.
+VOTE_CHOSEN_VOTER_DOWNGRADE: list[str] = []
 
 
 # How a medal weights its grades against each other (migration 346): a grade

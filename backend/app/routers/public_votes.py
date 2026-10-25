@@ -198,12 +198,11 @@ async def _fixtures_player_is_on(
     """``fixtures`` cut down to the games this player is on the votable list of:
     the ballot page's own list (``resolve_eligibility``), so the games offered to
     a verified player are exactly the ones they could open a ballot on. Nobody
-    is shown a game they did not play, except the person a captain-only team
-    nominated to count its votes."""
+    is shown a game they did not play, except a person chosen to vote for it."""
     local = await own_local_fixture_ids(db, player, fixtures)
-    # A team's nominated vote counter is not on its team list, and is still
+    # A person chosen to vote for a team is not on its team list, and is still
     # offered that team's games.
-    counts_for = await vote_svc.counter_fixture_ids(db, cfg, player.id, fixtures)
+    counts_for = await vote_svc.chosen_fixture_ids(db, cfg, player.id, fixtures)
     overrides = await vote_svc.overrides_by_fixture(db, medal.id, [f.id for f in fixtures])
     live_left = LIVE_EXAMINED
     keep: list[Fixture] = []
@@ -467,20 +466,26 @@ def _voter_role(cfg: dict, me: Optional[Player], eligible: list[dict]) -> tuple[
     'non_player' (allowed as a non-participant), or 'none' (can't vote —
     reason says why, for the UI).
 
-    ``cfg`` comes through ``cfg_for_fixture``. When it carries a ``vote_counter``
-    (a captain-only team whose captain handed the counting to someone), that
-    person votes whether or not they were in the side, and nobody else on the
-    team does, the captain included: two ballots from one team would count twice."""
+    ``cfg`` comes through ``cfg_for_fixture``. On a team set to 'chosen' only the
+    people listed in ``vote_chosen`` vote, each with their own ballot, whether or
+    not they were in the side; the captain and everyone else is refused. An empty
+    list lets nobody vote (fails closed)."""
     eligible_ids = {p["id"] for p in eligible}
     captain_ids = {p["id"] for p in eligible if p["is_captain"]}
-    counter = cfg.get("vote_counter") if cfg["voter_mode"] == "captain" else None
+    chosen = set(cfg.get("vote_chosen") or []) if cfg["voter_mode"] == "chosen" else None
+    if chosen is not None:
+        if me and str(me.id) in chosen:
+            return ("player", None)
+        if not chosen:
+            return ("none", "no_voters_chosen")
+        if me and str(me.id) in eligible_ids:
+            return ("none", "chosen_only")
+        if cfg["allow_non_participants"]:
+            return ("non_player", None)
+        return ("none", "chosen_only" if me else "verify_required")
     if me:
         mid = str(me.id)
-        if counter and mid == counter:
-            return ("player", None)
         if mid in eligible_ids:
-            if counter:
-                return ("none", "counter_only")
             if cfg["voter_mode"] == "captain" and mid not in captain_ids:
                 return ("none", "captain_only")
             return ("player", None)
@@ -558,10 +563,10 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         "me": _me_payload(club, me) if me else None,
         "role": role,
         "reason": reason,
-        # True for the person a captain nominated to submit this team's votes, so the
-        # page can say why a player who was not in the side is being asked.
-        "is_counter": bool(
-            me and cfg["voter_mode"] == "captain" and cfg.get("vote_counter") == str(me.id)
+        # True for a person chosen to vote for this team, so the page can say why a
+        # player who was not in the side is being asked.
+        "is_chosen": bool(
+            me and cfg["voter_mode"] == "chosen" and str(me.id) in (cfg.get("vote_chosen") or [])
         ),
         # Someone who cannot vote on this game (did not play it, or the club needs a
         # name first) is not handed its team list.
@@ -609,7 +614,8 @@ async def submit_ballot(token: str, fixture_id: str, body: BallotBody, request: 
     if role == "none":
         detail = {
             "captain_only": "Only the captain submits votes for this club.",
-            "counter_only": "The captain has nominated someone to submit the votes for this team.",
+            "chosen_only": "The votes for this team are submitted by the people the club has chosen.",
+            "no_voters_chosen": "No one has been chosen to vote for this team yet. Ask your club admin.",
             "did_not_play": "Only players who played in this game can vote.",
             "verify_required": "Find your name and verify with your PIN first.",
         }.get(reason, "You can't vote on this game.")

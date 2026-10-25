@@ -3482,7 +3482,7 @@ export const api = {
     request(`/votes/medals/${medalId}${confirm ? '?confirm=true' : ''}`, { method: 'DELETE' }),
   votesRegenerateLink: (medalId) =>
     request(`/votes/medals/${medalId}/regenerate`, { method: 'POST' }),
-  votesCounterOptions: () => request('/votes/counter-options'),
+  votesVoterOptions: () => request('/votes/voter-options'),
   votesGetWeighting: (medalId) => request(`/votes/medals/${medalId}/weighting`),
   votesGetSettings: (medalId) => request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`),
   votesSetSettings: (data, medalId) =>

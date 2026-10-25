@@ -1,6 +1,7 @@
 // Settings tab — ONE medal's setup. The public-link block lives in
 // ShareVotePanel (one sharing surface); everything else (name, grades,
-// voter_mode (plus grade_voter_modes and grade_vote_counters, one override per team), allow_non_participants, allow_self_vote, ballot_values,
+// voter_mode (plus grade_voter_modes and grade_vote_counters, one override per team; a team on
+// 'chosen' lists the people who vote for it), allow_non_participants, allow_self_vote, ballot_values,
 // counting_method, tie_policy, eligibility_source, auto_close_days) patches
 // the medal.
 import { useCallback, useEffect, useState } from 'react'
@@ -17,7 +18,8 @@ const SOURCES = [
   { value: 'playhq', label: 'Play.Cricket team list', hint: 'The side your club published on Play.Cricket. Ready on match day.' },
 ]
 const ballotLabel = (v) => (v || []).join('-')
-const MODE_LABEL = { players: 'All players', captain: 'Captain only' }
+const MODE_LABEL = { players: 'All players', captain: 'Captain only', chosen: 'Chosen people' }
+const MAX_CHOSEN = 12
 
 function Row({ label, hint, children }) {
   return (
@@ -155,8 +157,8 @@ export default function VotesSettings({
   const [busy, setBusy] = useState(false)
   const [ballotDraft, setBallotDraft] = useState(null)
   const [nameDraft, setNameDraft] = useState(null)
-  // Who a captain-only team can hand its vote counting to. Loaded once; the
-  // nominee does not have to be in the side.
+  // Who a team can choose to vote for it. Loaded once; they do not have to be
+  // in the side.
   const [people, setPeople] = useState([])
 
   const load = useCallback(() => {
@@ -166,7 +168,7 @@ export default function VotesSettings({
   useEffect(() => { load() }, [load])
   useEffect(() => {
     let live = true
-    api.votesCounterOptions().then((d) => { if (live) setPeople(d.players || []) }).catch(() => {})
+    api.votesVoterOptions().then((d) => { if (live) setPeople(d.players || []) }).catch(() => {})
     return () => { live = false }
   }, [])
 
@@ -230,9 +232,10 @@ export default function VotesSettings({
     update({ grade_voter_modes: next })
   }
 
-  const setTeamCounter = (name, playerId) => {
+  // The team's list is sent whole, so the server keeps exactly what is on screen.
+  const setChosen = (name, ids) => {
     const next = { ...(cfg.grade_vote_counters || {}) }
-    if (playerId) next[name] = playerId
+    if (ids.length) next[name] = ids
     else delete next[name]
     update({ grade_vote_counters: next })
   }
@@ -242,8 +245,7 @@ export default function VotesSettings({
   const chosenGrades = new Set(cfg.grade_names || [])
   const inactiveGrades = cfg.inactive_grades || []
   const teamModes = cfg.grade_voter_modes || {}
-  const teamCounters = cfg.grade_vote_counters || {}
-  const counterNames = cfg.vote_counter_names || {}
+  const teamChosen = cfg.vote_chosen || {}
   // The teams this medal counts: the ticked ones, or every active team when
   // none is ticked.
   const scopeTeams = gradeOptions.filter((g) => chosenGrades.size === 0 || chosenGrades.has(g.name))
@@ -327,13 +329,14 @@ export default function VotesSettings({
             options={[{ value: 'players', label: 'All players' }, { value: 'captain', label: 'Captain only' }]} />
         </Row>
         {scopeTeams.length > 0 && (
-          <Row label="Who votes, by team" hint="Some teams count every player's vote, others only the captain's. Pick per team, or leave a team on the default above. Where only the captain votes, the captain can hand the counting to someone else, who doesn't have to be in the side.">
+          <Row label="Who votes, by team" hint="Some teams count every player's vote, others only the captain's. Pick per team, or leave a team on the default above. Choose people to have a few named people decide a team's votes (say the captain and two selectors). They don't have to be in the side, and each submits their own ballot.">
             <div className="flex flex-col gap-1.5">
               {scopeTeams.map((g) => {
-                const counterId = teamCounters[g.name] || ''
-                const knownCounter = counterId && people.some((x) => x.id === counterId)
+                const chosen = teamChosen[g.name] || []
+                const chosenIds = new Set(chosen.map((x) => x.id))
+                const addable = people.filter((x) => !chosenIds.has(x.id))
                 return (
-                  <div key={g.id} className="flex flex-col gap-1">
+                  <div key={g.id} className="flex flex-col gap-1.5">
                     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                       <span className="text-sm min-w-0 break-words">{g.name}</span>
                       <select value={teamModes[g.name] || 'default'} onChange={(e) => setTeamMode(g.name, e.target.value)}
@@ -342,20 +345,41 @@ export default function VotesSettings({
                         <option value="default">Default ({MODE_LABEL[cfg.voter_mode]})</option>
                         <option value="players">{MODE_LABEL.players}</option>
                         <option value="captain">{MODE_LABEL.captain}</option>
+                        <option value="chosen">{MODE_LABEL.chosen}</option>
                       </select>
                     </div>
-                    {(teamModes[g.name] || cfg.voter_mode) === 'captain' && (
-                      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 pl-3">
-                        <span className="text-[12.5px] text-pb-faint min-w-0 break-words">Votes counted by</span>
-                        <select value={counterId} onChange={(e) => setTeamCounter(g.name, e.target.value)}
-                          disabled={!canManage || busy} aria-label={`Who counts the votes for ${g.name}`}
-                          className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm max-w-full focus:outline-none focus:border-pb-accent">
-                          <option value="">The captain</option>
-                          {counterId && !knownCounter && (
-                            <option value={counterId}>{counterNames[g.name] || 'Nominated player'}</option>
-                          )}
-                          {people.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                        </select>
+                    {teamModes[g.name] === 'chosen' && (
+                      <div className="pl-3 flex flex-col gap-1.5" data-testid={`chosen-${g.name}`}>
+                        {chosen.length === 0 ? (
+                          <div className="text-[12px] text-pb-amber">
+                            Nobody is chosen yet, so nobody can vote for this team.
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {chosen.map((x) => (
+                              <span key={x.id} className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full text-[12.5px] bg-pb-surface2 border pb-hairline">
+                                <span className="min-w-0 break-words">{x.name}</span>
+                                {canManage && (
+                                  <button type="button" disabled={busy} title={`Remove ${x.name}`} aria-label={`Remove ${x.name} from ${g.name}`}
+                                    onClick={() => setChosen(g.name, chosen.filter((y) => y.id !== x.id).map((y) => y.id))}
+                                    className="text-pb-faintest hover:text-pb-red text-xs px-1">✕</button>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {canManage && (
+                          <select value="" disabled={busy || chosen.length >= MAX_CHOSEN}
+                            aria-label={`Add a person to vote for ${g.name}`}
+                            onChange={(e) => e.target.value && setChosen(g.name, [...chosen.map((y) => y.id), e.target.value])}
+                            className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm max-w-full focus:outline-none focus:border-pb-accent">
+                            <option value="">{chosen.length >= MAX_CHOSEN ? `Up to ${MAX_CHOSEN} people` : 'Add a person…'}</option>
+                            {addable.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                          </select>
+                        )}
+                        <div className="text-[11px] text-pb-faintest">
+                          Only these people can vote for {g.name}, and each one submits their own ballot. Their votes add up and are turned into the game's {ballotLabel(cfg.ballot_values)} the same way as when every player votes.
+                        </div>
                       </div>
                     )}
                   </div>

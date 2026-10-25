@@ -27,7 +27,8 @@ const NOT_OPEN = {
 }
 const REASON = {
   captain_only: 'Only the captain submits votes for this club. Ask your skipper to cast them.',
-  counter_only: 'The captain has nominated someone to submit the votes for this team.',
+  chosen_only: 'The votes for this team are submitted by the people the club has chosen.',
+  no_voters_chosen: 'No one has been chosen to vote for this team yet. Ask your club admin.',
   did_not_play: 'Only players who played in this game can vote at this club.',
   verify_required: 'Find your name to vote on this game.',
 }
@@ -474,9 +475,9 @@ export default function PublicVoting() {
               </div>
             ) : (
               <>
-              {fixture.is_counter && (
+              {fixture.is_chosen && (
                 <p className="text-xs text-pb-faint mb-3">
-                  You are counting the votes for this team, in place of the captain.
+                  You are one of the people chosen to vote for this team.
                 </p>
               )}
               <Ballot fixture={fixture} values={values} votable={votable} picks={picks} setPicks={setPicks}

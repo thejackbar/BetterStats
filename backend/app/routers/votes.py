@@ -30,7 +30,7 @@ from __future__ import annotations
 import secrets
 import uuid
 from datetime import date
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -59,10 +59,11 @@ class MedalUpdate(BaseModel):
     # Per-team override, grade NAME -> mode. Sent whole: a name left out reverts
     # to the medal's voter_mode, and {} clears every override.
     grade_voter_modes: Optional[dict[str, str]] = None
-    # Per-team vote counter, grade NAME -> player id, for a team that counts the
-    # captain only. Sent whole: a name left out (or null) goes back to the
-    # captain, {} clears every one. The person need not be in the side.
-    grade_vote_counters: Optional[dict[str, Optional[str]]] = None
+    # The people chosen to vote for a team on the 'chosen' mode, grade NAME ->
+    # [player id, ...]. Sent whole: a name left out, null or [] has nobody chosen,
+    # {} clears every team. They need not be in the side. A bare id is read as a
+    # list of one.
+    grade_vote_counters: Optional[dict[str, Optional[Union[list[str], str]]]] = None
     # {"mode": 'off' | 'auto' | 'manual', "manual": {grade name: multiplier}},
     # sent whole. {} turns weighting off.
     grade_weighting: Optional[dict] = None
@@ -129,7 +130,7 @@ def _apply_medal_fields(m: VoteMedal, body: MedalUpdate) -> None:
         m.voter_mode = body.voter_mode
     if body.grade_voter_modes is not None:
         for mode in body.grade_voter_modes.values():
-            if mode not in vote_svc.VOTER_MODES:
+            if mode not in vote_svc.TEAM_VOTER_MODES:
                 raise HTTPException(status_code=400, detail="Invalid voter mode")
         m.grade_voter_modes = vote_svc.clean_grade_voter_modes(body.grade_voter_modes)
     if body.grade_vote_counters is not None:
@@ -178,19 +179,28 @@ def _apply_medal_fields(m: VoteMedal, body: MedalUpdate) -> None:
             m.link_token = secrets.token_urlsafe(24)
 
 
+def _chosen_ids(raw) -> list[str]:
+    return [raw] if isinstance(raw, str) else list(raw or [])
+
+
 async def _check_vote_counters(db: AsyncSession, club: Organisation, body: MedalUpdate) -> None:
-    """A nominated vote counter has to be a real player of this club. They do
-    not have to have played, since the captain's helper is often not in the side,
-    but they sign in on the voting page like any player, so a person who is not a
-    player of this club could never vote."""
+    """Everyone chosen to vote has to be a real player of this club. They do not
+    have to have played, since the people deciding a team's votes are often not
+    in the side, but they sign in on the voting page like any player, so a person
+    who is not a player of this club could never vote."""
     ids = set()
-    for pid in (body.grade_vote_counters or {}).values():
-        if not pid:
-            continue
-        try:
-            ids.add(uuid.UUID(pid))
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="Invalid vote counter")
+    for team, raw in (body.grade_vote_counters or {}).items():
+        listed = _chosen_ids(raw)
+        if len(set(listed)) > vote_svc.MAX_CHOSEN_VOTERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Choose at most {vote_svc.MAX_CHOSEN_VOTERS} people to vote for {team}",
+            )
+        for pid in listed:
+            try:
+                ids.add(uuid.UUID(pid))
+            except (ValueError, TypeError, AttributeError):
+                raise HTTPException(status_code=400, detail="Invalid voter")
     if not ids:
         return
     found = {r[0] for r in (await db.execute(
@@ -208,13 +218,13 @@ async def _medal_payloads(db: AsyncSession, club: Organisation, medals: list[Vot
     names = {mid: [r["name"] for r in rows] for mid, rows in pairs.items()}
     inactive = {mid: [r for r in rows if r["name"] not in active] for mid, rows in pairs.items()}
     out = [_settings_payload(m, names, inactive) for m in medals]
-    # The nominated counters by name, so a screen can say who without a roster fetch.
-    wanted = {uuid.UUID(pid) for p in out for pid in p["grade_vote_counters"].values()}
-    counter_names = await vote_svc.player_names(db, club.id, {str(i) for i in wanted}) if wanted else {}
+    # The chosen people by name, so a screen can show who without a roster fetch.
+    wanted = {pid for p in out for ids in p["grade_vote_counters"].values() for pid in ids}
+    chosen_names = await vote_svc.player_names(db, club.id, wanted) if wanted else {}
     for p in out:
-        p["vote_counter_names"] = {
-            team: counter_names.get(pid, "Unknown player")
-            for team, pid in p["grade_vote_counters"].items()
+        p["vote_chosen"] = {
+            team: [{"id": pid, "name": chosen_names.get(pid, "Unknown player")} for pid in ids]
+            for team, ids in p["grade_vote_counters"].items()
         }
     return out
 
@@ -285,15 +295,15 @@ async def update_medal(
     return await _one_medal_payload(db, club, medal)
 
 
-@router.get("/counter-options")
-async def counter_options(
+@router.get("/voter-options")
+async def voter_options(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
     user: User = Depends(require_any_cap(MANAGE_VOTES, VIEW_VOTE_RESULTS)),
 ):
-    """The people a captain-only team can nominate to count its votes: the same
-    active players the voting page's name list offers, since the nominee has to
-    pick their name there. Not limited to who played."""
+    """The people a team can choose to vote for it: the same active players the
+    voting page's name list offers, since each has to pick their name there. Not
+    limited to who played."""
     from app.routers.availability import active_self_service_players
     players = await active_self_service_players(db, club)
     return {"players": sorted(
@@ -611,6 +621,10 @@ async def list_vote_fixtures(
         eff_gid = grade_by_fixture.get(fid)
         match_id = vote_svc.match_ref_id(f)
         voters_expected = vote_svc.voters_expected_for(source, match_id, f.id, scorecard_counts, lineup_counts)
+        # A team on 'chosen' is owed a ballot from each person listed, not from the side.
+        team_name = grade_names.get(str(eff_gid)) if eff_gid else None
+        if vote_svc.voter_mode_for_grade(cfg, team_name) == "chosen":
+            voters_expected = len((cfg.get("grade_vote_counters") or {}).get(team_name) or [])
         ballots = counts.get(fid, 0)
         outstanding_count = max(0, voters_expected - player_counts.get(fid, 0)) if voters_expected else 0
         return {
@@ -717,10 +731,12 @@ async def fixture_detail(
         key=lambda r: (-r["points"], -r["raw"], r["name"]),
     )
 
-    outstanding = await vote_svc.outstanding_voters(db, club.id, eligible, ballots)
     fx_cfg = await vote_svc.cfg_for_fixture(db, cfg, fx)
-    counter_names = await vote_svc.player_names(
-        db, club.id, {fx_cfg["vote_counter"]} if fx_cfg.get("vote_counter") else set())
+    # On a 'chosen' team only the listed people are owed a ballot or a nudge. They
+    # may not have played, and the rest of the side does not vote.
+    voters = await vote_svc.voters_for_game(db, club.id, fx_cfg, eligible)
+    chosen = voters if fx_cfg["voter_mode"] == "chosen" else []
+    outstanding = await vote_svc.outstanding_voters(db, club.id, voters, ballots)
 
     return {
         "fixture": {
@@ -730,7 +746,7 @@ async def fixture_detail(
             "date": fx.played_on.isoformat() if fx.played_on else None,
             "state": state,
             "override": ov.status if ov else None,
-            "voters_expected": len(eligible),
+            "voters_expected": len(voters),
             "weight": round(weight, 2),
         },
         "outstanding": outstanding,
@@ -739,11 +755,8 @@ async def fixture_detail(
         "settings": {
             **_settings_payload(s),
             "voter_mode": fx_cfg["voter_mode"],
-            # The person counting this team's votes in place of the captain, if any.
-            "vote_counter": (
-                {"id": fx_cfg["vote_counter"], "name": counter_names.get(fx_cfg["vote_counter"], "Unknown player")}
-                if fx_cfg.get("vote_counter") else None
-            ),
+            # The people chosen to vote for this game's team (empty unless it is on 'chosen').
+            "vote_chosen": chosen,
         },
         "eligibility": {
             "requested": elig["requested"],
@@ -847,8 +860,8 @@ async def admin_enter_ballot(
             detail="No team list for this game yet — save a BetterSelect XI, publish the side on Play.Cricket, or wait for the scorecard to sync",
         )
     eligible_ids = {p["id"] for p in eligible}
-    # The person counting this team's votes is a player ballot even if they did not play.
-    counter_id = (await vote_svc.cfg_for_fixture(db, cfg, fx)).get("vote_counter")
+    # A person chosen to vote for this team is a player ballot even if they did not play.
+    chosen_ids = set((await vote_svc.cfg_for_fixture(db, cfg, fx)).get("vote_chosen") or [])
 
     voter_pid: Optional[uuid.UUID] = None
     voter_name: Optional[str] = None
@@ -896,7 +909,7 @@ async def admin_enter_ballot(
             fixture_id=fx.id,
             voter_player_id=voter_pid,
             voter_name=voter_name,
-            voter_kind="player" if (voter_pid and (str(voter_pid) in eligible_ids or str(voter_pid) == counter_id)) else "non_player",
+            voter_kind="player" if (voter_pid and (str(voter_pid) in eligible_ids or str(voter_pid) in chosen_ids)) else "non_player",
             source="admin",
             recorded_by=user.id,
         )
@@ -1107,7 +1120,9 @@ async def nudge(
         ov = await vote_svc.get_override(db, s.id, fx.id)
         elig = await vote_svc.resolve_eligibility(db, club, fx, cfg, ov.eligibility_source if ov else None)
         ballots_by_fx = await vote_svc.load_ballots_by_fixture(db, club.id, [fx.id], s.id)
-        outstanding = await vote_svc.outstanding_voters(db, club.id, elig["players"], ballots_by_fx.get(str(fx.id), []))
+        voters = await vote_svc.voters_for_game(
+            db, club.id, await vote_svc.cfg_for_fixture(db, cfg, fx), elig["players"])
+        outstanding = await vote_svc.outstanding_voters(db, club.id, voters, ballots_by_fx.get(str(fx.id), []))
         wanted = set(body.player_ids) if (body.fixture_id and body.player_ids) else None
         candidates = [p for p in outstanding if wanted is None or p["id"] in wanted]
         if not candidates:
