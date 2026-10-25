@@ -1,6 +1,6 @@
 // Club ladder — ranked squads with round-on-round movement arrows, the GW and
 // total columns, and the manager's own row highlighted. A "···" marks the jump
-// to the manager's position when they sit below the visible window.
+// (every team is listed; nothing is cut off).
 import { useEffect, useState } from 'react'
 import { api } from '../../lib/api'
 import { DISP, pts, tintBg, MoveArrow } from './ui'
@@ -112,9 +112,8 @@ export default function Ladder({ token, season, desktop, nav }) {
     </div>
   )
 
-  const top = rows.slice(0, 20)
+  // Every team, not a window of them: a manager below 20th must see who is around them.
   const me = rows.find(r => r.you)
-  const showJump = me && !top.some(r => r.you)
   const leader = rows[0]
 
   const header = (
@@ -124,13 +123,7 @@ export default function Ladder({ token, season, desktop, nav }) {
   )
   const tableRows = (
     <div>
-      {top.map(r => <LadderRow key={r.rank} r={r} onOpen={onOpen} />)}
-      {showJump && (
-        <>
-          <div style={{ textAlign: 'center', color: 'var(--faintest)', font: `700 14px ${DISP}`, padding: '4px 0' }}>· · ·</div>
-          <LadderRow r={me} onOpen={onOpen} />
-        </>
-      )}
+      {rows.map(r => <LadderRow key={r.squad_id || r.rank} r={r} onOpen={onOpen} />)}
     </div>
   )
 

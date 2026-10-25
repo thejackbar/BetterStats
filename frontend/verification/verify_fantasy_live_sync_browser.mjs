@@ -337,16 +337,19 @@ async function openTeam({ live }) {
 }
 
 // ── 6. The ladder follows the round, and a locked team can be opened ─────────
-async function openLadder({ visible = true, tab = 'Ladder' } = {}) {
+async function openLadder({ visible = true, tab = 'Ladder', many = 0 } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   const page = await ctx.newPage()
   const errors = [], reqs = []
   page.on('pageerror', (e) => errors.push(String(e)))
   const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
-  const rows = [
-    { rank: 1, squad_id: 's-a', team_name: 'Team A', manager: 'Manager A', points: 35, gw: 30, rank_delta: 1, you: true },
-    { rank: 2, squad_id: 's-b', team_name: 'Team B', manager: 'Manager B', points: 30, gw: 10, rank_delta: -1, you: false },
-  ]
+  const rows = many
+    ? Array.from({ length: many }, (_, i) => ({ rank: i + 1, squad_id: `s-${i + 1}`, team_name: `Team ${i + 1}`, manager: `Manager ${i + 1}`,
+                                                 points: 100 - i, gw: 5, rank_delta: 0, you: i === many - 1 }))
+    : [
+        { rank: 1, squad_id: 's-a', team_name: 'Team A', manager: 'Manager A', points: 35, gw: 30, rank_delta: 1, you: true },
+        { rank: 2, squad_id: 's-b', team_name: 'Team B', manager: 'Manager B', points: 30, gw: 10, rank_delta: -1, you: false },
+      ]
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api/, '')
     if (path === '/public/fantasy/tok') return json(route, { club: { name: 'Applecross CC' }, season: { name: 'Fantasy', status: 'active', rules: {} }, me: { id: 'm1', display_name: 'Xavier' } })
@@ -396,6 +399,16 @@ async function openLadder({ visible = true, tab = 'Ladder' } = {}) {
   await n.page.waitForSelector('text=Team B', { timeout: 15000 })
   ck('before any round has locked the rows are not openable', (await n.page.getByRole('button', { name: "See Team B's team" }).count()) === 0)
   await n.ctx.close()
+  for (const width of [1280, 390]) {
+    const m = await openLadder({ many: 26 })
+    await m.page.setViewportSize({ width, height: 900 })
+    await m.page.waitForSelector('text=Team 26', { timeout: 15000 })
+    const names = await m.page.locator('[role="button"][aria-label^="See Team"]').count()
+    ck(`${width}px: all 26 teams are listed, including the 21st to 25th and the last one (you)`, names === 26, String(names))
+    const over = await m.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    ck(`${width}px: the long ladder does not scroll sideways`, over <= 1, String(over))
+    await m.ctx.close()
+  }
   const g = await openLadder({ tab: 'Leagues' })
   await g.page.getByRole('button').filter({ hasText: "You're 1st of 2" }).click()
   await g.page.getByRole('button', { name: 'Standings' }).waitFor({ timeout: 15000 })
