@@ -1586,6 +1586,8 @@ async def live(token: str, request: Request, db: AsyncSession = Depends(get_db))
             "lineup": await _enrich_lineup(db, res["lineup"]),
         },
         "playing_now": playing,
+        # When the games behind these points were last read (null before the first live pass).
+        "checked_at": rnd.live_checked_at.isoformat() if rnd.live_checked_at else None,
         "provisional_rank": prov_rank,
         "overall_rank": await _overall_rank(db, squad.league_id, squad.id),
     }

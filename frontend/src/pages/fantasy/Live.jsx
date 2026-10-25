@@ -58,6 +58,13 @@ export default function Live({ token, nav }) {
             <div>
               <div style={{ font: `800 58px/0.82 ${DISP}`, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{pts(mine.points)}</div>
               <div style={{ font: `600 9.5px 'Hanken Grotesk'`, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--faint)', marginTop: 4 }}>{isLive ? 'Live points' : 'Round points'}</div>
+              {isLive && (
+                <div style={{ font: `500 10.5px 'Hanken Grotesk'`, color: 'var(--faint)', marginTop: 4 }}>
+                  {data.checked_at
+                    ? `Scores checked ${new Date(data.checked_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}. Running points until the round is confirmed.`
+                    : 'Running points until the round is confirmed.'}
+                </div>
+              )}
             </div>
             {rank && (
               <div style={{ paddingBottom: 6 }}>

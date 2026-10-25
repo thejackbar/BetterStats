@@ -366,6 +366,16 @@ async def settle_all_fantasy():
                 logger.error(f"Fantasy settlement failed for season {fs.id}: {e}")
 
 
+async def live_sync_fantasy():
+    """Running scores: re-read the games of every Fantasy round that is being played and bring its
+    provisional points in line (services/fantasy_live.py). Never raises."""
+    from app.services import fantasy_live
+    try:
+        await fantasy_live.run_all(async_session_maker)
+    except Exception as e:
+        logger.error(f"Fantasy live scoring failed: {e}")
+
+
 async def resolve_all_drafts():
     """Advance any in-progress draft whose pick clock has lapsed, so auto-picks
     happen even if nobody is watching the board."""
@@ -977,6 +987,18 @@ def start_scheduler():
         id="daily_fantasy_settle",
         replace_existing=True,
     )
+    # BetterFantasyCricket running scores — every 10 minutes, only for clubs with a round being
+    # played, only inside the club's playing hours (fantasy_live decides; most passes read nothing).
+    # Final scores are still confirmed by the daily settle above.
+    scheduler.add_job(
+        live_sync_fantasy,
+        trigger="interval",
+        minutes=10,
+        id="fantasy_live_sync",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     # BetterCricket CRM — rescore EVERY club daily (usage breadcrumbs move even
     # when the club record doesn't), and re-run the pipeline promotion. Runs
     # whether or not any external CRM is configured: the score is computed from
@@ -1211,7 +1233,7 @@ def start_scheduler():
                 "drift check first Sun 05:00 Perth, Square 04:00, fantasy settle 05:00, "
                 "engagement rescore 06:00, trial lifecycle nudges 08:00, notifications 08:45, "
                 "BetterScout refresh 09:00, Meta Ads snapshot hourly at :05, "
-                "draft tick /15min", marketing_mode)
+                "draft tick /15min, fantasy live scores /10min", marketing_mode)
 
 
 def stop_scheduler():

@@ -35,7 +35,7 @@ from app.models.db import (
     FantasySeason, FantasyLeague, FantasyLeagueMember, FantasyRound, FantasyPoolPlayer,
     FantasyManager, FantasySquad, FantasySquadPlayer, FantasyDraft, FANTASY_ROLES,
 )
-from app.services import fantasy_engine, fantasy_draft, fantasy_pool_check, fantasy_grades, fantasy_pricing
+from app.services import fantasy_engine, fantasy_draft, fantasy_pool_check, fantasy_grades, fantasy_pricing, fantasy_live
 from app.routers import public_fantasy
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
 from app.services.session_safety import rollback_keeping
@@ -330,6 +330,7 @@ class RulesUpdate(BaseModel):
     wildcards_per_half: int | None = None
     triple_captains_per_half: int | None = None
     price_window_years: int | None = None
+    live_sync: bool | None = None   # false stops the scheduled running-score pass for this season
 
 
 @router.patch("/season/{season_id}/rules")
@@ -362,6 +363,8 @@ async def update_rules(season_id: str, body: RulesUpdate, club=Depends(get_curre
             rules[fld] = max(0, int(val))
     if body.price_window_years is not None:
         rules["price_window_years"] = max(1, int(body.price_window_years))
+    if body.live_sync is not None:
+        rules[fantasy_live.LIVE_SYNC_RULE] = bool(body.live_sync)
     if rules.get("count_best_n", 11) > rules.get("squad_size", 12):
         raise HTTPException(status_code=400, detail="Best-N can't exceed the squad size.")
     fs.rules = rules  # reassign so the JSONB change is flagged
@@ -1084,9 +1087,16 @@ async def list_rounds(season_id: str, club=Depends(get_current_club), db: AsyncS
             d = await fantasy_engine.round_drift(db, fs, r)
             if d:
                 drift[str(r.id)] = d
+    _, club_day = await fantasy_live.club_today(db, fs)
     return {
+        "live_sync": fantasy_live.live_sync_on(fs.rules),
         "rounds": [
             {
+                # Games are being played in this round's window today (a round settled on its last
+                # morning still is), so its points can still move.
+                "playing": bool(r.status != fantasy_engine.ROUND_UNSETTLED and r.start_date and r.end_date
+                                and r.start_date <= club_day <= r.end_date),
+                "live_checked_at": r.live_checked_at.isoformat() if r.live_checked_at else None,
                 "drift": {"count": len(drift[str(r.id)]), "players": [f"{d['name']} ({d['stored']:g} → {d['now']:g})" for d in drift[str(r.id)][:6]]}
                          if str(r.id) in drift else None,
                 "id": str(r.id), "round_number": r.round_number, "name": r.name,
@@ -1202,6 +1212,23 @@ async def settle_due(season_id: str, club=Depends(get_current_club), db: AsyncSe
     late = await fantasy_engine.refresh_recent_rounds(db, fs)
     await db.commit()
     return {"rounds_settled": settled, "rounds_refreshed": len(running), "rounds_refreshed_late": late}
+
+
+@router.post("/season/{season_id}/sync-scores")
+async def sync_scores(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Read the club's games that are being played and bring the running round's scores up to date
+    now, instead of waiting for the next automatic pass. Points stay provisional: the round is
+    confirmed by Settle once it has finished. Safe to press at any time; two presses inside a minute
+    give the first answer."""
+    fs = await _load_season(db, club, season_id)
+    try:
+        res = await fantasy_live.live_pass(db, fs, manual=True)
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error("Fantasy sync scores failed for season %s: %s", season_id, e)
+        raise HTTPException(status_code=502, detail="Couldn't read the latest scorecards. Try again in a minute.")
+    return res
 
 
 @router.delete("/season/{season_id}")

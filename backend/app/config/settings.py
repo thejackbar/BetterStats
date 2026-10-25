@@ -173,6 +173,12 @@ class Settings(BaseSettings):
     xero_client_id: str = ""
     xero_client_secret: str = ""
 
+    # ─── BetterFantasyCricket running scores ───────────────────────────────────
+    # The scheduled live pass (services/fantasy_live.py) re-reads the games of a round being
+    # played every few minutes. This is the platform-wide stop: set FANTASY_LIVE_SYNC_ENABLED=false
+    # in the server .env to halt it everywhere (a season can also switch itself off in its rules).
+    fantasy_live_sync_enabled: bool = True
+
     # ─── Marketing club directory crawl (BetterCricket outreach, super-admin) ──
     # Walks the CA/grassroots org graph to build the national club list for our
     # own outreach. Politeness is deliberate: low concurrency + a jittered delay

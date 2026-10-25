@@ -79,6 +79,8 @@
 
 47. `grassroots_scores_client._grade_matches_cache` expires after `_GRADE_MATCHES_TTL` (30 min); `force=True` bypasses it. It used to live for the whole process, shared by the probe, the sync, BetterIQ, social rounds and fantasy, so never rely on a list being as old as the process. A new `sync_runs.skip_reason` of `no_fixtures_in_window` on a club that CA shows playing is this bug's signature.
 
+48. In-play figures are believed ONLY by the Fantasy live pass: `sync_grassroots_game_level_data(live=True, live_today=)` reads just the fixtures CA has not finished with (stored while unfinished, listed LIVE, or not held and started), at most `LIVE_MAX_GAMES`, with `force=True` scorecards, and passes `in_play_ok=True` to `card_figures_refresh`. It also keeps `games.innings_totals` in step. The ordinary sync still believes only a COMPLETED card, so a stale in-play card can never overwrite a finished figure there. Never pass `live=True` from a scheduled club sync.
+
 ## Traps and failure signatures
 
 - Two-day grades all billed as One Day: `match_format` had no writer. Rules 18 to 21.
