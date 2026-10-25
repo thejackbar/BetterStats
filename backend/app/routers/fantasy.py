@@ -1088,14 +1088,16 @@ async def list_rounds(season_id: str, club=Depends(get_current_club), db: AsyncS
             if d:
                 drift[str(r.id)] = d
     _, club_day = await fantasy_live.club_today(db, fs)
+    live_state = fantasy_live.round_states(rows, club_day)
     return {
         "live_sync": fantasy_live.live_sync_on(fs.rules),
         "rounds": [
             {
                 # Games are being played in this round's window today (a round settled on its last
                 # morning still is), so its points can still move.
-                "playing": bool(r.status != fantasy_engine.ROUND_UNSETTLED and r.start_date and r.end_date
-                                and r.start_date <= club_day <= r.end_date),
+                "playing": live_state[r.id][0],
+                # Open to Sync scores: started, and the next round has not (see fantasy_live.round_states).
+                "syncable": live_state[r.id][1],
                 "live_checked_at": r.live_checked_at.isoformat() if r.live_checked_at else None,
                 "drift": {"count": len(drift[str(r.id)]), "players": [f"{d['name']} ({d['stored']:g} → {d['now']:g})" for d in drift[str(r.id)][:6]]}
                          if str(r.id) in drift else None,

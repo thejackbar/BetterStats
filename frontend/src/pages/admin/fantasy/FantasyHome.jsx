@@ -241,12 +241,13 @@ export default function FantasyHome() {
                         </td>
                         <td className="py-1.5 pr-3">
                           <span className={r.status === 'scored' ? 'text-pb-accent' : r.status === 'unsettled' ? 'text-amber-400' : r.playing ? 'text-green-400' : 'text-pb-faint'}>
-                            {r.playing && r.status !== 'scored' && r.status !== 'unsettled' ? 'live' : r.status}
+                            {r.playing && r.status !== 'scored' && r.status !== 'unsettled' ? 'live' : r.syncable && r.status === 'upcoming' ? 'ended, not confirmed' : r.status}
                           </span>
-                          {r.playing && r.status !== 'unsettled' && (
+                          {r.syncable && r.status !== 'unsettled' && (
                             <div className="text-[11px] text-pb-faint mt-0.5 max-w-xs">
-                              Being played now. {r.live_checked_at ? `Scores last checked ${fmtTime(r.live_checked_at)}.` : 'Scores not checked yet.'}
-                              {r.status === 'scored' ? ' Confirmed early, so these still follow the games.' : ' Running scores until you confirm the round.'}
+                              {r.playing ? 'Being played now.' : 'Games are over, and the next round has not started.'}
+                              {' '}{r.live_checked_at ? `Scores last checked ${fmtTime(r.live_checked_at)}.` : 'Scores not checked yet.'}
+                              {r.status === 'scored' ? ' Confirmed already, and still follows late scorecards.' : ' Running scores until you confirm the round.'}
                             </div>
                           )}
                           {r.drift && (
@@ -263,7 +264,7 @@ export default function FantasyHome() {
                               Unsettle
                             </button>
                           )}
-                          {r.playing && r.status !== 'unsettled' && (
+                          {r.syncable && r.status !== 'unsettled' && (
                             <button onClick={syncScores} disabled={busy === 'sync'}
                               className="text-xs underline text-pb-accent hover:text-pb-text disabled:opacity-50 mr-3">
                               {busy === 'sync' ? '…' : 'Sync scores'}

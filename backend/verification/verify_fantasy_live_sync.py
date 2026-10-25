@@ -476,6 +476,88 @@ async def main() -> None:
             rules = await fantasy_router.update_rules(str(FS_ID), fantasy_router.RulesUpdate(budget=100), club=org, db=s, _=None)
         check("and an update that does not send it leaves it alone", rules["rules"].get("live_sync") is False)
 
+    print("\n-- 10. Between rounds (reported: Sync scores said nothing is being played the day after round 3) --")
+    # Applecross: round 2 over, round 3 ended yesterday and was never confirmed, round 4 starts in six days.
+    G3, R2, R3, R4 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with Session() as s:
+        await s.execute(text("DELETE FROM games WHERE id IN (:a, :b)"), {"a": G1, "b": G2})
+        await s.execute(text("DELETE FROM fantasy_rounds WHERE id = :r"), {"r": RND})
+        await s.execute(text("UPDATE fantasy_seasons SET rules = rules - 'live_sync' WHERE id=:i"), {"i": FS_ID})
+        s.add_all([
+            FantasyRound(id=R2, fantasy_season_id=FS_ID, organisation_id=ORG, round_number=2, name="Round 2",
+                         start_date=TODAY - timedelta(days=15), end_date=TODAY - timedelta(days=8), status="scored"),
+            FantasyRound(id=R3, fantasy_season_id=FS_ID, organisation_id=ORG, round_number=3, name="Round 3",
+                         start_date=D1, end_date=D1),
+            FantasyRound(id=R4, fantasy_season_id=FS_ID, organisation_id=ORG, round_number=4, name="Round 4",
+                         start_date=TODAY + timedelta(days=6), end_date=TODAY + timedelta(days=7)),
+        ])
+        await s.commit()
+    for k in list(statuses):
+        del statuses[k]
+    statuses[str(G3)] = "COMPLETED"
+    first_day[str(G3)] = D1
+    two_day[str(G3)] = 1
+    cards[str(G3)] = card(G3, D1, "COMPLETED", runs=60, balls=50, fours=6, sixes=2, dt_id=2, dt="Bowled", wkts=1)
+    await set_stamp("NULL")
+    ft = await free_transfers()
+    res = await run_live(manual=True)
+    check("Sync scores runs for round 3 the day after it ended", res.get("ran") is True, str(res))
+    check("the finished game we had never stored is read and stored", await runs_of(G3, SUSH) == 60, str(await runs_of(G3, SUSH)))
+    r3 = await val("SELECT total_points FROM fantasy_player_round_scores WHERE round_id=:r AND player_id=:p", r=R3, p=SUSH)
+    check("Fantasy shows 90 for it (60 + 6 fours + 4 for two sixes + 16 for the fifty + 4)", r3 is not None and float(r3[0]) == 90.0, str(r3))
+    st3 = await val("SELECT status, scored_at FROM fantasy_rounds WHERE id=:r", r=R3)
+    check("round 3 is still waiting to be confirmed, not scored", st3[0] == "upcoming" and st3[1] is None, str(st3))
+    check("round 2, over and confirmed, was not touched", (await val("SELECT live_checked_at FROM fantasy_rounds WHERE id=:r", r=R2) or (1,))[0] is None
+          if await has_stamp_column() else True)
+    check("no free transfer was granted by the sync", await free_transfers() == ft)
+
+    async with Session() as s:
+        rounds = list((await s.execute(text("SELECT 1"))).all()) and None
+        from sqlalchemy import select as _select
+        rounds = list((await s.execute(_select(FantasyRound).where(FantasyRound.fantasy_season_id == FS_ID))).scalars().all())
+    if fantasy_live is not None and hasattr(fantasy_live, "round_states"):
+        def open_ids(day):
+            st = fantasy_live.round_states(rounds, day)
+            return {n for r in rounds for n in [r.round_number] if st[r.id][1]}
+        check("round 3 stays open from its first day to the day before round 4 starts",
+              all(3 in open_ids(TODAY + timedelta(days=d)) for d in (0, 1, 3, 5)), str([open_ids(TODAY + timedelta(days=d)) for d in (0, 5)]))
+        check("and closes when round 4 starts, which is then the open one",
+              open_ids(TODAY + timedelta(days=6)) == {4}, str(open_ids(TODAY + timedelta(days=6))))
+        check("round 2 closed the day round 3 started", 2 not in open_ids(D1) and 3 in open_ids(D1), str(open_ids(D1)))
+        check("a round that has not started is not open", 4 not in open_ids(TODAY), str(open_ids(TODAY)))
+        last = [r for r in rounds if r.round_number == 4]
+        end4 = last[0].end_date
+        check("the final round stays open a few days after its last day, then closes",
+              fantasy_live.round_states(last, end4 + timedelta(days=3))[last[0].id][1]
+              and not fantasy_live.round_states(last, end4 + timedelta(days=4))[last[0].id][1])
+        check("a round an admin unsettled is never open", not fantasy_live.round_states(
+            [type("R", (), dict(id=1, round_number=1, status="unsettled", start_date=D1, end_date=D1))()], TODAY)[1][1])
+    else:
+        check("round_states exists", False, "missing")
+
+    print("   -- the scheduled pass while only a finished round is open: four looks a day --")
+    fetched.clear()
+    res = await run_live(now=AFTERNOON)
+    check("2pm: not one of the four times, nothing is read", res.get("reason") == "waiting_for_next_check" and not fetched, f"{res} {fetched}")
+    await set_stamp("NULL")
+    res = await run_live(now=AFTERNOON.replace(hour=12, minute=5))
+    check("12:05: it looks", res.get("ran") is True, str(res))
+    res = await run_live(now=AFTERNOON.replace(hour=12, minute=35))
+    check("12:35: the same hour is not looked at twice", res.get("reason") == "waiting_for_next_check", str(res))
+    if fantasy_live is not None and hasattr(fantasy_live, "seasons_to_check"):
+        ids = await fantasy_live.seasons_to_check(Session, NOW_UTC.date())
+        check("the scheduled job's season list includes the club", FS_ID in ids, str(ids))
+        async with Session() as s:
+            await s.execute(text("DELETE FROM fantasy_rounds WHERE id = :r"), {"r": R4})
+            await s.execute(text("UPDATE fantasy_rounds SET start_date = :a, end_date = :a WHERE id = :r"),
+                            {"a": TODAY - timedelta(days=9), "r": R3})
+            await s.commit()
+        check("and drops it once the last round is well over", FS_ID not in await fantasy_live.seasons_to_check(Session, NOW_UTC.date()))
+        res = await run_live(manual=True)
+        check("Sync scores then says plainly that nothing is open", res.get("reason") == "no_running_round" and bool(res.get("message")), str(res))
+    else:
+        check("the scheduled job has a season list to test", False, "seasons_to_check missing")
+
     print(f"\n{PASS} passed, {FAIL} failed")
     await engine.dispose()
     sys.exit(1 if FAIL else 0)

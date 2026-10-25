@@ -16,6 +16,12 @@ One pass for one season (``live_pass``):
 3. Stamp ``fantasy_rounds.live_checked_at``, so "nothing moved" can be told from "nothing was looked
    at".
 
+A round stays open to this pass from its first day until the day before the next round starts (a
+few days after its last day when it is the final round), not just while its own window lasts: its last
+day's games finish and get entered after the window has closed, and the gap between two rounds is
+exactly when a finished round is waiting to be confirmed. Once its window is over a round is looked at
+only ``ENDED_ROUND_HOURS`` (four times a day), so a quiet fortnight costs next to nothing.
+
 Never granted, filled or marked here: the free transfer rollover, head-to-head results, a round's
 ``scored`` status, prices. Those wait for the round to be settled.
 
@@ -47,6 +53,11 @@ LIVE_SYNC_RULE = "live_sync"
 # results sync and the 05:00 settle cover everything outside them.
 PLAY_FROM_HOUR = 7
 PLAY_UNTIL_HOUR = 22
+# Club-local hours at which the scheduled pass looks at a round whose window is over but which is still
+# open (no later round has started). The first pass in the hour does it (the job runs every 10 minutes).
+ENDED_ROUND_HOURS = (8, 12, 16, 20)
+# After the LAST round of a season there is no next round to close it: stay open this many days.
+FINAL_ROUND_GRACE_DAYS = 3
 # An admin pressing Sync scores twice in a row gets the first answer.
 MANUAL_COOLDOWN_SECONDS = 60
 PAUSE_BETWEEN_CLUBS_SECONDS = 2.0
@@ -55,7 +66,7 @@ _org_locks: dict[str, asyncio.Lock] = {}
 
 # What an admin is told when a pass did not run. The scheduled pass logs the key instead.
 REASON_TEXT = {
-    "no_running_round": "No round is being played today. A finished round is confirmed with Confirm final scores.",
+    "no_running_round": "No round is open to sync right now. A round stays open until the next one starts.",
     "sync_running": "The club has a sync running. The scores follow it when it finishes.",
     "already_running": "Scores are already being synced. Give it a minute.",
     "just_checked": "The scores were checked a moment ago.",
@@ -80,17 +91,38 @@ async def club_today(session: AsyncSession, fs, now: datetime | None = None) -> 
     return local, local.date()
 
 
-async def running_rounds(session: AsyncSession, fs, today) -> list[FantasyRound]:
-    """Rounds whose window includes ``today`` and that no admin has taken out of settlement. A round
-    already marked scored is included: one that settled on its last morning is still being played."""
+def round_states(rounds: list, today: date) -> dict:
+    """``{round id: (playing, open)}`` for one season's rounds on a club-local ``today``.
+
+    ``playing``: today is inside the round's own window. ``open``: the round has started and the next
+    round has not (the day before it starts is the last open day; for the final round, a few days
+    after its last day), or it is being played. A round an admin took out of settlement is neither."""
+    ordered = sorted(rounds, key=lambda r: r.round_number)
+    out: dict = {}
+    for i, r in enumerate(ordered):
+        if r.status == fantasy_engine.ROUND_UNSETTLED or not r.start_date or not r.end_date:
+            out[r.id] = (False, False)
+            continue
+        nxt = next((n.start_date for n in ordered[i + 1:] if n.start_date), None)
+        until = (nxt - timedelta(days=1)) if nxt else r.end_date + timedelta(days=FINAL_ROUND_GRACE_DAYS)
+        playing = r.start_date <= today <= r.end_date
+        out[r.id] = (playing, playing or (r.start_date <= today <= max(until, r.end_date)))
+    return out
+
+
+async def season_rounds(session: AsyncSession, fs) -> list[FantasyRound]:
     return list((await session.execute(
-        select(FantasyRound).where(
-            FantasyRound.fantasy_season_id == fs.id,
-            FantasyRound.status != fantasy_engine.ROUND_UNSETTLED,
-            FantasyRound.start_date <= today,
-            FantasyRound.end_date >= today,
-        ).order_by(FantasyRound.round_number)
+        select(FantasyRound).where(FantasyRound.fantasy_season_id == fs.id).order_by(FantasyRound.round_number)
     )).scalars().all())
+
+
+async def running_rounds(session: AsyncSession, fs, today) -> list[FantasyRound]:
+    """The season's rounds that are open to the live pass today (see ``round_states``). A round already
+    marked scored is included: one that settled on its last morning is still being played, and one whose
+    last games were entered after it settled still moves."""
+    rounds = await season_rounds(session, fs)
+    states = round_states(rounds, today)
+    return [r for r in rounds if states[r.id][1]]
 
 
 def _in_flight(org_id: str) -> bool:
@@ -119,7 +151,9 @@ async def _live_pass(session: AsyncSession, fs, *, manual: bool = False, now: da
         return out
 
     local_now, today = await club_today(session, fs, now)
-    rounds = await running_rounds(session, fs, today)
+    all_rounds = await season_rounds(session, fs)
+    states = round_states(all_rounds, today)
+    rounds = [r for r in all_rounds if states[r.id][1]]
     if not rounds:
         out["reason"] = "no_running_round"
         return out
@@ -138,6 +172,10 @@ async def _live_pass(session: AsyncSession, fs, *, manual: bool = False, now: da
             return out
         if not (PLAY_FROM_HOUR <= local_now.hour < PLAY_UNTIL_HOUR):
             out["reason"] = "outside_play_hours"
+            return out
+        if not any(playing for playing, _ in states.values()) and not (
+                local_now.hour in ENDED_ROUND_HOURS and local_now.minute < 10):
+            out["reason"] = "waiting_for_next_check"   # only finished rounds are open: four looks a day
             return out
 
     org_id = str(org.id)
@@ -199,17 +237,28 @@ async def live_pass(session: AsyncSession, fs, *, manual: bool = False, now: dat
     return out
 
 
+async def seasons_to_check(session_maker, today: date) -> list:
+    """Seasons with a round open to the live pass on ``today`` or the day either side of it (the clubs
+    are in different timezones; ``live_pass`` decides on the club's own date). Every round of such a
+    season is read, because the next round's start is what closes a round."""
+    near = select(FantasyRound.fantasy_season_id).where(
+        FantasyRound.start_date <= today + timedelta(days=1),
+        FantasyRound.end_date >= today - timedelta(days=60))
+    async with session_maker() as session:
+        rows = (await session.execute(
+            select(FantasyRound).where(FantasyRound.fantasy_season_id.in_(near))
+        )).scalars().all()
+    by_season: dict = {}
+    for r in rows:
+        by_season.setdefault(r.fantasy_season_id, []).append(r)
+    return [sid for sid, rs in by_season.items()
+            if any(o for d in (-1, 0, 1) for _, o in round_states(rs, today + timedelta(days=d)).values())]
+
+
 async def run_all(session_maker) -> list[dict]:
     """The scheduled pass: every season with a round that could be in play, one at a time, each in
     its own session so one club's failure cannot stop the rest."""
-    today = datetime.now(timezone.utc).date()
-    async with session_maker() as session:
-        season_ids = list((await session.execute(
-            text("""SELECT DISTINCT fantasy_season_id FROM fantasy_rounds
-                    WHERE status <> :unsettled AND start_date <= :hi AND end_date >= :lo"""),
-            {"unsettled": fantasy_engine.ROUND_UNSETTLED, "hi": today + timedelta(days=1),
-             "lo": today - timedelta(days=1)},
-        )).scalars().all())
+    season_ids = await seasons_to_check(session_maker, datetime.now(timezone.utc).date())
     results: list[dict] = []
     for sid in season_ids:
         async with session_maker() as session:

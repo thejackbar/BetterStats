@@ -27,21 +27,21 @@ const today = new Date()
 const day = (n) => { const d = new Date(today); d.setDate(d.getDate() + n); return iso(d) }
 const checkedAt = new Date(today.getTime() - 4 * 60 * 1000).toISOString()
 
-const ROUNDS = (live_sync) => ({
+const ROUNDS = (live_sync, ended = false) => ({
   live_sync,
   rounds: [
-    { id: 'r1', round_number: 1, name: 'Round 1', status: 'scored', playing: false, live_checked_at: null, drift: null,
+    { id: 'r1', round_number: 1, name: 'Round 1', status: 'scored', playing: false, syncable: false, live_checked_at: null, drift: null,
       start_date: day(-20), end_date: day(-14), lock_at: new Date(today.getTime() - 20 * 864e5).toISOString(), lock_manual: false },
-    { id: 'r2', round_number: 2, name: 'Round 2', status: 'upcoming', playing: true, live_checked_at: checkedAt, drift: null,
+    { id: 'r2', round_number: 2, name: 'Round 2', status: 'upcoming', playing: !ended, syncable: true, live_checked_at: checkedAt, drift: null,
       start_date: day(-1), end_date: day(6), lock_at: new Date(today.getTime() - 864e5).toISOString(), lock_manual: false },
-    { id: 'r3', round_number: 3, name: 'Round 3', status: 'upcoming', playing: false, live_checked_at: null, drift: null,
+    { id: 'r3', round_number: 3, name: 'Round 3', status: 'upcoming', playing: false, syncable: false, live_checked_at: null, drift: null,
       start_date: day(8), end_date: day(9), lock_at: new Date(today.getTime() + 8 * 864e5).toISOString(), lock_manual: false },
   ],
 })
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function openPage({ width = 1440, syncReply, liveSync = true } = {}) {
+async function openPage({ width = 1440, syncReply, liveSync = true, ended = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1100 } })
   const page = await ctx.newPage()
   const errors = [], calls = []
@@ -65,7 +65,7 @@ async function openPage({ width = 1440, syncReply, liveSync = true } = {}) {
         link_token: 'tok', link_active: true, counts: { pool: 30, rounds: 3, rounds_scored: 1 },
       })
     }
-    if (path === '/club-admin/fantasy/season/s1/rounds') return json(route, ROUNDS(liveOn))
+    if (path === '/club-admin/fantasy/season/s1/rounds') return json(route, ROUNDS(liveOn, ended))
     if (path === '/club-admin/fantasy/season/s1/sync-scores' && method === 'POST') {
       calls.push('POST sync-scores')
       return json(route, syncReply)
@@ -159,6 +159,22 @@ const flashText = async (page) => (await page.locator('div.rounded.bg-pb-accent\
   await page.getByRole('button', { name: 'Sync scores' }).first().click()
   await page.waitForSelector('text=Checked 1 game in play')
   ck('a pass with no change says so, and does not claim a move', /No scores have changed since the last look/.test(await flashText(page)) && !/moved/.test(await flashText(page)), await flashText(page))
+  await ctx.close()
+}
+
+// ── 2b. Between rounds: the round is over, the next has not started ───────────
+{
+  const { page, ctx } = await openPage({ ended: true, syncReply: { ran: true, games_checked: 2, players_moved: 4, message: null, rounds: [] } })
+  const r2 = rowOf(page, 'Round 2')
+  const t = await r2.innerText()
+  ck('a finished round still open to syncing reads "ended, not confirmed", not "upcoming" or "live"',
+     /ended, not confirmed/.test(t) && !/upcoming/.test(t) && !/\blive\b/.test(t), t)
+  ck('and says the games are over and the next round has not started', /Games are over, and the next round has not started/.test(t), t)
+  ck('and still offers Sync scores in its row', (await r2.getByText('Sync scores').count()) === 1)
+  await r2.getByRole('button', { name: 'Sync scores' }).click()
+  await page.waitForSelector('text=Checked 2 games in play')
+  ck('which sends the same sync request', /Checked 2 games in play\. 4 players moved/.test(await flashText(page)))
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/fantasy_live_admin_between_rounds.png`, fullPage: true })
   await ctx.close()
 }
 
