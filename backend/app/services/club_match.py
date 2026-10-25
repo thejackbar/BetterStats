@@ -121,6 +121,17 @@ def fixture_involves_club(club, fx: dict) -> bool:
     ) is not None
 
 
+def fixture_is_in_house(club, fx: dict) -> bool:
+    """True when BOTH sides are the club's own teams (Applecross 8th XI v 10th XI).
+
+    Owning organisation ids only, and both must be present: two names that share
+    a first word prove nothing ("North Beach" and "North Perth"). A fixture like
+    this is one match with two sides to pick, so it needs a row for each."""
+    ids = club_org_ids(club)
+    home, away = fx.get("home_org_id"), fx.get("away_org_id")
+    return bool(home and away and str(home).lower() in ids and str(away).lower() in ids)
+
+
 def fixture_is_between_others(club, fx: dict) -> bool:
     """True only when the payload NAMES both owning clubs and neither is ours.
 

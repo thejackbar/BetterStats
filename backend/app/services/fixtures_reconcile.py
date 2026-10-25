@@ -166,13 +166,17 @@ async def reconcile(
     listing: dict,
     today: date,
     derive_sides,
+    derive_all_sides=None,
 ) -> ReconcileResult:
     """Re-key, remove or cancel stale synced fixtures. Does not commit.
 
     ``games`` are this sync's normalised fixtures (with ``db_grade_id``);
     ``derive_sides(game)`` gives ``(home_away, opponent)`` from our side.
-    ``existing`` is every fixture row of the club; rows that get removed are
-    also taken out of that list's by-GUID view by the caller via the result.
+    ``derive_all_sides(game)``, when given, gives a list of them: a game between
+    two of the club's own teams is one match with a row for each side, and each
+    row re-keys onto its own side of the re-issued game. Without it a game is
+    one row. ``existing`` is every fixture row of the club; rows that get removed
+    are also taken out of that list's by-GUID view by the caller via the result.
     """
     result = ReconcileResult()
     foreign = find_foreign(existing, incoming_ids, listing)
@@ -181,8 +185,12 @@ async def reconcile(
     if not stale and not foreign:
         return result
 
-    by_gid: dict[str, Fixture] = {f.playhq_id: f for f in existing if f.playhq_id and f.source == "grassroots"}
-    work = await fixtures_with_work(db, list(stale) + foreign + [by_gid[g["id"]] for g in games if g.get("id") in by_gid])
+    by_gid: dict[str, list[Fixture]] = defaultdict(list)
+    for f in existing:
+        if f.playhq_id and f.source == "grassroots":
+            by_gid[f.playhq_id].append(f)
+    work = await fixtures_with_work(
+        db, list(stale) + foreign + [f for g in games for f in by_gid.get(g.get("id"), [])])
 
     # --- 1. Re-key: pair a stale row with the one game CA lists in its place.
     stale_by_key: dict[tuple, list[Fixture]] = defaultdict(list)
@@ -192,8 +200,8 @@ async def reconcile(
     for g in games:
         if not g.get("id"):
             continue
-        home_away, opponent = derive_sides(g)
-        games_by_key[_row_key(g.get("db_grade_id"), g.get("round"), home_away, opponent)].append(g)
+        for home_away, opponent in (derive_all_sides(g) if derive_all_sides else [derive_sides(g)]):
+            games_by_key[_row_key(g.get("db_grade_id"), g.get("round"), home_away, opponent)].append(g)
 
     handled: set[str] = set()
     for key, rows in stale_by_key.items():
@@ -208,10 +216,13 @@ async def reconcile(
         if len(rows) != 1 or len(cands) != 1:
             continue
         old, g = rows[0], cands[0]
-        twin = by_gid.get(g["id"])
-        if twin is not None and twin.id != old.id:
-            # An earlier sync already gave this GUID its own row. Fold it into
-            # the older one, unless somebody has already started using it.
+        # An earlier sync may already have given this GUID its own row. Fold it
+        # into the older one, unless somebody has already started using it. In an
+        # in-house game the row for the club's OTHER side is not a twin.
+        in_house = bool(derive_all_sides) and len(derive_all_sides(g)) > 1
+        twin = next((t for t in by_gid.get(g["id"], [])
+                     if t.id != old.id and (not in_house or t.home_away == old.home_away)), None)
+        if twin is not None:
             if str(twin.id) in work:
                 continue
             await db.delete(twin)
