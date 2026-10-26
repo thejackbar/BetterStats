@@ -3577,6 +3577,9 @@ export const api = {
   fanSaveSquad: (token, data) => request(`/public/fantasy/${token}/squad`, { method: 'POST', body: JSON.stringify(data) }),
   fanTransfer: (token, out_player_id, in_player_id) =>
     request(`/public/fantasy/${token}/transfer`, { method: 'POST', body: JSON.stringify({ out_player_id, in_player_id }) }),
+  // Several swaps at once; the server checks the budget over the whole set.
+  fanTransfers: (token, swaps) =>
+    request(`/public/fantasy/${token}/transfers`, { method: 'POST', body: JSON.stringify({ swaps }) }),
   fanCancelQueuedTransfer: (token, id) =>
     request(`/public/fantasy/${token}/transfer/queued/${id}`, { method: 'DELETE' }),
   fanSetCaptain: (token, captain_player_id, vice_player_id) =>

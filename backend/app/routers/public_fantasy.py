@@ -1110,12 +1110,114 @@ class TransferBody(BaseModel):
     in_player_id: str
 
 
-@router.post("/{token}/transfer")
-async def transfer(token: str, body: TransferBody, request: Request, db: AsyncSession = Depends(get_db)):
-    """Swap one player for another of the same role. The first free transfer of the
-    round is free; further transfers cost the points hit. Budget uses the current
-    price of the player leaving, so a rise while owned adds to the bank and a fall
-    takes from it. After the round has locked the swap is queued instead (see below)."""
+class TransfersBody(BaseModel):
+    swaps: list[TransferBody]
+
+
+MAX_SWAPS_PER_REQUEST = 15
+
+
+async def _make_transfers(db: AsyncSession, season: FantasySeason, squad: FantasySquad,
+                          swaps: list[TransferBody]) -> dict:
+    """Carry out one or more like-for-like swaps as ONE request. The budget is checked
+    over the whole set (what every player leaving returns less what every player coming
+    in costs), so a manager can sell two players to afford one dearer pick. Each swap
+    uses a free transfer while there is one, then costs the points hit. Nothing is
+    written unless every swap passes. After the round has locked the swaps are queued."""
+    if not swaps:
+        raise HTTPException(status_code=400, detail="Pick a player out and a player in.")
+    if len(swaps) > MAX_SWAPS_PER_REQUEST:
+        raise HTTPException(status_code=400, detail=f"At most {MAX_SWAPS_PER_REQUEST} transfers at a time.")
+    outs = [s.out_player_id for s in swaps]
+    ins = [s.in_player_id for s in swaps]
+    if len(set(outs)) != len(outs) or len(set(ins)) != len(ins):
+        raise HTTPException(status_code=400, detail="Each player can only be in one transfer.")
+
+    # Once the round has locked the XI is frozen until it is scored, so a transfer
+    # made now is queued: it happens when the round is scored, at the prices then,
+    # and counts for the round after it (services/fantasy_queue).
+    locked_round = await _current_round(db, season)
+    if _round_locked(locked_round):
+        res = None
+        try:
+            for s in swaps:
+                res = await fantasy_queue.queue_transfer(db, season, squad, locked_round, s.out_player_id, s.in_player_id)
+        except fantasy_queue.QueueError as e:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail=str(e))
+        await db.commit()
+        # The last call's warning is the estimate over everything now queued.
+        return {"ok": True, "queued": True, "id": res["id"], "count": len(swaps), "after_round": locked_round.round_number,
+                "warning": res["warning"], "budget_remaining": float(squad.budget_remaining or 0),
+                "free_transfers": squad.free_transfers}
+
+    sps = (await db.execute(
+        select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
+    )).scalars().all()
+    have = {str(s.player_id) for s in sps}
+    budget = float(squad.budget_remaining or 0)
+    plan = []
+    for s in swaps:
+        out_sp = next((x for x in sps if str(x.player_id) == s.out_player_id), None)
+        if out_sp is None:
+            raise HTTPException(status_code=400, detail="That player isn't in your squad.")
+        if out_sp.is_captain or out_sp.is_vice_captain:
+            raise HTTPException(status_code=400, detail="Change your captain or vice before transferring them out.")
+        if s.in_player_id in have:
+            raise HTTPException(status_code=400, detail="You already have that player.")
+        in_pool = (await db.execute(
+            select(FantasyPoolPlayer).where(
+                FantasyPoolPlayer.fantasy_season_id == season.id,
+                FantasyPoolPlayer.player_id == s.in_player_id,
+            )
+        )).scalar_one_or_none()
+        if in_pool is None or not in_pool.is_available:
+            raise HTTPException(status_code=400, detail="That player isn't available.")
+        if in_pool.role != out_sp.role:
+            raise HTTPException(status_code=400, detail=f"Transfers must be like-for-like by role ({out_sp.role}).")
+        out_pool = (await db.execute(
+            select(FantasyPoolPlayer).where(
+                FantasyPoolPlayer.fantasy_season_id == season.id,
+                FantasyPoolPlayer.player_id == s.out_player_id,
+            )
+        )).scalar_one_or_none()
+        sell = _sell_value(out_sp.purchase_price, out_pool.current_price if out_pool else (out_sp.purchase_price or 0))
+        budget += sell - float(in_pool.current_price)
+        plan.append((out_sp, in_pool, sell))
+    if budget < -1e-6:
+        raise HTTPException(status_code=400, detail="Not enough budget for that transfer." if len(swaps) == 1
+                            else "Not enough budget for those transfers.")
+
+    rnd = locked_round
+    hit_points = int((season.rules or DEFAULT_RULES).get("transfer_hit", DEFAULT_RULES["transfer_hit"]))
+    total_hit = 0
+    for out_sp, in_pool, sell in plan:
+        if squad.free_transfers and squad.free_transfers > 0:
+            squad.free_transfers -= 1
+            hit = 0
+        else:
+            hit = hit_points
+        total_hit += hit
+        out_id = str(out_sp.player_id)
+        await db.delete(out_sp)
+        db.add(FantasySquadPlayer(
+            squad_id=squad.id, player_id=str(in_pool.player_id), role=in_pool.role,
+            purchase_price=in_pool.current_price, added_round=rnd.round_number if rnd else None,
+        ))
+        db.add(FantasyTransaction(squad_id=squad.id, league_id=squad.league_id, round_id=rnd.id if rnd else None,
+                                  type="transfer_out", player_id=out_id, price=sell))
+        db.add(FantasyTransaction(squad_id=squad.id, league_id=squad.league_id, round_id=rnd.id if rnd else None,
+                                  type="transfer_in", player_id=str(in_pool.player_id), price=in_pool.current_price))
+        await db.flush()
+        await _record_round_transfer(db, squad.id, rnd, hit)
+    squad.budget_remaining = round(budget, 1)
+    await db.commit()
+    await _recount_ownership(db, season.id)
+    return {"ok": True, "hit": total_hit, "count": len(swaps), "budget_remaining": squad.budget_remaining,
+            "free_transfers": squad.free_transfers}
+
+
+async def _transfer_context(db: AsyncSession, token: str, request: Request):
     club = await _club_for_token(db, token)
     mgr = await _manager_for_session(db, request, club)
     season = await _current_season(db, club)
@@ -1125,77 +1227,25 @@ async def transfer(token: str, body: TransferBody, request: Request, db: AsyncSe
     if squad is None:
         raise HTTPException(status_code=400, detail="Build your squad first.")
     rate_limit.enforce(f"fantasy-write:{mgr.id}", WRITE_LIMIT, WRITE_WINDOW)
+    return season, squad
 
-    # Once the round has locked the XI is frozen until it is scored, so a transfer
-    # made now is queued: it happens when the round is scored, at the prices then,
-    # and counts for the round after it (services/fantasy_queue).
-    locked_round = await _current_round(db, season)
-    if _round_locked(locked_round):
-        try:
-            res = await fantasy_queue.queue_transfer(db, season, squad, locked_round, body.out_player_id, body.in_player_id)
-        except fantasy_queue.QueueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        await db.commit()
-        return {"ok": True, "queued": True, "id": res["id"], "after_round": locked_round.round_number,
-                "warning": res["warning"], "budget_remaining": float(squad.budget_remaining or 0),
-                "free_transfers": squad.free_transfers}
 
-    sps = (await db.execute(
-        select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
-    )).scalars().all()
-    out_sp = next((s for s in sps if str(s.player_id) == body.out_player_id), None)
-    if out_sp is None:
-        raise HTTPException(status_code=400, detail="That player isn't in your squad.")
-    if out_sp.is_captain or out_sp.is_vice_captain:
-        raise HTTPException(status_code=400, detail="Change your captain or vice before transferring them out.")
-    if any(str(s.player_id) == body.in_player_id for s in sps):
-        raise HTTPException(status_code=400, detail="You already have that player.")
+@router.post("/{token}/transfer")
+async def transfer(token: str, body: TransferBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Swap one player for another of the same role. The first free transfer of the
+    round is free; further transfers cost the points hit. Budget uses the current
+    price of the player leaving, so a rise while owned adds to the bank and a fall
+    takes from it. After the round has locked the swap is queued instead (see below)."""
+    season, squad = await _transfer_context(db, token, request)
+    return await _make_transfers(db, season, squad, [body])
 
-    in_pool = (await db.execute(
-        select(FantasyPoolPlayer).where(
-            FantasyPoolPlayer.fantasy_season_id == season.id,
-            FantasyPoolPlayer.player_id == body.in_player_id,
-        )
-    )).scalar_one_or_none()
-    if in_pool is None or not in_pool.is_available:
-        raise HTTPException(status_code=400, detail="That player isn't available.")
-    if in_pool.role != out_sp.role:
-        raise HTTPException(status_code=400, detail=f"Transfers must be like-for-like by role ({out_sp.role}).")
 
-    out_pool = (await db.execute(
-        select(FantasyPoolPlayer).where(
-            FantasyPoolPlayer.fantasy_season_id == season.id,
-            FantasyPoolPlayer.player_id == body.out_player_id,
-        )
-    )).scalar_one_or_none()
-    out_current = out_pool.current_price if out_pool else (out_sp.purchase_price or 0)
-    sell = _sell_value(out_sp.purchase_price, out_current)
-    budget = float(squad.budget_remaining or 0) + sell - float(in_pool.current_price)
-    if budget < -1e-6:
-        raise HTTPException(status_code=400, detail="Not enough budget for that transfer.")
-
-    rnd = await _current_round(db, season)
-    if squad.free_transfers and squad.free_transfers > 0:
-        squad.free_transfers -= 1
-        hit = 0
-    else:
-        hit = int((season.rules or DEFAULT_RULES).get("transfer_hit", DEFAULT_RULES["transfer_hit"]))
-
-    await db.delete(out_sp)
-    db.add(FantasySquadPlayer(
-        squad_id=squad.id, player_id=body.in_player_id, role=in_pool.role,
-        purchase_price=in_pool.current_price, added_round=rnd.round_number if rnd else None,
-    ))
-    squad.budget_remaining = round(budget, 1)
-    db.add(FantasyTransaction(squad_id=squad.id, league_id=squad.league_id, round_id=rnd.id if rnd else None,
-                              type="transfer_out", player_id=body.out_player_id, price=sell))
-    db.add(FantasyTransaction(squad_id=squad.id, league_id=squad.league_id, round_id=rnd.id if rnd else None,
-                              type="transfer_in", player_id=body.in_player_id, price=in_pool.current_price))
-    await db.flush()
-    await _record_round_transfer(db, squad.id, rnd, hit)
-    await db.commit()
-    await _recount_ownership(db, season.id)
-    return {"ok": True, "hit": hit, "budget_remaining": squad.budget_remaining, "free_transfers": squad.free_transfers}
+@router.post("/{token}/transfers")
+async def transfers(token: str, body: TransfersBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Several swaps at once, with the budget checked over the whole set: sell two
+    players to afford one dearer pick. All or nothing."""
+    season, squad = await _transfer_context(db, token, request)
+    return await _make_transfers(db, season, squad, body.swaps)
 
 
 @router.delete("/{token}/transfer/queued/{queued_id}")

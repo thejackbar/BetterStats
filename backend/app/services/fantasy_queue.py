@@ -147,12 +147,16 @@ async def apply_pending(session: AsyncSession, fs) -> dict:
     def cancel(q, reason):
         q.status, q.reason = "cancelled", reason
 
-    for q in rows:
+    async def attempt(q):
+        """Carry out one queued swap. Returns "applied", "cancelled", or a shortfall
+        message when only the budget stops it: the swap is left pending so the others
+        can free money first (a manager who queued two sales to afford one dearer pick)."""
+        nonlocal applied, cancelled
         squad = await session.get(FantasySquad, q.squad_id)
         if squad is None:
             cancel(q, "The team no longer exists.")
             cancelled += 1
-            continue
+            return "cancelled"
         sps = (await session.execute(
             select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
         )).scalars().all()
@@ -160,29 +164,27 @@ async def apply_pending(session: AsyncSession, fs) -> dict:
         if out_sp is None:
             cancel(q, "The player going out is no longer in your team.")
             cancelled += 1
-            continue
+            return "cancelled"
         if any(s.player_id == q.in_player_id for s in sps):
             cancel(q, "The player coming in is already in your team.")
             cancelled += 1
-            continue
+            return "cancelled"
         in_pool = await _pool(session, fs.id, q.in_player_id)
         if in_pool is None or not in_pool.is_available:
             cancel(q, "The player coming in is no longer available.")
             cancelled += 1
-            continue
+            return "cancelled"
         if in_pool.role != out_sp.role:
             cancel(q, "The player coming in is no longer the same role.")
             cancelled += 1
-            continue
+            return "cancelled"
         out_pool = await _pool(session, fs.id, q.out_player_id)
         sell = round(_f(out_pool.current_price) if out_pool else _f(out_sp.purchase_price), 1)
         buy = round(_f(in_pool.current_price), 1)
         bank = _f(squad.budget_remaining) + sell - buy
         if bank < -1e-6:
-            cancel(q, f"After the round's price changes you were {abs(bank):.1f} short (sold for {sell:.1f}, "
-                      f"{buy:.1f} to buy).")
-            cancelled += 1
-            continue
+            return (f"After the round's price changes you were {abs(bank):.1f} short (sold for {sell:.1f}, "
+                    f"{buy:.1f} to buy).")
 
         if squad.free_transfers and squad.free_transfers > 0:
             squad.free_transfers -= 1
@@ -210,6 +212,25 @@ async def apply_pending(session: AsyncSession, fs) -> dict:
         q.sell_value, q.buy_price, q.hit, q.free_used = sell, buy, hit, free_used
         q.applied_round_number = nxt.round_number if nxt else None
         applied += 1
+        return "applied"
+
+    # A swap that only the budget stops waits for the rest of the squad's queue to go
+    # first; it is cancelled only when a whole pass applies nothing new.
+    todo = list(rows)
+    while todo:
+        short, progress = [], False
+        for q in todo:
+            r = await attempt(q)
+            if r in ("applied", "cancelled"):
+                progress = True
+            else:
+                short.append((q, r))
+        if not progress:
+            for q, msg in short:
+                cancel(q, msg)
+                cancelled += 1
+            break
+        todo = [q for q, _ in short]
     await session.flush()
     if applied:
         await fantasy_squad.recount_ownership(session, fs.id)

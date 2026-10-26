@@ -125,7 +125,17 @@ const cardCount = (page) => page.locator('button[aria-pressed][aria-label]').cou
   ck('1600px: all 12 cards and the right rail are there', (await cardCount(d.page)) === 12 && /THIS ROUND/i.test(await d.page.locator('body').innerText()))
   const over = await d.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   ck('1600px: no sideways scroll', over <= 1, String(over))
+  const boxes = await d.page.locator('button[aria-pressed][aria-label]').evaluateAll(els => els.map(e => { const r = e.closest('div[style*="scale"]')?.getBoundingClientRect() || e.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), b: Math.round(r.bottom), w: Math.round(r.width) } }))
+  const rows = [...new Set(boxes.map(b => b.y))]
+  ck('1600px: the whole XI is two even rows of six', rows.length === 2 && boxes.filter(b => b.y === rows[0]).length === 6 && boxes.filter(b => b.y === rows[1]).length === 6, JSON.stringify(rows))
+  ck('1600px: every card is on the first screen, with no scrolling', Math.max(...boxes.map(b => b.b)) <= 1000, String(Math.max(...boxes.map(b => b.b))))
+  ck('1600px: the cards fill the column rather than a corner of it', Math.max(...boxes.map(b => b.x + b.w)) > 900, String(Math.max(...boxes.map(b => b.x + b.w))))
   if (SHOTS) await d.page.screenshot({ path: `${SHOTS}/myteam_cards_1600.png` })
+  await d.page.setViewportSize({ width: 1280, height: 900 }); await d.page.waitForTimeout(400)
+  const b2 = await d.page.locator('button[aria-pressed][aria-label]').evaluateAll(els => els.map(e => { const r = e.closest('div[style*="scale"]')?.getBoundingClientRect() || e.getBoundingClientRect(); return { y: Math.round(r.top), b: Math.round(r.bottom), w: Math.round(r.width) } }))
+  ck('1280px: still two rows, and the cards are no narrower than 110px', new Set(b2.map(b => b.y)).size === 2 && Math.min(...b2.map(b => b.w)) >= 110, JSON.stringify([...new Set(b2.map(b => b.y))]) + ' w=' + Math.min(...b2.map(b => b.w)))
+  ck('1280px: no sideways scroll', (await d.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) <= 1)
+  if (SHOTS) await d.page.screenshot({ path: `${SHOTS}/myteam_cards_1280.png` })
   ck('no page errors', d.errors.length === 0, d.errors.join(' | '))
   await d.ctx.close()
 }
