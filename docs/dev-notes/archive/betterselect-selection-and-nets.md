@@ -1880,3 +1880,13 @@ Reported: every time the player dashboard link was shared, people had to tap "Th
 `PublicAvailability.jsx` reads `player` once into a ref, then strips `player` and `tab` from the URL with `setSearchParams(..., { replace: true })`; other parameters are kept. The autopick still works for the first visit. Panel copy says to share from the panel. Links already pasted into chats with `?player=` still pick that player for whoever opens them; there is no way to tell them from a real reminder, and the PIN step now names the person loudly (v9.129.29).
 
 Check: `verify_player_login_identity_browser.mjs` (21; section "The link people share").
+
+### v9.129.35: Selection Whiteboard sideways scroll and team arrows
+
+Reported: people on iPad and phones struggled to scroll the Whiteboard sideways. The board already had `overflow-x-auto`, but the global scrollbar is 6px, which is hard to grab and hides on touch devices.
+
+`.pb-hscroll` (`styles/theme.css`) gives the board a 16px webkit scrollbar with a visible track. Firefox falls back to `scrollbar-width: auto` under `@supports not selector(::-webkit-scrollbar)`, since Chrome ignores the webkit rules once a standard scrollbar property is set. `Board` in `AdminSelectionDraftTable.jsx` adds a Previous and Next team pair above the scroller. A step goes to the next team whose left edge is past the current scroll position, measured from the DOM at click time (the pool is `sticky left-0`, so a team lines up at its offset minus the pool width and the 10px gap), clamping at the ends. The pair shows only while `scrollLeft` or the overflow says there is somewhere to go.
+
+The screen still shows the "needs a wider screen" note under 1024px (`isPhone`), so an iPad held upright does not get the board. That was left as it was.
+
+Check: `verify_whiteboard_scroll_arrows_browser.mjs` (15). Headless Chromium hides scrollbars by default, so it launches with `ignoreDefaultArgs: ['--hide-scrollbars']` to measure the bar. The Selection board Gender filter check in `verify_draft_table_browser.mjs` fails with and without this change.

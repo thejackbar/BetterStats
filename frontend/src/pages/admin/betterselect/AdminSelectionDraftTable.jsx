@@ -321,12 +321,61 @@ function Board({ ctx, isPhone }) {
   const [listRef, listH] = useBoxHeight()
   const maxSlots = Math.max(1, ...ctx.order.map((f) => ctx.cols[f].slots.length))
   const density = rowDensity(listH, maxSlots)
+
+  // The back and forward arrows step the board one team at a time. The pool is
+  // pinned on the left, so a team "lines up" when its left edge sits just beside it.
+  const [edge, setEdge] = useState({ back: false, forward: false })
+  const syncEdge = useCallback(() => {
+    const el = fitRef.current
+    if (!el) return
+    const back = el.scrollLeft > 2
+    const forward = el.scrollLeft < el.scrollWidth - el.clientWidth - 2
+    setEdge((e) => (e.back === back && e.forward === forward ? e : { back, forward }))
+  }, [fitRef])
+  useEffect(() => {
+    const el = fitRef.current
+    if (!el) return undefined
+    syncEdge()
+    el.addEventListener('scroll', syncEdge, { passive: true })
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(syncEdge) : null
+    if (ro) ro.observe(el)
+    return () => { el.removeEventListener('scroll', syncEdge); if (ro) ro.disconnect() }
+  }, [fitRef, syncEdge, ctx.order.length])
+  const step = (dir) => {
+    const el = fitRef.current
+    if (!el) return
+    const box = el.getBoundingClientRect()
+    const pool = el.querySelector('[data-pool-col]')
+    const lead = pool ? pool.getBoundingClientRect().width + 10 : 0
+    const stops = [...el.querySelectorAll('[data-team-col]')]
+      .map((c) => Math.round(c.getBoundingClientRect().left - box.left + el.scrollLeft - lead))
+    const now = el.scrollLeft
+    const to = dir > 0 ? stops.find((s) => s > now + 2) : [...stops].reverse().find((s) => s < now - 2)
+    const left = to == null ? (dir > 0 ? el.scrollWidth : 0) : Math.max(0, to)
+    const calm = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    el.scrollTo({ left, behavior: calm ? 'auto' : 'smooth' })
+  }
+  const arrow = 'w-11 h-11 sm:w-9 sm:h-9 rounded-full inline-flex items-center justify-center border border-pb-hairline2 bg-pb-surface2 text-pb-text shadow-sm transition active:scale-95 disabled:opacity-30 disabled:cursor-default enabled:hover:border-pb-accent/60 enabled:hover:text-pb-accent'
+
   return (
-    <div ref={fitRef} data-draft-table data-autoscroll-x data-fit={fitH != null ? 'on' : 'off'} style={fitH != null ? { height: fitH } : undefined}
-      className="flex gap-2.5 overflow-x-auto pb-1 items-stretch">
-      <PoolColumn ctx={ctx} drag={drag} />
-      {ctx.order.map((f, i) => <TeamColumn key={f} col={f} density={density} listRef={i === 0 ? listRef : undefined} ctx={ctx} drag={drag} />)}
-    </div>
+    <>
+      {(edge.back || edge.forward) && (
+        <div className="flex items-center justify-end gap-2 mb-1.5" data-board-nav>
+          <span className="text-[12px] text-pb-faint mr-1">Teams</span>
+          <button type="button" data-board-back onClick={() => step(-1)} disabled={!edge.back} aria-label="Previous team" title="Previous team" className={arrow}>
+            <Icon name="chevron" size={18} className="rotate-180" />
+          </button>
+          <button type="button" data-board-forward onClick={() => step(1)} disabled={!edge.forward} aria-label="Next team" title="Next team" className={arrow}>
+            <Icon name="chevron" size={18} />
+          </button>
+        </div>
+      )}
+      <div ref={fitRef} data-draft-table data-autoscroll-x data-fit={fitH != null ? 'on' : 'off'} style={fitH != null ? { height: fitH } : undefined}
+        className="flex gap-2.5 overflow-x-auto pb-1 items-stretch pb-hscroll">
+        <PoolColumn ctx={ctx} drag={drag} />
+        {ctx.order.map((f, i) => <TeamColumn key={f} col={f} density={density} listRef={i === 0 ? listRef : undefined} ctx={ctx} drag={drag} />)}
+      </div>
+    </>
   )
 }
 
