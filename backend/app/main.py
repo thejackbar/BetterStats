@@ -4523,6 +4523,11 @@ async def lifespan(app: FastAPI):
         from app.services.player_cards_ddl import STATEMENTS as _PLAYER_CARDS_DDL
         for _stmt in _PLAYER_CARDS_DDL:
             await conn.execute(text(_stmt))
+        # Migration 364: swap requests between two players. Same one-copy rule: this list and
+        # alembic's 364 both run services/player_card_swaps_ddl.STATEMENTS.
+        from app.services.player_card_swaps_ddl import STATEMENTS as _PLAYER_CARD_SWAPS_DDL
+        for _stmt in _PLAYER_CARD_SWAPS_DDL:
+            await conn.execute(text(_stmt))
         # Every club with players has a player page link, so one without BetterSelect (whose admin
         # never switched self-service on) still has the page its Player Cards live on. Only a club
         # that has none gets one; BetterSelect clubs keep their own self-service switch, which

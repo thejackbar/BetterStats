@@ -35,3 +35,26 @@ Not built yet:
 - Swapping cards (phase 2).
 - A season rollover rule for banked packs (they bank across seasons today; the weekly pack is the only one that expires).
 - Rarity and figures are the unfiltered career block (`v_effective_player_season_stats`), not raised to held scorecards, so a profile can read a game or two higher for a player Cricket Australia undercounted.
+
+## v9.130.1 (2026-10-26): swaps, sharing, a tidier book, the admin view
+
+Asked for after the first release was in use: the book was four pages of the owner's own special cards; special cards should use the whole photo; text was clipped; cards should use the club's font; swapping; sharing and a GIF; and an admin view of who collects what.
+
+Decisions the club owner made:
+
+- Swaps need no real sign in ("not high value still"). The PIN cookie names both people; the safeguard is that nothing moves without the second person's yes.
+- A GIF is for the player's own card only (the shine, or turning over). Any card can be shared as a picture.
+- The book orders specials awards, milestones, centuries, half centuries, wickets (five-fors and hat-tricks), debuts, and groups a player's cards of one kind into one stack.
+
+What was built:
+
+- Migration 364 and `services/player_card_swaps_ddl.py`: `player_card_swaps`. Its four player columns are on `merge_carry.CARRIED`. A request is never deleted; it ends accepted, declined or cancelled, or lapses (read from its age, 14 days, nothing stored).
+- `services/player_card_swaps.py`: `spare()` is the one definition of what can go (one is always kept; the player's own card is implied, so every pulled copy of it is spare). The accept re-checks both cards under row locks taken in a fixed order, moves one copy each way (a pulled copy before a gifted one, marked `source = 'swap'`) and answers 409 with a readable reason if either is no longer a double. Only another player's spare cards are ever readable through the swap routes.
+- `services/player_card_admin.py` and read-only routes under `/player-cards` (`MANAGE_SETTINGS`): `overview`, `activity`, `catalogue` (paged, filterable), `players/{id}`, `swaps` (audit, with expired derived from age).
+- The public routes `GET/POST /me/cards/swaps...`; the profile summary carries `swaps_waiting`.
+- `_club_branding` now carries the club's font fields (`fonts.public_font_fields`), and `useCardStyle` adds the club's @font-face and display font to the cards.
+- Frontend: `FitText` (measured shrink-to-fit with room for italic lean; replaces the length based sizes), `SpecialFront` redrawn on the same layout as a player card, `CardGallery` categories and stacks, `SwapsPanel`, `ShareSheet`, `lib/cardGif.js` (two flat pictures of the card composed on a canvas, quantised from the card's own pixels, `gifenc` 1.0.3 MIT, pinned), `renderNodeBlob` and `deliverBlob` split out of `exportNodePng`, and a seven tab `AdminPlayerCards`.
+
+Verified: `verify_player_cards.py` (186 checks; the control on the previous commit fails exactly the swap and admin checks and nothing else), `verify_merge_carry.py`, the two older player page suites (their harnesses now load the swaps DDL), `audit_route_access.py`; browser: `verify_player_cards_browser.mjs` (51), `verify_player_cards_v2_browser.mjs` (46: stacks and order, full photo, no clipping, club font, a real PNG and two real GIFs downloaded and read back, swaps down to the exact requests), `verify_player_cards_admin_browser.mjs` (51: every tab, the exact query each filter sends, 390px on every tab).
+
+Not built: an email or push when a swap is asked (the page header says "1 swap request" instead); a GIF of someone else's card; special cards for club records.

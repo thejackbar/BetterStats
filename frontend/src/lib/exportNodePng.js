@@ -44,14 +44,20 @@ async function inlineFontUrls(block) {
   return out
 }
 
-export async function exportNodePng(node, name, { width, height, backgroundColor = '#0a0d14', scale = 2, share = true } = {}) {
+// Render a node to a PNG blob (no sharing, no download): the part other exporters build on.
+export async function renderNodeBlob(node, { width, height, backgroundColor = '#0a0d14', scale = 2 } = {}) {
   if (!node) throw new Error('Nothing to export')
   await document.fonts?.ready
   const { domToBlob } = await import('modern-screenshot')
   const cssText = await exportFontCss(familiesUsedBy(node)).catch(() => '')
   const blob = await domToBlob(node, { type: 'image/png', scale, width, height, backgroundColor, ...(cssText ? { font: { cssText } } : {}) })
   if (!blob) throw new Error('Could not make the image')
-  const file = new File([blob], `${name}.png`, { type: 'image/png' })
+  return blob
+}
+
+// Hand a file to the phone's share sheet, or download it where there is none. 'shared' | 'saved' | 'cancelled'.
+export async function deliverBlob(blob, filename, type, { share = true } = {}) {
+  const file = new File([blob], filename, { type })
   if (share && navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({ files: [file] })
@@ -64,10 +70,15 @@ export async function exportNodePng(node, name, { width, height, backgroundColor
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `${name}.png`
+  a.download = filename
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
   return 'saved'
+}
+
+export async function exportNodePng(node, name, { width, height, backgroundColor = '#0a0d14', scale = 2, share = true } = {}) {
+  const blob = await renderNodeBlob(node, { width, height, backgroundColor, scale })
+  return deliverBlob(blob, `${name}.png`, 'image/png', { share })
 }

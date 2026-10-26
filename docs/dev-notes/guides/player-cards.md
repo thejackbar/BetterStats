@@ -20,14 +20,19 @@
 7. **Special cards** are made by `refresh_specials` (throttled 10 minutes per club, `force` from the admin button), each with a stable `event_key` (player, date, innings) so pairing a manual game with a synced one does not make a second card. Add a kind in `SPECIAL_KINDS`, the insert in `refresh_specials`, `cardTheme.SPECIALS` and `specialHeadline`.
 8. **The player page no longer needs BetterSelect.** `_club_for_token(need_select=False)` serves the landing, PIN, `/me`, profile, ranks and details; the availability write (`set_me`) still needs it. A club without it gets `has_availability: false` and no Availability section. Keep `SELECT_ONLY` modules blocked for it.
 9. **A PATCH reads `model_fields_set`**: an absent key leaves the setting alone, `timezone: null` clears it.
-10. **Frontend**: card faces are drawn flat at `CARD_W x CARD_H` and scaled with `ScaledCard`. The gallery measures its own width (phone 2x2, tablet 3x2, spread two pages), so the player page's cards section spans every column (`Group wide`). Every animation is off under reduced motion. `innerText` of a card returns capitals (CSS uppercase), write checks that way.
+10. **Swaps** (`services/player_card_swaps.py`): only a double moves (`spare()`), one card for one card, nothing moves until the person asked accepts, and the accept re-checks both cards under row locks (fixed order) so a stale request answers 409 and moves nothing. A request is never deleted. Only another player's SPARE cards are readable by a player. No separate sign in: the PIN cookie is the identity and the second person's yes is the safeguard. A swapped copy is marked `source = 'swap'`.
+11. **The book** files specials awards, milestones, centuries, half centuries, wickets, debuts (`CATEGORIES` in `CardGallery.jsx`; add a kind to one of them) and stacks one player's cards of one kind on one slot. Grey slots are for player cards only.
+12. **Text on a card goes through `FitText`**, never a length based font size: it measures, so a long name, a long award or a wide club font cannot clip. Italic type needs room on the right (`FitText` adds it); never `overflow: hidden` on display type. Cards use the club's display font through `useCardStyle`.
+13. **Sharing**: a picture for any card, and for the player's own card a link and a GIF made on the device (`lib/cardGif.js`). Rendering goes through `renderNodeBlob`, so the club's font is embedded as on the share card.
+14. **The admin view** (`services/player_card_admin.py`) only reads. A card is drawn only for a player in the pool; anyone else appears as a line of text. "Expired" is derived from age and never written.
+15. **Frontend**: card faces are drawn flat at `CARD_W x CARD_H` and scaled with `ScaledCard`. The gallery measures its own width (phone 2x2, tablet 3x2, spread two pages), so the player page's cards section spans every column (`Group wide`). Every animation is off under reduced motion. `innerText` of a card returns capitals (CSS uppercase), write checks that way.
 
 ## Verify
 
-- `backend/verification/verify_player_cards.py` on its own database (104 checks); control: run it on the previous commit.
-- `frontend/verification/verify_player_cards_browser.mjs` on the production build (`vite preview`); never rebuild `dist` under a running preview for a long run.
+- `backend/verification/verify_player_cards.py` on its own database (186 checks); control: run it on the previous commit.
+- `frontend/verification/verify_player_cards_browser.mjs`, `_v2_browser.mjs` and `_admin_browser.mjs` on the production build (`vite preview`); never rebuild `dist` under a running preview for a long run.
 - Also re-run `verify_merge_carry.py`, `verify_player_page_dashboard.py`, `verify_player_dashboard_and_fines.py`, `audit_route_access.py`.
 
 ## Open follow-ups
 
-- Club record special cards; swapping cards (needs real sign-in, not a 4 digit PIN); a season rollover rule for banked packs; figures are not raised to held scorecards.
+- Club record special cards; an email or push for a swap request; a season rollover rule for banked packs; figures are not raised to held scorecards. Swaps rest on the PIN, so a club that wants trading to carry weight needs real sign-in first.

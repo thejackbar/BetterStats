@@ -8,8 +8,11 @@ import { cardSponsor, onColor } from '../../components/PlayerTradingCard'
 import FlipCard from '../../components/FlipCard'
 import CardGallery from '../../components/cards/CardGallery'
 import PackOpening, { PackArt } from '../../components/cards/PackOpening'
+import ShareSheet from '../../components/cards/ShareSheet'
+import SwapsPanel from '../../components/cards/SwapsPanel'
 import { CARD_H, CARD_W, CardInfoBack, CardView, DEFAULT_DISPLAY, ScaledCard } from '../../components/cards/CardFaces'
 import { TIERS, PACKS } from '../../components/cards/cardTheme'
+import { useCardStyle } from '../../components/cards/useCardStyle'
 
 const MONO = "'JetBrains Mono', monospace"
 
@@ -54,13 +57,19 @@ export default function CardsModule({ token, club, onReady }) {
   const [busyAll, setBusyAll] = useState(false)
   const [allResult, setAllResult] = useState(null)
   const [err, setErr] = useState('')
-  const accent = club?.accent_color || club?.primary_color || '#16c784'
-  const display = DEFAULT_DISPLAY
+  const [tab, setTab] = useState('book') // book | swaps
+  const [shareCard, setShareCard] = useState(null)
+  const [offer, setOffer] = useState(null)
+  const [swapsWaiting, setSwapsWaiting] = useState(0)
+  const { accent, display } = useCardStyle(club)
   const sponsor = cardSponsor(useClubSponsors(club?.slug))
 
   const load = useCallback(() => api.availPublicCards(token)
     .then((d) => { setData(d); onReady?.(d.packs.length) })
     .catch(() => setFailed(true)), [token, onReady])
+  // Swap requests waiting on this player, for the tab. A failure leaves it at what it was.
+  const loadSwaps = useCallback(() => api.availPublicSwaps(token).then((b) => setSwapsWaiting(b.incoming.length)).catch(() => {}), [token])
+  useEffect(() => { loadSwaps() }, [loadSwaps])
   useEffect(() => { load() }, [load])
 
   const mine = useMemo(() => data?.cards.find((c) => c.mine), [data])
@@ -157,9 +166,26 @@ export default function CardsModule({ token, club, onReady }) {
       </div>
 
       <div style={{ marginTop: 18 }}>
-        <CardGallery cards={data.cards} totals={data.totals} club={club} accent={accent} display={display} sponsor={sponsor} />
+        <div role="tablist" aria-label="Cards" style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          {[['book', 'Card book'], ['swaps', swapsWaiting ? `Swaps (${swapsWaiting})` : 'Swaps']].map(([k, label]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-cards-tab={k}
+              style={{ padding: '8px 16px', borderRadius: 10, fontWeight: 700, fontSize: 13, border: '1px solid var(--pb-hairline, rgba(255,255,255,.25))', background: tab === k ? accent : 'transparent', color: tab === k ? onColor(accent) : 'inherit' }}>
+              {label}
+            </button>
+          ))}
+          {mine && <button type="button" onClick={() => setShareCard(mine)} data-share-mine style={{ marginLeft: 'auto', padding: '8px 16px', borderRadius: 10, fontWeight: 700, fontSize: 13, border: '1px solid var(--pb-hairline, rgba(255,255,255,.25))' }}>Share my card</button>}
+        </div>
+        {tab === 'book' && (
+          <CardGallery cards={data.cards} totals={data.totals} club={club} accent={accent} display={display} sponsor={sponsor} meId={mine?.player_id}
+            onShare={setShareCard} onOffer={(c) => { setOffer(c); setTab('swaps') }} />
+        )}
+        {tab === 'swaps' && (
+          <SwapsPanel token={token} club={club} accent={accent} display={display} sponsor={sponsor} offer={offer} onOfferDone={() => setOffer(null)}
+            onChanged={() => { load(); loadSwaps() }} />
+        )}
       </div>
 
+      {shareCard && <ShareSheet card={shareCard} club={club} accent={accent} display={display} sponsor={sponsor} onClose={() => setShareCard(null)} />}
       {pack && <PackOpening key={pack.id} pack={pack} packsLeft={Math.max(0, packs.length - 1)} club={club} accent={accent} display={display} sponsor={sponsor} owned={owned}
         openPack={() => api.availPublicOpenCard(token, pack.id)} onClose={close} onNext={openNext} />}
       {allResult && <AllSummary result={allResult} club={club} accent={accent} display={display} sponsor={sponsor} onClose={() => { setAllResult(null); load() }} />}

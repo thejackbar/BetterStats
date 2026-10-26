@@ -55,6 +55,7 @@ from app.routers.availability import (
 )
 from app.services import fines as fines_svc, player_cards as cards_svc, player_dashboard, rate_limit, section_names, selection_rules as rules_svc, squad_sides
 from app.services import votes as vote_svc
+from app.services.fonts import public_font_fields
 from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.squad_next_game import fixtures_for_player
 from app.services.session_safety import rollback_keeping
@@ -171,6 +172,9 @@ async def _club_for_token(db: AsyncSession, token: str, need_select: bool = True
 
 def _club_branding(club: Organisation) -> dict:
     return {
+        # The club's chosen fonts (and the address of an uploaded one), so the player's cards can be
+        # drawn in the club's own typeface, as its share card is.
+        **public_font_fields(club),
         "name": club.name,
         "short_name": club.short_name,
         "slug": club.slug,

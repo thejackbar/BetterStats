@@ -3404,6 +3404,11 @@ export const api = {
   setPlayerCardHidden: (playerId, hidden) =>
     request(`/player-cards/players/${playerId}/hidden`, { method: 'POST', body: JSON.stringify({ hidden }) }),
   refreshPlayerCardSpecials: () => request('/player-cards/refresh-specials', { method: 'POST' }),
+  getPlayerCardOverview: () => request('/player-cards/overview'),
+  getPlayerCardActivity: () => request('/player-cards/activity'),
+  getPlayerCardCatalogue: (params = {}) => request(`/player-cards/catalogue?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()}`),
+  getPlayerCardPlayer: (id) => request(`/player-cards/players/${id}`),
+  getPlayerCardSwaps: (params = {}) => request(`/player-cards/swaps?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()}`),
 
   // ─── BetterSelect: self-service availability link (admin) ───
   bsGetSelfService: () => request('/availability/self-service'),
@@ -3469,6 +3474,13 @@ export const api = {
     request(`/public/availability/${token}/me/cards/packs/${packId}/open`, { method: 'POST' }),
   availPublicOpenAllCards: (token) =>
     request(`/public/availability/${token}/me/cards/open-all`, { method: 'POST' }),
+  // Swapping doubles with another player: the board, one player's doubles, asking, and answering.
+  availPublicSwaps: (token) => request(`/public/availability/${token}/me/cards/swaps`),
+  availPublicSwapPlayer: (token, playerId) => request(`/public/availability/${token}/me/cards/swaps/players/${playerId}`),
+  availPublicAskSwap: (token, data) =>
+    request(`/public/availability/${token}/me/cards/swaps`, { method: 'POST', body: JSON.stringify(data) }),
+  availPublicAnswerSwap: (token, id, action) =>
+    request(`/public/availability/${token}/me/cards/swaps/${id}/${action}`, { method: 'POST' }),
 
   // ─── Public: net check-in (no admin auth; player cookie) ───
   // Reached by scanning the QR code on the fence or tapping the NFC tag —

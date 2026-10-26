@@ -39,36 +39,41 @@ export const SPECIALS = {
   century: {
     label: 'Century', tag: 'Ton',
     panel: 'linear-gradient(165deg, #fde68a 0%, #d99a14 38%, #7c4a03 100%)', accent: '#fff4c2', on: '#2a1802',
+    band: 'linear-gradient(180deg, #fde68a, #e0a417)',
     pattern: 'repeating-conic-gradient(from 0deg at 50% 38%, rgba(255,255,255,.22) 0deg 6deg, transparent 6deg 18deg)',
   },
   fifty: {
     label: 'Half century', tag: 'Fifty',
     panel: 'linear-gradient(165deg, #f3b07a 0%, #c0652b 42%, #4a1d09 100%)', accent: '#ffe2c8', on: '#2a0f03',
+    band: 'linear-gradient(180deg, #f6b988, #cf7332)',
     pattern: 'repeating-linear-gradient(115deg, rgba(255,255,255,.14) 0 10px, transparent 10px 26px)',
   },
   five_for: {
     label: 'Five wicket haul', tag: 'Five-for',
     panel: 'linear-gradient(165deg, #c4a1ff 0%, #7c3aed 42%, #25104f 100%)', accent: '#efe4ff', on: '#ffffff',
+    band: 'linear-gradient(180deg, #8b5cf6, #4c1d95)',
     pattern: 'repeating-linear-gradient(90deg, rgba(255,255,255,.16) 0 5px, transparent 5px 34px)',
   },
   hat_trick: {
     label: 'Hat-trick', tag: 'Hat-trick',
     panel: 'linear-gradient(165deg, #ff6b6b 0%, #b91c1c 40%, #1a0707 100%)', accent: '#ffe0e0', on: '#ffffff',
+    band: 'linear-gradient(180deg, #ef4444, #7f1d1d)',
     pattern: 'radial-gradient(circle at 50% 40%, rgba(255,255,255,.25) 0 36px, transparent 37px), radial-gradient(circle at 20% 55%, rgba(255,255,255,.14) 0 22px, transparent 23px), radial-gradient(circle at 80% 55%, rgba(255,255,255,.14) 0 22px, transparent 23px)',
   },
   debut: {
     label: 'Debut', tag: 'Debut',
     panel: 'linear-gradient(165deg, #ecfdf5 0%, #34d399 38%, #064e3b 100%)', accent: '#ffffff', on: '#022c22',
+    band: 'linear-gradient(180deg, #86efc0, #10b981)',
     pattern: 'repeating-radial-gradient(circle at 50% 100%, rgba(255,255,255,.2) 0 4px, transparent 4px 22px)',
   },
   games: {
     label: 'Games milestone', tag: 'Milestone',
     // Bronze, silver, gold and platinum by how many games.
     tiers: [
-      { upTo: 50, panel: 'linear-gradient(165deg, #e6a875 0%, #a8602d 45%, #3b1b0a 100%)', accent: '#ffe2c8', on: '#2a0f03' },
-      { upTo: 100, panel: 'linear-gradient(165deg, #ffffff 0%, #aab4c0 42%, #4b5563 100%)', accent: '#ffffff', on: '#111827' },
-      { upTo: 200, panel: 'linear-gradient(165deg, #fde68a 0%, #d99a14 40%, #6b3f02 100%)', accent: '#fff4c2', on: '#2a1802' },
-      { upTo: Infinity, panel: 'linear-gradient(165deg, #e0f2fe 0%, #38bdf8 38%, #0c2a4a 100%)', accent: '#ffffff', on: '#06203a' },
+      { upTo: 50, panel: 'linear-gradient(165deg, #e6a875 0%, #a8602d 45%, #3b1b0a 100%)', band: 'linear-gradient(180deg, #ebb585, #b86f3a)', accent: '#ffe2c8', on: '#2a0f03' },
+      { upTo: 100, panel: 'linear-gradient(165deg, #ffffff 0%, #aab4c0 42%, #4b5563 100%)', band: 'linear-gradient(180deg, #ffffff, #c4ccd6)', accent: '#ffffff', on: '#111827' },
+      { upTo: 200, panel: 'linear-gradient(165deg, #fde68a 0%, #d99a14 40%, #6b3f02 100%)', band: 'linear-gradient(180deg, #fde68a, #e0a417)', accent: '#fff4c2', on: '#2a1802' },
+      { upTo: Infinity, panel: 'linear-gradient(165deg, #e0f2fe 0%, #38bdf8 38%, #0c2a4a 100%)', band: 'linear-gradient(180deg, #e0f2fe, #7dd3fc)', accent: '#ffffff', on: '#06203a' },
     ],
     pattern: 'repeating-linear-gradient(45deg, rgba(255,255,255,.15) 0 3px, transparent 3px 14px)',
   },
@@ -80,6 +85,13 @@ export const SPECIALS = {
   },
 }
 
+// Dark ink on a light colour, white on a dark one.
+function onInk(hex) {
+  if (!hex || hex[0] !== '#' || hex.length !== 7) return '#ffffff'
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#050a0c' : '#ffffff'
+}
+
 export function specialLook(card, accent) {
   const s = SPECIALS[card.special_kind] || SPECIALS.award
   if (card.special_kind === 'games') {
@@ -88,7 +100,12 @@ export function specialLook(card, accent) {
     return { ...s, ...t }
   }
   if (!s.panel) {
-    return { ...s, panel: `linear-gradient(165deg, color-mix(in srgb, ${accent} 70%, #fff) 0%, ${accent} 42%, color-mix(in srgb, ${accent} 30%, #000) 100%)` }
+    return {
+      ...s,
+      panel: `linear-gradient(165deg, color-mix(in srgb, ${accent} 70%, #fff) 0%, ${accent} 42%, color-mix(in srgb, ${accent} 30%, #000) 100%)`,
+      band: `linear-gradient(180deg, ${accent}, color-mix(in srgb, ${accent} 70%, #000))`,
+      on: onInk(accent),
+    }
   }
   return s
 }

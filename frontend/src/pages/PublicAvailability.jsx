@@ -394,7 +394,9 @@ function summaryFor(id, { me, data, ladder, cardsReady }) {
   if (id === 'cards') {
     const n = cardsReady ?? data?.cards?.ready
     if (n == null) return {}
-    return n > 0 ? { text: n === 1 ? '1 pack to open' : `${n} packs to open`, tone: AMBER } : { text: 'Card book' }
+    if (n > 0) return { text: n === 1 ? '1 pack to open' : `${n} packs to open`, tone: AMBER }
+    const w = data?.cards?.swaps_waiting || 0
+    return w > 0 ? { text: w === 1 ? '1 swap request' : `${w} swap requests`, tone: AMBER } : { text: 'Card book' }
   }
   if (!data) return {}
   if (id === 'selection') {

@@ -696,7 +696,12 @@ async def dashboard_summary(db: AsyncSession, club: Organisation, player: Player
         return None
     await ensure_grants(db, club, pid, snap)
     packs = await available_packs(db, pid, snap)
-    return {"ready": len(packs), "resets_at": week_ends_at(snap["settings"]).isoformat()}
+    from app.services import player_card_swaps  # imported here: that module imports this one
+    return {
+        "ready": len(packs),
+        "swaps_waiting": await player_card_swaps.waiting_count(db, pid),
+        "resets_at": week_ends_at(snap["settings"]).isoformat(),
+    }
 
 
 # ── Pack grants ───────────────────────────────────────────────────────────────

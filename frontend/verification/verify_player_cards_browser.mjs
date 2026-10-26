@@ -125,7 +125,7 @@ const run = async () => {
     const byRuns = await names()
     check('sort by runs puts the top run scorer first', /Mole|Adams/.test(byRuns[0] || '') , JSON.stringify(byRuns))
     await page.selectOption('[data-gallery-sort]', 'rarity')
-    check('sort by rarity puts the special first', /Century|Five wicket/.test((await names())[0] || ''), JSON.stringify(await names()))
+    check('sort by rarity puts the rarest player card first (specials are filed after the players)', /Mole/.test((await names())[0] || ''), JSON.stringify(await names()))
     await page.click('[data-gallery-filter="special"]')
     const specials = await names()
     check('the Specials filter shows only special cards', specials.length > 0 && specials.every((n) => /Century|Five wicket/.test(n)), JSON.stringify(specials))

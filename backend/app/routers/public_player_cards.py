@@ -15,11 +15,12 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.routers.public_availability import _club_branding, _club_for_token, _client_ip, _player_for_session
-from app.services import player_cards as cards, rate_limit
+from app.services import player_card_swaps as swaps, player_cards as cards, rate_limit
 from app.services.session_safety import rollback_keeping
 
 router = APIRouter(prefix="/public/availability", tags=["public-player-cards"])
@@ -95,3 +96,74 @@ async def open_all_my_packs(token: str, request: Request, db: AsyncSession = Dep
     await db.commit()
     packs = await cards.available_packs(db, str(player.id), snap)
     return {**result, "packs_left": len(packs)}
+
+
+# ── Swaps ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+SWAP_LIMIT = 30
+SWAP_WINDOW = 60
+
+
+class SwapBody(BaseModel):
+    to_player_id: str
+    give_key: str
+    want_key: str
+
+
+def _refuse(exc: swaps.SwapError):
+    return HTTPException(status_code=exc.status, detail=exc.message)
+
+
+@router.get("/{token}/me/cards/swaps")
+async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Swap requests in and out, the player's own doubles, and who has doubles to offer."""
+    club, player, snap = await _ready(db, request, token)
+    me = str(player.id)
+    return {
+        **await swaps.list_swaps(db, club, snap, me),
+        "mine": await swaps.spare_cards(db, club, snap, me),
+        "people": await swaps.swap_people(db, club, snap, me),
+        "expires_days": swaps.SWAP_DAYS,
+        "max_open": swaps.MAX_OUTGOING,
+    }
+
+
+@router.get("/{token}/me/cards/swaps/players/{player_id}")
+async def get_swap_player(token: str, player_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """One other player's doubles, and nothing else of their collection."""
+    club, player, snap = await _ready(db, request, token)
+    if player_id == str(player.id) or player_id not in snap["people"]:
+        raise HTTPException(status_code=404, detail="That player is not available to swap with.")
+    return {
+        "player": {"player_id": player_id, "name": snap["people"][player_id]["display_name"]},
+        "cards": await swaps.spare_cards(db, club, snap, player_id),
+    }
+
+
+@router.post("/{token}/me/cards/swaps")
+async def ask_for_swap(token: str, body: SwapBody, request: Request, db: AsyncSession = Depends(get_db)):
+    club, player, snap = await _ready(db, request, token)
+    rate_limit.enforce(f"cards-swap:{player.id}:{_client_ip(request)}", SWAP_LIMIT, SWAP_WINDOW,
+                       detail="Slow down. Give it a few seconds and try again.")
+    try:
+        new_id = await swaps.create_swap(db, club, snap, str(player.id), body.to_player_id, body.give_key, body.want_key)
+    except swaps.SwapError as exc:
+        await db.rollback()
+        raise _refuse(exc)
+    await db.commit()
+    return {"id": new_id, "status": "pending"}
+
+
+@router.post("/{token}/me/cards/swaps/{swap_id}/{action}")
+async def answer_swap(token: str, swap_id: str, action: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """accept (the person asked), decline (the person asked) or cancel (the person who asked)."""
+    club, player, snap = await _ready(db, request, token)
+    rate_limit.enforce(f"cards-swap:{player.id}:{_client_ip(request)}", SWAP_LIMIT, SWAP_WINDOW,
+                       detail="Slow down. Give it a few seconds and try again.")
+    try:
+        status = await swaps.respond(db, club, snap, str(player.id), swap_id, action)
+    except swaps.SwapError as exc:
+        await db.rollback()
+        raise _refuse(exc)
+    await db.commit()
+    return {"status": status}

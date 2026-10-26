@@ -10,7 +10,7 @@
 //   ScaledCard    CardView scaled to a width, so one card design serves a phone and a desktop.
 //
 // Missing figures read "-" (a bowler's batting average, a batter's wickets).
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import './cards.css'
 import { CARD_W, CARD_H, hexWithAlpha, onColor, splitName, usePhotoMode } from '../PlayerTradingCard'
 import { TIERS, specialLook, specialHeadline, fmtDate } from './cardTheme'
@@ -29,7 +29,49 @@ const reducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia
 
 const num = (v) => (v == null ? '-' : Number(v).toLocaleString('en-AU'))
 const rate = (v) => (v == null ? '-' : Number(v).toFixed(2))
-const figureSize = (v) => { const n = String(v).length; return n <= 2 ? 27 : n === 3 ? 24 : n === 4 ? 21 : n === 5 ? 18 : 15 }
+
+// Text that shrinks until it fits its box, so a long name, a long award or a wide club font never clips. The size
+// is measured, not guessed from the length, so it follows whatever typeface the club uses. Italic type leans past
+// its own box, so the box gets a little room on the right. `wrap` lets a title run to several lines inside `boxH`.
+// It measures again when the fonts finish loading.
+export function FitText({ children, max, min = 9, wrap = false, boxH, family, weight = 800, italic = false, align, lineHeight = 1, style }) {
+  const outer = useRef(null)
+  const inner = useRef(null)
+  const text = Array.isArray(children) ? children.join('') : String(children ?? '')
+  const [size, setSize] = useState(max)
+  const fit = useCallback(() => {
+    const o = outer.current
+    const i = inner.current
+    if (!o || !i) return
+    const room = o.clientWidth
+    if (!room) return
+    let lo = min
+    let hi = max
+    let best = min
+    for (let n = 0; n < 8; n += 1) {
+      const mid = (lo + hi) / 2
+      i.style.fontSize = `${mid}px`
+      const ok = i.scrollWidth <= room + 0.5 && (!wrap || !boxH || i.scrollHeight <= boxH + 0.5)
+      if (ok) { best = mid; lo = mid } else { hi = mid }
+    }
+    // A size that never fits still shows at the smallest size, never clipped to nothing.
+    i.style.fontSize = `${best}px`
+    setSize(best)
+  }, [max, min, wrap, boxH])
+  useLayoutEffect(() => { fit() }, [fit, text, family, weight])
+  useEffect(() => {
+    let alive = true
+    document.fonts?.ready?.then(() => { if (alive) fit() })
+    const onLoad = () => { if (alive) fit() }
+    document.fonts?.addEventListener?.('loadingdone', onLoad)
+    return () => { alive = false; document.fonts?.removeEventListener?.('loadingdone', onLoad) }
+  }, [fit])
+  return (
+    <div ref={outer} data-fit style={{ width: '100%', minWidth: 0, textAlign: align, ...(wrap && boxH ? { height: boxH, display: 'flex', alignItems: 'center', justifyContent: align === 'center' ? 'center' : 'flex-start' } : null) }}>
+      <span ref={inner} style={{ display: wrap ? 'block' : 'inline-block', width: wrap ? '100%' : undefined, whiteSpace: wrap ? 'normal' : 'nowrap', paddingRight: '0.16em', boxSizing: 'border-box', fontFamily: family, fontWeight: weight, fontStyle: italic ? 'italic' : 'normal', lineHeight, fontSize: size, overflowWrap: wrap ? 'anywhere' : undefined, ...style }}>{children}</span>
+    </div>
+  )
+}
 
 function initialsOf(name) {
   const { first, last } = splitName(name)
@@ -81,7 +123,7 @@ function Band({ items, accent }) {
       <div style={{ position: 'absolute', left: 8, right: 8, bottom: 12, display: 'flex' }}>
         {items.map((it, i) => (
           <div key={it.label} style={{ flex: 1, minWidth: 0, overflow: 'hidden', textAlign: 'center', color: ink, borderLeft: i ? `1px solid ${ink === '#fff' ? 'rgba(255,255,255,.35)' : 'rgba(5,10,12,.3)'}` : undefined }}>
-            <div style={{ font: `800 ${figureSize(it.value)}px/1 ${it.display}`, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{it.value}</div>
+            <div style={{ fontVariantNumeric: 'tabular-nums' }}><FitText max={27} min={11} align="center" family={it.display} weight={800}>{it.value}</FitText></div>
             <div style={{ height: 2, width: 22, background: ink, opacity: 0.8, margin: '5px auto 4px', borderRadius: 1 }} />
             <div style={{ font: `700 9px ${SANS}`, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.85, whiteSpace: 'nowrap' }}>{it.label}</div>
           </div>
@@ -146,7 +188,6 @@ export function CardInfoBack({ card, club, accent, display = DEFAULT_DISPLAY }) 
 // A regular card.
 export function CardFront({ card, club, accent, display = DEFAULT_DISPLAY, sponsor, label = 'Career Statistics' }) {
   const { first, last } = splitName(card.name)
-  const size = last.length <= 7 ? 44 : last.length <= 10 ? 37 : last.length <= 13 ? 30 : 25
   const tier = TIERS[card.tier] || TIERS.common
   const hero = !!card.hero_photo_url
   const items = [
@@ -166,9 +207,9 @@ export function CardFront({ card, club, accent, display = DEFAULT_DISPLAY, spons
       {hero && <div style={{ position: 'absolute', left: 0, right: 0, bottom: BAND_H - 30, height: 150, background: 'linear-gradient(to top, rgba(5,10,12,.85), rgba(5,10,12,0))' }} />}
 
       <div style={{ position: 'absolute', top: 14, left: 16, right: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-        <div style={{ minWidth: 0 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
           {first && <div style={{ font: `600 italic 14px ${SANS}`, textTransform: 'uppercase', letterSpacing: 1, color: '#fff', textShadow: '0 1px 8px rgba(0,0,0,.7)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{first}</div>}
-          <div style={{ font: `800 italic ${size}px/0.95 ${display}`, textTransform: 'uppercase', letterSpacing: 0.5, color: '#fff', textShadow: '0 2px 12px rgba(0,0,0,.65)', whiteSpace: 'nowrap' }}>{last}</div>
+          <FitText max={44} min={18} family={display} weight={800} italic lineHeight={0.95} style={{ textTransform: 'uppercase', letterSpacing: 0.5, color: '#fff', textShadow: '0 2px 12px rgba(0,0,0,.65)' }}>{last}</FitText>
         </div>
         <div style={{ flex: 'none', textAlign: 'right' }} data-card-rarity>
           <div style={{ font: `700 8.5px ${MONO}`, letterSpacing: 1.4, textTransform: 'uppercase', color: '#fff', opacity: 0.9, textShadow: '0 1px 6px rgba(0,0,0,.7)' }}>Rarity</div>
@@ -180,7 +221,7 @@ export function CardFront({ card, club, accent, display = DEFAULT_DISPLAY, spons
       <div style={{ position: 'absolute', left: 14, right: 14, bottom: BAND_H + 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7 }}>
         <div style={{ font: `600 8.5px ${MONO}`, letterSpacing: 1.6, textTransform: 'uppercase', color: '#fff', opacity: 0.85, textShadow: '0 1px 6px rgba(0,0,0,.7)', whiteSpace: 'nowrap' }}>{label}</div>
         {sponsor && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px 4px 12px', borderRadius: 10, background: 'rgba(5,10,12,.7)', border: '1px solid rgba(255,255,255,.14)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px 4px 12px', borderRadius: 10, background: 'rgba(5,10,12,.7)', border: '1px solid rgba(255,255,255,.14)', maxWidth: '100%', boxSizing: 'border-box' }}>
             <span style={{ font: `500 9.5px ${SANS}`, color: 'rgba(255,255,255,.75)' }}>Sponsored by</span>
             <img src={sponsor.logo_url} alt={sponsor.name || ''} style={{ maxWidth: 96, maxHeight: 24, objectFit: 'contain' }} />
           </div>
@@ -191,59 +232,56 @@ export function CardFront({ card, club, accent, display = DEFAULT_DISPLAY, spons
   )
 }
 
-// A special card: one event, its own colours.
+// A special card: one event, its own colours, the player's whole photo behind it. The layout mirrors the regular card
+// (name top left, a corner top right, a slanted band along the bottom) so the two sit side by side in a book.
 export function SpecialFront({ card, club, accent, display = DEFAULT_DISPLAY }) {
   const look = specialLook(card, accent)
   const { first, last } = splitName(card.name)
   const head = specialHeadline(card)
   const d = card.detail || {}
-  const bigSize = head.long
-    ? (head.big.length > 26 ? 24 : head.big.length > 16 ? 30 : 38)
-    : head.small ? 54 : (String(head.big).length <= 3 ? 104 : String(head.big).length <= 5 ? 84 : 66)
   const opp = d.opposition ? `v ${d.opposition}` : ''
   const when = fmtDate(card.occurred_on)
-  const nameSize = last.length <= 8 ? 32 : last.length <= 11 ? 27 : 22
+  const pill = [opp, when].filter(Boolean).join('  ·  ')
+  const hero = !!card.hero_photo_url
+  const BAND = 168
+  const numeric = !head.small && String(head.big).length <= 6
   return (
     <TierFrame tier="special" accent={accent} foil panel={look.panel}>
-      <div style={{ position: 'absolute', inset: 0, background: look.pattern, opacity: 0.9 }} />
-      <div style={{ position: 'absolute', left: 14, top: 14, display: 'flex', alignItems: 'center', gap: 7 }}>
-        <span style={{ padding: '3px 9px', borderRadius: 999, background: 'rgba(5,10,12,.55)', border: '1px solid rgba(255,255,255,.4)', font: `700 9px ${MONO}`, letterSpacing: 1.6, textTransform: 'uppercase', color: '#fff' }}>Special</span>
-        <span style={{ font: `700 9px ${MONO}`, letterSpacing: 1.6, textTransform: 'uppercase', color: look.on, opacity: 0.85 }}>{look.label}</span>
-      </div>
-      {club?.logo_url && <img src={club.logo_url} alt="" style={{ position: 'absolute', right: 14, top: 10, width: 34, height: 34, objectFit: 'contain', filter: 'drop-shadow(0 2px 6px rgba(0,0,0,.4))' }} />}
+      <div style={{ position: 'absolute', inset: 0, background: look.pattern, opacity: 0.55 }} />
+      <Portrait card={card} club={club} accent={accent} />
+      {hero && <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 120, background: 'linear-gradient(to bottom, rgba(5,10,12,.72), rgba(5,10,12,0))' }} />}
+      {hero && <div style={{ position: 'absolute', left: 0, right: 0, bottom: BAND - 36, height: 120, background: 'linear-gradient(to top, rgba(5,10,12,.7), rgba(5,10,12,0))' }} />}
 
-      {/* The player, in a cut-out window so the colour of the event still reads around them. */}
-      <div style={{ position: 'absolute', left: 22, right: 22, top: 56, height: 214, borderRadius: 18, overflow: 'hidden', boxShadow: `0 0 0 3px ${hexWithAlpha('#ffffff', 0.55)}, 0 12px 30px rgba(0,0,0,.4)`, background: 'rgba(5,10,12,.35)' }}>
-        <WindowPortrait card={card} club={club} accent={accent} />
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 90, background: 'linear-gradient(to top, rgba(5,10,12,.78), rgba(5,10,12,0))' }} />
-        <div style={{ position: 'absolute', left: 12, right: 12, bottom: 8 }}>
-          {first && <div style={{ font: `600 italic 12px ${SANS}`, textTransform: 'uppercase', letterSpacing: 1, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{first}</div>}
-          <div style={{ font: `800 italic ${nameSize}px/0.95 ${display}`, textTransform: 'uppercase', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{last}</div>
+      <div style={{ position: 'absolute', top: 14, left: 16, right: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          {first && <div style={{ font: `600 italic 14px ${SANS}`, textTransform: 'uppercase', letterSpacing: 1, color: '#fff', textShadow: '0 1px 8px rgba(0,0,0,.7)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{first}</div>}
+          <FitText max={40} min={18} family={display} weight={800} italic lineHeight={0.95} style={{ textTransform: 'uppercase', letterSpacing: 0.5, color: '#fff', textShadow: '0 2px 12px rgba(0,0,0,.65)' }}>{last}</FitText>
+        </div>
+        <div style={{ flex: 'none', textAlign: 'right', maxWidth: 96 }}>
+          <span style={{ display: 'inline-block', padding: '3px 9px', borderRadius: 999, background: 'rgba(5,10,12,.6)', border: '1px solid rgba(255,255,255,.45)', font: `700 9px ${MONO}`, letterSpacing: 1.6, textTransform: 'uppercase', color: '#fff' }}>Special</span>
+          <div style={{ font: `700 8.5px ${MONO}`, letterSpacing: 1.3, textTransform: 'uppercase', color: '#fff', marginTop: 5, textShadow: '0 1px 6px rgba(0,0,0,.8)', overflowWrap: 'anywhere' }}>{look.label}</div>
         </div>
       </div>
 
-      <div style={{ position: 'absolute', left: 14, right: 14, top: 282, bottom: 14, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: look.on }}>
-        <div data-special-headline style={{ font: `800 italic ${bigSize}px/0.92 ${display}`, color: look.accent, textShadow: '0 3px 14px rgba(0,0,0,.35)', maxWidth: '100%', overflow: 'hidden', textTransform: head.small ? 'uppercase' : undefined, wordBreak: head.long ? 'break-word' : undefined }}>{head.big}</div>
-        {head.sub && <div style={{ font: `600 12px ${SANS}`, letterSpacing: 0.5, marginTop: 6, opacity: 0.9 }}>{head.sub}</div>}
-        {(opp || when) && (
-          <div style={{ marginTop: 8, padding: '4px 12px', borderRadius: 999, background: 'rgba(5,10,12,.5)', color: '#fff', font: `600 10px ${MONO}`, letterSpacing: 1, textTransform: 'uppercase', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {[opp, when].filter(Boolean).join('  ·  ')}
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: BAND }}>
+        <div style={{ position: 'absolute', inset: 0, background: look.band, clipPath: 'polygon(0 14%, 100% 0, 100% 100%, 0 100%)' }} />
+        <div style={{ position: 'absolute', inset: 0, background: look.pattern, opacity: 0.35, clipPath: 'polygon(0 14%, 100% 0, 100% 100%, 0 100%)' }} />
+        <div style={{ position: 'absolute', left: 14, right: 14, top: 30, bottom: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5, color: look.on, textAlign: 'center' }}>
+          <div data-special-headline style={{ width: '100%' }}>
+            {head.long
+              ? <FitText max={30} min={13} wrap boxH={56} align="center" family={display} weight={800} italic lineHeight={1.02} style={{ textTransform: 'uppercase', color: look.on }}>{head.big}</FitText>
+              : <FitText max={numeric ? 70 : 40} min={16} align="center" family={display} weight={800} italic lineHeight={0.95} style={{ textTransform: 'uppercase', color: look.on, textShadow: '0 2px 10px rgba(0,0,0,.18)' }}>{head.big}</FitText>}
           </div>
-        )}
+          {head.sub && <div style={{ width: '100%' }}><FitText max={12} min={8} align="center" family={SANS} weight={600} style={{ opacity: 0.92 }}>{head.sub}</FitText></div>}
+          {pill && (
+            <div style={{ maxWidth: '100%', boxSizing: 'border-box', padding: '4px 12px', borderRadius: 999, background: 'rgba(5,10,12,.55)', color: '#fff' }}>
+              <FitText max={10} min={7} align="center" family={MONO} weight={600} style={{ letterSpacing: 0.8, textTransform: 'uppercase' }}>{pill}</FitText>
+            </div>
+          )}
+        </div>
       </div>
     </TierFrame>
   )
-}
-
-// The portrait inside a special card's window (a fixed box, so it does not use the full-panel layout).
-function WindowPortrait({ card, club, accent }) {
-  const photo = usePhotoMode(card.hero_photo_url, card.photo_url)
-  if (photo.mode === 'none') {
-    return club?.logo_url
-      ? <img src={club.logo_url} alt="" style={{ position: 'absolute', inset: 0, margin: 'auto', width: 120, height: 120, objectFit: 'contain' }} />
-      : <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `linear-gradient(145deg, ${accent}, color-mix(in srgb, ${accent} 45%, #000))`, color: onColor(accent), font: `800 italic 84px ${DEFAULT_DISPLAY}` }}>{initialsOf(card.name)}</div>
-  }
-  return <img src={photo.src} alt="" onError={photo.fail} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 18%' }} />
 }
 
 // The face-down side.

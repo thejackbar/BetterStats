@@ -13,7 +13,7 @@ import secrets
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_SETTINGS, require_cap
 from app.models.db import Organisation, Player, User, get_db
 from app.routers.auth import get_current_club
-from app.services import audit_log, player_cards as cards
+from app.routers.public_availability import _club_branding
+from app.services import audit_log, player_card_admin as insight, player_cards as cards
 
 router = APIRouter(prefix="/player-cards", tags=["player-cards"])
 
@@ -75,6 +76,8 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
         })
     rows.sort(key=lambda r: (r["display_name"] or "").lower())
     return {
+        # The club's colours and fonts, so the screen can draw the cards as the players see them.
+        "club": _club_branding(club),
         "settings": {
             "enabled": settings["enabled"],
             "include_juniors": settings["include_juniors"],
@@ -160,3 +163,80 @@ async def refresh_specials(
     made = await cards.refresh_specials(db, club, force=True)
     await db.commit()
     return {"made": made}
+
+
+# ── What the club can see: reads only ────────────────────────────────────────────────────────────────────────
+
+@router.get("/overview")
+async def overview(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Totals, and a row per player: cards collected, packs opened and waiting, when, and swaps."""
+    snap = await cards.club_snapshot(db, club)
+    return await insight.overview(db, club, snap)
+
+
+@router.get("/activity")
+async def activity(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """What was added lately: special cards, the latest cards pulled or swapped in, the latest packs opened,
+    and a fortnight of special cards added, packs opened and swaps made."""
+    snap = await cards.club_snapshot(db, club)
+    return await insight.activity(db, club, snap)
+
+
+@router.get("/catalogue")
+async def catalogue(
+    kind: str = Query("all", pattern="^(all|player|special)$"),
+    special_kind: Optional[str] = Query(None, pattern="^[a-z_]{1,20}$"),
+    q: str = Query("", max_length=80),
+    sort: str = Query("rarity", pattern="^(rarity|name|recent|held)$"),
+    limit: int = Query(60, ge=1, le=insight.PAGE_MAX),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Every card that can come out of a pack, with copies held and owners."""
+    snap = await cards.club_snapshot(db, club)
+    return await insight.catalogue(db, club, snap, kind=kind, special_kind=special_kind, q=q, sort=sort, limit=limit, offset=offset)
+
+
+@router.get("/players/{player_id}")
+async def player_detail(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """One player's whole collection, their packs and what they have pulled or swapped lately. 404, not 403,
+    for another club's player."""
+    try:
+        pid = uuid.UUID(player_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Player not found")
+    player = await db.get(Player, pid)
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+    snap = await cards.club_snapshot(db, club)
+    return await insight.player_view(db, club, snap, player)
+
+
+@router.get("/swaps")
+async def swap_audit(
+    status: str = Query("all", pattern="^(all|pending|accepted|declined|cancelled|expired)$"),
+    q: str = Query("", max_length=80),
+    limit: int = Query(50, ge=1, le=insight.PAGE_MAX),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Every swap request the club's players have made, whoever asked and however it ended."""
+    snap = await cards.club_snapshot(db, club)
+    return await insight.swap_audit(db, club, snap, status=status, q=q, limit=limit, offset=offset)
