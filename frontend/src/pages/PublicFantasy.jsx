@@ -24,6 +24,7 @@ import Live from './fantasy/Live'
 import Fixtures from './fantasy/Fixtures'
 import Ladder from './fantasy/Ladder'
 import TeamView from './fantasy/TeamView'
+import Teams from './fantasy/Teams'
 import Leagues from './fantasy/Leagues'
 import Draft from './fantasy/Draft'
 import { PlayerProfile, Compare, StatsExplorer } from './fantasy/Players'
@@ -32,7 +33,7 @@ import Settings, { HowToPlay } from './fantasy/Settings'
 import Share from './fantasy/Share'
 import ViewAsBar from './fantasy/ViewAsBar'
 
-const NAV = [['team', 'My Team'], ['points', 'Points'], ['pick', 'Pick Squad'], ['ladder', 'Ladder'], ['leagues', 'Leagues'], ['draft', 'Draft']]
+const NAV = [['team', 'My Team'], ['points', 'Points'], ['pick', 'Pick Squad'], ['ladder', 'Ladder'], ['teams', 'Teams'], ['leagues', 'Leagues'], ['draft', 'Draft']]
 const QUICK = [['transfers', 'Transfers'], ['chips', 'Chips'], ['fixtures', 'Fixtures'], ['stats', 'Players'], ['live', 'Live'], ['share', 'Share'], ['help', 'Rules']]
 // Screens with a dedicated desktop layout that should use the full width. The rest
 // (forms, reading, single-item views) stay in a comfortable centred column.
@@ -135,6 +136,7 @@ export default function PublicFantasy() {
       case 'fixtures': return <Fixtures token={token} season={season} nav={nav} desktop={desktop} />
       case 'ladder': return <Ladder token={token} season={season} desktop={desktop} nav={nav} />
       case 'leagues': return <Leagues token={token} flash={flash} fail={fail} desktop={desktop} nav={nav} initialLeague={params.leagueId} />
+      case 'teams': return <Teams token={token} />
       case 'teamview': return <TeamView token={token} squadId={params.squadId} onBack={() => nav(params.from || 'ladder', params.leagueId ? { leagueId: params.leagueId } : {})} />
       case 'draft': return <Draft token={token} flash={flash} fail={fail} />
       case 'player': return <PlayerProfile token={token} playerId={params.playerId} season={season} onBack={() => nav(params.from || 'team')} nav={nav} desktop={desktop} />

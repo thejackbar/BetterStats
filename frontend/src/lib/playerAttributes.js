@@ -118,3 +118,25 @@ export function ageFromDob(dob, asOf) {
 export function ageShort(age) {
   return age == null ? null : `${age}y`
 }
+
+// The two or three style chips on a player card: "RH Batter", "RH Medium", "Wicketkeeper". Reads only what the
+// public player payload carries, which a club switches on per attribute, so a hidden attribute gives no chip.
+const BOWL_TYPE = { FAST: 'Fast', FAST_MEDIUM: 'Fast Medium', MEDIUM_FAST: 'Medium Fast', MEDIUM: 'Medium', WRIST_SPIN: 'Wrist Spin' }
+export function styleChips(player) {
+  const chips = []
+  if (player?.batting_hand === 'LEFT' || player?.batting_hand === 'RIGHT') {
+    chips.push({ kind: 'bat', label: `${player.batting_hand === 'LEFT' ? 'LH' : 'RH'} Batter` })
+  }
+  const act = player?.bowling_action
+  const type = player?.bowling_type
+  if (act || type) {
+    const left = act === 'LEFT_ARM'
+    let t = BOWL_TYPE[type]
+    if (type === 'FINGER_SPIN') t = left ? 'Orthodox' : (act ? 'Off Spin' : 'Finger Spin')
+    if (type === 'WRIST_SPIN' && act && !left) t = 'Leg Spin'
+    const arm = act ? (left ? 'LH' : 'RH') : ''
+    if (t) chips.push({ kind: 'bowl', label: `${arm} ${t}`.trim() })
+  }
+  if (/keeper/i.test(player?.player_role || '')) chips.push({ kind: 'wk', label: 'Wicketkeeper' })
+  return chips
+}

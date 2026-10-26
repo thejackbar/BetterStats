@@ -116,6 +116,14 @@ export default function Ladder({ token, season, desktop, nav }) {
   const me = rows.find(r => r.you)
   const leader = rows[0]
 
+  // Once a round has locked every team can be browsed side by side, as a list or a stack of cards.
+  const allTeams = onOpen && (
+    <button onClick={() => nav('teams')} style={{
+      display: 'block', margin: '12px 0 0', padding: '9px 12px', borderRadius: 11, cursor: 'pointer', textAlign: 'left',
+      background: tintBg(10, 'var(--surface)'), border: `1px solid ${tintBg(30)}`, color: 'var(--accent-strong)', font: `700 12.5px 'Hanken Grotesk'`,
+    }}>Browse every team as a list or cards ›</button>
+  )
+
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '13px 0 7px' }}>
       <Th w={24}>#</Th><span style={{ width: 18 }} /><Th>Team</Th><Th>GW</Th><Th w={50} right>Total</Th>
@@ -132,6 +140,7 @@ export default function Ladder({ token, season, desktop, nav }) {
       <div>
         <ScreenTitle title="Club ladder" sub={`${rows.length} managers`} />
         <LiveChip live={data.live} />
+        {allTeams}
         <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 22, alignItems: 'start', paddingTop: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, position: 'sticky', top: 12 }}>
             {me && <PositionCard r={me} label="Your position" you />}
@@ -150,6 +159,7 @@ export default function Ladder({ token, season, desktop, nav }) {
     <div>
       <ScreenTitle title="Club ladder" sub={`${rows.length} managers`} />
       <LiveChip live={data.live} />
+      {allTeams}
       {header}
       {tableRows}
     </div>

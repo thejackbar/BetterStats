@@ -274,16 +274,32 @@ def _player_card(p: Player) -> dict:
     return {"photo_url": p.photo_url, "initials": _initials(p.name)}
 
 
-async def _enrich_lineup(db: AsyncSession, lineup: list, sort: bool = True) -> list[dict]:
+async def _player_info(db: AsyncSession, ids) -> dict[str, tuple]:
+    """player id -> (name, photo_url) for a set of ids, in one query."""
+    ids = list(ids)
+    if not ids:
+        return {}
+    return {str(pid): (nm, photo) for pid, nm, photo in (await db.execute(
+        select(Player.id, Player.name, Player.photo_url).where(Player.id.in_(ids))
+    )).all()}
+
+
+def _lineup_ids(lineup: list) -> list:
+    return [uuid.UUID(str(e["player_id"])) for e in lineup if e.get("player_id")]
+
+
+async def _enrich_lineup(db: AsyncSession, lineup: list, sort: bool = True, info: Optional[dict] = None) -> list[dict]:
     """Add the player name + photo + initials onto a stored round lineup snapshot,
-    so Points and Live can render the photo-led rows. Counted players first."""
-    ids = [uuid.UUID(str(e["player_id"])) for e in lineup if e.get("player_id")]
-    info: dict[str, tuple] = {}
-    if ids:
-        for pid, nm, photo in (await db.execute(
-            select(Player.id, Player.name, Player.photo_url).where(Player.id.in_(ids))
-        )).all():
-            info[str(pid)] = (nm, photo)
+    so Points and Live can render the photo-led rows. Counted players first.
+    ``info`` is a ``_player_info`` result already loaded for many lineups at once; any player it lacks
+    (a lineup scored live rather than read from a stored row) is looked up here, so it is only a shortcut."""
+    ids = _lineup_ids(lineup)
+    if info is None:
+        info = await _player_info(db, ids)
+    else:
+        missing = [i for i in ids if str(i) not in info]
+        if missing:
+            info = {**info, **(await _player_info(db, missing))}
     rows = sorted(lineup, key=lambda e: (not e.get("counted"), e.get("role", ""))) if sort else lineup
     out = []
     for e in rows:
@@ -1585,16 +1601,39 @@ async def _score_squad_live(db: AsyncSession, season: FantasySeason, rnd: Fantas
     return res, cur_chip, score_by_player
 
 
+async def _locked_team(db: AsyncSession, season, rnd, me, target, manager_name: str, *,
+                       srs: Optional[FantasySquadRoundScore], info: Optional[dict] = None) -> dict:
+    """One manager's team as it was LOCKED for ``rnd`` (the most recently locked round), the shape both
+    ``team_view`` and ``teams_view`` return. ``srs`` is the squad's row for that round, or None.
+
+    The lineup is the one stored with the squad's round row, which is written from the picks while the round
+    is locked (they are frozen) and kept as it was when the round was settled; picks held now are read only
+    for a round that is locked and has no row yet."""
+    head = {
+        "squad_id": str(target.id), "team_name": target.team_name, "manager": manager_name,
+        "you": target.id == me.id, "total_points": float(target.total_points),
+        "round": {"number": rnd.round_number, "name": rnd.name, "status": "scored" if rnd.status == "scored" else "live"},
+    }
+    if target.joined_round is not None and target.joined_round > rnd.round_number:
+        return {**head, "lineup": None, "points": None, "chip_used": None,
+                "note": "This team joined after that round locked, so it has no locked team to show."}
+    if srs is not None and srs.lineup:
+        lineup, points, chip = srs.lineup, float(srs.points), srs.chip_used
+    elif rnd.status != "scored":
+        res, chip, _ = await _score_squad_live(db, season, rnd, target)
+        lineup, points = res["lineup"], res["points"]
+    else:
+        return {**head, "lineup": None, "points": None, "chip_used": None,
+                "note": "There is no locked team on record for this round."}
+    return {**head, "lineup": await _enrich_lineup(db, lineup, info=info), "points": points, "chip_used": chip}
+
+
 @router.get("/{token}/team/{squad_id}")
 async def team_view(token: str, squad_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Another manager's team as it was LOCKED for the most recently locked round, with the points it has
     scored. Nothing later is shown: not the transfers they have queued, not a change applied after the round
     settled, not their bank, prices or chips for the next round. Only managers in the league can look, and
-    only once a round has locked (before that every XI is still being decided).
-
-    The lineup is the one stored with the squad's round row, which is written from the picks while the round
-    is locked (they are frozen) and kept as it was when the round was settled; picks held now are read only
-    for a round that is locked and has no row yet."""
+    only once a round has locked (before that every XI is still being decided). See ``_locked_team``."""
     club = await _club_for_token(db, token)
     mgr = await _manager_for_session(db, request, club)
     season = await _current_season(db, club)
@@ -1612,29 +1651,57 @@ async def team_view(token: str, squad_id: str, request: Request, db: AsyncSessio
     rnd = await _last_locked_round(db, season.id)
     if rnd is None:
         raise HTTPException(status_code=403, detail="Teams are shown once the first round has locked.")
-
     owner = await db.get(FantasyManager, target.manager_id)
-    head = {
-        "squad_id": str(target.id), "team_name": target.team_name, "manager": owner.display_name if owner else "",
-        "you": target.id == me.id, "total_points": float(target.total_points),
-        "round": {"number": rnd.round_number, "name": rnd.name, "status": "scored" if rnd.status == "scored" else "live"},
-    }
-    if target.joined_round is not None and target.joined_round > rnd.round_number:
-        return {**head, "lineup": None, "points": None, "chip_used": None,
-                "note": "This team joined after that round locked, so it has no locked team to show."}
     srs = (await db.execute(
         select(FantasySquadRoundScore).where(
             FantasySquadRoundScore.squad_id == target.id, FantasySquadRoundScore.round_id == rnd.id)
     )).scalar_one_or_none()
-    if srs is not None and srs.lineup:
-        lineup, points, chip = srs.lineup, float(srs.points), srs.chip_used
-    elif rnd.status != "scored":
-        res, chip, _ = await _score_squad_live(db, season, rnd, target)
-        lineup, points = res["lineup"], res["points"]
-    else:
-        return {**head, "lineup": None, "points": None, "chip_used": None,
-                "note": "There is no locked team on record for this round."}
-    return {**head, "lineup": await _enrich_lineup(db, lineup), "points": points, "chip_used": chip}
+    return await _locked_team(db, season, rnd, me, target, owner.display_name if owner else "", srs=srs)
+
+
+@router.get("/{token}/teams")
+async def teams_view(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Every team in the viewer's league as it was LOCKED for the most recently locked round, ranked as the
+    ladder is, in one request: the list and card views of the Teams screen. Same gate and the same rule as
+    ``team_view`` (it is the same ``_locked_team``), so it can never show more than opening each team would:
+    no queued transfers, no prices, bank or next round's chips."""
+    club = await _club_for_token(db, token)
+    mgr = await _manager_for_session(db, request, club)
+    season = await _current_season(db, club)
+    if season is None:
+        raise HTTPException(status_code=404, detail="No fantasy season")
+    me = await _global_squad(db, season, mgr)
+    if me is None:
+        raise HTTPException(status_code=403, detail="Build your squad to see how other managers lined up.")
+    rnd = await _last_locked_round(db, season.id)
+    if rnd is None:
+        raise HTTPException(status_code=403, detail="Teams are shown once the first round has locked.")
+    standings = await _league_standings(db, league_id=me.league_id)
+    squads = {str(sq.id): sq for sq in (await db.execute(
+        select(FantasySquad).where(FantasySquad.league_id == me.league_id)
+    )).scalars().all()}
+    srs_by = {str(r.squad_id): r for r in (await db.execute(
+        select(FantasySquadRoundScore).where(
+            FantasySquadRoundScore.round_id == rnd.id,
+            FantasySquadRoundScore.squad_id.in_([sq.id for sq in squads.values()]))
+    )).scalars().all()} if squads else {}
+    # One player lookup for every lineup, not one per team.
+    need: set = set()
+    for r in srs_by.values():
+        if r.lineup:
+            need.update(_lineup_ids(r.lineup))
+    info = await _player_info(db, need)
+    teams = []
+    for row in standings:
+        sq = squads.get(row["squad_id"])
+        if sq is None:
+            continue
+        t = await _locked_team(db, season, rnd, me, sq, row["manager"], srs=srs_by.get(row["squad_id"]), info=info)
+        teams.append({**t, "rank": row["rank"], "rank_delta": row["rank_delta"]})
+    return {
+        "round": {"number": rnd.round_number, "name": rnd.name, "status": "scored" if rnd.status == "scored" else "live"},
+        "teams": teams,
+    }
 
 
 @router.get("/{token}/live")

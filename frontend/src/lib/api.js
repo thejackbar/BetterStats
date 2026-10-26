@@ -3571,6 +3571,7 @@ export const api = {
   fanCancelChip: (token, chip) => request(`/public/fantasy/${token}/chip/cancel`, { method: 'POST', body: JSON.stringify({ chip }) }),
   fanLadder: (token) => request(`/public/fantasy/${token}/ladder`),
   fanTeam: (token, squadId) => request(`/public/fantasy/${token}/team/${squadId}`),
+  fanTeams: (token) => request(`/public/fantasy/${token}/teams`),
   fanLeagues: (token) => request(`/public/fantasy/${token}/leagues`),
   fanLeague: (token, leagueId) => request(`/public/fantasy/${token}/leagues/${leagueId}`),
   fanLeaveLeague: (token, leagueId) => request(`/public/fantasy/${token}/leagues/${leagueId}/leave`, { method: 'POST' }),
