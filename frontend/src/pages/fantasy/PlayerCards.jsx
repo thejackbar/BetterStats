@@ -2,6 +2,7 @@
 // same look as the share cards (black frame, the club's colour, the photo in a ring, an angled band along the
 // bottom) at a size that fits two across a phone. Tapping one selects it; the actions for it (captain, vice,
 // profile) open under its group exactly as they do on the sheet.
+import { useLayoutEffect, useRef, useState } from 'react'
 import { splitName } from '../../components/PlayerTradingCard'
 import { DISP, ROLE_GROUP, ROLE_SHORT, money, pts, PriceArrow, Avatar } from './ui'
 import { SectionLabel } from './shell'
@@ -12,7 +13,14 @@ const INK = '#050a0c'
 const FRAME = 5
 const PANEL_W = CARD_W - FRAME * 2
 
-export function FantasyPlayerCard({ p, gw, selected, onClick }) {
+export function FantasyPlayerCard({ p, gw, selected, onClick, scale = 1 }) {
+  const card = <FantasyPlayerCardFace p={p} gw={gw} selected={selected} onClick={onClick} />
+  if (scale === 1) return card
+  // Drawn at the design size and shrunk or grown as a whole, so type and spacing keep their proportions.
+  return <div style={{ width: CARD_W * scale, height: CARD_H * scale, flex: 'none' }}><div style={{ width: CARD_W, height: CARD_H, transform: `scale(${scale})`, transformOrigin: 'top left' }}>{card}</div></div>
+}
+
+function FantasyPlayerCardFace({ p, gw, selected, onClick }) {
   const { first, last } = splitName(p.name)
   const size = last.length <= 8 ? 21 : last.length <= 11 ? 17 : 14
   const photo = p.photo_url
@@ -56,14 +64,55 @@ export function FantasyPlayerCard({ p, gw, selected, onClick }) {
   )
 }
 
-// Every role group, a grid of cards each, with the open player's actions under their group.
+const GAP = 12
+const MIN_W = 120   // narrowest a card gets on a wide screen before it wraps to another row
+const MAX_SCALE = 1.1
+
+// How many cards go in a row and how big they are, so the whole XI is two even rows rather than a row of ten and
+// a stray two: the fewest rows that keep a card at least MIN_W wide, then spread the cards evenly over them.
+export function fitCards(n, width) {
+  if (!n || !width) return { cols: Math.max(n, 1), scale: 1 }
+  const fit = Math.max(1, Math.floor((width + GAP) / (MIN_W + GAP)))
+  const rows = Math.ceil(n / Math.min(n, fit))
+  const cols = Math.ceil(n / rows)
+  const w = (width - GAP * (cols - 1)) / cols
+  return { cols, scale: Math.min(MAX_SCALE, w / CARD_W) }
+}
+
+// A phone shows every role group, two cards across. A wide screen shows the whole XI at once, role by role in one
+// even grid (each card carries its role tag), with the open player's actions under it.
 export default function SquadCards({ groups, gwPts, openId, onPlayer, actions, desktop }) {
+  const boxRef = useRef(null)
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    const el = boxRef.current
+    if (!desktop || !el || typeof ResizeObserver === 'undefined') return undefined
+    const measure = () => setWidth(el.clientWidth)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [desktop])
+
+  const all = groups.flatMap(g => g.rows)
+  if (desktop) {
+    const { cols, scale } = fitCards(all.length, width)
+    const open = all.find(p => p.player_id === openId)
+    return (
+      <div ref={boxRef} style={{ paddingTop: 6 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, ${CARD_W * scale}px)`, gap: GAP, justifyContent: 'start' }}>
+          {all.map(p => <FantasyPlayerCard key={p.player_id} p={p} gw={gwPts?.[p.player_id]} scale={scale} selected={openId === p.player_id} onClick={() => onPlayer(p.player_id)} />)}
+        </div>
+        {open && actions(open)}
+      </div>
+    )
+  }
   return (
     <div>
       {groups.map(g => (
         <div key={g.role}>
           <SectionLabel right={<span style={{ font: `600 10.5px 'Hanken Grotesk'`, color: 'var(--faint)' }}>{g.rows.length}{g.quota ? ` / ${g.quota}` : ''}</span>}>{ROLE_GROUP[g.role]}</SectionLabel>
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, ${CARD_W}px)`, gap: 12, justifyContent: desktop ? 'start' : 'center' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, ${CARD_W}px)`, gap: GAP, justifyContent: 'center' }}>
             {g.rows.map(p => <FantasyPlayerCard key={p.player_id} p={p} gw={gwPts?.[p.player_id]} selected={openId === p.player_id} onClick={() => onPlayer(p.player_id)} />)}
           </div>
           {g.rows.some(p => p.player_id === openId) && actions(g.rows.find(p => p.player_id === openId))}
