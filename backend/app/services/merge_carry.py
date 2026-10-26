@@ -96,6 +96,18 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     ("fantasy_waiver_claims", "drop_player_id", "uuid", None),
     ("fantasy_queued_transfers", "out_player_id", "uuid", None),
     ("fantasy_queued_transfers", "in_player_id", "uuid", None),
+    # Player Cards (migration 363). A collection is what a person has opened over
+    # months and cannot be re-earned, so it moves with them. The owner column moves
+    # the cards a player holds, the subject columns re-point a card at the keeper
+    # when the removed record was the person on it. Nothing here can clash on a
+    # unique key: a special card has one subject, a gift is keyed to it, and a
+    # pack's (source, ref_key) is dropped from the removed side when the keeper
+    # already earned the same one (the same person, the same week).
+    ("player_card_packs", "player_id", "uuid", ("source", "ref_key")),
+    ("player_card_copies", "owner_player_id", "uuid", None),
+    ("player_card_copies", "subject_player_id", "uuid", None),
+    ("player_special_cards", "player_id", "uuid", None),
+    ("player_card_hidden", "player_id", "uuid", ("organisation_id",)),
 )
 
 # Tables whose primary key is not an `id` column: the column that identifies one
@@ -137,6 +149,7 @@ _OWN_CLUB_TABLES = {
     "player_name_aliases", "comms_contacts", "crm_people", "fee_members",
     "fantasy_pool_players", "fantasy_drafts", "fantasy_waiver_claims",
     "fine_entries", "fine_payments",
+    "player_card_packs", "player_card_copies", "player_special_cards", "player_card_hidden",
 }
 
 _CAST = {"int": "int[]", "uuid": "uuid[]"}

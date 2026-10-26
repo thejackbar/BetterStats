@@ -20,7 +20,7 @@ from app.routers import admin_broadcasts
 from app.routers import product_updates
 from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
-from app.routers import card_review, auth, organisations, players, games, game_fow, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, fines, website, comms, public_comms, public_ses, public_contact, public_teaser, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import card_review, auth, organisations, players, games, game_fow, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_player_cards, player_cards_admin, public_net_checkin, net_manager, fines, website, comms, public_comms, public_ses, public_contact, public_teaser, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours, role_programs
@@ -4517,6 +4517,23 @@ async def lifespan(app: FastAPI):
         for _stmt in _FANTASY_LIVE_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 363: Player Cards (packs, owned cards, special cards, hidden
+        # players, a club's card settings). Same one-copy rule: this list and
+        # alembic's 363 both run services/player_cards_ddl.STATEMENTS.
+        from app.services.player_cards_ddl import STATEMENTS as _PLAYER_CARDS_DDL
+        for _stmt in _PLAYER_CARDS_DDL:
+            await conn.execute(text(_stmt))
+        # Every club with players has a player page link, so one without BetterSelect (whose admin
+        # never switched self-service on) still has the page its Player Cards live on. Only a club
+        # that has none gets one; BetterSelect clubs keep their own self-service switch, which
+        # stays off until they turn it on.
+        await conn.execute(text(
+            "UPDATE organisations o SET availability_link_token = "
+            "replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '') "
+            "WHERE o.availability_link_token IS NULL "
+            "AND EXISTS (SELECT 1 FROM players p WHERE p.organisation_id = o.id)"
+        ))
+
         # Migration 328: a historical summary that stops at a season. Same
         # one-copy rule: this list and alembic's 328 both run
         # services/import_through_ddl.STATEMENTS.
@@ -6601,6 +6618,8 @@ app.include_router(votes.router, dependencies=[Depends(require_module("select"))
 # design — it resolves the club from the link token and enforces entitlement +
 # enabled-flag itself, so it is NOT wrapped in require_module.
 app.include_router(public_availability.router)                                            # BetterSelect (public)
+app.include_router(public_player_cards.router)                                            # Player Cards (public, behind the player page PIN)
+app.include_router(player_cards_admin.router)                                             # Player Cards settings (BetterStats, MANAGE_SETTINGS)
 # Player/supporter-facing vote collection (magic link + PIN). Unauthenticated by
 # necessity — resolves the club from its vote-link token and checks entitlement +
 # the enabled flag itself, so it is NOT wrapped in require_module.

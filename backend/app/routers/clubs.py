@@ -96,14 +96,13 @@ async def get_club_by_slug(slug: str, request: Request, db: AsyncSession = Depen
 
 
 def _player_page_path(org: Organisation) -> str | None:
-    if (
-        org.availability_self_service_enabled
-        and org.availability_show_on_site is not False
-        and org.availability_link_token
-        and org_has_module(org, MODULE_SELECT)
-    ):
-        return f"/avail/{org.availability_link_token}"
-    return None
+    """The link to the club's player page. A club with BetterSelect keeps its self-service switch;
+    a club without it has the page for its Player Cards and season, on whenever the site shows it."""
+    if not org.availability_link_token or org.availability_show_on_site is False:
+        return None
+    if org_has_module(org, MODULE_SELECT):
+        return f"/avail/{org.availability_link_token}" if org.availability_self_service_enabled else None
+    return f"/avail/{org.availability_link_token}"
 
 
 @router.get("/{slug}/manifest")

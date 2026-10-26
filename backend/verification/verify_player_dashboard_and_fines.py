@@ -64,7 +64,7 @@ async def main():
         for _ in range(2):  # the lifespan re-runs the list on every boot
             for stmt in (ddl.STATEMENTS if ddl else []) + (cap_ddl.STATEMENTS if cap_ddl else []):
                 await conn.execute(text(stmt))
-        for mod in ("selection_lock_ddl", "team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl", "audit_ddl", "availability_maybe_ddl"):
+        for mod in ("selection_lock_ddl", "team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl", "audit_ddl", "availability_maybe_ddl", "player_cards_ddl"):
             m = guarded(f"app.services.{mod}")
             for stmt in (m.STATEMENTS if m else []):
                 await conn.execute(text(stmt))
@@ -268,7 +268,7 @@ async def main():
 
     print("\n# I. The player's page: the club's modules")
     prof = await profile(ids["sam"])
-    check("a club that never chose gets the original page (availability is the page itself, not a module), plus Fines for a squad that has it on (Show squad is off, so the squad section carries a note)", prof["modules"], ["squad", "selected", "training", "fines"])
+    check("a club that never chose gets the original page (availability is the page itself, not a module), plus Fines for a squad that has it on (Show squad is off, so the squad section carries a note)", prof["modules"], ["cards", "squad", "selected", "training", "fines"])
     check("a module that is off is never queried", (prof["season"], prof["fees"]), (None, None))
 
     res, _ = await admin(av.update_self_service, av.SelfServiceUpdate(dashboard_modules=["bogus", "season", "fines", "season", "fees", "ladder"]))

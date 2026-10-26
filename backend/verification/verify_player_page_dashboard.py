@@ -73,7 +73,7 @@ async def main():
     await base.build_schema()
     async with engine.begin() as conn:
         for mod in ("selection_lock_ddl", "team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl", "audit_ddl",
-                    "availability_maybe_ddl", "availability_site_link_ddl", "player_contact_ddl", "fines_ddl", "fines_cap_ddl", "fantasy_queue_ddl"):
+                    "availability_maybe_ddl", "availability_site_link_ddl", "player_contact_ddl", "fines_ddl", "fines_cap_ddl", "fantasy_queue_ddl", "player_cards_ddl"):
             m = guarded(f"app.services.{mod}")
             for stmt in (m.STATEMENTS if m else []):
                 await conn.execute(text(stmt))
@@ -254,11 +254,11 @@ async def main():
     await set_modules(None)
     await set_org(org, player_dashboard_modules={"on": ["season"], "known": ["availability", "votes", "squad", "selected", "training", "ladder", "season", "fees", "fines"]})
     mods = (await profile("sam"))["modules"]
-    check("a club that saved its list before Fantasy existed gets Fantasy switched on", mods, ["fantasy", "season"])
+    check("a club that saved its list before Fantasy existed gets Fantasy switched on (and, since v9.130.0, Player Cards, which arrive switched on the same way)", mods, ["cards", "fantasy", "season"])
     await set_modules(["season", "fantasy"])
     # A stale stored 'availability' is dropped quietly.
     await set_org(org, player_dashboard_modules=["availability", "season", "fantasy"])
-    check("a stored list that still names availability just loses it", (await profile("sam"))["modules"], ["season", "fantasy"])
+    check("a stored list that still names availability just loses it", (await profile("sam"))["modules"], ["cards", "season", "fantasy"])
     await set_modules(["season", "fantasy"])
 
     print("\n# C. Season dashboard")
@@ -427,7 +427,12 @@ async def main():
     await set_org(org, availability_self_service_enabled=True, availability_link_token=None)
     check("no token yet: null", (await club_payload(org)).get("player_page_path"), None)
     await set_org(org, availability_link_token=tok, module_overrides=["fantasy", "fees"])
-    check("a club without BetterSelect gets null even with the link set", (await club_payload(org)).get("player_page_path"), None)
+    # Player Cards (v9.130.0): the player page is no longer BetterSelect-only. A club without it has
+    # the page (cards and season, no availability) whenever it has a link and has not hidden it.
+    check("a club without BetterSelect has the page too (its Player Cards live there)", (await club_payload(org)).get("player_page_path"), f"/avail/{tok}")
+    await set_org(org, availability_show_on_site=False)
+    check("...unless it hides the link", (await club_payload(org)).get("player_page_path"), None)
+    await set_org(org, availability_show_on_site=True)
     await set_org(org, module_overrides=["select", "fantasy", "fees"])
     check("restored, it is back", (await club_payload(org)).get("player_page_path"), f"/avail/{tok}")
     blob = json.dumps(await club_payload(org))
