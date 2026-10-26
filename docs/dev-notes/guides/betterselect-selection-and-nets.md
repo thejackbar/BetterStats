@@ -142,6 +142,8 @@
 
 97b. Two-day wording (v9.122.2): every screen words a two-day answer through `lib/availability.weekFlag` and draws it with `ui.WeekFlag` ("W2 ONLY" in the half colour, "W1 OUT" red, "W2 ?" amber; never the same words in two colours). Week names are the club's (`selection_rules_config.week_names`, `useWeekNames()`, public `week_names`): never write "W1", "Week 1" or "W2" as a literal in a screen. The quick answers are `weekPatterns(names)` (Both weeks, W1 Only, W2 Only, Not available), each saved as one write per date. A squad's next two-day game carries `end_on` in `squad_next`; the Squads board judges it on both weeks. Check: `verify_squads_two_day_browser.mjs`, `verify_week_names.py`, `verify_squad_next_game.py`.
 
+- Past Lineups (v9.129.38, `PastLineups.jsx`, `GET /selection/past-lineups[/teams]`): a team is `squad_sides.resolve` of the fixture (squad, plus its own team when the squad has several), never grade id alone; in/out is against the older game of the SAME team and the query reads one game past the page. A new reader of "a team's past sides" must go through `_past_team_key`. Check: `verify_past_lineups.py`, `verify_past_lineups_browser.mjs`.
+
 **Layout and process**
 54. `min-w-0` goes on the element that may shrink (`<h1>` `truncate min-w-0`, toggle `shrink-0`), not the group. Selection header uses `flex-wrap xl:flex-nowrap` and moves user name + Logout from `sm` to `xl`; only Selection passes `headerLeft`. `flex-wrap` cannot save a `shrink-0` child. A native date input clips its year if it shares a row (age on the caption line).
 55. Re-check `origin/main` at merge before numbering a migration (duplicate revision ids break Alembic).

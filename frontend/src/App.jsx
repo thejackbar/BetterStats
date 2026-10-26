@@ -206,6 +206,7 @@ const BsSelection = lazy(() => import('./pages/admin/betterselect/AdminSelection
 const BsSelectionOverview = lazy(() => import('./pages/admin/betterselect/AdminSelectionOverview'))
 const BsSelectionDraftTable = lazy(() => import('./pages/admin/betterselect/AdminSelectionDraftTable'))
 const BsAuditHistory = lazy(() => import('./pages/admin/betterselect/AuditHistory'))
+const BsPastLineups = lazy(() => import('./pages/admin/betterselect/PastLineups'))
 const BsLadders = lazy(() => import('./pages/admin/betterselect/AdminLadders'))
 const BsNets = lazy(() => import('./pages/admin/betterselect/Nets'))
 const BsNetSession = lazy(() => import('./pages/admin/betterselect/NetSession'))
@@ -608,6 +609,7 @@ export default function App() {
           <Route path="/admin/betterselect/availability" element={<ProtectedRoute requireModule="select"><BsAvailability /></ProtectedRoute>} />
           <Route path="/admin/betterselect/selection" element={<ProtectedRoute requireModule="select"><BsSelectionOverview /></ProtectedRoute>} />
           <Route path="/admin/betterselect/whiteboard" element={<ProtectedRoute requireModule="select"><BsSelectionDraftTable /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/past-lineups" element={<ProtectedRoute requireModule="select"><BsPastLineups /></ProtectedRoute>} />
           <Route path="/admin/betterselect/audit" element={<ProtectedRoute requireModule="select"><BsAuditHistory /></ProtectedRoute>} />
           {/* Its old address, from before it had its own place in the menu. */}
           <Route path="/admin/betterselect/selection/draft-table" element={<RedirectKeepingSearch to="/admin/betterselect/whiteboard" />} />

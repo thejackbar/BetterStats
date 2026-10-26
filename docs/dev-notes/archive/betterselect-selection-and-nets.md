@@ -1902,3 +1902,15 @@ Touch (`(hover: none)`) has no drag. A drag from a whole card was never going to
 The menu button in `BetterSelectLayout` (`data-menu-toggle`) hides the sidebar from `md` up and keeps the choice in `usePersistedState('select.sidebarHidden')`. Below `md` the same button opens the existing slide-over.
 
 Check: `verify_whiteboard_phone_browser.mjs` (33), driven with real touch events through CDP (`Input.dispatchTouchEvent`; `Input.synthesizeScrollGesture` did not scroll even a plain div here). `verify_draft_table_browser.mjs`'s 390px check now expects the board. Checked in Chromium only; Edge and Chrome on iOS run on WebKit, which this sandbox does not have.
+
+## Past Lineups (v9.129.38)
+
+A selector wanted to look back at a team's earlier sides without opening fixtures one by one. New screen `/admin/betterselect/past-lineups` (`PastLineups.jsx`, Match Day menu, `SELECT_SELECTION`), backed by two read-only routes in `routers/selection.py`, declared before `/{fixture_id}`: `GET /selection/past-lineups/teams` and `GET /selection/past-lineups`.
+
+A "team" is the squad, or one team of a squad that covers several (`team` key is `<squad id>` or `<squad id>:<side key>`), resolved per fixture through `squad_sides.resolve`, the same as the board and `previous_xi`. Only games up to today, not cancelled, with a saved `fixture_lineups` row count. A game no squad claims belongs to no team. The feed is newest first, paged by `offset`/`limit` (8 default, 30 max). Each game carries `vs_previous` (who is in and out against the next older game of the SAME team); the window reads one game past the page so the oldest card of a page is never shown as all new. `fixture_id` in place of `team` means "this fixture's team" (the builder's Past sides button).
+
+Screen: team chips, year headings, an IntersectionObserver sentinel plus a button for the next page, tap a name to follow a player (`data-past-following`). The last team looked at is kept in `bs_pref:select.pastLineups.team`. It reads the `select.juniors` preference like the other BetterSelect screens.
+
+Not built: who actually played (the scorecard) against who was selected, and the result of each game.
+
+Checks: `backend/verification/verify_past_lineups.py` (43 checks, Postgres; control on the previous `selection.py` fails all of the feature checks, a mutant that drops the extra baseline game fails the two paging checks), `frontend/verification/verify_past_lineups_browser.mjs` (44 checks; locale-agnostic dates, the in/out label is CSS-uppercased so match with `/i`).

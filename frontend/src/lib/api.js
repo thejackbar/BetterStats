@@ -3622,6 +3622,19 @@ export const api = {
   bsLockSelection: (fixtureId) => request(`/selection/${fixtureId}/lock`, { method: 'POST' }),
   bsUnlockSelection: (fixtureId) => request(`/selection/${fixtureId}/unlock`, { method: 'POST' }),
   bsSelectionHistory: (fixtureId) => request(`/selection/${fixtureId}/history`),
+  // Past Lineups: one team's saved XIs going back in time. `team` is a key from
+  // bsPastLineupTeams; `fixtureId` means "the team this fixture belongs to".
+  bsPastLineupTeams: ({ hideJuniors = false } = {}) =>
+    request(`/selection/past-lineups/teams${hideJuniors ? '?hide_juniors=true' : ''}`),
+  bsPastLineups: ({ team, fixtureId, offset = 0, limit = 8, hideJuniors = false } = {}) => {
+    const q = new URLSearchParams()
+    if (team) q.set('team', team)
+    else if (fixtureId) q.set('fixture_id', fixtureId)
+    if (offset) q.set('offset', String(offset))
+    q.set('limit', String(limit))
+    if (hideJuniors) q.set('hide_juniors', 'true')
+    return request(`/selection/past-lineups?${q.toString()}`)
+  },
   // Audit History: the club-wide trail of changes to players.
   bsAuditEvents: (params = {}) => request(`/audit/events${auditQuery(params)}`),
   bsAuditFacets: () => request('/audit/facets'),

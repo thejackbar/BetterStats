@@ -57,6 +57,7 @@ const CRICKET_GROUPS = [
       { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: null, anyCaps: selectCaps(CAP.SELECT_AVAILABILITY), desc: "Who's around each weekend." },
       { to: '/admin/betterselect/selection', label: 'Selection', icon: 'selection', cap: null, anyCaps: selectCaps(CAP.SELECT_SELECTION), desc: 'Pick and share your XI.' },
       { to: '/admin/betterselect/whiteboard', label: 'Selection Whiteboard', icon: 'cols', cap: null, anyCaps: selectCaps(CAP.SELECT_SELECTION), desc: 'Every team for the day side by side. Drag players between them.' },
+      { to: '/admin/betterselect/past-lineups', label: 'Past Lineups', icon: 'history', cap: null, anyCaps: selectCaps(CAP.SELECT_SELECTION), desc: "Scroll back through a team's earlier sides and see who came in and out." },
     ],
   },
   {
