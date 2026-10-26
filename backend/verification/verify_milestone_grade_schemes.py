@@ -315,6 +315,13 @@ async def main() -> None:
     check("P1's 60 games in A Grade show the 50 rung only",
           vals(rep["achieved"], P1, "grade_matches", "A Grade") == [50],
           str(vals(rep["achieved"], P1, "grade_matches", "A Grade")))
+    # Dated by the 50th game in date order: P1's 30 older A Grade games come first, so the 50th is
+    # the 20th of the 30 recent ones (seeded `old` back to `old` minus 29 days), `old` minus 10 days.
+    fiftieth = [r["achieved_at"] for r in rep["achieved"]
+                if r["player_id"] == str(P1) and r["type"] == "grade_matches"
+                and r["detail"] == "A Grade" and r["milestone_value"] == 50]
+    check("…and that rung carries the date of the 50th game played in the grade, not a blank",
+          fiftieth == [(date.today() - timedelta(days=70)).isoformat()], str(fiftieth))
     check("P3's 48 games in B Grade are 2 from 50",
           ups(rep["upcoming"], P3, "grade_matches", "B Grade") == [50])
     check("P2's 72 games in A Grade are not in reach of anything",

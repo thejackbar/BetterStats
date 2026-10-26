@@ -6622,36 +6622,48 @@ async def list_milestones_report(
     # ------------------------------------------------------------------
     # Achieved: computed grade_matches (all players, bulk SQL)
     # ------------------------------------------------------------------
+    # One row per game the player appeared in, so the Nth game (the date the
+    # milestone was reached) can be read off the list in date order.
     gm_rows = await db.execute(
         _text("""
+            WITH played AS (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS player_name,
+                    p.gender AS gender,
+                    COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                    ga.game_id AS game_id,
+                    MIN(g.played_at) AS played_at
+                FROM game_appearances ga
+                JOIN players p ON p.id = ga.player_id
+                JOIN games g ON g.id = ga.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                LEFT JOIN LATERAL (
+                    SELECT canonical_name FROM grade_merge_logs gml
+                    WHERE gml.org_id = CAST(:org_id AS UUID)
+                      AND gml.alias_name = gr.name AND gml.undone_at IS NULL
+                    LIMIT 1
+                ) am ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT gr2.display_name_override FROM grades gr2
+                    JOIN seasons s2 ON s2.id = gr2.season_id
+                    WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                      AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                      AND gr2.display_name_override IS NOT NULL
+                    LIMIT 1
+                ) gdn ON TRUE
+                WHERE p.organisation_id = :org_id AND p.is_player = TRUE
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender,
+                         COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)),
+                         ga.game_id
+            )
             SELECT
-                p.id::text AS player_id,
-                COALESCE(p.display_name_override, p.name) AS player_name,
-                p.gender AS gender,
-                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
-                COUNT(DISTINCT ga.game_id) AS matches
-            FROM game_appearances ga
-            JOIN players p ON p.id = ga.player_id
-            JOIN games g ON g.id = ga.game_id
-            JOIN grades gr ON gr.id = g.grade_id
-            LEFT JOIN LATERAL (
-                SELECT canonical_name FROM grade_merge_logs gml
-                WHERE gml.org_id = CAST(:org_id AS UUID)
-                  AND gml.alias_name = gr.name AND gml.undone_at IS NULL
-                LIMIT 1
-            ) am ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT gr2.display_name_override FROM grades gr2
-                JOIN seasons s2 ON s2.id = gr2.season_id
-                WHERE s2.organisation_id = CAST(:org_id AS UUID)
-                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
-                  AND gr2.display_name_override IS NOT NULL
-                LIMIT 1
-            ) gdn ON TRUE
-            WHERE p.organisation_id = :org_id AND p.is_player = TRUE
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender,
-                     COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
-            HAVING COUNT(DISTINCT ga.game_id) >= :min_step
+                player_id::text AS player_id, player_name, gender, grade_name,
+                COUNT(*) AS matches,
+                ARRAY_AGG(played_at ORDER BY played_at NULLS LAST, game_id) AS played_dates
+            FROM played
+            GROUP BY player_id, player_name, gender, grade_name
+            HAVING COUNT(*) >= :min_step
         """),
         {"org_id": org_id, "min_step": book.smallest_step("matches")},
     )
@@ -6660,7 +6672,10 @@ async def list_milestones_report(
         grade_name = r["grade_name"]
         if not grade_name:
             continue
+        dates = r["played_dates"] or []
         for threshold in crossed_thresholds("grade_matches", n, book.for_grade(grade_name)):
+            # The date of the Nth game in the grade; None when that game has no date.
+            reached = dates[threshold - 1] if 0 < threshold <= len(dates) else None
             achieved.append({
                 "player_id": r["player_id"],
                 "player_name": r["player_name"],
@@ -6668,7 +6683,7 @@ async def list_milestones_report(
                 "type": "grade_matches",
                 "category": "matches",
                 "milestone_value": threshold,
-                "achieved_at": None,
+                "achieved_at": reached.isoformat() if reached else None,
                 "detail": grade_name,
             })
 

@@ -1247,3 +1247,12 @@ Follow-up to v9.126.0 (which did Team of the Week only): every layout now lists 
 - Errors that look like a refusal (`out of memory`, `no available backend`, `RangeError`) on a constrained device get one retry on a fresh worker after 1.5s, then a plain message; a refused full run also sets `bgRemoval.fullCrashed`. A failed full run leaves the light cut-out on screen.
 - Not verified on a real phone: the refusal is simulated in Chromium.
 
+
+## Milestone cards: names clipped and undated games milestones (v9.129.31.1)
+
+- Report, screenshot of the Milestones post: "SANDEEP RED..." and a surname cut off along the bottom of its card, plus a "Games in PSWL South A" row showing "no date" in the picker.
+- Cause, names. A wide card (photo beside the text, the shape nine cards make on a square post) sized the big number from the card's height alone (`cardH * 0.46`). The unit, number, date and name band then asked for more than the card holds, and the card's `overflow: hidden` took the name band's bottom edge. Short numbers ("9,000" is width-limited) happened to fit, which is why only some cards clipped. The first name was a plain ellipsis line.
+- Fix, names. `MilestoneCards` budgets the number from what the name band and the unit and date lines leave (`wideInfoRoom`), the text block above the band can no longer push it (`minHeight: 0; overflow: hidden`), and the first name is an `AutoFitText` down to 9px.
+- Cause, date. `list_milestones_report` computes `grade_matches` in SQL and wrote `achieved_at: None` for every rung. The picker then said "no date" and `inWindow` kept it out of every window but All time.
+- Fix, date. The query lists each distinct game per player and grade with its date, in date order, and a rung takes the date of the Nth game. A game with no date gives no date. The public Records page with a grade picked still returns undated grade rungs.
+- Proof: the real post in Chromium with the shipped bundle, nine cards with "Sandeep Reddy Doma" and long surnames, before and after; `verify_milestones_browser.mjs` 55 of 55. The new query against a real Postgres 16 (four games inserted out of order, one with two appearance rows) returns four matches and the dates in order. The new assertion in `verify_milestone_grade_schemes.py` was added but not run, because the backend dependencies would not install in this sandbox.
