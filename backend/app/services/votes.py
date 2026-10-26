@@ -43,6 +43,11 @@ VOTER_MODES = {"players", "captain"}
 # list is per team, and not a football mode, so ``VOTER_MODES`` stays as it was.
 TEAM_VOTER_MODES = VOTER_MODES | {"chosen"}
 MAX_CHOSEN_VOTERS = 12
+# A team's voting settings are keyed by its grade NAME. Two of a club's teams can
+# play the same grade (Applecross 8th and 10th XI in One Day Grade 6 Black), and
+# the name cannot tell them apart, so each is keyed "<grade name>::<team id>".
+TEAM_KEY_SEP = "::"
+MAX_TEAM_KEY = 160
 # How a medal weights its grades: not at all, from fixture counts against the
 # top grade, or by hand. A multiplier outside this range is a typo, not a plan.
 WEIGHT_MODES = ("off", "auto", "manual")
@@ -304,7 +309,7 @@ def clean_grade_voter_modes(raw) -> dict[str, str]:
     for name, mode in raw.items():
         if not isinstance(name, str):
             continue
-        key = name.strip()[:120]
+        key = name.strip()[:MAX_TEAM_KEY]
         if key and mode in TEAM_VOTER_MODES:
             out[key] = mode
     return out
@@ -323,7 +328,7 @@ def clean_grade_vote_counters(raw) -> dict[str, list[str]]:
     for name, ids in raw.items():
         if not isinstance(name, str):
             continue
-        key = name.strip()[:120]
+        key = name.strip()[:MAX_TEAM_KEY]
         if isinstance(ids, str):
             ids = [ids]
         if not key or not isinstance(ids, (list, tuple)):
@@ -341,22 +346,110 @@ def clean_grade_vote_counters(raw) -> dict[str, list[str]]:
     return out
 
 
-def voter_mode_for_grade(cfg: dict, grade_name: Optional[str]) -> str:
-    """Who votes on a game in this team: the team's own setting, else the medal's."""
-    if grade_name:
-        mode = (cfg.get("grade_voter_modes") or {}).get(grade_name)
-        if mode in TEAM_VOTER_MODES:
-            return mode
-    return cfg["voter_mode"]
+async def shared_grade_teams(db: AsyncSession, org_id) -> dict[str, list[dict]]:
+    """Grade NAME -> the club's teams that play it this season, for the grades
+    more than one of the club's active teams play. Every other grade is left out,
+    and its team is keyed by the grade name as ever.
+
+    Read from where this season's fixtures sit (``fixtures.team_id``), because
+    that is what tells the teams apart when the grade cannot: sync puts a fixture
+    on a team by its own name ("Applecross 10th XI") as well as by its grade. Each
+    entry is ``{id, key, name}``, ``key`` being what the team's settings are stored
+    under."""
+    rows = (await db.execute(
+        text(
+            "SELECT DISTINCT g.name, t.id, COALESCE(NULLIF(t.short_name, ''), t.name), COALESCE(t.sequence, 0) "
+            "FROM fixtures f "
+            "JOIN grades g ON g.id = f.grade_id "
+            "JOIN teams t ON t.id = f.team_id AND t.organisation_id = :org AND COALESCE(t.is_active, true) "
+            "WHERE f.organisation_id = :org "
+            "AND f.grade_id IN (SELECT a.id FROM (" + _ACTIVE_GRADES_SQL + ") a)"
+        ),
+        {"org": org_id},
+    )).fetchall()
+    by_grade: dict[str, list[tuple]] = {}
+    for grade_name, tid, label, seq in rows:
+        by_grade.setdefault(grade_name, []).append((seq, label, str(tid)))
+    return {
+        name: [{"id": tid, "key": f"{name}{TEAM_KEY_SEP}{tid}", "name": label}
+               for _seq, label, tid in sorted(found)]
+        for name, found in by_grade.items() if len(found) > 1
+    }
 
 
-async def cfg_for_fixture(db: AsyncSession, cfg: dict, fixture: Fixture) -> dict:
+def team_setting_key(shared: dict, grade_name: Optional[str], team_id) -> Optional[str]:
+    """What a game's team's voting settings are stored under: its grade name, or
+    "<grade name>::<team id>" when another of the club's teams plays that grade."""
+    if grade_name and team_id:
+        for t in shared.get(grade_name, ()):
+            if t["id"] == str(team_id):
+                return t["key"]
+    return grade_name
+
+
+def team_vote_setting(cfg: dict, shared: dict, grade_name: Optional[str], team_id) -> tuple[str, list[str]]:
+    """Who votes on a game in this team, and the people chosen when that is
+    'chosen': the team's own setting, else the medal's mode with nobody chosen.
+
+    A setting saved under the bare grade name before the grade's teams were told
+    apart still applies to them until the club sets each one (the settings screen
+    and the next save split it per team, see ``split_legacy_team_settings``)."""
+    modes = cfg.get("grade_voter_modes") or {}
+    key = team_setting_key(shared, grade_name, team_id)
+    if key not in modes and grade_name in modes:
+        key = grade_name
+    mode = modes.get(key)
+    if mode not in TEAM_VOTER_MODES:
+        return cfg["voter_mode"], []
+    chosen = list((cfg.get("grade_vote_counters") or {}).get(key) or []) if mode == "chosen" else []
+    return mode, chosen
+
+
+def split_legacy_team_settings(modes: dict, counters: dict, shared: dict) -> tuple[dict, dict]:
+    """Copies of a medal's per-team voter modes and chosen people with any entry
+    stored under the name of a grade that more than one of the club's teams play
+    handed to each of those teams under its own key. Nothing else changes, and
+    running it again changes nothing. Until this ran, one entry covered every team
+    in the grade, so each team gets the same setting it had and the club can then
+    change them one at a time."""
+    modes, counters = dict(modes), dict(counters)
+    for name, teams in shared.items():
+        mode, ids = modes.pop(name, None), counters.pop(name, None)
+        for t in teams:
+            if mode is not None:
+                modes.setdefault(t["key"], mode)
+            if ids:
+                counters.setdefault(t["key"], list(ids))
+    return modes, counters
+
+
+async def team_options(db: AsyncSession, org_id, shared: Optional[dict] = None) -> list[dict]:
+    """The teams a medal's per-team settings are offered for: each active grade
+    once, or once per team where several of the club's teams play it. ``key`` is
+    what the settings are stored under, ``grade_name`` is what the medal's grade
+    ticks are matched on, ``name`` is what the screen shows."""
+    shared = await shared_grade_teams(db, org_id) if shared is None else shared
+    out: list[dict] = []
+    for g in await club_grade_options(db, org_id):
+        teams = shared.get(g["name"])
+        if not teams:
+            out.append({"key": g["name"], "grade_name": g["name"], "name": g["name"]})
+            continue
+        out.extend(
+            {"key": t["key"], "grade_name": g["name"], "name": f"{g['name']} · {t['name']}"}
+            for t in teams
+        )
+    return out
+
+
+async def cfg_for_fixture(db: AsyncSession, cfg: dict, fixture: Fixture, shared: Optional[dict] = None) -> dict:
     """``cfg`` with ``voter_mode`` resolved for this fixture's team, and
     ``vote_chosen`` (a list of player ids) set when that team is on 'chosen'. A
     copy, so the medal's own config is untouched. Costs nothing when no team has
     its own setting, which is every club until one is set. Read
     ``cfg.get("vote_chosen")``: a config that never went through here has no
-    such key."""
+    such key. A caller resolving many fixtures passes ``shared`` (from
+    ``shared_grade_teams``) so it is read once."""
     if not cfg.get("grade_voter_modes"):
         return cfg
     gid = (await effective_grade_ids(db, [fixture])).get(str(fixture.id))
@@ -365,10 +458,10 @@ async def cfg_for_fixture(db: AsyncSession, cfg: dict, fixture: Fixture) -> dict
         name = (await db.execute(
             text("SELECT name FROM grades WHERE id = :id"), {"id": gid},
         )).scalar_one_or_none()
-    voter_mode = voter_mode_for_grade(cfg, name)
-    chosen = list((cfg.get("grade_vote_counters") or {}).get(name) or []) if name else []
-    return {**cfg, "voter_mode": voter_mode,
-            "vote_chosen": chosen if voter_mode == "chosen" else []}
+    if shared is None:
+        shared = await shared_grade_teams(db, fixture.organisation_id)
+    voter_mode, chosen = team_vote_setting(cfg, shared, name, fixture.team_id)
+    return {**cfg, "voter_mode": voter_mode, "vote_chosen": chosen}
 
 
 async def chosen_fixture_ids(db: AsyncSession, cfg: dict, player_id, fixtures: list[Fixture]) -> set[uuid.UUID]:
@@ -377,8 +470,7 @@ async def chosen_fixture_ids(db: AsyncSession, cfg: dict, player_id, fixtures: l
     never find these. One grade read for the lot, and nothing at all when this
     player is on nobody's list."""
     pid = str(player_id)
-    names = {n for n, ids in (cfg.get("grade_vote_counters") or {}).items() if pid in ids}
-    if not names or not fixtures:
+    if not fixtures or not any(pid in ids for ids in (cfg.get("grade_vote_counters") or {}).values()):
         return set()
     grade_by_fixture = await effective_grade_ids(db, fixtures)
     gids = list(set(grade_by_fixture.values()))
@@ -388,10 +480,12 @@ async def chosen_fixture_ids(db: AsyncSession, cfg: dict, player_id, fixtures: l
         text("SELECT id, name FROM grades WHERE id = ANY(CAST(:ids AS uuid[]))"), {"ids": gids},
     )).fetchall()
     name_by_gid = {gid: nm for gid, nm in rows}
+    shared = await shared_grade_teams(db, fixtures[0].organisation_id)
     out: set[uuid.UUID] = set()
     for f in fixtures:
         nm = name_by_gid.get(grade_by_fixture.get(str(f.id)))
-        if nm in names and voter_mode_for_grade(cfg, nm) == "chosen":
+        mode, chosen = team_vote_setting(cfg, shared, nm, f.team_id)
+        if mode == "chosen" and pid in chosen:
             out.add(f.id)
     return out
 

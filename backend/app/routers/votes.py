@@ -218,6 +218,14 @@ async def _medal_payloads(db: AsyncSession, club: Organisation, medals: list[Vot
     names = {mid: [r["name"] for r in rows] for mid, rows in pairs.items()}
     inactive = {mid: [r for r in rows if r["name"] not in active] for mid, rows in pairs.items()}
     out = [_settings_payload(m, names, inactive) for m in medals]
+    # Two of the club's teams in one grade are offered, and stored, one each. A
+    # setting saved before that under the bare grade name is shown on both.
+    shared = await vote_svc.shared_grade_teams(db, club.id)
+    options = await vote_svc.team_options(db, club.id, shared)
+    for p in out:
+        p["grade_voter_modes"], p["grade_vote_counters"] = vote_svc.split_legacy_team_settings(
+            p["grade_voter_modes"], p["grade_vote_counters"], shared)
+        p["team_options"] = options
     # The chosen people by name, so a screen can show who without a roster fetch.
     wanted = {pid for p in out for ids in p["grade_vote_counters"].values() for pid in ids}
     chosen_names = await vote_svc.player_names(db, club.id, wanted) if wanted else {}
@@ -227,6 +235,23 @@ async def _medal_payloads(db: AsyncSession, club: Organisation, medals: list[Vot
             for team, ids in p["grade_vote_counters"].items()
         }
     return out
+
+
+async def _split_stored_team_settings(db: AsyncSession, club: Organisation, m: VoteMedal) -> None:
+    """Hand a medal's per-team settings saved under a shared grade's bare name to
+    each team in it, before a save changes either map. The screen already shows
+    them split and sends them back whole; this keeps the map that is NOT sent
+    (a save of only the modes, say) in step with the one that is."""
+    shared = await vote_svc.shared_grade_teams(db, club.id)
+    if not shared:
+        return
+    modes = vote_svc.clean_grade_voter_modes(m.grade_voter_modes)
+    counters = vote_svc.clean_grade_vote_counters(m.grade_vote_counters)
+    new_modes, new_counters = vote_svc.split_legacy_team_settings(modes, counters, shared)
+    if new_modes != modes:
+        m.grade_voter_modes = new_modes
+    if new_counters != counters:
+        m.grade_vote_counters = new_counters
 
 
 async def _medals_payload(db: AsyncSession, club: Organisation) -> list[dict]:
@@ -289,6 +314,7 @@ async def update_medal(
     if not medal:
         raise HTTPException(status_code=404, detail="Medal not found")
     await _check_vote_counters(db, club, body)
+    await _split_stored_team_settings(db, club, medal)
     _apply_medal_fields(medal, body)
     await db.commit()
     await db.refresh(medal)
@@ -443,6 +469,7 @@ async def update_settings(
     else:
         # A club turning voting on for the first time has no row at all.
         medal = await vote_svc.ensure_default_medal(db, club.id)
+    await _split_stored_team_settings(db, club, medal)
     _apply_medal_fields(medal, body)
     await db.commit()
     await db.refresh(medal)
@@ -605,6 +632,8 @@ async def list_vote_fixtures(
         lineup_counts = await vote_svc.lineup_voter_counts(db, club.id, [fid for fid in season_fids if str(fid) in lineup_saved])
         player_counts = await vote_svc.player_ballot_counts(db, club.id, season_fids, s.id if s else None)
 
+    shared_teams = await vote_svc.shared_grade_teams(db, club.id) if cfg.get("grade_voter_modes") else {}
+
     def _row(f: Fixture) -> dict:
         fid = str(f.id)
         ov = overrides.get(fid)
@@ -623,8 +652,9 @@ async def list_vote_fixtures(
         voters_expected = vote_svc.voters_expected_for(source, match_id, f.id, scorecard_counts, lineup_counts)
         # A team on 'chosen' is owed a ballot from each person listed, not from the side.
         team_name = grade_names.get(str(eff_gid)) if eff_gid else None
-        if vote_svc.voter_mode_for_grade(cfg, team_name) == "chosen":
-            voters_expected = len((cfg.get("grade_vote_counters") or {}).get(team_name) or [])
+        team_mode, team_chosen = vote_svc.team_vote_setting(cfg, shared_teams, team_name, f.team_id)
+        if team_mode == "chosen":
+            voters_expected = len(team_chosen)
         ballots = counts.get(fid, 0)
         outstanding_count = max(0, voters_expected - player_counts.get(fid, 0)) if voters_expected else 0
         return {
