@@ -2574,6 +2574,23 @@ async def sync_grassroots_game_level_data(
                         except Exception as _e:
                             await session.rollback()
                             logger.warning(f"GR-sync: figure refresh of {match_id_str} failed: {_e}")
+                        # A player named on the sheet we first stored who CA has since dropped from the
+                        # final sheet (a late withdrawal) did not play: nothing else ever takes the row
+                        # off. Recent games only; history goes through backfill_reserve_flags.
+                        try:
+                            from app.services import participant_relink, withdrawn_appearances
+                            if participant_relink.played_within(scorecard):
+                                _wd = await withdrawn_appearances.mark_withdrawn(
+                                    session, org_uuid, match_uuid, scorecard,
+                                    lambda g: _team_pid(_parse_uuid(g)))
+                                if _wd:
+                                    stats["gr_appearances_withdrawn"] = (
+                                        stats.get("gr_appearances_withdrawn", 0) + _wd["marked"])
+                                    stats["gr_appearances_restored"] = (
+                                        stats.get("gr_appearances_restored", 0) + _wd["cleared"])
+                        except Exception as _e:
+                            await session.rollback()
+                            logger.warning(f"GR-sync: withdrawal check of {match_id_str} failed: {_e}")
                         stats["gr_games_skipped_done"] += 1
                         continue
                     # else: the row exists (the other synced club created it)
