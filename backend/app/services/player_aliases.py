@@ -44,6 +44,32 @@ def normalise_name_key(name) -> str:
     return " ".join(tokens)
 
 
+def short_name_alias(alias_map: dict[str, str], short_name) -> Optional[str]:
+    """Player id (string) for an initial-and-surname feed name ("S Johnson") whose
+    full alias ("Shaylyn Johnson") was recorded by a rename or merge. A scorecard row
+    carries the short form, which never equals the two-word alias key.
+
+    Only a two-word alias with the same surname and a given name starting with the
+    initial counts, and only when exactly one player holds such an alias: a wrong
+    attachment is worse than none."""
+    words = normalise_name_key(short_name).split()
+    raw = [w for w in re.split(r"[\s,]+", str(short_name or "").strip().lower()) if w]
+    if len(raw) != 2:
+        return None
+    first, last = (raw[0], raw[1]) if len(raw[0]) == 1 else (raw[1], raw[0]) if len(raw[1]) == 1 else (None, None)
+    if not first or not words:
+        return None
+    hits = set()
+    for key, pid in alias_map.items():
+        toks = key.split()
+        if len(toks) != 2 or last not in toks:
+            continue
+        other = toks[1] if toks[0] == last else toks[0]
+        if len(other) > 1 and other.startswith(first):
+            hits.add(pid)
+    return next(iter(hits)) if len(hits) == 1 else None
+
+
 async def org_alias_map(db: AsyncSession, org_id) -> dict[str, str]:
     """Every alias in the org, keyed by `normalise_name_key` -> player id
     (string). Cheap — this table is small per club."""
