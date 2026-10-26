@@ -1,14 +1,19 @@
 // The two faces of a player's share card, drawn flat at a fixed size (CARD_W x CARD_H). The front is the
-// trading card: the photo full bleed over the club's colour, the sponsor, the name and the style chips. The back
-// holds the figures. The share page turns one into the other with FlipCard and renders the same markup to a PNG.
+// trading card: a black frame round a panel in the club's colour, the name and best club ranking up top, the
+// photo, the sponsor and style chips, and a band of headline figures along the bottom. A hero (action) photo
+// fills the panel; a headshot sits smaller, in the middle. The back is the player details sheet. The share page
+// turns one into the other with FlipCard and renders the same markup to a PNG.
 import { useEffect, useState } from 'react'
 import { fmt2, fmtCount } from '../lib/cricketFormat'
 import { styleChips } from '../lib/playerAttributes'
+import { splitDisplayName } from '../lib/nameFormat'
 import betterStatsLogo from '../assets/bettercricket-white.svg'
 
 export const CARD_W = 360
 export const CARD_H = 492
+const FRAME = 7
 const MONO = "'JetBrains Mono', monospace"
+const SANS = "'Inter', sans-serif"
 const INK = '#050a0c'
 
 export function hexWithAlpha(hex, alpha) {
@@ -19,13 +24,19 @@ export function hexWithAlpha(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`
 }
 
+// Dark ink on a light club colour, white on a dark one, so the stat band stays readable whatever the club picked.
+export function onColor(hex) {
+  if (!hex || hex[0] !== '#' || hex.length !== 7) return '#fff'
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16))
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? INK : '#fff'
+}
+
 const ordinal = (r) => (r % 100 >= 11 && r % 100 <= 13) ? `${r}th` : `${r}${({ 1: 'st', 2: 'nd', 3: 'rd' }[r % 10] || 'th')}`
 
-// "George Pullinger" -> first "George", last "Pullinger"; a single word is all surname.
+// Stored names are "Last, First"; a free-text override can be "First Last". A single word is all surname.
 export function splitName(full) {
-  const parts = String(full || '').trim().split(/\s+/).filter(Boolean)
-  if (parts.length < 2) return { first: '', last: parts[0] || '' }
-  return { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1] }
+  const { first, last } = splitDisplayName(full)
+  return last ? { first, last } : { first: '', last: first }
 }
 
 // The player's best club ranking, the big number on the front. None when they are not ranked in the top 99.
@@ -44,174 +55,220 @@ export function cardSponsor(data) {
   return list.find(s => s.tier === 'major') || list[0] || null
 }
 
+// Hero photo first, then the headshot, then nothing (the club logo stands in). A photo that fails to load drops a step.
+function usePhotoMode(heroUrl, photoUrl) {
+  const [heroOk, setHeroOk] = useState(!!heroUrl)
+  const [photoOk, setPhotoOk] = useState(!!photoUrl)
+  useEffect(() => { setHeroOk(!!heroUrl) }, [heroUrl])
+  useEffect(() => { setPhotoOk(!!photoUrl) }, [photoUrl])
+  if (heroUrl && heroOk) return { mode: 'hero', src: heroUrl, fail: () => setHeroOk(false) }
+  if (photoUrl && photoOk) return { mode: 'head', src: photoUrl, fail: () => setPhotoOk(false) }
+  return { mode: 'none', src: null, fail: () => {} }
+}
+
 function Icon({ kind, color }) {
-  const p = { width: 13, height: 13, viewBox: '0 0 24 24', fill: 'none', stroke: color, strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
+  const p = { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: color, strokeWidth: 2.4, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
   if (kind === 'bat') return <svg {...p}><path d="M4 20l9-9" /><path d="M13 11l4.5-4.5a2.1 2.1 0 013 3L16 14z" /></svg>
   if (kind === 'bowl') return <svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M6.5 6.5c3 2 3 9 0 11M17.5 6.5c-3 2-3 9 0 11" /></svg>
   return <svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M8 12l3 3 5-6" /></svg>
 }
 
-function Chips({ player, accent }) {
+function Chips({ player, light }) {
   const chips = styleChips(player)
   if (!chips.length) return null
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 12 }}>
+    <div style={{ display: 'flex', flexWrap: 'nowrap', justifyContent: 'center', gap: 6, width: '100%' }}>
       {chips.map(c => (
-        <span key={c.kind} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, font: "500 14px 'Inter', sans-serif", color: 'rgba(255,255,255,.92)' }}>
-          <Icon kind={c.kind} color={accent} />{c.label}
+        <span key={c.kind} style={{ whiteSpace: 'nowrap', flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 999, background: 'rgba(5,10,12,.62)', border: '1px solid rgba(255,255,255,.22)', font: `600 11px ${SANS}`, color: '#fff' }}>
+          <Icon kind={c.kind} color={light} />{c.label}
         </span>
       ))}
     </div>
   )
 }
 
-function Face({ children, accent, side }) {
+// The black frame every face sits in, with the club-coloured (front) or navy (back) panel inside it.
+function Frame({ children, accent, panel }) {
   return (
-    <div style={{
-      position: 'relative', width: CARD_W, height: CARD_H, borderRadius: 22, overflow: 'hidden', color: '#fff', fontFamily: "'Inter', sans-serif",
-      background: side === 'front'
-        ? `linear-gradient(165deg, color-mix(in srgb, ${accent} 42%, ${INK}) 0%, ${INK} 78%)`
-        : `linear-gradient(150deg, #0d1b2a 0%, #0f2235 60%, #0d1b2a 100%)`,
-      boxShadow: `0 14px 34px rgba(0,0,0,.45), inset 0 0 0 1px ${hexWithAlpha(accent, 0.3)}`,
-    }}>{children}</div>
+    <div style={{ position: 'relative', width: CARD_W, height: CARD_H, borderRadius: 26, padding: FRAME, boxSizing: 'border-box', background: INK, color: '#fff', fontFamily: SANS, boxShadow: '0 14px 34px rgba(0,0,0,.45)' }}>
+      <div style={{ position: 'relative', width: '100%', height: '100%', borderRadius: 19, overflow: 'hidden', background: panel, boxShadow: `inset 0 0 0 1px ${hexWithAlpha(accent, 0.35)}` }}>{children}</div>
+    </div>
   )
 }
 
-export function PlayerCardFront({ player, org, accent, display, sponsor, rankings, photoUrl, seasonLabel }) {
-  const [photoOk, setPhotoOk] = useState(!!photoUrl)
-  useEffect(() => { setPhotoOk(!!photoUrl) }, [photoUrl])
+const PANEL_W = CARD_W - FRAME * 2
+const PANEL_H = CARD_H - FRAME * 2
+const BAND_H = 92
+
+// Longer figures get smaller type so six of them always fit along the band, in the club's font or a fallback.
+const figureSize = (v) => { const n = String(v).length; return n <= 2 ? 27 : n === 3 ? 24 : n === 4 ? 21 : n === 5 ? 18 : 15 }
+
+function Band({ items, accent }) {
+  const ink = onColor(accent)
+  return (
+    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: BAND_H }}>
+      <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(180deg, ${accent}, color-mix(in srgb, ${accent} 78%, #000))`, clipPath: 'polygon(0 22%, 100% 0, 100% 100%, 0 100%)' }} />
+      <div style={{ position: 'absolute', left: 8, right: 8, bottom: 12, display: 'flex' }}>
+        {items.map((it, i) => (
+          <div key={it.label} style={{ flex: 1, minWidth: 0, overflow: 'hidden', textAlign: 'center', color: ink, borderLeft: i ? `1px solid ${ink === '#fff' ? 'rgba(255,255,255,.35)' : 'rgba(5,10,12,.3)'}` : undefined }}>
+            <div style={{ font: `800 ${figureSize(it.value)}px/1 ${it.display}`, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{it.value}</div>
+            <div style={{ height: 2, width: 22, background: ink, opacity: 0.8, margin: '5px auto 4px', borderRadius: 1 }} />
+            <div style={{ font: `700 9px ${SANS}`, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.85 }}>{it.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Up to six headline figures: the ones this player has.
+function bandItems({ cb, cbw, cf }, display) {
+  const catches = cf ? (cf.total_catches_non_wk ?? cf.total_catches ?? 0) + (cf.total_catches_wk ?? 0) : 0
+  return [
+    cb?.games != null && { label: 'Matches', value: String(cb.games) },
+    cb?.total_runs != null && { label: 'Runs', value: fmtCount(cb.total_runs) },
+    cb?.high_score != null && { label: 'HS', value: String(cb.high_score) },
+    cb?.average != null && { label: 'Average', value: fmt2(cb.average) },
+    cbw?.total_wickets > 0 && { label: 'Wickets', value: fmtCount(cbw.total_wickets) },
+    catches > 0 && { label: 'Catches', value: fmtCount(catches) },
+  ].filter(Boolean).slice(0, 6).map(i => ({ ...i, display }))
+}
+
+export function PlayerCardFront({ player, org, accent, display, sponsor, rankings, photoUrl, heroUrl, seasonLabel, cb, cbw, cf }) {
+  const photo = usePhotoMode(heroUrl, photoUrl)
   const { first, last } = splitName(player?.display_name || player?.name)
   const rank = bestRank(rankings)
-  const size = last.length <= 8 ? 58 : last.length <= 11 ? 46 : 36
-  const logo = org?.logo_url || betterStatsLogo
+  const size = last.length <= 7 ? 44 : last.length <= 10 ? 37 : last.length <= 13 ? 30 : 25
+  const light = `color-mix(in srgb, ${accent} 55%, #fff)`
+  const items = bandItems({ cb, cbw, cf }, display)
+  const hero = photo.mode === 'hero'
+  const CIRCLE = 176
   return (
-    <Face accent={accent} side="front">
-      {/* A slash of the club colour behind the player, the way the club's own posts have one. */}
-      <div style={{ position: 'absolute', top: -10, right: -30, width: 210, height: 330, background: hexWithAlpha(accent, 0.85), clipPath: 'polygon(38% 0, 100% 0, 100% 100%, 0 62%)', opacity: 0.9 }} />
-      <div style={{ position: 'absolute', top: 40, right: 26, width: 70, height: 250, background: hexWithAlpha(accent, 0.35), clipPath: 'polygon(55% 0, 100% 0, 45% 100%, 0 100%)' }} />
-      {photoOk
-        ? <img src={photoUrl} alt="" onError={() => setPhotoOk(false)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 18%' }} />
-        : <img src={logo} alt="" style={{ position: 'absolute', left: '50%', top: 150, width: 190, height: 190, objectFit: 'contain', transform: 'translateX(-50%)', opacity: 0.9, filter: 'drop-shadow(0 6px 24px rgba(0,0,0,.5))' }} />}
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '58%', background: `linear-gradient(to top, ${INK} 6%, rgba(5,10,12,.82) 42%, rgba(5,10,12,0) 100%)` }} />
+    <Frame accent={accent} panel={`linear-gradient(170deg, color-mix(in srgb, ${accent} 88%, #000) 0%, color-mix(in srgb, ${accent} 34%, ${INK}) 62%, ${INK} 100%)`}>
+      {/* The club colour as a slash and a patch of halftone behind the player. */}
+      <div style={{ position: 'absolute', top: 0, right: -20, width: 230, height: 300, background: hexWithAlpha('#ffffff', 0.1), clipPath: 'polygon(40% 0, 100% 0, 100% 100%, 0 70%)' }} />
+      <div style={{ position: 'absolute', left: 0, top: 150, width: 170, height: 190, opacity: 0.22, background: 'radial-gradient(#fff 1.3px, transparent 1.6px) 0 0 / 9px 9px', clipPath: 'polygon(0 0, 100% 18%, 80% 100%, 0 100%)' }} />
 
-      {sponsor && (
-        <div style={{ position: 'absolute', top: 14, left: 14 }}>
-          <div style={{ font: "500 11px 'Inter', sans-serif", color: 'rgba(255,255,255,.8)', textShadow: '0 1px 6px rgba(0,0,0,.6)' }}>Sponsored by:</div>
-          <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 128, height: 40, borderRadius: 8, background: 'rgba(8,12,14,.72)', border: '1px solid rgba(255,255,255,.12)' }}>
-            <img src={sponsor.logo_url} alt={sponsor.name || ''} style={{ maxWidth: 108, maxHeight: 26, objectFit: 'contain' }} />
-          </div>
-        </div>
+      {hero && <img src={photo.src} alt="" onError={photo.fail} style={{ position: 'absolute', left: 0, top: 0, width: PANEL_W, height: PANEL_H - 40, objectFit: 'cover', objectPosition: '50% 18%' }} />}
+      {photo.mode === 'head' && (
+        <img src={photo.src} alt="" onError={photo.fail} style={{ position: 'absolute', left: (PANEL_W - CIRCLE) / 2, top: 96, width: CIRCLE, height: CIRCLE, borderRadius: '50%', objectFit: 'cover', objectPosition: '50% 22%', boxShadow: `0 0 0 5px ${light}, 0 14px 32px rgba(0,0,0,.55)` }} />
       )}
-      <div style={{ position: 'absolute', top: 14, right: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ font: `600 10px ${MONO}`, letterSpacing: 1, textTransform: 'uppercase', color: 'rgba(255,255,255,.85)', textShadow: '0 1px 6px rgba(0,0,0,.6)' }}>{seasonLabel}</span>
-      </div>
+      {photo.mode === 'none' && (
+        <img src={org?.logo_url || betterStatsLogo} alt="" style={{ position: 'absolute', left: (PANEL_W - 150) / 2, top: 104, width: 150, height: 150, objectFit: 'contain', filter: 'drop-shadow(0 6px 24px rgba(0,0,0,.5))' }} />
+      )}
+      {hero && <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 120, background: 'linear-gradient(to bottom, rgba(5,10,12,.7), rgba(5,10,12,0))' }} />}
+      {hero && <div style={{ position: 'absolute', left: 0, right: 0, bottom: BAND_H - 30, height: 150, background: 'linear-gradient(to top, rgba(5,10,12,.85), rgba(5,10,12,0))' }} />}
 
-      <div style={{ position: 'absolute', left: 22, right: 22, bottom: 22 }}>
-        {first && <div style={{ font: "500 18px 'Inter', sans-serif", color: 'rgba(255,255,255,.92)', lineHeight: 1.1 }}>{first}</div>}
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 }}>
-          <div style={{ minWidth: 0, font: `800 ${size}px/0.95 ${display}`, textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{last}</div>
-          {rank && (
-            <div style={{ flex: 'none', textAlign: 'right', paddingBottom: 2 }}>
-              <div style={{ font: `800 62px/0.85 ${display}`, fontStyle: 'italic', color: '#fff', textShadow: `0 2px 18px ${hexWithAlpha(accent, 0.7)}` }}>#{rank.rank}</div>
-              <div style={{ font: `600 9px ${MONO}`, letterSpacing: 1.5, textTransform: 'uppercase', color: accent, marginTop: 4 }}>Club {rank.label}</div>
-            </div>
-          )}
+      {/* Name and best ranking */}
+      <div style={{ position: 'absolute', top: 14, left: 16, right: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          {first && <div style={{ font: `600 italic 14px ${SANS}`, textTransform: 'uppercase', letterSpacing: 1, color: '#fff', textShadow: '0 1px 8px rgba(0,0,0,.7)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{first}</div>}
+          <div style={{ font: `800 italic ${size}px/0.95 ${display}`, textTransform: 'uppercase', letterSpacing: 0.5, color: '#fff', textShadow: '0 2px 12px rgba(0,0,0,.65)', whiteSpace: 'nowrap' }}>{last}</div>
         </div>
-        <Chips player={player} accent={accent} />
-      </div>
-    </Face>
-  )
-}
-
-function Stat({ label, value, highlight, accent, big }) {
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{ font: `700 ${highlight ? 26 : big ? 22 : 20}px/1 ${MONO}`, color: highlight ? accent : '#fff' }}>{value ?? '—'}</div>
-      <div style={{ font: "500 9px 'Inter', sans-serif", color: '#64748b', textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 5 }}>{label}</div>
-    </div>
-  )
-}
-
-function Block({ title, display, children, first }) {
-  return (
-    <div style={{ borderTop: first ? undefined : '1px solid rgba(30,41,59,.9)', paddingTop: first ? 0 : 12, marginTop: first ? 0 : 12 }}>
-      <div style={{ font: `500 11px ${display}`, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 9 }}>{title}</div>
-      {children}
-    </div>
-  )
-}
-
-function Pill({ children, accent }) {
-  return <span style={{ background: hexWithAlpha(accent, 0.1), border: `1px solid ${hexWithAlpha(accent, 0.3)}`, borderRadius: 6, padding: '3px 9px', font: "500 11px 'Inter', sans-serif", color: accent }}>{children}</span>
-}
-
-export function PlayerCardBack({ player, cb, cbw, cf, org, accent, display, rankings, photoUrl, seasonLabel }) {
-  const [photoOk, setPhotoOk] = useState(!!photoUrl)
-  useEffect(() => { setPhotoOk(!!photoUrl) }, [photoUrl])
-  const fieldingHasData = cf && ((cf.total_catches_non_wk ?? cf.total_catches ?? 0) > 0 || (cf.total_catches_wk ?? 0) > 0 || (cf.total_run_outs ?? 0) > 0 || (cf.total_stumpings ?? 0) > 0)
-  const hasBowling = cbw && cbw.total_wickets > 0
-  const ranks = [['Runs', rankings?.runs_rank], ['Wickets', rankings?.wickets_rank], ['Catches', rankings?.catches_rank]].filter(([, r]) => Number.isInteger(r) && r >= 1)
-  return (
-    <Face accent={accent} side="back">
-      <div style={{ padding: '20px 22px', height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {org?.logo_url && <img src={org.logo_url} alt="" style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 4, flex: 'none' }} />}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ font: `500 12px ${display}`, color: accent, letterSpacing: 2, textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{org?.name}</div>
-            <div style={{ font: "400 11px 'Inter', sans-serif", color: '#64748b', marginTop: 2 }}>{seasonLabel}</div>
+        {rank && (
+          <div style={{ flex: 'none', textAlign: 'right' }}>
+            <div style={{ font: `800 italic 40px/0.9 ${display}`, color: '#fff', textShadow: '0 2px 12px rgba(0,0,0,.65)' }}>#{rank.rank}</div>
+            <div style={{ font: `700 8.5px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase', color: '#fff', opacity: 0.9, marginTop: 3, textShadow: '0 1px 6px rgba(0,0,0,.7)' }}>Club {rank.label}</div>
           </div>
-          {photoOk && <img src={photoUrl} alt="" onError={() => setPhotoOk(false)} style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 8, border: `2px solid ${hexWithAlpha(accent, 0.3)}`, flex: 'none' }} />}
+        )}
+      </div>
+
+      {/* Style chips and the sponsor, above the band */}
+      <div style={{ position: 'absolute', left: 14, right: 14, bottom: BAND_H + 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7 }}>
+        <div style={{ font: `600 8.5px ${MONO}`, letterSpacing: 1.6, textTransform: 'uppercase', color: '#fff', opacity: 0.85, textShadow: '0 1px 6px rgba(0,0,0,.7)', whiteSpace: 'nowrap' }}>{seasonLabel}</div>
+        <Chips player={player} light={light} />
+        {sponsor && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px 4px 12px', borderRadius: 10, background: 'rgba(5,10,12,.7)', border: '1px solid rgba(255,255,255,.14)' }}>
+            <span style={{ font: `500 9.5px ${SANS}`, color: 'rgba(255,255,255,.75)' }}>Sponsored by</span>
+            <img src={sponsor.logo_url} alt={sponsor.name || ''} style={{ maxWidth: 96, maxHeight: 24, objectFit: 'contain' }} />
+          </div>
+        )}
+      </div>
+
+      {items.length > 0 ? <Band items={items} accent={accent} /> : null}
+    </Frame>
+  )
+}
+
+// A pill-outlined row of the details sheet: a muted label on the left, the figure on the right.
+function Row({ label, value, accent, strong }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, height: 24, padding: '0 9px', borderRadius: 8, border: `1px solid ${strong ? hexWithAlpha(accent, 0.7) : 'rgba(255,255,255,.28)'}`, background: strong ? hexWithAlpha(accent, 0.16) : 'rgba(5,10,12,.35)' }}>
+      <span style={{ font: `600 9px ${SANS}`, letterSpacing: 0.8, textTransform: 'uppercase', color: 'rgba(255,255,255,.7)', whiteSpace: 'nowrap' }}>{label}</span>
+      <span style={{ font: `700 13px ${MONO}`, color: strong ? '#fff' : 'rgba(255,255,255,.95)', whiteSpace: 'nowrap' }}>{value ?? '-'}</span>
+    </div>
+  )
+}
+
+function Section({ title, rows, accent, display }) {
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ font: `700 11px ${display}`, letterSpacing: 2.5, textTransform: 'uppercase', color: accent }}>{title}</span>
+        <span style={{ flex: 1, height: 1, background: hexWithAlpha(accent, 0.35) }} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+        {rows.map(r => <Row key={r.label} {...r} accent={accent} />)}
+      </div>
+    </div>
+  )
+}
+
+export function PlayerCardBack({ player, org, accent, display, rankings, photoUrl, heroUrl, seasonLabel, cb, cbw, cf }) {
+  const photo = usePhotoMode(heroUrl, photoUrl)
+  const { first, last } = splitName(player?.display_name || player?.name)
+  const hasBowling = cbw && cbw.total_wickets > 0
+  const catches = cf ? (cf.total_catches_non_wk ?? cf.total_catches ?? 0) : 0
+  const fieldingHasData = cf && (catches > 0 || (cf.total_catches_wk ?? 0) > 0 || (cf.total_run_outs ?? 0) > 0 || (cf.total_stumpings ?? 0) > 0)
+  const ranks = [['Runs', rankings?.runs_rank], ['Wickets', rankings?.wickets_rank], ['Catches', rankings?.catches_rank]].filter(([, r]) => Number.isInteger(r) && r >= 1)
+  const batting = cb && [
+    { label: 'Matches', value: cb.games }, { label: 'Innings', value: cb.innings },
+    { label: 'Runs', value: cb.total_runs != null ? fmtCount(cb.total_runs) : null, strong: true }, { label: 'High score', value: cb.high_score },
+    { label: 'Average', value: cb.average != null ? fmt2(cb.average) : null }, { label: '100s / 50s', value: `${cb.hundreds ?? 0} / ${cb.fifties ?? 0}` },
+  ]
+  const bowling = hasBowling && [
+    { label: 'Wickets', value: fmtCount(cbw.total_wickets), strong: true }, { label: 'Average', value: cbw.average != null ? fmt2(cbw.average) : null },
+    { label: 'Economy', value: cbw.economy != null ? fmt2(cbw.economy) : null }, { label: 'Best', value: cbw.best_bowling_figures || (cbw.best_figures_wickets ? `${fmtCount(cbw.best_figures_wickets)} wkts` : null) },
+    { label: '5 wickets', value: fmtCount(cbw.five_fors ?? 0) },
+  ]
+  const fielding = fieldingHasData && [
+    { label: 'Catches', value: fmtCount(catches), strong: true }, { label: 'Keeper ct', value: fmtCount(cf.total_catches_wk ?? 0) },
+    { label: 'Run outs', value: fmtCount(cf.total_run_outs ?? 0) }, { label: 'Stumpings', value: fmtCount(cf.total_stumpings ?? 0) },
+  ]
+  return (
+    <Frame accent={accent} panel="linear-gradient(160deg, #101f33 0%, #0b1624 60%, #08111c 100%)">
+      {photo.src && <img src={photo.src} alt="" onError={photo.fail} style={{ position: 'absolute', right: 0, top: 30, width: '66%', height: '74%', objectFit: 'cover', objectPosition: '50% 20%', opacity: 0.2 }} />}
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(8,17,28,.55) 0%, rgba(8,17,28,.2) 100%)' }} />
+      <div style={{ position: 'relative', height: '100%', boxSizing: 'border-box', padding: '14px 16px 10px', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ font: `800 italic 20px ${display}`, letterSpacing: 2, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Player details</div>
+          <span style={{ flex: 1 }} />
+          {org?.logo_url && <img src={org.logo_url} alt="" style={{ width: 26, height: 26, objectFit: 'contain', borderRadius: 4 }} />}
         </div>
-        <div style={{ font: `800 34px/1 ${display}`, textTransform: 'uppercase', letterSpacing: 1, margin: '14px 0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{player?.display_name || player?.name}</div>
+        <div style={{ height: 2, background: `linear-gradient(90deg, ${accent}, transparent)`, margin: '7px 0 10px' }} />
+
+        <div style={{ width: '100%', boxSizing: 'border-box', padding: '6px 12px', borderRadius: 8, border: `1px solid ${hexWithAlpha(accent, 0.7)}`, background: 'rgba(5,10,12,.55)' }}>
+          {first && <div style={{ font: `500 italic 11px ${SANS}`, letterSpacing: 1.2, textTransform: 'uppercase', color: 'rgba(255,255,255,.85)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{first}</div>}
+          <div style={{ font: `800 24px/1.05 ${display}`, textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{last}</div>
+          <div style={{ font: `500 9px ${MONO}`, letterSpacing: 1, textTransform: 'uppercase', color: 'rgba(255,255,255,.6)', marginTop: 3, whiteSpace: 'nowrap' }}>{seasonLabel}</div>
+        </div>
         {ranks.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
-            {ranks.map(([l, r]) => <span key={l} style={{ background: hexWithAlpha(accent, 0.15), border: `1px solid ${hexWithAlpha(accent, 0.4)}`, borderRadius: 5, padding: '2px 8px', font: `500 10px ${MONO}`, letterSpacing: 0.5, color: accent }}>{ordinal(r)} {l.toLowerCase()}</span>)}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
+            {ranks.map(([l, r]) => <span key={l} style={{ background: hexWithAlpha(accent, 0.18), border: `1px solid ${hexWithAlpha(accent, 0.5)}`, borderRadius: 5, padding: '1px 7px', font: `600 9.5px ${MONO}`, color: '#fff' }}>{ordinal(r)} {l.toLowerCase()}</span>)}
           </div>
         )}
 
         <div style={{ flex: 1, minHeight: 0 }}>
-          {cb && (
-            <Block title="Batting" display={display} first>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
-                <Stat label="M" value={cb.games} accent={accent} />
-                <Stat label="Inns" value={cb.innings} accent={accent} />
-                <Stat label="Runs" value={cb.total_runs != null ? fmtCount(cb.total_runs) : null} highlight accent={accent} />
-                <Stat label="HS" value={cb.high_score} accent={accent} />
-                <Stat label="Ave" value={cb.average != null ? fmt2(cb.average) : null} accent={accent} />
-              </div>
-              {(cb.hundreds > 0 || cb.fifties > 0) && (
-                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                  {cb.hundreds > 0 && <Pill accent={accent}>{cb.hundreds} x {cb.hundreds === 1 ? '100' : '100s'}</Pill>}
-                  {cb.fifties > 0 && <Pill accent={accent}>{cb.fifties} x {cb.fifties === 1 ? '50' : '50s'}</Pill>}
-                </div>
-              )}
-            </Block>
-          )}
-          {hasBowling && (
-            <Block title="Bowling" display={display} first={!cb}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-                <Stat label="Wkts" value={cbw.total_wickets != null ? fmtCount(cbw.total_wickets) : null} highlight accent={accent} />
-                <Stat label="Ave" value={cbw.average != null ? fmt2(cbw.average) : null} accent={accent} />
-                <Stat label="Econ" value={cbw.economy != null ? fmt2(cbw.economy) : null} accent={accent} />
-                <Stat label="Best" value={cbw.best_bowling_figures || (cbw.best_figures_wickets ? `${fmtCount(cbw.best_figures_wickets)} wkts` : '—')} accent={accent} big />
-              </div>
-              {cbw.five_fors > 0 && <div style={{ marginTop: 10 }}><Pill accent={accent}>{cbw.five_fors} x {cbw.five_fors === 1 ? '5fa' : '5fas'}</Pill></div>}
-            </Block>
-          )}
-          {fieldingHasData && (
-            <Block title="Fielding" display={display} first={!cb && !hasBowling}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-                <Stat label="Ct" value={fmtCount(cf.total_catches_non_wk ?? cf.total_catches)} highlight accent={accent} />
-                <Stat label="Ct (WK)" value={fmtCount(cf.total_catches_wk)} accent={accent} />
-                <Stat label="RO" value={fmtCount(cf.total_run_outs)} accent={accent} />
-                <Stat label="Stmps" value={fmtCount(cf.total_stumpings)} accent={accent} />
-              </div>
-            </Block>
-          )}
-          {!cb && !hasBowling && !fieldingHasData && <p style={{ font: "400 13px 'Inter', sans-serif", color: '#94a3b8' }}>No figures to show yet.</p>}
+          {batting && <Section title="Batting" rows={batting} accent={accent} display={display} />}
+          {bowling && <Section title="Bowling" rows={bowling} accent={accent} display={display} />}
+          {fielding && <Section title="Fielding" rows={fielding} accent={accent} display={display} />}
+          {!batting && !bowling && !fielding && <p style={{ font: `400 13px ${SANS}`, color: '#94a3b8', marginTop: 14 }}>No figures to show yet.</p>}
         </div>
-        <div style={{ textAlign: 'right', font: `500 11px ${display}`, color: hexWithAlpha(accent, 0.4), letterSpacing: 2, textTransform: 'uppercase' }}>BetterCricket</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, font: `500 9px ${display}`, letterSpacing: 1.8, textTransform: 'uppercase', color: 'rgba(255,255,255,.5)' }}>
+          <span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{org?.name}</span>
+          <span style={{ minWidth: 0, flex: '0 1 auto', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: hexWithAlpha(accent, 0.8) }}>BetterCricket</span>
+        </div>
       </div>
-    </Face>
+    </Frame>
   )
 }

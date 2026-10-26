@@ -27,7 +27,7 @@ const LOGO = svg('<rect width="200" height="200" rx="40" fill="#f0b429"/><text x
 const SPONSOR = svg('<rect width="300" height="80" fill="#1a1a1a"/><rect x="20" y="25" width="30" height="30" fill="#e11"/><text x="62" y="52" font-size="30" fill="#fff" font-family="Arial">KITCHENHAUS</text>', 300, 80)
 
 const PLAYER = {
-  id: 'p1', name: 'George Pullinger', display_name: 'George Pullinger', organisation_id: 'org1', claimed: false, playhq_id: null,
+  id: 'p1', name: 'Pullinger, George', display_name: 'Pullinger, George', organisation_id: 'org1', claimed: false, playhq_id: null,
   photo_url: '/api/players/p1/photo', is_overseas: false, batting_hand: 'RIGHT', bowling_action: 'RIGHT_ARM', bowling_type: 'MEDIUM',
 }
 const STATS = (player) => ({
@@ -39,7 +39,7 @@ const STATS = (player) => ({
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function open({ width = 1000, player = PLAYER, photo = true, sponsors = true, ranks = { runs_rank: 1, wickets_rank: 7, catches_rank: 12 } } = {}) {
+async function open({ width = 1000, player = PLAYER, photo = true, hero = false, sponsors = true, ranks = { runs_rank: 1, wickets_rank: 7, catches_rank: 12 } } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1000 }, acceptDownloads: true })
   const page = await ctx.newPage()
   const errors = [], reqs = []
@@ -50,9 +50,10 @@ async function open({ width = 1000, player = PLAYER, photo = true, sponsors = tr
     const path = url.pathname.replace(/^\/api/, '')
     reqs.push(path + url.search)
     if (path === '/players/p1/photo') return photo ? route.fulfill({ status: 200, contentType: 'image/svg+xml', body: PHOTO }) : route.fulfill({ status: 404, body: '' })
+    if (path === '/players/p1/hero') return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: PHOTO })
     if (path === '/logo.svg') return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: LOGO })
     if (path === '/sponsor.svg') return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: SPONSOR })
-    if (path === '/players/p1/stats') return json(route, STATS(player))
+    if (path === '/players/p1/stats') return json(route, STATS(hero ? { ...player, hero_photo_url: '/api/players/p1/hero' } : player))
     if (path === '/players/p1/rankings') return json(route, ranks)
     if (path === '/organisations/org1') return json(route, { id: 'org1', name: 'Applecross CC', slug: 'apx', logo_url: '/api/logo.svg', accent_color: '#f0b429', theme_config: {} })
     if (path === '/organisations/org1/seasons') return json(route, [{ id: 's24', name: '2024/25', start_year: 2024 }, { id: 's23', name: '2023/24', start_year: 2023 }])
@@ -74,14 +75,30 @@ const visibleText = (page) => page.locator('[role="button"][aria-pressed] > div[
   const p = await open()
   const front = await visibleText(p.page)
   ck('it opens on the front, not turned', (await flipState(p.page)) === 'false' && (await turned(p.page)) === 'none', await turned(p.page))
-  ck('the first name sits above the SURNAME', /George/.test(front) && /PULLINGER/.test(front), front)
+  ck('"Last, First" is shown as the first name over the SURNAME, with no comma', /GEORGE/i.test(front) && /PULLINGER/.test(front) && !/,/.test(front.replace(/1,234/g, '')), front)
   ck('the style chips read RH Batter and RH Medium', /RH Batter/.test(front) && /RH Medium/.test(front), front)
   ck('the big number is the best club ranking, labelled', /#1/.test(front) && /CLUB RUNS/.test(front), front)
-  ck('the sponsor is named and drawn', /Sponsored by:/.test(front) && (await p.page.locator('[role="button"][aria-pressed] img[src="/api/sponsor.svg"]').count()) >= 1)
+  ck('the sponsor is named and drawn', /Sponsored by/.test(front) && (await p.page.locator('[role="button"][aria-pressed] img[src="/api/sponsor.svg"]').count()) >= 1)
   ck('the player\'s photo is the card background', (await p.page.locator('[role="button"][aria-pressed] img[src="/api/players/p1/photo"]').count()) >= 1)
-  ck('the figures are not on the front', !/BATTING/.test(front) && !/1,?234/.test(front), front)
+  ck('the front carries a band of headline figures, not the full sheet', /MATCHES/.test(front) && /RUNS/.test(front) && /1,234/.test(front) && /WICKETS/.test(front) && !/BATTING/.test(front) && !/HIGH SCORE/.test(front), front)
+  const img = await p.page.locator('[role="button"][aria-pressed] > div[aria-hidden="false"] img[src="/api/players/p1/photo"]').boundingBox()
+  const cardBox = await p.page.locator('[role="button"][aria-pressed]').boundingBox()
+  ck('a headshot is a smaller picture, not the whole card', img && img.width < cardBox.width * 0.6 && img.height < cardBox.height * 0.45, JSON.stringify({ img, w: cardBox.width }))
+  ck('and it is centred', img && Math.abs((img.x + img.width / 2) - (cardBox.x + cardBox.width / 2)) < 6, JSON.stringify({ img, cardBox }))
   ck('the club slug went to the sponsor list', p.reqs.includes('/clubs/apx/sponsors'), p.reqs.join(' '))
   if (SHOTS) await p.page.screenshot({ path: `${SHOTS}/share_front_1000.png` })
+  ck('no page errors', p.errors.length === 0, p.errors.join(' | '))
+  await p.ctx.close()
+}
+
+// ── 1b. A hero photo fills the card ───────────────────────────────────────────
+{
+  const p = await open({ hero: true })
+  const cardBox = await p.page.locator('[role="button"][aria-pressed]').boundingBox()
+  const img = await p.page.locator('[role="button"][aria-pressed] > div[aria-hidden="false"] img[src="/api/players/p1/hero"]').boundingBox()
+  ck('a hero photo fills the width of the card', img && img.width > cardBox.width * 0.9, JSON.stringify({ img, w: cardBox.width }))
+  ck('and the headshot is not drawn as well', (await p.page.locator('[role="button"][aria-pressed] > div[aria-hidden="false"] img[src="/api/players/p1/photo"]').count()) === 0)
+  if (SHOTS) await p.page.screenshot({ path: `${SHOTS}/share_front_hero.png` })
   ck('no page errors', p.errors.length === 0, p.errors.join(' | '))
   await p.ctx.close()
 }
@@ -107,7 +124,8 @@ const visibleText = (page) => page.locator('[role="button"][aria-pressed] > div[
   await p.page.waitForTimeout(900)
   const back = await visibleText(p.page)
   ck('a tap turns it over', (await flipState(p.page)) === 'true' && /matrix3d\(-1|matrix\(-1/.test(await turned(p.page)), await turned(p.page))
-  ck('the back holds the figures', /BATTING/.test(back) && /1,?234/.test(back) && /BOWLING/.test(back) && /FIELDING/.test(back) && /101\*/.test(back), back)
+  ck('the back is the details sheet with every figure', /PLAYER DETAILS/.test(back) && /BATTING/.test(back) && /1,?234/.test(back) && /BOWLING/.test(back) && /FIELDING/.test(back) && /101\*/.test(back) && /HIGH SCORE/.test(back), back)
+  ck('its name box reads first name then SURNAME and the club is not cut off', /GEORGE\s+PULLINGER/i.test(back) && /APPLECROSS CC/.test(back) && !/…|\.\.\./.test(back), back)
   ck('and the rankings as badges', /1st runs/.test(back) && /7th wickets/.test(back), back)
   if (SHOTS) await p.page.screenshot({ path: `${SHOTS}/share_back_1000.png` })
   await p.page.getByRole('button', { name: 'SHOW CARD' }).click(); await p.page.waitForTimeout(900)

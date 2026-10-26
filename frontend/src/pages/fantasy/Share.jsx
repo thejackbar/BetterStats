@@ -1,8 +1,9 @@
 // Shareable cards — a Gameweek-result square (430×430) and a recruit-a-mate story
-// (300×533), both over the aurora. Rendered to PNG with modern-screenshot for
-// web-share / download (the same exporter the admin social posts use).
+// (300×533), both over the aurora. Rendered to PNG by lib/exportNodePng (modern-screenshot, with the web
+// fonts inlined) for web-share / download.
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
+import { exportNodePng } from '../../lib/exportNodePng'
 import { Aurora, DISP, GREEN, pts, Btn, useFantasy, fantasyName } from './ui'
 import { ScreenTitle } from './shell'
 
@@ -44,19 +45,8 @@ export default function Share({ token, squad, nav }) {
     if (!ref.current) return
     setBusy(name)
     try {
-      await document.fonts.ready
-      const { domToBlob } = await import('modern-screenshot')
-      const blob = await domToBlob(ref.current, { type: 'image/png', scale: 2, width: w, height: h, backgroundColor: '#0a0d14' })
-      if (!blob) return
-      const file = new File([blob], `${name}.png`, { type: 'image/png' })
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file] })
-      } else {
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url; a.download = `${name}.png`
-        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
-      }
-    } catch { /* user dismissed share */ } finally { setBusy('') }
+      await exportNodePng(ref.current, name, { width: w, height: h })
+    } catch { /* could not render, or the share sheet failed */ } finally { setBusy('') }
   }
 
   return (

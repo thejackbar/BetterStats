@@ -9,7 +9,7 @@ import { rememberClubSlug } from '../lib/clubSlug'
 import { useClubSponsors } from '../lib/useClubSponsors'
 import { exportNodePng } from '../lib/exportNodePng'
 import FlipCard from '../components/FlipCard'
-import { CARD_W, CARD_H, PlayerCardFront, PlayerCardBack, cardSponsor } from '../components/PlayerTradingCard'
+import { CARD_W, CARD_H, PlayerCardFront, PlayerCardBack, cardSponsor, splitName } from '../components/PlayerTradingCard'
 
 // The card's display face follows the club's chosen display font (useClubTheme
 // injects any uploaded @font-face); Barlow Condensed stays the default so a
@@ -91,13 +91,16 @@ export default function ShareCard() {
     ? (seasons.find(s => s.id === selectedSeason)?.name ?? 'Season')
     : 'Career Statistics'
 
+  const { first: pFirst, last: pLast } = splitName(player.display_name || player.name)
+  const prettyName = [pFirst, pLast].filter(Boolean).join(' ')
+
   const handleShare = async () => {
     const url = window.location.href
-    const text = `${player.name} — ${fmtCount(cb?.total_runs ?? 0)} runs, ${fmtCount(cbw?.total_wickets ?? 0)} wickets | BetterCricket`
+    const text = `${prettyName} — ${fmtCount(cb?.total_runs ?? 0)} runs, ${fmtCount(cbw?.total_wickets ?? 0)} wickets | BetterCricket`
 
     if (navigator.share) {
       try {
-        await navigator.share({ title: `${player.name} — BetterCricket`, text, url })
+        await navigator.share({ title: `${prettyName} — BetterCricket`, text, url })
       } catch {}
     } else {
       await navigator.clipboard.writeText(`${text}\n${url}`)
@@ -108,14 +111,14 @@ export default function ShareCard() {
 
   const accent = org?.theme_config?.accent || org?.accent_color || '#16c784'
   const display = clubDisplayFamily(org)
-  const faceProps = { player, org, accent, display, rankings, photoUrl: player.photo_url, seasonLabel }
+  const faceProps = { player, org, accent, display, rankings, photoUrl: player.photo_url, heroUrl: player.hero_photo_url, seasonLabel, cb, cbw, cf }
   const front = <PlayerCardFront {...faceProps} sponsor={sponsor} />
-  const back = <PlayerCardBack {...faceProps} cb={cb} cbw={cbw} cf={cf} />
+  const back = <PlayerCardBack {...faceProps} />
 
   const handleSave = async () => {
     setSaving(true); setSaveErr('')
     try {
-      await exportNodePng(exportRef.current, `${(player.name || 'player').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${flipped ? 'stats' : 'card'}`, { width: CARD_W, height: CARD_H, backgroundColor: 'transparent' })
+      await exportNodePng(exportRef.current, `${(prettyName || 'player').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${flipped ? 'stats' : 'card'}`, { width: CARD_W, height: CARD_H, backgroundColor: 'transparent' })
     } catch { setSaveErr('Could not make the image. Try again.') } finally { setSaving(false) }
   }
 

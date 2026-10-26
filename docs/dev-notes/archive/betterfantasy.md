@@ -211,3 +211,13 @@ Frontend: `pages/fantasy/Teams.jsx`, `components/CardSwap.jsx` (gsap, already a 
 
 The player share card (`pages/ShareCard.jsx`, `components/PlayerTradingCard.jsx`, `components/FlipCard.jsx`) draws both faces at a fixed 360 x 492 and scales the wrapper to fit a phone, so the saved image matches the screen. It adds no new public data: the big number is the player's best club ranking (top 99 only), not a shirt number, because `shirt_number` is not in the public player payload and publishing it needs a club setting. Style chips read `styleChips()` over attributes the club already shows publicly. The page now calls `rememberClubSlug` because its URL has no slug and it reads the sponsor list. In the sandbox, `modern-screenshot` did not embed web fonts for any card (the older gameweek card too), so exported images fell back to the generic family; the new card names a `sans-serif` fallback. It is worth checking the export once in a browser that has the fonts.
 
+## v9.129.33: player cards on My Team, the share card redrawn, exported fonts
+
+Asked: the share card picture was too big (use the hero size for a hero image, a smaller centred picture for a headshot), clean up and shrink the back, take the layout from the Stat Attack card (front) and the Kohli player details card (back); and let My Team show each player as a card.
+
+`players/{id}/stats` now carries `hero_photo_url` (the public players list already did, and a privacy removal clears it). The share card front is `PlayerCardFront` (hero fills the panel, headshot is a 176px ring, none falls back to the club logo; the stat band's ink colour follows the club colour's brightness), the back is `PlayerCardBack`. Names go through `splitDisplayName`: the first version split "Barendse, Jack" on the last space and showed "Barendse," over "JACK".
+
+Exported text was clipping on the back and colliding in the stat band. Cause: the exporter freezes box sizes from the live page, but the fonts never reached the image. Three attempts: (1) a fixed family list passed as `font.cssText` made no difference; (2) adding the families the node uses made no difference; (3) the real cause, found by reading `embedWebFont` in modern-screenshot 4.7.0, is that `cssText` is added as it is with its `https:` URLs, which an image cannot load. Inlining each file as a data URL fixed it. The old gameweek and invite cards had the same problem and now use the shared exporter.
+
+My Team cards: `SquadCards` / `FantasyPlayerCard`. Browser check: `verify_fantasy_my_team_cards_browser.mjs` (20), `verify_player_share_card_browser.mjs` (hero and headshot sizes, comma names), `verify_fantasy_teams_browser.mjs`.
+
