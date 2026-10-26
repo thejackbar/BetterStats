@@ -247,8 +247,10 @@ export default function VotesSettings({
   const teamModes = cfg.grade_voter_modes || {}
   const teamChosen = cfg.vote_chosen || {}
   // The teams this medal counts: the ticked ones, or every active team when
-  // none is ticked.
-  const scopeTeams = gradeOptions.filter((g) => chosenGrades.size === 0 || chosenGrades.has(g.name))
+  // none is ticked. The server lists a grade once per team when two of the club's
+  // teams play it, and each is stored under its own key (see team_options).
+  const teamOptions = cfg.team_options || gradeOptions.map((g) => ({ key: g.name, grade_name: g.name, name: g.name }))
+  const scopeTeams = teamOptions.filter((t) => chosenGrades.size === 0 || chosenGrades.has(t.grade_name))
 
   const ballot = ballotDraft || (cfg.ballot_values || []).map(String)
   const setPos = (i, v) => setBallotDraft(ballot.map((x, j) => (j === i ? v.replace(/\D/g, '').slice(0, 3) : x)))
@@ -332,14 +334,14 @@ export default function VotesSettings({
           <Row label="Who votes, by team" hint="Some teams count every player's vote, others only the captain's. Pick per team, or leave a team on the default above. Choose people to have a few named people decide a team's votes (say the captain and two selectors). They don't have to be in the side, and each submits their own ballot.">
             <div className="flex flex-col gap-1.5">
               {scopeTeams.map((g) => {
-                const chosen = teamChosen[g.name] || []
+                const chosen = teamChosen[g.key] || []
                 const chosenIds = new Set(chosen.map((x) => x.id))
                 const addable = people.filter((x) => !chosenIds.has(x.id))
                 return (
-                  <div key={g.id} className="flex flex-col gap-1.5">
+                  <div key={g.key} className="flex flex-col gap-1.5">
                     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                       <span className="text-sm min-w-0 break-words">{g.name}</span>
-                      <select value={teamModes[g.name] || 'default'} onChange={(e) => setTeamMode(g.name, e.target.value)}
+                      <select value={teamModes[g.key] || 'default'} onChange={(e) => setTeamMode(g.key, e.target.value)}
                         disabled={!canManage || busy}
                         className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-pb-accent">
                         <option value="default">Default ({MODE_LABEL[cfg.voter_mode]})</option>
@@ -348,8 +350,8 @@ export default function VotesSettings({
                         <option value="chosen">{MODE_LABEL.chosen}</option>
                       </select>
                     </div>
-                    {teamModes[g.name] === 'chosen' && (
-                      <div className="pl-3 flex flex-col gap-1.5" data-testid={`chosen-${g.name}`}>
+                    {teamModes[g.key] === 'chosen' && (
+                      <div className="pl-3 flex flex-col gap-1.5" data-testid={`chosen-${g.key}`}>
                         {chosen.length === 0 ? (
                           <div className="text-[12px] text-pb-amber">
                             Nobody is chosen yet, so nobody can vote for this team.
@@ -361,7 +363,7 @@ export default function VotesSettings({
                                 <span className="min-w-0 break-words">{x.name}</span>
                                 {canManage && (
                                   <button type="button" disabled={busy} title={`Remove ${x.name}`} aria-label={`Remove ${x.name} from ${g.name}`}
-                                    onClick={() => setChosen(g.name, chosen.filter((y) => y.id !== x.id).map((y) => y.id))}
+                                    onClick={() => setChosen(g.key, chosen.filter((y) => y.id !== x.id).map((y) => y.id))}
                                     className="text-pb-faintest hover:text-pb-red text-xs px-1">✕</button>
                                 )}
                               </span>
@@ -371,7 +373,7 @@ export default function VotesSettings({
                         {canManage && (
                           <select value="" disabled={busy || chosen.length >= MAX_CHOSEN}
                             aria-label={`Add a person to vote for ${g.name}`}
-                            onChange={(e) => e.target.value && setChosen(g.name, [...chosen.map((y) => y.id), e.target.value])}
+                            onChange={(e) => e.target.value && setChosen(g.key, [...chosen.map((y) => y.id), e.target.value])}
                             className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm max-w-full focus:outline-none focus:border-pb-accent">
                             <option value="">{chosen.length >= MAX_CHOSEN ? `Up to ${MAX_CHOSEN} people` : 'Add a person…'}</option>
                             {addable.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
