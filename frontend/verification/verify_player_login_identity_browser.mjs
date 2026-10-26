@@ -4,6 +4,8 @@
 //   * the PIN step names the player in a card, in the label and on the button
 //   * "This isn't me" is a real button that goes back to the names
 //   * a wrong PIN repeats whose mobile was wanted, and sends the exact request
+//   * the plain club link picks nobody; a link carrying ?player= picks that player once, then
+//     the address bar is the plain link again, so copying it never hands the next person a name
 //   * 390px: no sideways overflow
 //
 //   npx vite preview --port 5199 &    node verify_player_login_identity_browser.mjs
@@ -64,6 +66,45 @@ const run = async () => {
     check('no mobile on file: still says who, and names them in the explanation', /logging in as/i.test(await card.innerText()) && /no mobile number on file for No Phone/i.test(await page.locator('body').innerText()))
     check('...and offers no PIN box', (await page.getByPlaceholder('••••').count()) === 0)
     await ctx.close()
+  })
+  await safe('shared link', async () => {
+    console.log('\n── The link people share ──')
+    const stubs = async (page) => {
+      await page.route('**/api/**', (r) => json(r, {}))
+      await page.route(/\/api\/public\/availability\/tok$/, (r) => json(r, { club: CLUB, require_pin: true, players: [
+        { id: 'p0', display_name: 'Ann Anchor', has_phone: true }, { id: 'p1', display_name: 'Sam Sledge', has_phone: true }] }))
+      await page.route(/\/api\/public\/availability\/tok\/me(\?.*)?$/, (r) => json(r, { detail: 'Not verified' }, 401))
+    }
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 800 } })
+    const page = await ctx.newPage(); page.setDefaultTimeout(8000)
+    await stubs(page)
+    await page.goto(`${BASE}/avail/tok`)
+    await page.getByPlaceholder('Search your name…').waitFor()
+    check('the plain link asks who you are and picks nobody', (await page.locator('[data-signing-in-as]').count()) === 0)
+    check('...and lists every player', (await page.getByText('Ann Anchor').count()) === 1 && (await page.getByText('Sam Sledge').count()) === 1)
+    await ctx.close()
+
+    const ctx2 = await browser.newContext({ viewport: { width: 390, height: 800 } })
+    const p2 = await ctx2.newPage(); p2.setDefaultTimeout(8000)
+    await stubs(p2)
+    await p2.goto(`${BASE}/avail/tok?tab=mine&player=p1&utm=x`)
+    await p2.locator('[data-signing-in-name]').waitFor()
+    check('a link with ?player= picks that player', (await p2.locator('[data-signing-in-name]').innerText()) === 'Sam Sledge')
+    await p2.waitForTimeout(300)
+    const u = new URL(p2.url())
+    check('...then the address bar is the plain link (player and tab gone)', u.pathname === '/avail/tok' && !u.searchParams.has('player') && !u.searchParams.has('tab'), p2.url())
+    check('...and other query parameters are left alone', u.searchParams.get('utm') === 'x', p2.url())
+    // Somebody else opens what was copied from that address bar.
+    const ctx3 = await browser.newContext({ viewport: { width: 390, height: 800 } })
+    const p3 = await ctx3.newPage(); p3.setDefaultTimeout(8000)
+    await stubs(p3)
+    await p3.goto(p2.url())
+    await p3.getByPlaceholder('Search your name…').waitFor()
+    check('what a person copies from the address bar picks nobody for the next person', (await p3.locator('[data-signing-in-as]').count()) === 0)
+    await p2.locator('[data-not-you]').click()
+    await p2.getByPlaceholder('Search your name…').waitFor()
+    check('"This isn\'t me" still returns to the names after the clean-up', true)
+    await ctx2.close(); await ctx3.close()
   })
   await browser.close()
   console.log(`\n${PASS} passed, ${FAIL} failed`)

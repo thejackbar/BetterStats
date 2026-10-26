@@ -1872,3 +1872,11 @@ Clubs reported "my mobile does not work" on the player page. The cause was nearl
 Not changed: `PublicVoting.jsx` has its own PIN step with the same wording ("Last 4 digits of your mobile") and the same trap. Voting links arrive with `?player=` from reminders, so it is the likelier place for the same mistake; it was left alone because the request was about the player page.
 
 Check: `verify_player_login_identity_browser.mjs` (14; control build of the previous page fails at the first check without crashing). `verify_vote_my_page_link_browser.mjs` updated for the new button and label (21).
+
+## v9.129.30: the shared player page link never carries a player
+
+Reported: every time the player dashboard link was shared, people had to tap "This isn't me". The only ways the page picks a name before a person does are a signed `bs_avail` cookie (per browser, so not on a recipient's own device) and `?player=<id>`, which `public_votes.my_page` and the vote reminder links add. An admin who arrived by one of those and copied the address bar shared their own name. The Self-service link panel and the club site button already give the plain `/avail/<token>`.
+
+`PublicAvailability.jsx` reads `player` once into a ref, then strips `player` and `tab` from the URL with `setSearchParams(..., { replace: true })`; other parameters are kept. The autopick still works for the first visit. Panel copy says to share from the panel. Links already pasted into chats with `?player=` still pick that player for whoever opens them; there is no way to tell them from a real reminder, and the PIN step now names the person loudly (v9.129.29).
+
+Check: `verify_player_login_identity_browser.mjs` (21; section "The link people share").

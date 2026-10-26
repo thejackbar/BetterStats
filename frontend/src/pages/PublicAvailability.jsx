@@ -538,8 +538,17 @@ export default function PublicAvailability() {
   const { token } = useParams()
   // Arriving from the voting page: `?player=<id>` has them already picked, so it is
   // only the PIN left to type. (`?tab=mine` on older links is ignored: there is one page now.)
-  const [searchParams] = useSearchParams()
-  const playerParam = searchParams.get('player') || ''
+  const [searchParams, setSearchParams] = useSearchParams()
+  // Read once. The address bar is then cleaned (below), so a link copied from it
+  // is the plain club link and never has one player picked for the next person.
+  const playerParam = useRef(searchParams.get('player') || '').current
+  useEffect(() => {
+    if (!searchParams.has('player') && !searchParams.has('tab')) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('player'); next.delete('tab')
+    setSearchParams(next, { replace: true })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const autoPicked = useRef(false)
   const [step, setStep] = useState('loading') // loading | pick | pin | weekend | dead
   const [club, setClub] = useState(null)

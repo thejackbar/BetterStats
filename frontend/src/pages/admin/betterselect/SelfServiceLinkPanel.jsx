@@ -225,7 +225,7 @@ export default function SelfServiceLinkPanel() {
                   {canEdit && <Btn sm variant="ghost" onClick={regenerate} disabled={busy}>Regenerate</Btn>}
                 </div>
                 <p className="text-[11px] text-pb-faintest mt-1.5">
-                  Pin it in your team’s group chat or Facebook group. Anyone with the link still needs a player’s own PIN to set their availability.
+                  Pin it in your team’s group chat or Facebook group. This is the one link to share: it never picks a name for anybody, each person finds their own and enters the last 4 digits of their own mobile. Share it from here, not from your browser’s address bar.
                 </p>
               </div>
 
