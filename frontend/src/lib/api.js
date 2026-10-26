@@ -3570,6 +3570,9 @@ export const api = {
   fanChip: (token, chip) => request(`/public/fantasy/${token}/chip`, { method: 'POST', body: JSON.stringify({ chip }) }),
   fanCancelChip: (token, chip) => request(`/public/fantasy/${token}/chip/cancel`, { method: 'POST', body: JSON.stringify({ chip }) }),
   fanLadder: (token) => request(`/public/fantasy/${token}/ladder`),
+  fanRoundWinners: (token) => request(`/public/fantasy/${token}/round-winners`),
+  fanRoundInsights: (token, n) => request(`/public/fantasy/${token}/round-insights${n != null ? `?round=${n}` : ''}`),
+  fanRoundRanking: (token, n) => request(`/public/fantasy/${token}/round-ranking/${n}`),
   fanTeam: (token, squadId) => request(`/public/fantasy/${token}/team/${squadId}`),
   fanTeams: (token) => request(`/public/fantasy/${token}/teams`),
   fanLeagues: (token) => request(`/public/fantasy/${token}/leagues`),
@@ -4096,6 +4099,7 @@ export const api = {
   fantasyPatchPool: (poolId, data) =>
     request(`/club-admin/fantasy/pool/${poolId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   fantasyListRounds: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/rounds`),
+  fantasyRoundWinners: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/round-winners`),
   fantasyPriceMovements: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/price-movements`),
   fantasySetRoundLock: (roundId, lock_at) =>
     request(`/club-admin/fantasy/rounds/${roundId}/lock`, { method: 'PATCH', body: JSON.stringify({ lock_at }) }),

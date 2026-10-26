@@ -231,6 +231,7 @@ const FantasySettings = lazy(() => import('./pages/admin/fantasy/FantasySettings
 const FantasyScoring = lazy(() => import('./pages/admin/fantasy/FantasyScoring'))
 const FantasyPool = lazy(() => import('./pages/admin/fantasy/FantasyPool'))
 const FantasyPrices = lazy(() => import('./pages/admin/fantasy/FantasyPrices'))
+const FantasyWinners = lazy(() => import('./pages/admin/fantasy/FantasyWinners'))
 const FantasyPlayers = lazy(() => import('./pages/admin/fantasy/FantasyPlayers'))
 const FantasyLeagues = lazy(() => import('./pages/admin/fantasy/FantasyLeagues'))
 
@@ -546,6 +547,7 @@ export default function App() {
           <Route path="/admin/fantasy/scoring" element={<ProtectedRoute requireModule="fantasy"><FantasyScoring /></ProtectedRoute>} />
           <Route path="/admin/fantasy/pool" element={<ProtectedRoute requireModule="fantasy"><FantasyPool /></ProtectedRoute>} />
           <Route path="/admin/fantasy/prices" element={<ProtectedRoute requireModule="fantasy"><FantasyPrices /></ProtectedRoute>} />
+          <Route path="/admin/fantasy/winners" element={<ProtectedRoute requireModule="fantasy"><FantasyWinners /></ProtectedRoute>} />
           <Route path="/admin/fantasy/players" element={<ProtectedRoute requireModule="fantasy"><FantasyPlayers /></ProtectedRoute>} />
           <Route path="/admin/fantasy/leagues" element={<ProtectedRoute requireModule="fantasy"><FantasyLeagues /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute requireActivePlan><AdminSettings /></ProtectedRoute>} />

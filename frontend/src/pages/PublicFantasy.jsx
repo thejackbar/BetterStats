@@ -23,6 +23,7 @@ import Points from './fantasy/Points'
 import Live from './fantasy/Live'
 import Fixtures from './fantasy/Fixtures'
 import Ladder from './fantasy/Ladder'
+import Insights from './fantasy/Insights'
 import TeamView from './fantasy/TeamView'
 import Teams from './fantasy/Teams'
 import Leagues from './fantasy/Leagues'
@@ -34,10 +35,10 @@ import Share from './fantasy/Share'
 import ViewAsBar from './fantasy/ViewAsBar'
 
 const NAV = [['team', 'My Team'], ['points', 'Points'], ['pick', 'Pick Squad'], ['ladder', 'Ladder'], ['teams', 'Teams'], ['leagues', 'Leagues'], ['draft', 'Draft']]
-const QUICK = [['transfers', 'Transfers'], ['chips', 'Chips'], ['fixtures', 'Fixtures'], ['stats', 'Players'], ['live', 'Live'], ['share', 'Share'], ['help', 'Rules']]
+const QUICK = [['transfers', 'Transfers'], ['chips', 'Chips'], ['fixtures', 'Fixtures'], ['insights', 'Insights'], ['stats', 'Players'], ['live', 'Live'], ['share', 'Share'], ['help', 'Rules']]
 // Screens with a dedicated desktop layout that should use the full width. The rest
 // (forms, reading, single-item views) stay in a comfortable centred column.
-const WIDE = new Set(['team', 'transfers', 'points', 'stats', 'pick', 'ladder', 'fixtures', 'leagues', 'player'])
+const WIDE = new Set(['team', 'transfers', 'points', 'stats', 'pick', 'ladder', 'insights', 'fixtures', 'leagues', 'player'])
 
 export default function PublicFantasy() {
   const { token } = useParams()
@@ -134,6 +135,7 @@ export default function PublicFantasy() {
       case 'points': return <Points token={token} nav={nav} desktop={desktop} />
       case 'live': return <Live token={token} nav={nav} />
       case 'fixtures': return <Fixtures token={token} season={season} nav={nav} desktop={desktop} />
+      case 'insights': return <Insights token={token} nav={nav} desktop={desktop} />
       case 'ladder': return <Ladder token={token} season={season} desktop={desktop} nav={nav} />
       case 'leagues': return <Leagues token={token} flash={flash} fail={fail} desktop={desktop} nav={nav} initialLeague={params.leagueId} />
       case 'teams': return <Teams token={token} />

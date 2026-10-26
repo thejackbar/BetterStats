@@ -221,3 +221,13 @@ Exported text was clipping on the back and colliding in the stat band. Cause: th
 
 My Team cards: `SquadCards` / `FantasyPlayerCard`. Browser check: `verify_fantasy_my_team_cards_browser.mjs` (20), `verify_player_share_card_browser.mjs` (hero and headshot sizes, comma names), `verify_fantasy_teams_browser.mjs`.
 
+
+## Round winners and round insights (v9.129.34)
+
+Asked: rankings for each round so the club can see round winners, backdated so it can go round by round; then more colour on the public page (top 10 players, most traded in and out, biggest price risers and fallers, filtered by round).
+
+Round winners: `services/fantasy_round_rank.py` ranks every scored round from `fantasy_squad_round_scores.points` for the club-wide league (net of any transfer hit, the same figure as the ladder's GW column). Nothing is stored, so rounds scored before this existed are covered and an unsettled round drops out. Competition ranking (1, 1, 3); a tie for first is a shared win; a round topped on 0 has no winner. A team is ranked only for rounds it had joined (`joined_round`) and where its row has a lineup or points, so a chip-only tally row never shows as a 0. Routes: `GET /public/fantasy/{token}/round-winners`, `/round-ranking/{n}`, admin `GET /club-admin/fantasy/season/{id}/round-winners`. Screens: Ladder "Round winners" tab (`RoundRanking.jsx`), admin Round winners page (`FantasyWinners.jsx`). Defaults chosen with the club: club-wide ladder only (mini leagues not covered), shared win on a tie, hits included.
+
+Round insights: `services/fantasy_round_insights.py`, `GET /public/fantasy/{token}/round-insights?round=n`, screen `Insights.jsx` (Insights in the quick links). Top 10 scorers from `fantasy_player_round_scores` with `picked_by` from the stored squad round lineups; trades from `fantasy_transactions` `transfer_in` / `transfer_out` by `round_id`; risers and fallers from `fantasy_pricing.season_history`. The picker offers scored rounds plus the open round, which shows trades only.
+
+Checks: `verify_fantasy_round_rank.py` (39), `verify_fantasy_round_insights.py` (29), `frontend/verification/verify_fantasy_round_winners_browser.mjs` (38). The admin page compiles and shares the endpoint's checks; it was not driven in a browser.

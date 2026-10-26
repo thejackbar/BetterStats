@@ -3,8 +3,9 @@
 // (every team is listed; nothing is cut off).
 import { useEffect, useState } from 'react'
 import { api } from '../../lib/api'
-import { DISP, pts, tintBg, MoveArrow } from './ui'
+import { DISP, pts, tintBg, MoveArrow, Segmented } from './ui'
 import { ScreenTitle } from './shell'
+import RoundRanking from './RoundRanking'
 
 // A row opens that manager's team as locked when `onOpen` is given (once a round has locked).
 const openProps = (r, onOpen) => onOpen ? {
@@ -88,7 +89,7 @@ export function LiveChip({ live }) {
   )
 }
 
-export default function Ladder({ token, season, desktop, nav }) {
+function SeasonLadder({ token, season, desktop, nav }) {
   const [data, setData] = useState(null)
   // Reload while a round is being played, so the ladder moves as the scores are read.
   useEffect(() => {
@@ -162,6 +163,22 @@ export default function Ladder({ token, season, desktop, nav }) {
       {allTeams}
       {header}
       {tableRows}
+    </div>
+  )
+}
+
+// The season ladder, or who won each round. Round winners reads every round already scored, so past
+// rounds can be walked through one at a time.
+export default function Ladder(props) {
+  const [view, setView] = useState('season')
+  return (
+    <div>
+      <div style={{ padding: '10px 0 4px', maxWidth: 420 }}>
+        <Segmented options={[['season', 'Season ladder'], ['rounds', 'Round winners']]} value={view} onChange={setView} />
+      </div>
+      {view === 'rounds'
+        ? <RoundRanking token={props.token} desktop={props.desktop} />
+        : <SeasonLadder {...props} />}
     </div>
   )
 }

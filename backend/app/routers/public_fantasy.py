@@ -39,7 +39,7 @@ from app.models.db import (
     FantasySquadRoundScore, FantasyPlayerRoundScore,
     FantasyDraft, FantasyDraftPick, FantasyDraftWishlist, FantasyWaiverClaim, FantasyTrade,
 )
-from app.services import rate_limit, fantasy_draft, fantasy_engine, fantasy_squad, fantasy_queue, section_names
+from app.services import rate_limit, fantasy_draft, fantasy_engine, fantasy_squad, fantasy_queue, fantasy_round_rank, fantasy_round_insights, section_names
 from app.services.fantasy_squad import validate_squad, score_squad_round
 from app.services.fantasy_scoring import DEFAULT_RULES, DEFAULT_SCORING
 
@@ -959,6 +959,77 @@ async def ladder(token: str, request: Request, db: AsyncSession = Depends(get_db
         # Once a round has locked, a team can be opened (see team_view).
         "teams_visible": (await _last_locked_round(db, season.id)) is not None and my_squad_id is not None,
     }
+
+
+# ── round winners ─────────────────────────────────────────────────────────────
+
+async def _scored_round_rankings(db: AsyncSession, token: str, request: Request):
+    """Every scored round of the club-wide ladder, ranked, plus the signed-in manager's squad id (or None).
+    Derived on each call from the stored round rows, so every round already settled is covered."""
+    club = await _club_for_token(db, token)
+    season = await _current_season(db, club)
+    league = await _global_league(db, season) if season is not None else None
+    if league is None:
+        return [], None
+    my_squad_id = None
+    mid = _read_session(request, club.id)
+    if mid:
+        mine = (await db.execute(
+            select(FantasySquad.id).where(FantasySquad.league_id == league.id, FantasySquad.manager_id == mid)
+        )).scalar_one_or_none()
+        my_squad_id = str(mine) if mine else None
+    return await fantasy_round_rank.season_round_rankings(db, season.id, league.id), my_squad_id
+
+
+@router.get("/{token}/round-winners")
+async def round_winners(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The winner of every scored round, oldest first, and how many rounds each team has won. A tie for
+    first is a shared win. Rounds still to be scored, or taken back out of settlement, are not listed."""
+    rounds, my_squad_id = await _scored_round_rankings(db, token, request)
+    summary = fantasy_round_rank.winners_summary(rounds)
+    for t in summary["tally"]:
+        t["you"] = t["squad_id"] == my_squad_id
+    for rnd in summary["rounds"]:
+        for w in rnd["winners"]:
+            w["you"] = w["squad_id"] == my_squad_id
+    return {**summary, "my_squad_id": my_squad_id}
+
+
+@router.get("/{token}/round-ranking/{round_number}")
+async def round_ranking(token: str, round_number: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """The full ranking of one scored round: every team that played it, best first, with its winner(s)."""
+    rounds, my_squad_id = await _scored_round_rankings(db, token, request)
+    rnd = next((r for r in rounds if r["number"] == round_number), None)
+    if rnd is None:
+        raise HTTPException(status_code=404, detail="That round has not been scored")
+    for r in rnd["ranking"]:
+        r["you"] = r["squad_id"] == my_squad_id
+    for w in rnd["winners"]:
+        w["you"] = w["squad_id"] == my_squad_id
+    return {**rnd, "my_squad_id": my_squad_id}
+
+
+@router.get("/{token}/round-insights")
+async def round_insights(token: str, round: Optional[int] = None, db: AsyncSession = Depends(get_db)):
+    """Colour for the Insights screen, one round at a time: the top 10 scorers, the players traded in and out
+    most, and the biggest price risers and fallers. ``round`` picks the round (default: the latest scored
+    one, or the round being picked for when none is scored yet). Rounds offered are the scored ones plus the
+    open round, which shows trades so far. Derived on each call (services/fantasy_round_insights)."""
+    club = await _club_for_token(db, token)
+    season = await _current_season(db, club)
+    league = await _global_league(db, season) if season is not None else None
+    if league is None:
+        return {"rounds": [], "selected": None}
+    options = await fantasy_round_insights.round_options(db, season.id)
+    if not options:
+        return {"rounds": [], "selected": None}
+    if round is None:
+        pick = next((o for o in reversed(options) if o["status"] == "scored"), options[-1])
+    else:
+        pick = next((o for o in options if o["number"] == round), None)
+        if pick is None:
+            raise HTTPException(status_code=404, detail="That round has no insights yet")
+    return {"rounds": options, "selected": await fantasy_round_insights.insights_for_round(db, season, league.id, pick)}
 
 
 # ── transfers, captain, chips ────────────────────────────────────────────────
