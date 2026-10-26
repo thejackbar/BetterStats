@@ -247,6 +247,8 @@ export const api = {
   // Which of these players have no earlier game on the club's record (debuts).
   // `before` is the match day as an ISO date; absent means today.
   getSocialDebuts: (ids, before) => request(`/admin/social/debuts?player_ids=${encodeURIComponent((ids || []).join(','))}${before ? `&before=${encodeURIComponent(String(before).slice(0, 10))}` : ''}`),
+  // Upcoming club milestones for a lineup's players (a badge per player, up to three on the strip), with a freshness verdict.
+  getSocialMilestoneWatch: (ids, on) => request(`/admin/social/milestone-watch?player_ids=${encodeURIComponent((ids || []).join(','))}${on ? `&on=${encodeURIComponent(String(on).slice(0, 10))}` : ''}`),
 
   // BetterSocials — media library. `kind` is undefined for the ordinary Photos
   // pool, or 'background' for the small reusable post-background library —

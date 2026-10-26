@@ -143,6 +143,10 @@
 78. Pure-texture elements a layout draws itself are gated on `usePostLook().texture`; content, photos, scrims and panels never are.
 76. A layout colour a club may want to set goes in `LAYOUT_PARTS` and is read with `pc`/`pt` against the layout's own fallback; absent means unchanged. A saved template field that is absent is a pre-v9.126.0 template (rule 52). New parts that mean something per layout (not shared) need their own key.
 
+**Milestone watch on lineups (v9.130.1, `services/social_milestones.py`, `WATCH_TEMPLATES` in `AdminSocialPost.jsx`)**
+80. The badge and strip read `GET /admin/social/milestone-watch`, which reuses `milestone_totals.profile_totals` and the club's `Scheme`/`reach_window`; never a second milestone rule. A lineup layout opts in only once its rows and footer hold `MilestoneBadge` and `watchStrip` at every size with 12 names (`WATCH_TEMPLATES`; others say so on screen). The new props (`p.milestone`, `watch`) are absent when off, so an old post is unchanged.
+81. Stale means the last round was never pulled (a past `UPCOMING`/`LIVE` club game, or the last successful sync older than the last scored game). It blocks both save paths in the handlers (`watchBlock`), not just the buttons; `unknown` (no sync history) says so and never blocks. Check: `verify_social_milestones.py`, `verify_lineup_milestones_browser.mjs`.
+
 ## Traps and failure signatures
 - Geometry checks pass but a layout reads wrong (black bands, clumped story names). Judge from real screenshots.
 - Hero layouts show a crest, not the cut-out: harness roster stubbed `photo_url: null`. Stubs must cover every conditional's data (give players a photo and a route for it).

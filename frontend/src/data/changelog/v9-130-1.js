@@ -3,13 +3,12 @@ export default {
   date: '2026-10-26',
   // Above v9.130.0's sortKey. Check origin/main at merge time.
   sortKey: '2026-11-09T05:00:00Z',
-  title: 'Player Cards: swaps, sharing, a tidier card book and a club view',
+  title: 'Milestone watch on lineup posts, and Milestones settings out of the way',
   items: [
-    'New: swap cards. A player can swap a double for another player\'s double. You always keep one of every card, so only the spares can go, and nothing moves until the other player says yes. Requests lapse after 14 days. Start one from the Swaps tab, or tap a double in your book and offer it.',
-    'New: share a card. Any card can be shared as a picture. Your own card can also be shared as a link to your card page, or as a short looping GIF of the shine or of the card turning over to its details and back.',
-    'Changed: the card book files special cards after the players in a set order (club awards, milestones, centuries, half centuries, wickets, debuts). One player\'s cards of one kind sit together as a stack on a single slot, so fifty awards no longer fill four pages. Tap a stack to open it. There is a filter for each kind.',
-    'Changed: special cards use the whole photo, in the same layout as a player card, with a coloured band for the event. Cards now use the club\'s own display font when it has one.',
-    'Fixed: long names, long award titles and wide fonts were clipped on the cards. The text now shrinks to fit.',
-    'New: the Player Cards admin page has tabs. Overview shows how the cards are being used. Players lists who has collected what and when, and a click opens that player\'s whole collection, packs and swaps. Activity lists special cards and cards added lately. All cards shows every card that exists and how many are out there. Packs shows who has and has not opened one. Swaps is an audit of every swap request.',
+    'New: lineup posts can show who is about to reach a club milestone. A gold badge sits beside the player\'s name, and a Milestone watch strip above the foot lists up to three, for example "Sam Szigligeti — 40 runs to 1,000 club runs". The strip is left off the post entirely when nobody is close.',
+    'New: the watch uses the same figures and increments as the Milestones page. A player in the XI on 49 games is flagged as playing their 50th, 99 as their 100th, and so on for the steps your club has set. Runs and wickets show when a player is within reach of the next one. A certain games milestone comes first, then the closest, one per player.',
+    'New: it works on Hero List, Card Grid, Side Numbered, Team Sheet, Split Poster and Match Day Card, at every post size, including 12 names. The other lineup layouts say they do not draw it.',
+    'New: figures are as of the last completed round. If a game from that round has not been scored yet, or the last sync finished before it was played, the post will not download or save to Club Room until you run a sync and press Check again, or switch Milestone watch off.',
+    'Changed: on the Milestones page the settings for how often runs, wickets, matches and catches are marked, and the per grade ones, now sit at the bottom of the page, closed until you open them, so the milestones come first.',
   ],
 }

@@ -36,7 +36,7 @@ Not built yet:
 - A season rollover rule for banked packs (they bank across seasons today; the weekly pack is the only one that expires).
 - Rarity and figures are the unfiltered career block (`v_effective_player_season_stats`), not raised to held scorecards, so a profile can read a game or two higher for a player Cricket Australia undercounted.
 
-## v9.130.1 (2026-10-26): swaps, sharing, a tidier book, the admin view
+## v9.130.2 (2026-10-26): swaps, sharing, a tidier book, the admin view
 
 Asked for after the first release was in use: the book was four pages of the owner's own special cards; special cards should use the whole photo; text was clipped; cards should use the club's font; swapping; sharing and a GIF; and an admin view of who collects what.
 
