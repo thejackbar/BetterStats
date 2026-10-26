@@ -196,9 +196,10 @@ async def _fixtures_player_is_on(
     db: AsyncSession, club: Organisation, cfg: dict, medal: VoteMedal, player: Player, fixtures: list[Fixture],
 ) -> list[Fixture]:
     """``fixtures`` cut down to the games this player is on the votable list of:
-    the ballot page's own list (``resolve_eligibility``), so the games offered to
-    a verified player are exactly the ones they could open a ballot on. Nobody
-    is shown a game they did not play, except a person chosen to vote for it."""
+    the ballot page's own list (``resolve_eligibility``) and its own voting rule
+    (``_voter_role``), so the games offered to a verified player are exactly the
+    ones they could vote on. Nobody is shown a game they did not play, except a
+    person chosen to vote for it."""
     local = await own_local_fixture_ids(db, player, fixtures)
     # A person chosen to vote for a team is not on its team list, and is still
     # offered that team's games.
@@ -217,7 +218,12 @@ async def _fixtures_player_is_on(
                 continue
             live_left -= 1
         elig = await vote_svc.resolve_eligibility(db, club, f, cfg, override_source)
-        if str(player.id) in {p["id"] for p in elig["players"]}:
+        if str(player.id) not in {p["id"] for p in elig["players"]}:
+            continue
+        # On a team set to captain only, the rest of the side has nothing to vote
+        # on there, and the voting page takes a player straight to their next game.
+        role, _reason = _voter_role(await vote_svc.cfg_for_fixture(db, cfg, f), player, elig["players"])
+        if role == "player":
             keep.append(f)
     return keep
 

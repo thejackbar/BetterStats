@@ -9,7 +9,6 @@ import { PbSpinner } from '../../../../lib/presskit'
 import { Btn, Icon } from '../ui'
 import BallotProgress from './BallotProgress'
 import VoteStateBadge from './VoteStateBadge'
-import ShareVotePanel from './ShareVotePanel'
 import OutstandingVoters from './OutstandingVoters'
 import VoteFace from './VoteFace'
 import { fmtDate } from './votesTokens'
@@ -307,8 +306,6 @@ export default function FixtureDetail({ fixtureId, medalId, onBack }) {
         </div>
 
         <div className="w-full lg:w-[320px] shrink-0 flex flex-col gap-4">
-          <ShareVotePanel settings={detail.settings} fixtures={[fx]}
-            scope={{ fixtureId: fx.id, label: `${fx.round} v ${fx.opponent || 'TBC'}` }} />
           <OutstandingVoters fixture={{ ...fx, outstanding: detail.outstanding }} medalId={medalId} onNudged={load} />
         </div>
       </div>
