@@ -1,8 +1,8 @@
 export default {
   version: 'v9.129.33',
   date: '2026-10-26',
-  // Above v9.129.32's sortKey. Check origin/main at merge time.
-  sortKey: '2026-11-08T23:00:00Z',
+  // Above v9.129.32.1's sortKey. Check origin/main at merge time.
+  sortKey: '2026-11-08T23:30:00Z',
   title: 'Fantasy My Team as player cards, a tidier player share card, and saved cards keep their fonts',
   items: [
     'New: My Team has a Sheet / Cards switch. Cards shows one card per player, grouped by role, with their photo, price and the points for the round. Tap a card for the same captain, vice and profile buttons the sheet has. Your choice is remembered.',
