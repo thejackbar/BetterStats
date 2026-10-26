@@ -33,6 +33,7 @@ import { availSortRank, AVAILABILITY, halfStatus, viewStatus, weekFlag } from '.
 import { useSelectConfig } from '../../../lib/useAvailabilityConfig'
 import { Icon, Avatar, Btn, Tag, RuleTags, WeekFlag, playedWithinYears, recencyOf } from './ui'
 import { DnD, useDrag } from './selectionDnd'
+import { BottomSheet, SheetAction } from './SelectionMobile'
 import { nameMatches, roleLine, spark, formMeta, normGender, unavailableWeeksText, gameDatesLabel, fixtureTabs } from './selectionMeta'
 import { xiCompliance, isBlocked } from './selectionRules'
 import { confirmSig, restoreDraft } from './selectionDraft'
@@ -118,9 +119,11 @@ function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) 
   const out = p.availability === 'UNAVAILABLE'
   return (
     <div data-player-card={p.id} data-density={slot ? density : undefined}
-      {...(ctx.canEdit ? drag.bind(item) : {})}
-      onClick={!slot && ctx.canEdit ? drag.clickGuard(() => ctx.tapPool(p)) : undefined}
-      className={`group relative flex items-center gap-2 pl-3 pr-2 rounded-lg border bg-pb-surface2 overflow-hidden transition-colors select-none ${slot ? 'h-full min-h-0' : 'shrink-0 py-1.5'} ${ctx.canEdit ? 'cursor-grab' : ''} ${barred ? 'border-pb-red/45' : 'border-pb-hairline'} hover:border-pb-accent/45`}>
+      // A finger never starts a drag here: it scrolls the board, and taps do the work
+      // (the Pool adds, a team's player opens the sheet). Mouse, trackpad and pen drag.
+      {...(ctx.canEdit ? { onPointerDown: (e) => { if (e.pointerType !== 'touch') drag.bind(item).onPointerDown(e) } } : {})}
+      onClick={!ctx.canEdit ? undefined : !slot ? drag.clickGuard(() => ctx.tapPool(p)) : ctx.touch ? drag.clickGuard(() => ctx.openSlot(col, idx)) : undefined}
+      className={`group relative flex items-center gap-2 pl-3 pr-2 rounded-lg border bg-pb-surface2 overflow-hidden transition-colors select-none ${slot ? 'h-full min-h-0' : ctx.touch ? 'shrink-0 py-2.5' : 'shrink-0 py-1.5'} ${ctx.canEdit && !ctx.touch ? 'cursor-grab' : ''} ${barred ? 'border-pb-red/45' : 'border-pb-hairline'} hover:border-pb-accent/45`}>
       <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: shown === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
       <Avatar player={p} size={tight ? 20 : dense ? 24 : 30} noLink />
       <div className="flex-1 min-w-0">
@@ -142,7 +145,7 @@ function PlayerCard({ p, kind, col, idx, density = 'full', alsoIn, ctx, drag }) 
           </div>
         )}
       </div>
-      {slot && ctx.canEdit && (
+      {slot && ctx.canEdit && !ctx.touch && (
         <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5 rounded-md bg-pb-surface2 pl-1" onPointerDown={(e) => e.stopPropagation()}>
           <button type="button" title="Captain" onClick={() => ctx.toggleCap(col, p.id)}
             className={`w-[22px] h-[22px] rounded text-[9.5px] font-bold font-mono ${isCap ? 'bg-pb-accent text-pb-bg' : 'bg-pb-surface text-pb-faint hover:text-pb-text'}`}>C</button>
@@ -199,7 +202,8 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
   if (rules.warnings.length) flags.push({ tone: 'amber', text: `${rules.warnings.length} to check`, title: rules.warnings.map((w) => `${w.player ? w.player + ': ' : ''}${w.detail}`).join('\n') })
   return (
     <section data-team-col={col} data-drop-kind="col" data-drop-col={col}
-      className={`flex-1 basis-0 min-w-[212px] min-h-0 flex flex-col rounded-xl border bg-pb-surface transition-colors ${hovered ? 'border-pb-accent' : active ? 'border-pb-accent/60' : 'border-pb-hairline'}`}
+      data-col-label={ctx.shortTeam(fx)}
+      className={`${ctx.phone ? 'shrink-0 w-[86vw] max-w-[380px] snap-start' : 'flex-1 basis-0 min-w-[212px]'} min-h-0 flex flex-col rounded-xl border bg-pb-surface transition-colors ${hovered ? 'border-pb-accent' : active ? 'border-pb-accent/60' : 'border-pb-hairline'}`}
       style={hovered ? { background: tint('var(--pb-accent)', 6) } : undefined}>
       <header className="px-2.5 pt-2 pb-1.5 border-b pb-hairline cursor-pointer" onClick={() => ctx.setActiveFid(col)} title="Click a player in the pool to add them to this team">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -231,16 +235,16 @@ function TeamColumn({ col, density, listRef, ctx, drag }) {
                 {status === 'error' ? 'Not saving' : status === 'saving' ? 'Saving…' : status === 'saved' ? 'Draft saved' : 'Draft'}
               </span>
               <button type="button" title="Back to the confirmed XI" aria-label={`Discard changes to ${ctx.shortTeam(fx)}`} onClick={(e) => { e.stopPropagation(); ctx.discard(col) }}
-                className="w-[22px] h-[22px] rounded inline-flex items-center justify-center text-pb-faint hover:text-pb-text hover:bg-pb-surface2"><Icon name="reset" size={12} /></button>
+                className={`${ctx.touch ? 'w-[34px] h-[34px]' : 'w-[22px] h-[22px]'} rounded inline-flex items-center justify-center text-pb-faint hover:text-pb-text hover:bg-pb-surface2`}><Icon name="reset" size={12} /></button>
               <button type="button" data-confirm-col={col} onClick={(e) => { e.stopPropagation(); ctx.confirmOne(col) }} disabled={ctx.busy}
-                className="px-2 py-0.5 rounded-md font-display font-semibold text-[11.5px] bg-pb-accent text-[#08110b] disabled:opacity-40">Confirm</button>
+                className={`${ctx.touch ? 'px-3.5 py-2 text-[13px]' : 'px-2 py-0.5 text-[11.5px]'} rounded-md font-display font-semibold bg-pb-accent text-[#08110b] disabled:opacity-40`}>Confirm</button>
             </>
           )}
           {c.locked && !dirty && filled.length > 0
             ? <span className="text-[10.5px] font-semibold text-pb-faint inline-flex items-center gap-1" data-locked-col={col} title="Locked. Change anyone and you will be asked to unlock it."><Icon name="lock" size={11} />Locked</span>
             : !dirty && filled.length > 0 && <span className="text-[10.5px] font-semibold text-pb-faint inline-flex items-center gap-1"><Icon name="check" size={11} />Confirmed</span>}
           <Link to={`/admin/betterselect/select/${fx.id}`} onClick={(e) => e.stopPropagation()} title="Open this team in the full Selection board" aria-label={`Open ${ctx.shortTeam(fx)}`}
-            className="w-[22px] h-[22px] rounded inline-flex items-center justify-center text-pb-faint hover:text-pb-accent hover:bg-pb-surface2"><Icon name="arrow" size={12} /></Link>
+            className={`${ctx.touch ? 'w-[34px] h-[34px]' : 'w-[22px] h-[22px]'} rounded inline-flex items-center justify-center text-pb-faint hover:text-pb-accent hover:bg-pb-surface2`}><Icon name="arrow" size={12} /></Link>
         </div>
       </header>
       {conflict && (
@@ -268,15 +272,15 @@ function PoolColumn({ ctx, drag }) {
     // under it): the pool is where a drag starts and ends, so it must stay in
     // view however far the teams are scrolled. Its tint is mixed into the surface
     // colour, never transparent, or the columns would show through.
-    <section data-pool-col data-autoscroll-skip data-drop-kind="pool"
-      className={`sticky left-0 z-10 w-[270px] shrink-0 min-h-0 flex flex-col rounded-xl border bg-pb-surface shadow-[6px_0_14px_-8px_rgba(0,0,0,0.4)] transition-colors ${hovered ? 'border-pb-red/50' : 'border-pb-hairline'}`}
+    <section data-pool-col data-col-label="Pool" data-drop-kind="pool" {...(ctx.phone ? {} : { 'data-autoscroll-skip': '' })}
+      className={`${ctx.phone ? 'w-[86vw] max-w-[380px] snap-start' : 'sticky left-0 z-10 w-[270px] shadow-[6px_0_14px_-8px_rgba(0,0,0,0.4)]'} shrink-0 min-h-0 flex flex-col rounded-xl border bg-pb-surface transition-colors ${hovered ? 'border-pb-red/50' : 'border-pb-hairline'}`}
       style={hovered ? { background: 'color-mix(in srgb, var(--pb-red) 5%, var(--pb-surface))' } : undefined}>
       <header className="px-2.5 pt-2 pb-2 border-b pb-hairline flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-display font-bold text-[14px]">Pool</h3>
           <span className="font-mono text-[11px] text-pb-faint pb-num" data-pool-count>{ctx.pool.length} of {ctx.poolTotal}</span>
         </div>
-        <div className="flex items-center gap-2 bg-pb-surface2 border border-pb-hairline rounded-lg px-2.5 h-[30px] text-pb-faint focus-within:border-pb-accent">
+        <div className={`flex items-center gap-2 bg-pb-surface2 border border-pb-hairline rounded-lg px-2.5 ${ctx.touch ? 'h-[40px]' : 'h-[30px]'} text-pb-faint focus-within:border-pb-accent`}>
           <Icon name="search" size={13} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a player…" aria-label="Find a player"
             className="bg-transparent border-0 outline-none text-pb-text text-[13px] w-full placeholder:text-pb-faint" />
@@ -301,7 +305,17 @@ function PoolColumn({ ctx, drag }) {
             <input type="checkbox" checked={hideOut} onChange={(e) => setHideOut(e.target.checked)} />Hide unavailable
           </label>
         </div>
-        {ctx.canEdit && activeTeam && <div className="text-[11px] text-pb-faint">Click a player to add them to <b className="text-pb-text">{activeTeam}</b>, or drag onto any team.</div>}
+        {ctx.canEdit && activeTeam && (ctx.touch
+          ? (
+            <label className="flex items-center gap-2 text-[12px] text-pb-faint">
+              <span className="shrink-0">Tap a player to add them to</span>
+              <select value={ctx.activeFid} onChange={(e) => ctx.setActiveFid(e.target.value)} aria-label="Add players to" data-add-to
+                className="flex-1 min-w-0 bg-pb-surface2 border border-pb-hairline2 rounded-md px-2 py-1.5 text-pb-text font-semibold">
+                {ctx.order.map((f) => <option key={f} value={f} style={{ color: '#000' }}>{ctx.shortTeam(ctx.cols[f].fx)}</option>)}
+              </select>
+            </label>
+          )
+          : <div className="text-[11px] text-pb-faint">Click a player to add them to <b className="text-pb-text">{activeTeam}</b>, or drag onto any team.</div>)}
       </header>
       <div className="flex-1 min-h-0 overflow-y-auto pb-scroll p-1.5 flex flex-col gap-1" data-pool-list>
         {ctx.pool.map((p) => <PlayerCard key={p.id} p={p} kind="pool" ctx={ctx} drag={drag} />)}
@@ -313,25 +327,40 @@ function PoolColumn({ ctx, drag }) {
 }
 
 // ── The board ───────────────────────────────────────────────────────────────
-function Board({ ctx, isPhone }) {
+function Board({ ctx }) {
   const drag = useDrag()
+  const phone = ctx.phone
   // Measured here, not on the screen: the board only exists once the day has
   // loaded, and the height is from where it starts to the bottom of the window.
-  const [fitRef, fitH] = useFitHeight({ enabled: !isPhone, bottom: 20 })
+  // On a phone the header above takes most of the screen, so the board keeps a
+  // floor and the page scrolls down to it rather than squeezing the rows.
+  const [fitRef, fitH] = useFitHeight({ enabled: true, bottom: 20, min: phone ? 460 : 240 })
   const [listRef, listH] = useBoxHeight()
   const maxSlots = Math.max(1, ...ctx.order.map((f) => ctx.cols[f].slots.length))
   const density = rowDensity(listH, maxSlots)
 
-  // The back and forward arrows step the board one team at a time. The pool is
-  // pinned on the left, so a team "lines up" when its left edge sits just beside it.
-  const [edge, setEdge] = useState({ back: false, forward: false })
+  // The back and forward arrows step the board one team at a time. Beside a pinned
+  // pool a team "lines up" when its left edge sits just next to it. On a phone the
+  // pool is a page like the teams, each page nearly the width of the screen, so a
+  // step is a whole page and the bar says which one you are on.
+  const [edge, setEdge] = useState({ back: false, forward: false, here: '', pos: '' })
   const syncEdge = useCallback(() => {
     const el = fitRef.current
     if (!el) return
     const back = el.scrollLeft > 2
     const forward = el.scrollLeft < el.scrollWidth - el.clientWidth - 2
-    setEdge((e) => (e.back === back && e.forward === forward ? e : { back, forward }))
-  }, [fitRef])
+    let here = '', pos = ''
+    if (phone) {
+      const box = el.getBoundingClientRect()
+      const pages = [...el.querySelectorAll('[data-pool-col],[data-team-col]')]
+      let best = Infinity
+      pages.forEach((c, i) => {
+        const d = Math.abs(c.getBoundingClientRect().left - box.left)
+        if (d < best) { best = d; here = c.getAttribute('data-col-label') || ''; pos = `${i + 1} of ${pages.length}` }
+      })
+    }
+    setEdge((e) => (e.back === back && e.forward === forward && e.here === here && e.pos === pos ? e : { back, forward, here, pos }))
+  }, [fitRef, phone])
   useEffect(() => {
     const el = fitRef.current
     if (!el) return undefined
@@ -346,8 +375,8 @@ function Board({ ctx, isPhone }) {
     if (!el) return
     const box = el.getBoundingClientRect()
     const pool = el.querySelector('[data-pool-col]')
-    const lead = pool ? pool.getBoundingClientRect().width + 10 : 0
-    const stops = [...el.querySelectorAll('[data-team-col]')]
+    const lead = phone || !pool ? 0 : pool.getBoundingClientRect().width + 10
+    const stops = [...el.querySelectorAll(phone ? '[data-pool-col],[data-team-col]' : '[data-team-col]')]
       .map((c) => Math.round(c.getBoundingClientRect().left - box.left + el.scrollLeft - lead))
     const now = el.scrollLeft
     const to = dir > 0 ? stops.find((s) => s > now + 2) : [...stops].reverse().find((s) => s < now - 2)
@@ -356,26 +385,79 @@ function Board({ ctx, isPhone }) {
     el.scrollTo({ left, behavior: calm ? 'auto' : 'smooth' })
   }
   const arrow = 'w-11 h-11 sm:w-9 sm:h-9 rounded-full inline-flex items-center justify-center border border-pb-hairline2 bg-pb-surface2 text-pb-text shadow-sm transition active:scale-95 disabled:opacity-30 disabled:cursor-default enabled:hover:border-pb-accent/60 enabled:hover:text-pb-accent'
+  const backBtn = (
+    <button type="button" data-board-back onClick={() => step(-1)} disabled={!edge.back} aria-label="Previous team" title="Previous team" className={arrow}>
+      <Icon name="chevron" size={18} className="rotate-180" />
+    </button>
+  )
+  const forwardBtn = (
+    <button type="button" data-board-forward onClick={() => step(1)} disabled={!edge.forward} aria-label="Next team" title="Next team" className={arrow}>
+      <Icon name="chevron" size={18} />
+    </button>
+  )
 
   return (
     <>
-      {(edge.back || edge.forward) && (
+      {phone && (
+        <div className="flex items-center gap-2 mb-1.5" data-board-nav>
+          {backBtn}
+          <div className="flex-1 min-w-0 text-center leading-tight" data-board-here>
+            <div className="font-display font-bold text-[15px] truncate">{edge.here || 'Pool'}</div>
+            <div className="font-mono text-[10.5px] text-pb-faint">{edge.pos}</div>
+          </div>
+          {forwardBtn}
+        </div>
+      )}
+      {!phone && (edge.back || edge.forward) && (
         <div className="flex items-center justify-end gap-2 mb-1.5" data-board-nav>
           <span className="text-[12px] text-pb-faint mr-1">Teams</span>
-          <button type="button" data-board-back onClick={() => step(-1)} disabled={!edge.back} aria-label="Previous team" title="Previous team" className={arrow}>
-            <Icon name="chevron" size={18} className="rotate-180" />
-          </button>
-          <button type="button" data-board-forward onClick={() => step(1)} disabled={!edge.forward} aria-label="Next team" title="Next team" className={arrow}>
-            <Icon name="chevron" size={18} />
-          </button>
+          {backBtn}{forwardBtn}
         </div>
       )}
       <div ref={fitRef} data-draft-table data-autoscroll-x data-fit={fitH != null ? 'on' : 'off'} style={fitH != null ? { height: fitH } : undefined}
-        className="flex gap-2.5 overflow-x-auto pb-1 items-stretch pb-hscroll">
+        className={`flex gap-2.5 overflow-x-auto pb-1 items-stretch pb-hscroll ${phone ? 'snap-x snap-mandatory' : ''}`}>
         <PoolColumn ctx={ctx} drag={drag} />
         {ctx.order.map((f, i) => <TeamColumn key={f} col={f} density={density} listRef={i === 0 ? listRef : undefined} ctx={ctx} drag={drag} />)}
       </div>
     </>
+  )
+}
+
+// What a tap on a player in a team offers where there is no mouse to hover or drag
+// with (a phone, an iPad): the three things the hover buttons do, plus a move to
+// any other team of the day, which is what a drag does.
+function SlotActionSheet({ sheet, ctx, onClose }) {
+  const fmt = useAdminNameFormat()
+  const c = ctx.cols[sheet.col]
+  const id = c ? c.slots[sheet.idx] : null
+  const p = id ? (c.poolById[id] || ctx.merged[id]) : null
+  useEffect(() => { if (!p) onClose() }, [p, onClose])
+  if (!p) return null
+  const isCap = c.cap === id
+  const isWk = c.wk === id
+  const done = (fn) => () => { fn(); onClose() }
+  const blockedFor = (f) => {
+    const t = ctx.cols[f]
+    if (t.slots.includes(id)) return 'already in it'
+    if (!t.poolById[id]) return 'not in its pool'
+    if (t.slots.indexOf(null) < 0) return 'full'
+    return null
+  }
+  return (
+    <BottomSheet testId="whiteboard-slot-sheet" onClose={onClose} title={fmt(p.display_name)}
+      subtitle={`${ctx.shortTeam(c.fx)} · ${sheet.idx + 1}${isCap ? ' · captain' : ''}${isWk ? ' · keeper' : ''}`}>
+      <SheetAction icon="flag" on={isCap} onClick={done(() => ctx.toggleCap(sheet.col, id))}>{isCap ? 'Remove as captain' : 'Make captain'}</SheetAction>
+      <SheetAction icon="player" on={isWk} onClick={done(() => ctx.toggleWk(sheet.col, id))}>{isWk ? 'Remove as keeper' : 'Make wicket-keeper'}</SheetAction>
+      {ctx.order.filter((f) => f !== sheet.col).map((f) => {
+        const why = blockedFor(f)
+        return (
+          <SheetAction key={f} icon="arrow" disabled={!!why} onClick={done(() => ctx.moveTo(sheet.col, sheet.idx, f))}>
+            Move to {ctx.shortTeam(ctx.cols[f].fx)}{why ? ` (${why})` : ''}
+          </SheetAction>
+        )
+      })}
+      <SheetAction icon="trash" danger onClick={done(() => ctx.removeAt(sheet.col, sheet.idx))}>Back to the pool</SheetAction>
+    </BottomSheet>
   )
 }
 
@@ -394,7 +476,13 @@ export default function AdminSelectionDraftTable() {
   toastRef.current = toast
   const { theme, toggle: toggleTheme } = useTheme()
   const canEdit = canEditCap(CAP.SELECT_SELECTION, CAP.MANAGE_SELECTIONS)
-  const isPhone = useMediaQuery('(max-width: 1023px)')
+  // phone: a screen too narrow for the Pool and a team side by side (the same width the
+  // menu turns into a slide-over), so each is a page you swipe between. touch: no
+  // mouse to hover or drag with, so a tap on a player opens a sheet of what a drag does.
+  const phone = useMediaQuery('(max-width: 767px)')
+  const touch = useMediaQuery('(hover: none)')
+  const [sheet, setSheet] = useState(null)          // { col, idx }: the player whose actions are open
+  const closeSheet = useCallback(() => setSheet(null), [])
   const [params, setParams] = useSearchParams()
 
   const [overview, setOverview] = useState(null)
@@ -712,6 +800,12 @@ export default function AdminSelectionDraftTable() {
     } else moveSlot(item.col, item.idx, fid, idx)
   }
 
+  // A tap-sheet move: the same as dropping the player on the other team's column.
+  const moveTo = (fromFid, fromIdx, toFid) => {
+    const id = colsRef.current?.[fromFid]?.slots[fromIdx]
+    if (id) onDrop({ kind: 'col', col: toFid }, { kind: 'slot', col: fromFid, idx: fromIdx, player: { id } })
+  }
+
   const toggleCap = (fid, id) => guarded([fid], () => edit((prev) => put(prev, fid, { cap: prev[fid].cap === id ? null : id })))
   const toggleWk = (fid, id) => guarded([fid], () => edit((prev) => put(prev, fid, { wk: prev[fid].wk === id ? null : id })))
 
@@ -932,33 +1026,26 @@ export default function AdminSelectionDraftTable() {
       </BetterSelectLayout>
     )
   }
-  if (isPhone) {
-    return (
-      <BetterSelectLayout title="Selection Whiteboard" actions={actions} wide>
-        <div className="pb-card rounded-xl px-5 py-8 text-center text-sm text-pb-dim">
-          <b className="block text-pb-text font-display text-base mb-1">The Selection Whiteboard needs a wider screen</b>
-          Teams sit side by side here, so it is built for a laptop or a tablet held sideways.{' '}
-          <Link to="/admin/betterselect/selection" className="text-pb-accent underline">Back to Selection</Link>
-        </div>
-      </BetterSelectLayout>
-    )
-  }
-
   const ctx = {
     weekNames,
     cols, order, merged, status, conflicts, canEdit, busy, activeFid, setActiveFid,
     shortTeam: ctxShort, squadShort, squadOptions, pool, poolTotal: unnamed.length, showGender, weekByPlayer, day,
     filters: { q, setQ, hideOut, setHideOut, squad, setSquad, gender, setGender },
     tapPool, removeAt, toggleCap, toggleWk, confirmOne, discard, useTheirs, keepMine,
+    phone, touch, openSlot: (col, idx) => setSheet({ col, idx }), moveTo,
   }
 
   return (
     <BetterSelectLayout title="Selection Whiteboard" actions={actions} wide>
       <div className="flex items-end justify-between gap-x-5 gap-y-2 flex-wrap mb-3">
         <div className="min-w-0">
-          <h2 className="font-display font-bold text-[18px] tracking-tight">Selection Whiteboard</h2>
-          <p className="text-[13px] text-pb-dim mt-0.5">
-            Every team for the day side by side. Drag a player from one team to another, or into and out of the pool. Changes save as drafts until you confirm.
+          <h2 className="hidden md:block font-display font-bold text-[18px] tracking-tight">Selection Whiteboard</h2>
+          <p className="text-[13px] text-pb-dim md:mt-0.5" data-whiteboard-intro>
+            {phone ? 'Swipe sideways, or use the arrows, to move between the Pool and each team. ' : 'Every team for the day side by side. '}
+            {touch
+              ? (canEdit ? 'Tap a player in the Pool to add them, or a player in a team to move them or take them out. ' : '')
+              : 'Drag a player from one team to another, or into and out of the pool. '}
+            Changes save as drafts until you confirm.
           </p>
           {Object.keys(weekByPlayer).length > 0 && (
             <p className="text-[12px] text-pb-faint mt-0.5 max-w-[70ch]" data-week-legend>
@@ -993,8 +1080,9 @@ export default function AdminSelectionDraftTable() {
       </div>
 
       <DnD onDrop={onDrop}>
-        <Board ctx={ctx} isPhone={isPhone} />
+        <Board ctx={ctx} />
       </DnD>
+      {sheet && ctx.canEdit && <SlotActionSheet sheet={sheet} ctx={ctx} onClose={closeSheet} />}
     </BetterSelectLayout>
   )
 }

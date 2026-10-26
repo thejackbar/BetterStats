@@ -1890,3 +1890,15 @@ Reported: people on iPad and phones struggled to scroll the Whiteboard sideways.
 The screen still shows the "needs a wider screen" note under 1024px (`isPhone`), so an iPad held upright does not get the board. That was left as it was.
 
 Check: `verify_whiteboard_scroll_arrows_browser.mjs` (15). Headless Chromium hides scrollbars by default, so it launches with `ignoreDefaultArgs: ['--hide-scrollbars']` to measure the bar. The Selection board Gender filter check in `verify_draft_table_browser.mjs` fails with and without this change.
+
+### v9.129.36: Selection Whiteboard on iPhone and iPad, and a hideable menu
+
+Reported: people on iPhone and iPad could not use the Whiteboard, and the 240px menu took room a tablet needed. Below 1024px the screen showed "needs a wider screen"; from `md` up the menu could not be hidden.
+
+The phone gate is gone. Under 768px (`phone`) the Pool stops being `sticky` and becomes a page like the teams, 86vw wide with `snap-x snap-mandatory`, so the next page shows a sliver. The arrows bar is always shown there and reads the page nearest the left edge from `data-col-label`. `useFitHeight` gets a 460px floor on a phone so the header above does not squeeze the rows; the page scrolls down to the board instead.
+
+Touch (`(hover: none)`) has no drag. A drag from a whole card was never going to work under a finger (the browser takes the gesture for a scroll), and the old engine treated the resulting `pointercancel` as a drop, which could place a player where the finger lifted. `selectionDnd` now ends a cancelled gesture without dropping, and the Whiteboard card ignores `pointerType === 'touch'` on pointer down, so mouse, trackpad and pen still drag on an iPad. Taps do the work: a Pool tap adds to the team in the "Tap a player to add them to" box (the active team, changed here without scrolling back to a team header), and a team player opens `SlotActionSheet`, built on the Selection board's `BottomSheet` and `SheetAction`. A move uses the same `onDrop` path as dropping on a column, so the same full, not-in-pool and already-in refusals apply; the sheet greys those rows out and says why. The hover-only captain, keeper and remove buttons are not drawn on touch.
+
+The menu button in `BetterSelectLayout` (`data-menu-toggle`) hides the sidebar from `md` up and keeps the choice in `usePersistedState('select.sidebarHidden')`. Below `md` the same button opens the existing slide-over.
+
+Check: `verify_whiteboard_phone_browser.mjs` (33), driven with real touch events through CDP (`Input.dispatchTouchEvent`; `Input.synthesizeScrollGesture` did not scroll even a plain div here). `verify_draft_table_browser.mjs`'s 390px check now expects the board. Checked in Chromium only; Edge and Chrome on iOS run on WebKit, which this sandbox does not have.

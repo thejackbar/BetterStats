@@ -77,23 +77,27 @@ export function DnD({ onDrop, children }) {
       setHover(t ? t.key : null)
       setDrag({ item: r.item, x: e.clientX, y: e.clientY })
     }
-    const up = (e) => {
+    const finish = (e, drop) => {
       const r = ref.current
       if (!r.item) return
-      if (r.active) { const t = hit(e.clientX, e.clientY); if (t) onDropRef.current(t, r.item) }
+      if (drop && r.active) { const t = hit(e.clientX, e.clientY); if (t) onDropRef.current(t, r.item) }
       r.item = null; r.active = false
       cancelAnimationFrame(raf); raf = 0
       document.body.style.userSelect = ''
       setDrag(null); setHover(null)
     }
+    const up = (e) => finish(e, true)
+    // The browser took the gesture (a finger that turned into a scroll): that is
+    // not a drop, whatever is under the finger when it lets go.
+    const cancel = (e) => finish(e, false)
     window.addEventListener('pointermove', move, { passive: false })
     window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', up)
+    window.addEventListener('pointercancel', cancel)
     return () => {
       cancelAnimationFrame(raf)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', up)
+      window.removeEventListener('pointercancel', cancel)
       document.body.style.userSelect = ''
     }
   }, [])

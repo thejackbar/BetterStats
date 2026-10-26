@@ -11,6 +11,7 @@ import ModuleSwitcher from './ModuleSwitcher'
 import BookmarkButton from './BookmarkButton'
 import { IS_AFL, PLATFORM_NAME } from '../../lib/sport'
 import { useHalfColours } from '../../lib/useAvailabilityConfig'
+import usePersistedState from '../../lib/usePersistedState'
 
 // The football app has no bookmarks service, so the star renders nothing there.
 const Bookmark = IS_AFL ? () => null : BookmarkButton
@@ -134,6 +135,9 @@ export default function BetterSelectLayout({ children, title, caption, actions, 
   const location = useLocation()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
+  // From tablet width up the menu is pinned beside the page. It can be tucked away
+  // to give a wide screen (the Whiteboard) its room, and the choice is remembered.
+  const [navHidden, setNavHidden] = usePersistedState('select.sidebarHidden', false, (v) => typeof v === 'boolean')
   const [club, setClub] = useState(_clubCache)
   useEffect(() => { loadClubBranding().then(s => { if (s) setClub(s) }) }, [])
   useClubTheme(club)  // inject the club's white-label palette (accent etc.)
@@ -203,7 +207,7 @@ export default function BetterSelectLayout({ children, title, caption, actions, 
     <div className="min-h-screen bg-pb-bg text-pb-text flex"
       style={{ '--pb-accent': BRAND.accent, '--pb-accent-rgb': BRAND.accentRgb }}>
       {/* Sidebar */}
-      <aside className="w-60 border-r pb-hairline bg-pb-surface hidden md:flex flex-col sticky top-0 h-screen">
+      <aside data-sidebar className={`w-60 border-r pb-hairline bg-pb-surface ${navHidden ? 'hidden' : 'hidden md:flex'} flex-col sticky top-0 h-screen`}>
         <Brand />
         <nav className="flex-1 overflow-y-auto py-2"><NavItems /></nav>
       </aside>
@@ -235,7 +239,11 @@ export default function BetterSelectLayout({ children, title, caption, actions, 
             sideways and they certainly do not overlap. */}
         <header className="sticky top-0 z-30 bg-pb-surface/80 backdrop-blur border-b pb-hairline px-4 md:px-6 py-3 flex flex-wrap xl:flex-nowrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex items-center gap-3">
-            <button onClick={() => setMobileOpen(true)} className="md:hidden text-pb-faint">☰</button>
+            <button type="button" onClick={() => setMobileOpen(true)} aria-label="Open the menu" data-menu-open
+              className="md:hidden -ml-2 w-11 h-11 inline-flex items-center justify-center text-[20px] text-pb-faint active:text-pb-text">☰</button>
+            <button type="button" onClick={() => setNavHidden((h) => !h)} data-menu-toggle aria-expanded={!navHidden}
+              aria-label={navHidden ? 'Show the menu' : 'Hide the menu'} title={navHidden ? 'Show the menu' : 'Hide the menu'}
+              className="hidden md:inline-flex -ml-1.5 w-9 h-9 items-center justify-center rounded-lg text-[18px] text-pb-faint hover:text-pb-text hover:bg-pb-surface2">☰</button>
             <div className="min-w-0">
               <h1 className="font-display font-bold text-lg md:text-xl truncate min-w-0">{title}</h1>
               {caption && <div className="font-mono text-[10.5px] text-pb-faintest truncate">{caption}</div>}
