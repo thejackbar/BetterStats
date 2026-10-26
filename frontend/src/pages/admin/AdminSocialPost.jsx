@@ -173,6 +173,13 @@ const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', CUSTOM_LAYOUT_ID]
 // on the player either way, so switching layout never loses it.
 const DEBUT_TEMPLATES = ['T1', 'T3', 'T10', 'T11', 'T12']
 const DEBUT_TEMPLATE_NAMES = { T1: 'Hero List', T3: 'Side Numbered', T10: 'Team Sheet', T11: 'Split Poster', T12: 'Match Day Card' }
+// The layouts that draw the gold milestone badge and the Milestone watch strip. Same
+// reasoning as the debut tag: a lineup layout opts in once its rows and footer have been
+// made to hold them at every post size.
+const WATCH_TEMPLATES = ['T1', 'T2', 'T3', 'T10', 'T11', 'T12']
+const WATCH_TEMPLATE_NAMES = { T1: 'Hero List', T2: 'Card Grid', T3: 'Side Numbered', T10: 'Team Sheet', T11: 'Split Poster', T12: 'Match Day Card' }
+// A match day the server can read: ISO only. The editor's own date is often a display string.
+const matchDayIso = (v) => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10) : null)
 
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
@@ -413,7 +420,7 @@ const ROLE_LONG = IS_AFL
   ? { FB: 'Full Back', HB: 'Half Back', C: 'Centre', W: 'Wing', MID: 'Midfield', RUCK: 'Ruck', HF: 'Half Forward', FF: 'Full Forward', UTIL: 'Utility' }
   : { BAT: 'Batter', BOWL: 'Bowler', AR: 'All-Rounder', WK: 'Wicket-Keeper' }
 
-function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, debut = false, role = IS_AFL ? '' : 'BAT', totw = null } = {}, nameFormat = 'last_first', swap = false) {
+function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, debut = false, role = IS_AFL ? '' : 'BAT', totw = null, milestone = null } = {}, nameFormat = 'last_first', swap = false) {
   const raw = splitName(p.display_name || p.name, nameFormat)
   const first = swap ? raw.last : raw.first
   const last  = swap ? raw.first.toUpperCase() : raw.last
@@ -423,6 +430,8 @@ function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keepe
     captain, viceCaptain, keeper,
     // First game for the club. Tagged on the lineup layouts that draw it.
     debut: !!debut,
+    // The club milestone this player is about to reach (lineup posts only), or null.
+    milestone,
     headshot: p.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null,
     // The action shot, when the club has one. Only the big hero slot reaches
     // for it — grids and card fronts stay on the headshot, which is the photo
@@ -1725,6 +1734,27 @@ export default function AdminSocialPost() {
       setDebutCheck({ status: 'err', message: e?.message || 'Could not check debuts' })
     }
   }, [])
+
+  // Milestone watch: which of the lineup's players are about to reach a club milestone,
+  // read from the Milestones page's own figures. `watchOn` is the club's switch for this
+  // post; the strip and the badges draw only on the layouts in WATCH_TEMPLATES. A stale
+  // answer (the last round has not been pulled) stops the post being made until it is
+  // re-checked or the strip is switched off.
+  const [watchOn, setWatchOn] = useState(true)
+  const [watchDate, setWatchDate] = useState(null)
+  const [watchNonce, setWatchNonce] = useState(0)
+  const [watchState, setWatchState] = useState(null)
+  const watchIds = selectedPlayers.map((sp) => sp?.player?.id).filter(Boolean).map(String)
+  const watchKey = watchIds.join(',')
+  useEffect(() => {
+    if (IS_AFL || !WATCH_TEMPLATES.includes(templateId) || !watchOn || !watchKey) { setWatchState(null); return undefined }
+    let dead = false
+    setWatchState({ status: 'loading' })
+    api.getSocialMilestoneWatch(watchKey.split(','), watchDate)
+      .then((d) => { if (!dead) setWatchState({ status: 'ok', data: d }) })
+      .catch((e) => { if (!dead) setWatchState({ status: 'err', message: e?.message || 'Could not read milestones' }) })
+    return () => { dead = true }
+  }, [watchKey, watchDate, watchOn, templateId, watchNonce])
 
   const [scorecardMatch, setScorecardMatch] = useState(DEFAULT_SCORECARD)
   const [scUrlInput, setScUrlInput] = useState('')
@@ -3058,6 +3088,7 @@ export default function AdminSocialPost() {
   // with Google Fonts embedded so the display face survives the capture). The
   // render target is already mounted off-screen at full W×H.
   const handleExport = async () => {
+    if (watchBlock) { setExportError(watchBlock); return }
     setExporting(true)
     setExportError(null)
     try {
@@ -3105,6 +3136,7 @@ export default function AdminSocialPost() {
   // Blank-tab multi-slide carousel) to keep this additive and low-risk.
   const handleSaveToClubRoom = async () => {
     if (!renderRef.current) return
+    if (watchBlock) { setExportError(watchBlock); return }
     setSavingToClubRoom(true)
     setExportError(null)
     setClubRoomSaved(false)
@@ -3451,10 +3483,24 @@ export default function AdminSocialPost() {
     if (scSplitOn) { extraProps.square = true; extraProps.only = scSplitIdx === 0 ? 'home' : 'away' }
   }
 
+  // The watch answer for the open layout, only while it is switched on and drawn here.
+  const watchLive = !IS_AFL && watchOn && WATCH_TEMPLATES.includes(templateId) && watchState?.status === 'ok' ? watchState.data : null
   const templatePlayers = selectedPlayers.map((sp, i) => {
-    const base = playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames)
+    const badge = watchLive?.badges?.[String(sp.player.id)] || null
+    const base = playerToTemplatePlayer(sp.player, badge ? { ...sp, milestone: badge } : sp, nameFormat, swapNames)
     return base
   })
+  const watchItems = (watchLive?.items || []).map((it) => {
+    const tp = templatePlayers.find((t) => String(t._id) === String(it.player_id))
+    return tp ? { key: `${it.player_id}:${it.kind}`, name: [tp.first, tp.last].filter(Boolean).join(' '), label: it.label } : null
+  }).filter(Boolean)
+  // Making the post is refused while the figures may be a round behind (or still being read).
+  const watchBlock = !IS_AFL && watchOn && WATCH_TEMPLATES.includes(templateId) && watchKey
+    ? (watchState?.status === 'loading' ? 'Reading milestones'
+      : watchState?.status === 'ok' && watchState.data.stale ? (watchState.data.stale_reason || 'Milestone figures are out of date') : null)
+    : null
+  // Absent when there is nothing to say, so a lineup without milestones is as it was.
+  if (watchItems.length) extraProps.watch = watchItems
 
   const matchData = {
     competition: match.competition || 'COMPETITION',
@@ -4137,6 +4183,7 @@ export default function AdminSocialPost() {
         return { player, role: IS_AFL ? ((pp?.skill_positions?.[0]) || '') : socialRole({ ...player, ...(pp || {}) }), captain: !!l.is_captain, viceCaptain: false, keeper: !!l.is_wicket_keeper }
       }).filter(Boolean)
       setSelectedPlayers(picked)
+      setWatchDate(matchDayIso(d.fixture?.played_on))
       checkDebuts(picked, d.fixture?.played_on || null)
       const fx = d.fixture
       if (fx) {
@@ -4174,6 +4221,7 @@ export default function AdminSocialPost() {
       }
     })
     setSelectedPlayers(picked)
+    setWatchDate(matchDayIso(fx.date))
     checkDebuts(picked, fx.date || null)
     setMatch((m) => ({ ...m, competition: fx.grade || m.competition, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
     if (oppTeam?.club || oppTeam?.name) setOpponent((o) => ({ ...o, name: oppTeam.club || oppTeam.name || o.name, logo: oppTeam.logo_url || o.logo }))
@@ -4462,12 +4510,13 @@ export default function AdminSocialPost() {
       <button onClick={openSaveDialog} title="Save this post as a reusable template" data-testid="save-as-template"
         className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">SAVE AS TEMPLATE</button>
       {!IS_AFL && !((isBlankTab && pages.count > 1) || roundPagesOn || scSplitOn) && (
-        <button onClick={handleSaveToClubRoom} disabled={savingToClubRoom} title="Add this post to the Club Room Mode TV slideshow"
+        <button onClick={handleSaveToClubRoom} disabled={savingToClubRoom || !!watchBlock} title={watchBlock ? `${watchBlock}. Check the Milestone watch under Players, or switch it off.` : 'Add this post to the Club Room Mode TV slideshow'}
           className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-60">
           {savingToClubRoom ? 'SAVING…' : clubRoomSaved ? '✓ SAVED' : 'SAVE TO CLUB ROOM'}
         </button>
       )}
-      <button onClick={handleExport} disabled={exporting}
+      <button onClick={handleExport} disabled={exporting || !!watchBlock} data-testid="download-png"
+        title={watchBlock ? `${watchBlock}. Check the Milestone watch under Players, or switch it off.` : undefined}
         className="px-3.5 h-8 rounded-md font-mono text-[10px] tracking-wide2 disabled:opacity-60 transition-colors"
         style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>{exporting ? 'EXPORTING…' : (isBlankTab && pages.count > 1 ? `↓ ${pages.count} SLIDES` : roundPagesOn ? `↓ ${roundPage.count} SLIDES` : scSplitOn ? '↓ 2 SLIDES' : '↓ DOWNLOAD PNG')}</button>
     </>
@@ -5569,6 +5618,49 @@ export default function AdminSocialPost() {
                           ? debutCheck.message
                           : 'Marks a player DEBUT when the club holds no earlier game for them. Switch any tag by hand with the DEBUT button on their row.'}
                     </p>
+                  </div>
+                )}
+                {!IS_AFL && selectedPlayers.length > 0 && (
+                  <div className="mb-3 flex flex-col gap-1" data-testid="milestone-watch">
+                    <label className="flex items-center gap-2 text-[11px] text-pb-dim cursor-pointer select-none">
+                      <input type="checkbox" checked={watchOn} onChange={(e) => setWatchOn(e.target.checked)} data-testid="milestone-watch-toggle" />
+                      <span className="font-mono text-[10px] tracking-wide2">MILESTONE WATCH</span>
+                    </label>
+                    {watchOn && !WATCH_TEMPLATES.includes(templateId) && (
+                      <p className="text-[11px] text-pb-faint leading-relaxed" data-testid="milestone-unsupported">
+                        {tmpl.name} does not draw milestones. Layouts that do: <span className="text-pb-dim">{WATCH_TEMPLATES.map(id => WATCH_TEMPLATE_NAMES[id]).join(', ')}</span>.
+                      </p>
+                    )}
+                    {watchOn && WATCH_TEMPLATES.includes(templateId) && (
+                      <div className="text-[11px] leading-relaxed" data-testid="milestone-watch-status">
+                        {watchState?.status === 'loading' && <p className="text-pb-faintest">Reading the club's milestones…</p>}
+                        {watchState?.status === 'err' && (
+                          <p className="text-pb-red">{watchState.message}. The post has no milestones until this is read.</p>
+                        )}
+                        {watchState?.status === 'ok' && watchState.data.stale && (
+                          <p className="text-pb-red" data-testid="milestone-stale">
+                            Not making this post: {watchState.data.stale_reason}
+                          </p>
+                        )}
+                        {watchState?.status === 'ok' && !watchState.data.stale && (
+                          <p className="text-pb-faintest">
+                            {watchItems.length
+                              ? `${watchItems.length} on the strip, ${Object.keys(watchState.data.badges || {}).length} with a badge. `
+                              : 'Nobody in this XI is close to a club milestone. '}
+                            {watchState.data.freshness === 'unknown'
+                              ? 'The club has no sync history to check the figures against, so they are as the club last recorded them. '
+                              : watchState.data.as_of
+                                ? `Figures to the round of ${watchState.data.as_of}. `
+                                : ''}
+                            {watchState.data.known.length < watchIds.length
+                              ? `${watchIds.length - watchState.data.known.length} not in the club's player list, so left out. `
+                              : ''}
+                          </p>
+                        )}
+                        <button onClick={() => setWatchNonce((n) => n + 1)} data-testid="milestone-recheck"
+                          className="mt-1 font-mono text-[10px] tracking-wide2 px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text">CHECK AGAIN</button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {!IS_AFL && selectedPlayers.length < playerCap && (

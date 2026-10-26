@@ -20,7 +20,7 @@
 // Every part is a root child with a `data-layer` name, so each is a layer in
 // the Layers panel and can be reordered or hidden.
 import { useLayoutEffect, useRef, useState } from 'react'
-import { AutoFitText, CreditMark, RoleChip, DebutTag, LINEUP_MAX } from './cricket-templates'
+import { AutoFitText, CreditMark, RoleChip, DebutTag, MilestoneBadge, watchStrip, watchStripH, LINEUP_MAX } from './cricket-templates'
 import { mixHex } from './split-template'
 import { aspectOf, pick } from './postAspect'
 import { LayerRoot } from './postLayers'
@@ -66,7 +66,7 @@ function sponsorBarH(count) {
 // shapes are 1080 wide, so the question is only where the extra height goes.
 // `players` is how many names the list holds: the rows share the same room, so a
 // twelfth player makes each row a little shorter instead of being cut.
-function cardGeo(width, height, count, players = 11) {
+function cardGeo(width, height, count, players = 11, watchCount = 0) {
   const A = aspectOf(width, height)
   const barH = sponsorBarH(count)
   // A story's bottom couple of hundred pixels carry the app's reply bar: the
@@ -77,14 +77,16 @@ function cardGeo(width, height, count, players = 11) {
   const logoMaxH = pick(A, { square: 116, portrait: 132, story: 176 })
   const top0 = logoTop + logoMaxH + pick(A, { square: 24, portrait: 30, story: 40 })
   const gapAbove = barH ? pick(A, { square: 36, portrait: 44, story: 56 }) : pick(A, { square: 56, portrait: 64, story: 220 })
-  const avail = height - barTotal - gapAbove - top0
+  // The milestone watch strip takes its room off the foot of the list's run.
+  const watchH = watchStripH(watchCount, A)
+  const avail = height - barTotal - gapAbove - top0 - (watchH ? watchH + 16 : 0)
   const rows = Math.max(11, Math.min(players, LINEUP_MAX))
   const rowH = Math.min(pick(A, { square: 60, portrait: 76, story: 88 }), avail / rows)
   const listH = rowH * rows
   // Rows stop growing before the room runs out, so the list is centred in what
   // is left rather than hanging from the logo.
   const listTop = top0 + Math.max(0, (avail - listH) / 2)
-  return { A, barH, lift, barTotal, logoTop, logoMaxH, top0, rowH, listH, listTop }
+  return { A, barH, lift, barTotal, logoTop, logoMaxH, top0, rowH, listH, listTop, watchH, gapAbove, avail }
 }
 
 // The sponsor grid sits inside the white bar, clear of the two corner slashes.
@@ -204,7 +206,7 @@ function useSharedNameSize(listRef, cap) {
 
 export function LineupCard({
   width = 1080, height = 1080, team = {}, opponent = {}, match = {}, players, palette = {},
-  card, sponsorCount = 1, sponsorPanel = 'light', logoRatio = 1, headline = '', parts,
+  card, sponsorCount = 1, sponsorPanel = 'light', logoRatio = 1, headline = '', watch, parts,
 }) {
   const P = (players || []).slice(0, LINEUP_MAX)
   const c = { ...LINEUP_CARD_DEFAULTS, ...(card || {}) }
@@ -216,7 +218,7 @@ export function LineupCard({
   const cornerLight = pc(parts, 't12CornerStripe', mixHex(corner, '#ffffff', 0.38))
   const wash = pc(parts, 't12Wash', c.wash || cardWashDefault(accent))
   const washOpacity = Math.max(0, Math.min(1, Number(c.washOpacity)))
-  const g = cardGeo(width, height, sponsorCount, P.length)
+  const g = cardGeo(width, height, sponsorCount, P.length, (watch || []).length)
   const { A, rowH } = g
 
   // Text is white unless the wash is both pale and heavy enough to need dark type.
@@ -314,6 +316,7 @@ export function LineupCard({
                 {p.captain && <RoleChip kind="C" accent={chipBg} ink={chipInk} />}
                 {p.viceCaptain && <RoleChip kind="VC" accent={chipBg} ink={chipInk} />}
                 {p.debut && <DebutTag accent={chipBg} ink={chipInk} />}
+                {p.milestone && <MilestoneBadge m={p.milestone} compact />}
               </div>
               <div style={{ width: RAIL_W, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <RoleIcon kind={kind} size={iconSize} />
@@ -322,6 +325,8 @@ export function LineupCard({
           )
         })}
       </div>
+
+      {watchStrip({ items: watch, A, ink: '#ffffff', style: { position: 'absolute', left: LIST_X, width: width - 200 - LIST_X, top: g.top0 + g.avail + 16 } })}
 
       <div data-layer="Match details" style={{
         position: 'absolute', left: detailsX, top: g.listTop, width: detailsW, textAlign: 'center', color: ink,

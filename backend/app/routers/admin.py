@@ -2207,6 +2207,35 @@ async def get_social_debuts(
         raise HTTPException(500, f"Debut check error: {exc}") from exc
 
 
+@router.get("/social/milestone-watch", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
+async def get_social_milestone_watch(
+    player_ids: str = "", on: str = "",
+    db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
+):
+    """Upcoming club milestones for a lineup's players, for the BetterSocials
+    lineup posts: a gold badge beside a name and a "Milestone watch" strip.
+
+    ``player_ids`` is a comma separated list of this club's player ids and ``on``
+    the match day (ISO, today when absent). The figures and the thresholds are
+    the Milestones page's own, read through the club's increments. The answer
+    carries ``freshness`` (``fresh``, ``stale`` or ``unknown``): ``stale`` means
+    the last round has not been pulled yet, and the editor will not make the post
+    until it has been."""
+    from datetime import date as _date
+    from app.services.social_milestones import parse_ids, social_milestones
+    day = None
+    if on.strip():
+        try:
+            day = _date.fromisoformat(on.strip()[:10])
+        except ValueError:
+            raise HTTPException(400, "on must be an ISO date (YYYY-MM-DD)")
+    try:
+        return await social_milestones(db, club, parse_ids(player_ids), day)
+    except Exception as exc:
+        log.exception("social milestone watch failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Milestone watch error: {exc}") from exc
+
+
 async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None):
     raw = await get_match_scorecard(match_id)
     if raw is None:

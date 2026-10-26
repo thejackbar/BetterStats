@@ -301,6 +301,7 @@ export default function AdminMilestones() {
   const [savingStep, setSavingStep] = useState(false)
   const [stepError, setStepError] = useState(null)
   const [gradeError, setGradeError] = useState(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -376,46 +377,6 @@ export default function AdminMilestones() {
           <h1 className="font-display font-bold text-2xl text-pb-text mb-1">Milestones</h1>
           <p className="text-pb-faint text-sm">Upcoming and achieved milestones across all club members.</p>
         </div>
-
-        {/* Which milestones the club tracks. Applies to the Milestones page the
-            public sees, the dashboard, player profiles and the milestone emails. */}
-        {data?.scheme && (
-          <div className="pb-card px-4 py-4 mb-6">
-            <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Milestones tracked</p>
-            <p className="text-pb-faint text-sm mb-3">
-              Choose how often a milestone is marked across a player's whole career at the club.
-              Pick a preset or type your own.
-            </p>
-            <div className="flex flex-wrap gap-x-8 gap-y-4">
-              {STATS.map(({ stat, label }) => (
-                <StepPicker
-                  key={stat}
-                  label={`${label}, every`}
-                  stat={stat}
-                  value={data.scheme[`${stat}_step`]}
-                  options={data.scheme_options[`${stat}_steps`]}
-                  limits={data.step_limits[stat]}
-                  onChange={v => changeStep(`${stat}_step`, v)}
-                  disabled={!canPickSteps || savingStep}
-                />
-              ))}
-            </div>
-            {!canPickSteps && (
-              <p className="text-pb-faintest text-xs mt-3">You need the Milestones permission to change these.</p>
-            )}
-            {stepError && <p className="text-red-400 text-sm mt-3">{stepError}</p>}
-          </div>
-        )}
-
-        {data?.scheme && data.grade_schemes && (
-          <GradeSchemeCard
-            data={data}
-            canEdit={canPickSteps}
-            saving={savingStep}
-            onChange={changeGradeStep}
-            error={gradeError}
-          />
-        )}
 
         {/* Filter bar */}
         <div className="flex flex-wrap items-center gap-3 mb-6">
@@ -663,6 +624,71 @@ export default function AdminMilestones() {
               </section>
             )}
           </div>
+        )}
+
+        {/* The increments live at the foot and start closed: the list of runs,
+            wickets and matches pickers (plus a card per grade) was longer than
+            the milestones it configures. */}
+        {data?.scheme && (
+          <section className="mt-10" data-testid="milestone-settings">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(v => !v)}
+              aria-expanded={settingsOpen}
+              aria-controls="milestone-settings-body"
+              className="w-full flex items-center justify-between gap-3 pb-card px-4 py-3 text-left hover:bg-pb-surface2 transition-colors"
+            >
+              <span>
+                <span className="block font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Milestone settings</span>
+                <span className="block text-pb-faintest text-xs mt-0.5">How often runs, wickets, matches and catches are marked, club wide and by grade.</span>
+              </span>
+              <span className="font-mono text-[10px] tracking-wide2 text-pb-faint shrink-0">{settingsOpen ? 'HIDE' : 'SHOW'}</span>
+            </button>
+            {settingsOpen && (
+              <div id="milestone-settings-body" className="mt-4 space-y-6">
+            {/* Which milestones the club tracks. Applies to the Milestones page the
+                public sees, the dashboard, player profiles and the milestone emails. */}
+            {data?.scheme && (
+              <div className="pb-card px-4 py-4">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Milestones tracked</p>
+                <p className="text-pb-faint text-sm mb-3">
+                  Choose how often a milestone is marked across a player's whole career at the club.
+                  Pick a preset or type your own.
+                </p>
+                <div className="flex flex-wrap gap-x-8 gap-y-4">
+                  {STATS.map(({ stat, label }) => (
+                    <StepPicker
+                      key={stat}
+                      label={`${label}, every`}
+                      stat={stat}
+                      value={data.scheme[`${stat}_step`]}
+                      options={data.scheme_options[`${stat}_steps`]}
+                      limits={data.step_limits[stat]}
+                      onChange={v => changeStep(`${stat}_step`, v)}
+                      disabled={!canPickSteps || savingStep}
+                    />
+                  ))}
+                </div>
+                {!canPickSteps && (
+                  <p className="text-pb-faintest text-xs mt-3">You need the Milestones permission to change these.</p>
+                )}
+                {stepError && <p className="text-red-400 text-sm mt-3">{stepError}</p>}
+              </div>
+            )}
+
+            {data?.scheme && data.grade_schemes && (
+              <GradeSchemeCard
+                data={data}
+                canEdit={canPickSteps}
+                saving={savingStep}
+                onChange={changeGradeStep}
+                error={gradeError}
+              />
+            )}
+
+              </div>
+            )}
+          </section>
         )}
       </div>
     </BetterStatsLayout>
