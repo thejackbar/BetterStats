@@ -56,7 +56,7 @@ export function cardSponsor(data) {
 }
 
 // Hero photo first, then the headshot, then nothing (the club logo stands in). A photo that fails to load drops a step.
-function usePhotoMode(heroUrl, photoUrl) {
+export function usePhotoMode(heroUrl, photoUrl) {
   const [heroOk, setHeroOk] = useState(!!heroUrl)
   const [photoOk, setPhotoOk] = useState(!!photoUrl)
   useEffect(() => { setHeroOk(!!heroUrl) }, [heroUrl])

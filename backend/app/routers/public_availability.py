@@ -212,6 +212,7 @@ async def get_landing(token: str, db: AsyncSession = Depends(get_db)):
     return {
         "club": _club_branding(club),
         "require_pin": bool(club.availability_require_pin),
+        "has_availability": org_has_module(club, MODULE_SELECT),
         "allow_maybe": allow_maybe(club),
         "week_names": rules_svc.club_config(club)["week_names"],
         "players": [

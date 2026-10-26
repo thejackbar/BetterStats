@@ -16,13 +16,14 @@ import { api } from '../lib/api'
 import { AvailabilityEditor, ALL_CHOICES, unansweredNextWeek } from './playerhome/AvailabilityEditor'
 import Group, { useOpenSections } from './playerhome/Group'
 import DetailsModal from './playerhome/DetailsModal'
+import CardsModule from './playerhome/CardsModule'
 import FantasyCard, { fmtLockShort, nextDeadline, ordinal } from './playerhome/FantasyCard'
 import PlayerHero from './playerhome/PlayerHero'
 import SeasonDashboard from './playerhome/SeasonDashboard'
 import { Muted, Section, fmtShort, money } from './playerhome/ui'
 
 
-function ClubHeader({ club }) {
+function ClubHeader({ club, hasAvailability = true }) {
   const initials = (club?.name || 'Club').split(' ').map((w) => w[0]).join('').slice(0, 3).toUpperCase()
   return (
     <div className="flex flex-col items-center text-center gap-3 mb-6">
@@ -30,8 +31,8 @@ function ClubHeader({ club }) {
         ? <img src={club.logo_url} alt="" className="w-16 h-16 rounded-xl object-contain bg-pb-surface2 p-1" />
         : <span className="w-16 h-16 rounded-xl flex items-center justify-center font-display font-bold text-xl" style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{initials}</span>}
       <div>
-        <div className="font-display font-bold text-xl leading-tight">{club?.name || 'Set your availability'}</div>
-        <div className="font-mono text-[11px] tracking-wide2 text-pb-faint mt-1">SET YOUR AVAILABILITY</div>
+        <div className="font-display font-bold text-xl leading-tight">{club?.name || 'Your player page'}</div>
+        <div className="font-mono text-[11px] tracking-wide2 text-pb-faint mt-1">{hasAvailability ? 'SET YOUR AVAILABILITY' : 'YOUR PLAYER PAGE'}</div>
       </div>
     </div>
   )
@@ -365,9 +366,10 @@ function FinesModule({ data }) {
 
 // The sections of the page, in the order a player reads them. Each holds the club's
 // modules that belong to it, in the club's own order; a section with none drops out.
-// Availability always shows, because the answer buttons are in it.
+// Availability always shows for a club with BetterSelect, because the answer buttons are in it.
 const GROUPS = [
   { id: 'availability', title: 'Availability', keys: [] },
+  { id: 'cards', title: 'Player Cards', keys: ['cards'], hideTitle: true, wide: true },
   { id: 'selection', title: 'Selection', keys: ['squad', 'selected', 'training', 'ladder'] },
   { id: 'admin', title: 'Club admin', keys: ['fees', 'fines'] },
   { id: 'voting', title: 'Voting', keys: ['votes'], hideTitle: true },
@@ -383,11 +385,16 @@ const GREEN = 'var(--pb-positive)'
 
 // One line per section, from data the page already holds, shown even when the
 // section is closed. Left empty rather than made up when there is nothing true to say.
-function summaryFor(id, { me, data, ladder }) {
+function summaryFor(id, { me, data, ladder, cardsReady }) {
   if (id === 'availability') {
     const n = unansweredNextWeek(me)
     if (n > 0) return { text: `${n} to answer`, tone: AMBER }
     return (me.dates || []).length ? { text: 'All answered', tone: GREEN } : { text: 'No games to answer yet' }
+  }
+  if (id === 'cards') {
+    const n = cardsReady ?? data?.cards?.ready
+    if (n == null) return {}
+    return n > 0 ? { text: n === 1 ? '1 pack to open' : `${n} packs to open`, tone: AMBER } : { text: 'Card book' }
   }
   if (!data) return {}
   if (id === 'selection') {
@@ -436,6 +443,7 @@ function MyPage({ token, me, club, availability, onSwitch }) {
   const [showDetails, setShowDetails] = useState(false)
   const [notice, setNotice] = useState(null) // {text, tone} after a save
   const [ranks, setRanks] = useState(null) // club ranks for the season shown; read once, when Stats opens
+  const [cardsReady, setCardsReady] = useState(null) // packs to open, kept current as the player opens them
   useEffect(() => {
     let alive = true
     const load = () => api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
@@ -472,6 +480,7 @@ function MyPage({ token, me, club, availability, onSwitch }) {
 
   const render = (key) => {
     switch (key) {
+      case 'cards': return <CardsModule key={key} token={token} club={club} onReady={setCardsReady} />
       case 'votes': return <VotesModule key={key} data={data} />
       case 'ladder': return <LadderModule key={key} state={ladder} />
       case 'season': return <SeasonDashboard key={key} data={data} ranks={ranks} />
@@ -487,7 +496,7 @@ function MyPage({ token, me, club, availability, onSwitch }) {
   const squads = data ? (data.squads || []) : (me.squads || [])
   const shown = GROUPS
     .map((g) => ({ ...g, mods: modules.filter((m) => g.keys.includes(m)) }))
-    .filter((g) => g.id === 'availability' || g.mods.length > 0)
+    .filter((g) => (g.id === 'availability' ? me.has_availability !== false : g.mods.length > 0))
   const allOpen = shown.every((g) => sections.isOpen(g.id))
 
   return (
@@ -518,9 +527,9 @@ function MyPage({ token, me, club, availability, onSwitch }) {
       </div>
       <div className="md:columns-2 md:gap-3" data-groups>
         {shown.map((g) => {
-          const { text, tone } = summaryFor(g.id, { me, data, ladder })
+          const { text, tone } = summaryFor(g.id, { me, data, ladder, cardsReady })
           return (
-            <Group key={g.id} id={g.id} hideTitle={g.hideTitle}
+            <Group key={g.id} id={g.id} hideTitle={g.hideTitle} wide={g.wide}
               title={g.id === 'fantasy' && data?.fantasy?.name ? data.fantasy.name : g.title}
               summary={text} tone={tone} open={sections.isOpen(g.id)} onToggle={sections.toggle}>
               {g.id === 'availability' && availability({ selected: data?.selected || [] })}
@@ -553,6 +562,7 @@ export default function PublicAvailability() {
   const [step, setStep] = useState('loading') // loading | pick | pin | weekend | dead
   const [club, setClub] = useState(null)
   const [requirePin, setRequirePin] = useState(true)
+  const [hasAvailability, setHasAvailability] = useState(true) // false for a club without BetterSelect: no games to answer
   const [players, setPlayers] = useState([])
   const [search, setSearch] = useState('')
   const [chosen, setChosen] = useState(null) // {id, display_name, has_phone}
@@ -591,6 +601,7 @@ export default function PublicAvailability() {
         if (!alive) return
         setClub(d.club)
         setRequirePin(d.require_pin)
+        setHasAvailability(d.has_availability !== false)
         setPlayers(d.players || [])
         // Already verified on this device? Jump straight to the weekend.
         try {
@@ -734,7 +745,7 @@ export default function PublicAvailability() {
           </div>
         )}
 
-        {(step === 'pick' || step === 'pin') && <ClubHeader club={club} />}
+        {(step === 'pick' || step === 'pin') && <ClubHeader club={club} hasAvailability={hasAvailability} />}
 
         {/* Step 1 — pick your name */}
         {step === 'pick' && (

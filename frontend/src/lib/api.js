@@ -3397,6 +3397,14 @@ export const api = {
   bsDeleteAvailabilityPeriod: (id) =>
     request(`/availability/periods/${id}`, { method: 'DELETE' }),
 
+  // ─── Player Cards (BetterStats): the club's settings, behind MANAGE_SETTINGS ───
+  getPlayerCardSettings: () => request('/player-cards/settings'),
+  updatePlayerCardSettings: (data) =>
+    request('/player-cards/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  setPlayerCardHidden: (playerId, hidden) =>
+    request(`/player-cards/players/${playerId}/hidden`, { method: 'POST', body: JSON.stringify({ hidden }) }),
+  refreshPlayerCardSpecials: () => request('/player-cards/refresh-specials', { method: 'POST' }),
+
   // ─── BetterSelect: self-service availability link (admin) ───
   bsGetSelfService: () => request('/availability/self-service'),
   bsSetSelfService: (data) =>
@@ -3455,6 +3463,12 @@ export const api = {
   availPublicDetails: (token) => request(`/public/availability/${token}/me/details`),
   availPublicUpdateDetails: (token, data) =>
     request(`/public/availability/${token}/me/details`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // Player Cards on the player's own page: the collection and the packs ready, opening one, opening all.
+  availPublicCards: (token) => request(`/public/availability/${token}/me/cards`),
+  availPublicOpenCard: (token, packId) =>
+    request(`/public/availability/${token}/me/cards/packs/${packId}/open`, { method: 'POST' }),
+  availPublicOpenAllCards: (token) =>
+    request(`/public/availability/${token}/me/cards/open-all`, { method: 'POST' }),
 
   // ─── Public: net check-in (no admin auth; player cookie) ───
   // Reached by scanning the QR code on the fence or tapping the NFC tag —
