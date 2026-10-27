@@ -7,7 +7,7 @@
 
 **Archive** (full history, do not load whole): `docs/dev-notes/archive/player-cards.md`.
 
-**Related guides**: `betterselect-selection-and-nets` (the player page and its PIN), `cross-club-and-data-safety` (`merge_carry`), `stats-figures-records-and-filters` (the figures cards read), `sponsors-tiers-and-naming` (the sponsor chip on a card).
+**Related guides**: `betterselect-selection-and-nets` (the player page and its PIN), `cross-club-and-data-safety` (`merge_carry`), `stats-figures-records-and-filters` (the figures cards read), `sponsors-tiers-and-naming` (the sponsor chip on a card, and who picks it).
 
 ## Standing rules
 

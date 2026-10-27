@@ -23,6 +23,9 @@ export default function AdminSponsors() {
   const [pinTarget, setPinTarget] = useState('')
   const [pinPick, setPinPick] = useState([])
   const [pinSaving, setPinSaving] = useState(false)
+  // The sponsor picked for each card surface: { surfaces: [{ key, label }], picks: { share_card: id|null, ... } }.
+  const [cardPicks, setCardPicks] = useState(null)
+  const [cardSaving, setCardSaving] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -57,11 +60,12 @@ export default function AdminSponsors() {
   async function load() {
     setLoading(true)
     try {
-      const [data, settings, secs, pinData] = await Promise.all([
+      const [data, settings, secs, pinData, cardData] = await Promise.all([
         api.adminListSponsors(), api.adminGetSponsorSettings(), api.adminGetSectionNames(),
-        api.adminGetPostDefaults().catch(() => null),
+        api.adminGetPostDefaults().catch(() => null), api.adminGetCardSponsors().catch(() => null),
       ])
       if (pinData) applyPins(pinData)
+      setCardPicks(cardData)
       setSponsors(data)
       setMeta(settings)
       setLabelDraft(settings.tier_labels || {})
@@ -185,6 +189,19 @@ export default function AdminSponsors() {
     const next = { ...pins, [kind]: { ...pins[kind] } }
     delete next[kind][name]
     savePins(next)
+  }
+
+  async function saveCardPick(surface, sponsorId) {
+    setCardSaving(surface)
+    try {
+      setCardPicks(await api.adminPutCardSponsors({ [surface]: sponsorId || null }))
+      clearClubSponsors()
+      showFlash('Card sponsor saved')
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setCardSaving('')
+    }
   }
 
   function applySections(view) {
@@ -589,6 +606,36 @@ export default function AdminSponsors() {
             >
               {labelSaving ? 'Saving…' : 'Save names'}
             </button>
+          </div>
+        )}
+
+        {/* Card sponsors: the sponsor on the player share card and the Player Cards */}
+        {cardPicks && (
+          <div className="pb-card px-4 py-4 mt-6" data-testid="card-sponsors">
+            <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-1">Sponsors on player cards</h2>
+            <p className="text-pb-faintest text-[11px] mb-3">
+              Pick the sponsor shown on the player share card and on the Player Cards. With nothing picked, the card shows your
+              top sponsor that has a logo. Whoever shares a card can still choose a different sponsor, or none, for that share.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {cardPicks.surfaces.map(surface => (
+                <label key={surface.key} className="text-xs text-pb-faint">
+                  {surface.label}
+                  <select
+                    value={sponsors.some(x => x.id === cardPicks.picks[surface.key] && x.logo_url) ? cardPicks.picks[surface.key] : ''}
+                    onChange={e => saveCardPick(surface.key, e.target.value)}
+                    disabled={cardSaving === surface.key}
+                    className="mt-1 w-full px-2 py-1.5 text-sm bg-pb-bg border pb-hairline rounded text-pb-text focus:outline-none focus:border-pb-accent disabled:opacity-50"
+                  >
+                    <option value="">Top sponsor (automatic)</option>
+                    {sponsors.filter(s => s.logo_url).map(s => (
+                      <option key={s.id} value={s.id}>{s.name} · {tierLabel(s.tier)}</option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+            <p className="mt-2 text-pb-faintest text-[11px]">Only sponsors with a logo can go on a card.</p>
           </div>
         )}
 

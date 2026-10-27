@@ -3057,6 +3057,10 @@ export const api = {
   adminGetPostDefaults: () => request('/club-admin/sponsors/post-defaults'),
   adminPutPostDefaults: (data) =>
     request('/club-admin/sponsors/post-defaults', { method: 'PUT', body: JSON.stringify(data) }),
+  // The sponsor picked for the player share card and for the Player Cards.
+  adminGetCardSponsors: () => request('/club-admin/sponsors/card-sponsors'),
+  adminPutCardSponsors: (data) =>
+    request('/club-admin/sponsors/card-sponsors', { method: 'PUT', body: JSON.stringify(data) }),
   adminPostSponsorDefault: ({ team, grade } = {}) => {
     const params = new URLSearchParams()
     if (team) params.set('team', team)

@@ -49,6 +49,7 @@ from app.services import section_names
 from app.services import honour_layout
 from app.services import honours as honours_service
 from app.services import post_sponsors
+from app.services import card_sponsors
 from app.services import player_privacy
 from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
@@ -5853,6 +5854,53 @@ async def put_post_defaults(
         "assignments": post_sponsors.assignments_view(club.post_sponsor_defaults, ids),
         "club_default_ids": post_sponsors.club_default_ids(sponsors),
     }
+
+
+def _card_sponsors_payload(club: Organisation, sponsors: list[Sponsor]) -> dict:
+    return {
+        "surfaces": [{"key": k, "label": card_sponsors.SURFACE_LABELS[k]} for k in card_sponsors.SURFACES],
+        "picks": card_sponsors.view(club.card_sponsors, sponsors),
+    }
+
+
+@router.get("/sponsors/card-sponsors")
+async def get_card_sponsors(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The sponsor picked for the player share card and for the Player Cards. A
+    surface with no pick shows the club's top sponsor that has a logo."""
+    return _card_sponsors_payload(club, await _club_sponsor_rows(db, club))
+
+
+class CardSponsorsPut(BaseModel):
+    share_card: Optional[str] = None
+    player_cards: Optional[str] = None
+
+
+@router.put("/sponsors/card-sponsors")
+async def put_card_sponsors(
+    data: CardSponsorsPut,
+    current_user: User = Depends(require_cap(MANAGE_SPONSORS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pick the sponsor for a card surface. A surface not sent keeps its pick; sent
+    as null it goes back to the top sponsor. A sponsor that is not this club's, or
+    has no logo, is refused."""
+    sponsors = await _club_sponsor_rows(db, club)
+    usable = {str(s.id) for s in sponsors if s.logo_url}
+    merged = dict(card_sponsors.view(club.card_sponsors, sponsors))
+    for surface in data.model_fields_set:
+        val = getattr(data, surface)
+        if val is not None and val not in usable:
+            raise HTTPException(status_code=422, detail="Pick a sponsor of this club that has a logo")
+        merged[surface] = val
+    club.card_sponsors = card_sponsors.clean(merged, sponsors)
+    await db.commit()
+    await db.refresh(club)
+    return _card_sponsors_payload(club, sponsors)
 
 
 @router.get("/sponsors/post-default")

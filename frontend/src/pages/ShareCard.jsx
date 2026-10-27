@@ -1,4 +1,4 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner } from '../lib/presskit'
@@ -9,7 +9,7 @@ import { rememberClubSlug } from '../lib/clubSlug'
 import { useClubSponsors } from '../lib/useClubSponsors'
 import { exportNodePng } from '../lib/exportNodePng'
 import FlipCard from '../components/FlipCard'
-import { CARD_W, CARD_H, PlayerCardFront, PlayerCardBack, cardSponsor, splitName } from '../components/PlayerTradingCard'
+import { CARD_W, CARD_H, PlayerCardFront, PlayerCardBack, cardSponsor, cardSponsorOptions, NO_SPONSOR, splitName } from '../components/PlayerTradingCard'
 
 // The card's display face follows the club's chosen display font (useClubTheme
 // injects any uploaded @font-face); Barlow Condensed stays the default so a
@@ -42,7 +42,17 @@ export default function ShareCard() {
   // This URL carries no club slug, so tell the sponsor list whose sponsors to draw.
   useEffect(() => { rememberClubSlug(org?.slug) }, [org?.slug])
   const sponsorData = useClubSponsors(org?.slug)
-  const sponsor = cardSponsor(sponsorData)
+  // Who shares the card picks the sponsor on it. '' follows the club's pick; the choice rides in the link
+  // (?sponsor=<id> or ?sponsor=none) so the person who opens it sees the same card.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const sponsorChoice = searchParams.get('sponsor') || ''
+  const sponsorOptions = cardSponsorOptions(sponsorData)
+  const sponsor = cardSponsor(sponsorData, 'share_card', sponsorChoice)
+  const pickSponsor = (value) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev)
+    if (value) next.set('sponsor', value); else next.delete('sponsor')
+    return next
+  }, { replace: true })
 
   // The card is drawn at one fixed size; shrink the whole thing to fit a phone rather than reflowing it.
   useLayoutEffect(() => {
@@ -143,6 +153,22 @@ export default function ShareCard() {
               {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
             </select>
             {statsLoading && <span className="font-mono text-[10px] text-pb-faint">updating…</span>}
+          </div>
+        )}
+
+        {sponsorOptions.length > 0 && (
+          <div className="mb-6 flex items-center gap-3">
+            <label htmlFor="card-sponsor" className="font-mono text-[10px] tracking-wide2 text-pb-faint">SPONSOR</label>
+            <select
+              id="card-sponsor"
+              value={sponsorChoice === NO_SPONSOR || sponsorOptions.some(o => o.id === sponsorChoice) ? sponsorChoice : ''}
+              onChange={e => pickSponsor(e.target.value)}
+              className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
+            >
+              <option value="">Club's choice</option>
+              {sponsorOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              <option value={NO_SPONSOR}>No sponsor</option>
+            </select>
           </div>
         )}
 

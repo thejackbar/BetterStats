@@ -138,7 +138,7 @@ const visibleText = (page) => page.locator('[role="button"][aria-pressed] > div[
 
   // The season picker still drives both requests.
   p.reqs.length = 0
-  await p.page.locator('select').selectOption('s24')
+  await p.page.locator('select:not(#card-sponsor)').selectOption('s24')
   await p.page.waitForTimeout(800)
   ck('picking a season asks for that season\'s stats and rankings', p.reqs.some(r => r.startsWith('/players/p1/stats') && r.includes('season_id=s24')) && p.reqs.some(r => r.startsWith('/players/p1/rankings') && r.includes('season_id=s24')), p.reqs.join(' '))
   ck('and the card says which season', /2024\/25/.test(await p.page.locator('[role="button"][aria-pressed]').innerText()) || /2024/.test(await p.page.locator('body').innerText()))
