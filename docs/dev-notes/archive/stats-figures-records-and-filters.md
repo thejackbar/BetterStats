@@ -2650,3 +2650,9 @@ Asked for: on the partnerships leaderboard, click a row and land on the scorecar
 - Decisions: a draw or a game with no winner awards nothing and is listed for a person. An in-house final (both sides the club's own) is skipped. A 12th man who did not play and a person who asked to be removed are left out. A club that wants either adds the honour by hand, and the reconcile never removes a hand-typed row.
 - Checks: `verify_premierships_auto.py` 60 against a real Postgres (control on the previous commit fails the won-grand-final check: nothing is written from the scorecard). `verify_premierships_auto_browser.mjs` 42 (Premierships page, scorecard banner, Awards panel, profile badge, 390px). `verify_club_room_honours`, `verify_honour_board_caps`, `verify_honour_board_layout` and `verify_club_room_award_slides` pass unchanged. `audit_route_access` output is identical before and after.
 - Not verified: live data. After deploy run `python -m app.scripts.backfill_round_names <club> --apply --premierships` for a club whose grand finals are older than its last full sync, then read the Premierships page against the club's own record.
+
+## v9.131.2.1: premierships skip a hidden junior programme
+
+- Finding: the first Shoalwater Bay dry run listed Under 13, Under 15 and Year 10-11 grand finals. The reconcile did not read `hide_juniors`, so a club hiding its juniors would have had every child in a junior flag named on the public Premierships page.
+- Fix: `grand_final_wins` drops a game whose grade is a hidden junior grade, and the plan removes automatic rows already written for one. Hand-typed rows are never touched.
+- Checks: `verify_premierships_auto.py` section 9b (65 total). The control run on the previous `premierships.py` fails two checks: the junior honours stay with the switch on, and the junior win is still counted.

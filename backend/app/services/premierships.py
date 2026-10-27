@@ -20,6 +20,8 @@ What is stored, and what is not:
   edits is flipped to ``auto_created = FALSE`` by the achievements router and
   is theirs from then on. A person who deletes an automatic honour leaves a
   ``premiership_auto_exclusions`` row, so it is not written back.
+* With ``organisations.hide_juniors`` on, grand finals in junior grades are skipped, and any automatic
+  honour already written for one is removed on the next reconcile (it is ours to remove).
 * A player who asked to be removed (``players.privacy_hidden_at``) gets no automatic honour.
 * Nothing is guessed. A grand final with no winner on the card (a draw, a
   no-result, a missing round name) writes nothing and is reported.
@@ -38,7 +40,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation, async_session_maker
-from app.services import honours
+from app.services import honours, junior_hiding
 from app.services.club_match import fixture_side
 from app.services.grade_labels import grade_alias_map, grade_key, strip_sponsor_suffix
 
@@ -96,7 +98,7 @@ async def grand_final_wins(db: AsyncSession, club: Organisation) -> tuple[list[d
     """
     org_id = club.id
     rows = (await db.execute(text("""
-        SELECT g.id, g.played_at, g.home_team, g.away_team, g.home_org_id, g.away_org_id,
+        SELECT g.id, g.grade_id, g.played_at, g.home_team, g.away_team, g.home_org_id, g.away_org_id,
                g.winning_team, g.round_name, g.status, g.ca_called_off,
                gr.name AS grade_name,
                s.id AS season_id, s.name AS season_name, s.year AS season_year,
@@ -111,11 +113,17 @@ async def grand_final_wins(db: AsyncSession, club: Organisation) -> tuple[list[d
 
     own_names = await _own_grade_names(db, org_id)
     aliases = await grade_alias_map(db, org_id)
+    # A club that hides its junior programme from the public site gets no honours written for it:
+    # a premiership names every child in the side, and the Premierships page is public.
+    hiding = await junior_hiding.resolve(db, org_id, with_players=False)
+    hidden_grades = {str(g) for g in hiding.grade_ids} if hiding.active else set()
 
     candidates: list[dict] = []
     unresolved: list[dict] = []
     for r in rows:
         if not is_grand_final_round(r["round_name"]):
+            continue
+        if r["grade_id"] is not None and str(r["grade_id"]) in hidden_grades:
             continue
         if (r["status"] or "COMPLETED").upper() != "COMPLETED" or r["ca_called_off"]:
             continue
