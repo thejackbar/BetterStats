@@ -18,6 +18,15 @@ longer lists, in this order:
      the row: keep it, set status CANCELLED, and let the club decide. A club's
      hand-typed work is never deleted by a sync.
 
+A game CA re-lists in a DIFFERENT grade is the same side, moved (the association
+put Applecross's 8th XI from One Day Grade 6 to Grade 5): same day, same team of
+ours, new grade and new opponent. It is re-keyed onto the new GUID exactly like
+step 1, so the row keeps its team, picked XI, draft, votes and notes, and the vote
+medals that counted the old grade are widened to count the new one
+(``grade_move``). This also puts right a row an earlier sync already CANCELLED
+because the new grade was not known yet. Only when exactly one row and one game
+share the day and the team name: it never guesses.
+
 A fourth case sits outside that order: a synced fixture that is **not the
 club's at all**. A grade is a whole competition, and before fixtures were
 filtered by owning club a sync stored other clubs' games too ("North Beach v
@@ -35,6 +44,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
@@ -44,6 +54,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Fixture
+from app.services import grade_move
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +78,12 @@ class ReconcileResult:
     rekeyed: list[Fixture] = field(default_factory=list)
     removed: list[Fixture] = field(default_factory=list)
     cancelled: list[Fixture] = field(default_factory=list)
+    moved: list[Fixture] = field(default_factory=list)       # re-keyed into another grade
+    medals_extended: list[str] = field(default_factory=list)  # vote medals now counting the new grade
 
     @property
     def changed(self) -> int:
-        return len(self.rekeyed) + len(self.removed) + len(self.cancelled)
+        return len(self.rekeyed) + len(self.removed) + len(self.cancelled) + len(self.moved)
 
 
 def _norm(s: Optional[str]) -> str:
@@ -142,6 +155,31 @@ def find_stale(
     return stale
 
 
+def find_moved(
+    existing: Iterable[Fixture],
+    incoming_ids: set[str],
+    stale: Iterable[Fixture],
+    today: date,
+) -> list[Fixture]:
+    """Synced fixtures that could have moved grade: the stale ones, plus rows an
+    earlier sync CANCELLED (find_stale skips those, and a row cancelled only
+    because its new grade was not known yet must still be able to follow its side)."""
+    out = {str(f.id): f for f in stale}
+    for f in existing:
+        if (f.source == "grassroots" and f.playhq_id and f.playhq_id not in incoming_ids
+                and (f.status or "").upper() == "CANCELLED"
+                and f.played_on is not None and f.played_on >= today):
+            out.setdefault(str(f.id), f)
+    return list(out.values())
+
+
+def _game_day(g: dict) -> Optional[date]:
+    try:
+        return date.fromisoformat(str(g.get("played_at") or "")[:10])
+    except ValueError:
+        return None
+
+
 def find_foreign(existing: Iterable[Fixture], incoming_ids: set[str], listing: dict) -> list[Fixture]:
     """Synced fixtures CA lists between two other clubs.
 
@@ -182,7 +220,9 @@ async def reconcile(
     foreign = find_foreign(existing, incoming_ids, listing)
     foreign_ids = {str(f.id) for f in foreign}
     stale = [f for f in find_stale(existing, incoming_ids, listing, today) if str(f.id) not in foreign_ids]
-    if not stale and not foreign:
+    movable = [f for f in find_moved(existing, incoming_ids, stale, today)
+               if str(f.id) not in foreign_ids]
+    if not stale and not foreign and not movable:
         return result
 
     by_gid: dict[str, list[Fixture]] = defaultdict(list)
@@ -232,6 +272,53 @@ async def reconcile(
         old.playhq_id = str(g["id"])
         result.rekeyed.append(old)
         handled.add(str(old.id))
+
+    # --- 1b. Moved grade: the same day and the same team of ours, listed by CA in
+    # another grade. Re-key onto the new GUID so the row (and everything a person
+    # did on it) goes with the side.
+    moved_by_key: dict[tuple, list[Fixture]] = defaultdict(list)
+    for f in movable:
+        if str(f.id) in handled or not f.played_on or not f.grade_id:
+            continue
+        ours = grade_move.our_side_name(f.home_away, f.home_team, f.away_team)
+        if ours:
+            moved_by_key[(f.played_on, ours)].append(f)
+    claimed = {str(f.playhq_id) for f in result.rekeyed}
+    games_by_move: dict[tuple, list[dict]] = defaultdict(list)
+    for g in games:
+        if not g.get("id") or not g.get("db_grade_id") or str(g["id"]) in claimed:
+            continue
+        sides = derive_all_sides(g) if derive_all_sides else [derive_sides(g)]
+        if len(sides) != 1 or not sides[0][0]:
+            continue
+        day = _game_day(g)
+        ours = grade_move.our_side_name(sides[0][0], g.get("home_team"), g.get("away_team"))
+        if day and ours:
+            games_by_move[(day, ours)].append(g)
+    for key, rows in moved_by_key.items():
+        cands = [g for g in games_by_move.get(key, []) if str(g["db_grade_id"]) != str(rows[0].grade_id)]
+        if len(rows) != 1 or len(cands) != 1:
+            continue
+        old, g = rows[0], cands[0]
+        twin = next((t for t in by_gid.get(g["id"], []) if t.id != old.id), None)
+        if twin is not None:
+            if str(twin.id) in work:
+                continue
+            await db.delete(twin)
+            result.removed.append(twin)
+            existing.remove(twin)
+            await db.flush()
+        old_grade = old.grade_id
+        old.playhq_id = str(g["id"])
+        result.moved.append(old)
+        handled.add(str(old.id))
+        try:
+            new_grade = uuid.UUID(str(g["db_grade_id"]))
+            for name in await grade_move.extend_medals(db, old.organisation_id, old_grade, new_grade):
+                if name not in result.medals_extended:
+                    result.medals_extended.append(name)
+        except Exception:
+            logger.warning("grade move: widening vote medals failed for %s", old.id, exc_info=True)
 
     # --- 2 and 3. Whatever is left is no longer happening, and another club's
     # games were never the club's to have.
