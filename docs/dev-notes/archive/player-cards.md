@@ -83,3 +83,13 @@ Asked for: "you should be able to trade multiple cards at once so you can add as
 
 Verified: `verify_player_cards.py` (220; the control on the previous commit fails the award checks and stops at the first multi-card request), `verify_merge_carry.py`, the two player page suites, `audit_route_access.py`; browser `verify_player_cards_browser.mjs` (51), `_v2_` (46), `_admin_` (51), and `_v3_` (30: trays, counts, limits, the exact body posted, a long request at 390px).
 
+## v9.131.4 (2026-10-27): browse other players' cards, and find who has a card
+
+Asked for: "make a gallery where you can see another player's cards in the same way you can see your own cards and sort them", and "search cards to see if anyone has pulled that card so you can find specific people and request swaps".
+
+- `CardGallery` gained `browse` (with `marked`, `onAction`, `actionLabel`, `zBase`): no grey slots, a search box over name, title, season and grade, no Newest sort (the cards another player could offer carry no date), the count on a card is `tradeable`, a round pick button on every card (and on each card inside an opened stack), and holding a card up offers Add to / Take out of my request. The builder uses it for both sides, replacing the old paged grid, and is now a solid dark sheet 780px wide so the book gets the tablet layout on wide screens.
+- `swaps.find_cards` and `GET /me/cards/swaps/find?q=`: tokens must all appear in the player's name, the special's title, kind label, season, grade or opposition; at least two characters; rate limited with the other swap routes; up to 30 cards, players first by tier, then specials; `unheld` names up to five matching players nobody has pulled yet. Holders are only players in the pool, never the asker, and each shows only how many copies could go.
+- Frontend: `FindCards` on the Swaps tab (debounced 300ms) with an Ask button per holder that opens the builder with the person and card already chosen.
+
+Verified: `verify_player_cards.py` (231), the other backend suites, `audit_route_access.py`; browser `_v3_` (47: book sort, search, paging, quick pick and viewer action, find with the exact query, 390px and 1280), `_v2_` (46), `_admin_` (51), the first suite (51).
+

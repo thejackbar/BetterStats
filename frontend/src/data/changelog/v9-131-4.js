@@ -2,7 +2,7 @@ export default {
   version: 'v9.131.4',
   date: '2026-10-27',
   // Above v9.131.3's sortKey. Check origin/main at merge time.
-  sortKey: '2026-11-09T12:00:00Z',
+  sortKey: '2026-11-09T13:00:00Z',
   title: 'Player Cards: browse other players\' cards when swapping, and find who has a card',
   items: [
     'New: when you ask another player for cards, their cards now open as a card book, the same as your own. Sort them by rarity, name or any of the figures, filter to players or one kind of special, search by name, and turn the pages. Tap the plus on a card to add it to your request, or hold a card up to see its details first. Specials sit in stacks as they do in your book.',
