@@ -97,6 +97,7 @@ const run = async () => {
     calls.push({ method, path, query: u.search.replace(/^\?/, ''), body })
     if (path === '/player-cards/overview') return json(OV)
     if (path === '/player-cards/activity') return json(ACT)
+    if (path === '/player-cards/wanted') return json({ total_wants: 7, cards: [{ key: 'p:a1', kind: 'player', player: 'Adams, Brian', tier: 'epic', title: 'Card', wanted_by: 4, could_swap: 2 }, { key: 's:x', kind: 'special', player: 'Baker, Chris', title: 'Century', tier: 'special', wanted_by: 3, could_swap: 0 }] })
     if (path === '/player-cards/catalogue') {
       const q = u.searchParams
       let items = CAT.filter((c) => (q.get('kind') === 'player' ? c.kind === 'player' : q.get('kind') === 'special' ? c.kind === 'special' : true))
@@ -167,6 +168,7 @@ const run = async () => {
 
   console.log('\nactivity')
   await tab('activity')
+  check('the most wanted cards show demand and how many could swap, with no names of who wants them', (await page.locator('[data-most-wanted] tbody tr').count()) === 2 && /Adams, Brian \(Epic\)/.test(await page.locator('[data-most-wanted]').innerText()) && !/wishlist|wish list of/i.test(await page.locator('[data-most-wanted]').innerText()))
   check('special cards added lately, with who, when and how many hold them', (await page.locator('[data-recent-specials] tbody tr').count()) === 2 && /Century/.test(await page.locator('[data-recent-specials]').innerText()))
   check('cards pulled or swapped in, marked new or a double', /NEW/.test(await page.locator('[data-recent-cards]').innerText()) && /double/.test(await page.locator('[data-recent-cards]').innerText()) && /swap/.test(await page.locator('[data-recent-cards]').innerText()))
   check('packs opened lately with the best card', /opened a weekly pack/.test(await page.locator('[data-recent-openings]').innerText()))
@@ -236,6 +238,12 @@ const run = async () => {
   await page.waitForFunction(() => document.querySelector('[role="switch"][aria-label="Include junior players"]').getAttribute('aria-checked') === 'true')
   check('a switch sends only what it changed', JSON.stringify(calls.filter((c) => c.method === 'PATCH').pop().body) === '{"include_juniors":true}')
   await page.getByRole('switch', { name: 'Include junior players' }).click()
+  for (const [name, key] of [['Sets are on', 'sets_enabled'], ['Showcases are on', 'showcase_enabled'], ['The collectors board is on', 'board_enabled'], ['This week at the club is on', 'feed_enabled']]) {
+    await page.getByRole('switch', { name }).click()
+    await page.waitForFunction((n) => document.querySelector(`[role="switch"][aria-label="${n}"]`).getAttribute('aria-checked') === 'false', name)
+    check(`the ${name.toLowerCase()} switch sends ${key} false and nothing else`, JSON.stringify(calls.filter((c) => c.method === 'PATCH').pop().body) === `{"${key}":false}`)
+    await page.getByRole('switch', { name }).click()
+  }
   check('card emails are on by default, and the switch sends only alerts_enabled', (await page.getByRole('switch', { name: 'Card emails are on' }).getAttribute('aria-checked')) === 'true')
   await page.getByRole('switch', { name: 'Card emails are on' }).click()
   await page.waitForFunction(() => document.querySelector('[role="switch"][aria-label="Card emails are on"]').getAttribute('aria-checked') === 'false')

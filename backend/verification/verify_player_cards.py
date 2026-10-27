@@ -70,6 +70,10 @@ if HAVE_SWAPS:
     from app.services import player_card_swaps_ddl as _swap_ddl
     SWAP_DDL = _swap_ddl.STATEMENTS
     try:
+        from app.services.player_card_community_ddl import STATEMENTS as COMMUNITY_DDL
+    except ImportError:
+        COMMUNITY_DDL = []
+    try:
         from app.services.player_card_social_ddl import STATEMENTS as SOCIAL_DDL
     except ImportError:   # the control run on the commit before the social side
         SOCIAL_DDL = []
@@ -78,6 +82,7 @@ else:
     swaps = None
     SWAP_DDL = []
     SOCIAL_DDL = []
+    COMMUNITY_DDL = []
     ITEM_DDL = []
 
 DB = os.environ["DATABASE_URL"]
@@ -155,7 +160,7 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
-        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL:
+        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL:
             await conn.execute(text(stmt))
 
 
@@ -1184,11 +1189,11 @@ async def main() -> None:
 
             # alert settings
             pr = await social.load_prefs(db, a)
-            check("alerts are on until a player turns them off", pr == {"alert_swaps": True, "alert_wants": True})
+            check("alerts are on until a player turns them off", pr["alert_swaps"] is True and pr["alert_wants"] is True)
             await social.save_prefs(db, club, a, {"alert_swaps": False})
             await db.commit()
             pr = await social.load_prefs(db, a)
-            check("a setting not sent is left alone", pr == {"alert_swaps": False, "alert_wants": True})
+            check("a setting not sent is left alone", pr["alert_swaps"] is False and pr["alert_wants"] is True)
             await social.save_prefs(db, club, a, {"alert_swaps": True})
             await db.commit()
 
@@ -1322,6 +1327,145 @@ async def main() -> None:
                 alerts._deliver, email_mod.email_is_live = real_deliver, real_live
                 await db.execute(text("UPDATE players SET email = NULL, date_of_birth = NULL WHERE id IN (:a, :d)"), {"a": ALPHA, "d": DELTA})
                 await db.commit()
+
+    # ── The community side: sets, showcase, collectors board, club feed, switches ────────────────────────────────
+    print("\nthe community side")
+    try:
+        from app.services import player_card_community as community, player_card_sets as card_sets
+    except ImportError:
+        community = card_sets = None
+    if community is None or not HAVE_SWAPS:
+        for label in ("sets", "showcase", "board", "feed", "switches"):
+            check(f"{label}: the community side exists", False, "app.services.player_card_community missing")
+    else:
+        async with Session() as db:
+            club = await db.get(Organisation, ORG)
+            await db.execute(text("DELETE FROM player_card_copies WHERE source IN ('pack', 'swap') AND organisation_id = :o"), {"o": ORG})
+            for t in ("player_card_showcase", "player_card_prefs", "player_card_wants"):
+                await db.execute(text(f"DELETE FROM {t}"))
+            await db.execute(text("DELETE FROM player_card_swaps WHERE organisation_id = :o"), {"o": ORG})
+            await db.execute(text("UPDATE club_card_settings SET sets_enabled = TRUE, showcase_enabled = TRUE, board_enabled = TRUE, feed_enabled = TRUE WHERE organisation_id = :o"), {"o": ORG})
+            await db.commit()
+            cards.forget(ORG)
+            a, d, c_ = str(ALPHA), str(DELTA), str(CHARLIE)
+
+            async def put(owner, subject, n, special=None, source="pack"):
+                for _ in range(n):
+                    await db.execute(text("INSERT INTO player_card_copies (organisation_id, owner_player_id, subject_player_id, special_id, source) "
+                                          "VALUES (:o, :ow, :s, :sp, :src)"), {"o": ORG, "ow": owner, "s": subject, "sp": special, "src": source})
+                await db.commit()
+
+            async def refused(coro):
+                try:
+                    await coro
+                    return None
+                except swaps.SwapError as exc:
+                    await db.commit()
+                    return exc.status
+            snap = await cards.club_snapshot(db, club, fresh=True)
+
+            # sets
+            ov = await card_sets.overview(db, club, snap, a)
+            keys = {x["key"]: x for x in ov["sets"]}
+            check("a set is offered once the club has three of its cards (games milestones and debuts are; a lone century is not)", "kind:games" in keys and "kind:debut" in keys and "kind:century" not in keys, str(sorted(keys)))
+            check("a set says how many cards it has, how many you hold and how far through you are", keys["kind:debut"]["total"] >= 4 and 0 <= keys["kind:debut"]["owned"] <= keys["kind:debut"]["total"] and keys["kind:debut"]["percent"] == round(100 * keys["kind:debut"]["owned"] / keys["kind:debut"]["total"]))
+            before = keys["kind:games"]["owned"]
+            gsp = (await db.execute(text("SELECT id::text FROM player_special_cards WHERE kind = 'games' AND player_id = :p ORDER BY title LIMIT 1"), {"p": DELTA})).scalar()
+            gsp2 = (await db.execute(text("SELECT id::text FROM player_special_cards WHERE kind = 'games' AND player_id = :p ORDER BY title LIMIT 1"), {"p": ALPHA})).scalar()
+            await put(ALPHA, ALPHA, 4, special=gsp2)    # hoarding the same card does not move the set on
+            ov2 = {x["key"]: x for x in (await card_sets.overview(db, club, snap, a))["sets"]}
+            check("holding a card moves you through the set by one, however many copies you hold", ov2["kind:games"]["owned"] >= before and ov2["kind:games"]["owned"] <= before + 1)
+            mem = await card_sets.members(db, club, snap, "kind:games")
+            check("a set's cards can be read, and an unknown set is None", mem and len(mem[1]) == keys["kind:games"]["total"] and await card_sets.members(db, club, snap, "kind:nonsense") is None)
+            import app.services.player_card_catalogue as cat_mod
+            pg = await cat_mod.page(db, club, snap, a, filter="all", limit=36, set_key="kind:games")
+            ids_ = {c["special_id"] for it in pg["items"] for c in (it.get("cards") or [it]) if c.get("special_id")}
+            check("the catalogue reads a set through set_key: only that set's cards", ids_ and ids_ <= mem[1] and all(it.get("kind") != "player" for it in pg["items"]), str(pg["total"]))
+            check("an unknown set_key shows nothing", (await cat_mod.page(db, club, snap, a, filter="all", limit=36, set_key="nope"))["items"] == [])
+            tiers = [k for k in keys if k.startswith("tier:")]
+            check("tier sets list the players of that tier", all(keys[k]["group"] == "Players" for k in tiers))
+
+            # showcase
+            await put(ALPHA, CHARLIE, 1)
+            sc = await community.get_showcase(db, club, snap, a)
+            check("a showcase starts empty", sc["cards"] == [] and sc["max"] == 6)
+            await community.set_showcase(db, club, snap, a, [f"p:{CHARLIE}", f"p:{ALPHA}", f"s:{gsp2}"])
+            await db.commit()
+            sc = await community.get_showcase(db, club, snap, a)
+            check("cards can be pinned in an order, a player's own card among them", [c["key"] for c in sc["cards"]] == [f"p:{CHARLIE}", f"p:{ALPHA}", f"s:{gsp2}"], str([c["key"] for c in sc["cards"]]))
+            check("a card you do not hold cannot be pinned (409)", await refused(community.set_showcase(db, club, snap, a, [f"p:{BRAVO}"])) == 409)
+            check("more than six is refused (422)", await refused(community.set_showcase(db, club, snap, a, [f"p:{CHARLIE}"] * 7)) == 422 and await refused(community.set_showcase(db, club, snap, a, [f"p:{CHARLIE}", f"p:{CHARLIE}"])) == 422)
+            check("a refused save changed nothing", [c["key"] for c in (await community.get_showcase(db, club, snap, a))["cards"]] == [f"p:{CHARLIE}", f"p:{ALPHA}", f"s:{gsp2}"])
+            await db.execute(text("DELETE FROM player_card_copies WHERE owner_player_id = :a AND subject_player_id = :c"), {"a": ALPHA, "c": CHARLIE}); await db.commit()
+            check("a pinned card that is swapped away drops off the showcase", [c["key"] for c in (await community.get_showcase(db, club, snap, a))["cards"]] == [f"p:{ALPHA}", f"s:{gsp2}"])
+
+            # the board
+            await put(DELTA, BRAVO, 1)
+            b0 = await community.board(db, club, snap, a)
+            check("nobody is on the collectors board until they opt in", b0["entries"] == [] and b0["me_opted_in"] is False)
+            from app.services import player_card_social as social_mod
+            await social_mod.save_prefs(db, club, a, {"board_opt_in": True}); await social_mod.save_prefs(db, club, d, {"board_opt_in": True}); await db.commit()
+            b1 = await community.board(db, club, snap, a)
+            check("players who opted in are on it, ranked by share of the set, with names and no one else", {e["player_id"] for e in b1["entries"]} == {a, d} and b1["me_opted_in"] is True and b1["me_rank"] in (1, 2))
+            check("...best share first", [e["percent"] for e in b1["entries"]] == sorted([e["percent"] for e in b1["entries"]], reverse=True))
+            pct = {e["player_id"]: e["percent"] for e in b1["entries"]}
+            await put(ALPHA, ALPHA, 6, special=gsp2)
+            b2 = await community.board(db, club, snap, a)
+            check("hoarding copies does not move anyone up (share of distinct cards)", {e["player_id"]: e["percent"] for e in b2["entries"]} == pct)
+            await put(ALPHA, DELTA, 1)
+            b3 = await community.board(db, club, snap, a)
+            check("a new distinct card does", {e["player_id"]: e["percent"] for e in b3["entries"]}[a] > pct[a])
+            check("an entry shows the rarest player card held and the showcase, never the rest of the collection", all(set(e) == {"player_id", "name", "percent", "held", "rarest", "showcase", "rank"} for e in b3["entries"]))
+            spec_pids = [str(r[0]) for r in (await db.execute(text("SELECT player_id FROM player_special_cards WHERE organisation_id = :o"), {"o": ORG})).fetchall()]
+            n_players = len([1 for pid, f in snap["figs"].items() if f["matches"] > 0 and pid in snap["people"]])
+            check("the share is over every card in the club (players and special cards of players in the pool)", b3["total_cards"] == n_players + len([x for x in spec_pids if x in snap["people"]]), f'{b3["total_cards"]} vs {n_players} + {len(spec_pids)}')
+
+            # the feed
+            today = __import__("datetime").date.today()
+            await db.execute(text("INSERT INTO player_special_cards (organisation_id, player_id, kind, event_key, occurred_on, title, detail) VALUES (:o, :p, 'century', 'century:feed-new', :d, 'Century', '{}'::jsonb)"), {"o": ORG, "p": DELTA, "d": today})
+            await db.execute(text("INSERT INTO player_special_cards (organisation_id, player_id, kind, event_key, occurred_on, title, detail) VALUES (:o, :p, 'century', 'century:feed-old', :d, 'Century', '{}'::jsonb)"), {"o": ORG, "p": DELTA, "d": today - __import__("datetime").timedelta(days=40)})
+            await db.commit()
+            sid_new = (await db.execute(text("SELECT id::text FROM player_special_cards WHERE event_key = 'century:feed-new'"))).scalar()
+            await put(ALPHA, DELTA, 1, special=sid_new)         # Alpha pulled Delta's new century out of a pack
+            cards.forget(ORG)
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            sw = await swaps.create_swap(db, club, snap, a, d, [{"key": f"p:{DELTA}", "qty": 1}], [{"key": f"p:{BRAVO}", "qty": 1}])
+            await swaps.respond(db, club, snap, d, sw, "accept"); await db.commit()
+            fd = await community.feed(db, club, snap, a)
+            kinds_ = [e["type"] for e in fd["events"]]
+            check("the feed has this week's dated special cards, big pulls and swaps agreed", "special" in kinds_ and "pull" in kinds_ and "swap" in kinds_, str(kinds_))
+            check("a special card for something that happened long ago is not news", not any("feed-old" in str(e) for e in fd["events"]) and sum(1 for e in fd["events"] if e["type"] == "special") == 1)
+            check("it is newest first", [e["on"] for e in fd["events"]] == sorted([e["on"] for e in fd["events"]], reverse=True))
+            await social_mod.save_prefs(db, club, a, {"feed_hidden": True}); await db.commit()
+            fd2 = await community.feed(db, club, snap, d)
+            check("a player who opted out is left out of it entirely (their pulls and their swaps)", not any(e["type"] in ("pull", "swap") for e in fd2["events"]))
+            check("opt-in and opt-out default to off", (await social_mod.load_prefs(db, c_)) == {"alert_swaps": True, "alert_wants": True, "board_opt_in": False, "feed_hidden": False})
+            await social_mod.save_prefs(db, club, a, {"feed_hidden": False}); await db.commit()
+
+            # switches and the routes
+            from app.routers import public_player_cards as pcr2
+            rq = lambda who: request_for(who, ORG)
+            check("every optional part is on to begin with", (await pcr2.get_my_cards(TOKEN, rq(ALPHA), db))["features"] == {"sets": True, "showcase": True, "board": True, "feed": True})
+            check("GET sets, one set, the showcase, the board and the feed answer", all([(await pcr2.get_sets(TOKEN, rq(ALPHA), db))["sets"], (await pcr2.get_set(TOKEN, "kind:games", rq(ALPHA), db))["total"] >= 3, "cards" in await pcr2.get_showcase(TOKEN, rq(ALPHA), db), "entries" in await pcr2.get_board(TOKEN, rq(ALPHA), db), "events" in await pcr2.get_feed(TOKEN, rq(ALPHA), db)]))
+            check("an unknown set is a 404", await status_of(pcr2.get_set(TOKEN, "kind:nope", rq(ALPHA), db)) == 404)
+            put_ = await pcr2.put_showcase(TOKEN, pcr2.ShowcaseBody(keys=[f"p:{ALPHA}"]), rq(ALPHA), db)
+            check("PUT the showcase", [c["key"] for c in put_["cards"]] == [f"p:{ALPHA}"])
+            check("PUT a card you do not hold is a 409", await status_of(pcr2.put_showcase(TOKEN, pcr2.ShowcaseBody(keys=[f"p:{HOTEL}"]), rq(ALPHA), db)) == 409)
+            await cards.save_settings(db, ORG, {"sets_enabled": False, "board_enabled": False}); await db.commit(); cards.forget(ORG)
+            check("a club that switches parts off: those answer 404 and the others still work", await status_of(pcr2.get_sets(TOKEN, rq(ALPHA), db)) == 404 and await status_of(pcr2.get_board(TOKEN, rq(ALPHA), db)) == 404 and "events" in await pcr2.get_feed(TOKEN, rq(ALPHA), db))
+            check("the club's switches are on the features the player page reads", (await pcr2.get_my_cards(TOKEN, rq(ALPHA), db))["features"] == {"sets": False, "showcase": True, "board": False, "feed": True})
+            adm_set = await admin_routes.get_settings(db, club, User(id=uuid.uuid4(), email="admin@example.com"))
+            check("the admin settings carry the switches", adm_set["settings"]["sets_enabled"] is False and adm_set["settings"]["feed_enabled"] is True, str(adm_set["settings"]))
+            await cards.save_settings(db, ORG, {"sets_enabled": True, "board_enabled": True}); await db.commit(); cards.forget(ORG)
+            check("an unsent switch is left alone", (await cards.load_settings(db, ORG))["feed_enabled"] is True)
+
+            # most wanted (admin): demand as counts only
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            await social_mod.add_want(db, club, snap, c_, f"p:{DELTA}"); await social_mod.add_want(db, club, snap, str(ECHO), f"p:{DELTA}") if str(ECHO) in snap["people"] else None
+            await db.commit()
+            from app.services import player_card_admin as insight
+            mw = await insight.most_wanted(db, club, snap)
+            check("the admin sees the most wanted cards, with how many want each and how many could swap one, and no names of who", mw["cards"] and mw["cards"][0]["wanted_by"] >= 1 and "could_swap" in mw["cards"][0] and not ({"wanters", "players"} & set(mw["cards"][0])) and mw["total_wants"] >= 1)
 
     # ── The migration and its mirror ─────────────────────────────────────────
     print("\nmigration")

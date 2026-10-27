@@ -13,11 +13,14 @@ export const NAV = [
   { key: 'book', label: 'My cards', icon: 'book', to: '/book' },
   { key: 'club', label: 'Club cards', icon: 'club', to: '/club' },
   { key: 'wishlist', label: 'Wish list', icon: 'heart', to: '/wishlist', badge: 'wants' },
+  { key: 'showcase', label: 'Showcase', icon: 'star', to: '/showcase', feature: ['showcase'] },
   { group: 'Packs' },
   { key: 'packs', label: 'Open packs', icon: 'packs', to: '/packs', badge: 'packs' },
   { group: 'Trading' },
   { key: 'swaps', label: 'Swaps', icon: 'swaps', to: '/swaps', badge: 'swaps' },
   { key: 'spares', label: 'Spares', icon: 'spares', to: '/spares' },
+  { group: 'Club', feature: ['sets', 'board', 'feed'] },
+  { key: 'sets', label: 'Sets and board', icon: 'trophy', to: '/sets', feature: ['sets', 'board', 'feed'] },
   { group: 'Help' },
   { key: 'how', label: 'How it works', icon: 'help', to: '/how' },
   { key: 'settings', label: 'Settings', icon: 'bolt', to: '/settings' },
@@ -32,6 +35,12 @@ function Badge({ n, accent, small }) {
   )
 }
 
+// An entry shows when any of the parts it needs is switched on (an entry with none listed always shows).
+export function useNav() {
+  const { features } = usePC()
+  return NAV.filter((n) => !n.feature || n.feature.some((f) => features[f]))
+}
+
 function useCounts() {
   const { packsCount, swapsWaiting, wants } = usePC()
   return { packs: packsCount, swaps: swapsWaiting, wants: wants.ready }
@@ -44,6 +53,7 @@ function initials(name) {
 export function Sidebar() {
   const { basePath, base, club, me, onSwitch, accent } = usePC()
   const counts = useCounts()
+  const nav = useNav()
   return (
     <aside data-sidebar className="hidden lg:flex flex-col shrink-0 w-[248px] sticky top-0 h-screen border-r pb-hairline py-5 px-3 overflow-y-auto" aria-label="Player Cards">
       <div className="flex items-center gap-3 px-2 mb-4">
@@ -59,7 +69,7 @@ export function Sidebar() {
         <Icon name="back" size={16} /> Back to my page
       </Link>
       <nav className="flex flex-col gap-0.5">
-        {NAV.map((n, i) => n.group ? (
+        {nav.map((n, i) => n.group ? (
           <div key={`g${i}`} className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faintest px-2 pt-4 pb-1">{n.group}</div>
         ) : (
           <NavLink key={n.key} to={`${basePath}${n.to}`} end={n.end} data-nav={n.key}
@@ -82,10 +92,11 @@ export function Sidebar() {
 export function Rail() {
   const { basePath, base, accent } = usePC()
   const counts = useCounts()
+  const nav = useNav()
   return (
     <aside data-rail className="hidden md:flex lg:hidden flex-col items-center shrink-0 w-[68px] sticky top-0 h-screen border-r pb-hairline py-4 gap-1" aria-label="Player Cards">
       <Link to={base} aria-label="Back to my page" title="Back to my page" className="w-10 h-10 grid place-items-center rounded-lg text-pb-dim hover:text-pb-text hover:bg-pb-surface2 mb-2"><Icon name="back" /></Link>
-      {NAV.filter((n) => !n.group).map((n) => (
+      {nav.filter((n) => !n.group).map((n) => (
         <NavLink key={n.key} to={`${basePath}${n.to}`} end={n.end} data-nav={n.key} aria-label={n.label} title={n.label}
           className={({ isActive }) => `relative w-11 h-11 grid place-items-center rounded-lg ${isActive ? '' : 'text-pb-dim hover:text-pb-text hover:bg-pb-surface2'}`}
           style={({ isActive }) => (isActive ? { background: accent, color: onColor(accent) } : undefined)}>
@@ -98,7 +109,7 @@ export function Rail() {
 }
 
 export function BottomBar() {
-  const { basePath, base, accent, me, onSwitch } = usePC()
+  const { basePath, base, accent, me, onSwitch, features } = usePC()
   const counts = useCounts()
   const { pathname } = useLocation()
   const [more, setMore] = useState(false)
@@ -128,7 +139,7 @@ export function BottomBar() {
         <div role="dialog" aria-modal="true" aria-label="More" data-more-sheet className="md:hidden fixed inset-0 z-40" onClick={() => setMore(false)} style={{ background: 'rgba(3,6,10,.7)' }}>
           <div onClick={(e) => e.stopPropagation()} className="absolute bottom-0 inset-x-0 rounded-t-2xl bg-pb-surface border-t pb-hairline p-4" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}>
             <div className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint mb-2">More</div>
-            {[{ to: `${basePath}/club`, label: 'Club cards', icon: 'club' }, { to: `${basePath}/wishlist`, label: 'Wish list', icon: 'heart' }, { to: `${basePath}/spares`, label: 'Spares', icon: 'spares' }, { to: `${basePath}/how`, label: 'How it works', icon: 'help' }, { to: `${basePath}/settings`, label: 'Settings', icon: 'bolt' }, { to: base, label: 'Back to my page', icon: 'back' }].map((l) => (
+            {[{ to: `${basePath}/club`, label: 'Club cards', icon: 'club' }, { to: `${basePath}/wishlist`, label: 'Wish list', icon: 'heart' }, ...(features.showcase ? [{ to: `${basePath}/showcase`, label: 'Showcase', icon: 'star' }] : []), { to: `${basePath}/spares`, label: 'Spares', icon: 'spares' }, ...((features.sets || features.board || features.feed) ? [{ to: `${basePath}/sets`, label: 'Sets and board', icon: 'trophy' }] : []), { to: `${basePath}/how`, label: 'How it works', icon: 'help' }, { to: `${basePath}/settings`, label: 'Settings', icon: 'bolt' }, { to: base, label: 'Back to my page', icon: 'back' }].map((l) => (
               <Link key={l.label} to={l.to} onClick={() => setMore(false)} data-more-link className="flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-pb-surface2"><Icon name={l.icon} />{l.label}</Link>
             ))}
             <div className="flex items-center justify-between px-2 pt-3 text-sm text-pb-faint border-t pb-hairline mt-2">

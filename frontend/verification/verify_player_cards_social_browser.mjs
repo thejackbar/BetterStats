@@ -219,7 +219,7 @@ const run = async () => {
   {
     reset()
     const { ctx, page } = await open(390, '/settings', { wait: '[data-screen="settings"] [data-pref]' })
-    check('two emails can be switched, both on to begin with', (await page.locator('[data-pref] input:checked').count()) === 2)
+    check('two emails can be switched, both on to begin with', (await page.locator('[data-pref="alert_swaps"] input').isChecked()) && (await page.locator('[data-pref="alert_wants"] input').isChecked()))
     calls.length = 0
     await page.locator('[data-pref="alert_wants"] input').click()
     await page.waitForSelector('[data-saved]')

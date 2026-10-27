@@ -61,7 +61,7 @@ function useWide(min = 1360) {
   return wide
 }
 
-export default function CatalogueTab({ token, club, accent, display, sponsor, onAsk, intro = true, panel = false, wants, onToggleWant, cardHref }) {
+export default function CatalogueTab({ token, club, accent, display, sponsor, onAsk, intro = true, panel = false, wants, onToggleWant, cardHref, setKey }) {
   const wide = useWide()
   const [held, setHeld] = useState(null)
   const [state, setState] = useState({ items: [], total: 0, counts: {}, loading: true })
@@ -72,12 +72,12 @@ export default function CatalogueTab({ token, club, accent, display, sponsor, on
     const n = ++seq.current
     setState((s) => ({ ...s, loading: true })); setErr('')
     try {
-      const r = await api.availPublicCatalogue(token, params)
+      const r = await api.availPublicCatalogue(token, setKey ? { ...params, set: setKey } : params)
       if (n === seq.current) setState({ items: r.items, total: r.total, counts: r.counts, loading: false })
     } catch (e) {
       if (n === seq.current) { setState((s) => ({ ...s, loading: false })); setErr(e?.message || 'Could not load the cards.') }
     }
-  }, [token])
+  }, [token, setKey])
   const remote = useMemo(() => ({ ...state, onQuery }), [state, onQuery])
   const holders = (card, close) => <Holders key={card.key} token={token} card={card} accent={accent} wants={wants} onToggleWant={onToggleWant} cardHref={cardHref} onAsk={(h) => { close(); onAsk({ player: { player_id: h.player_id, name: h.name }, card: { ...card, tradeable: h.tradeable } }) }} />
   return (

@@ -156,14 +156,15 @@ async def card_detail(db: AsyncSession, club: Organisation, snap: dict, me: str,
 
 # ── Alert settings ────────────────────────────────────────────────────────────────────────────────────────────
 
-PREF_FIELDS = ("alert_swaps", "alert_wants")
+PREF_FIELDS = ("alert_swaps", "alert_wants", "board_opt_in", "feed_hidden")
+_PREF_DEFAULTS = {"alert_swaps": True, "alert_wants": True, "board_opt_in": False, "feed_hidden": False}
 
 
 async def load_prefs(db: AsyncSession, me: str) -> dict:
     row = (await db.execute(text(
-        "SELECT alert_swaps, alert_wants FROM player_card_prefs WHERE player_id = CAST(:me AS UUID)"
+        "SELECT alert_swaps, alert_wants, board_opt_in, feed_hidden FROM player_card_prefs WHERE player_id = CAST(:me AS UUID)"
     ), {"me": me})).mappings().first()
-    out = {"alert_swaps": True, "alert_wants": True}
+    out = dict(_PREF_DEFAULTS)
     if row:
         out.update({k: bool(row[k]) for k in PREF_FIELDS})
     return out
@@ -176,8 +177,8 @@ async def save_prefs(db: AsyncSession, club: Organisation, me: str, patch: dict)
         if k in patch and patch[k] is not None:
             current[k] = bool(patch[k])
     await db.execute(text(
-        "INSERT INTO player_card_prefs (player_id, organisation_id, alert_swaps, alert_wants) "
-        "VALUES (CAST(:me AS UUID), CAST(:o AS UUID), :a, :w) "
-        "ON CONFLICT (player_id) DO UPDATE SET alert_swaps = :a, alert_wants = :w, updated_at = NOW()"
-    ), {"me": me, "o": str(club.id), "a": current["alert_swaps"], "w": current["alert_wants"]})
+        "INSERT INTO player_card_prefs (player_id, organisation_id, alert_swaps, alert_wants, board_opt_in, feed_hidden) "
+        "VALUES (CAST(:me AS UUID), CAST(:o AS UUID), :a, :w, :b, :f) "
+        "ON CONFLICT (player_id) DO UPDATE SET alert_swaps = :a, alert_wants = :w, board_opt_in = :b, feed_hidden = :f, updated_at = NOW()"
+    ), {"me": me, "o": str(club.id), "a": current["alert_swaps"], "w": current["alert_wants"], "b": current["board_opt_in"], "f": current["feed_hidden"]})
     return current

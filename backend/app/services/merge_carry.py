@@ -122,6 +122,9 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     ("player_card_open_offers", "subject_player_id", "uuid", ("player_id", "special_id")),
     ("player_card_prefs", "player_id", "uuid", ("organisation_id",)),
     ("player_card_alerts", "player_id", "uuid", None),
+    # The showcase: the player who pinned and the subject of each pinned card (migration 369).
+    ("player_card_showcase", "player_id", "uuid", ("subject_player_id", "special_id")),
+    ("player_card_showcase", "subject_player_id", "uuid", ("player_id", "special_id")),
 )
 
 # Tables whose primary key is not an `id` column: the column that identifies one
@@ -165,7 +168,7 @@ _OWN_CLUB_TABLES = {
     "fine_entries", "fine_payments",
     "player_card_packs", "player_card_copies", "player_special_cards", "player_card_hidden",
     "player_card_swaps", "player_card_swap_items",
-    "player_card_wants", "player_card_open_offers", "player_card_prefs", "player_card_alerts",
+    "player_card_wants", "player_card_open_offers", "player_card_prefs", "player_card_alerts", "player_card_showcase",
 }
 
 _CAST = {"int": "int[]", "uuid": "uuid[]"}

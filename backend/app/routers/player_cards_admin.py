@@ -46,6 +46,10 @@ class SettingsBody(BaseModel):
     weekly_packs: Optional[int] = None
     timezone: Optional[str] = None
     alerts_enabled: Optional[bool] = None
+    sets_enabled: Optional[bool] = None
+    showcase_enabled: Optional[bool] = None
+    board_enabled: Optional[bool] = None
+    feed_enabled: Optional[bool] = None
 
 
 class HiddenBody(BaseModel):
@@ -85,6 +89,7 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
             "weekly_packs": settings["weekly_packs"],
             "timezone": settings["timezone"],
             "alerts_enabled": settings.get("alerts_enabled", True) is not False,
+            **{k: settings.get(k, True) is not False for k in ("sets_enabled", "showcase_enabled", "board_enabled", "feed_enabled")},
             "effective_timezone": str(cards.club_zone(settings)),
         },
         "timezones": [{"id": i, "label": n} for i, n in TIMEZONES],
@@ -207,6 +212,18 @@ async def catalogue(
     """Every card that can come out of a pack, with copies held and owners."""
     snap = await cards.club_snapshot(db, club)
     return await insight.catalogue(db, club, snap, kind=kind, special_kind=special_kind, q=q, sort=sort, limit=limit, offset=offset)
+
+
+@router.get("/wanted")
+async def most_wanted(
+    limit: int = Query(15, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """The cards most often on a wish list. Demand only, never whose list."""
+    snap = await cards.club_snapshot(db, club)
+    return await insight.most_wanted(db, club, snap, limit=limit)
 
 
 @router.get("/players/{player_id}")

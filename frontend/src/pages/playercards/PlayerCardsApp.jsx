@@ -19,6 +19,9 @@ import Wishlist from './Wishlist'
 import Spares from './Spares'
 import CardPage from './CardPage'
 import Settings from './Settings'
+import Sets from './Sets'
+import SetPage from './SetPage'
+import Showcase from './Showcase'
 
 function Overlays() {
   const { token, club, accent, display, sponsor, pack, owned, packsCount, closePack, nextPack, allResult, setAllResult, load } = usePC()
@@ -57,6 +60,11 @@ function Shell() {
               <Route path="cards/wishlist" element={<Wishlist />} />
               <Route path="cards/spares" element={<Spares />} />
               <Route path="cards/card/:key" element={<CardPage />} />
+              <Route path="cards/showcase" element={<Showcase />} />
+              <Route path="cards/sets" element={<Sets tab="sets" />} />
+              <Route path="cards/sets/board" element={<Sets tab="board" />} />
+              <Route path="cards/sets/week" element={<Sets tab="week" />} />
+              <Route path="cards/set/:key" element={<SetPage />} />
               <Route path="cards/how" element={<HowItWorks />} />
               <Route path="cards/settings" element={<Settings />} />
               <Route path="cards/*" element={<Navigate to={basePath} replace />} />

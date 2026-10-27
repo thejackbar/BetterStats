@@ -93,7 +93,7 @@ HAVE = ("all", "not_mine", "swappable")
 
 
 async def page(db: AsyncSession, club: Organisation, snap: dict, me: str, *, filter: str = "all", sort: str = "rarity",
-               q: str = "", offset: int = 0, limit: int = 12, have: str = "all") -> dict:
+               q: str = "", offset: int = 0, limit: int = 12, have: str = "all", set_key: Optional[str] = None) -> dict:
     """One window of the book. `filter` is all, regular, special or a category key; `have` narrows to the cards the
     asker does not hold ("not_mine") or that at least one other player could swap ("swappable"). Returns `{total, counts, items}`
     where an item is a card or, for a player's several cards of one category, a stack `{stack, key, cat, cards, name, count}`."""
@@ -104,6 +104,11 @@ async def page(db: AsyncSession, club: Organisation, snap: dict, me: str, *, fil
     mine = (await swaps._rows_by_card(db, club.id, me)).get(me, {})
 
     have = have if have in HAVE else "all"
+    in_set = None
+    if set_key:
+        from app.services import player_card_sets as sets_mod
+        found = await sets_mod.members(db, club, snap, set_key)
+        in_set = found[:2] if found else (set(), set())
 
     def wanted(key: tuple) -> bool:
         if have == "not_mine":
@@ -122,7 +127,7 @@ async def page(db: AsyncSession, club: Organisation, snap: dict, me: str, *, fil
         if f["matches"] <= 0 or pid not in snap["people"]:
             continue
         c = cards.regular_card(snap, pid)
-        if c and wanted((pid, None)) and (not words or _matches(words, c["name"])):
+        if c and (in_set is None or pid in in_set[0]) and wanted((pid, None)) and (not words or _matches(words, c["name"])):
             players.append(c)
     players.sort(key=_player_sort(sort))
 
@@ -135,7 +140,7 @@ async def page(db: AsyncSession, club: Organisation, snap: dict, me: str, *, fil
         pid = str(r["player_id"])
         person = snap["people"].get(pid)
         cat = CAT_OF.get(r["kind"])
-        if not person or not cat or not wanted((pid, str(r["id"]))):
+        if not person or not cat or not wanted((pid, str(r["id"]))) or (in_set is not None and str(r["id"]) not in in_set[1]):
             continue
         if words:
             d = r["detail"] or {}

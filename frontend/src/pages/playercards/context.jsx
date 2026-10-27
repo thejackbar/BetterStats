@@ -38,6 +38,8 @@ export function PlayerCardsProvider({ token, club, me, onSwitch, children }) {
   useEffect(() => { load(); loadSwaps(); loadWants() }, [load, loadSwaps, loadWants])
 
   const mine = useMemo(() => data?.cards.find((c) => c.mine) || null, [data])
+  // Which optional parts the club has switched on. Until the cards load, or from a server that does not say, all of them are.
+  const features = useMemo(() => ({ sets: true, showcase: true, board: true, feed: true, ...(data?.features || {}) }), [data])
 
   const startPack = useCallback((p) => {
     setOwned(new Set((data?.cards || []).map((c) => c.key)))
@@ -65,7 +67,7 @@ export function PlayerCardsProvider({ token, club, me, onSwitch, children }) {
 
   const value = {
     token, club, me, onSwitch, accent, display, sponsor, base, basePath,
-    data, failed, load, mine, swapsWaiting, loadSwaps, wants, loadWants, toggleWant,
+    data, failed, load, mine, features, swapsWaiting, loadSwaps, wants, loadWants, toggleWant,
     pack, owned, startPack, closePack, nextPack, allResult, setAllResult, busyAll, openAll, packErr,
     packsCount: data?.packs?.length || 0,
   }

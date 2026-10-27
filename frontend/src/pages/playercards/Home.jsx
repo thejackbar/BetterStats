@@ -1,10 +1,13 @@
 // Home: your card, the packs waiting (open them from here), what is waiting in swaps, and how far through the set you are.
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import FlipCard from '../../components/FlipCard'
 import { onColor } from '../../components/PlayerTradingCard'
 import { PackArt } from '../../components/cards/PackOpening'
 import ShareSheet from '../../components/cards/ShareSheet'
+import { api } from '../../lib/api'
+import { Mini } from '../../components/cards/SwapsPanel'
+import { Week } from './Sets'
 import { CARD_H, CARD_W, CardInfoBack, CardView } from '../../components/cards/CardFaces'
 import { PACKS } from '../../components/cards/cardTheme'
 import PageHead, { ghostBtn } from './PageHead'
@@ -93,8 +96,10 @@ function Tile({ to, title, children, accent, tag }) {
 }
 
 export default function Home() {
-  const { data, failed, mine, club, accent, display, sponsor, basePath, swapsWaiting, wants } = usePC()
+  const { token, data, failed, mine, features, club, accent, display, sponsor, basePath, swapsWaiting, wants } = usePC()
   const [share, setShare] = useState(null)
+  const [pinned, setPinned] = useState([])
+  useEffect(() => { if (features.showcase) api.availPublicShowcase(token).then((r) => setPinned(r.cards || [])).catch(() => {}) }, [token, features.showcase])
   if (failed) return <div className="text-sm text-pb-faint" data-cards-failed>Your cards could not load. Reload to try again.</div>
   if (!data) return <div className="text-sm text-pb-faint" data-cards-loading>Loading your cards…</div>
   const t = data.totals || {}
@@ -135,6 +140,18 @@ export default function Home() {
           <div className="text-sm text-pb-dim mt-1">Search, sort, and see who could swap you a copy.</div>
         </Tile>
       </div>
+      {features.showcase && pinned.length > 0 && (
+        <div data-home-showcase className="rounded-2xl border pb-hairline bg-pb-surface p-4 mt-4">
+          <div className="flex items-center justify-between mb-2"><span className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint">Your showcase</span><Link to={`${basePath}/showcase`} className="text-[12.5px] underline">Change</Link></div>
+          <div className="flex flex-wrap gap-2">{pinned.map((c) => <Link key={c.key} to={`${basePath}/card/${encodeURIComponent(c.key)}`}><Mini card={c} club={club} accent={accent} display={display} sponsor={sponsor} width={72} count={1} /></Link>)}</div>
+        </div>
+      )}
+      {features.feed && (
+        <div data-home-week className="rounded-2xl border pb-hairline bg-pb-surface p-4 mt-4">
+          <div className="flex items-center justify-between mb-2"><span className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint">This week at the club</span><Link to={`${basePath}/sets/week`} className="text-[12.5px] underline">See all</Link></div>
+          <Week limit={5} />
+        </div>
+      )}
       {share && <ShareSheet card={share} club={club} accent={accent} display={display} sponsor={sponsor} onClose={() => setShare(null)} />}
     </div>
   )

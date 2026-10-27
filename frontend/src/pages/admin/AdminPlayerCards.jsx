@@ -242,10 +242,33 @@ function PlayersTab({ ov, open }) {
 }
 
 // ── Activity ───────────────────────────────────────────────────────────────────────────────────────────────────
+// The cards most often on a wish list: demand only, never whose list it is on.
+function MostWanted() {
+  const [d, setD] = useState(null)
+  useEffect(() => { api.getPlayerCardWanted().then(setD).catch(() => setD({ cards: [], total_wants: 0 })) }, [])
+  return (
+    <Card title="Most wanted cards">
+      <p className="text-[12.5px] text-pb-faint mb-3">The cards players have put on their wish lists, most wanted first. You see how many want each card and how many players could swap one now, never whose list it is on.</p>
+      {!d ? <div className="text-sm text-pb-faint">Loading…</div> : d.cards.length === 0 ? <div className="text-sm text-pb-faint" data-no-wanted>Nothing on a wish list yet.</div> : (
+        <div className="overflow-x-auto"><table className="w-full text-sm" data-most-wanted>
+          <thead><tr className="text-left font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest"><th className="px-2 py-1">Card</th><th className="px-2 py-1 text-right">Want it</th><th className="px-2 py-1 text-right">Could swap now</th></tr></thead>
+          <tbody>{d.cards.map((c) => (
+            <tr key={c.key} className="border-t border-pb-hairline">
+              <td className="px-2 py-1.5">{c.kind === 'special' ? `${c.player}: ${c.title}` : `${c.player} (${tierLabel(c.tier)})`}</td>
+              <td className="px-2 py-1.5 text-right font-mono">{c.wanted_by}</td>
+              <td className="px-2 py-1.5 text-right font-mono">{c.could_swap}</td>
+            </tr>))}
+          </tbody></table></div>
+      )}
+    </Card>
+  )
+}
+
 function ActivityTab({ a, open }) {
   if (!a) return <div className="text-sm text-pb-faint">Loading…</div>
   return (
     <div className="space-y-4">
+      <MostWanted />
       <Card title="Special cards added lately">
         <div className="overflow-x-auto"><table className="w-full text-sm" data-recent-specials>
           <thead><tr className="text-left font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest"><th className="px-2 py-1">Card</th><th className="px-2 py-1">Player</th><th className="px-2 py-1">Happened</th><th className="px-2 py-1">Added</th><th className="px-2 py-1 text-right">Held</th></tr></thead>
@@ -462,6 +485,14 @@ function SettingsTab({ data, setData }) {
             hint="Switching them off hides the cards and the packs from your players. Nothing they have collected is lost." />
           <Toggle on={s.alerts_enabled !== false} disabled={saving} onChange={(v) => save({ alerts_enabled: v })} label="Card emails are on"
             hint="Emails to players when a swap is asked of them and when a card on their wish list is available. Players can also switch each one off. Players with no email on file, and under 18s, are never emailed." />
+          <Toggle on={s.sets_enabled !== false} disabled={saving} onChange={(v) => save({ sets_enabled: v })} label="Sets are on"
+            hint="Groups of cards players work towards completing, such as every century at the club. Nothing is awarded for finishing one." />
+          <Toggle on={s.showcase_enabled !== false} disabled={saving} onChange={(v) => save({ showcase_enabled: v })} label="Showcases are on"
+            hint="Players can pin up to six cards they hold, shown next to their name on the collectors board." />
+          <Toggle on={s.board_enabled !== false} disabled={saving} onChange={(v) => save({ board_enabled: v })} label="The collectors board is on"
+            hint="Only players who choose to join are listed, ranked by share of the set held (different cards, never copies)." />
+          <Toggle on={s.feed_enabled !== false} disabled={saving} onChange={(v) => save({ feed_enabled: v })} label="This week at the club is on"
+            hint="A short feed on Home of special cards earned, big pulls and swaps agreed. Players can leave their name out of it." />
           <Toggle on={s.include_juniors} disabled={saving} onChange={(v) => save({ include_juniors: v })} label="Include junior players"
             hint="Off by default. When on, juniors have cards and can be pulled from packs. Check with their families first." />
           <div className="grid sm:grid-cols-2 gap-3">

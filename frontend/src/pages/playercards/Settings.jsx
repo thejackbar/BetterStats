@@ -8,9 +8,14 @@ const ROWS = [
   ['alert_swaps', 'A swap is asked of me', 'An email when another player asks to swap cards with you, or sends one back changed.'],
   ['alert_wants', 'A card on my wish list is available', 'One email the first time someone could swap you a card on your list. You are not emailed again for that card unless nobody could swap it in between.'],
 ]
+// Choices about being seen. `invert` is a setting stored the other way round: the box is ticked when it is off.
+const SEEN = [
+  ['board_opt_in', 'Show me on the collectors board', 'Off until you switch it on. The board shows your name, your showcase and your rarest player card, and where you stand by share of the set.', false, 'board'],
+  ['feed_hidden', 'Show my name in This week', 'The club\'s weekly feed names who earned a special card, pulled a big card or agreed a swap. Untick this to be left out of it.', true, 'feed'],
+]
 
 export default function Settings() {
-  const { token, club, accent } = usePC()
+  const { token, club, accent, features } = usePC()
   const [prefs, setPrefs] = useState(null)
   const [err, setErr] = useState('')
   const [saved, setSaved] = useState('')
@@ -24,7 +29,7 @@ export default function Settings() {
   if (!prefs && !err) return <div className="text-sm text-pb-faint" data-settings-loading>Loading…</div>
   return (
     <div data-screen="settings">
-      <PageHead title="Settings" sub="The emails Player Cards sends you." />
+      <PageHead title="Settings" sub="The emails Player Cards sends you, and what the club can see of you." />
       {err && <div role="alert" className="text-sm mb-3" style={{ color: 'var(--pb-red, #f87171)' }}>{err}</div>}
       {prefs && (
         <>
@@ -34,6 +39,15 @@ export default function Settings() {
             {ROWS.map(([key, label, help]) => (
               <label key={key} className="flex gap-4 items-start rounded-2xl border pb-hairline bg-pb-surface p-4 cursor-pointer" data-pref={key}>
                 <input type="checkbox" checked={prefs[key]} onChange={(e) => set(key, e.target.checked)} className="w-5 h-5 mt-0.5" style={{ accentColor: accent }} />
+                <span><span className="block font-semibold">{label}</span><span className="block text-sm text-pb-dim mt-0.5">{help}</span></span>
+              </label>
+            ))}
+          </div>
+          <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mt-6 mb-2">Being seen</h2>
+          <div className="flex flex-col gap-3 max-w-xl">
+            {SEEN.filter(([, , , , feature]) => features[feature]).map(([key, label, help, invert]) => (
+              <label key={key} className="flex gap-4 items-start rounded-2xl border pb-hairline bg-pb-surface p-4 cursor-pointer" data-pref={key}>
+                <input type="checkbox" checked={invert ? !prefs[key] : !!prefs[key]} onChange={(e) => set(key, invert ? !e.target.checked : e.target.checked)} className="w-5 h-5 mt-0.5" style={{ accentColor: accent }} />
                 <span><span className="block font-semibold">{label}</span><span className="block text-sm text-pb-dim mt-0.5">{help}</span></span>
               </label>
             ))}

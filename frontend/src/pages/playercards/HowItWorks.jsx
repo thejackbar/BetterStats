@@ -55,6 +55,14 @@ export default function HowItWorks() {
           <li>You can be emailed when someone asks you for a swap and when a card on your wish list becomes available. You choose which in Settings, and your club can switch the emails off.</li>
         </ul>
       </Section>
+      <Section id="club" title="Sets, showcase and the collectors board">
+        <ul>
+          <li>A set is a group of cards you can work towards completing, such as every century at the club or a season's awards. Finishing one earns a banner and bragging rights, nothing more.</li>
+          <li>Your showcase is up to six cards you hold, pinned for the club to see next to your name.</li>
+          <li>The collectors board ranks only players who chose to be on it, by how much of the club's set they hold. It counts different cards, never copies, so hoarding doubles does not help.</li>
+          <li>This week lists what has happened in the club's cards lately. You can leave your name out of it in Settings.</li>
+        </ul>
+      </Section>
       <Section id="privacy" title="Who sees what">
         <ul>
           <li>Other players can see the cards you could swap and nothing else: not your packs, not your wish list, and not how many of a card you hold beyond what you could give.</li>

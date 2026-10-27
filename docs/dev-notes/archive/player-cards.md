@@ -128,3 +128,14 @@ Phase 2 of the Player Cards page plan.
 
 Verified: `verify_player_cards.py` (309; the control on the previous commit fails the seven social groups only), `verify_merge_carry.py`, the player page suites, `audit_route_access.py`; browser `_social_` (39), `_page_` (54), `_v3_` (65), `_v2_` (45), `_admin_` (54), the first suite (55).
 
+## v9.132.2 (2026-10-27): sets, showcase, the collectors board and This week
+
+Phase 3 of the Player Cards page plan.
+
+- Migration 369 (`player_card_community_ddl.py`): `player_card_showcase`, `player_card_prefs.board_opt_in` and `.feed_hidden`, and the club's `sets_enabled`, `showcase_enabled`, `board_enabled`, `feed_enabled`. Choices left open in the plan, taken as suggested: the board is opt in and the feed opt out; sets earn a banner only.
+- `services/player_card_sets.py`, `player_card_community.py`; routes `/me/cards/sets`, `/sets/{key}`, `/showcase` (GET, PUT), `/board`, `/feed`, `features` on `/me/cards` and on prefs; `set=` on the catalogue; admin `GET /player-cards/wanted` and the four switches on the Settings tab.
+- Frontend: Sets (tabs: Sets, Collectors, This week), SetPage, Showcase, Home blocks for the showcase and the week, Settings toggles for being seen, nav entries that follow the club's switches.
+- Not done, and why: the scope doc put the showcase on "your public card page". The only public page is the stats share page (`/players/:id/share`), which is not a trading card page and has no card data behind it, so the showcase shows to the club (the board, Home) instead. If a public card page is wanted, it needs its own public route and a decision about what is public.
+
+Verified: `verify_player_cards.py` (344), `verify_merge_carry.py`, the player page suites, `audit_route_access.py`; browser `_community_` (33), `_social_` (39), `_page_` (54), `_v3_` (65), `_v2_` (45), `_admin_` (59), the first suite (55).
+

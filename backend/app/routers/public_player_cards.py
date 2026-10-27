@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.routers.public_availability import _club_branding, _club_for_token, _client_ip, _player_for_session
-from app.services import player_card_alerts as alerts, player_card_catalogue as catalogue, player_card_social as social, player_card_swaps as swaps, player_cards as cards, rate_limit
+from app.services import player_card_alerts as alerts, player_card_catalogue as catalogue, player_card_community as community, player_card_sets as card_sets, player_card_social as social, player_card_swaps as swaps, player_cards as cards, rate_limit
 from app.services.session_safety import rollback_keeping
 
 router = APIRouter(prefix="/public/availability", tags=["public-player-cards"])
@@ -64,8 +64,22 @@ async def get_my_cards(token: str, request: Request, db: AsyncSession = Depends(
         "packs": packs,
         "pack_size": cards.PACK_SIZE,
         "season": snap["season_label"],
+        "features": _features(snap),
         **collection,
     }
+
+
+FEATURES = ("sets", "showcase", "board", "feed")
+
+
+def _features(snap: dict) -> dict:
+    """Which of the club's optional parts are switched on (all are, until a club switches one off)."""
+    return {k: snap["settings"].get(f"{k}_enabled", True) is not False for k in FEATURES}
+
+
+def _need(snap: dict, feature: str) -> None:
+    if not _features(snap)[feature]:
+        raise HTTPException(status_code=404, detail="That is not switched on for your club.")
 
 
 @router.post("/{token}/me/cards/packs/{pack_id}/open")
@@ -150,7 +164,7 @@ async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(
 
 @router.get("/{token}/me/cards/catalogue")
 async def get_catalogue(token: str, request: Request, filter: str = "all", sort: str = "rarity", q: str = "", offset: int = 0, limit: int = 12, have: str = "all",
-                        db: AsyncSession = Depends(get_db)):
+                        set: str = "", db: AsyncSession = Depends(get_db)):
     """The club's whole set, a window at a time, laid out like the player's own book (players, then special cards in
     stacks). Nothing needs to be held, and nothing about anyone's collection is shown beyond whether a copy could be swapped."""
     club, player, snap = await _ready(db, request, token)
@@ -158,7 +172,7 @@ async def get_catalogue(token: str, request: Request, filter: str = "all", sort:
                        detail="Slow down. Give it a few seconds and try again.")
     if sort not in catalogue.SORTS:
         sort = "rarity"
-    return await catalogue.page(db, club, snap, str(player.id), filter=filter[:20], sort=sort, q=q[:80], offset=offset, limit=limit, have=have[:12])
+    return await catalogue.page(db, club, snap, str(player.id), filter=filter[:20], sort=sort, q=q[:80], offset=offset, limit=limit, have=have[:12], set_key=(set[:60] or None))
 
 
 @router.get("/{token}/me/cards/catalogue/holders")
@@ -263,6 +277,12 @@ class OpenBody(BaseModel):
 class PrefsBody(BaseModel):
     alert_swaps: Optional[bool] = None
     alert_wants: Optional[bool] = None
+    board_opt_in: Optional[bool] = None
+    feed_hidden: Optional[bool] = None
+
+
+class ShowcaseBody(BaseModel):
+    keys: list[str]
 
 
 @router.get("/{token}/me/cards/wants")
@@ -331,7 +351,7 @@ async def get_card(token: str, key: str, request: Request, db: AsyncSession = De
 async def get_prefs(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     club, player, snap = await _ready(db, request, token)
     return {**await social.load_prefs(db, str(player.id)), "club_alerts": snap["settings"].get("alerts_enabled", True) is not False,
-            "email_on_file": bool((getattr(player, "email", None) or "").strip())}
+            "email_on_file": bool((getattr(player, "email", None) or "").strip()), "features": _features(snap)}
 
 
 @router.put("/{token}/me/cards/prefs")
@@ -342,4 +362,64 @@ async def put_prefs(token: str, body: PrefsBody, request: Request, db: AsyncSess
     out = await social.save_prefs(db, club, str(player.id), patch)
     await db.commit()
     return {**out, "club_alerts": snap["settings"].get("alerts_enabled", True) is not False,
-            "email_on_file": bool((getattr(player, "email", None) or "").strip())}
+            "email_on_file": bool((getattr(player, "email", None) or "").strip()), "features": _features(snap)}
+
+
+# ── Sets, showcase, the collectors board and the club feed ───────────────────────────────────────────────────
+
+@router.get("/{token}/me/cards/sets")
+async def get_sets(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Every set the club has, with how far through each the player is."""
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "sets")
+    return await card_sets.overview(db, club, snap, str(player.id))
+
+
+@router.get("/{token}/me/cards/sets/{set_key}")
+async def get_set(token: str, set_key: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """One set's heading and progress. Its cards are read through the catalogue with `set=`."""
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "sets")
+    found = await card_sets.members(db, club, snap, set_key[:60])
+    if not found:
+        raise HTTPException(status_code=404, detail="That set could not be found.")
+    mine = await card_sets.held_keys(db, club, str(player.id))
+    keys = {f"p:{p}" for p in found[0]} | {f"s:{x}" for x in found[1]}
+    return {**found[2], "total": len(keys), "owned": len(keys & mine), "complete": len(keys & mine) >= len(keys)}
+
+
+@router.get("/{token}/me/cards/showcase")
+async def get_showcase(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "showcase")
+    return await community.get_showcase(db, club, snap, str(player.id))
+
+
+@router.put("/{token}/me/cards/showcase")
+async def put_showcase(token: str, body: ShowcaseBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Replace the showcase: up to six cards the player holds, in order."""
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "showcase")
+    try:
+        await community.set_showcase(db, club, snap, str(player.id), body.keys)
+    except swaps.SwapError as exc:
+        await db.rollback()
+        raise _refuse(exc)
+    await db.commit()
+    return await community.get_showcase(db, club, snap, str(player.id))
+
+
+@router.get("/{token}/me/cards/board")
+async def get_board(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The collectors board: only players who opted in, by share of the set held."""
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "board")
+    return await community.board(db, club, snap, str(player.id))
+
+
+@router.get("/{token}/me/cards/feed")
+async def get_feed(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """What has happened in the club's cards this week."""
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "feed")
+    return await community.feed(db, club, snap, str(player.id))

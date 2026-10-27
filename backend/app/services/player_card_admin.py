@@ -259,6 +259,27 @@ async def catalogue(db: AsyncSession, club: Organisation, snap: dict, *, kind: s
     }
 
 
+# ── Most wanted ───────────────────────────────────────────────────────────────────────────────────────────────
+
+async def most_wanted(db: AsyncSession, club: Organisation, snap: dict, limit: int = 15) -> dict:
+    """The cards most often on a wish list, with how many players could swap one now. Counts only: the club sees demand, never whose
+    list a card is on."""
+    rows = (await db.execute(text(
+        "SELECT subject_player_id::text AS subject, special_id::text AS special_id, COUNT(*) AS n FROM player_card_wants "
+        "WHERE organisation_id = CAST(:o AS UUID) GROUP BY subject_player_id, special_id ORDER BY n DESC, subject_player_id LIMIT :l"
+    ), {"o": str(club.id), "l": max(1, min(int(limit or 15), 50))})).mappings().all()
+    nm = await names(db, club.id)
+    specials = await _specials(db, club.id, [r["special_id"] for r in rows])
+    holders = await swaps._rows_by_card(db, club.id)
+    total = (await db.execute(text("SELECT COUNT(*) FROM player_card_wants WHERE organisation_id = CAST(:o AS UUID)"), {"o": str(club.id)})).scalar() or 0
+    out = []
+    for r in rows:
+        card = (r["subject"], r["special_id"])
+        swappable = sum(1 for owner, held in holders.items() if owner in snap["people"] and swaps.tradeable(owner, card, held.get(card, 0)) > 0)
+        out.append({**_label(nm, snap, r["subject"], r["special_id"], specials), "wanted_by": int(r["n"]), "could_swap": swappable})
+    return {"cards": out, "total_wants": int(total)}
+
+
 # ── One player ────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def player_view(db: AsyncSession, club: Organisation, snap: dict, player: Player) -> dict:
