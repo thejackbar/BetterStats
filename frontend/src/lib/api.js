@@ -3498,6 +3498,15 @@ export const api = {
   // Swapping doubles with another player: the board, one player's doubles, asking, and answering.
   availPublicSwaps: (token, { history = false } = {}) => request(`/public/availability/${token}/me/cards/swaps${history ? '?history=true' : ''}`),
   availPublicSwapPlayer: (token, playerId) => request(`/public/availability/${token}/me/cards/swaps/players/${playerId}`),
+  availPublicWants: (token) => request(`/public/availability/${token}/me/cards/wants`),
+  availPublicAddWant: (token, key) => request(`/public/availability/${token}/me/cards/wants`, { method: 'POST', body: JSON.stringify({ key }) }),
+  availPublicRemoveWant: (token, key) => request(`/public/availability/${token}/me/cards/wants?key=${encodeURIComponent(key)}`, { method: 'DELETE' }),
+  availPublicSpares: (token) => request(`/public/availability/${token}/me/cards/spares`),
+  availPublicSetSpareOpen: (token, key, open) => request(`/public/availability/${token}/me/cards/spares/open`, { method: 'POST', body: JSON.stringify({ key, open }) }),
+  availPublicCard: (token, key) => request(`/public/availability/${token}/me/cards/card?key=${encodeURIComponent(key)}`),
+  availPublicCardPrefs: (token) => request(`/public/availability/${token}/me/cards/prefs`),
+  availPublicSaveCardPrefs: (token, data) => request(`/public/availability/${token}/me/cards/prefs`, { method: 'PUT', body: JSON.stringify(data) }),
+  availPublicCounterSwap: (token, id, data) => request(`/public/availability/${token}/me/cards/swaps/${id}/counter`, { method: 'POST', body: JSON.stringify(data) }),
   availPublicCatalogue: (token, params) =>
     request(`/public/availability/${token}/me/cards/catalogue?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()}`),
   availPublicCatalogueHolders: (token, key) =>

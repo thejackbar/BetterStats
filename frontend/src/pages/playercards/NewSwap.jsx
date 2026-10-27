@@ -20,8 +20,8 @@ export default function NewSwap() {
   const leave = () => navigate(`${basePath}/swaps`)
   return (
     <div data-screen="new-swap">
-      <PageHead title="Start a swap" />
-      <Builder inline token={token} board={board} give={state.give || null} prefill={state.ask || null} club={club} accent={accent} display={display} sponsor={sponsor}
+      <PageHead title={state.counter ? 'Change the swap' : 'Start a swap'} />
+      <Builder inline token={token} board={board} give={state.give || null} giveList={state.giveList || null} prefill={state.ask || null} counter={state.counter || null} club={club} accent={accent} display={display} sponsor={sponsor}
         onClose={leave} onSent={() => { loadSwaps(); navigate(`${basePath}/swaps/sent`, { state: { sent: true } }) }} />
     </div>
   )

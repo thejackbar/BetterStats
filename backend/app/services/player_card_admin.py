@@ -279,7 +279,8 @@ async def player_view(db: AsyncSession, club: Organisation, snap: dict, player: 
     """), {"p": pid})).mappings().all()
     specials = await _specials(db, club.id, [r["special_id"] for r in got])
     sw = (await db.execute(text("""
-        SELECT s.id::text AS id, s.from_player_id::text AS f, s.to_player_id::text AS t, s.status, s.created_at, s.resolved_at, NOW() AS now
+        SELECT s.id::text AS id, s.from_player_id::text AS f, s.to_player_id::text AS t, s.status, s.created_at, s.resolved_at, NOW() AS now,
+               s.note, s.parent_swap_id::text AS parent_id
           FROM player_card_swaps s WHERE s.from_player_id = CAST(:p AS UUID) OR s.to_player_id = CAST(:p AS UUID)
          ORDER BY s.created_at DESC LIMIT 25
     """), {"p": pid})).mappings().all()
@@ -316,7 +317,7 @@ def _swap_row(r, nm: dict, snap: dict, specials: dict, sides: dict) -> dict:
     return {
         "id": r["id"], "status": status,
         "from": {"id": r["f"], "name": nm.get(r["f"])}, "to": {"id": r["t"], "name": nm.get(r["t"])},
-        "give": side(sides["give"]), "want": side(sides["want"]),
+        "give": side(sides["give"]), "want": side(sides["want"]), "note": r["note"], "parent_id": r["parent_id"],
         "created_at": r["created_at"].isoformat(), "resolved_at": r["resolved_at"].isoformat() if r["resolved_at"] else None,
     }
 
@@ -327,7 +328,7 @@ async def swap_audit(db: AsyncSession, club: Organisation, snap: dict, *, status
     nm = await names(db, club.id)
     cond = ""
     params: dict = {"o": str(club.id)}
-    if status in ("accepted", "declined", "cancelled"):
+    if status in ("accepted", "declined", "cancelled", "countered"):
         cond = " AND s.status = :st"
         params["st"] = status
     elif status == "pending":
@@ -335,7 +336,8 @@ async def swap_audit(db: AsyncSession, club: Organisation, snap: dict, *, status
     elif status == "expired":
         cond = f" AND s.status = 'pending' AND s.created_at <= NOW() - INTERVAL '{swaps.SWAP_DAYS} days'"
     rows = (await db.execute(text(f"""
-        SELECT s.id::text AS id, s.from_player_id::text AS f, s.to_player_id::text AS t, s.status, s.created_at, s.resolved_at, NOW() AS now
+        SELECT s.id::text AS id, s.from_player_id::text AS f, s.to_player_id::text AS t, s.status, s.created_at, s.resolved_at, NOW() AS now,
+               s.note, s.parent_swap_id::text AS parent_id
           FROM player_card_swaps s WHERE s.organisation_id = CAST(:o AS UUID){cond} ORDER BY s.created_at DESC
     """), params)).mappings().all()
     items = await swaps._items_of(db, [r["id"] for r in rows])
@@ -347,7 +349,7 @@ async def swap_audit(db: AsyncSession, club: Organisation, snap: dict, *, status
                   or any(needle in c["player"].lower() for c in s["give"] + s["want"])]
     counts = (await db.execute(text(f"""
         SELECT COUNT(*) FILTER (WHERE status = 'accepted') AS accepted, COUNT(*) FILTER (WHERE status = 'declined') AS declined,
-               COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled,
+               COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled, COUNT(*) FILTER (WHERE status = 'countered') AS countered,
                COUNT(*) FILTER (WHERE status = 'pending' AND created_at > NOW() - INTERVAL '{swaps.SWAP_DAYS} days') AS pending,
                COUNT(*) FILTER (WHERE status = 'pending' AND created_at <= NOW() - INTERVAL '{swaps.SWAP_DAYS} days') AS expired
           FROM player_card_swaps WHERE organisation_id = CAST(:o AS UUID)

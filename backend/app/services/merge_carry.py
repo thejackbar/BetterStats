@@ -115,11 +115,18 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     ("player_card_swaps", "want_subject_player_id", "uuid", None),
     # The cards on each side of a swap (migration 366): the subject of each card.
     ("player_card_swap_items", "subject_player_id", "uuid", None),
+    # The wish list, the cards a player is open to swapping, their alert settings and the alert log (migration 368).
+    ("player_card_wants", "player_id", "uuid", ("subject_player_id", "special_id")),
+    ("player_card_wants", "subject_player_id", "uuid", ("player_id", "special_id")),
+    ("player_card_open_offers", "player_id", "uuid", ("subject_player_id", "special_id")),
+    ("player_card_open_offers", "subject_player_id", "uuid", ("player_id", "special_id")),
+    ("player_card_prefs", "player_id", "uuid", ("organisation_id",)),
+    ("player_card_alerts", "player_id", "uuid", None),
 )
 
 # Tables whose primary key is not an `id` column: the column that identifies one
 # row among this player's own (the other half of the key is the player).
-_ROW_KEY = {"fixture_lineups": "fixture_id", "team_members": "team_id"}
+_ROW_KEY = {"fixture_lineups": "fixture_id", "team_members": "team_id", "player_card_prefs": "player_id"}
 
 # A row somebody decided something about (a membership with payments and a role,
 # a contact who unsubscribed, a CRM link) is never deleted to settle a clash
@@ -158,6 +165,7 @@ _OWN_CLUB_TABLES = {
     "fine_entries", "fine_payments",
     "player_card_packs", "player_card_copies", "player_special_cards", "player_card_hidden",
     "player_card_swaps", "player_card_swap_items",
+    "player_card_wants", "player_card_open_offers", "player_card_prefs", "player_card_alerts",
 }
 
 _CAST = {"int": "int[]", "uuid": "uuid[]"}

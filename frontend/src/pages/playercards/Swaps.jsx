@@ -39,7 +39,7 @@ export default function Swaps({ tab = 'asking' }) {
 
   if (failed) return <div className="text-sm text-pb-faint" data-swaps-failed>Swaps could not load. Reload to try again.</div>
   if (!board) return <div className="text-sm text-pb-faint" data-swaps-loading>Loading swaps…</div>
-  const ui = { club, accent, display, sponsor, busy, answer }
+  const ui = { club, accent, display, sponsor, busy, answer, onCounter: (sw) => navigate(`${basePath}/swaps/new`, { state: { counter: sw } }) }
   const tabs = [['', 'Asking you', board.incoming.length, 'asking'], ['/sent', 'You asked', board.outgoing.length, 'sent'], ['/history', 'History', 0, 'history']]
   const offerable = board.mine.reduce((n, c) => n + c.tradeable, 0)
   const list = tab === 'asking' ? board.incoming : tab === 'sent' ? board.outgoing : []
@@ -70,7 +70,7 @@ export default function Swaps({ tab = 'asking' }) {
           {board.recent.map((s) => (
             <div key={s.id} data-swap-recent data-status={s.status} className="rounded-xl border pb-hairline bg-pb-surface p-3 mb-2 text-[13.5px]">
               <div>
-                <strong>{s.status === 'accepted' ? 'Swapped with' : s.status === 'declined' ? (s.direction === 'out' ? 'Declined by' : 'You declined') : 'Cancelled with'} {s.other.name}</strong>
+                <strong>{s.status === 'accepted' ? 'Swapped with' : s.status === 'declined' ? (s.direction === 'out' ? 'Declined by' : 'You declined') : s.status === 'countered' ? (s.direction === 'out' ? 'Changed by' : 'You changed it for') : 'Cancelled with'} {s.other.name}</strong>
                 <span className="text-pb-faint"> · {ago(s.resolved_at || s.created_at)}</span>
               </div>
               <div className="text-pb-dim mt-0.5">{s.direction === 'out' ? 'You gave' : 'You got'} {sideLine(s.give)}; {s.direction === 'out' ? 'you got' : 'you gave'} {sideLine(s.want)}.</div>

@@ -45,6 +45,7 @@ class SettingsBody(BaseModel):
     include_juniors: Optional[bool] = None
     weekly_packs: Optional[int] = None
     timezone: Optional[str] = None
+    alerts_enabled: Optional[bool] = None
 
 
 class HiddenBody(BaseModel):
@@ -83,6 +84,7 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
             "include_juniors": settings["include_juniors"],
             "weekly_packs": settings["weekly_packs"],
             "timezone": settings["timezone"],
+            "alerts_enabled": settings.get("alerts_enabled", True) is not False,
             "effective_timezone": str(cards.club_zone(settings)),
         },
         "timezones": [{"id": i, "label": n} for i, n in TIMEZONES],
@@ -229,7 +231,7 @@ async def player_detail(
 
 @router.get("/swaps")
 async def swap_audit(
-    status: str = Query("all", pattern="^(all|pending|accepted|declined|cancelled|expired)$"),
+    status: str = Query("all", pattern="^(all|pending|accepted|declined|cancelled|countered|expired)$"),
     q: str = Query("", max_length=80),
     limit: int = Query(50, ge=1, le=insight.PAGE_MAX),
     offset: int = Query(0, ge=0),

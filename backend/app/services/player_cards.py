@@ -118,6 +118,7 @@ def default_settings() -> dict:
         "weekly_packs": DEFAULT_WEEKLY_PACKS,
         "timezone": None,
         "launched_at": None,
+        "alerts_enabled": True,
     }
 
 
@@ -151,7 +152,7 @@ def week_ends_at(settings: dict, now: Optional[datetime] = None) -> datetime:
 
 async def load_settings(db: AsyncSession, org_id) -> dict:
     row = (await db.execute(text(
-        "SELECT enabled, include_juniors, weekly_packs, timezone, launched_at "
+        "SELECT enabled, include_juniors, weekly_packs, timezone, launched_at, alerts_enabled "
         "FROM club_card_settings WHERE organisation_id = CAST(:o AS UUID)"
     ), {"o": str(org_id)})).mappings().first()
     if not row:
@@ -185,6 +186,9 @@ async def save_settings(db: AsyncSession, org_id, patch: dict) -> dict:
     if "weekly_packs" in patch and patch["weekly_packs"] is not None:
         sets.append("weekly_packs = :weekly_packs")
         params["weekly_packs"] = max(0, min(int(patch["weekly_packs"]), MAX_WEEKLY_PACKS))
+    if "alerts_enabled" in patch and patch["alerts_enabled"] is not None:
+        sets.append("alerts_enabled = :alerts_enabled")
+        params["alerts_enabled"] = bool(patch["alerts_enabled"])
     if "timezone" in patch:
         tz = (patch["timezone"] or "").strip() or None
         if tz:

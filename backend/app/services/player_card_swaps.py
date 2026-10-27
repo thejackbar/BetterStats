@@ -264,7 +264,7 @@ async def waiting_count(db: AsyncSession, me: str) -> int:
 async def list_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str, history: bool = False) -> dict:
     rows = (await db.execute(text(f"""
         SELECT s.id::text AS id, s.from_player_id::text AS from_id, s.to_player_id::text AS to_id,
-               s.status, s.created_at, s.resolved_at, {_live_sql()} AS live
+               s.status, s.created_at, s.resolved_at, s.note, s.parent_swap_id::text AS parent_id, {_live_sql()} AS live
           FROM player_card_swaps s
          WHERE s.organisation_id = CAST(:org AS UUID)
            AND (s.from_player_id = CAST(:me AS UUID) OR s.to_player_id = CAST(:me AS UUID))
@@ -292,7 +292,7 @@ async def list_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str, 
         return {
             "id": r["id"], "direction": "out" if outgoing else "in", "status": status,
             "other": {"player_id": other, "name": (snap["people"].get(other) or {}).get("display_name") or "A player"},
-            "give": cards_of(r, "give"), "want": cards_of(r, "want"),
+            "give": cards_of(r, "give"), "want": cards_of(r, "want"), "note": r["note"], "parent_id": r["parent_id"],
             "created_at": r["created_at"].isoformat(), "resolved_at": r["resolved_at"].isoformat() if r["resolved_at"] else None,
         }
 
@@ -305,8 +305,18 @@ async def list_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str, 
     }
 
 
-async def create_swap(db: AsyncSession, club: Organisation, snap: dict, me: str, to_id: str, give_raw, want_raw) -> str:
-    """`give_raw` and `want_raw` are lists of `{key, qty}`."""
+NOTE_MAX = 200
+
+
+def _clean_note(note) -> Optional[str]:
+    note = " ".join(str(note or "").split())
+    return note[:NOTE_MAX] or None
+
+
+async def create_swap(db: AsyncSession, club: Organisation, snap: dict, me: str, to_id: str, give_raw, want_raw,
+                      note: Optional[str] = None, parent_id: Optional[str] = None) -> str:
+    """`give_raw` and `want_raw` are lists of `{key, qty}`. `note` travels with the request; `parent_id` is the request this
+    one answers (a counter offer)."""
     if to_id == me or to_id not in snap["people"]:
         raise SwapError("That player is not available to swap with.", 404)
     give = await _parse_items(db, club, snap, give_raw)
@@ -336,10 +346,10 @@ async def create_swap(db: AsyncSession, club: Organisation, snap: dict, me: str,
             if _signature(sides["give"], sides["want"]) == mine_sig:
                 raise SwapError("You have already asked them for that swap.")
     new_id = (await db.execute(text("""
-        INSERT INTO player_card_swaps (organisation_id, from_player_id, to_player_id)
-        VALUES (CAST(:org AS UUID), CAST(:me AS UUID), CAST(:to AS UUID))
+        INSERT INTO player_card_swaps (organisation_id, from_player_id, to_player_id, note, parent_swap_id)
+        VALUES (CAST(:org AS UUID), CAST(:me AS UUID), CAST(:to AS UUID), :note, CAST(:parent AS UUID))
         RETURNING id::text
-    """), {"org": str(club.id), "me": me, "to": to_id})).scalar()
+    """), {"org": str(club.id), "me": me, "to": to_id, "note": _clean_note(note), "parent": parent_id})).scalar()
     for side, side_items in (("give", give), ("want", want)):
         for (subject, special_id), qty in side_items:
             await db.execute(text("""
@@ -426,3 +436,34 @@ async def respond(db: AsyncSession, club: Organisation, snap: dict, me: str, swa
         "UPDATE player_card_swaps SET status = :st, resolved_at = NOW() WHERE id = CAST(:id AS UUID)"
     ), {"st": new, "id": swap_id})
     return new
+
+
+async def counter_swap(db: AsyncSession, club: Organisation, snap: dict, me: str, swap_id: str, give_raw, want_raw,
+                       note: Optional[str] = None) -> str:
+    """The person asked answers with a changed request instead of a yes or a no: a new request from them to the person who
+    asked, pointing at the old one, which ends as `countered`. The new request is checked like any other (they must hold what
+    they give, the other person what they are asked for). Returns the new request's id."""
+    try:
+        uuid.UUID(swap_id)
+    except ValueError:
+        raise SwapError("That swap could not be found.", 404)
+    s = (await db.execute(text(f"""
+        SELECT s.from_player_id::text AS from_id, s.to_player_id::text AS to_id, {_live_sql()} AS live, s.status
+          FROM player_card_swaps s
+         WHERE s.id = CAST(:id AS UUID) AND s.organisation_id = CAST(:org AS UUID)
+           AND (s.from_player_id = CAST(:me AS UUID) OR s.to_player_id = CAST(:me AS UUID))
+         FOR UPDATE
+    """), {"id": swap_id, "org": str(club.id), "me": me})).mappings().first()
+    if not s:
+        raise SwapError("That swap could not be found.", 404)
+    if s["to_id"] != me:
+        raise SwapError("Only the person asked can counter it.", 403)
+    if s["status"] != "pending":
+        raise SwapError("That swap has already been dealt with.")
+    if not s["live"]:
+        raise SwapError("That swap request has expired.")
+    new_id = await create_swap(db, club, snap, me, s["from_id"], give_raw, want_raw, note=note, parent_id=swap_id)
+    await db.execute(text(
+        "UPDATE player_card_swaps SET status = 'countered', resolved_at = NOW() WHERE id = CAST(:id AS UUID)"
+    ), {"id": swap_id})
+    return new_id

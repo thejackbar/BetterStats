@@ -374,7 +374,7 @@ function PacksTab({ ov, open }) {
 }
 
 // ── Swaps ───────────────────────────────────────────────────────────────────────────────────────────────────────
-const STATUS_TONE = { accepted: 'var(--pb-positive)', declined: 'var(--pb-red)', cancelled: 'var(--pb-faint)', pending: 'var(--pb-amber)', expired: 'var(--pb-faint)' }
+const STATUS_TONE = { accepted: 'var(--pb-positive)', declined: 'var(--pb-red)', cancelled: 'var(--pb-faint)', countered: 'var(--pb-faint)', pending: 'var(--pb-amber)', expired: 'var(--pb-faint)' }
 function SwapTable({ rows }) {
   if (!rows.length) return <div className="text-sm text-pb-faint">No swaps.</div>
   const one = (c) => `${c.kind === 'special' ? `${c.player}: ${c.title}` : `${c.player} (${tierLabel(c.tier)})`}${(c.qty || 1) > 1 ? ` ×${c.qty}` : ''}`
@@ -385,7 +385,7 @@ function SwapTable({ rows }) {
       <tbody>{rows.map((r) => (
         <tr key={r.id} className="border-t border-pb-hairline align-top" data-swap-row={r.status}>
           <td className="px-2 py-1.5 whitespace-nowrap text-pb-dim">{fmtWhen(r.created_at)}</td>
-          <td className="px-2 py-1.5">{r.from.name}</td><td className="px-2 py-1.5">{line(r.give)}</td>
+          <td className="px-2 py-1.5">{r.from.name}{r.parent_id && <div className="text-[11px] text-pb-amber" data-swap-changed>a changed swap</div>}{r.note && <div className="text-[11.5px] text-pb-faint italic max-w-[16rem]" data-swap-row-note>“{r.note}”</div>}</td><td className="px-2 py-1.5">{line(r.give)}</td>
           <td className="px-2 py-1.5">{r.to.name}</td><td className="px-2 py-1.5">{line(r.want)}</td>
           <td className="px-2 py-1.5 whitespace-nowrap"><span style={{ color: STATUS_TONE[r.status] }} className="font-semibold capitalize">{r.status}</span>{r.resolved_at && <span className="text-pb-faint text-[11.5px]"> {fmtDate(r.resolved_at)}</span>}</td>
         </tr>))}
@@ -407,7 +407,7 @@ function SwapsTab() {
     <Card title="Swap audit">
       <p className="text-[12.5px] text-pb-faint mb-3">Every swap request, whoever asked and however it ended. A request nobody answers lapses after 14 days.</p>
       <div className="flex flex-wrap gap-2 mb-3">
-        {[['all', 'All'], ['accepted', `Accepted ${c.accepted ?? ''}`], ['pending', `Open ${c.pending ?? ''}`], ['declined', `Declined ${c.declined ?? ''}`], ['cancelled', `Cancelled ${c.cancelled ?? ''}`], ['expired', `Expired ${c.expired ?? ''}`]].map(([k, l]) => (
+        {[['all', 'All'], ['accepted', `Accepted ${c.accepted ?? ''}`], ['pending', `Open ${c.pending ?? ''}`], ['declined', `Declined ${c.declined ?? ''}`], ['cancelled', `Cancelled ${c.cancelled ?? ''}`], ['countered', `Changed ${c.countered ?? ''}`], ['expired', `Expired ${c.expired ?? ''}`]].map(([k, l]) => (
           <button key={k} type="button" onClick={() => setStatus(k)} data-swap-filter={k} className={`px-3 py-1 rounded-full text-[12px] font-semibold border ${status === k ? 'bg-pb-accent text-pb-bg border-transparent' : 'border-pb-hairline2 text-pb-text'}`}>{l.trim()}</button>
         ))}
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a player" aria-label="Find a swap by player" className="bg-pb-surface2 border border-pb-hairline2 rounded px-2.5 py-1 text-sm min-w-0 flex-1" />
@@ -460,6 +460,8 @@ function SettingsTab({ data, setData }) {
         <div className="space-y-4">
           <Toggle on={s.enabled} disabled={saving} onChange={(v) => save({ enabled: v })} label="Player Cards are on"
             hint="Switching them off hides the cards and the packs from your players. Nothing they have collected is lost." />
+          <Toggle on={s.alerts_enabled !== false} disabled={saving} onChange={(v) => save({ alerts_enabled: v })} label="Card emails are on"
+            hint="Emails to players when a swap is asked of them and when a card on their wish list is available. Players can also switch each one off. Players with no email on file, and under 18s, are never emailed." />
           <Toggle on={s.include_juniors} disabled={saving} onChange={(v) => save({ include_juniors: v })} label="Include junior players"
             hint="Off by default. When on, juniors have cards and can be pulled from packs. Check with their families first." />
           <div className="grid sm:grid-cols-2 gap-3">

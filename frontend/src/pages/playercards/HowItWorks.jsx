@@ -45,11 +45,19 @@ export default function HowItWorks() {
           <li>Your own card cannot be swapped away. Extra copies of it you have pulled can.</li>
           <li>Nothing moves until the other player says yes. They can say no, and you can cancel any time before.</li>
           <li>Requests lapse after 14 days. When someone accepts, every card in the request moves, or none of them do.</li>
+          <li>The person asked can say yes, say no, or change it: pick different cards and send it back. The first request then ends and they decide on yours. A short note can go with any request.</li>
+        </ul>
+      </Section>
+      <Section id="wishlist" title="Wish list, spares and emails">
+        <ul>
+          <li>Put any card on your wish list from Club cards. Only you can see the list. It shows who could swap you each card now, and you can ask them from there.</li>
+          <li>A spare is a copy beyond the one you keep. The Spares page gathers them so you can offer several at once. If you switch a spare to open to offers, you will see how many players want that card, as a number, never as names.</li>
+          <li>You can be emailed when someone asks you for a swap and when a card on your wish list becomes available. You choose which in Settings, and your club can switch the emails off.</li>
         </ul>
       </Section>
       <Section id="privacy" title="Who sees what">
         <ul>
-          <li>Other players can see the cards you could swap and nothing else: not your packs, and not how many of a card you hold beyond what you could give.</li>
+          <li>Other players can see the cards you could swap and nothing else: not your packs, not your wish list, and not how many of a card you hold beyond what you could give.</li>
           <li>Club cards shows every card in the club and how many other players could swap you a copy. It never shows a person's whole collection.</li>
           <li>If you would rather not be in the cards, ask your club to hide you.</li>
         </ul>

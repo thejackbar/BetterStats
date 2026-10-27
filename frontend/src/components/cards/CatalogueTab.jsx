@@ -3,6 +3,7 @@
 // in stacks, searchable and sortable like your own. Each card says how many other players could swap a copy, and a
 // card held up lists them, each with an Ask button that opens a swap request with that player and card chosen.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { onColor } from '../PlayerTradingCard'
 import CardGallery from './CardGallery'
@@ -10,7 +11,7 @@ import CardPanel from './CardPanel'
 
 const MONO = "'JetBrains Mono', monospace"
 
-function Holders({ token, card, accent, onAsk }) {
+function Holders({ token, card, accent, onAsk, wants, onToggleWant, cardHref }) {
   const [res, setRes] = useState(null)
   const [err, setErr] = useState('')
   useEffect(() => {
@@ -34,6 +35,17 @@ function Holders({ token, card, accent, onAsk }) {
             style={{ padding: '7px 14px', borderRadius: 10, border: 0, background: accent, color: onColor(accent), font: `700 11px ${MONO}`, letterSpacing: 1.1, textTransform: 'uppercase' }}>Ask</button>
         </div>
       ))}
+      {(onToggleWant || cardHref) && (
+        <div className="flex flex-wrap gap-2 mt-3 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,.1)' }}>
+          {onToggleWant && res.mine_copies === 0 && (
+            <button type="button" data-want-toggle aria-pressed={wants?.has(card.key)} onClick={() => onToggleWant(card)}
+              style={{ padding: '7px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,.35)', background: wants?.has(card.key) ? accent : 'rgba(255,255,255,.08)', color: wants?.has(card.key) ? onColor(accent) : '#fff', font: `700 11px ${MONO}`, letterSpacing: 1, textTransform: 'uppercase' }}>
+              {wants?.has(card.key) ? 'On my wish list' : 'Add to wish list'}
+            </button>
+          )}
+          {cardHref && <Link to={cardHref(card)} data-card-page-link style={{ padding: '7px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,.35)', color: '#fff', font: `700 11px ${MONO}`, letterSpacing: 1, textTransform: 'uppercase', textDecoration: 'none' }}>Card page</Link>}
+        </div>
+      )}
     </div>
   )
 }
@@ -49,7 +61,7 @@ function useWide(min = 1360) {
   return wide
 }
 
-export default function CatalogueTab({ token, club, accent, display, sponsor, onAsk, intro = true, panel = false }) {
+export default function CatalogueTab({ token, club, accent, display, sponsor, onAsk, intro = true, panel = false, wants, onToggleWant, cardHref }) {
   const wide = useWide()
   const [held, setHeld] = useState(null)
   const [state, setState] = useState({ items: [], total: 0, counts: {}, loading: true })
@@ -67,7 +79,7 @@ export default function CatalogueTab({ token, club, accent, display, sponsor, on
     }
   }, [token])
   const remote = useMemo(() => ({ ...state, onQuery }), [state, onQuery])
-  const holders = (card, close) => <Holders key={card.key} token={token} card={card} accent={accent} onAsk={(h) => { close(); onAsk({ player: { player_id: h.player_id, name: h.name }, card: { ...card, tradeable: h.tradeable } }) }} />
+  const holders = (card, close) => <Holders key={card.key} token={token} card={card} accent={accent} wants={wants} onToggleWant={onToggleWant} cardHref={cardHref} onAsk={(h) => { close(); onAsk({ player: { player_id: h.player_id, name: h.name }, card: { ...card, tradeable: h.tradeable } }) }} />
   return (
     <div data-catalogue>
       {intro && (

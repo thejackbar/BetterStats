@@ -14,13 +14,13 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.routers.public_availability import _club_branding, _club_for_token, _client_ip, _player_for_session
-from app.services import player_card_catalogue as catalogue, player_card_swaps as swaps, player_cards as cards, rate_limit
+from app.services import player_card_alerts as alerts, player_card_catalogue as catalogue, player_card_social as social, player_card_swaps as swaps, player_cards as cards, rate_limit
 from app.services.session_safety import rollback_keeping
 
 router = APIRouter(prefix="/public/availability", tags=["public-player-cards"])
@@ -69,7 +69,7 @@ async def get_my_cards(token: str, request: Request, db: AsyncSession = Depends(
 
 
 @router.post("/{token}/me/cards/packs/{pack_id}/open")
-async def open_my_pack(token: str, pack_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def open_my_pack(token: str, pack_id: str, request: Request, db: AsyncSession = Depends(get_db), background_tasks: BackgroundTasks = None):
     """Open one pack. The pack is locked while it is drawn, so two taps cannot open it twice."""
     club, player, snap = await _ready(db, request, token)
     rate_limit.enforce(f"cards-open:{player.id}:{_client_ip(request)}", OPEN_LIMIT, OPEN_WINDOW,
@@ -82,18 +82,22 @@ async def open_my_pack(token: str, pack_id: str, request: Request, db: AsyncSess
         await db.rollback()
         raise HTTPException(status_code=409, detail="That pack is not available to open.")
     await db.commit()
+    if background_tasks is not None:   # a wish list may now have a card someone could swap
+        background_tasks.add_task(alerts.scan_wants, club.id, [c["key"] for c in got if c.get("key")])
     packs = await cards.available_packs(db, str(player.id), snap)
     return {"cards": got, "packs_left": len(packs)}
 
 
 @router.post("/{token}/me/cards/open-all")
-async def open_all_my_packs(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def open_all_my_packs(token: str, request: Request, db: AsyncSession = Depends(get_db), background_tasks: BackgroundTasks = None):
     """Open every pack that is ready, up to a sensible number, and report what came out."""
     club, player, snap = await _ready(db, request, token)
     rate_limit.enforce(f"cards-open-all:{player.id}:{_client_ip(request)}", 6, OPEN_WINDOW,
                        detail="Slow down. Give it a few seconds and try again.")
     result = await cards.open_many(db, club, player, snap)
     await db.commit()
+    if background_tasks is not None:
+        background_tasks.add_task(alerts.scan_wants, club.id, None)
     packs = await cards.available_packs(db, str(player.id), snap)
     return {**result, "packs_left": len(packs)}
 
@@ -117,6 +121,13 @@ class SwapBody(BaseModel):
     want: Optional[list[SwapCard]] = None
     give_key: Optional[str] = None
     want_key: Optional[str] = None
+    note: Optional[str] = None
+
+
+class CounterBody(BaseModel):
+    give: list[SwapCard]
+    want: list[SwapCard]
+    note: Optional[str] = None
 
 
 def _refuse(exc: swaps.SwapError):
@@ -185,23 +196,43 @@ async def get_swap_player(token: str, player_id: str, request: Request, db: Asyn
 
 
 @router.post("/{token}/me/cards/swaps")
-async def ask_for_swap(token: str, body: SwapBody, request: Request, db: AsyncSession = Depends(get_db)):
+async def ask_for_swap(token: str, body: SwapBody, request: Request, db: AsyncSession = Depends(get_db), background_tasks: BackgroundTasks = None):
     club, player, snap = await _ready(db, request, token)
     rate_limit.enforce(f"cards-swap:{player.id}:{_client_ip(request)}", SWAP_LIMIT, SWAP_WINDOW,
                        detail="Slow down. Give it a few seconds and try again.")
     try:
         give = [c.model_dump() for c in body.give] if body.give is not None else ([{"key": body.give_key}] if body.give_key else [])
         want = [c.model_dump() for c in body.want] if body.want is not None else ([{"key": body.want_key}] if body.want_key else [])
-        new_id = await swaps.create_swap(db, club, snap, str(player.id), body.to_player_id, give, want)
+        new_id = await swaps.create_swap(db, club, snap, str(player.id), body.to_player_id, give, want, note=body.note)
     except swaps.SwapError as exc:
         await db.rollback()
         raise _refuse(exc)
     await db.commit()
+    if background_tasks is not None:
+        background_tasks.add_task(alerts.swap_asked, club.id, new_id)
+    return {"id": new_id, "status": "pending"}
+
+
+@router.post("/{token}/me/cards/swaps/{swap_id}/counter")
+async def counter_swap(token: str, swap_id: str, body: CounterBody, request: Request, db: AsyncSession = Depends(get_db), background_tasks: BackgroundTasks = None):
+    """Answer a request with a changed one: a new request back to the person who asked, and the old one ends as countered."""
+    club, player, snap = await _ready(db, request, token)
+    rate_limit.enforce(f"cards-swap:{player.id}:{_client_ip(request)}", SWAP_LIMIT, SWAP_WINDOW,
+                       detail="Slow down. Give it a few seconds and try again.")
+    try:
+        new_id = await swaps.counter_swap(db, club, snap, str(player.id), swap_id, [c.model_dump() for c in body.give],
+                                          [c.model_dump() for c in body.want], note=body.note)
+    except swaps.SwapError as exc:
+        await db.rollback()
+        raise _refuse(exc)
+    await db.commit()
+    if background_tasks is not None:
+        background_tasks.add_task(alerts.swap_asked, club.id, new_id)
     return {"id": new_id, "status": "pending"}
 
 
 @router.post("/{token}/me/cards/swaps/{swap_id}/{action}")
-async def answer_swap(token: str, swap_id: str, action: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def answer_swap(token: str, swap_id: str, action: str, request: Request, db: AsyncSession = Depends(get_db), background_tasks: BackgroundTasks = None):
     """accept (the person asked), decline (the person asked) or cancel (the person who asked)."""
     club, player, snap = await _ready(db, request, token)
     rate_limit.enforce(f"cards-swap:{player.id}:{_client_ip(request)}", SWAP_LIMIT, SWAP_WINDOW,
@@ -212,4 +243,103 @@ async def answer_swap(token: str, swap_id: str, action: str, request: Request, d
         await db.rollback()
         raise _refuse(exc)
     await db.commit()
+    if status == "accepted" and background_tasks is not None:   # the cards moved: someone's wish may now be met, or lost
+        sides = (await swaps._items_of(db, [swap_id]))[swap_id]
+        background_tasks.add_task(alerts.scan_wants, club.id, [swaps.key_of(*c) for side in sides.values() for c, _ in side])
     return {"status": status}
+
+
+# ── Wish list, spares, one card, alert settings ───────────────────────────────────────────────────────────────
+
+class KeyBody(BaseModel):
+    key: str
+
+
+class OpenBody(BaseModel):
+    key: str
+    open: bool
+
+
+class PrefsBody(BaseModel):
+    alert_swaps: Optional[bool] = None
+    alert_wants: Optional[bool] = None
+
+
+@router.get("/{token}/me/cards/wants")
+async def get_wants(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The player's wish list, each card with who could swap one now."""
+    club, player, snap = await _ready(db, request, token)
+    return await social.list_wants(db, club, snap, str(player.id))
+
+
+@router.post("/{token}/me/cards/wants")
+async def add_want(token: str, body: KeyBody, request: Request, db: AsyncSession = Depends(get_db)):
+    club, player, snap = await _ready(db, request, token)
+    rate_limit.enforce(f"cards-want:{player.id}:{_client_ip(request)}", SWAP_LIMIT * 2, SWAP_WINDOW,
+                       detail="Slow down. Give it a few seconds and try again.")
+    try:
+        await social.add_want(db, club, snap, str(player.id), body.key)
+    except swaps.SwapError as exc:
+        await db.rollback()
+        raise _refuse(exc)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{token}/me/cards/wants")
+async def remove_want(token: str, key: str, request: Request, db: AsyncSession = Depends(get_db)):
+    club, player, snap = await _ready(db, request, token)
+    try:
+        await social.remove_want(db, club, str(player.id), key)
+    except swaps.SwapError as exc:
+        await db.rollback()
+        raise _refuse(exc)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/{token}/me/cards/spares")
+async def get_spares(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The cards the player holds more of than they keep, and whether they are open to offers on each."""
+    club, player, snap = await _ready(db, request, token)
+    return await social.spares(db, club, snap, str(player.id))
+
+
+@router.post("/{token}/me/cards/spares/open")
+async def set_spare_open(token: str, body: OpenBody, request: Request, db: AsyncSession = Depends(get_db)):
+    club, player, snap = await _ready(db, request, token)
+    try:
+        await social.set_open(db, club, snap, str(player.id), body.key, body.open)
+    except swaps.SwapError as exc:
+        await db.rollback()
+        raise _refuse(exc)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/{token}/me/cards/card")
+async def get_card(token: str, key: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """One card in full: the card, who could swap one, how many the asker holds, whether it is on their wish list."""
+    club, player, snap = await _ready(db, request, token)
+    try:
+        return await social.card_detail(db, club, snap, str(player.id), key[:60])
+    except swaps.SwapError as exc:
+        raise _refuse(exc)
+
+
+@router.get("/{token}/me/cards/prefs")
+async def get_prefs(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    club, player, snap = await _ready(db, request, token)
+    return {**await social.load_prefs(db, str(player.id)), "club_alerts": snap["settings"].get("alerts_enabled", True) is not False,
+            "email_on_file": bool((getattr(player, "email", None) or "").strip())}
+
+
+@router.put("/{token}/me/cards/prefs")
+async def put_prefs(token: str, body: PrefsBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Only the settings sent are changed."""
+    club, player, snap = await _ready(db, request, token)
+    patch = {k: getattr(body, k) for k in body.model_fields_set}
+    out = await social.save_prefs(db, club, str(player.id), patch)
+    await db.commit()
+    return {**out, "club_alerts": snap["settings"].get("alerts_enabled", True) is not False,
+            "email_on_file": bool((getattr(player, "email", None) or "").strip())}

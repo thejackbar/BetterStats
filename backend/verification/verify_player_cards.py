@@ -69,10 +69,15 @@ if HAVE_SWAPS:
     from app.services import player_card_swaps as swaps
     from app.services import player_card_swaps_ddl as _swap_ddl
     SWAP_DDL = _swap_ddl.STATEMENTS
+    try:
+        from app.services.player_card_social_ddl import STATEMENTS as SOCIAL_DDL
+    except ImportError:   # the control run on the commit before the social side
+        SOCIAL_DDL = []
     ITEM_DDL = getattr(_swap_ddl, "ITEM_STATEMENTS", [])  # absent before migration 366
 else:
     swaps = None
     SWAP_DDL = []
+    SOCIAL_DDL = []
     ITEM_DDL = []
 
 DB = os.environ["DATABASE_URL"]
@@ -150,7 +155,7 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
-        for stmt in CARD_DDL + SWAP_DDL:
+        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL:
             await conn.execute(text(stmt))
 
 
@@ -1084,6 +1089,239 @@ async def main() -> None:
                   and (await db.execute(text("SELECT count(*) FROM player_card_swaps WHERE :k IN (from_player_id, to_player_id)"), {"k": keep})).scalar() >= 2)
         check("special cards of the removed player move to the keeper",
               (await db.execute(text("SELECT count(*) FROM player_special_cards WHERE player_id = :k AND event_key = 'century:merge-test'"), {"k": keep})).scalar() == 1)
+
+    # ── The social side: wish list, spares, one card, counter offers, notes, alerts ─────────────────────────
+    print("\nthe social side")
+    try:
+        from app.services import player_card_social as social, player_card_alerts as alerts
+        from app.services import email_service as email_mod
+    except ImportError:
+        social = alerts = email_mod = None
+    if social is None or not HAVE_SWAPS:
+        for label in ("wish list", "spares", "card page", "prefs", "counter offers", "notes", "alerts"):
+            check(f"{label}: the social side exists", False, "app.services.player_card_social missing")
+    else:
+        async with Session() as db:
+            club = await db.get(Organisation, ORG)
+            await db.execute(text("DELETE FROM player_card_copies WHERE source IN ('pack', 'swap') AND organisation_id = :o"), {"o": ORG})
+            for t in ("player_card_wants", "player_card_open_offers", "player_card_prefs", "player_card_alerts"):
+                await db.execute(text(f"DELETE FROM {t}"))
+            await db.execute(text("DELETE FROM player_card_swaps WHERE organisation_id = :o"), {"o": ORG})
+            await db.execute(text("UPDATE club_card_settings SET alerts_enabled = TRUE WHERE organisation_id = :o"), {"o": ORG})
+            await db.commit()
+            cards.forget(ORG)
+
+            async def put(owner, subject, n, special=None):
+                for _ in range(n):
+                    await db.execute(text("INSERT INTO player_card_copies (organisation_id, owner_player_id, subject_player_id, special_id, source) "
+                                          "VALUES (:o, :ow, :s, :sp, 'pack')"), {"o": ORG, "ow": owner, "s": subject, "sp": special})
+                await db.commit()
+
+            async def held_n(owner, subject):
+                return (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE owner_player_id = :o AND subject_player_id = :s AND special_id IS NULL"), {"o": owner, "s": subject})).scalar()
+
+            async def refused(coro):
+                try:
+                    await coro
+                    return None
+                except swaps.SwapError as exc:
+                    await db.commit()
+                    return exc.status
+
+            a, d, c_ = str(ALPHA), str(DELTA), str(CHARLIE)
+            await put(DELTA, BRAVO, 2)
+            await put(CHARLIE, BRAVO, 1)
+            await put(HOTEL, BRAVO, 3)          # out of the pool
+            snap = await cards.club_snapshot(db, club, fresh=True)
+
+            # the wish list
+            await social.add_want(db, club, snap, a, f"p:{BRAVO}")
+            await social.add_want(db, club, snap, a, f"p:{BRAVO}")
+            await db.commit()
+            wl = await social.list_wants(db, club, snap, a)
+            check("a card can be put on the wish list, once however many times it is added", len(wl["wants"]) == 1 and wl["wants"][0]["key"] == f"p:{BRAVO}")
+            check("it shows who could swap one now, in name order, never a player out of the pool", [h["player_id"] for h in wl["wants"][0]["holders"]] == sorted([str(DELTA), str(CHARLIE)], key=lambda x: {str(DELTA): "delta", str(CHARLIE): "charlie"}[x]) and wl["ready"] == 1, str(wl["wants"][0]["holders"]))
+            check("nobody else sees it: another player's list is empty", (await social.list_wants(db, club, snap, d))["wants"] == [])
+            check("your own card cannot be wanted (409)", await refused(social.add_want(db, club, snap, a, f"p:{ALPHA}")) == 409)
+            await put(ALPHA, CHARLIE, 1)
+            check("a card you already hold cannot be wanted (409)", await refused(social.add_want(db, club, snap, a, f"p:{CHARLIE}")) == 409)
+            check("a card of a player out of the pool cannot be wanted (409)", await refused(social.add_want(db, club, snap, a, f"p:{HOTEL}")) == 409)
+            check("a made-up key is refused (422)", await refused(social.add_want(db, club, snap, a, "p:nope")) == 422)
+            old_max = social.MAX_WANTS
+            social.MAX_WANTS = 1
+            check("the list is capped", await refused(social.add_want(db, club, snap, a, f"p:{DELTA}")) == 409)
+            social.MAX_WANTS = old_max
+            await social.remove_want(db, club, a, f"p:{BRAVO}")
+            await db.commit()
+            check("a card comes off the list", (await social.list_wants(db, club, snap, a))["wants"] == [])
+
+            # spares and open to offers
+            await put(ALPHA, CHARLIE, 2)           # three Charlie in all: two spare
+            await put(ALPHA, ALPHA, 1)             # a pulled copy of their own card: one spare
+            sp_ = await social.spares(db, club, snap, a)
+            by = {x["key"]: x for x in sp_["cards"]}
+            check("a spare is a copy beyond the one kept (three Charlie is two spare)", by.get(f"p:{CHARLIE}", {}).get("spare") == 2, str(by.keys()))
+            check("...and every pulled copy of the player's own card is a spare", by.get(f"p:{ALPHA}", {}).get("spare") == 1)
+            check("a single card is not a spare", f"p:{BRAVO}" not in by and sp_["total"] == 3)
+            check("being open to offers is off until it is turned on, and no demand is shown", by[f"p:{CHARLIE}"]["open"] is False and "wanted_by" not in by[f"p:{CHARLIE}"])
+            await social.add_want(db, club, snap, d, f"p:{CHARLIE}")
+            check("open to offers needs a spare (409)", await refused(social.set_open(db, club, snap, a, f"p:{BRAVO}", True)) == 409)
+            await social.set_open(db, club, snap, a, f"p:{CHARLIE}", True)
+            await db.commit()
+            by = {x["key"]: x for x in (await social.spares(db, club, snap, a))["cards"]}
+            check("once open, the holder is told how many players want it, as a number", by[f"p:{CHARLIE}"]["open"] is True and by[f"p:{CHARLIE}"]["wanted_by"] == 1)
+            check("...and the number never carries names", all(k != "wanters" for k in by[f"p:{CHARLIE}"]))
+            await social.set_open(db, club, snap, a, f"p:{CHARLIE}", False)
+            await db.commit()
+            check("it can be turned off again", [x["open"] for x in (await social.spares(db, club, snap, a))["cards"] if x["key"] == f"p:{CHARLIE}"] == [False])
+
+            # one card in full
+            await social.add_want(db, club, snap, a, f"p:{BRAVO}")
+            await db.commit()
+            det = await social.card_detail(db, club, snap, a, f"p:{BRAVO}")
+            check("the card page: the card, who could swap one, and whether it is wanted", det["card"]["key"] == f"p:{BRAVO}" and len(det["holders"]) == 2 and det["wanted"] is True and det["mine_copies"] == 0, str(det)[:200])
+            check("...and wanted is false for a card that is not on the list", (await social.card_detail(db, club, snap, a, f"p:{DELTA}"))["wanted"] is False)
+
+            # alert settings
+            pr = await social.load_prefs(db, a)
+            check("alerts are on until a player turns them off", pr == {"alert_swaps": True, "alert_wants": True})
+            await social.save_prefs(db, club, a, {"alert_swaps": False})
+            await db.commit()
+            pr = await social.load_prefs(db, a)
+            check("a setting not sent is left alone", pr == {"alert_swaps": False, "alert_wants": True})
+            await social.save_prefs(db, club, a, {"alert_swaps": True})
+            await db.commit()
+
+            # notes and counter offers
+            long_note = "  hello   there " + "x" * 400
+            first = await swaps.create_swap(db, club, snap, a, d, [{"key": f"p:{CHARLIE}", "qty": 1}], [{"key": f"p:{BRAVO}", "qty": 1}], note=long_note)
+            await db.commit()
+            row = (await db.execute(text("SELECT note FROM player_card_swaps WHERE id = CAST(:i AS UUID)"), {"i": first})).scalar()
+            check("a note is tidied and cut to 200 characters", row.startswith("hello there x") and len(row) == 200, str(len(row)))
+            li = await swaps.list_swaps(db, club, snap, d)
+            check("the person asked sees the note", li["incoming"][0]["note"] == row)
+            check("only the person asked can counter (403)", await refused(swaps.counter_swap(db, club, snap, a, first, [{"key": f"p:{CHARLIE}", "qty": 1}], [{"key": f"p:{BRAVO}", "qty": 1}])) == 403)
+            check("a counter must hold up like any request: cards the answerer does not hold are refused (409)", await refused(swaps.counter_swap(db, club, snap, d, first, [{"key": f"p:{ALPHA}", "qty": 1}], [{"key": f"p:{CHARLIE}", "qty": 1}])) == 409)
+            check("...and the request it answered is still waiting after a refused counter", (await db.execute(text("SELECT status FROM player_card_swaps WHERE id = CAST(:i AS UUID)"), {"i": first})).scalar() == "pending")
+            counter = await swaps.counter_swap(db, club, snap, d, first, [{"key": f"p:{BRAVO}", "qty": 2}], [{"key": f"p:{CHARLIE}", "qty": 2}], note="how about two each")
+            await db.commit()
+            st = (await db.execute(text("SELECT status, parent_swap_id::text, from_player_id::text, to_player_id::text FROM player_card_swaps WHERE id = CAST(:i AS UUID)"), {"i": counter})).first()
+            old = (await db.execute(text("SELECT status FROM player_card_swaps WHERE id = CAST(:i AS UUID)"), {"i": first})).scalar()
+            check("a counter is a new request from the person asked back to the one who asked, pointing at the first", st[0] == "pending" and st[1] == first and st[2] == d and st[3] == a)
+            check("the first ends as countered, and cannot be accepted or countered again (409)", old == "countered" and await refused(swaps.respond(db, club, snap, d, first, "accept")) == 409 and await refused(swaps.counter_swap(db, club, snap, d, first, [{"key": f"p:{BRAVO}", "qty": 1}], [{"key": f"p:{CHARLIE}", "qty": 1}])) == 409)
+            la = await swaps.list_swaps(db, club, snap, a)
+            check("the person who first asked now has the counter coming in, with its note and its parent", la["incoming"] and la["incoming"][0]["parent_id"] == first and la["incoming"][0]["note"] == "how about two each")
+            check("the countered request shows in history", any(r["status"] == "countered" for r in (await swaps.list_swaps(db, club, snap, a, history=True))["recent"]))
+            before = (await held_n(ALPHA, CHARLIE), await held_n(DELTA, BRAVO))
+            check("accepting the counter moves the counter's cards", await swaps.respond(db, club, snap, a, counter, "accept") == "accepted")
+            await db.commit()
+            check("Delta gave two Bravo for two Charlie", await held_n(DELTA, BRAVO) == before[1] - 2 and await held_n(DELTA, CHARLIE) == 2 and await held_n(ALPHA, CHARLIE) == before[0] - 2 and await held_n(ALPHA, BRAVO) == 2, str((await held_n(DELTA, BRAVO), await held_n(ALPHA, BRAVO))))
+            adm = await admin_routes.swap_audit("countered", "", 50, 0, db, club, User(id=uuid.uuid4(), email="admin@example.com"))
+            check("the admin audit lists countered requests, with their note and parent", adm["swaps"] and all(r["status"] == "countered" for r in adm["swaps"]) and adm["counts"]["countered"] >= 1 and "parent_id" in adm["swaps"][0])
+
+            # alerts: a fake email provider, never a real send
+            sent_mail = []
+
+            async def fake_deliver(db_, club_, *, to_email, to_name, subject, body_html, body_text):
+                sent_mail.append((to_email, subject, body_text))
+                return True, None
+            real_deliver, real_live = alerts._deliver, email_mod.email_is_live
+            alerts._deliver = fake_deliver
+            email_mod.email_is_live = lambda: True
+            try:
+                await db.execute(text("UPDATE players SET email = 'alpha@example.com', date_of_birth = NULL WHERE id = :p"), {"p": ALPHA})
+                await db.execute(text("UPDATE players SET email = 'delta@example.com', date_of_birth = NULL WHERE id = :p"), {"p": DELTA})
+                await db.execute(text("DELETE FROM player_card_wants"))
+                await db.execute(text("DELETE FROM player_card_alerts"))
+                await db.execute(text("DELETE FROM player_card_copies WHERE subject_player_id = :b"), {"b": BRAVO})
+                await db.commit()
+                await put(DELTA, BRAVO, 1)
+                cards.forget(ORG)
+                snap = await cards.club_snapshot(db, club, fresh=True)
+                await social.add_want(db, club, snap, a, f"p:{BRAVO}")
+                await db.commit()
+                n_alert = lambda: db.execute(text("SELECT count(*) FROM player_card_alerts WHERE player_id = :p AND kind = 'want_available'"), {"p": ALPHA})
+                await alerts.scan_wants(ORG, [f"p:{BRAVO}"])
+                check("a wish list card someone could swap sends one email to the person who wants it", len(sent_mail) == 1 and sent_mail[0][0] == "alpha@example.com" and "wish list" in sent_mail[0][1].lower(), str(sent_mail))
+                check("...which names the card and links to the wish list", "Bravo" in sent_mail[0][2] and f"/playerdash/{TOKEN}/cards/wishlist" in sent_mail[0][2])
+                await alerts.scan_wants(ORG, None)
+                check("scanning again does not send it again", len(sent_mail) == 1 and (await n_alert()).scalar() == 1)
+                await db.execute(text("DELETE FROM player_card_copies WHERE subject_player_id = :b"), {"b": BRAVO})
+                await db.commit()
+                await alerts.scan_wants(ORG, [f"p:{BRAVO}"])
+                cleared = (await db.execute(text("SELECT count(*) FROM player_card_alerts WHERE player_id = :p AND cleared_at IS NOT NULL"), {"p": ALPHA})).scalar()
+                check("when nobody could swap it any more the alert is cleared, ready to fire again", cleared == 1)
+                await put(DELTA, BRAVO, 1)
+                await alerts.scan_wants(ORG, [f"p:{BRAVO}"])
+                check("...and when someone has it again it is announced again", len(sent_mail) == 2)
+                check("the alert log keeps both, one cleared", (await db.execute(text("SELECT count(*) FROM player_card_alerts WHERE player_id = :p AND status = 'sent'"), {"p": ALPHA})).scalar() == 2)
+
+                # gates
+                async def fresh_alert():
+                    await db.execute(text("DELETE FROM player_card_alerts WHERE player_id = :p"), {"p": ALPHA})
+                    await db.commit()
+                    sent_mail.clear()
+                await fresh_alert()
+                await db.execute(text("UPDATE club_card_settings SET alerts_enabled = FALSE WHERE organisation_id = :o"), {"o": ORG})
+                await db.commit()
+                await alerts.scan_wants(ORG, None)
+                check("a club that switches alerts off sends none", not sent_mail)
+                await db.execute(text("UPDATE club_card_settings SET alerts_enabled = TRUE WHERE organisation_id = :o"), {"o": ORG})
+                await fresh_alert()
+                await social.save_prefs(db, club, a, {"alert_wants": False}); await db.commit()
+                await alerts.scan_wants(ORG, None)
+                check("a player who switched wish list alerts off gets none", not sent_mail)
+                await social.save_prefs(db, club, a, {"alert_wants": True}); await fresh_alert()
+                await db.execute(text("UPDATE players SET date_of_birth = CURRENT_DATE - INTERVAL '15 years' WHERE id = :p"), {"p": ALPHA}); await db.commit()
+                await alerts.scan_wants(ORG, None)
+                check("a player under 18 is not emailed directly", not sent_mail)
+                await db.execute(text("UPDATE players SET date_of_birth = NULL, email = NULL WHERE id = :p"), {"p": ALPHA}); await fresh_alert()
+                await alerts.scan_wants(ORG, None)
+                check("a player with no address is skipped, and it is written down", not sent_mail and (await db.execute(text("SELECT detail FROM player_card_alerts WHERE player_id = :p"), {"p": ALPHA})).scalar() == "no_email")
+                await db.execute(text("UPDATE players SET email = 'alpha@example.com' WHERE id = :p"), {"p": ALPHA}); await fresh_alert()
+                email_mod.email_is_live = lambda: False
+                await alerts.scan_wants(ORG, None); await alerts.scan_wants(ORG, None)
+                rows_ = (await db.execute(text("SELECT status, detail FROM player_card_alerts WHERE player_id = :p"), {"p": ALPHA})).fetchall()
+                check("with no live email provider it is a failure on record, never a send, and does not pile up", not sent_mail and [tuple(r) for r in rows_] == [("failed", "email_not_live")], str(rows_))
+                email_mod.email_is_live = lambda: True
+                await alerts.scan_wants(ORG, None)
+                check("it is retried when the provider is back", len(sent_mail) == 1)
+
+                # a swap asked
+                sent_mail.clear()
+                await db.execute(text("DELETE FROM player_card_swaps WHERE organisation_id = :o"), {"o": ORG}); await db.commit()
+                snap = await cards.club_snapshot(db, club, fresh=True)
+                await put(ALPHA, CHARLIE, 1)
+                nsw = await swaps.create_swap(db, club, snap, a, d, [{"key": f"p:{CHARLIE}", "qty": 1}], [{"key": f"p:{BRAVO}", "qty": 1}], note="fancy a swap?")
+                await db.commit()
+                await alerts.swap_asked(ORG, nsw)
+                check("the person asked is emailed about a swap, with the note and a link to Swaps", len(sent_mail) == 1 and sent_mail[0][0] == "delta@example.com" and "fancy a swap?" in sent_mail[0][2] and f"/playerdash/{TOKEN}/cards/swaps" in sent_mail[0][2], str(sent_mail)[:300])
+                await alerts.swap_asked(ORG, nsw)
+                check("...once", len(sent_mail) == 1)
+                # the routes
+                from app.routers import public_player_cards as pcr
+                await db.execute(text("DELETE FROM player_card_wants")); await db.commit()
+                rq = lambda who: request_for(who, ORG)
+                await pcr.add_want(TOKEN, pcr.KeyBody(key=f"p:{DELTA}"), rq(CHARLIE), db)
+                wl_ = await pcr.get_wants(TOKEN, rq(CHARLIE), db)
+                check("GET and POST the wish list", len(wl_["wants"]) == 1 and wl_["wants"][0]["key"] == f"p:{DELTA}")
+                check("POST a card you already have is a 409", await status_of(pcr.add_want(TOKEN, pcr.KeyBody(key=f"p:{CHARLIE}"), rq(CHARLIE), db)) == 409)
+                await pcr.remove_want(TOKEN, f"p:{DELTA}", rq(CHARLIE), db)
+                check("DELETE takes it off", (await pcr.get_wants(TOKEN, rq(CHARLIE), db))["wants"] == [])
+                sp2 = await pcr.get_spares(TOKEN, rq(ALPHA), db)
+                check("GET spares", "cards" in sp2 and "total" in sp2)
+                check("POST open to offers on a card with no spare is a 409", await status_of(pcr.set_spare_open(TOKEN, pcr.OpenBody(key=f"p:{BRAVO}", open=True), rq(ALPHA), db)) == 409)
+                cd = await pcr.get_card(TOKEN, f"p:{BRAVO}", rq(ALPHA), db)
+                check("GET one card", cd["card"]["key"] == f"p:{BRAVO}" and "holders" in cd and "wanted" in cd)
+                pf = await pcr.put_prefs(TOKEN, pcr.PrefsBody(alert_wants=False), rq(ALPHA), db)
+                check("PUT prefs changes only what is sent, and reports the club switch and the address", pf["alert_wants"] is False and pf["alert_swaps"] is True and pf["club_alerts"] is True and pf["email_on_file"] is True, str(pf))
+                check("GET prefs reads it back", (await pcr.get_prefs(TOKEN, rq(ALPHA), db))["alert_wants"] is False)
+                await pcr.put_prefs(TOKEN, pcr.PrefsBody(alert_wants=True), rq(ALPHA), db)
+                check("no cookie, no wish list (401)", await status_of(pcr.get_wants(TOKEN, Request({"type": "http", "method": "GET", "path": "/", "headers": [], "client": ("1.1.1.1", 1)}), db)) == 401)
+            finally:
+                alerts._deliver, email_mod.email_is_live = real_deliver, real_live
+                await db.execute(text("UPDATE players SET email = NULL, date_of_birth = NULL WHERE id IN (:a, :d)"), {"a": ALPHA, "d": DELTA})
+                await db.commit()
 
     # ── The migration and its mirror ─────────────────────────────────────────
     print("\nmigration")

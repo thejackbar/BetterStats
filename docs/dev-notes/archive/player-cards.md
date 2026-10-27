@@ -116,3 +116,15 @@ Verified: `verify_player_cards.py` (253), `verify_merge_carry.py`, `verify_playe
 
 Phases 2 and 3 (wish list, spares, card page, counters; sets, showcase, board, feed) follow.
 
+## v9.132.1 (2026-10-27): wish list, spares, the card page, changing a swap, alerts
+
+Phase 2 of the Player Cards page plan.
+
+- Migration 368 (`player_card_social_ddl.py`): wants, open offers, prefs, the alert log, `player_card_swaps.parent_swap_id` and `note`, `club_card_settings.alerts_enabled`. Defaults for the choices left open in the plan: wish list private; email alerts on by default and switchable by player and by club; counter offers in; no rewards. (The first numbered 368 as main's top was 367.)
+- `services/player_card_social.py`: wish list (with who could swap each card now), spares and open to offers (the demand as a number), one card in full, prefs. Routes under `/me/cards/wants`, `/spares`, `/spares/open`, `/card`, `/prefs`, and `POST /me/cards/swaps/{id}/counter`.
+- `swaps.counter_swap`: only the person asked, on a live pending request; the new request is checked like any other; the old one ends `countered` in the same transaction. The admin audit has a Changed filter and shows the note and whether a request is a changed one.
+- `services/player_card_alerts.py`: `swap_asked` and `scan_wants` as background tasks after pack opens, open-all and accepted swaps (a scan re-arms an alert when nobody could swap the card any more), and a club switch on the admin Settings tab.
+- Frontend: Wishlist, Spares, CardPage, Settings screens; Club cards holders panel has Add to wish list and Card page; the builder has a note box (200 characters), and "Change it" on an incoming request opens it pre-filled with their cards and yours; Home has a Wish list tile; the sidebar has Wish list (badge: cards someone could swap), Spares and Settings, and More holds them on a phone.
+
+Verified: `verify_player_cards.py` (309; the control on the previous commit fails the seven social groups only), `verify_merge_carry.py`, the player page suites, `audit_route_access.py`; browser `_social_` (39), `_page_` (54), `_v3_` (65), `_v2_` (45), `_admin_` (54), the first suite (55).
+

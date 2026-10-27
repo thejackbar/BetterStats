@@ -12,12 +12,15 @@ export const NAV = [
   { group: 'Collection' },
   { key: 'book', label: 'My cards', icon: 'book', to: '/book' },
   { key: 'club', label: 'Club cards', icon: 'club', to: '/club' },
+  { key: 'wishlist', label: 'Wish list', icon: 'heart', to: '/wishlist', badge: 'wants' },
   { group: 'Packs' },
   { key: 'packs', label: 'Open packs', icon: 'packs', to: '/packs', badge: 'packs' },
   { group: 'Trading' },
   { key: 'swaps', label: 'Swaps', icon: 'swaps', to: '/swaps', badge: 'swaps' },
+  { key: 'spares', label: 'Spares', icon: 'spares', to: '/spares' },
   { group: 'Help' },
   { key: 'how', label: 'How it works', icon: 'help', to: '/how' },
+  { key: 'settings', label: 'Settings', icon: 'bolt', to: '/settings' },
 ]
 
 const MONO = "'JetBrains Mono', monospace"
@@ -30,8 +33,8 @@ function Badge({ n, accent, small }) {
 }
 
 function useCounts() {
-  const { packsCount, swapsWaiting } = usePC()
-  return { packs: packsCount, swaps: swapsWaiting }
+  const { packsCount, swapsWaiting, wants } = usePC()
+  return { packs: packsCount, swaps: swapsWaiting, wants: wants.ready }
 }
 
 function initials(name) {
@@ -125,7 +128,7 @@ export function BottomBar() {
         <div role="dialog" aria-modal="true" aria-label="More" data-more-sheet className="md:hidden fixed inset-0 z-40" onClick={() => setMore(false)} style={{ background: 'rgba(3,6,10,.7)' }}>
           <div onClick={(e) => e.stopPropagation()} className="absolute bottom-0 inset-x-0 rounded-t-2xl bg-pb-surface border-t pb-hairline p-4" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}>
             <div className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint mb-2">More</div>
-            {[{ to: `${basePath}/club`, label: 'Club cards', icon: 'club' }, { to: `${basePath}/how`, label: 'How it works', icon: 'help' }, { to: base, label: 'Back to my page', icon: 'back' }].map((l) => (
+            {[{ to: `${basePath}/club`, label: 'Club cards', icon: 'club' }, { to: `${basePath}/wishlist`, label: 'Wish list', icon: 'heart' }, { to: `${basePath}/spares`, label: 'Spares', icon: 'spares' }, { to: `${basePath}/how`, label: 'How it works', icon: 'help' }, { to: `${basePath}/settings`, label: 'Settings', icon: 'bolt' }, { to: base, label: 'Back to my page', icon: 'back' }].map((l) => (
               <Link key={l.label} to={l.to} onClick={() => setMore(false)} data-more-link className="flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-pb-surface2"><Icon name={l.icon} />{l.label}</Link>
             ))}
             <div className="flex items-center justify-between px-2 pt-3 text-sm text-pb-faint border-t pb-hairline mt-2">

@@ -93,7 +93,7 @@ function Tile({ to, title, children, accent, tag }) {
 }
 
 export default function Home() {
-  const { data, failed, mine, club, accent, display, sponsor, basePath, swapsWaiting } = usePC()
+  const { data, failed, mine, club, accent, display, sponsor, basePath, swapsWaiting, wants } = usePC()
   const [share, setShare] = useState(null)
   if (failed) return <div className="text-sm text-pb-faint" data-cards-failed>Your cards could not load. Reload to try again.</div>
   if (!data) return <div className="text-sm text-pb-faint" data-cards-loading>Loading your cards…</div>
@@ -125,6 +125,10 @@ export default function Home() {
           <div style={{ height: 6, borderRadius: 3, background: 'rgba(148,163,184,.25)', marginTop: 12, overflow: 'hidden' }}>
             <div style={{ width: `${t.regular_total ? Math.round(((t.regular_owned || 0) / t.regular_total) * 100) : 0}%`, height: '100%', background: accent }} />
           </div>
+        </Tile>
+        <Tile to={`${basePath}/wishlist`} title="Wish list" tag="wishlist">
+          <div style={{ font: `800 22px/1.1 ${display}`, textTransform: 'uppercase' }}>{wants.ready ? `${wants.ready} could be yours` : wants.count ? `${wants.count} on your list` : 'Nothing on it yet'}</div>
+          <div className="text-sm text-pb-dim mt-1">{wants.ready ? 'Someone has a copy you could ask for.' : 'Add the cards you are after and see who has them.'}</div>
         </Tile>
         <Tile to={`${basePath}/club`} title="Club cards" tag="club">
           <div style={{ font: `800 22px/1.1 ${display}`, textTransform: 'uppercase' }}>Every card in the club</div>

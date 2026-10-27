@@ -91,7 +91,9 @@ export function RequestCard({ swap, ...ui }) {
           ? <><strong>{swap.other.name}</strong> wants to swap with you</>
           : <>Waiting for <strong>{swap.other.name}</strong></>}
         <span style={{ opacity: 0.6 }}> · {ago(swap.created_at)}</span>
+        {swap.parent_id && <span data-swap-counter-tag style={{ marginLeft: 8, font: `700 10px ${MONO}`, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--pb-amber, #fbbf24)' }}>A changed swap</span>}
       </div>
+      {swap.note && <div data-swap-note style={{ fontSize: 13.5, fontStyle: 'italic', opacity: 0.9, margin: '0 0 10px', paddingLeft: 10, borderLeft: '2px solid var(--pb-hairline, rgba(255,255,255,.25))', overflowWrap: 'anywhere' }}>{swap.other.name}: {swap.note}</div>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <Side cards={swap.give} label={incoming ? 'You would get' : 'You give'} {...ui} />
         <div aria-hidden style={{ fontSize: 20, opacity: 0.7, textAlign: 'center' }}>⇅</div>
@@ -102,6 +104,7 @@ export function RequestCard({ swap, ...ui }) {
           <>
             <button type="button" disabled={ui.busy} onClick={() => ui.answer(swap.id, 'accept')} data-swap-accept style={{ ...btn, background: ui.accent, color: onColor(ui.accent), border: 0 }}>Accept</button>
             <button type="button" disabled={ui.busy} onClick={() => ui.answer(swap.id, 'decline')} data-swap-decline style={btn}>Decline</button>
+            {ui.onCounter && <button type="button" disabled={ui.busy} onClick={() => ui.onCounter(swap)} data-swap-counter style={btn}>Change it</button>}
           </>
         ) : (
           <button type="button" disabled={ui.busy} onClick={() => ui.answer(swap.id, 'cancel')} data-swap-cancel style={btn}>Cancel</button>
@@ -111,14 +114,22 @@ export function RequestCard({ swap, ...ui }) {
   )
 }
 
-export function Builder({ token, board, give: preGive, prefill, club, accent, display, sponsor, onClose, onSent, inline = false }) {
+export function Builder({ token, board, give: preGive, giveList, prefill, counter, club, accent, display, sponsor, onClose, onSent, inline = false }) {
   const [player, setPlayer] = useState(null)
   const [theirs, setTheirs] = useState(null)
   const [want, setWant] = useState(() => new Map())
+  const mineByKey = useMemo(() => new Map(board.mine.map((c) => [c.key, c])), [board.mine])
   const [give, setGive] = useState(() => {
-    const held = preGive && (board.mine.find((c) => c.key === preGive.key) || { ...preGive, tradeable: 1 })
-    return new Map(held ? [[held.key, { card: held, qty: 1 }]] : [])
+    // From one card (My cards), from several (Spares), or from a request being changed (what they asked of you).
+    const items = counter ? counter.want.map((c) => ({ card: c, qty: c.qty }))
+      : giveList ? giveList
+      : preGive ? [{ card: preGive, qty: 1 }] : []
+    return new Map(items.map(({ card, qty }) => {
+      const held = mineByKey.get(card.key) || { ...card, tradeable: Math.max(qty, 1) }
+      return [held.key, { card: held, qty: Math.max(1, Math.min(qty, held.tradeable || 1)) }]
+    }))
   })
+  const [note, setNote] = useState('')
   const [q, setQ] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -135,19 +146,38 @@ export function Builder({ token, board, give: preGive, prefill, club, accent, di
   const remove = (set) => (card) => set((m) => { const next = new Map(m); next.delete(card.key); return next })
   const asList = (m) => [...m.values()].map((r) => ({ key: r.card.key, qty: r.qty }))
 
+  // `initial` is what was already chosen (a card from a search, or the cards of a request being changed). Once their cards load, each
+  // is swapped for the fresh copy, so its count is held to what they could give now, and any they no longer have are dropped and said so.
   const pick = async (p, initial) => {
     setPlayer(p); setWant(initial || new Map()); setTheirs(null); setErr('')
-    try { setTheirs((await api.availPublicSwapPlayer(token, p.player_id)).cards) } catch (e) { setErr(e?.message || 'Could not load their cards.') }
+    try {
+      const cards = (await api.availPublicSwapPlayer(token, p.player_id)).cards
+      setTheirs(cards)
+      if (initial && initial.size) {
+        const fresh = new Map(cards.map((c) => [c.key, c]))
+        const kept = new Map()
+        let dropped = 0
+        for (const [k, { card, qty }] of initial) {
+          const now = fresh.get(k)
+          if (now) kept.set(k, { card: now, qty: Math.max(1, Math.min(qty, now.tradeable || 1)) }); else dropped += 1
+        }
+        setWant(kept)
+        if (dropped) setErr(`${dropped === 1 ? 'One of those cards is' : `${dropped} of those cards are`} no longer available from ${p.name}.`)
+      }
+    } catch (e) { setErr(e?.message || 'Could not load their cards.') }
   }
-  // Coming from a card search: the person and the card are already chosen.
+  // Coming from a card search or a swap being changed: the person (and the cards) are already chosen.
   useEffect(() => {
-    if (prefill) pick(prefill.player, new Map([[prefill.card.key, { card: prefill.card, qty: 1 }]]))
+    if (counter) pick(counter.other, new Map(counter.give.map((c) => [c.key, { card: c, qty: c.qty }])))
+    else if (prefill) pick(prefill.player, new Map([[prefill.card.key, { card: prefill.card, qty: 1 }]]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const send = async () => {
     setBusy(true); setErr('')
     try {
-      await api.availPublicAskSwap(token, { to_player_id: player.player_id, give: asList(give), want: asList(want) })
+      const body = { give: asList(give), want: asList(want), ...(note.trim() ? { note: note.trim() } : {}) }
+      if (counter) await api.availPublicCounterSwap(token, counter.id, body)
+      else await api.availPublicAskSwap(token, { to_player_id: player.player_id, ...body })
       onSent()
     } catch (e) {
       setErr(e?.message || 'Could not send that.')
@@ -158,18 +188,18 @@ export function Builder({ token, board, give: preGive, prefill, club, accent, di
   const content = (
       <div data-swap-builder onClick={inline ? undefined : (e) => e.stopPropagation()} style={{ width: '100%', maxWidth: inline ? 'none' : 780, padding: inline ? '0 0 24px' : '52px 14px 28px', boxSizing: 'border-box', color: '#fff' }}>
         {!inline && <button type="button" onClick={onClose} aria-label="Close" style={{ position: 'fixed', right: 14, top: 14, width: 38, height: 38, borderRadius: 19, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(255,255,255,.08)', color: '#fff' }}>✕</button>}
-        {!inline && <div style={{ font: `800 italic 26px ${display}`, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>Start a swap</div>}
-        <div style={{ textAlign: inline ? 'left' : 'center', fontSize: 12.5, opacity: 0.75, marginTop: 4 }}>As many cards each way as you like: one for four, six for two. They have to say yes.</div>
+        {!inline && <div style={{ font: `800 italic 26px ${display}`, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>{counter ? 'Change the swap' : 'Start a swap'}</div>}
+        <div style={{ textAlign: inline ? 'left' : 'center', fontSize: 12.5, opacity: 0.75, marginTop: 4 }}>{counter ? `${counter.other.name} asked for the cards below. Change what you give or what you get and send it back. The first request ends and they decide on yours.` : 'As many cards each way as you like: one for four, six for two. They have to say yes.'}</div>
 
-        {board.mine.length === 0 && !preGive && !prefill && <p data-no-doubles style={{ textAlign: 'center', marginTop: 18 }}>You have no cards to offer yet. Open a pack and whatever you pull can go in a swap. Your own card always stays yours.</p>}
+        {board.mine.length === 0 && !preGive && !giveList && !prefill && !counter && <p data-no-doubles style={{ textAlign: 'center', marginTop: 18 }}>You have no cards to offer yet. Open a pack and whatever you pull can go in a swap. Your own card always stays yours.</p>}
 
-        {(board.mine.length > 0 || preGive || prefill) && (
+        {(board.mine.length > 0 || preGive || giveList || prefill || counter) && (
           <>
             <div style={h}>1. Who with</div>
             {player ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <strong>{player.name}</strong>
-                <button type="button" onClick={() => { setPlayer(null); setWant(new Map()) }} style={{ ...btn, padding: '5px 10px' }}>Change</button>
+                {!counter && <button type="button" onClick={() => { setPlayer(null); setWant(new Map()) }} style={{ ...btn, padding: '5px 10px' }}>Change</button>}
               </div>
             ) : (
               <>
@@ -204,7 +234,7 @@ export function Builder({ token, board, give: preGive, prefill, club, accent, di
 
         {player && want.size > 0 && (
           <>
-            <div style={h}>3. The cards you give{preGive ? ' (add more if you like)' : ''}</div>
+            <div style={h}>3. The cards you give{preGive || giveList || counter ? ' (add or take out as you like)' : ''}</div>
             <div data-card-pick="yours">
               <CardGallery browse cards={board.mine} club={club} accent={accent} display={display} sponsor={sponsor} marked={new Set(give.keys())} zBase={90}
                 onAction={toggle(setGive)} actionLabel={(c) => (give.has(c.key) ? 'Take out of my request' : 'Add to my request')} />
@@ -216,7 +246,12 @@ export function Builder({ token, board, give: preGive, prefill, club, accent, di
         {ready && (
           <div data-swap-confirm style={{ marginTop: 18, textAlign: 'center' }}>
             <div style={{ fontSize: 13, marginBottom: 10 }}>You give <strong>{totalOf([...give.values()])}</strong> for <strong>{totalOf([...want.values()])}</strong> from {player.name}.</div>
-            <button type="button" disabled={busy} onClick={send} data-swap-send style={{ ...btn, padding: '12px 22px', background: accent, color: onColor(accent), border: 0 }}>{busy ? 'Sending…' : `Ask ${player.name}`}</button>
+            <label style={{ display: 'block', maxWidth: 420, margin: '0 auto 12px', textAlign: 'left' }}>
+              <span style={{ font: `600 10px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase', opacity: 0.7 }}>A note, if you like ({200 - note.length} left)</span>
+              <textarea value={note} onChange={(e) => setNote(e.target.value.slice(0, 200))} rows={2} data-swap-note-input placeholder="Mate, I have been after this one all season"
+                style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.25)', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 15, resize: 'vertical' }} />
+            </label>
+            <button type="button" disabled={busy} onClick={send} data-swap-send style={{ ...btn, padding: '12px 22px', background: accent, color: onColor(accent), border: 0 }}>{busy ? 'Sending…' : counter ? `Send it back to ${player.name}` : `Ask ${player.name}`}</button>
           </div>
         )}
         {err && <div role="alert" data-swap-error style={{ marginTop: 12, textAlign: 'center', color: '#fecaca', fontSize: 13 }}>{err}</div>}

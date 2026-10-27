@@ -4535,6 +4535,11 @@ async def lifespan(app: FastAPI):
         from app.services.player_card_swaps_ddl import STATEMENTS as _PLAYER_CARD_SWAPS_DDL
         for _stmt in _PLAYER_CARD_SWAPS_DDL:
             await conn.execute(text(_stmt))
+        # Migration 368: wish list, open to offers, alert settings and log, counter offers and a note on a swap.
+        # Same one-copy rule: this list and alembic's 368 both run services/player_card_social_ddl.STATEMENTS.
+        from app.services.player_card_social_ddl import STATEMENTS as _PLAYER_CARD_SOCIAL_DDL
+        for _stmt in _PLAYER_CARD_SOCIAL_DDL:
+            await conn.execute(text(_stmt))
         # Migration 365: automatic premierships (round name, honour-to-scorecard link, auto marker,
         # exclusions). Same one-copy rule: this list and alembic's 365 both run
         # services/premierships_ddl.STATEMENTS.
