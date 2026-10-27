@@ -113,7 +113,7 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     ("player_card_swaps", "to_player_id", "uuid", None),
     ("player_card_swaps", "give_subject_player_id", "uuid", None),
     ("player_card_swaps", "want_subject_player_id", "uuid", None),
-    # The cards on each side of a swap (migration 365): the subject of each card.
+    # The cards on each side of a swap (migration 366): the subject of each card.
     ("player_card_swap_items", "subject_player_id", "uuid", None),
 )
 

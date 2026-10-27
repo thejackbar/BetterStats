@@ -72,3 +72,14 @@ What changed:
 
 Verified: `verify_player_cards.py` (194; the control on the previous commit fails exactly the milestone and swap checks), the other suites unchanged, browser `verify_player_cards_v2_browser.mjs` (46), new `verify_player_cards_v3_browser.mjs` (17: stack order, the three new faces without clipping, the offer button rule, search and paging at 390px).
 
+## v9.131.1 (2026-10-27): swap as many cards as you like, and awards use display names
+
+Asked for: "you should be able to trade multiple cards at once so you can add as many cards as you like", for example one card for four of another person's, and "awards should always pick up display name and display season too".
+
+- Migration 366 and `player_card_swap_items` (organisation, swap, side give or want, subject, special card, qty; the subject column is on `merge_carry.CARRIED`). The DDL module now has `BASE_STATEMENTS` (364), `ITEM_STATEMENTS` (366) and `STATEMENTS` (both, for the lifespan and the harnesses). The backfill copies every pre-366 request's two cards into items once; `give_subject_player_id` and `want_subject_player_id` lost their NOT NULL, and the downgrade drops only the items table. This was first numbered 365 and v9.130.4, then renumbered when main took 365 and v9.131.0.
+- `create_swap` takes lists of `{key, qty}` a side: both sides non-empty, no card on both sides, every quantity held, and an identical live request to the same person is refused (a different count is a different request). `respond` locks every copy for both people in a fixed order and moves all of it or none of it; the error says whose cards fell short.
+- Frontend: tap to add or remove a card on each side, a tray listing what is picked with a count (`n of held`) where a card is held more than once, a request shown as two labelled groups of cards with their counts, and the admin audit lists every card with `×qty`.
+- Awards: `_insert_achievements` titles an award with the club's own display name and gives the season as the club writes it (seasons id to name, underscore to slash), for new cards and, as an update of title and detail only, for ones already made (so a rename or a corrected season reaches them). Hat-trick cards get the same season treatment.
+
+Verified: `verify_player_cards.py` (220; the control on the previous commit fails the award checks and stops at the first multi-card request), `verify_merge_carry.py`, the two player page suites, `audit_route_access.py`; browser `verify_player_cards_browser.mjs` (51), `_v2_` (46), `_admin_` (51), and `_v3_` (30: trays, counts, limits, the exact body posted, a long request at 390px).
+

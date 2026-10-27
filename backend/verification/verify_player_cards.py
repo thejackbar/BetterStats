@@ -69,7 +69,7 @@ if HAVE_SWAPS:
     from app.services import player_card_swaps as swaps
     from app.services import player_card_swaps_ddl as _swap_ddl
     SWAP_DDL = _swap_ddl.STATEMENTS
-    ITEM_DDL = getattr(_swap_ddl, "ITEM_STATEMENTS", [])  # absent before migration 365
+    ITEM_DDL = getattr(_swap_ddl, "ITEM_STATEMENTS", [])  # absent before migration 366
 else:
     swaps = None
     SWAP_DDL = []
@@ -808,7 +808,7 @@ async def main() -> None:
             check("one card can be asked for several of theirs", bool(one_for_four))
             await swaps.respond(db, club, snap, a, one_for_four, "cancel")
             await db.commit()
-            # a request made before migration 365 (its cards in the old columns) is carried across, once
+            # a request made before migration 366 (its cards in the old columns) is carried across, once
             old_id = (await db.execute(text("INSERT INTO player_card_swaps (organisation_id, from_player_id, to_player_id, give_subject_player_id, want_subject_player_id) "
                                             "VALUES (:o, :a, :d, :c, :b) RETURNING id::text"), {"o": ORG, "a": ALPHA, "d": DELTA, "c": CHARLIE, "b": BRAVO})).scalar()
             for _ in range(2):
@@ -1009,8 +1009,8 @@ async def main() -> None:
     if HAVE_SWAPS:
         mig2 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "364_player_card_swaps.py").read_text()
         check("the swaps migration follows 363 and runs its own shared list", "down_revision = \"363\"" in mig2 and "player_card_swaps_ddl import BASE_STATEMENTS" in mig2 and "player_card_swaps_ddl import STATEMENTS" in main_src_swaps())
-        mig3 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "365_player_card_swap_items.py").read_text()
-        check("the items migration follows 364, runs its own shared list, and drops only its own table", "down_revision = \"364\"" in mig3 and "ITEM_STATEMENTS" in mig3 and "ITEM_DOWNGRADE" in mig3)
+        mig3 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "366_player_card_swap_items.py").read_text()
+        check("the items migration follows 365, runs its own shared list, and drops only its own table", "down_revision = \"365\"" in mig3 and "ITEM_STATEMENTS" in mig3 and "ITEM_DOWNGRADE" in mig3)
     main_src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
     check("the lifespan mirrors the same list", "from app.services.player_cards_ddl import STATEMENTS" in main_src)
 

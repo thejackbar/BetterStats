@@ -7,11 +7,11 @@ card, its special card id. A request is never deleted: it ends as accepted, decl
 
 Every player column is on `merge_carry.CARRIED`, so a player merge moves the requests with the person.
 
-Migration 365 makes a request many cards each way: `player_card_swap_items` holds the cards on each side
+Migration 366 makes a request many cards each way: `player_card_swap_items` holds the cards on each side
 (`side` give or want, with a quantity), and the single `give_*` / `want_*` columns above become optional (a
-request made before 365 is copied into items once and keeps its old columns; a newer one leaves them empty).
+request made before 366 is copied into items once and keeps its old columns; a newer one leaves them empty).
 
-ONE copy of the DDL: alembic's 364 runs BASE_STATEMENTS, 365 runs ITEM_STATEMENTS, and main.py's lifespan
+ONE copy of the DDL: alembic's 364 runs BASE_STATEMENTS, 366 runs ITEM_STATEMENTS, and main.py's lifespan
 mirror (and the test harnesses) run STATEMENTS, which is both. Every statement is idempotent.
 """
 
@@ -48,7 +48,7 @@ ITEM_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS ix_card_swap_items_swap ON player_card_swap_items (swap_id)",
-    # A request made before 365 carried one card each way in its own columns: copy each across once.
+    # A request made before 366 carried one card each way in its own columns: copy each across once.
     """
     INSERT INTO player_card_swap_items (organisation_id, swap_id, side, subject_player_id, special_id)
     SELECT s.organisation_id, s.id, 'give', s.give_subject_player_id, s.give_special_id FROM player_card_swaps s
