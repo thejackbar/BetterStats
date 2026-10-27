@@ -252,7 +252,7 @@ const SOURCE_HELP = {
   results: 'Pull the latest round\'s results for every grade straight from the results feed.',
   motm: 'Paste the match link and we\'ll work out the player of the match from the scorecard. You choose which of their batting, bowling and fielding stats go on the post.',
   milestones: 'Pick the milestones your club has recorded: a 100th game, 1,000 career runs, a 50th wicket. Choose a window, then tick or untick the ones to feature. Up to 12 go on the post.',
-  totw: 'Pull the latest round, or paste any match link from the round you want. Every grade\'s scorecard is scored the same way as the player of the match, and the best performers become the team. Choose 6 to 14 players.',
+  totw: 'Pull the latest round, or paste any match link from the round you want. Every grade\'s scorecard is scored the same way as the player of the match, and the best performers become the team. Choose 6 to 14 players. Pick Team of the round to count games that are still being played.',
 }
 if (IS_AFL) {
   SOURCE_HELP.lineup = 'Pick a recent game below to pull the side your club named on PlayHQ, with the captain and the match details. Or add players yourself in Content.'
@@ -981,7 +981,7 @@ function OppLogoChip({ logo, loading, onClear }) {
 // live feed with no link, or a pasted match link resolves that link's own round
 // (onFetchLink). A pasted playhq.com link comes back as a `notice` — a different
 // id namespace, so the correction renders as its own amber box.
-function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice, off = [], onToggleCat }) {
+function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice, off = [], onToggleCat, inPlay, onInPlay }) {
   const [link, setLink] = useState('')
   const rowsOf = (d) => (d ? d[rowsKey] || [] : [])
   // Which categories the pull holds, counted on the day being shown.
@@ -997,6 +997,14 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
           style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
           {status === 'loading' ? 'Loading…' : 'Pull latest round'}
         </button>
+        {onInPlay && (
+          <label className="flex items-start gap-2 text-xs font-mono text-pb-text cursor-pointer" data-testid="results-in-play">
+            <input type="checkbox" className="mt-0.5" checked={!!inPlay} disabled={status === 'loading'} onChange={e => onInPlay(e.target.checked)} />
+            <span>Include games in progress
+              <span className="block text-pb-faintest text-[10px] leading-relaxed font-sans">They show as IN PROGRESS with the score so far, and can be removed from the list.</span>
+            </span>
+          </label>
+        )}
         {dates.length > 1 && (
           <select value={idx} onChange={e => onPick(+e.target.value)} aria-label="Match-day"
             className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono">
@@ -1062,6 +1070,8 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
 // on, or the one a pasted match link names) and set how many of its best
 // performers go on the post.
 const TOTW_SCOPE_OPTS = [['all', 'All teams'], ['junior', 'Juniors'], ['senior', 'Seniors']]
+// What a pull counts: finished games only (a week), or games still in play too (a round).
+const TOTW_BASIS_OPTS = [['week', 'Team of the week'], ['round', 'Team of the round']]
 const TOTW_RANGE_KEY = 'bs_social_totw_range'
 const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 function lastSevenDays() {
@@ -1071,6 +1081,14 @@ function lastSevenDays() {
 }
 // The period a club last pulled, so a round that always runs Tuesday to Sunday
 // is not typed in again each week. Per browser, and only a convenience.
+const RR_LIVE_KEY = 'bs_social_results_live'
+function readRrLive() {
+  try { return localStorage.getItem(RR_LIVE_KEY) !== '0' } catch { return true }
+}
+function writeRrLive(on) {
+  try { localStorage.setItem(RR_LIVE_KEY, on ? '1' : '0') } catch { /* private window */ }
+}
+
 function readTotwRange() {
   try {
     const r = JSON.parse(localStorage.getItem(TOTW_RANGE_KEY) || 'null')
@@ -1140,11 +1158,47 @@ function TotwImportBox({ status, notice, data, onPull, onFetchLink, range, onRan
           ✓ {data.players.length} performers from {data.matches} {data.matches === 1 ? 'match' : 'matches'} · {[data.scope && data.scope !== 'all' ? (data.scope === 'junior' ? 'Juniors' : 'Seniors') : '', data.round, data.label].filter(Boolean).join(' · ')}
         </p>
       )}
+      {status === 'ok' && data?.liveMatches > 0 && (
+        <p className="font-mono text-[9px] mt-1 text-amber-400 leading-relaxed" data-testid="totw-live-note">
+          {data.liveMatches} of those {data.liveMatches === 1 ? 'match is' : 'matches are'} still in play, so {data.liveMatches === 1 ? 'its figures are' : 'their figures are'} not final. Pull again once {data.liveMatches === 1 ? 'it finishes' : 'they finish'}.
+        </p>
+      )}
       {status && status !== 'loading' && status !== 'ok' && (
         <p className="font-mono text-[9px] mt-1.5 text-pb-faint">✗ {status}</p>
       )}
       <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">
         Points are the same as the player of the match: 1 a run, 20 a wicket, 2 a maiden, 8 an outfield catch, stumping or run out, 4 a keeper catch. A player who played in two grades counts once, on their better day.
+      </p>
+    </div>
+  )
+}
+
+// Whether the pull counts finished games only (a team of the week) or games still
+// being played as well (a team of the round). Changing it pulls the same round
+// again, and the post's heading follows what the pull was made with.
+function TotwBasisPicker({ basis, onChange, busy }) {
+  return (
+    <div className="mb-4" data-testid="totw-basis">
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-1.5">Games counted</p>
+      <div className="flex flex-wrap gap-1.5">
+        {TOTW_BASIS_OPTS.map(([k, label]) => {
+          const on = basis === k
+          return (
+            <button key={k} type="button" onClick={() => onChange(k)} aria-pressed={on} disabled={busy}
+              data-testid={`totw-basis-${k}`}
+              className="px-3 min-h-8 rounded border font-mono text-[10px] tracking-wide2 transition-colors disabled:opacity-60"
+              style={on
+                ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+                : { background: 'transparent', color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' }}>
+              {label}
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">
+        {basis === 'round'
+          ? 'Also counts games still being played, including a two-day game that is part way through, so you can post the round before its last game finishes. Those figures can still change.'
+          : 'Finished games only, so every figure is final.'}
       </p>
     </div>
   )
@@ -1261,6 +1315,7 @@ function TotwTeamShape({ mode, onMode, makeup, onMakeup, data, count, onSize }) 
 function TotwControls({ t }) {
   return (
     <>
+      <TotwBasisPicker basis={t.plan.basis} onChange={t.onBasis} busy={t.import.status === 'loading'} />
       <TotwScopePicker scope={t.plan.scope} onChange={t.onScope} data={t.import.data} busy={t.import.status === 'loading'} />
       <TotwImportBox status={t.import.status} notice={t.import.notice} data={t.import.data}
         onPull={t.onPull} onFetchLink={t.onFetchLink}
@@ -1812,7 +1867,7 @@ export default function AdminSocialPost() {
   const [totwOpts, setTotwOpts] = useState({ showPoints: false })
   // How the pool is pulled and shaped: which teams (all, juniors, seniors), the
   // period for a round that is not a weekend, and best performers or a set make-up.
-  const [totwPlan, setTotwPlan] = useState(() => ({ scope: 'all', range: readTotwRange(), mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
+  const [totwPlan, setTotwPlan] = useState(() => ({ scope: 'all', basis: 'week', range: readTotwRange(), mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
   // Milestones: the club's recorded list, which are ticked (in post order), the
   // window and search that narrow the picker, and what the post says about them.
   const [msImport, setMsImport] = useState({ status: null, report: null })
@@ -1832,6 +1887,9 @@ export default function AdminSocialPost() {
   // Play.cricket round import (the multi-match analogue of the scorecard import).
   const [fxImport, setFxImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
   const [rrImport, setRrImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
+  // Whether a Results pull also takes games still in play. On unless the club turned it off.
+  const [rrLive, setRrLive] = useState(readRrLive)
+  const rrLastQ = useRef('')
   // Categories switched OFF on each import (empty = everything the pull found).
   const [fxOff, setFxOff] = useState([])
   const [rrOff, setRrOff] = useState([])
@@ -2705,11 +2763,12 @@ export default function AdminSocialPost() {
   // the teams re-pulls the same round.
   const loadTotw = useCallback(async (q, over = {}) => {
     const scope = over.scope ?? totwPlan.scope
+    const basis = over.basis ?? totwPlan.basis
     const dateFrom = over.dateFrom || ''
     const dateTo = over.dateTo || ''
     setTotwImport(s => ({ ...s, status: 'loading', notice: null }))
     try {
-      const data = await api.getSocialTotw(q || '', { dateFrom, dateTo, scope })
+      const data = await api.getSocialTotw(q || '', { dateFrom, dateTo, scope, basis })
       if (data.kind === 'round' && data.players?.length) {
         setTotwImport({ status: 'ok', data, notice: null, source: { q: q || '', dateFrom, dateTo } })
         applyTotw(data, TOTW_DEFAULT, totwPlan.mode === 'makeup' ? totwPlan.makeup : null)
@@ -2736,6 +2795,13 @@ export default function AdminSocialPost() {
     setTotwPlan(pl => ({ ...pl, scope }))
     const src = totwImport.source
     if (src && totwImport.data) loadTotw(src.q, { dateFrom: src.dateFrom, dateTo: src.dateTo, scope })
+  }
+  // Same round, counted the other way: a new pull, since the pool changes.
+  const changeTotwBasis = (basis) => {
+    if (basis === totwPlan.basis) return
+    setTotwPlan(pl => ({ ...pl, basis }))
+    const src = totwImport.source
+    if (src && totwImport.data) loadTotw(src.q, { dateFrom: src.dateFrom, dateTo: src.dateTo, basis })
   }
   const changeTotwMode = (mode) => {
     if (mode === totwPlan.mode) return
@@ -2806,7 +2872,7 @@ export default function AdminSocialPost() {
   // Everything the Team of the Week panel needs, in one prop for TotwControls.
   const totwControls = {
     plan: totwPlan, import: totwImport, count: selectedPlayers.length,
-    onScope: changeTotwScope, onMode: changeTotwMode, onMakeup: changeTotwMakeup, onSize: changeTotwSize,
+    onScope: changeTotwScope, onBasis: changeTotwBasis, onMode: changeTotwMode, onMakeup: changeTotwMakeup, onSize: changeTotwSize,
     onRange: (range) => setTotwPlan(pl => ({ ...pl, range })),
     onPull: () => loadTotw(''), onFetchLink: (q) => loadTotw(q), onPullRange: pullTotwRange,
   }
@@ -2833,16 +2899,18 @@ export default function AdminSocialPost() {
     setResults(sortByGrade(filterByCats(d.results || [], off).map(r => ({ ...r }))))
     setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
   }, [])
-  const importResults = useCallback(async () => {
+  // `live` is passed in (not read from state) so flipping the box can re-pull at once.
+  const runResultsPull = useCallback(async (live) => {
     setRrImport(s => ({ ...s, status: 'loading' }))
     try {
-      const data = await api.getSocialResults()
+      const data = await api.getSocialResults('', { live })
       const dates = data.dates || []
       if (!dates.length) { setRrImport({ status: 'empty', dates: [], idx: 0, season: data.season }); return }
       setRrImport({ status: 'ok', dates, idx: 0, season: data.season })
       applyRrDate(dates[0], data.season, rrOff)
     } catch (e) { setRrImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
   }, [applyRrDate, rrOff])
+  const importResults = useCallback(() => { rrLastQ.current = ''; return runResultsPull(rrLive) }, [runResultsPull, rrLive])
 
   // Same round pull, resolved from a pasted match link instead of the live
   // feed's latest — any one match link from a round names the whole round.
@@ -2869,10 +2937,10 @@ export default function AdminSocialPost() {
     }
   }, [applyFxDate, fxOff])
 
-  const importResultsFromLink = useCallback(async (q) => {
+  const runResultsLink = useCallback(async (q, live) => {
     setRrImport(s => ({ ...s, status: 'loading', notice: null }))
     try {
-      const data = await api.getSocialResults(q)
+      const data = await api.getSocialResults(q, { live })
       if (data.kind === 'round') {
         const dates = data.dates || []
         if (!dates.length) { setRrImport(s => ({ ...s, status: 'empty', notice: null })); return }
@@ -2889,6 +2957,13 @@ export default function AdminSocialPost() {
       setRrImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
     }
   }, [applyRrDate, rrOff])
+  const importResultsFromLink = useCallback((q) => { rrLastQ.current = q; return runResultsLink(q, rrLive) }, [runResultsLink, rrLive])
+  const changeRrLive = (live) => {
+    setRrLive(live)
+    writeRrLive(live)
+    // A pull already on screen is made again, counted the new way.
+    if (rrImport.status === 'ok') { if (rrLastQ.current) runResultsLink(rrLastQ.current, live); else runResultsPull(live) }
+  }
 
   // Switch a category on or off and re-fill from the day being shown.
   const toggleFxCat = (k) => {
@@ -3656,6 +3731,8 @@ export default function AdminSocialPost() {
       round: matchData.round, date: matchData.date, comp: match.competition, showPoints: totwOpts.showPoints,
       // JUNIOR or SENIOR above the round on a scoped team, nothing on the club's whole week.
       heading: { junior: 'JUNIOR', senior: 'SENIOR' }[totwImport.data?.scope] || undefined,
+      // What the pull counted, not what the button says now (the heading cannot disagree with the team).
+      basis: totwImport.data?.mode === 'round' ? 'round' : undefined,
     }
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
@@ -3759,7 +3836,7 @@ export default function AdminSocialPost() {
     setPotmImport({ status: null, data: null, playerIdx: 0, include: { bat: true, bowl: true, field: true } })
     setTotwImport({ status: null, data: null, notice: null })
     setTotwOpts({ showPoints: false })
-    setTotwPlan(pl => ({ scope: 'all', range: pl.range, mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
+    setTotwPlan(pl => ({ scope: 'all', basis: 'week', range: pl.range, mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
     totwCursor.current = -1
     setMsImport({ status: null, report: null })
     setMsPicks([])
@@ -4893,7 +4970,7 @@ export default function AdminSocialPost() {
                   <div className="pb-card p-4">
                     <RoundImportBox hint="recent results" rowsKey="results"
                       status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
-                      onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
+                      onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice} inPlay={rrLive} onInPlay={IS_AFL ? undefined : changeRrLive}
                       onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
                       off={rrOff} onToggleCat={toggleRrCat} />
                   </div>
@@ -6387,7 +6464,7 @@ export default function AdminSocialPost() {
                 </div>
                 <RoundImportBox hint="recent results" rowsKey="results"
                   status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
-                  onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
+                  onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice} inPlay={rrLive} onInPlay={IS_AFL ? undefined : changeRrLive}
                   onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
                   off={rrOff} onToggleCat={toggleRrCat} />
                 {tmpl.hasLeaders && (
@@ -6424,6 +6501,7 @@ export default function AdminSocialPost() {
                           <select value={r.outcome} onChange={e => set({ outcome: e.target.value })}
                             className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
                             <option value="W">Won</option><option value="L">Lost</option><option value="T">Tie/NR</option>
+                            {r.outcome === 'LIVE' && <option value="LIVE">In progress</option>}
                           </select>
                           <button onClick={() => setResults(rows => rows.filter((_, j) => j !== i))}
                             title="Remove this row" aria-label="Remove this row" className="text-pb-faintest hover:text-red-400 text-xs">✕</button>

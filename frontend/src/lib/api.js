@@ -233,14 +233,21 @@ export const api = {
   getSocialScorecard: (matchId) => request(`/admin/social/scorecard/${matchId}`),
   socialMatchLookup: (q) => request(`/admin/social/match-lookup?q=${encodeURIComponent(q)}`),
   getSocialFixtures: (q) => request(`/admin/social/fixtures${q ? `?q=${encodeURIComponent(q)}` : ''}`),
-  getSocialResults: (q) => request(`/admin/social/results${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  getSocialResults: (q, { live = false } = {}) => {
+    const p = new URLSearchParams()
+    if (q) p.set('q', q)
+    if (live) p.set('live', 'true')
+    const qs = p.toString()
+    return request(`/admin/social/results${qs ? `?${qs}` : ''}`)
+  },
   getSocialPotm: (matchId) => request(`/admin/social/potm/${matchId}`),
-  getSocialTotw: (q, { dateFrom = '', dateTo = '', scope = 'all' } = {}) => {
+  getSocialTotw: (q, { dateFrom = '', dateTo = '', scope = 'all', basis = 'week' } = {}) => {
     const p = new URLSearchParams()
     if (q) p.set('q', q)
     if (dateFrom) p.set('date_from', dateFrom)
     if (dateTo) p.set('date_to', dateTo)
     if (scope && scope !== 'all') p.set('scope', scope)
+    if (basis === 'round') p.set('mode', 'round')
     const qs = p.toString()
     return request(`/admin/social/totw${qs ? `?${qs}` : ''}`)
   },
