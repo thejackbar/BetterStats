@@ -190,7 +190,8 @@ async def _renames(db: AsyncSession, org_id: uuid.UUID) -> dict:
             for d in res.mappings().all()}
 
 
-async def premiership_squads(db: AsyncSession, org_id: uuid.UUID) -> dict:
+async def premiership_squads(db: AsyncSession, org_id: uuid.UUID,
+                               game_links: Optional[dict] = None) -> dict:
     """Every flag the club has recorded, as the squad that won it.
 
     A flag is one (season, team, COMPETITION) — the competition is in the key
@@ -210,6 +211,11 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID) -> dict:
     the person who led it is wrong in the way a reader notices immediately.
     A person recorded twice for one flag (in the squad AND as its captain) is
     ONE player carrying both, never two rows.
+
+    ``game_links`` is ``{achievement id: scorecard game id}`` (cricket only,
+    ``services/premierships.achievement_game_links``). When given, each card
+    carries the ``game_id`` of the grand final it came from. Football's silo
+    passes nothing and its payload is unchanged.
     """
     rows = await _rows(db, org_id, PREMIERSHIP_CATEGORY)
     renames = await _renames(db, org_id)
@@ -234,6 +240,10 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID) -> dict:
                 "competition": _competition_title(label) if is_flag else None,
                 "players": {},
             }
+            if game_links is not None:
+                g["game_id"] = None
+        if game_links is not None and not g.get("game_id"):
+            g["game_id"] = game_links.get(r["id"])
         pkey = _person_key(r["player_id"], r["name"])
         p = g["players"].get(pkey)
         if p is None:
@@ -265,6 +275,8 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID) -> dict:
             continue
         loose = groups.pop(key)
         target = groups[flags[0]]
+        if game_links is not None and not target.get("game_id"):
+            target["game_id"] = loose.get("game_id")
         for pkey, p in loose["players"].items():
             existing = target["players"].get(pkey)
             if existing is None:

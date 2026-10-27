@@ -2635,7 +2635,15 @@ function AchievementsSection({ playerId, orgId, playerName }) {
               </span>
             )}
           </div>
-          <div className="hb-season">{season}</div>
+          <div className="hb-season">
+            <span className="truncate">{season}</span>
+            {a.game_id && (
+              <Link to={`/games/${a.game_id}${orgId ? `?org=${orgId}` : ''}`} className="hb-scorecard"
+                    title="The grand final scorecard this premiership came from">
+                Scorecard →
+              </Link>
+            )}
+          </div>
           {canEdit && (
             <div className="hb-admin-btns">
               {onEdit && <button className="hb-edit-btn" onClick={onEdit}>Edit</button>}
