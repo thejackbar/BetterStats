@@ -823,6 +823,22 @@ async def main() -> None:
                     check("who has a card: the players who could swap one, in name order, never the asker", {h["player_id"] for h in hold["holders"]} == {str(DELTA), str(CHARLIE)} and [h["name"] for h in hold["holders"]] == sorted([h["name"] for h in hold["holders"]], key=str.lower) and hold["mine_copies"] == 1)
                     check("a made-up card key is refused (422)", await refused(catalogue.holders_of(db, club, snap, a, "p:not-a-uuid")) == 422)
                     check("a card of a player out of the pool is refused (409)", await refused(catalogue.holders_of(db, club, snap, a, f"p:{HOTEL}")) == 409)
+                    nm_ = await catalogue.page(db, club, snap, a, filter="regular", have="not_mine", limit=36)
+                    keys_ = {i["key"] for i in nm_["items"]}
+                    check("Not mine leaves out the cards the asker holds (their own, and the Bravo they pulled)", f"p:{ALPHA}" not in keys_ and f"p:{BRAVO}" not in keys_ and f"p:{CHARLIE}" in keys_ and nm_["counts"]["regular"] == len(nm_["items"]), str(keys_))
+                    sw_ = await catalogue.page(db, club, snap, a, filter="all", have="swappable", limit=36)
+                    check("Someone could swap it keeps only cards another player could swap, and says so on each", sw_["items"] and all((i.get("others") or 0) > 0 for it in sw_["items"] for i in (it.get("cards") or [it])) and f"p:{BRAVO}" in {i["key"] for i in sw_["items"]}, str([i.get("key") for i in sw_["items"]]))
+                    check("an unknown have value is read as all", (await catalogue.page(db, club, snap, a, filter="regular", have="nonsense", limit=36))["counts"]["regular"] == 5)
+                    old_ = (await db.execute(text("SELECT id::text FROM player_card_swaps WHERE status = 'accepted' AND organisation_id = :o LIMIT 1"), {"o": ORG})).scalar()
+                    if old_:
+                        await db.execute(text("UPDATE player_card_swaps SET created_at = NOW() - INTERVAL '100 days' WHERE id = CAST(:i AS UUID)"), {"i": old_})
+                        await db.commit()
+                        who_ = (await db.execute(text("SELECT from_player_id::text FROM player_card_swaps WHERE id = CAST(:i AS UUID)"), {"i": old_})).scalar()
+                        short = await swaps.list_swaps(db, club, snap, who_)
+                        full = await swaps.list_swaps(db, club, snap, who_, history=True)
+                        check("History reaches back a year, the short list only a month", old_ in {r["id"] for r in full["recent"]} and old_ not in {r["id"] for r in short["recent"]})
+                    else:
+                        check("History reaches back a year, the short list only a month", False, "no accepted swap to age")
                     check("reading the set writes nothing", (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE organisation_id = :o"), {"o": ORG})).scalar() == copies_before)
 
 
@@ -1032,7 +1048,7 @@ async def main() -> None:
         check("the admin payload lists every player with why they are out",
               {r["id"]: r["excluded"] for r in payload["players"]}.get(str(GOLF)) == "private"
               and {r["id"]: r["excluded"] for r in payload["players"]}.get(str(ECHO)) == "junior", str({r["display_name"]: r["excluded"] for r in payload["players"]}))
-        check("...and the link to the player page", payload["link"]["path"] == f"/avail/{TOKEN}")
+        check("...and the link to the player page", payload["link"]["path"] == f"/playerdash/{TOKEN}")
         gone = await status_of(admin_routes.hide_player(str(SEL_PLAYER), admin_routes.HiddenBody(hidden=True), db, club, user))
         check("hiding another club's player is a 404, not a 403", gone == 404)
 

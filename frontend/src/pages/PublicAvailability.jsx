@@ -1,6 +1,6 @@
 // BetterSelect — the player's own page (public, no login).
 //
-// Reached via a per-club magic link (/avail/:token) pinned in a group chat or a
+// Reached via a per-club magic link (/playerdash/:token, which the older /avail/:token still opens) pinned in a group chat or a
 // QR. Pick your name, prove it's you with the last 4 digits of your mobile, and
 // land on one dashboard: your photo and squads, the next games to answer
 // (Available / Maybe / Unavailable), and whichever cards the club has turned on
@@ -16,7 +16,8 @@ import { api } from '../lib/api'
 import { AvailabilityEditor, ALL_CHOICES, unansweredNextWeek } from './playerhome/AvailabilityEditor'
 import Group, { useOpenSections } from './playerhome/Group'
 import DetailsModal from './playerhome/DetailsModal'
-import CardsModule from './playerhome/CardsModule'
+import CardsSummary from './playerhome/CardsSummary'
+import PlayerCardsApp from './playercards/PlayerCardsApp'
 import FantasyCard, { fmtLockShort, nextDeadline, ordinal } from './playerhome/FantasyCard'
 import PlayerHero from './playerhome/PlayerHero'
 import SeasonDashboard from './playerhome/SeasonDashboard'
@@ -482,7 +483,7 @@ function MyPage({ token, me, club, availability, onSwitch }) {
 
   const render = (key) => {
     switch (key) {
-      case 'cards': return <CardsModule key={key} token={token} club={club} onReady={setCardsReady} />
+      case 'cards': return <CardsSummary key={key} token={token} club={club} swapsWaiting={data?.cards?.swaps_waiting || 0} onReady={setCardsReady} />
       case 'votes': return <VotesModule key={key} data={data} />
       case 'ladder': return <LadderModule key={key} state={ladder} />
       case 'season': return <SeasonDashboard key={key} data={data} ranks={ranks} />
@@ -546,7 +547,9 @@ function MyPage({ token, me, club, availability, onSwitch }) {
 }
 
 export default function PublicAvailability() {
-  const { token } = useParams()
+  const { token, '*': rest } = useParams()
+  // /playerdash/:token is the dashboard; /playerdash/:token/cards and what is under it is the Player Cards page.
+  const inCards = rest === 'cards' || (rest || '').startsWith('cards/')
   // Arriving from the voting page: `?player=<id>` has them already picked, so it is
   // only the PIN left to type. (`?tab=mine` on older links is ignored: there is one page now.)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -729,6 +732,14 @@ export default function PublicAvailability() {
       setTimeout(() => setSavedDate((cur) => (cur === pair.key ? null : cur)), 1600)
     }
     setSavingDate((cur) => (cur === pair.key ? null : cur))
+  }
+
+  if (step === 'weekend' && me && inCards) {
+    return (
+      <div className="min-h-screen bg-pb-bg text-pb-text" style={accent ? { '--pb-accent': accent } : undefined}>
+        <PlayerCardsApp token={token} club={club} me={me} onSwitch={switchPlayer} />
+      </div>
+    )
   }
 
   return (

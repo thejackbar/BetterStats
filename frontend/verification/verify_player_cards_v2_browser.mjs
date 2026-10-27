@@ -12,6 +12,7 @@
 //
 //   APP_URL=http://localhost:4173 SHOT_DIR=/tmp/cards2 node verification/verify_player_cards_v2_browser.mjs
 import { chromium } from 'playwright'
+import { cardsUrl, goNav } from './lib/cardsPage.mjs'
 import fs from 'node:fs'
 
 const BASE = process.env.APP_URL || 'http://localhost:4173'
@@ -71,7 +72,7 @@ const run = async () => {
   const resetBoard = () => { board = { incoming: [REQ], outgoing: [], recent: [], mine: [swapCard(base('p2', 'Zed, Alan', 'common', 18), 2)], people: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 1 }, { player_id: 'p9', name: 'Smith, Sue', tradeable: 3 }], expires_days: 14, max_open: 10 } }
   resetBoard()
 
-  const open = async (width, { height = 900 } = {}) => {
+  const open = async (width, { height = 900, route = '/book' } = {}) => {
     const ctx = await browser.newContext({ viewport: { width, height }, isMobile: width < 500, hasTouch: width < 500, acceptDownloads: true })
     await ctx.addInitScript(() => { try { localStorage.setItem('bs.playerpage.open', JSON.stringify({ cards: true })) } catch (e) { /* none */ } })
     const page = await ctx.newPage()
@@ -104,8 +105,8 @@ const run = async () => {
       if (/\/me(\?|$)/.test(url)) return json({ club: CLUB, player: { id: ME, display_name: 'Barendse, Jack' }, dates: [], availability: {}, has_squad: false, squads: [], has_availability: false })
       return json({ club: CLUB, require_pin: true, has_availability: false, players: [{ id: ME, display_name: 'Barendse, Jack', has_phone: true }] })
     })
-    await page.goto(`${BASE}/avail/tok123`)
-    await page.waitForSelector('[data-cards-module]', { timeout: 20000 })
+    await page.goto(cardsUrl(BASE, 'tok123', route))
+    await page.waitForSelector('[data-cards-page] [data-screen]', { timeout: 20000 })
     await page.waitForTimeout(500)
     return { ctx, page }
   }
@@ -237,10 +238,9 @@ const run = async () => {
   {
     resetBoard(); swapFails = false
     const { ctx, page } = await open(390)
-    check('the swaps tab carries the number of requests waiting', /Swaps \(1\)/.test(await page.locator('[data-cards-tab="swaps"]').textContent()))
-    check('the page header counts it once the packs are gone (or shows packs first)', /1 pack to open|1 swap request/.test(await page.locator('[data-group="cards"] [data-group-summary]').first().textContent()))
-    await page.click('[data-cards-tab="swaps"]')
-    await page.waitForSelector('[data-swaps-panel]')
+    check('Swaps carries the number of requests waiting', (await page.locator('[data-nav="swaps"]:visible [data-nav-badge]').first().textContent()) === '1')
+    await goNav(page, 'swaps')
+    await page.waitForSelector('[data-screen="swaps"]')
     check('a request asked of the player is shown with both cards', (await page.locator('[data-swap-request="w1"]').count()) === 1 && /Dave, Dan/.test(await page.locator('[data-swap-request="w1"]').textContent()))
     check('the cards you could offer are counted', /2 cards you could offer/.test(await page.locator('[data-doubles-count]').textContent()))
     check('no horizontal scroll on the swaps tab', (await overflow(page)) <= 0)
@@ -253,8 +253,8 @@ const run = async () => {
 
     // an accept that the server refuses is shown, not swallowed
     resetBoard(); swapFails = true
-    await page.reload(); await page.waitForSelector('[data-cards-module]')
-    await page.click('[data-cards-tab="swaps"]')
+    await page.reload(); await page.waitForSelector('[data-cards-page] [data-screen]')
+    await goNav(page, 'swaps')
     await page.click('[data-swap-accept]')
     await page.waitForFunction(() => /no longer theirs to give/.test(document.querySelector('[data-swap-msg]')?.textContent || ''))
     check('a swap the server refuses says why and stays on the list', (await page.locator('[data-swap-request="w1"]').count()) === 1)
@@ -266,8 +266,8 @@ const run = async () => {
 
     // build a swap by hand
     resetBoard(); board.incoming = []
-    await page.reload(); await page.waitForSelector('[data-cards-module]')
-    await page.click('[data-cards-tab="swaps"]')
+    await page.reload(); await page.waitForSelector('[data-cards-page] [data-screen]')
+    await goNav(page, 'swaps')
     await page.click('[data-swap-start]')
     await page.waitForSelector('[data-swap-builder]')
     check('the builder opens on who to swap with', (await page.locator('[data-swap-player]').count()) === 2)
@@ -290,7 +290,7 @@ const run = async () => {
     check('it then shows as a request you made, with a Cancel', (await page.locator('[data-swap-cancel]').count()) === 1 && /Swap request sent/.test(await page.locator('[data-swap-msg]').textContent()))
 
     // offered straight from a held card
-    await page.click('[data-cards-tab="book"]')
+    await goNav(page, 'book')
     await page.click('[data-gallery-filter="regular"]')
     await page.locator('[data-slot-card="p:p2"]').click()
     await page.click('[data-viewer-offer]')
@@ -306,7 +306,7 @@ const run = async () => {
     // a player with nothing to offer
     resetBoard(); board.mine = []; board.incoming = []
     const b = await open(390)
-    await b.page.click('[data-cards-tab="swaps"]')
+    await goNav(b.page, 'swaps')
     await b.page.click('[data-swap-start]')
     await b.page.waitForSelector('[data-swap-builder]')
     check('with no cards the builder says so instead of offering a swap', (await b.page.locator('[data-no-doubles]').count()) === 1 && (await b.page.locator('[data-swap-player]').count()) === 0)

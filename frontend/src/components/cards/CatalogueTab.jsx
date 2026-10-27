@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import { onColor } from '../PlayerTradingCard'
 import CardGallery from './CardGallery'
+import CardPanel from './CardPanel'
 
 const MONO = "'JetBrains Mono', monospace"
 
@@ -37,7 +38,20 @@ function Holders({ token, card, accent, onAsk }) {
   )
 }
 
-export default function CatalogueTab({ token, club, accent, display, sponsor, onAsk }) {
+// A wide screen has room for the card beside the book; anything narrower holds it up over the book.
+function useWide(min = 1360) {
+  const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.innerWidth >= min)
+  useEffect(() => {
+    const fit = () => setWide(window.innerWidth >= min)
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [min])
+  return wide
+}
+
+export default function CatalogueTab({ token, club, accent, display, sponsor, onAsk, intro = true, panel = false }) {
+  const wide = useWide()
+  const [held, setHeld] = useState(null)
   const [state, setState] = useState({ items: [], total: 0, counts: {}, loading: true })
   const [err, setErr] = useState('')
   const seq = useRef(0)
@@ -53,14 +67,22 @@ export default function CatalogueTab({ token, club, accent, display, sponsor, on
     }
   }, [token])
   const remote = useMemo(() => ({ ...state, onQuery }), [state, onQuery])
+  const holders = (card, close) => <Holders key={card.key} token={token} card={card} accent={accent} onAsk={(h) => { close(); onAsk({ player: { player_id: h.player_id, name: h.name }, card: { ...card, tradeable: h.tradeable } }) }} />
   return (
     <div data-catalogue>
-      <p style={{ fontSize: 13, opacity: 0.8, margin: '0 0 10px', lineHeight: 1.5 }}>
-        Every card in the club, held or not. Hold one up to see who could swap you a copy.
-      </p>
+      {intro && (
+        <p style={{ fontSize: 13, opacity: 0.8, margin: '0 0 10px', lineHeight: 1.5 }}>
+          Every card in the club, held or not. Hold one up to see who could swap you a copy.
+        </p>
+      )}
       {err && <div role="alert" data-catalogue-error style={{ fontSize: 13, color: '#fecaca', margin: '0 0 8px' }}>{err}</div>}
-      <CardGallery remote={remote} club={club} accent={accent} display={display} sponsor={sponsor}
-        viewerExtra={(card, close) => <Holders key={card.key} token={token} card={card} accent={accent} onAsk={(h) => { close(); onAsk({ player: { player_id: h.player_id, name: h.name }, card: { ...card, tradeable: h.tradeable } }) }} />} />
+      <div data-catalogue-layout style={panel && wide ? { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 24, alignItems: 'start' } : undefined}>
+        <CardGallery remote={remote} club={club} accent={accent} display={display} sponsor={sponsor} onHold={panel && wide ? setHeld : undefined}
+          viewerExtra={(card, close) => holders(card, close)} />
+        {panel && wide && (held
+          ? <CardPanel card={held} club={club} accent={accent} display={display} sponsor={sponsor} onClose={() => setHeld(null)} extra={holders(held, () => setHeld(null))} />
+          : <aside data-card-panel-empty className="rounded-2xl border pb-hairline p-5 text-sm text-pb-dim" style={{ position: 'sticky', top: 16 }}>Tap a card to hold it up here, turn it over, and see who could swap you a copy.</aside>)}
+      </div>
     </div>
   )
 }

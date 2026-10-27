@@ -152,7 +152,7 @@ def _me_payload(club: Organisation, player: Player) -> dict:
     are here: a club that lets supporters vote must not hand them the player link."""
     out = {"id": str(player.id), "display_name": player.display_name}
     if club.availability_self_service_enabled and club.availability_link_token:
-        out["my_page"] = f"/avail/{club.availability_link_token}?tab=mine&player={player.id}"
+        out["my_page"] = f"/playerdash/{club.availability_link_token}?tab=mine&player={player.id}"
     return out
 
 

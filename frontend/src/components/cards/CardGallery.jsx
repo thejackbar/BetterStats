@@ -259,10 +259,11 @@ function StackViewer({ item, club, accent, display, sponsor, onPick, onClose, zI
   )
 }
 
-export default function CardGallery({ cards = [], totals, club, accent, display = DEFAULT_DISPLAY, sponsor, onShare, onOffer, meId, browse = false, marked, onAction, actionLabel, zBase = 80, remote, viewerExtra }) {
+export default function CardGallery({ cards = [], totals, club, accent, display = DEFAULT_DISPLAY, sponsor, onShare, onOffer, meId, browse = false, marked, onAction, actionLabel, zBase = 80, remote, viewerExtra, onHold }) {
   const isRemote = !!remote
   const [sort, setSort] = useState(browse || remote ? 'rarity' : 'recent')
   const [needle, setNeedle] = useState('')
+  const [have, setHave] = useState('all') // the club's set only: all | not_mine | swappable
   const [filter, setFilter] = useState('all')
   const [page, setPage] = useState(0)
   const [open, setOpen] = useState(null)
@@ -333,14 +334,14 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
   const spreads = Math.max(1, Math.ceil(listLength / slotsPerSpread))
   const at = Math.min(page, spreads - 1)
   useEffect(() => { if (page > spreads - 1) setPage(spreads - 1) }, [page, spreads])
-  useEffect(() => { setPage(0) }, [sort, filter, mode, needle])
+  useEffect(() => { setPage(0) }, [sort, filter, mode, needle, have])
   // The club's set is asked for a window at a time, a moment after typing stops.
   const onQuery = remote?.onQuery
   useEffect(() => {
     if (!onQuery) return undefined
-    const t = setTimeout(() => onQuery({ filter, sort, q: needle.trim(), offset: at * slotsPerSpread, limit: slotsPerSpread }), needle ? 250 : 0)
+    const t = setTimeout(() => onQuery({ filter, sort, q: needle.trim(), offset: at * slotsPerSpread, limit: slotsPerSpread, ...(have !== 'all' ? { have } : {}) }), needle ? 250 : 0)
     return () => clearTimeout(t)
-  }, [onQuery, filter, sort, needle, at, slotsPerSpread])
+  }, [onQuery, filter, sort, needle, at, slotsPerSpread, have])
 
   const turn = (dir) => {
     const next = Math.max(0, Math.min(spreads - 1, at + dir))
@@ -367,7 +368,8 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
   const paper = 'linear-gradient(180deg, #151d29, #0f1620)'
   const sel = { background: 'var(--pb-surface2, #1a2330)', color: 'var(--pb-text, #fff)', border: '1px solid var(--pb-hairline, rgba(255,255,255,.18))', borderRadius: 8, padding: '6px 8px', fontSize: 13 }
   const pct = totals?.regular_total ? Math.round((owned / totals.regular_total) * 100) : 0
-  const hold = (c) => setOpen(c) // the stack stays open underneath, so closing the card returns to it
+  // The stack stays open underneath, so closing the card returns to it. With `onHold` (a side panel) the card goes there instead.
+  const hold = (c) => { if (onHold) { onHold(c); setStack(null) } else setOpen(c) }
 
   return (
     <div data-card-gallery ref={hostRef} style={{ width: '100%' }}>
@@ -391,6 +393,16 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
             <div style={{ width: `${pct}%`, height: '100%', background: accent }} />
           </div>
         </div>
+        )}
+        {remote && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+            <span style={{ opacity: 0.7 }}>Show</span>
+            <select aria-label="Which cards" value={have} onChange={(e) => setHave(e.target.value)} style={sel} data-gallery-have>
+              <option value="all">Every card</option>
+              <option value="not_mine">Not mine</option>
+              <option value="swappable">Someone could swap it</option>
+            </select>
+          </label>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <span style={{ opacity: 0.7 }}>Sort</span>
@@ -421,7 +433,7 @@ export default function CardGallery({ cards = [], totals, club, accent, display 
                     if (c.stack) return <StackSlot key={c.key} item={c} width={cardW} club={club} accent={accent} display={display} sponsor={sponsor} onOpen={setStack} marked={marked} />
                     const dot = browse && onAction
                     const slot = (
-                      <button key={dot ? undefined : c.key} type="button" onClick={() => setOpen(c)} data-slot-card={c.key} data-tier={c.tier} aria-label={`${c.name}${c.kind === 'special' ? `, ${c.title}` : `, ${(TIERS[c.tier] || TIERS.common).label}`}${remote ? `, ${c.others || 'no'} other ${c.others === 1 ? 'player' : 'players'} could swap one` : countOf(c, browse) > 1 ? `, ${countOf(c, browse)} ${browse ? 'could go' : 'copies'}` : ''}${marked?.has(c.key) ? ', picked' : ''}`}
+                      <button key={dot ? undefined : c.key} type="button" onClick={() => hold(c)} data-slot-card={c.key} data-tier={c.tier} aria-label={`${c.name}${c.kind === 'special' ? `, ${c.title}` : `, ${(TIERS[c.tier] || TIERS.common).label}`}${remote ? `, ${c.others || 'no'} other ${c.others === 1 ? 'player' : 'players'} could swap one` : countOf(c, browse) > 1 ? `, ${countOf(c, browse)} ${browse ? 'could go' : 'copies'}` : ''}${marked?.has(c.key) ? ', picked' : ''}`}
                         style={{ position: 'relative', padding: 0, border: 0, background: 'none', cursor: 'pointer', width: cardW, height: cardW * (CARD_H / CARD_W), flex: 'none', textAlign: 'left', outline: marked?.has(c.key) ? `3px solid ${accent}` : 'none', outlineOffset: 2, borderRadius: cardW * 0.07 }}>
                         <ScaledCard width={cardW}><CardView card={c} club={club} accent={accent} display={display} sponsor={sponsor} /></ScaledCard>
                         {(remote ? false : countOf(c, browse) > 1) && <span data-copies style={{ position: 'absolute', right: 6, bottom: '22%', padding: '1px 7px', borderRadius: 999, background: '#0b1018', border: '1px solid rgba(255,255,255,.5)', color: '#fff', font: `700 11px ${MONO}` }}>×{countOf(c, browse)}</span>}

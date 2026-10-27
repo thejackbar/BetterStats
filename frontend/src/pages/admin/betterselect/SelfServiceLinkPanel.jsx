@@ -73,7 +73,7 @@ export default function SelfServiceLinkPanel() {
   const [busy, setBusy] = useState(false)
   const [qr, setQr] = useState(null)
 
-  const fullUrl = cfg?.token ? `${window.location.origin}/avail/${cfg.token}` : ''
+  const fullUrl = cfg?.token ? `${window.location.origin}/playerdash/${cfg.token}` : ''
   const message = fullUrl ? `🏏 Set your availability: ${fullUrl}` : ''
 
   const load = useCallback(() => {

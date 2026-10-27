@@ -419,7 +419,7 @@ async def main():
 
     check("the column exists and defaults to on", await cols(), "true")
     pl = await club_payload(org)
-    check("a club with BetterSelect and the link on gets the path", pl.get("player_page_path"), f"/avail/{tok}")
+    check("a club with BetterSelect and the link on gets the path", pl.get("player_page_path"), f"/playerdash/{tok}")
     await set_org(org, availability_show_on_site=False)
     check("a club that hides it gets null", (await club_payload(org)).get("player_page_path"), None)
     await set_org(org, availability_show_on_site=True, availability_self_service_enabled=False)
@@ -429,12 +429,12 @@ async def main():
     await set_org(org, availability_link_token=tok, module_overrides=["fantasy", "fees"])
     # Player Cards (v9.130.0): the player page is no longer BetterSelect-only. A club without it has
     # the page (cards and season, no availability) whenever it has a link and has not hidden it.
-    check("a club without BetterSelect has the page too (its Player Cards live there)", (await club_payload(org)).get("player_page_path"), f"/avail/{tok}")
+    check("a club without BetterSelect has the page too (its Player Cards live there)", (await club_payload(org)).get("player_page_path"), f"/playerdash/{tok}")
     await set_org(org, availability_show_on_site=False)
     check("...unless it hides the link", (await club_payload(org)).get("player_page_path"), None)
     await set_org(org, availability_show_on_site=True)
     await set_org(org, module_overrides=["select", "fantasy", "fees"])
-    check("restored, it is back", (await club_payload(org)).get("player_page_path"), f"/avail/{tok}")
+    check("restored, it is back", (await club_payload(org)).get("player_page_path"), f"/playerdash/{tok}")
     blob = json.dumps(await club_payload(org))
     check("the public club payload carries nothing else from the link (no PIN setting, no modules)", any(k in blob for k in ("require_pin", "dashboard_modules")), False)
 
@@ -448,7 +448,7 @@ async def main():
     res = await self_service(av.SelfServiceUpdate(allow_maybe=True))
     check("a POST that does not send it leaves it alone", res.get("show_on_site"), False)
     res = await self_service(av.SelfServiceUpdate(show_on_site=True))
-    check("and it turns back on", (res.get("show_on_site"), (await club_payload(org)).get("player_page_path")), (True, f"/avail/{tok}"))
+    check("and it turns back on", (res.get("show_on_site"), (await club_payload(org)).get("player_page_path")), (True, f"/playerdash/{tok}"))
 
     print("\n# J. Update my details")
     from types import SimpleNamespace

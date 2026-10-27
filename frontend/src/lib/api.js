@@ -3493,7 +3493,7 @@ export const api = {
   availPublicOpenAllCards: (token) =>
     request(`/public/availability/${token}/me/cards/open-all`, { method: 'POST' }),
   // Swapping doubles with another player: the board, one player's doubles, asking, and answering.
-  availPublicSwaps: (token) => request(`/public/availability/${token}/me/cards/swaps`),
+  availPublicSwaps: (token, { history = false } = {}) => request(`/public/availability/${token}/me/cards/swaps${history ? '?history=true' : ''}`),
   availPublicSwapPlayer: (token, playerId) => request(`/public/availability/${token}/me/cards/swaps/players/${playerId}`),
   availPublicCatalogue: (token, params) =>
     request(`/public/availability/${token}/me/cards/catalogue?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()}`),

@@ -7,6 +7,7 @@
 //
 //   APP_URL=http://localhost:4173 node verification/verify_player_cards_v3_browser.mjs
 import { chromium } from 'playwright'
+import { cardsUrl, goNav } from './lib/cardsPage.mjs'
 
 const BASE = process.env.APP_URL || 'http://localhost:4173'
 const PASS = [], FAIL = []
@@ -67,7 +68,7 @@ const board = { incoming: [inReq], outgoing: [], recent: [], mine: [CARDS[1], ..
 const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium' })
   const errors = []
-  const open = async (width) => {
+  const open = async (width, route = '/book') => {
     const ctx = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 500, hasTouch: width < 500 })
     await ctx.addInitScript(() => { try { localStorage.setItem('bs.playerpage.open', JSON.stringify({ cards: true })) } catch (e) { /* none */ } })
     const page = await ctx.newPage()
@@ -90,8 +91,8 @@ const run = async () => {
       if (/\/me(\?|$)/.test(url)) return json({ club: CLUB, player: { id: ME, display_name: 'Barendse, Jack' }, dates: [], availability: {}, has_squad: false, squads: [], has_availability: false })
       return json({ club: CLUB, require_pin: true, has_availability: false, players: [{ id: ME, display_name: 'Barendse, Jack', has_phone: true }] })
     })
-    await page.goto(`${BASE}/avail/tok123`)
-    await page.waitForSelector('[data-cards-module]', { timeout: 20000 })
+    await page.goto(cardsUrl(BASE, 'tok123', route))
+    await page.waitForSelector('[data-cards-page] [data-screen]', { timeout: 20000 })
     await page.waitForTimeout(500)
     return { ctx, page }
   }
@@ -153,7 +154,7 @@ const run = async () => {
   console.log('\nthe swap builder with a big collection')
   {
     const { ctx, page } = await open(390)
-    await page.click('[data-cards-tab="swaps"]')
+    await goNav(page, 'swaps')
     await page.click('[data-swap-start]')
     await page.waitForSelector('[data-swap-builder]')
     await page.locator('[data-swap-player="p7"]').click()
@@ -197,7 +198,7 @@ const run = async () => {
   console.log('\nmany cards each way')
   {
     const { ctx, page } = await open(390)
-    await page.click('[data-cards-tab="swaps"]')
+    await goNav(page, 'swaps')
     await page.waitForSelector('[data-swap-request="w9"]')
     const req = page.locator('[data-swap-request="w9"]')
     check('a request lists every card on each side, with counts', (await req.locator('[data-swap-side="You would get"] [aria-label]').count()) === 4 && /5 cards/.test(await req.locator('[data-swap-side="You would get"]').textContent()) && (await req.locator('[data-swap-side="You give"] [aria-label]').count()) === 1, (await req.textContent()).slice(0, 200))
@@ -248,7 +249,7 @@ const run = async () => {
   console.log('\nfinding a card')
   {
     const { ctx, page } = await open(390)
-    await page.click('[data-cards-tab="swaps"]')
+    await goNav(page, 'swaps')
     await page.waitForSelector('[data-find-input]')
     finds.length = 0
     await page.fill('[data-find-input]', 'z')
@@ -276,7 +277,7 @@ const run = async () => {
   {
     const { ctx, page } = await open(390)
     catCalls.length = 0
-    await page.click('[data-cards-tab="club"]')
+    await goNav(page, 'club')
     await page.waitForSelector('[data-catalogue] [data-slot-card]')
     check('the first window is asked for with the defaults and four to a page on a phone', catCalls[0] && catCalls[0].filter === 'all' && catCalls[0].sort === 'rarity' && catCalls[0].offset === '0' && catCalls[0].limit === '4' && !('q' in catCalls[0]), JSON.stringify(catCalls[0]))
     const cat = page.locator('[data-catalogue]')
@@ -326,7 +327,7 @@ const run = async () => {
   console.log('\nthe builder on a wide screen, 1280')
   {
     const { ctx, page } = await open(1280)
-    await page.click('[data-cards-tab="swaps"]')
+    await goNav(page, 'swaps')
     await page.click('[data-swap-start]')
     await page.locator('[data-swap-player="p7"]').click()
     await page.waitForSelector('[data-card-pick="theirs"] [data-slot-card]')

@@ -87,7 +87,7 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
         },
         "timezones": [{"id": i, "label": n} for i, n in TIMEZONES],
         "max_weekly_packs": cards.MAX_WEEKLY_PACKS,
-        "link": {"path": f"/avail/{club.availability_link_token}" if club.availability_link_token else None},
+        "link": {"path": f"/playerdash/{club.availability_link_token}" if club.availability_link_token else None},
         "pool": {"size": sum(1 for r in rows if r["in_pool"]), "players": len(rows)},
         "players": rows,
     }

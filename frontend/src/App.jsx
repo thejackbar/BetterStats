@@ -37,6 +37,14 @@ import { MARKETING_PATHS, isMarketingPath, rendersOwnMarketingNav } from './lib/
 // Also the reference list for ClubCTABar (which BetterCricket pages vs. club public
 // pages get the "get your club on BetterCricket" bar shown to every visitor).
 export { MARKETING_PATHS, isMarketingPath, rendersOwnMarketingNav }
+// An old /avail/<token> link (pinned in a group chat, on a poster, in a QR code) opens the same page at its new address,
+// keeping whatever followed it: a sub page, ?player=<id>, a hash.
+function LegacyAvailRedirect() {
+  const { token, '*': rest } = useParams()
+  const { search, hash } = useLocation()
+  return <Navigate replace to={`/playerdash/${token}${rest ? `/${rest}` : ''}${search}${hash}`} />
+}
+
 function ConditionalNavbar() {
   const { pathname } = useLocation()
   // Two lists, because /trial and /demo draw their own MarketingNav without
@@ -46,7 +54,7 @@ function ConditionalNavbar() {
   // mobile page — it renders its own minimal header, no club nav. The BetterPosts
   // editor is a full-viewport takeover with its own header, so suppress the club
   // nav there too.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/nets-checkin/') || pathname.startsWith('/admin/social-post') || pathname.startsWith('/betterscout')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/playerdash/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/nets-checkin/') || pathname.startsWith('/admin/social-post') || pathname.startsWith('/betterscout')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -408,7 +416,10 @@ export default function App() {
           </Route>
 
           {/* Public self-service availability (no login — magic link + PIN) */}
-          <Route path="/avail/:token" element={<PublicAvailability />} />
+          {/* The player dashboard. /avail is the address players already have pinned in group chats and on posters, so it stays
+              as an alias that moves on to the same page at its new address. */}
+          <Route path="/playerdash/:token/*" element={<PublicAvailability />} />
+          <Route path="/avail/:token/*" element={<LegacyAvailRedirect />} />
           <Route path="/vote/:token" element={<PublicVoting />} />
           <Route path="/preview/:token" element={<TeaserPreview />} />
           {/* The picture the renderer screenshots; see TeaserCard.jsx. */}

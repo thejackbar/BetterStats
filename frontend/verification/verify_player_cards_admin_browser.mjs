@@ -31,7 +31,7 @@ const state = {
 const settingsPayload = () => ({
   club: CLUB, settings: state.settings,
   timezones: [{ id: 'Australia/Perth', label: 'Western Australia' }, { id: 'Australia/Sydney', label: 'New South Wales, ACT' }],
-  max_weekly_packs: 10, link: { path: '/avail/tok123' },
+  max_weekly_packs: 10, link: { path: '/playerdash/tok123' },
   pool: { size: state.players.filter((p) => p.in_pool).length, players: state.players.length }, players: state.players,
 })
 const prow = (id, name, x = {}) => ({ id, name, in_pool: true, rarity: 50, tier: 'rare', cards: 5, regular: 4, specials: 1, copies: 7, collected_pct: 33, packs_opened: 0, packs_waiting: 2, opened_7d: 0, first_opened_at: null, last_opened_at: null, last_card_at: null, swaps: 0, swaps_done: 0, ...x })
@@ -223,7 +223,7 @@ const run = async () => {
   await page.waitForSelector('[data-card-player]')
   check('the pool count is in the heading', /Players in the card pool \(2 of 5\)/i.test(await text()))
   check('cards are on and juniors are off by default', (await page.getByRole('switch', { name: 'Player Cards are on' }).getAttribute('aria-checked')) === 'true' && (await page.getByRole('switch', { name: 'Include junior players' }).getAttribute('aria-checked')) === 'false')
-  check('the player page link is shown', /\/avail\/tok123/.test(await page.locator('[data-player-page-link]').innerText()))
+  check('the player page link is shown', /\/playerdash\/tok123/.test(await page.locator('[data-player-page-link]').innerText()))
   const reasons = await page.locator('[data-card-player]').evaluateAll((els) => Object.fromEntries(els.map((e) => [e.getAttribute('data-card-player'), e.innerText])))
   check('a junior and a privacy-hidden player are shown as out, with the reason', /Junior player, and juniors are switched off/.test(reasons.c3) && /Hidden from the public site/.test(reasons.d4))
   check('no Hide button for those', !/Hide|Show/.test(reasons.c3) && !/Hide|Show/.test(reasons.d4) && /Hide/.test(reasons.a1))

@@ -34,6 +34,8 @@ SWAP_DAYS = 14
 MAX_OUTGOING = 10
 RECENT_SHOWN = 15
 RECENT_DAYS = 30
+HISTORY_DAYS = 365   # the History screen reaches back a year
+HISTORY_SHOWN = 100
 MAX_CARDS = 50   # different cards on one side of a request
 MAX_COPIES = 99  # copies of one card
 
@@ -259,14 +261,14 @@ async def waiting_count(db: AsyncSession, me: str) -> int:
     ), {"me": me})).scalar() or 0)
 
 
-async def list_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str) -> dict:
+async def list_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str, history: bool = False) -> dict:
     rows = (await db.execute(text(f"""
         SELECT s.id::text AS id, s.from_player_id::text AS from_id, s.to_player_id::text AS to_id,
                s.status, s.created_at, s.resolved_at, {_live_sql()} AS live
           FROM player_card_swaps s
          WHERE s.organisation_id = CAST(:org AS UUID)
            AND (s.from_player_id = CAST(:me AS UUID) OR s.to_player_id = CAST(:me AS UUID))
-           AND (s.status = 'pending' OR s.created_at > NOW() - INTERVAL '{RECENT_DAYS} days')
+           AND (s.status = 'pending' OR s.created_at > NOW() - INTERVAL '{HISTORY_DAYS if history else RECENT_DAYS} days')
          ORDER BY s.created_at DESC
     """), {"org": str(club.id), "me": me})).mappings().all()
     items = await _items_of(db, [r["id"] for r in rows])
@@ -299,7 +301,7 @@ async def list_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str) 
     return {
         "incoming": [s for s in live if s["direction"] == "in" and s["give"] and s["want"]],
         "outgoing": [s for s in live if s["direction"] == "out" and s["give"] and s["want"]],
-        "recent": [s for s in shaped if s["status"] not in ("pending", "expired")][:RECENT_SHOWN],
+        "recent": [s for s in shaped if s["status"] not in ("pending", "expired")][:(HISTORY_SHOWN if history else RECENT_SHOWN)],
     }
 
 

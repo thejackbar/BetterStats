@@ -8,6 +8,7 @@
 //   npx vite build && npx vite preview --port 4173 &
 //   APP_URL=http://localhost:4173 SHOT_DIR=/tmp/cards node verification/verify_player_cards_browser.mjs
 import { chromium } from 'playwright'
+import { cardsUrl, goNav } from './lib/cardsPage.mjs'
 import fs from 'node:fs'
 
 const BASE = process.env.APP_URL || 'http://localhost:4173'
@@ -61,7 +62,7 @@ const run = async () => {
   let packList = PACKS.slice()
   let openFails = false
 
-  const open = async (width, { reduce = false, height = 900 } = {}) => {
+  const open = async (width, { reduce = false, height = 900, route = '', dash = false } = {}) => {
     const ctx = await browser.newContext({ viewport: { width, height }, isMobile: width < 500, hasTouch: width < 500, reducedMotion: reduce ? 'reduce' : 'no-preference' })
     await ctx.addInitScript(() => { try { localStorage.setItem('bs.playerpage.open', JSON.stringify({ cards: true })) } catch (e) { /* none */ } })
     const page = await ctx.newPage()
@@ -87,9 +88,15 @@ const run = async () => {
       if (/\/me(\?|$)/.test(url)) return json({ club: CLUB, player: { id: 'p1', display_name: 'Barendse, Jack' }, dates: [], availability: {}, has_squad: false, squads: [], has_availability: false })
       return json({ club: CLUB, require_pin: true, has_availability: false, players: [{ id: 'p1', display_name: 'Barendse, Jack', has_phone: true }] })
     })
-    await page.goto(`${BASE}/avail/tok123`)
-    await page.waitForSelector('[data-my-page]', { timeout: 20000 })
-    await page.waitForSelector('[data-cards-module]', { timeout: 20000 })
+    if (dash) {
+      // The old address still opens the page, at the new one.
+      await page.goto(`${BASE}/avail/tok123`)
+      await page.waitForSelector('[data-my-page]', { timeout: 20000 })
+      await page.waitForSelector('[data-cards-module]', { timeout: 20000 })
+    } else {
+      await page.goto(cardsUrl(BASE, 'tok123', route))
+      await page.waitForSelector('[data-cards-page] [data-screen]', { timeout: 20000 })
+    }
     await page.waitForTimeout(400)
     return { ctx, page }
   }
@@ -97,13 +104,26 @@ const run = async () => {
   const overflow = (page) => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
 
   // ── 390px: the page of a club without BetterSelect ────────────────────────────────────────────────────────
-  console.log('\nthe player page, no BetterSelect, 390px')
+  console.log('\nthe player dashboard, no BetterSelect, 390px')
+  {
+    const d = await open(390, { dash: true })
+    check('the old /avail address lands on /playerdash', new URL(d.page.url()).pathname === '/playerdash/tok123', d.page.url())
+    check('no Availability section for a club without BetterSelect', (await d.page.locator('[data-group="availability"]').count()) === 0)
+    check('a Player Cards section is there', (await d.page.locator('[data-group="cards"]').count()) === 1)
+    const summary = (await d.page.locator('[data-group="cards"] [data-group-summary]').first().textContent()) || ''
+    check('its header says how many packs are waiting', /3 packs to open/.test(summary), summary)
+    check('the section is a small summary with a button to the page, not the whole book', (await d.page.locator('[data-cards-module] [data-open-cards-page]').count()) === 1 && (await d.page.locator('[data-cards-module] [data-card-gallery]').count()) === 0)
+    check('no horizontal scroll on the dashboard', (await overflow(d.page)) <= 0)
+    await shot(d.page, '00-dashboard-390')
+    await d.page.click('[data-open-cards-page]')
+    await d.page.waitForSelector('[data-cards-page] [data-screen="home"]')
+    check('the button opens the Player Cards page', new URL(d.page.url()).pathname === '/playerdash/tok123/cards', d.page.url())
+    await d.ctx.close()
+  }
+
+  console.log('\nthe Player Cards page, 390px')
   {
     const { ctx, page } = await open(390)
-    check('no Availability section for a club without BetterSelect', (await page.locator('[data-group="availability"]').count()) === 0)
-    check('a Player Cards section is there', (await page.locator('[data-group="cards"]').count()) === 1)
-    const summary = (await page.locator('[data-group="cards"] [data-group-summary]').first().textContent()) || ''
-    check('its header says how many packs are waiting', /3 packs to open/.test(summary), summary)
     check('three packs are counted, by kind', (await page.locator('[data-packs-ready]').textContent()).includes('3 packs'))
     check('the pack kinds show (Weekly, Runs, Duck)', (await page.locator('[data-pack-count]').count()) === 3)
     check('no horizontal scroll', (await overflow(page)) <= 0, `over by ${await overflow(page)}px`)
@@ -113,6 +133,7 @@ const run = async () => {
     await shot(page, '01-page-390')
 
     // The card book
+    await goNav(page, 'book')
     const collected = (await page.locator('[data-collected]').textContent()) || ''
     check('the book says how much of the set is collected', /Collected 4 \/ 14/.test(collected) && /Specials 2 \/ 6/.test(collected), collected)
     check('two cards across on a phone (2 x 2 a page)', (await page.locator('[data-slot-card], [data-empty-slot]').count()) === 4)
@@ -160,6 +181,7 @@ const run = async () => {
 
     // ── Opening a pack ────────────────────────────────────────────────────────────────────────────────────────
     console.log('\nopening a pack')
+    await goNav(page, 'home')
     calls.length = 0
     await page.click('[data-open-pack]')
     await page.waitForSelector('[data-pack-overlay]')
@@ -199,8 +221,8 @@ const run = async () => {
     await page.click('[data-pack-close]')
     await page.waitForTimeout(400)
     check('closing returns to the page', (await page.locator('[data-pack-overlay]').count()) === 0)
-    const hdr = (await page.locator('[data-group="cards"] [data-group-summary]').first().textContent()) || ''
-    check('the section header count follows the packs (2 left)', /2 packs to open/.test(hdr), hdr)
+    const badge = (await page.locator('[data-nav="packs"]:visible [data-nav-badge]').first().textContent()) || ''
+    check('the Packs badge follows the packs (2 left)', badge === '2', badge)
 
     // open all
     calls.length = 0
@@ -247,7 +269,7 @@ const run = async () => {
   console.log('\nthe book on a wide screen')
   {
     packList = PACKS.slice()
-    const { ctx, page } = await open(1280, { height: 1000 })
+    const { ctx, page } = await open(1280, { height: 1000, route: '/book' })
     check('two pages open side by side', (await page.locator('[data-page]').count()) === 2)
     check('three across on a page', (await page.locator('[data-mode="spread"]').count()) === 1)
     check('no horizontal scroll at 1280', (await overflow(page)) <= 0)

@@ -89,15 +89,28 @@ async def _holder_map(db: AsyncSession, club: Organisation, snap: dict, me: str)
     return out
 
 
+HAVE = ("all", "not_mine", "swappable")
+
+
 async def page(db: AsyncSession, club: Organisation, snap: dict, me: str, *, filter: str = "all", sort: str = "rarity",
-               q: str = "", offset: int = 0, limit: int = 12) -> dict:
-    """One window of the book. `filter` is all, regular, special or a category key. Returns `{total, counts, items}`
+               q: str = "", offset: int = 0, limit: int = 12, have: str = "all") -> dict:
+    """One window of the book. `filter` is all, regular, special or a category key; `have` narrows to the cards the
+    asker does not hold ("not_mine") or that at least one other player could swap ("swappable"). Returns `{total, counts, items}`
     where an item is a card or, for a player's several cards of one category, a stack `{stack, key, cat, cards, name, count}`."""
     limit = max(1, min(int(limit or 12), PAGE_MAX))
     offset = max(0, int(offset or 0))
     words = [w for w in (q or "").lower().replace(",", " ").split() if w][:6]
     holders = await _holder_map(db, club, snap, me)
     mine = (await swaps._rows_by_card(db, club.id, me)).get(me, {})
+
+    have = have if have in HAVE else "all"
+
+    def wanted(key: tuple) -> bool:
+        if have == "not_mine":
+            return mine.get(key, 0) + (1 if key == (me, None) else 0) == 0
+        if have == "swappable":
+            return bool(holders.get(key))
+        return True
 
     def decorate(card: dict, key: tuple) -> dict:
         hs = holders.get(key, [])
@@ -109,7 +122,7 @@ async def page(db: AsyncSession, club: Organisation, snap: dict, me: str, *, fil
         if f["matches"] <= 0 or pid not in snap["people"]:
             continue
         c = cards.regular_card(snap, pid)
-        if c and (not words or _matches(words, c["name"])):
+        if c and wanted((pid, None)) and (not words or _matches(words, c["name"])):
             players.append(c)
     players.sort(key=_player_sort(sort))
 
@@ -122,7 +135,7 @@ async def page(db: AsyncSession, club: Organisation, snap: dict, me: str, *, fil
         pid = str(r["player_id"])
         person = snap["people"].get(pid)
         cat = CAT_OF.get(r["kind"])
-        if not person or not cat:
+        if not person or not cat or not wanted((pid, str(r["id"]))):
             continue
         if words:
             d = r["detail"] or {}

@@ -101,8 +101,8 @@ def _player_page_path(org: Organisation) -> str | None:
     if not org.availability_link_token or org.availability_show_on_site is False:
         return None
     if org_has_module(org, MODULE_SELECT):
-        return f"/avail/{org.availability_link_token}" if org.availability_self_service_enabled else None
-    return f"/avail/{org.availability_link_token}"
+        return f"/playerdash/{org.availability_link_token}" if org.availability_self_service_enabled else None
+    return f"/playerdash/{org.availability_link_token}"
 
 
 @router.get("/{slug}/manifest")

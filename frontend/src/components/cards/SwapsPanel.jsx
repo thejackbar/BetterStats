@@ -17,20 +17,20 @@ import { TIERS } from './cardTheme'
 const MONO = "'JetBrains Mono', monospace"
 const btn = { padding: '9px 16px', borderRadius: 10, border: '1px solid rgba(255,255,255,.35)', background: 'rgba(255,255,255,.08)', color: '#fff', font: `700 11px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase' }
 
-const cardLine = (c) => (c ? (c.kind === 'special' ? `${c.name}: ${c.title}` : `${c.name}, ${(TIERS[c.tier] || TIERS.common).label}`) : 'A card')
-const totalOf = (list) => (list || []).reduce((n, c) => n + (c.qty || 1), 0)
+export const cardLine = (c) => (c ? (c.kind === 'special' ? `${c.name}: ${c.title}` : `${c.name}, ${(TIERS[c.tier] || TIERS.common).label}`) : 'A card')
+export const totalOf = (list) => (list || []).reduce((n, c) => n + (c.qty || 1), 0)
 // A side of a request in a sentence: the cards by name when there are one or two, else how many.
-const sideLine = (list) => {
+export const sideLine = (list) => {
   if (!list || list.length === 0) return 'nothing'
   if (list.length <= 2) return list.map((c) => `${cardLine(c)}${(c.qty || 1) > 1 ? ` ×${c.qty}` : ''}`).join(' and ')
   return `${totalOf(list)} cards`
 }
-const ago = (iso) => {
+export const ago = (iso) => {
   const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
   return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`
 }
 
-function Mini({ card, club, accent, display, sponsor, selected, onClick, label, width = 104, count }) {
+export function Mini({ card, club, accent, display, sponsor, selected, onClick, label, width = 104, count }) {
   const inner = <ScaledCard width={width}><CardView card={card} club={club} accent={accent} display={display} sponsor={sponsor} holo={false} /></ScaledCard>
   const badge = (n) => n > 1 && <span data-card-count style={{ position: 'absolute', right: 4, bottom: '22%', padding: '1px 6px', borderRadius: 999, background: '#0b1018', border: '1px solid rgba(255,255,255,.5)', color: '#fff', font: `700 10px ${MONO}` }}>×{n}</span>
   if (!onClick) return <div style={{ position: 'relative' }} aria-label={label || cardLine(card)}>{inner}{badge(count)}</div>
@@ -46,7 +46,7 @@ function Mini({ card, club, accent, display, sponsor, selected, onClick, label, 
 
 // What has been picked on one side, one line a card with a count to change (a card held three times can go
 // once, twice or all three) and a way to take it back out.
-function Tray({ chosen, onQty, onRemove, label }) {
+export function Tray({ chosen, onQty, onRemove, label }) {
   if (!chosen.size) return null
   const rows = [...chosen.values()]
   const total = rows.reduce((n, r) => n + r.qty, 0)
@@ -71,7 +71,7 @@ function Tray({ chosen, onQty, onRemove, label }) {
   )
 }
 
-function Side({ cards, label, ...ui }) {
+export function Side({ cards, label, ...ui }) {
   return (
     <div data-swap-side={label}>
       <div style={{ font: `600 9.5px ${MONO}`, letterSpacing: 1, textTransform: 'uppercase', opacity: 0.7, marginBottom: 6 }}>{label} · {totalOf(cards)} {totalOf(cards) === 1 ? 'card' : 'cards'}</div>
@@ -82,7 +82,7 @@ function Side({ cards, label, ...ui }) {
   )
 }
 
-function Request({ swap, ...ui }) {
+export function RequestCard({ swap, ...ui }) {
   const incoming = swap.direction === 'in'
   return (
     <div data-swap-request={swap.id} style={{ border: '1px solid var(--pb-hairline, rgba(255,255,255,.2))', borderRadius: 14, padding: 12 }}>
@@ -111,7 +111,7 @@ function Request({ swap, ...ui }) {
   )
 }
 
-function Builder({ token, board, give: preGive, prefill, club, accent, display, sponsor, onClose, onSent }) {
+export function Builder({ token, board, give: preGive, prefill, club, accent, display, sponsor, onClose, onSent, inline = false }) {
   const [player, setPlayer] = useState(null)
   const [theirs, setTheirs] = useState(null)
   const [want, setWant] = useState(() => new Map())
@@ -155,12 +155,11 @@ function Builder({ token, board, give: preGive, prefill, club, accent, display, 
   }
   const ready = !!player && want.size > 0 && give.size > 0
   const h = { font: `700 11px ${MONO}`, letterSpacing: 1.4, textTransform: 'uppercase', opacity: 0.8, margin: '14px 0 8px' }
-  return (
-    <Modal label="Start a swap" onClose={onClose} zIndex={85} solid>
-      <div data-swap-builder onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 780, padding: '52px 14px 28px', boxSizing: 'border-box', color: '#fff' }}>
-        <button type="button" onClick={onClose} aria-label="Close" style={{ position: 'fixed', right: 14, top: 14, width: 38, height: 38, borderRadius: 19, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(255,255,255,.08)', color: '#fff' }}>✕</button>
-        <div style={{ font: `800 italic 26px ${display}`, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>Start a swap</div>
-        <div style={{ textAlign: 'center', fontSize: 12.5, opacity: 0.75, marginTop: 4 }}>As many cards each way as you like: one for four, six for two. They have to say yes.</div>
+  const content = (
+      <div data-swap-builder onClick={inline ? undefined : (e) => e.stopPropagation()} style={{ width: '100%', maxWidth: inline ? 'none' : 780, padding: inline ? '0 0 24px' : '52px 14px 28px', boxSizing: 'border-box', color: '#fff' }}>
+        {!inline && <button type="button" onClick={onClose} aria-label="Close" style={{ position: 'fixed', right: 14, top: 14, width: 38, height: 38, borderRadius: 19, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(255,255,255,.08)', color: '#fff' }}>✕</button>}
+        {!inline && <div style={{ font: `800 italic 26px ${display}`, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>Start a swap</div>}
+        <div style={{ textAlign: inline ? 'left' : 'center', fontSize: 12.5, opacity: 0.75, marginTop: 4 }}>As many cards each way as you like: one for four, six for two. They have to say yes.</div>
 
         {board.mine.length === 0 && !preGive && !prefill && <p data-no-doubles style={{ textAlign: 'center', marginTop: 18 }}>You have no cards to offer yet. Open a pack and whatever you pull can go in a swap. Your own card always stays yours.</p>}
 
@@ -221,13 +220,15 @@ function Builder({ token, board, give: preGive, prefill, club, accent, display, 
           </div>
         )}
         {err && <div role="alert" data-swap-error style={{ marginTop: 12, textAlign: 'center', color: '#fecaca', fontSize: 13 }}>{err}</div>}
+        {inline && <div style={{ marginTop: 14, textAlign: 'center' }}><button type="button" onClick={onClose} data-swap-cancel-build style={{ ...btn, border: 0, background: 'none', textDecoration: 'underline', opacity: 0.8 }}>Cancel</button></div>}
       </div>
-    </Modal>
   )
+  if (inline) return content
+  return <Modal label="Start a swap" onClose={onClose} zIndex={85} solid>{content}</Modal>
 }
 
 // Search every card in the club for who holds a copy that could be swapped, and ask for it in one tap.
-function FindCards({ token, onAsk, ...ui }) {
+export function FindCards({ token, onAsk, ...ui }) {
   const [q, setQ] = useState('')
   const [res, setRes] = useState(null)
   const [err, setErr] = useState('')
@@ -273,74 +274,6 @@ function FindCards({ token, onAsk, ...ui }) {
           {res.more > 0 && <div style={{ fontSize: 12, opacity: 0.7 }}>{res.more} more match. Type more of the name to narrow it down.</div>}
         </div>
       )}
-    </div>
-  )
-}
-
-export default function SwapsPanel({ token, club, accent, display, sponsor, offer, onOfferDone, ask, onAskDone, onChanged }) {
-  const [board, setBoard] = useState(null)
-  const [failed, setFailed] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState('')
-  const [build, setBuild] = useState(false)
-  const [prefill, setPrefill] = useState(null)
-
-  const load = useCallback(() => api.availPublicSwaps(token).then((b) => { setBoard(b); return b }).catch(() => setFailed(true)), [token])
-  useEffect(() => { load() }, [load])
-  useEffect(() => { if (offer) setBuild(true) }, [offer])
-  // Asked for from the club's set: the person and the card are already chosen.
-  useEffect(() => { if (ask) { setPrefill(ask); setBuild(true) } }, [ask])
-
-  const answer = async (id, action) => {
-    setBusy(true); setMsg('')
-    try {
-      await api.availPublicAnswerSwap(token, id, action)
-      setMsg(action === 'accept' ? 'Swapped. The new card is in your book.' : action === 'decline' ? 'Declined.' : 'Cancelled.')
-      onChanged?.()
-    } catch (e) {
-      setMsg(e?.message || 'That did not work.')
-    } finally {
-      setBusy(false)
-      load()
-    }
-  }
-
-  if (failed) return <div className="text-sm text-pb-faint">Swaps could not load. Reload to try again.</div>
-  if (!board) return <div className="text-sm text-pb-faint" data-swaps-loading>Loading swaps…</div>
-  const ui = { club, accent, display, sponsor, busy, answer }
-  const offerable = board.mine.reduce((n, c) => n + c.tradeable, 0)
-  return (
-    <div data-swaps-panel>
-      <p style={{ fontSize: 13, opacity: 0.8, margin: '0 0 10px', lineHeight: 1.5 }}>
-        Swap any cards you hold for any cards another player holds, as many each way as you like. Nothing moves until the other player says yes, and they can say no. Your own card always stays yours. Requests lapse after {board.expires_days} days.
-      </p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
-        <button type="button" onClick={() => setBuild(true)} data-swap-start style={{ ...btn, padding: '11px 18px', background: accent, color: onColor(accent), border: 0 }}>Start a swap</button>
-        <span data-doubles-count style={{ font: `600 11px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase', opacity: 0.75 }}>{offerable === 0 ? 'No cards to offer yet' : `${offerable} ${offerable === 1 ? 'card' : 'cards'} you could offer`}</span>
-      </div>
-      <FindCards token={token} onAsk={(p) => { setPrefill(p); setBuild(true) }} {...ui} />
-      {msg && <div role="status" data-swap-msg style={{ fontSize: 13, marginBottom: 10 }}>{msg}</div>}
-
-      {board.incoming.length > 0 && <div style={{ font: `700 11px ${MONO}`, letterSpacing: 1.4, textTransform: 'uppercase', margin: '4px 0 8px', color: 'var(--pb-amber, #fbbf24)' }}>Asking you ({board.incoming.length})</div>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{board.incoming.map((s) => <Request key={s.id} swap={s} {...ui} />)}</div>
-      {board.outgoing.length > 0 && <div style={{ font: `700 11px ${MONO}`, letterSpacing: 1.4, textTransform: 'uppercase', margin: '16px 0 8px', opacity: 0.8 }}>You asked ({board.outgoing.length})</div>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{board.outgoing.map((s) => <Request key={s.id} swap={s} {...ui} />)}</div>
-      {board.incoming.length + board.outgoing.length === 0 && <div style={{ fontSize: 13, opacity: 0.7 }} data-no-requests>No swap requests open.</div>}
-
-      {board.recent.length > 0 && (
-        <div style={{ marginTop: 18 }}>
-          <div style={{ font: `700 11px ${MONO}`, letterSpacing: 1.4, textTransform: 'uppercase', opacity: 0.8, marginBottom: 6 }}>Lately</div>
-          {board.recent.map((s) => (
-            <div key={s.id} data-swap-recent style={{ fontSize: 12.5, opacity: 0.8, padding: '4px 0' }}>
-              {s.status === 'accepted' ? 'Swapped with' : s.status === 'declined' ? (s.direction === 'out' ? 'Declined by' : 'You declined') : 'Cancelled with'} <strong>{s.other.name}</strong>: {sideLine(s.give)} for {sideLine(s.want)} · {ago(s.resolved_at || s.created_at)}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {build && <Builder token={token} board={board} give={prefill ? null : (offer || null)} prefill={prefill} club={club} accent={accent} display={display} sponsor={sponsor}
-        onClose={() => { setBuild(false); setPrefill(null); onOfferDone?.(); onAskDone?.() }}
-        onSent={() => { setBuild(false); setPrefill(null); onOfferDone?.(); onAskDone?.(); setMsg('Swap request sent.'); load(); onChanged?.() }} />}
     </div>
   )
 }

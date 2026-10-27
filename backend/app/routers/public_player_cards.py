@@ -124,12 +124,12 @@ def _refuse(exc: swaps.SwapError):
 
 
 @router.get("/{token}/me/cards/swaps")
-async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(get_db), history: bool = False):
     """Swap requests in and out, the cards the player could offer, and who has cards to offer."""
     club, player, snap = await _ready(db, request, token)
     me = str(player.id)
     return {
-        **await swaps.list_swaps(db, club, snap, me),
+        **await swaps.list_swaps(db, club, snap, me, history=history),
         "mine": await swaps.tradeable_cards(db, club, snap, me),
         "people": await swaps.swap_people(db, club, snap, me),
         "expires_days": swaps.SWAP_DAYS,
@@ -138,7 +138,7 @@ async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(
 
 
 @router.get("/{token}/me/cards/catalogue")
-async def get_catalogue(token: str, request: Request, filter: str = "all", sort: str = "rarity", q: str = "", offset: int = 0, limit: int = 12,
+async def get_catalogue(token: str, request: Request, filter: str = "all", sort: str = "rarity", q: str = "", offset: int = 0, limit: int = 12, have: str = "all",
                         db: AsyncSession = Depends(get_db)):
     """The club's whole set, a window at a time, laid out like the player's own book (players, then special cards in
     stacks). Nothing needs to be held, and nothing about anyone's collection is shown beyond whether a copy could be swapped."""
@@ -147,7 +147,7 @@ async def get_catalogue(token: str, request: Request, filter: str = "all", sort:
                        detail="Slow down. Give it a few seconds and try again.")
     if sort not in catalogue.SORTS:
         sort = "rarity"
-    return await catalogue.page(db, club, snap, str(player.id), filter=filter[:20], sort=sort, q=q[:80], offset=offset, limit=limit)
+    return await catalogue.page(db, club, snap, str(player.id), filter=filter[:20], sort=sort, q=q[:80], offset=offset, limit=limit, have=have[:12])
 
 
 @router.get("/{token}/me/cards/catalogue/holders")
