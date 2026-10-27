@@ -32,12 +32,12 @@ const calls = [], catCalls = []
 let features, board, prefs, showcase
 const reset = () => {
   features = { sets: true, showcase: true, board: true, feed: true }
-  prefs = { alert_swaps: true, alert_wants: true, board_opt_in: false, feed_hidden: false, club_alerts: true, email_on_file: true }
+  prefs = { alert_swaps: false, alert_wants: false, board_hidden: false, feed_hidden: false, club_alerts: true, email_on_file: true }
   showcase = [MINE, ZED]
   board = { entries: [
     { player_id: 'p9', rank: 1, name: 'Smith, Sue', percent: 61.5, held: 24, rarest: { ...ADAMS }, showcase: [ADAMS] },
     { player_id: 'p7', rank: 2, name: 'Dave, Dan', percent: 40.2, held: 16, rarest: { ...ZED }, showcase: [] },
-  ], total_cards: 39, me_opted_in: false, me_rank: null, count: 2 }
+  ], total_cards: 39, me_on_board: true, me_hidden: false, me_rank: 2, me: { player_id: 'p1', rank: 2, name: 'Barendse, Jack', percent: 8, held: 3 }, count: 3 }
 }
 reset()
 const SETS = { sets: [
@@ -69,7 +69,7 @@ const run = async () => {
       }
       if (/\/me\/cards\/board/.test(url)) return json(board)
       if (/\/me\/cards\/feed/.test(url)) return json(FEED)
-      if (/\/me\/cards\/prefs/.test(url)) { if (method === 'PUT') { calls.push({ method, path, body }); prefs = { ...prefs, ...body }; if (body.board_opt_in) board = { ...board, me_opted_in: true, me_rank: 2, count: 3 } } return json({ ...prefs, features }) }
+      if (/\/me\/cards\/prefs/.test(url)) { if (method === 'PUT') { calls.push({ method, path, body }); prefs = { ...prefs, ...body }; if (body.board_hidden === true) board = { ...board, me_on_board: false, me_hidden: true, me_rank: null, me: null, count: 2 }; if (body.board_hidden === false) board = { ...board, me_on_board: true, me_hidden: false, me_rank: 2, count: 3 } } return json({ ...prefs, features }) }
       if (/\/me\/cards\/wants/.test(url)) return json({ wants: [], ready: 0, limit: 100 })
       if (/\/me\/cards\/catalogue\/holders/.test(url)) return json({ card: ADAMS, holders: [], mine_copies: 0 })
       if (/\/me\/cards\/catalogue/.test(url)) { catCalls.push(Object.fromEntries(new URL(url).searchParams.entries())); return json({ total: 1, counts: { regular: 0, special: 1, centuries: 1 }, items: [{ ...ADAMS, others: 1, mine_copies: 1 }], offset: 0, limit: 12 }) }
@@ -111,16 +111,18 @@ const run = async () => {
   {
     reset()
     const { ctx, page } = await open(390, '/sets/board', { wait: '[data-board]' })
-    check('not on the board yet: a join prompt, and the board still shows', (await page.locator('[data-board-join]').count()) === 1 && (await page.locator('[data-board-row]').count()) === 2)
+    check('everyone is on the board without joining: no join prompt, and where you stand', (await page.locator('[data-board-join]').count()) === 0 && (await page.locator('[data-board-row]').count()) === 2 && /number 2 of 3/.test(await page.locator('[data-board-me]').textContent()))
     check('it is ranked, with the share of the set and the number of different cards', /61.5% of the set · 24 different cards/.test(await page.locator('[data-board-row="p9"]').textContent()))
     check('an entry shows the showcase and the rarest card', (await page.locator('[data-board-row="p9"] [data-board-showcase]').count()) === 1 && /Rarest/.test(await page.locator('[data-board-row="p9"]').textContent()))
     check('...and the board says it counts different cards, not copies', /never copies/.test(await page.locator('[data-board]').textContent()))
     check('no horizontal scroll', (await overflow(page)) <= 0)
     if (SHOT) await page.screenshot({ path: `${SHOT}/community-board-390.png`, fullPage: true })
-    calls.length = 0
-    await page.click('[data-board-join-go]')
-    await page.waitForSelector('[data-board-me]')
-    check('joining sends only board_opt_in, then shows where you stand', JSON.stringify(calls.find((c) => c.method === 'PUT').body) === '{"board_opt_in":true}' && /number 2 of 3/.test(await page.locator('[data-board-me]').textContent()))
+    check('...and says anyone can leave in Settings', /leave in Settings/.test(await page.locator('[data-board]').textContent()))
+    board = { ...board, me_on_board: false, me_hidden: true, me_rank: null, me: null, count: 2 }
+    await page.reload()
+    await page.waitForSelector('[data-board-hidden]')
+    check('a player who left is told so and sees no rank, and the board still shows', (await page.locator('[data-board-me]').count()) === 0 && (await page.locator('[data-board-row]').count()) === 2)
+    reset()
     await page.click('[data-club-tab="week"]')
     await page.waitForSelector('[data-feed]')
     check('This week lists the events with their dates', (await page.locator('[data-feed-event]').count()) === 8)
@@ -156,12 +158,17 @@ const run = async () => {
   console.log('\nsettings for being seen')
   {
     reset()
-    const { ctx, page } = await open(390, '/settings', { wait: '[data-pref="board_opt_in"]' })
-    check('the board is off until you say so, and your name in This week is on', (await page.locator('[data-pref="board_opt_in"] input').isChecked()) === false && (await page.locator('[data-pref="feed_hidden"] input').isChecked()) === true)
+    const { ctx, page } = await open(390, '/settings', { wait: '[data-pref="board_hidden"]' })
+    check('both emails are off until you switch them on', (await page.locator('[data-pref="alert_swaps"] input').isChecked()) === false && (await page.locator('[data-pref="alert_wants"] input').isChecked()) === false)
+    check('the board is on and your name in This week is on, until you say otherwise', (await page.locator('[data-pref="board_hidden"] input').isChecked()) === true && (await page.locator('[data-pref="feed_hidden"] input').isChecked()) === true)
     calls.length = 0
-    await page.locator('[data-pref="board_opt_in"] input').click()
+    await page.locator('[data-pref="board_hidden"] input').click()
     await page.waitForSelector('[data-saved]')
-    check('joining the board sends board_opt_in true only', JSON.stringify(calls[0].body) === '{"board_opt_in":true}')
+    check('leaving the board sends board_hidden true only (stored the other way round)', JSON.stringify(calls[0].body) === '{"board_hidden":true}')
+    calls.length = 0
+    await page.locator('[data-pref="alert_swaps"] input').click()
+    await page.waitForTimeout(300)
+    check('switching a swap email on sends alert_swaps true only', JSON.stringify(calls[0].body) === '{"alert_swaps":true}')
     await page.locator('[data-pref="feed_hidden"] input').click()
     await page.waitForTimeout(300)
     check('unticking your name in This week sends feed_hidden true (it is stored the other way round)', calls.some((c) => JSON.stringify(c.body) === '{"feed_hidden":true}'))

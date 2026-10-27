@@ -74,6 +74,10 @@ if HAVE_SWAPS:
     except ImportError:
         COMMUNITY_DDL = []
     try:
+        from app.services.player_card_packs_ddl import STATEMENTS as PACKS_DDL
+    except ImportError:   # the control run on the commit before the new packs
+        PACKS_DDL = []
+    try:
         from app.services.player_card_social_ddl import STATEMENTS as SOCIAL_DDL
     except ImportError:   # the control run on the commit before the social side
         SOCIAL_DDL = []
@@ -83,6 +87,7 @@ else:
     SWAP_DDL = []
     SOCIAL_DDL = []
     COMMUNITY_DDL = []
+    PACKS_DDL = []
     ITEM_DDL = []
 
 DB = os.environ["DATABASE_URL"]
@@ -160,7 +165,7 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
-        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL:
+        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL:
             await conn.execute(text(stmt))
 
 
@@ -259,6 +264,9 @@ async def seed() -> None:
         if HAVE:
             await ex("INSERT INTO club_card_settings (organisation_id, launched_at, weekly_packs) "
                      "VALUES (:o, NOW() - INTERVAL '30 days', 1)", o=ORG)
+            if PACKS_DDL:
+                # The older sections were written when every special was gifted; the minimal default has its own section.
+                await ex("UPDATE club_card_settings SET starter_gifts = 'all', event_packs_enabled = FALSE WHERE organisation_id = :o", o=ORG)
         await s.commit()
 
 
@@ -1189,12 +1197,12 @@ async def main() -> None:
 
             # alert settings
             pr = await social.load_prefs(db, a)
-            check("alerts are on until a player turns them off", pr["alert_swaps"] is True and pr["alert_wants"] is True)
-            await social.save_prefs(db, club, a, {"alert_swaps": False})
+            check("no email is sent until a player turns it on (both alerts default off)", pr["alert_swaps"] is False and pr["alert_wants"] is False)
+            await social.save_prefs(db, club, a, {"alert_swaps": True})
             await db.commit()
             pr = await social.load_prefs(db, a)
-            check("a setting not sent is left alone", pr["alert_swaps"] is False and pr["alert_wants"] is True)
-            await social.save_prefs(db, club, a, {"alert_swaps": True})
+            check("a setting not sent is left alone", pr["alert_swaps"] is True and pr["alert_wants"] is False)
+            await social.save_prefs(db, club, a, {"alert_wants": True})
             await db.commit()
 
             # notes and counter offers
@@ -1300,6 +1308,10 @@ async def main() -> None:
                 nsw = await swaps.create_swap(db, club, snap, a, d, [{"key": f"p:{CHARLIE}", "qty": 1}], [{"key": f"p:{BRAVO}", "qty": 1}], note="fancy a swap?")
                 await db.commit()
                 await alerts.swap_asked(ORG, nsw)
+                check("a player who has not switched alerts on is not emailed about a swap (the default is off)", not sent_mail, str(sent_mail)[:200])
+                await db.execute(text("DELETE FROM player_card_alerts WHERE player_id = :p"), {"p": DELTA}); await db.commit()
+                await social.save_prefs(db, club, d, {"alert_swaps": True}); await db.commit()
+                await alerts.swap_asked(ORG, nsw)
                 check("the person asked is emailed about a swap, with the note and a link to Swaps", len(sent_mail) == 1 and sent_mail[0][0] == "delta@example.com" and "fancy a swap?" in sent_mail[0][2] and f"/playerdash/{TOKEN}/cards/swaps" in sent_mail[0][2], str(sent_mail)[:300])
                 await alerts.swap_asked(ORG, nsw)
                 check("...once", len(sent_mail) == 1)
@@ -1401,12 +1413,17 @@ async def main() -> None:
 
             # the board
             await put(DELTA, BRAVO, 1)
-            b0 = await community.board(db, club, snap, a)
-            check("nobody is on the collectors board until they opt in", b0["entries"] == [] and b0["me_opted_in"] is False)
             from app.services import player_card_social as social_mod
-            await social_mod.save_prefs(db, club, a, {"board_opt_in": True}); await social_mod.save_prefs(db, club, d, {"board_opt_in": True}); await db.commit()
+            on_board = {pid for pid, f in snap["figs"].items() if f["matches"] > 0 and pid in snap["people"]}
+            b0 = await community.board(db, club, snap, a)
+            check("everyone in the pool is on the collectors board without doing anything", {e["player_id"] for e in b0["entries"]} == on_board and len(on_board) >= 4 and b0.get("me_on_board") is True and b0.get("me_hidden") is False, str(len(b0["entries"])))
+            await social_mod.save_prefs(db, club, c_, {"board_hidden": True}); await db.commit()
+            bh = await community.board(db, club, snap, c_)
+            check("a player who leaves it is off the board, and told so", c_ not in {e["player_id"] for e in bh["entries"]} and bh.get("me_on_board") is False and bh.get("me_hidden") is True and bh.get("me") is None)
+            check("...and everyone else stays", {e["player_id"] for e in bh["entries"]} == on_board - {c_})
+            await social_mod.save_prefs(db, club, c_, {"board_hidden": False}); await db.commit()
             b1 = await community.board(db, club, snap, a)
-            check("players who opted in are on it, ranked by share of the set, with names and no one else", {e["player_id"] for e in b1["entries"]} == {a, d} and b1["me_opted_in"] is True and b1["me_rank"] in (1, 2))
+            check("ranked by share of the set, with names, and the viewer's rank", {e["player_id"] for e in b1["entries"]} == on_board and b1["me_rank"] in range(1, len(on_board) + 1) and b1["me"]["player_id"] == a and b1["count"] == len(on_board))
             check("...best share first", [e["percent"] for e in b1["entries"]] == sorted([e["percent"] for e in b1["entries"]], reverse=True))
             pct = {e["player_id"]: e["percent"] for e in b1["entries"]}
             await put(ALPHA, ALPHA, 6, special=gsp2)
@@ -1439,7 +1456,7 @@ async def main() -> None:
             await social_mod.save_prefs(db, club, a, {"feed_hidden": True}); await db.commit()
             fd2 = await community.feed(db, club, snap, d)
             check("a player who opted out is left out of it entirely (their pulls and their swaps)", not any(e["type"] in ("pull", "swap") for e in fd2["events"]))
-            check("opt-in and opt-out default to off", (await social_mod.load_prefs(db, c_)) == {"alert_swaps": True, "alert_wants": True, "board_opt_in": False, "feed_hidden": False})
+            check("the defaults: no email, on the board, in the feed", (await social_mod.load_prefs(db, c_)) == {"alert_swaps": False, "alert_wants": False, "board_hidden": False, "feed_hidden": False})
             await social_mod.save_prefs(db, club, a, {"feed_hidden": False}); await db.commit()
 
             # switches and the routes
@@ -1468,6 +1485,277 @@ async def main() -> None:
             check("the admin sees the most wanted cards, with how many want each and how many could swap one, and no names of who", mw["cards"] and mw["cards"][0]["wanted_by"] >= 1 and "could_swap" in mw["cards"][0] and not ({"wanters", "players"} & set(mw["cards"][0])) and mw["total_wants"] >= 1)
 
     # ── The migration and its mirror ─────────────────────────────────────────
+    # ── More packs: kinds, calendar, achievements, club events, minimal gifts ─────
+    print("\nmore packs")
+    if HAVE and PACKS_DDL:
+        from app.services import player_card_pack_kinds as K
+        import random as _random
+
+        # the odds, drawn straight from the pure function over a synthetic pool
+        pool = {"common": [f"c{i}" for i in range(80)], "rare": [f"r{i}" for i in range(40)],
+                "epic": [f"e{i}" for i in range(20)], "legendary": [f"l{i}" for i in range(10)]}
+
+        def rare_share(source, n=400):
+            hits = total = least = 0
+            least = 99
+            for _ in range(n):
+                got = cards.draw_cards(pool, [], 5, K.kind_for(source))
+                good = sum(1 for g in got if g["tier"] != "common")
+                hits += good
+                total += len(got)
+                least = min(least, good)
+            return hits / total, least
+
+        shares = {src: rare_share(src) for src in ("weekly", "match_day", "halloween", "fifty", "milestone", "five_for", "century")}
+        order = [shares[s][0] for s in ("weekly", "match_day", "halloween", "fifty", "milestone", "five_for", "century")]
+        check("a better pack is richer in Rare and better: standard < match day < holiday < fifty < milestone < five-for < century",
+              order == sorted(order) and len(set(round(o, 2) for o in order)) == len(order), str([round(o, 2) for o in order]))
+        check("a century pack is almost all Rare or better (over 90% of cards), a standard pack is not (under 50%)", shares["century"][0] > 0.90 and shares["weekly"][0] < 0.50, str(shares))
+        for src in ("weekly", "match_day", "fifty", "milestone", "five_for", "century"):
+            k = K.kind_for(src)
+            check(f"every {src} pack holds at least {k.rare_plus} Rare or better, over 400 packs", shares[src][1] >= k.rare_plus, str(shares[src]))
+        dup = any(len({(g['kind'], g['id']) for g in got}) != len(got) for got in (cards.draw_cards(pool, [], 5, K.kind_for("century")) for _ in range(200)))
+        check("the same card never appears twice in a pack", not dup)
+        sp = [cards.draw_cards(pool, [f"s{i}" for i in range(30)], 5, K.kind_for(src)) for src in ("weekly",) for _ in range(600)]
+        sp_c = [cards.draw_cards(pool, [f"s{i}" for i in range(30)], 5, K.kind_for("century")) for _ in range(600)]
+        rate = lambda packs: sum(1 for p in packs for g in p if g["kind"] == "special") / sum(len(p) for p in packs)
+        check("a special card turns up more often in a pack for an achievement than in a standard one", rate(sp_c) > rate(sp) + 0.05, f"{rate(sp):.3f} vs {rate(sp_c):.3f}")
+        check("a tiny club still gets a pack (an empty tier falls to the next)", len(cards.draw_cards({"common": ["a", "b"], "rare": [], "epic": [], "legendary": []}, [], 5, K.kind_for("century"))) == 2)
+        check("every pack source has a name, an unknown one a plain fallback", all(K.label_for(s) != "Pack" for s in K.KINDS) and K.label_for("nope") == "Pack")
+
+        # the calendar
+        D = date
+        check("Halloween is 31 October", [s for s, _ in K.annual_events(D(2026, 10, 31))] == ["halloween"] and not K.annual_events(D(2026, 10, 30)))
+        check("the Melbourne Cup pack is the first Tuesday of November (2026: the 3rd, 2027: the 2nd), no other Tuesday",
+              [s for s, _ in K.annual_events(D(2026, 11, 3))] == ["melbourne_cup"] and [s for s, _ in K.annual_events(D(2027, 11, 2))] == ["melbourne_cup"]
+              and not K.annual_events(D(2026, 11, 10)) and not K.annual_events(D(2026, 11, 2)))
+        check("Christmas, Boxing Day, New Year, Australia Day and Anzac Day each have their day",
+              [K.annual_events(D(2026, m, d))[0][0] for m, d in ((12, 25), (12, 26), (1, 1), (1, 26), (4, 25))] == ["christmas", "boxing_day", "new_year", "australia_day", "anzac_day"])
+        check("the ref carries the year, so a holiday comes once a year", K.annual_events(D(2026, 12, 25))[0][1] != K.annual_events(D(2027, 12, 25))[0][1])
+        days = [D(2026, 1, 1) + timedelta(days=i) for i in range(365)]
+        hits = [x for x in days if K.is_mystery_day(ORG, x)]
+        check("surprise packs land on roughly one day in twelve", 15 <= len(hits) <= 50, str(len(hits)))
+        check("...the same days every time, the same for everyone in a club, different for another club",
+              hits == [x for x in days if K.is_mystery_day(ORG, x)] and hits != [x for x in days if K.is_mystery_day(ORG_SELECT, x)])
+        check("a birthday is the day and month, a 29 February birthday is 28 February in a year without one",
+              K.is_birthday(D(2000, 3, 14), D(2026, 3, 14)) and not K.is_birthday(D(2000, 3, 14), D(2026, 3, 15)) and K.is_birthday(D(2000, 2, 29), D(2026, 2, 28))
+              and not K.is_birthday(D(2000, 2, 29), D(2026, 3, 1)) and K.is_birthday(D(2000, 2, 29), D(2028, 2, 29)) and not K.is_birthday(D(2000, 2, 29), D(2028, 2, 28)) and not K.is_birthday(None, D(2026, 1, 1)))
+
+        # grants, against the database
+        Z1, Z2 = uuid.uuid4(), uuid.uuid4()
+        async with Session() as db:
+            club = await db.get(Organisation, ORG)
+            await cards.save_settings(db, ORG, {"event_packs_enabled": True, "timezone": "Australia/Perth"})
+            await db.commit()
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            today = cards.club_today(snap["settings"])
+            for pid, name, dob in ((Z1, "Zulu, Z", today.replace(year=today.year - 30) if not (today.month == 2 and today.day == 29) else None), (Z2, "Yankee, Y", None)):
+                await db.execute(text("INSERT INTO players (id, organisation_id, name, is_player, status, is_public, date_of_birth) VALUES (:i, :o, :n, true, 'active', true, :d)"),
+                                 {"i": pid, "o": ORG, "n": name, "d": dob})
+            await db.commit()
+            z1, z2 = str(Z1), str(Z2)
+            n_packs = lambda pid, src: db.execute(text("SELECT count(*) FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND source = :s"), {"p": pid, "s": src})
+            real_today = cards.club_today
+            try:
+                if today.month != 2 or today.day != 29:
+                    await cards.ensure_grants(db, club, z1, snap)
+                    await cards.ensure_grants(db, club, z2, snap)
+                    await db.commit()
+                    check("a birthday pack on the day, to the player whose birthday it is and nobody else", (await n_packs(z1, "birthday")).scalar() == 1 and (await n_packs(z2, "birthday")).scalar() == 0)
+                    await cards.ensure_grants(db, club, z1, snap); await db.commit()
+                    check("...once, however often the page is opened", (await n_packs(z1, "birthday")).scalar() == 1)
+
+                async def on(day, pid):
+                    cards.club_today = lambda s, now=None: day
+                    try:
+                        added = await cards.ensure_grants(db, club, pid, snap)
+                        await db.commit()
+                        return added
+                    finally:
+                        cards.club_today = real_today
+
+                far = D(2031, 10, 31)
+                a1 = await on(far, z2)
+                check("a Halloween pack on 31 October", a1.get("halloween") == 1 and (await n_packs(z2, "halloween")).scalar() == 1)
+                check("...not given again that day", (await on(far, z2)).get("halloween") == 0)
+                check("...nor the day before", (await on(D(2031, 10, 30), z2)).get("halloween") is None)
+                check("...and next year's is a new pack", (await on(D(2032, 10, 31), z2)).get("halloween") == 1 and (await n_packs(z2, "halloween")).scalar() == 2)
+                check("the Melbourne Cup pack on the first Tuesday of November", (await on(D(2031, 11, 4), z2)).get("melbourne_cup") == 1)
+                mystery = next(x for x in (D(2031, 3, 1) + timedelta(days=i) for i in range(200)) if K.is_mystery_day(ORG, x))
+                plain = next(x for x in (D(2031, 3, 1) + timedelta(days=i) for i in range(200)) if not K.is_mystery_day(ORG, x) and not K.annual_events(x))
+                check("a surprise pack on a surprise day", (await on(mystery, z2)).get("mystery") == 1)
+                check("...and nothing on an ordinary one", (await on(plain, z2)).get("mystery") is None)
+                pk = (await db.execute(text("SELECT ref_key FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND source = 'mystery' AND ref_key = :r"), {"p": z2, "r": f"mystery:{mystery.isoformat()}"})).scalar()
+                check("a surprise pack is keyed by the date", pk == f"mystery:{mystery.isoformat()}", str(pk))
+
+                # Match Day
+                fx_today, fx_later, fx_multi, fx_cancel = (uuid.uuid4() for _ in range(4))
+                day = D(2031, 6, 14)
+                for fid, on_, end, status in ((fx_today, day, None, "UPCOMING"), (fx_later, day + timedelta(days=1), None, "UPCOMING"),
+                                              (fx_multi, day - timedelta(days=1), day + timedelta(days=1), "IN_PROGRESS"), (fx_cancel, day, None, "CANCELLED")):
+                    await db.execute(text("INSERT INTO fixtures (id, organisation_id, source, played_on, end_on, status) VALUES (:i, :o, 'manual', :d, :e, :s)"),
+                                     {"i": fid, "o": ORG, "d": on_, "e": end, "s": status})
+                await db.execute(text("INSERT INTO fixture_lineups (fixture_id, player_id, organisation_id) VALUES (:f, :p, :o)"), {"f": fx_later, "p": Z2, "o": ORG})
+                await db.commit()
+                check("no Match Day pack when the only fixture is tomorrow", (await on(day, z2)).get("match_day") is None)
+                await db.execute(text("INSERT INTO fixture_lineups (fixture_id, player_id, organisation_id) VALUES (:f, :p, :o)"), {"f": fx_cancel, "p": Z2, "o": ORG}); await db.commit()
+                check("...nor for a cancelled one", (await on(day, z2)).get("match_day") is None)
+                await db.execute(text("INSERT INTO fixture_lineups (fixture_id, player_id, organisation_id) VALUES (:f, :p, :o)"), {"f": fx_today, "p": Z2, "o": ORG}); await db.commit()
+                check("a Match Day pack on a team sheet for a fixture today", (await on(day, z2)).get("match_day") == 1)
+                check("...once", (await on(day, z2)).get("match_day") == 0)
+                await db.execute(text("DELETE FROM fixture_lineups WHERE fixture_id = :f"), {"f": fx_today})
+                await db.execute(text("INSERT INTO fixture_lineups (fixture_id, player_id, organisation_id) VALUES (:f, :p, :o)"), {"f": fx_multi, "p": Z2, "o": ORG}); await db.commit()
+                check("a two day match is Match Day on its second day too", (await on(day + timedelta(days=1), z2)).get("match_day") == 1)
+                check("a player not on any team sheet gets none", (await on(day, z1)).get("match_day") is None)
+                played = (await db.execute(text("SELECT g.played_at FROM game_appearances ga JOIN v_effective_games g ON g.id = ga.game_id WHERE ga.player_id = :p AND g.played_at IS NOT NULL LIMIT 1"), {"p": ALPHA})).scalar()
+                if played:
+                    check("a scorecard dated today counts too", (await on(played, str(ALPHA))).get("match_day") == 1, str(played))
+
+                # the club's switch
+                await cards.save_settings(db, ORG, {"event_packs_enabled": False}); await db.commit()
+                snap = await cards.club_snapshot(db, club, fresh=True)
+                off = await on(D(2033, 10, 31), z2)
+                check("with event packs switched off there is no holiday, birthday, surprise or Match Day pack", not any(off.get(k) for k in ("halloween", "mystery", "birthday", "match_day")), str(off))
+                await cards.save_settings(db, ORG, {"event_packs_enabled": True}); await db.commit()
+                snap = await cards.club_snapshot(db, club, fresh=True)
+
+                # club scheduled events (a Test match)
+                async def refused_value(coro):
+                    try:
+                        await coro
+                        return None
+                    except ValueError as exc:
+                        return str(exc)
+                check("a scheduled pack needs a name", await refused_value(cards.add_event(db, ORG, " ", day, day)) is not None)
+                check("...cannot end before it starts", await refused_value(cards.add_event(db, ORG, "X", day, day - timedelta(days=1))) is not None)
+                check("...and cannot run longer than a month", await refused_value(cards.add_event(db, ORG, "X", day, day + timedelta(days=40))) is not None)
+                test_day1 = D(2032, 12, 3)
+                ev = await cards.add_event(db, ORG, "Australia v South Africa, First Test", test_day1, test_day1 + timedelta(days=4), True)
+                await db.commit()
+                g1 = await on(test_day1, z2)
+                check("a scheduled Test match gives a pack on its first day", g1.get("event") == 1)
+                check("...named after it", any(p["label"] == "Australia v South Africa, First Test" and p["source"] == "event" for p in await cards.available_packs(db, z2, snap)))
+                check("...a fresh one on each day of the match", (await on(test_day1 + timedelta(days=1), z2)).get("event") == 1 and (await on(test_day1 + timedelta(days=4), z2)).get("event") == 1)
+                check("...none the day after it ends", (await on(test_day1 + timedelta(days=5), z2)).get("event") is None)
+                check("...none the day before it starts", (await on(test_day1 - timedelta(days=1), z2)).get("event") is None)
+                ev2 = await cards.add_event(db, ORG, "Club day", test_day1 + timedelta(days=30), test_day1 + timedelta(days=32), False)
+                await db.commit()
+                await on(test_day1 + timedelta(days=30), z2); await on(test_day1 + timedelta(days=31), z2)
+                check("a pack for the whole run (not one a day) comes once", (await db.execute(text("SELECT count(*) FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND label = 'Club day'"), {"p": z2})).scalar() == 1)
+                check("a club's scheduled packs are listed by date", [e["title"] for e in await cards.list_events(db, ORG) if e["starts_on"] >= str(test_day1)] == ["Australia v South Africa, First Test", "Club day"])
+                held_before = (await db.execute(text("SELECT count(*) FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND source = 'event'"), {"p": z2})).scalar()
+                check("deleting a scheduled pack gives nothing further and takes nothing back", await cards.delete_event(db, ORG, ev["id"]) is True and await cards.delete_event(db, ORG, ev["id"]) is False)
+                await db.commit()
+                check("...the packs already granted stay", (await db.execute(text("SELECT count(*) FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND source = 'event'"), {"p": z2})).scalar() == held_before)
+                check("another club cannot delete it (the id is checked against the club)", await cards.delete_event(db, ORG_SELECT, ev2["id"]) is False)
+                await cards.delete_event(db, ORG, ev2["id"]); await db.commit()
+            finally:
+                cards.club_today = real_today
+
+            # packs for what a player did
+            ach = {"century": ("century", 1), "fifty": ("fifty", 1), "five_for": ("five_for", 1), "hat_trick": ("hat_trick", 1),
+                   "runs_milestone": ("milestone", 1), "games": ("milestone", 1)}
+            launched = snap["settings"]["launched_at"].date()
+            recent = launched + timedelta(days=2)
+            for n, (kind, _) in enumerate(ach.items()):
+                await db.execute(text("INSERT INTO player_special_cards (organisation_id, player_id, kind, event_key, occurred_on, title, detail) VALUES (:o, :p, :k, :e, :d, :t, '{}'::jsonb)"),
+                                 {"o": ORG, "p": Z2, "k": kind, "e": f"ach:{kind}:{n}", "d": recent, "t": kind})
+            await db.execute(text("INSERT INTO player_special_cards (organisation_id, player_id, kind, event_key, occurred_on, title, detail) VALUES (:o, :p, 'century', 'ach:old', :d, 'Old', '{}'::jsonb)"),
+                             {"o": ORG, "p": Z2, "d": launched - timedelta(days=200)})
+            await db.execute(text("INSERT INTO player_special_cards (organisation_id, player_id, kind, event_key, occurred_on, title, detail) VALUES (:o, :p, 'debut', 'ach:debut', :d, 'Debut', '{}'::jsonb)"),
+                             {"o": ORG, "p": Z2, "d": recent})
+            await db.commit()
+            await cards.ensure_grants(db, club, z2, snap); await db.commit()
+            have = {r[0]: r[1] for r in (await db.execute(text("SELECT source, count(*) FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND source IN ('century','fifty','five_for','hat_trick','milestone') GROUP BY source"), {"p": z2})).fetchall()}
+            check("a pack for each century, fifty, five-for and hat-trick, and one for each landmark card (a games milestone and a runs milestone: two)",
+                  have == {"century": 1, "fifty": 1, "five_for": 1, "hat_trick": 1, "milestone": 2}, str(have))
+            check("a century from before the club began using cards earns nothing, and neither does a debut", have.get("century") == 1)
+            await cards.ensure_grants(db, club, z2, snap); await db.commit()
+            check("a second visit grants nothing again", (await db.execute(text("SELECT count(*) FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND source IN ('century','fifty','five_for','hat_trick','milestone')"), {"p": z2})).scalar() == 6)
+            listed = await cards.available_packs(db, z2, snap)
+            srcs = [p["source"] for p in listed]
+            check("the list leads with the starter packs, then what the player achieved, then the rest", srcs[:2] == ["starter", "starter"] and set(srcs[2:8]) == {"century", "fifty", "five_for", "hat_trick", "milestone"} and "weekly" in srcs and srcs.index("weekly") > 7, str(srcs))
+            check("each has its own name", {p["source"]: p["label"] for p in listed}["century"] == "Century pack" and {p["source"]: p["label"] for p in listed}["milestone"] == "Milestone pack")
+            seen_kinds = []
+            real_draw = cards.draw_cards
+            cards.draw_cards = lambda pool_, specials_, size=5, kind=None: (seen_kinds.append(kind.label if kind else None), real_draw(pool_, specials_, size, kind))[1]
+            try:
+                z2p = await db.get(Player, Z2)
+                cent = next(p for p in listed if p["source"] == "century")
+                opened = await cards.open_pack(db, club, z2p, cent["id"], snap)
+                await db.commit()
+            finally:
+                cards.draw_cards = real_draw
+            check("opening a century pack draws with the century odds and gives five cards", seen_kinds == ["Century pack"] and opened is not None and len(opened) >= 1, str(seen_kinds))
+
+            # the starting cards
+            check("a new club's starting cards are minimal", cards.default_settings()["starter_gifts"] == "minimal")
+            try:
+                await cards.save_settings(db, ORG, {"starter_gifts": "everything"})
+                bogus = False
+            except ValueError:
+                bogus = True
+                await db.rollback()
+                club = await db.get(Organisation, ORG)
+            check("an unknown starting-cards choice is refused", bogus)
+            Y = uuid.uuid4()
+            await db.execute(text("INSERT INTO players (id, organisation_id, name, is_player, status, is_public) VALUES (:i, :o, 'Xray, X', true, 'active', true)"), {"i": Y, "o": ORG})
+            spec = {}
+            for key, kind, ago in (("debut", "debut", 900), ("g10", "games", 800), ("g50", "games", 300), ("r1", "runs_milestone", 40), ("c1", "century", 30), ("f1", "fifty", 10)):
+                spec[key] = (await db.execute(text("INSERT INTO player_special_cards (organisation_id, player_id, kind, event_key, occurred_on, title, detail) VALUES (:o, :p, :k, :e, :d, :t, '{}'::jsonb) RETURNING id::text"),
+                                               {"o": ORG, "p": Y, "k": kind, "e": f"gift:{key}", "d": date.today() - timedelta(days=ago), "t": key})).scalar()
+            await db.commit()
+            await cards._gift_new_specials(db, str(ORG), "minimal"); await db.commit()
+            gifted = lambda: db.execute(text("SELECT sc.title FROM player_card_copies c JOIN player_special_cards sc ON sc.id = c.special_id WHERE c.owner_player_id = :p AND c.source = 'gift' ORDER BY sc.title"), {"p": Y})
+            check("a minimal club gifts the debut card and the latest landmark card, not the century, fifty or earlier games milestones", [r[0] for r in (await gifted()).fetchall()] == ["debut", "r1"], str([r[0] for r in (await gifted()).fetchall()]))
+            await cards._gift_new_specials(db, str(ORG), "minimal"); await db.commit()
+            check("...and a second look adds nothing", len((await gifted()).fetchall()) == 2)
+            await db.execute(text("INSERT INTO player_special_cards (organisation_id, player_id, kind, event_key, occurred_on, title, detail) VALUES (:o, :p, 'wickets_milestone', 'gift:w1', :d, 'w1', '{}'::jsonb)"), {"o": ORG, "p": Y, "d": date.today() - timedelta(days=1)})
+            await db.commit()
+            await cards._gift_new_specials(db, str(ORG), "minimal"); await db.commit()
+            check("a newer landmark is gifted when it arrives, and the older gift stays (add-only)", [r[0] for r in (await gifted()).fetchall()] == ["debut", "r1", "w1"])
+            await cards._gift_new_specials(db, str(ORG), "all"); await db.commit()
+            check("a club on 'all' gifts every one", len((await gifted()).fetchall()) == 7)
+            # one gifted copy has been swapped away and back (source swap), one is a pack pull
+            await db.execute(text("UPDATE player_card_copies SET source = 'swap' WHERE owner_player_id = :p AND special_id = CAST(:s AS UUID)"), {"p": Y, "s": spec["c1"]})
+            await db.commit()
+            dry = await cards.trim_gifts(db, str(ORG), apply=False)
+            check("a dry run says what it would remove and removes nothing", dry["cards"] >= 3 and dry["applied"] is False and len((await gifted()).fetchall()) == 6, str(dry))
+            from app.routers import player_cards_admin as adm
+            admin_user = User(id=uuid.uuid4(), email="admin@example.com")
+            routed = await adm.trim_gifts(adm.TrimBody(apply=True), db, club, admin_user)
+            left = [r[0] for r in (await gifted()).fetchall()]
+            check("applying takes the starting cards back to the debut and the latest landmark (the older gifts go)", routed["applied"] is True and "g10" not in left and "g50" not in left and "f1" not in left, str(left))
+            check("...but never a card that has moved (a swapped copy is no longer a gift)", (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE owner_player_id = :p AND special_id = CAST(:s AS UUID)"), {"p": Y, "s": spec["c1"]})).scalar() == 1)
+            check("...and no player is left with more than one gifted landmark that is not their latest",
+                  (await db.execute(text("""SELECT count(*) FROM player_card_copies c JOIN player_special_cards sc ON sc.id = c.special_id
+                       WHERE c.source = 'gift' AND c.organisation_id = :o AND sc.kind IN ('games','runs_milestone','wickets_milestone','dismissals_milestone')
+                         AND sc.id <> (SELECT l.id FROM player_special_cards l WHERE l.player_id = sc.player_id AND l.kind IN ('games','runs_milestone','wickets_milestone','dismissals_milestone')
+                                        ORDER BY l.occurred_on DESC NULLS LAST, l.created_at DESC, l.id DESC LIMIT 1)"""), {"o": ORG})).scalar() == 0)
+            check("...and the trim is on the audit trail", (await db.execute(text("SELECT count(*) FROM audit_logs WHERE action = 'player_card_gifts_trimmed'"))).scalar() >= 1)
+            again = await cards.trim_gifts(db, str(ORG), apply=False)
+            check("a second dry run finds nothing left to trim", again["cards"] == 0, str(again))
+            check("the packs a player pulled are never touched by a trim", (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE source = 'pack' AND organisation_id = :o"), {"o": ORG})).scalar() > 0)
+
+            # the admin payload and routes
+            pay = await adm.get_settings(db, club, admin_user)
+            check("the settings payload carries the two new switches and the scheduled packs", pay["settings"]["starter_gifts"] in ("minimal", "all") and pay["settings"]["event_packs_enabled"] is True and isinstance(pay["events"], list), str(pay["settings"]))
+            added = await adm.add_event(adm.EventBody(title="Boxing Day Test", starts_on=date.today() + timedelta(days=3)), db, club, admin_user)
+            eid = next(e["id"] for e in added["events"] if e["title"] == "Boxing Day Test")
+            check("the admin route schedules a pack for one day (the last day defaults to the first)", next(e for e in added["events"] if e["id"] == eid)["ends_on"] == next(e for e in added["events"] if e["id"] == eid)["starts_on"])
+            check("...a bad range is a 422", await status_of(adm.add_event(adm.EventBody(title="Bad", starts_on=date.today(), ends_on=date.today() - timedelta(days=2)), db, club, admin_user)) == 422)
+            club = await db.get(Organisation, ORG)   # the refused request rolled back and expired it
+            removed = await adm.delete_event(eid, db, club, admin_user)
+            check("...and removes it", all(e["id"] != eid for e in removed["events"]))
+            check("an id that is not there, or not a uuid, is a 404", await status_of(adm.delete_event(str(uuid.uuid4()), db, club, admin_user)) == 404 and await status_of(adm.delete_event("nope", db, club, admin_user)) == 404)
+            club = await db.get(Organisation, ORG)
+            await adm.update_settings(adm.SettingsBody(starter_gifts="all"), db, club, admin_user)
+            check("PATCH settings takes the starting-cards choice", (await cards.load_settings(db, ORG))["starter_gifts"] == "all")
+            check("...an unknown one is a 422", await status_of(adm.update_settings(adm.SettingsBody(starter_gifts="some"), db, club, admin_user)) == 422)
+            await db.rollback()
+    else:
+        check("(the control run has no new packs to test)", True)
+
     print("\nmigration")
     async with engine.begin() as conn:
         for stmt in CARD_DDL:
@@ -1482,6 +1770,12 @@ async def main() -> None:
         check("the items migration follows 365, runs its own shared list, and drops only its own table", "down_revision = \"365\"" in mig3 and "ITEM_STATEMENTS" in mig3 and "ITEM_DOWNGRADE" in mig3)
     main_src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
     check("the lifespan mirrors the same list", "from app.services.player_cards_ddl import STATEMENTS" in main_src)
+    if PACKS_DDL:
+        mig4 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "370_player_card_packs.py").read_text()
+        check("the packs migration follows 369, runs the shared list, and its lifespan mirror runs it too",
+              'down_revision = "369"' in mig4 and "STATEMENTS" in mig4 and "player_card_packs_ddl" in main_src)
+        check("its downgrade drops only what 370 added, never a table an earlier migration owns", "DROP TABLE IF EXISTS club_card_event_packs" in "\n".join(__import__("app.services.player_card_packs_ddl", fromlist=["DOWNGRADE"]).DOWNGRADE)
+              and "DROP TABLE IF EXISTS player_card_packs" not in "\n".join(__import__("app.services.player_card_packs_ddl", fromlist=["DOWNGRADE"]).DOWNGRADE))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     if FAILURES:

@@ -442,6 +442,94 @@ function SwapsTab() {
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────────────────────────────────────────
+const dayLabel = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+
+// Packs the club schedules itself for a big day: a Test match, a club day. Players pick one up the day they open their page.
+function EventPacks({ events, setData }) {
+  const toast = useToast()
+  const [title, setTitle] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [perDay, setPerDay] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const add = async (e) => {
+    e.preventDefault()
+    if (!title.trim() || !from) return
+    setBusy(true)
+    try {
+      setData(await api.addPlayerCardEvent({ title: title.trim(), starts_on: from, ends_on: to || null, per_day: perDay }))
+      setTitle(''); setFrom(''); setTo('')
+      toast?.success?.('Scheduled')
+    } catch (err) { toast?.error?.(err?.message || 'Could not schedule that.') } finally { setBusy(false) }
+  }
+  const remove = async (ev) => {
+    try { setData(await api.deletePlayerCardEvent(ev.id)) } catch (err) { toast?.error?.(err?.message || 'Could not remove that.') }
+  }
+  return (
+    <Card title="Scheduled packs">
+      <p className="text-[12.5px] text-pb-faint mb-3">Hand out a pack on a big day, like a Test match: Australia v South Africa, First Test, for each day it runs. Players pick one up the day they open their page. A pack already given stays with the player if you remove the day.</p>
+      <form onSubmit={add} className="grid gap-3 sm:grid-cols-2" data-event-form>
+        <Field label="Name of the pack"><input value={title} maxLength={80} onChange={(e) => setTitle(e.target.value)} placeholder="Australia v South Africa, First Test" aria-label="Name of the pack" className="w-full bg-pb-surface2 border border-pb-hairline2 rounded px-2.5 py-1.5 text-sm" /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="First day"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="First day" className="w-full bg-pb-surface2 border border-pb-hairline2 rounded px-2.5 py-1.5 text-sm" /></Field>
+          <Field label="Last day"><input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} aria-label="Last day" className="w-full bg-pb-surface2 border border-pb-hairline2 rounded px-2.5 py-1.5 text-sm" /></Field>
+        </div>
+        <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={perDay} onChange={(e) => setPerDay(e.target.checked)} data-event-per-day /> One pack on each day (otherwise one for the whole run)</label>
+        <div className="sm:col-span-2"><Btn type="submit" disabled={busy || !title.trim() || !from}>{busy ? 'Scheduling…' : 'Schedule it'}</Btn></div>
+      </form>
+      <div className="mt-4 rounded border pb-hairline divide-y divide-pb-hairline" data-event-list>
+        {events.length === 0 && <div className="p-3 text-sm text-pb-faint">Nothing scheduled.</div>}
+        {events.map((ev) => (
+          <div key={ev.id} className="flex items-center gap-3 px-3 py-2" data-event={ev.id}>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-pb-text">{ev.title}</div>
+              <div className="text-[11.5px] text-pb-faint">{ev.starts_on === ev.ends_on ? dayLabel(ev.starts_on) : `${dayLabel(ev.starts_on)} to ${dayLabel(ev.ends_on)}`} · {ev.per_day ? 'a pack each day' : 'one pack'}</div>
+            </div>
+            <Btn sm onClick={() => remove(ev)}>Remove</Btn>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+// What a player starts with. A club on the minimal setting gives the debut card and the latest milestone card; older gifts can be tidied.
+function StartingCards({ s, saving, save }) {
+  const toast = useToast()
+  const [preview, setPreview] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const check = async () => {
+    setBusy(true)
+    try { setPreview(await api.trimPlayerCardGifts(false)) } catch (e) { toast?.error?.(e?.message || 'Could not count them.') } finally { setBusy(false) }
+  }
+  const apply = async () => {
+    setBusy(true)
+    try { const out = await api.trimPlayerCardGifts(true); setPreview({ ...out, done: true }); toast?.success?.('Starting cards tidied') } catch (e) { toast?.error?.(e?.message || 'Could not tidy them.') } finally { setBusy(false) }
+  }
+  return (
+    <Card title="Starting cards">
+      <Field label="Every player starts with">
+        <Select value={s.starter_gifts || 'minimal'} disabled={saving} onChange={(e) => save({ starter_gifts: e.target.value })} aria-label="Starting cards">
+          <option value="minimal">Their own card, their debut card and their latest milestone card</option>
+          <option value="all">Every special card made about them</option>
+        </Select>
+      </Field>
+      <p className="text-[12.5px] text-pb-faint mt-2">A card is only ever added to what a player holds, so a player who already has more keeps them until you tidy them below. Cards a player has swapped away, and anything they pulled from a pack, are never touched.</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span data-trim-check><Btn sm onClick={check} disabled={busy}>{busy && !preview ? 'Counting…' : 'Count what could be tidied'}</Btn></span>
+        {preview && !preview.done && preview.cards > 0 && <span data-trim-apply><Btn sm onClick={apply} disabled={busy}>Remove {preview.cards} {preview.cards === 1 ? 'card' : 'cards'} from {preview.players} {preview.players === 1 ? 'player' : 'players'}</Btn></span>}
+      </div>
+      {preview && (
+        <p className="text-sm mt-2" data-trim-result>
+          {preview.done ? `Done. Took ${preview.cards} starting ${preview.cards === 1 ? 'card' : 'cards'} back from ${preview.players} ${preview.players === 1 ? 'player' : 'players'}.`
+            : preview.cards === 0 ? 'Nothing to tidy. Everyone is already down to the minimal set.'
+              : `${preview.cards} starting ${preview.cards === 1 ? 'card' : 'cards'} held by ${preview.players} ${preview.players === 1 ? 'player' : 'players'} would be removed. Their own card, debut and latest milestone stay.`}
+        </p>
+      )}
+    </Card>
+  )
+}
+
 function SettingsTab({ data, setData }) {
   const toast = useToast()
   const [saving, setSaving] = useState(false)
@@ -484,13 +572,15 @@ function SettingsTab({ data, setData }) {
           <Toggle on={s.enabled} disabled={saving} onChange={(v) => save({ enabled: v })} label="Player Cards are on"
             hint="Switching them off hides the cards and the packs from your players. Nothing they have collected is lost." />
           <Toggle on={s.alerts_enabled !== false} disabled={saving} onChange={(v) => save({ alerts_enabled: v })} label="Card emails are on"
-            hint="Emails to players when a swap is asked of them and when a card on their wish list is available. Players can also switch each one off. Players with no email on file, and under 18s, are never emailed." />
+            hint="Emails to players when a swap is asked of them and when a card on their wish list is available. Every player starts with both off and chooses to switch them on. Players with no email on file, and under 18s, are never emailed." />
+          <Toggle on={s.event_packs_enabled !== false} disabled={saving} onChange={(v) => save({ event_packs_enabled: v })} label="Day packs are on"
+            hint="Match Day, holiday (Halloween, the Melbourne Cup, Christmas and more), birthday and surprise packs. Players collect one by opening their page that day. Packs you schedule below are not affected by this switch." />
           <Toggle on={s.sets_enabled !== false} disabled={saving} onChange={(v) => save({ sets_enabled: v })} label="Sets are on"
             hint="Groups of cards players work towards completing, such as every century at the club. Nothing is awarded for finishing one." />
           <Toggle on={s.showcase_enabled !== false} disabled={saving} onChange={(v) => save({ showcase_enabled: v })} label="Showcases are on"
             hint="Players can pin up to six cards they hold, shown next to their name on the collectors board." />
           <Toggle on={s.board_enabled !== false} disabled={saving} onChange={(v) => save({ board_enabled: v })} label="The collectors board is on"
-            hint="Only players who choose to join are listed, ranked by share of the set held (different cards, never copies)." />
+            hint="Everyone with a card is listed, ranked by share of the set held (different cards, never copies). A player can leave it in their own settings." />
           <Toggle on={s.feed_enabled !== false} disabled={saving} onChange={(v) => save({ feed_enabled: v })} label="This week at the club is on"
             hint="A short feed on Home of special cards earned, big pulls and swaps agreed. Players can leave their name out of it." />
           <Toggle on={s.include_juniors} disabled={saving} onChange={(v) => save({ include_juniors: v })} label="Include junior players"
@@ -511,6 +601,8 @@ function SettingsTab({ data, setData }) {
           <p className="text-[12.5px] text-pb-faint">A weekly pack that is not opened by the end of the week is gone. Packs earned for runs, wickets and dismissals wait until they are opened.</p>
         </div>
       </Card>
+      <StartingCards s={s} saving={saving} save={save} />
+      <EventPacks events={data.events || []} setData={setData} />
       <Card title="Where players find them">
         {link ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -521,7 +613,7 @@ function SettingsTab({ data, setData }) {
         <p className="text-[12.5px] text-pb-faint mt-2">Players pick their name and enter the last 4 digits of their mobile number, as on the availability page. Mobile numbers are kept on the Players page. A player with no number on file cannot sign in until one is added.</p>
       </Card>
       <Card title="Special cards" action={<Btn sm onClick={findMore} disabled={refreshing}>{refreshing ? 'Looking…' : 'Look for new ones'}</Btn>}>
-        <p className="text-[12.5px] text-pb-faint">Centuries, half centuries, five-wicket hauls, hat-tricks, debuts, games milestones and club awards each get a card, made from your history and kept up to date as games come in. The player it is for is given a copy, and everyone else can pull it from a pack. Cards are only ever added: a score corrected later does not take one away.</p>
+        <p className="text-[12.5px] text-pb-faint">Centuries, half centuries, five-wicket hauls, hat-tricks, debuts, games milestones and club awards each get a card, made from your history and kept up to date as games come in. The player it is for starts with their debut and their latest milestone card (see Starting cards), and everyone else can pull the rest from a pack. Cards are only ever added: a score corrected later does not take one away.</p>
       </Card>
       <Card title={`Players in the card pool (${data.pool.size} of ${data.pool.players})`}>
         <div className="flex flex-wrap gap-2 mb-3">

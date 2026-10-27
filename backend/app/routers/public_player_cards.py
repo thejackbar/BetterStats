@@ -277,7 +277,7 @@ class OpenBody(BaseModel):
 class PrefsBody(BaseModel):
     alert_swaps: Optional[bool] = None
     alert_wants: Optional[bool] = None
-    board_opt_in: Optional[bool] = None
+    board_hidden: Optional[bool] = None
     feed_hidden: Optional[bool] = None
 
 
@@ -411,7 +411,7 @@ async def put_showcase(token: str, body: ShowcaseBody, request: Request, db: Asy
 
 @router.get("/{token}/me/cards/board")
 async def get_board(token: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """The collectors board: only players who opted in, by share of the set held."""
+    """The collectors board: every player in the pool who has not left it, by share of the set held."""
     club, player, snap = await _ready(db, request, token)
     _need(snap, "board")
     return await community.board(db, club, snap, str(player.id))

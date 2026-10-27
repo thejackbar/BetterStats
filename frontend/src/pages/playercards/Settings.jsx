@@ -5,12 +5,12 @@ import PageHead from './PageHead'
 import { usePC } from './context'
 
 const ROWS = [
-  ['alert_swaps', 'A swap is asked of me', 'An email when another player asks to swap cards with you, or sends one back changed.'],
-  ['alert_wants', 'A card on my wish list is available', 'One email the first time someone could swap you a card on your list. You are not emailed again for that card unless nobody could swap it in between.'],
+  ['alert_swaps', 'A swap is asked of me', 'Off until you switch it on. An email when another player asks to swap cards with you, or sends one back changed.'],
+  ['alert_wants', 'A card on my wish list is available', 'Off until you switch it on. One email the first time someone could swap you a card on your list. You are not emailed again for that card unless nobody could swap it in between.'],
 ]
 // Choices about being seen. `invert` is a setting stored the other way round: the box is ticked when it is off.
 const SEEN = [
-  ['board_opt_in', 'Show me on the collectors board', 'Off until you switch it on. The board shows your name, your showcase and your rarest player card, and where you stand by share of the set.', false, 'board'],
+  ['board_hidden', 'Show me on the collectors board', 'Everyone in the club is on it. The board shows your name, your showcase and your rarest player card, and where you stand by share of the set. Untick this to leave it.', true, 'board'],
   ['feed_hidden', 'Show my name in This week', 'The club\'s weekly feed names who earned a special card, pulled a big card or agreed a swap. Untick this to be left out of it.', true, 'feed'],
 ]
 
@@ -29,7 +29,7 @@ export default function Settings() {
   if (!prefs && !err) return <div className="text-sm text-pb-faint" data-settings-loading>Loading…</div>
   return (
     <div data-screen="settings">
-      <PageHead title="Settings" sub="The emails Player Cards sends you, and what the club can see of you." />
+      <PageHead title="Settings" sub="The emails Player Cards sends you (none unless you ask), and what the club can see of you." />
       {err && <div role="alert" className="text-sm mb-3" style={{ color: 'var(--pb-red, #f87171)' }}>{err}</div>}
       {prefs && (
         <>

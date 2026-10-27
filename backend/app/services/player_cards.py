@@ -33,12 +33,18 @@ corrected downwards never takes a pack back and a re-run grants nothing twice:
 * milestone: one per 25 runs, per 2 wickets and per 2 dismissals (catches, run outs, stumpings) in the
   club's current season, all grades. The first look backfills the whole season.
 * duck: one per duck scored since the club first used cards (the "better luck next time" pack).
+* achievement: one for each century, five-for, hat-trick, fifty and landmark (a games, runs, wickets or dismissals
+  milestone card) dated on or after the club first used cards. Nothing is backfilled from history.
+* a day: Match Day (the player is in a team sheet or played a game today), a holiday (Halloween, the Melbourne Cup,
+  Christmas, Boxing Day, New Year, Australia Day, Anzac Day), a birthday, a surprise drop on random days, and any day
+  the club schedules itself (a Test match). Granted when the player opens their page that day, then banked.
 
 Odds
 ----
-Each card in a pack is a special card 5% of the time (when the club has any), otherwise a regular
-card whose tier is drawn Common 60, Rare 28, Epic 10, Legendary 2. Every pack holds at least one
-Rare or better, and the same card does not appear twice in one pack.
+Standard packs: each card is a special card 5% of the time (when the club has any), otherwise a regular card whose
+tier is drawn Common 60, Rare 28, Epic 10, Legendary 2. Every pack holds at least one Rare or better, and the same card
+does not appear twice in one pack. Day packs and achievement packs have their own odds, a bigger guaranteed Rare-or-better
+count and a better special chance; all of that lives in `player_card_pack_kinds`.
 """
 from __future__ import annotations
 
@@ -54,6 +60,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation, Player
+from app.services import player_card_pack_kinds as kinds
 from app.services.game_status import NOT_PLAYED_SQL_LIST
 from app.services.season_kind import season_key_sql
 
@@ -72,18 +79,11 @@ OPEN_ALL_LIMIT = 500
 TIERS = ("common", "rare", "epic", "legendary")
 # Lowest rarity rating that earns each tier.
 TIER_FROM = (("legendary", 90), ("epic", 75), ("rare", 55), ("common", 0))
-PACK_WEIGHTS = {"common": 60, "rare": 28, "epic": 10, "legendary": 2}
+PACK_WEIGHTS = kinds.STANDARD
 SPECIAL_CHANCE = 0.05
 GAMES_MILESTONES = (10, 50, 100, 150, 200, 250, 300, 400, 500)
 
-PACK_SOURCES = {
-    "starter": "Starter pack",
-    "weekly": "Weekly pack",
-    "runs": "Runs pack",
-    "wickets": "Wickets pack",
-    "dismissals": "Dismissals pack",
-    "duck": "Duck pack",
-}
+PACK_SOURCES = {key: k.label for key, k in kinds.KINDS.items()}
 
 SPECIAL_KINDS = {
     "century": "Century",
@@ -106,6 +106,10 @@ STAT_MILESTONES = (
     ("dismissals_milestone", "dismissals", 50, 20),
 )
 
+# What a player is given when a card is made about them: their debut and their latest landmark, or every one.
+GIFT_MODES = ("minimal", "all")
+LANDMARK_KINDS = ("games", "runs_milestone", "wickets_milestone", "dismissals_milestone")
+
 _rng = secrets.SystemRandom()
 
 
@@ -123,6 +127,8 @@ def default_settings() -> dict:
         "showcase_enabled": True,
         "board_enabled": True,
         "feed_enabled": True,
+        "event_packs_enabled": True,
+        "starter_gifts": "minimal",
     }
 
 
@@ -157,13 +163,15 @@ def week_ends_at(settings: dict, now: Optional[datetime] = None) -> datetime:
 async def load_settings(db: AsyncSession, org_id) -> dict:
     row = (await db.execute(text(
         "SELECT enabled, include_juniors, weekly_packs, timezone, launched_at, alerts_enabled, "
-        "sets_enabled, showcase_enabled, board_enabled, feed_enabled "
+        "sets_enabled, showcase_enabled, board_enabled, feed_enabled, event_packs_enabled, starter_gifts "
         "FROM club_card_settings WHERE organisation_id = CAST(:o AS UUID)"
     ), {"o": str(org_id)})).mappings().first()
     if not row:
         return default_settings()
     out = dict(row)
     out["weekly_packs"] = max(0, min(int(out.get("weekly_packs") or 0), MAX_WEEKLY_PACKS))
+    if out.get("starter_gifts") not in GIFT_MODES:
+        out["starter_gifts"] = "minimal"
     return out
 
 
@@ -191,10 +199,16 @@ async def save_settings(db: AsyncSession, org_id, patch: dict) -> dict:
     if "weekly_packs" in patch and patch["weekly_packs"] is not None:
         sets.append("weekly_packs = :weekly_packs")
         params["weekly_packs"] = max(0, min(int(patch["weekly_packs"]), MAX_WEEKLY_PACKS))
-    for flag in ("alerts_enabled", "sets_enabled", "showcase_enabled", "board_enabled", "feed_enabled"):
+    for flag in ("alerts_enabled", "sets_enabled", "showcase_enabled", "board_enabled", "feed_enabled",
+                 "event_packs_enabled"):
         if flag in patch and patch[flag] is not None:
             sets.append(f"{flag} = :{flag}")
             params[flag] = bool(patch[flag])
+    if "starter_gifts" in patch and patch["starter_gifts"] is not None:
+        if patch["starter_gifts"] not in GIFT_MODES:
+            raise ValueError("Starting cards are either minimal or all.")
+        sets.append("starter_gifts = :starter_gifts")
+        params["starter_gifts"] = patch["starter_gifts"]
     if "timezone" in patch:
         tz = (patch["timezone"] or "").strip() or None
         if tz:
@@ -762,18 +776,51 @@ async def _insert_stat_milestones(db, org: str, snap: dict) -> int:
     return total
 
 
-async def _gift_new_specials(db, org: str) -> int:
-    """Everyone gets a copy of the special cards that commemorate them. Only adds."""
-    res = await db.execute(text("""
-        INSERT INTO player_card_copies (organisation_id, owner_player_id, subject_player_id, special_id, source)
-        SELECT sc.organisation_id, sc.player_id, sc.player_id, sc.id, 'gift'
-          FROM player_special_cards sc
-         WHERE sc.organisation_id = CAST(:org AS UUID)
-           AND NOT EXISTS (SELECT 1 FROM player_card_copies c
-                            WHERE c.owner_player_id = sc.player_id AND c.special_id = sc.id AND c.source = 'gift')
-        ON CONFLICT (owner_player_id, special_id) WHERE source = 'gift' DO NOTHING
-    """), {"org": org})
+_GIFT_INSERT = """
+    INSERT INTO player_card_copies (organisation_id, owner_player_id, subject_player_id, special_id, source)
+    SELECT sc.organisation_id, sc.player_id, sc.player_id, sc.id, 'gift'
+      FROM player_special_cards sc
+     WHERE sc.organisation_id = CAST(:org AS UUID)
+       AND {keep}
+       AND NOT EXISTS (SELECT 1 FROM player_card_copies c
+                        WHERE c.owner_player_id = sc.player_id AND c.special_id = sc.id AND c.source = 'gift')
+    ON CONFLICT (owner_player_id, special_id) WHERE source = 'gift' DO NOTHING
+"""
+
+# The one landmark card per player that a minimal club gifts: the latest by date, then the biggest.
+_LATEST_LANDMARK = """sc.kind = ANY(CAST(:landmarks AS text[])) AND sc.id = (
+        SELECT l.id FROM player_special_cards l
+         WHERE l.organisation_id = sc.organisation_id AND l.player_id = sc.player_id AND l.kind = ANY(CAST(:landmarks AS text[]))
+         ORDER BY l.occurred_on DESC NULLS LAST, l.created_at DESC NULLS LAST, l.id DESC LIMIT 1)"""
+_DEBUT_OR_LANDMARK = f"(sc.kind = 'debut' OR ({_LATEST_LANDMARK}))"
+
+
+async def _gift_new_specials(db, org: str, mode: str = "minimal") -> int:
+    """A player is given a copy of the special cards that commemorate them. A minimal club (the default) gives
+    their debut card and their latest landmark card; `all` gives every one. Only adds: a landmark that is later
+    superseded by a newer one keeps the copy the player already holds."""
+    keep = "TRUE" if mode == "all" else _DEBUT_OR_LANDMARK
+    res = await db.execute(text(_GIFT_INSERT.format(keep=keep)), {"org": org, "landmarks": list(LANDMARK_KINDS)})
     return res.rowcount or 0
+
+
+async def trim_gifts(db, org: str, *, apply: bool = False) -> dict:
+    """Take a club's starting gifts back to the minimal set: remove the gifted copies that are not the player's
+    debut or latest landmark. Only a copy still marked `gift` and held by the player it commemorates is touched (a swap re-marks the
+    copy `swap`, so a card that has moved is never taken back), and a pack pull is never a gift. Dry run unless
+    `apply`; returns what it would remove or removed."""
+    where = f"""
+        FROM player_card_copies c JOIN player_special_cards sc ON sc.id = c.special_id
+         WHERE c.organisation_id = CAST(:org AS UUID) AND c.source = 'gift' AND c.owner_player_id = sc.player_id
+           AND NOT {_DEBUT_OR_LANDMARK}"""
+    params = {"org": org, "landmarks": list(LANDMARK_KINDS)}
+    counted = (await db.execute(text(f"SELECT COUNT(*) AS n, COUNT(DISTINCT c.owner_player_id) AS players {where}"), params)).mappings().first()
+    out = {"cards": int(counted["n"] or 0), "players": int(counted["players"] or 0), "applied": False}
+    if apply and out["cards"]:
+        await db.execute(text(f"DELETE FROM player_card_copies WHERE id IN (SELECT c.id {where})"), params)
+        out["applied"] = True
+        forget(org)
+    return out
 
 
 async def refresh_specials(db: AsyncSession, club: Organisation, *, force: bool = False) -> dict:
@@ -797,7 +844,7 @@ async def refresh_specials(db: AsyncSession, club: Organisation, *, force: bool 
         made["achievements"] = await _insert_achievements(db, org, pids)
         made["games"] = await _insert_game_milestones(db, org, snap)
         made["stat_milestones"] = await _insert_stat_milestones(db, org, snap)
-        made["gifted"] = await _gift_new_specials(db, org)
+        made["gifted"] = await _gift_new_specials(db, org, snap["settings"].get("starter_gifts") or "minimal")
     _SPECIAL_REFRESH[key] = now
     return made
 
@@ -864,6 +911,124 @@ async def _duck_refs(db, pid: str, since: Optional[date]) -> list[str]:
     return [r[0] for r in rows.fetchall()]
 
 
+def club_today(settings: dict, now: Optional[datetime] = None) -> date:
+    return (now or datetime.now(timezone.utc)).astimezone(club_zone(settings)).date()
+
+
+async def _playing_today(db, org: str, pid: str, today: date) -> bool:
+    """On a team sheet for a fixture running today, or in a scorecard dated today. Either table may be absent on a
+    club that never used it, so each is read only where it exists."""
+    hit = (await db.execute(text("""
+        SELECT EXISTS (
+            SELECT 1 FROM fixture_lineups fl JOIN fixtures f ON f.id = fl.fixture_id
+             WHERE fl.player_id = CAST(:pid AS UUID) AND f.organisation_id = CAST(:org AS UUID)
+               AND f.status NOT IN ('CANCELLED', 'BYE') AND f.played_on IS NOT NULL
+               AND f.played_on <= :today AND :today <= COALESCE(f.end_on, f.played_on)
+        ) OR EXISTS (
+            SELECT 1 FROM game_appearances ga JOIN v_effective_games g ON g.id = ga.game_id
+             WHERE ga.player_id = CAST(:pid AS UUID) AND g.played_at = :today AND COALESCE(ga.is_reserve, FALSE) = FALSE
+        )
+    """), {"org": org, "pid": pid, "today": today})).scalar()
+    return bool(hit)
+
+
+async def _insert_labelled(db, org: str, pid: str, source: str, ref: str, label: Optional[str]) -> int:
+    res = await db.execute(text("""
+        INSERT INTO player_card_packs (organisation_id, player_id, source, ref_key, label)
+        VALUES (CAST(:org AS UUID), CAST(:pid AS UUID), :source, :ref, :label)
+        ON CONFLICT (player_id, source, ref_key) DO NOTHING
+    """), {"org": org, "pid": pid, "source": source, "ref": ref, "label": label})
+    return res.rowcount or 0
+
+
+async def _scheduled_events(db, org: str, today: date) -> list[dict]:
+    rows = (await db.execute(text("""
+        SELECT id::text AS id, title, starts_on, ends_on, per_day FROM club_card_event_packs
+         WHERE organisation_id = CAST(:org AS UUID) AND starts_on <= :today AND :today <= ends_on
+    """), {"org": org, "today": today})).mappings().all()
+    return [dict(r) for r in rows]
+
+
+MAX_EVENT_DAYS = 31
+MAX_EVENTS = 60
+
+
+async def list_events(db, org_id) -> list[dict]:
+    rows = (await db.execute(text("""
+        SELECT id::text AS id, title, starts_on, ends_on, per_day FROM club_card_event_packs
+         WHERE organisation_id = CAST(:org AS UUID) AND ends_on >= (CURRENT_DATE - 30) ORDER BY starts_on, created_at
+    """), {"org": str(org_id)})).mappings().all()
+    return [{"id": r["id"], "title": r["title"], "starts_on": r["starts_on"].isoformat(), "ends_on": r["ends_on"].isoformat(),
+             "per_day": bool(r["per_day"])} for r in rows]
+
+
+async def add_event(db, org_id, title: str, starts_on: date, ends_on: Optional[date], per_day: bool = True) -> dict:
+    """Schedule a pack for a day or a run of days (a Test match). Rejects a run that ends before it starts or is longer
+    than a month, so one slip of a year does not hand out a pack a day for twelve months."""
+    title = (title or "").strip()[:80]
+    if not title:
+        raise ValueError("Give the pack a name.")
+    ends_on = ends_on or starts_on
+    if ends_on < starts_on:
+        raise ValueError("The last day cannot be before the first.")
+    if (ends_on - starts_on).days + 1 > MAX_EVENT_DAYS:
+        raise ValueError(f"A scheduled pack can run at most {MAX_EVENT_DAYS} days.")
+    n = (await db.execute(text("SELECT COUNT(*) FROM club_card_event_packs WHERE organisation_id = CAST(:org AS UUID)"),
+                          {"org": str(org_id)})).scalar()
+    if int(n or 0) >= MAX_EVENTS:
+        raise ValueError("That is plenty of scheduled packs. Delete an old one first.")
+    row = (await db.execute(text("""
+        INSERT INTO club_card_event_packs (organisation_id, title, starts_on, ends_on, per_day)
+        VALUES (CAST(:org AS UUID), :title, :s, :e, :pd) RETURNING id::text
+    """), {"org": str(org_id), "title": title, "s": starts_on, "e": ends_on, "pd": bool(per_day)})).first()
+    return {"id": row[0], "title": title, "starts_on": starts_on.isoformat(), "ends_on": ends_on.isoformat(), "per_day": bool(per_day)}
+
+
+async def delete_event(db, org_id, event_id: str) -> bool:
+    """Remove a scheduled pack. Packs already granted from it stay with the players: they were earned."""
+    res = await db.execute(text(
+        "DELETE FROM club_card_event_packs WHERE id = CAST(:id AS UUID) AND organisation_id = CAST(:org AS UUID)"
+    ), {"id": event_id, "org": str(org_id)})
+    return bool(res.rowcount)
+
+
+async def _grant_day_packs(db, club: Organisation, pid: str, settings: dict) -> dict[str, int]:
+    """Packs for today: holidays, a birthday, a surprise drop, Match Day and any day the club scheduled. A day pack can
+    only be earned on its day (the page has to be opened), then it banks until opened."""
+    org, today = str(club.id), club_today(settings)
+    added: dict[str, int] = {}
+    if settings.get("event_packs_enabled") is not False:
+        for source, ref in kinds.annual_events(today):
+            added[source] = await _insert_packs(db, org, pid, source, [ref])
+        if kinds.is_mystery_day(org, today):
+            added["mystery"] = await _insert_packs(db, org, pid, "mystery", [f"mystery:{today.isoformat()}"])
+        dob = (await db.execute(text("SELECT date_of_birth FROM players WHERE id = CAST(:pid AS UUID)"), {"pid": pid})).scalar()
+        if kinds.is_birthday(dob, today):
+            added["birthday"] = await _insert_packs(db, org, pid, "birthday", [f"birthday:{today.year}"])
+        if await _playing_today(db, org, pid, today):
+            added["match_day"] = await _insert_packs(db, org, pid, "match_day", [f"match_day:{today.isoformat()}"])
+    for ev in await _scheduled_events(db, org, today):
+        ref = f"{ev['id']}:{today.isoformat()}" if ev["per_day"] else ev["id"]
+        added["event"] = added.get("event", 0) + await _insert_labelled(db, org, pid, "event", ref, ev["title"])
+    return added
+
+
+async def _grant_achievement_packs(db, org: str, pid: str, launched: Optional[datetime]) -> dict[str, int]:
+    """One pack for each century, five-for, hat-trick, fifty and landmark the player has had since the club began using
+    cards. Never from before: a club's whole history does not turn into a flood of high packs on launch."""
+    if launched is None:
+        return {}
+    rows = (await db.execute(text("""
+        SELECT id::text, kind FROM player_special_cards
+         WHERE organisation_id = CAST(:org AS UUID) AND player_id = CAST(:pid AS UUID)
+           AND kind = ANY(CAST(:kinds AS text[])) AND occurred_on >= :since
+    """), {"org": org, "pid": pid, "kinds": list(kinds.ACHIEVEMENT_PACKS), "since": launched.date()})).fetchall()
+    by_source: dict[str, list[str]] = {}
+    for sid, kind in rows:
+        by_source.setdefault(kinds.ACHIEVEMENT_PACKS[kind], []).append(sid)
+    return {src: await _insert_packs(db, org, pid, src, refs) for src, refs in by_source.items()}
+
+
 async def ensure_grants(db: AsyncSession, club: Organisation, pid: str, snap: dict) -> dict:
     """Add every pack this player has earned and not yet been granted. Safe to call on every visit."""
     settings, org = snap["settings"], str(club.id)
@@ -880,61 +1045,66 @@ async def ensure_grants(db: AsyncSession, club: Organisation, pid: str, snap: di
             added[source] = await _insert_packs(db, org, pid, source, [f"{season}:{i}" for i in range(1, total // per + 1)])
     launched = settings.get("launched_at")
     added["duck"] = await _insert_packs(db, org, pid, "duck", await _duck_refs(db, pid, launched.date() if launched else None))
+    added.update(await _grant_achievement_packs(db, org, pid, launched))
+    added.update(await _grant_day_packs(db, club, pid, settings))
     return added
+
+
+# Where each kind of pack sits in the list: what is special or time-limited first, bulk packs last.
+_PACK_ORDER = {"starter": 0, **{k: 1 for k in ("century", "five_for", "hat_trick", "fifty", "milestone")},
+               **{k: 2 for k in kinds.DAY_SOURCES}, "weekly": 3, "duck": 5}
 
 
 async def available_packs(db: AsyncSession, pid: str, snap: dict) -> list[dict]:
     """Unopened packs the player can open now. A weekly pack is only good in the week it was granted."""
     wk = week_key(snap["settings"])
     rows = await db.execute(text("""
-        SELECT id::text, source, ref_key, granted_at FROM player_card_packs
+        SELECT id::text, source, ref_key, granted_at, label FROM player_card_packs
          WHERE player_id = CAST(:pid AS UUID) AND opened_at IS NULL
            AND (source <> 'weekly' OR ref_key LIKE :wk)
-         ORDER BY CASE source WHEN 'starter' THEN 0 WHEN 'duck' THEN 2 WHEN 'weekly' THEN 1 ELSE 3 END, granted_at, ref_key
     """), {"pid": pid, "wk": f"{wk}:%"})
-    return [{"id": r[0], "source": r[1], "label": PACK_SOURCES.get(r[1], "Pack")} for r in rows.fetchall()]
+    packs = sorted(rows.fetchall(), key=lambda r: (_PACK_ORDER.get(r[1], 4), r[3], r[2]))
+    return [{"id": r[0], "source": r[1], "label": r[4] or kinds.label_for(r[1])} for r in packs]
 
 
 # ── Drawing a pack ────────────────────────────────────────────────────────────
 
-def _draw_tier(pool: dict[str, list[str]], allowed: Iterable[str]) -> Optional[str]:
+def _draw_tier(pool: dict[str, list[str]], allowed: Iterable[str], weights: Optional[dict] = None) -> Optional[str]:
     """A tier by weight among those that have anyone in them; an empty tier falls to the next lower."""
+    weights = weights or PACK_WEIGHTS
     live = [t for t in allowed if pool.get(t)]
     if not live:
         return None
-    total = sum(PACK_WEIGHTS[t] for t in live)
+    total = sum(weights[t] for t in live)
     pick = _rng.uniform(0, total)
     acc = 0.0
     for t in live:
-        acc += PACK_WEIGHTS[t]
+        acc += weights[t]
         if pick <= acc:
             return t
     return live[-1]
 
 
-def draw_cards(pool: dict[str, list[str]], specials: list[str], size: int = PACK_SIZE) -> list[dict]:
+def draw_cards(pool: dict[str, list[str]], specials: list[str], size: int = PACK_SIZE,
+               kind: Optional[kinds.Kind] = None) -> list[dict]:
     """The picks for one pack: `[{"kind": "player", "id": pid}, {"kind": "special", "id": special_id}]`.
-    Pure and RNG-driven, so the odds can be checked without a database."""
+    `kind` sets the odds, the special chance and how many cards are guaranteed Rare or better (the standard
+    pack when omitted). Pure and RNG-driven, so the odds can be checked without a database."""
+    kind = kind or kinds.DEFAULT_KIND
+    weights, special_chance = kind.weights, kind.special
     picks: list[dict] = []
     seen: set[tuple] = set()
 
-    def take(kind: str, ident: str) -> bool:
-        if (kind, ident) in seen:
-            return False
-        seen.add((kind, ident))
-        picks.append({"kind": kind, "id": ident, "tier": None})
-        return True
-
     def one(rare_plus: bool) -> Optional[dict]:
         for _ in range(12):
-            if specials and _rng.random() < SPECIAL_CHANCE:
+            if specials and _rng.random() < special_chance:
                 ident = _rng.choice(specials)
                 if (("special", ident)) not in seen:
                     seen.add(("special", ident))
                     return {"kind": "special", "id": ident, "tier": "special"}
-            tier = _draw_tier(pool, ("rare", "epic", "legendary") if rare_plus else TIERS)
+            tier = _draw_tier(pool, ("rare", "epic", "legendary") if rare_plus else TIERS, weights)
             if tier is None and rare_plus:
-                tier = _draw_tier(pool, TIERS)
+                tier = _draw_tier(pool, TIERS, weights)
             if tier is None:
                 return None
             ident = _rng.choice(pool[tier])
@@ -947,11 +1117,19 @@ def draw_cards(pool: dict[str, list[str]], specials: list[str], size: int = PACK
         pick = one(False)
         if pick:
             picks.append(pick)
-    if picks and not any(p["tier"] != "common" for p in picks):
-        # The guarantee: at least one Rare or better. The last slot is redrawn.
+    # The guarantee: at least `rare_plus` cards are Rare or better (a special card counts). Weakest slots are redrawn.
+    want = min(kind.rare_plus, len(picks))
+    for _ in range(want):
+        good = sum(1 for p in picks if p["tier"] != "common")
+        if good >= want:
+            break
+        slot = next((i for i in range(len(picks) - 1, -1, -1) if picks[i]["tier"] == "common"), None)
+        if slot is None:
+            break
         replacement = one(True)
-        if replacement:
-            picks[-1] = replacement
+        if not replacement:
+            break
+        picks[slot] = replacement
     return picks
 
 
@@ -968,7 +1146,7 @@ async def open_pack(db: AsyncSession, club: Organisation, player: Player, pack_i
     if row[1] == "weekly" and not str(row[2]).startswith(week_key(snap["settings"]) + ":"):
         return None
     specials = [sid for sid, owner in await _all_special_ids(db, club.id) if owner in snap["people"]]
-    picks = draw_cards(snap["pool"], specials)
+    picks = draw_cards(snap["pool"], specials, kind=kinds.kind_for(row[1]))
     await db.execute(text("UPDATE player_card_packs SET opened_at = NOW() WHERE id = CAST(:id AS UUID)"), {"id": pack_id})
     special_rows = await _specials_by_id(db, club.id, [p["id"] for p in picks if p["kind"] == "special"])
     cards: list[dict] = []

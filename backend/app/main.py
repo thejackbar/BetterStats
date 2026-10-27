@@ -4545,6 +4545,11 @@ async def lifespan(app: FastAPI):
         from app.services.player_card_community_ddl import STATEMENTS as _PLAYER_CARD_COMMUNITY_DDL
         for _stmt in _PLAYER_CARD_COMMUNITY_DDL:
             await conn.execute(text(_stmt))
+        # Migration 370: more packs, the starting-cards setting, board and alert defaults. Same one-copy rule with
+        # services/player_card_packs_ddl.STATEMENTS (the one data step lives only in alembic's 370).
+        from app.services.player_card_packs_ddl import STATEMENTS as _PLAYER_CARD_PACKS_DDL
+        for _stmt in _PLAYER_CARD_PACKS_DDL:
+            await conn.execute(text(_stmt))
         # Migration 365: automatic premierships (round name, honour-to-scorecard link, auto marker,
         # exclusions). Same one-copy rule: this list and alembic's 365 both run
         # services/premierships_ddl.STATEMENTS.

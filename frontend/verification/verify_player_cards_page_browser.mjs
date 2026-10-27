@@ -147,11 +147,37 @@ const run = async () => {
     check('the swaps tile says one is asking you', /1 asking you/.test(await page.locator('[data-tile="swaps"]').textContent()))
     check('the collection tile counts the set', /3\s*\/\s*14/.test(await page.locator('[data-tile="collection"]').textContent()))
     await goNav(page, 'packs')
-    check('Packs lists the six ways a pack arrives', (await page.locator('[data-way]').count()) === 6 && /2 packs to open/.test(await page.locator('[data-packs-ready]').textContent()))
+    check('Packs lists every way a pack arrives, in three groups', (await page.locator('[data-way]').count()) === 22 && (await page.locator('[data-pack-group]').count()) === 3 && /2 packs to open/.test(await page.locator('[data-packs-ready]').textContent()))
     await goNav(page, 'how')
     check('How it works has the odds for each tier and seven sections', (await page.locator('[data-odds]').count()) === 4 && (await page.locator('[data-how]').count()) === 7)
     check('...with the odds that the pack uses (60, 28, 10, 2)', /60 in 100/.test(await page.locator('[data-how="packs"]').textContent()) && /2 in 100/.test(await page.locator('[data-how="packs"]').textContent()))
     await ctx.close()
+  }
+
+  console.log('\npack art')
+  {
+    // Every kind of pack, and a scheduled event with a long name, at every size the page draws them.
+    const saved = [...PACKS]
+    PACKS.length = 0
+    PACKS.push({ id: 'a1', source: 'century', label: 'Century pack' }, { id: 'a2', source: 'event', label: 'Australia v South Africa, First Test' }, { id: 'a3', source: 'melbourne_cup', label: 'Melbourne Cup pack' }, { id: 'a4', source: 'weekly', label: 'Weekly pack' })
+    const fit = (page) => page.evaluate(() => [...document.querySelectorAll('[data-pack-art]')].map((a) => {
+      const r = a.getBoundingClientRect(), n = a.querySelector('[data-pack-name]')
+      return { src: a.dataset.packArt, w: Math.round(r.width), ratio: +(r.height / r.width).toFixed(2), nameFits: !n || (n.scrollWidth <= n.clientWidth + 1 && n.getBoundingClientRect().left >= r.left && n.getBoundingClientRect().right <= r.right + 0.5 && n.getBoundingClientRect().top > r.top + r.height * 0.3 && n.getBoundingClientRect().bottom < r.bottom - r.height * 0.08) }
+    }))
+    for (const [width, label] of [[1280, 'wide'], [390, 'phone']]) {
+      const { ctx, page } = await open(width, '/packs', { wait: '[data-screen="packs"] [data-way]' })
+      const all = await fit(page)
+      check(`${label}: every pack is the same shape (1.5 tall for 1 wide), whatever its size`, all.length >= 22 && all.every((a) => Math.abs(a.ratio - 1.5) < 0.03), JSON.stringify(all.filter((a) => Math.abs(a.ratio - 1.5) >= 0.03)))
+      check(`${label}: the pack's name sits inside it, even the longest`, all.every((a) => a.nameFits), JSON.stringify(all.filter((a) => !a.nameFits)))
+      check(`${label}: the packs in the list are big enough to read (88px wide)`, all.filter((a) => a.w === 88).length >= 22)
+      check(`${label}: the next pack is drawn larger than the list's`, all.some((a) => a.w >= 110))
+      check(`${label}: no horizontal scroll`, (await overflow(page)) <= 0)
+      if (SHOT) await page.screenshot({ path: `${SHOT}/packs-${width}.png`, fullPage: true })
+      check(`${label}: a scheduled event is counted by its own name`, /Australia v South Africa, First Test/i.test(await page.locator('[data-packs-ready]').locator('..').textContent()))
+      await ctx.close()
+    }
+    PACKS.length = 0
+    PACKS.push(...saved)
   }
 
   console.log('\nSwaps')
