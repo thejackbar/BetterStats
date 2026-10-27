@@ -41,6 +41,25 @@ const totals = { regular_owned: CARDS.filter((c) => c.kind === 'player').length,
 const swapCard = (c, tradeable) => ({ ...c, tradeable, copies: undefined })
 const posted = []
 const finds = []
+const catCalls = []
+const holderCalls = []
+const dec = (c, others, mine = 0) => ({ ...c, others, mine_copies: mine })
+const CAT_PLAYERS = [dec(CARDS[0], 0, 1), dec(base('c2', 'Bravo, Bob', 'epic', 80), 2), dec(base('c3', 'Cole, Cam', 'rare', 66), 1), dec(base('c4', 'Dunn, Dee', 'common', 30), 0), dec(base('c5', 'Eagle, Ed', 'common', 22), 3), dec(base('c6', 'Fox, Fay', 'common', 12), 0)]
+const CAT_AWARDS = [1, 2, 3].map((i) => dec(sp('c3', 'Cole, Cam', 'award', `Award ${i}`, { season: '2015/16', grade: 'Perpetual' }, { hero_photo_url: PHOTO }), i === 1 ? 2 : 0))
+const CAT_CENT = dec(sp('c5', 'Eagle, Ed', 'century', 'Century', { runs: 104, balls: 80, opposition: 'Rovers' }, { hero_photo_url: PHOTO }), 1)
+const CAT_MILE = dec(sp('c2', 'Bravo, Bob', 'runs_milestone', '1,000 runs', { threshold: 1000, total: 1400 }, { hero_photo_url: PHOTO }), 0)
+const CAT_ITEMS = [...CAT_PLAYERS, { stack: true, key: 'stack:awards:c3', cat: 'awards', cards: CAT_AWARDS, name: 'Cole, Cam', count: 3 }, CAT_MILE, CAT_CENT]
+const catPage = (u) => {
+  const q = Object.fromEntries(u.searchParams.entries())
+  catCalls.push(q)
+  let items = CAT_ITEMS
+  if (q.filter === 'regular') items = CAT_PLAYERS
+  else if (q.filter === 'milestones') items = [CAT_MILE]
+  else if (q.filter === 'special') items = CAT_ITEMS.slice(6)
+  if (q.q) items = items.filter((i) => (i.name || '').toLowerCase().includes(q.q.toLowerCase()))
+  const off = Number(q.offset || 0), lim = Number(q.limit || 12)
+  return { total: items.length, counts: { regular: 6, special: 5, awards: 3, milestones: 1, centuries: 1 }, items: items.slice(off, off + lim), offset: off, limit: lim }
+}
 const inReq = { id: 'w9', direction: 'in', status: 'pending', other: { player_id: 'p7', name: 'Dave, Dan' }, created_at: new Date().toISOString(), resolved_at: null,
   give: MANY.slice(0, 4).map((c, i) => ({ ...swapCard(c, 1), qty: i === 0 ? 2 : 1 })), want: [{ ...swapCard(CARDS[1], 1), qty: 1 }] }
 const board = { incoming: [inReq], outgoing: [], recent: [], mine: [CARDS[1], ...CARDS.slice(2, 4), ...MANY].map((c, i) => swapCard(c, i === 4 ? 2 : 1)), people: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 30 }], expires_days: 14, max_open: 10 }
@@ -59,6 +78,8 @@ const run = async () => {
       const json = (b, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(b) })
       if (!url.includes('/public/availability/')) return json({})
       if (/\/me\/cards\/swaps\/players\//.test(url)) return json({ player: { player_id: 'p7', name: 'Dave, Dan' }, cards: [swapCard(CARDS[1], 2), ...MANY.map((c, i) => swapCard(c, i === 0 ? 3 : 1))] })
+      if (/\/me\/cards\/catalogue\/holders/.test(url)) { holderCalls.push(decodeURIComponent(new URL(url).searchParams.get('key'))); return json({ card: CAT_PLAYERS[1], holders: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 2 }, { player_id: 'p9', name: 'Smith, Sue', tradeable: 1 }], mine_copies: 0 }) }
+      if (/\/me\/cards\/catalogue/.test(url)) return json(catPage(new URL(url)))
       if (/\/me\/cards\/swaps\/find/.test(url)) { finds.push(decodeURIComponent(url.split('q=')[1])); return json({ cards: [{ ...swapCard(CARDS[1], 2), holders: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 2 }, { player_id: 'p9', name: 'Smith, Sue', tradeable: 1 }] }], more: 0, unheld: ['Eagle, Ed'] }) }
       if (/\/me\/cards\/swaps$/.test(url)) {
         if (route.request().method() === 'POST') { posted.push(JSON.parse(route.request().postData())); return json({ id: 'n1', status: 'pending' }) }
@@ -248,6 +269,57 @@ const run = async () => {
     check('Ask opens a request with that player and that card already chosen', (await page.locator('[data-swap-player]').count()) === 0 && /Dave, Dan/.test(await page.locator('[data-swap-builder]').textContent()) && (await page.locator('[data-swap-tray="theirs"] [data-swap-picked="p:p2"]').count()) === 1)
     check('...and goes on to what you give', (await page.locator('[data-card-pick="yours"]').count()) === 1)
     if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/find-builder.png` })
+    await ctx.close()
+  }
+
+  console.log('\nthe club\'s whole set')
+  {
+    const { ctx, page } = await open(390)
+    catCalls.length = 0
+    await page.click('[data-cards-tab="club"]')
+    await page.waitForSelector('[data-catalogue] [data-slot-card]')
+    check('the first window is asked for with the defaults and four to a page on a phone', catCalls[0] && catCalls[0].filter === 'all' && catCalls[0].sort === 'rarity' && catCalls[0].offset === '0' && catCalls[0].limit === '4' && !('q' in catCalls[0]), JSON.stringify(catCalls[0]))
+    const cat = page.locator('[data-catalogue]')
+    check("it is the same book: pages, sort, filters and a search box", (await cat.locator('[data-gallery-pages]').count()) === 1 && (await cat.locator('[data-gallery-sort]').count()) === 1 && (await cat.locator('[data-gallery-search]').count()) === 1 && (await cat.locator('[data-gallery-filter]').count()) >= 4)
+    check('...with Newest first among the sorts (special cards have dates)', (await cat.locator('[data-gallery-sort] option').allTextContents()).some((x) => /newest/i.test(x)))
+    check('no card has to be held: there are no grey empty slots', (await cat.locator('[data-empty-slot]').count()) === 0)
+    check('the header says how many players and special cards there are', /6 players · 5 special cards/.test(await cat.locator('[data-browse-count]').textContent()))
+    check('each card says how many other players could swap one', (await cat.locator('[data-others="2"]').count()) === 1 && /2 can swap/.test(await cat.locator('[data-others="2"]').textContent()) && (await cat.locator('[data-others="0"]').count()) >= 1 && /none yet/.test(await cat.locator('[data-others="0"]').first().textContent()))
+    check('a card the viewer has is ticked', (await cat.locator('[data-mine]').count()) === 1)
+    check('no horizontal scroll', (await overflow(page)) <= 0)
+    if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/club-cards.png` })
+    catCalls.length = 0
+    await cat.locator('[data-gallery-next]').click()
+    await page.waitForTimeout(900)
+    check('Next asks for the next window', catCalls.some((c) => c.offset === '4' && c.filter === 'all'), JSON.stringify(catCalls))
+    check('...and the stack is on that page, with its count', (await cat.locator('[data-slot-stack="stack:awards:c3"]').count()) === 1 || (await cat.locator('[data-slot-card]').count()) >= 1)
+    catCalls.length = 0
+    await cat.locator('[data-gallery-search]').fill('bravo')
+    await page.waitForTimeout(700)
+    check('a search asks the server, from the first page', catCalls.length >= 1 && catCalls[catCalls.length - 1].q === 'bravo' && catCalls[catCalls.length - 1].offset === '0', JSON.stringify(catCalls))
+    check('...and shows the matches', /2 results/.test(await cat.locator('[data-browse-count]').textContent()), await cat.locator('[data-browse-count]').textContent())
+    await cat.locator('[data-gallery-search]').fill('')
+    catCalls.length = 0
+    await cat.locator('[data-gallery-filter="milestones"]').click()
+    await page.waitForTimeout(500)
+    check('a category chip asks for that category', catCalls.some((c) => c.filter === 'milestones'), JSON.stringify(catCalls))
+    catCalls.length = 0
+    await cat.locator('[data-gallery-sort]').selectOption('runs')
+    await page.waitForTimeout(500)
+    check('a sort is sent to the server', catCalls.some((c) => c.sort === 'runs'))
+    await cat.locator('[data-gallery-filter="regular"]').click()
+    await page.waitForTimeout(500)
+    holderCalls.length = 0
+    await cat.locator('[data-slot-card="p:c2"]').click()
+    await page.waitForSelector('[data-holders]')
+    check('holding a card up asks who has it, by its key', holderCalls.length === 1 && holderCalls[0] === 'p:c2', JSON.stringify(holderCalls))
+    check('...and lists the players who could swap one, each with Ask', (await page.locator('[data-holder]').count()) === 2 && /Dave, Dan ×2/.test(await page.locator('[data-holder="p7"]').textContent()))
+    check('it is not a trade yet: no Add to my request, no Offer', (await page.locator('[data-viewer-action]').count()) === 0 && (await page.locator('[data-viewer-offer]').count()) === 0)
+    if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/club-card-holders.png` })
+    await page.click('[data-holder-ask="p7"]')
+    await page.waitForSelector('[data-swap-builder]')
+    await page.waitForSelector('[data-card-pick="theirs"] [data-slot-card]')
+    check('Ask goes to a swap with that player and that card chosen', (await page.locator('[data-swap-tray="theirs"] [data-swap-picked="p:c2"]').count()) === 1 && /Dave, Dan/.test(await page.locator('[data-swap-builder]').textContent()) && (await page.locator('[data-swap-player]').count()) === 0)
     await ctx.close()
   }
 

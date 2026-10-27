@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.routers.public_availability import _club_branding, _club_for_token, _client_ip, _player_for_session
-from app.services import player_card_swaps as swaps, player_cards as cards, rate_limit
+from app.services import player_card_catalogue as catalogue, player_card_swaps as swaps, player_cards as cards, rate_limit
 from app.services.session_safety import rollback_keeping
 
 router = APIRouter(prefix="/public/availability", tags=["public-player-cards"])
@@ -135,6 +135,29 @@ async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(
         "expires_days": swaps.SWAP_DAYS,
         "max_open": swaps.MAX_OUTGOING,
     }
+
+
+@router.get("/{token}/me/cards/catalogue")
+async def get_catalogue(token: str, request: Request, filter: str = "all", sort: str = "rarity", q: str = "", offset: int = 0, limit: int = 12,
+                        db: AsyncSession = Depends(get_db)):
+    """The club's whole set, a window at a time, laid out like the player's own book (players, then special cards in
+    stacks). Nothing needs to be held, and nothing about anyone's collection is shown beyond whether a copy could be swapped."""
+    club, player, snap = await _ready(db, request, token)
+    rate_limit.enforce(f"cards-catalogue:{player.id}:{_client_ip(request)}", SWAP_LIMIT * 2, SWAP_WINDOW,
+                       detail="Slow down. Give it a few seconds and try again.")
+    if sort not in catalogue.SORTS:
+        sort = "rarity"
+    return await catalogue.page(db, club, snap, str(player.id), filter=filter[:20], sort=sort, q=q[:80], offset=offset, limit=limit)
+
+
+@router.get("/{token}/me/cards/catalogue/holders")
+async def get_catalogue_holders(token: str, key: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Who could swap a copy of one card."""
+    club, player, snap = await _ready(db, request, token)
+    try:
+        return await catalogue.holders_of(db, club, snap, str(player.id), key[:60])
+    except swaps.SwapError as exc:
+        raise _refuse(exc)
 
 
 @router.get("/{token}/me/cards/swaps/find")

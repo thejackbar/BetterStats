@@ -785,6 +785,45 @@ async def main() -> None:
                 check("a word that matches nothing says so", (await find(db, club, snap, a, "zzzzqq")) == {"cards": [], "more": 0, "unheld": []})
                 check("a search that is too short is refused (422)", await refused(find(db, club, snap, a, "b")) == 422 and await refused(find(db, club, snap, a, "  ")) == 422)
                 check("searching writes nothing", (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE organisation_id = :o"), {"o": ORG})).scalar() == copies_before)
+                # ── the club's whole set, to look through without holding any of it ──────────────────────────
+                try:
+                    from app.services import player_card_catalogue as catalogue
+                except ImportError:
+                    catalogue = None
+                if catalogue is None:
+                    check("the club catalogue exists", False, "app.services.player_card_catalogue missing")
+                else:
+                    pg = await catalogue.page(db, club, snap, a, filter="all", sort="rarity", offset=0, limit=36)
+                    kinds = lambda r: [("stack" if i.get("stack") else i["kind"]) for i in r["items"]]
+                    check("the set lists every drawable player's card, then the special cards", pg["counts"]["regular"] == 5 and kinds(pg)[:5] == ["player"] * 5, str(kinds(pg)[:8]))
+                    check("...a player's several cards of one kind sit in one stack with the true count", any(i.get("stack") and i["count"] == len(i["cards"]) and i["count"] > 1 for i in pg["items"]))
+                    check("...and the totals split into players, specials and each category", pg["counts"]["special"] > 5 and all(k in pg["counts"] for k in ("awards", "milestones", "centuries", "fifties", "wickets", "debuts")), str(pg["counts"]))
+                    br = next((i for i in pg["items"] if i.get("key") == f"p:{BRAVO}"), None)
+                    check("a card says how many other players could swap a copy (Delta and Charlie have Bravo)", br is not None and br["others"] == 2, str(br and br.get("others")))
+                    check("...and how many copies the asker holds (Alpha pulled one)", br is not None and br["mine_copies"] == 1)
+                    own = next((i for i in pg["items"] if i.get("key") == f"p:{ALPHA}"), None)
+                    check("the asker's own card counts as held without a row", own is not None and own["mine_copies"] == 1)
+                    check("nothing about anyone's holdings beyond what could go is sent", all(not ({"held", "owners", "copies"} & set(i)) for i in pg["items"] if not i.get("stack")))
+                    ms = await catalogue.page(db, club, snap, a, filter="milestones", limit=36)
+                    stack = next((i for i in ms["items"] if i.get("stack") and i["name"] == "Alpha, A"), None)
+                    titles = [c["title"] for c in (stack or {}).get("cards", [])]
+                    check("a category shows only its own kinds, milestones in order (games, then runs)", stack is not None and titles[0].endswith("games") and "1,000 runs" in titles and titles.index("1,000 runs") < titles.index("2,000 runs") and all(i.get("special_kind") in (None, "games", "runs_milestone", "wickets_milestone", "dismissals_milestone") for i in ms["items"]), str(titles))
+                    check("a filter to players gives players only", all(i["kind"] == "player" for i in (await catalogue.page(db, club, snap, a, filter="regular", limit=36))["items"]))
+                    ce = await catalogue.page(db, club, snap, a, filter="all", q="century", limit=36)
+                    check("a search narrows the set by name, title, kind or season", ce["items"] and all("century" in (c.get("title") or "").lower() or "century" in (c.get("special_kind") or "") for it in ce["items"] for c in (it.get("cards") or [it])), str(ce["total"]))
+                    check("...and a name finds the player's card", any(i.get("key") == f"p:{BRAVO}" for i in (await catalogue.page(db, club, snap, a, q="bravo", limit=36))["items"]))
+                    p1 = await catalogue.page(db, club, snap, a, filter="all", sort="name", offset=0, limit=3)
+                    p2 = await catalogue.page(db, club, snap, a, filter="all", sort="name", offset=3, limit=3)
+                    check("it pages, with no card on two pages", len(p1["items"]) == 3 and not ({i["key"] for i in p1["items"]} & {i["key"] for i in p2["items"]}) and p1["total"] == p2["total"])
+                    byname = [i["name"] for i in (await catalogue.page(db, club, snap, a, filter="regular", sort="name", limit=36))["items"]]
+                    check("sorted A to Z by surname", byname == sorted(byname, key=lambda n: (n.split(",")[0].lower(), n.lower())), str(byname))
+                    runs = [i["runs"] for i in (await catalogue.page(db, club, snap, a, filter="regular", sort="runs", limit=36))["items"]]
+                    check("sorted by a figure, the most first", runs == sorted(runs, reverse=True), str(runs))
+                    hold = await catalogue.holders_of(db, club, snap, a, f"p:{BRAVO}")
+                    check("who has a card: the players who could swap one, in name order, never the asker", {h["player_id"] for h in hold["holders"]} == {str(DELTA), str(CHARLIE)} and [h["name"] for h in hold["holders"]] == sorted([h["name"] for h in hold["holders"]], key=str.lower) and hold["mine_copies"] == 1)
+                    check("a made-up card key is refused (422)", await refused(catalogue.holders_of(db, club, snap, a, "p:not-a-uuid")) == 422)
+                    check("a card of a player out of the pool is refused (409)", await refused(catalogue.holders_of(db, club, snap, a, f"p:{HOTEL}")) == 409)
+                    check("reading the set writes nothing", (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE organisation_id = :o"), {"o": ORG})).scalar() == copies_before)
 
 
             # ── many cards each way ──────────────────────────────────────────────────────────────────────────

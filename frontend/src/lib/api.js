@@ -3495,6 +3495,10 @@ export const api = {
   // Swapping doubles with another player: the board, one player's doubles, asking, and answering.
   availPublicSwaps: (token) => request(`/public/availability/${token}/me/cards/swaps`),
   availPublicSwapPlayer: (token, playerId) => request(`/public/availability/${token}/me/cards/swaps/players/${playerId}`),
+  availPublicCatalogue: (token, params) =>
+    request(`/public/availability/${token}/me/cards/catalogue?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()}`),
+  availPublicCatalogueHolders: (token, key) =>
+    request(`/public/availability/${token}/me/cards/catalogue/holders?key=${encodeURIComponent(key)}`),
   availPublicSwapFind: (token, q) =>
     request(`/public/availability/${token}/me/cards/swaps/find?q=${encodeURIComponent(q)}`),
   availPublicAskSwap: (token, data) =>

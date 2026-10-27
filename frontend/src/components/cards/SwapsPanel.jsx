@@ -277,7 +277,7 @@ function FindCards({ token, onAsk, ...ui }) {
   )
 }
 
-export default function SwapsPanel({ token, club, accent, display, sponsor, offer, onOfferDone, onChanged }) {
+export default function SwapsPanel({ token, club, accent, display, sponsor, offer, onOfferDone, ask, onAskDone, onChanged }) {
   const [board, setBoard] = useState(null)
   const [failed, setFailed] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -288,6 +288,8 @@ export default function SwapsPanel({ token, club, accent, display, sponsor, offe
   const load = useCallback(() => api.availPublicSwaps(token).then((b) => { setBoard(b); return b }).catch(() => setFailed(true)), [token])
   useEffect(() => { load() }, [load])
   useEffect(() => { if (offer) setBuild(true) }, [offer])
+  // Asked for from the club's set: the person and the card are already chosen.
+  useEffect(() => { if (ask) { setPrefill(ask); setBuild(true) } }, [ask])
 
   const answer = async (id, action) => {
     setBusy(true); setMsg('')
@@ -337,8 +339,8 @@ export default function SwapsPanel({ token, club, accent, display, sponsor, offe
       )}
 
       {build && <Builder token={token} board={board} give={prefill ? null : (offer || null)} prefill={prefill} club={club} accent={accent} display={display} sponsor={sponsor}
-        onClose={() => { setBuild(false); setPrefill(null); onOfferDone?.() }}
-        onSent={() => { setBuild(false); setPrefill(null); onOfferDone?.(); setMsg('Swap request sent.'); load(); onChanged?.() }} />}
+        onClose={() => { setBuild(false); setPrefill(null); onOfferDone?.(); onAskDone?.() }}
+        onSent={() => { setBuild(false); setPrefill(null); onOfferDone?.(); onAskDone?.(); setMsg('Swap request sent.'); load(); onChanged?.() }} />}
     </div>
   )
 }

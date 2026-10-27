@@ -9,6 +9,7 @@ import FlipCard from '../../components/FlipCard'
 import CardGallery from '../../components/cards/CardGallery'
 import PackOpening, { PackArt } from '../../components/cards/PackOpening'
 import ShareSheet from '../../components/cards/ShareSheet'
+import CatalogueTab from '../../components/cards/CatalogueTab'
 import SwapsPanel from '../../components/cards/SwapsPanel'
 import { CARD_H, CARD_W, CardInfoBack, CardView, DEFAULT_DISPLAY, ScaledCard } from '../../components/cards/CardFaces'
 import { TIERS, PACKS } from '../../components/cards/cardTheme'
@@ -57,7 +58,8 @@ export default function CardsModule({ token, club, onReady }) {
   const [busyAll, setBusyAll] = useState(false)
   const [allResult, setAllResult] = useState(null)
   const [err, setErr] = useState('')
-  const [tab, setTab] = useState('book') // book | swaps
+  const [tab, setTab] = useState('book') // book | club | swaps
+  const [ask, setAsk] = useState(null)
   const [shareCard, setShareCard] = useState(null)
   const [offer, setOffer] = useState(null)
   const [swapsWaiting, setSwapsWaiting] = useState(0)
@@ -167,7 +169,7 @@ export default function CardsModule({ token, club, onReady }) {
 
       <div style={{ marginTop: 18 }}>
         <div role="tablist" aria-label="Cards" style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          {[['book', 'Card book'], ['swaps', swapsWaiting ? `Swaps (${swapsWaiting})` : 'Swaps']].map(([k, label]) => (
+          {[['book', 'Card book'], ['club', 'Club cards'], ['swaps', swapsWaiting ? `Swaps (${swapsWaiting})` : 'Swaps']].map(([k, label]) => (
             <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-cards-tab={k}
               style={{ padding: '8px 16px', borderRadius: 10, fontWeight: 700, fontSize: 13, border: '1px solid var(--pb-hairline, rgba(255,255,255,.25))', background: tab === k ? accent : 'transparent', color: tab === k ? onColor(accent) : 'inherit' }}>
               {label}
@@ -179,8 +181,9 @@ export default function CardsModule({ token, club, onReady }) {
           <CardGallery cards={data.cards} totals={data.totals} club={club} accent={accent} display={display} sponsor={sponsor} meId={mine?.player_id}
             onShare={setShareCard} onOffer={(c) => { setOffer(c); setTab('swaps') }} />
         )}
+        {tab === 'club' && <CatalogueTab token={token} club={club} accent={accent} display={display} sponsor={sponsor} onAsk={(a) => { setAsk(a); setTab('swaps') }} />}
         {tab === 'swaps' && (
-          <SwapsPanel token={token} club={club} accent={accent} display={display} sponsor={sponsor} offer={offer} onOfferDone={() => setOffer(null)}
+          <SwapsPanel token={token} club={club} accent={accent} display={display} sponsor={sponsor} offer={offer} onOfferDone={() => setOffer(null)} ask={ask} onAskDone={() => setAsk(null)}
             onChanged={() => { load(); loadSwaps() }} />
         )}
       </div>

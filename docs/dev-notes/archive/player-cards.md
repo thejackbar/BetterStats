@@ -93,3 +93,13 @@ Asked for: "make a gallery where you can see another player's cards in the same 
 
 Verified: `verify_player_cards.py` (231), the other backend suites, `audit_route_access.py`; browser `_v3_` (47: book sort, search, paging, quick pick and viewer action, find with the exact query, 390px and 1280), `_v2_` (46), `_admin_` (51), the first suite (51).
 
+## v9.131.5 (2026-10-27): the Club cards tab
+
+Asked for: search a particular card and see it "almost exactly the same as your own gallery", without having to start a trade, "sort of like the admin section has".
+
+- `services/player_card_catalogue.py`: `page` lays out the club's whole set as the book does (players sorted by the chosen figure, then special cards by category, one player's cards of a category as a stack with the true count, up to 100 cards sent per stack), from light rows, building only the window asked for; `holders_of` names who could swap a copy of one card. Filters: all, regular, special or a category; search over name, title, kind label, season, grade; sorts as the book, with Newest meaning when a special card was made. 36 a window at most.
+- Routes `GET /me/cards/catalogue` and `/me/cards/catalogue/holders`, rate limited.
+- `CardGallery` `remote` mode: the server lays out each window, the gallery asks for it whenever the page, sort, filter or search changes (search waits 250ms), counts for the chips come from the server, and a card held up shows `viewerExtra` (the holders and their Ask buttons). `CatalogueTab` answers latest-wins.
+
+Verified: `verify_player_cards.py` (249), the other backend suites, `audit_route_access.py`; browser `_v3_` (65: the exact query for the first window, next page, search, category and sort, badges, holders by key, Ask into a prefilled request) and the three older suites.
+
