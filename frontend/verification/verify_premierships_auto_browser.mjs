@@ -54,7 +54,19 @@ async function stub(page, state, { signedIn = false } = {}) {
     if (p === '/auth/me') return signedIn ? json(ADMIN) : json({ detail: 'Not authenticated' }, 401)
     if (p === `/clubs/${CLUB.slug}`) return json(CLUB)
     if (p === `/organisations/${CLUB.id}`) return json(CLUB)
-    if (p === `/honours/${CLUB.id}/premierships`) return json(PREMS)
+    if (p === `/honours/${CLUB.id}/premierships/squad` && method === 'POST') {
+      const b = JSON.parse(req.postData() || '{}')
+      state.squadPosts = [...(state.squadPosts || []), b]
+      if (b.role === 'Man of Steel') return json({ detail: 'Choose Player of the Match, 12th Man or 13th Man.' }, 400)
+      const card = state.squad.premierships.find(c => c.game_id === b.game_id)
+      const pl = card.players.find(x => x.player_id === b.player_id)
+      if (b.action === 'role' && pl) pl.roles = b.on ? [...pl.roles, b.role] : pl.roles.filter(r => r !== b.role)
+      if (b.action === 'add') { card.players.push({ player_id: b.player_id, name: 'Dan Day', photo_url: null, roles: b.role ? [b.role] : [], detail: null }); card.player_count += 1 }
+      if (b.action === 'remove') { card.players = card.players.filter(x => x.player_id !== b.player_id); card.player_count -= 1 }
+      return json({ ok: true })
+    }
+    if (p === `/honours/${CLUB.id}/premierships`) return json(state.squad || PREMS)
+    if (p === '/players') return json([{ id: 'p1', name: 'Caden Smith' }, { id: 'p2', name: 'Bob Bell' }, { id: 'p9', name: 'Dan Day' }])
     if (p === `/honours/games/${GF}/premierships`) {
       return json({ premierships: [{ org_id: CLUB.id, slug: CLUB.slug, club_name: CLUB.name, team: 'F Grade', season: '2025/26', players: 2 }] })
     }
@@ -161,6 +173,65 @@ for (const width of [1280, 390]) {
     && (await badgeLinks[0].getAttribute('href')) === `/games/${GF}?org=${CLUB.id}`)
   ck('no horizontal overflow', await noOverflow(page))
   if (width === 1280) await page.screenshot({ path: 'verification/shots/premierships_auto_profile.png' })
+  await page.close()
+
+  // 5. The squad editor
+  const fresh = () => ({ calls: [], squad: JSON.parse(JSON.stringify(PREMS)) })
+  page = await ctx.newPage(); page.on('pageerror', e => errors.push(e.message))
+  state = fresh(); await stub(page, state)
+  await page.goto(`${BASE}/${CLUB.slug}/premierships`)
+  await page.waitForSelector('main >> text=Scorecard')
+  ck('a public visitor sees no Edit squad', (await page.getByText('Edit squad').count()) === 0)
+  await page.close()
+
+  page = await ctx.newPage(); page.on('pageerror', e => errors.push(e.message))
+  state = fresh(); await stub(page, state, { signedIn: true })
+  await page.goto(`${BASE}/${CLUB.slug}/premierships`)
+  await page.waitForSelector('main >> text=Scorecard')
+  ck('an admin sees Edit squad on the card that links to a scorecard only', (await page.getByText('Edit squad').count()) === 1)
+  await page.getByText('Edit squad').click()
+  await page.waitForSelector('[data-testid="squad-editor"]')
+  ck('the editor lists the squad with a role button for each part', (await page.locator('[data-testid="squad-editor"] li').count()) === 2)
+  const bob = page.locator('[data-testid="squad-editor"] li', { hasText: 'Bell, Bob' })
+  await bob.getByRole('button', { name: '12th Man' }).click()
+  await page.waitForFunction(() => document.querySelector('[data-testid="squad-editor"]'))
+  ck('marking a 12th Man sends exactly that change',
+    JSON.stringify(state.squadPosts.at(-1)) === JSON.stringify({ game_id: GF, action: 'role', player_id: 'p2', role: '12th Man', on: true }),
+    JSON.stringify(state.squadPosts.at(-1)))
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="squad-editor"] li')]
+    .find(li => li.innerText.includes('Bell, Bob'))?.querySelector('button[aria-pressed="true"]'))
+  ck('and the button shows it is on once the card reloads', true)
+  await bob.getByRole('button', { name: '12th Man' }).click()
+  await page.waitForFunction(() => ![...document.querySelectorAll('[data-testid="squad-editor"] li')]
+    .find(li => li.innerText.includes('Bell, Bob'))?.querySelector('button[aria-pressed="true"]'))
+  ck('pressing it again unmarks it', JSON.stringify(state.squadPosts.at(-1)) ===
+    JSON.stringify({ game_id: GF, action: 'role', player_id: 'p2', role: '12th Man', on: false }))
+
+  await page.getByLabel('Player to add').selectOption('p9')
+  await page.getByLabel('Their part').selectOption('12th Man')
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="squad-editor"] li').length === 3)
+  ck('adding a 12th Man sends the player and the part', JSON.stringify(state.squadPosts.at(-1)) ===
+    JSON.stringify({ game_id: GF, action: 'add', player_id: 'p9', role: '12th Man' }), JSON.stringify(state.squadPosts.at(-1)))
+  ck('and they join the list', (await page.locator('[data-testid="squad-editor"]').innerText()).includes('Day, Dan'))
+  ck('a player already on the card is not offered again',
+    !(await page.getByLabel('Player to add').innerText()).includes('Bob Bell')
+    && !(await page.getByLabel('Player to add').innerText()).includes('Bell, Bob'))
+  if (width === 1280) await page.screenshot({ path: 'verification/shots/premierships_auto_editor.png' })
+  ck('no horizontal overflow with the editor open', await noOverflow(page))
+
+  page.once('dialog', d => d.dismiss())
+  await page.locator('[data-testid="squad-editor"] li', { hasText: 'Day, Dan' }).getByRole('button', { name: /Remove/ }).click()
+  await page.waitForTimeout(300)
+  ck('cancelling the confirm removes nobody and sends nothing',
+    state.squadPosts.at(-1).action === 'add' && (await page.locator('[data-testid="squad-editor"] li').count()) === 3)
+  page.once('dialog', d => d.accept())
+  await page.locator('[data-testid="squad-editor"] li', { hasText: 'Day, Dan' }).getByRole('button', { name: /Remove/ }).click()
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="squad-editor"] li').length === 2)
+  ck('removing sends exactly that', JSON.stringify(state.squadPosts.at(-1)) ===
+    JSON.stringify({ game_id: GF, action: 'remove', player_id: 'p9' }), JSON.stringify(state.squadPosts.at(-1)))
+  await page.getByText('Done').click()
+  ck('Done returns to the plain card', (await page.locator('[data-testid="squad-editor"]').count()) === 0)
   await page.close()
 
   ck(`no page errors at ${width}px`, errors.length === 0, errors.join(' | '))

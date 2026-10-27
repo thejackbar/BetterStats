@@ -216,8 +216,37 @@ def _person(player_id: Optional[str], name: Optional[str]) -> str:
     return honours._person_key(player_id, name)
 
 
+_FLAG_SUFFIX_RE = re.compile(r"[\s\-\u2013\u2014:]*premierships?$", re.I)
+
+
+def _label_key(achievement: Optional[str]) -> str:
+    """The grade or competition a typed flag names in its AWARD, lowercased: "2nd Grade One Day
+    Premiership" -> "2nd grade one day". Applecross types a flag against the team ("1st XI") and names the
+    competition in the award, so the subcategory alone says nothing about the grade Cricket Australia calls it."""
+    return grade_key(_FLAG_SUFFIX_RE.sub("", (achievement or "").strip()))
+
+
+def _words_prefix(a: str, b: str) -> bool:
+    """a is b, or one is the other followed by more words ("2nd grade" / "2nd grade one day")."""
+    if not a or not b:
+        return False
+    return a == b or a.startswith(b + " ") or b.startswith(a + " ")
+
+
 async def plan(db: AsyncSession, club: Organisation) -> dict:
-    """What reconcile would do, as data. Reads only."""
+    """What reconcile would do, as data. Reads only.
+
+    Matching is per PERSON and season YEAR, never by grade name alone, because clubs type a flag in more than
+    one way: against the grade ("F Grade"), or against the team ("1st XI") with the competition in the award
+    ("2nd Grade One Day Premiership"). For one person and year:
+
+      * a hand-typed flag whose subcategory or award names the won grade is that win (linked, never doubled);
+      * otherwise, when the person has at least as many typed flags that year as won grand finals, the typed
+        flags ARE those wins: nothing is added, and an automatic honour already written for one is removed
+        (``supersede``), because ours is the duplicate; a 1:1 pair is linked;
+      * when they have fewer typed flags than wins and none matches, nothing is guessed (``ambiguous``);
+      * with no typed flag that year the win earns the automatic honour.
+    """
     org_id = club.id
     wins, unresolved = await grand_final_wins(db, club)
     aliases = await grade_alias_map(db, org_id)
@@ -226,78 +255,122 @@ async def plan(db: AsyncSession, club: Organisation) -> dict:
         "SELECT game_id, player_id FROM premiership_auto_exclusions WHERE org_id = CAST(:org AS UUID)"
     ), {"org": str(org_id)})).all()}
 
+    def fold(key: str) -> str:
+        return aliases.get(key, key)
+
     desired: dict[tuple[str, str], dict] = {}
     for w in wins:
         for p in w["players"]:
             desired[(w["game_id"], p["player_id"])] = {"win": w, "player": p}
 
-    # A grade can win two grand finals in one year (spring and summer comps).
-    # A hand-typed row then cannot be matched to either, so it is left alone.
-    by_slot: dict[tuple, list[dict]] = {}
-    for w in wins:
-        by_slot.setdefault((w["year"], w["grade_key"]), []).append(w)
+    out = {"create": [], "link": [], "update_detail": [], "delete": [], "supersede": [], "unlink": [],
+           "covered": 0, "ambiguous": 0, "unresolved": unresolved, "wins": len(wins)}
 
-    def row_slot(r: dict) -> tuple:
-        key = grade_key(r["subcategory"])
-        return (honours.year_of(honours.season_label(r["season_name"]), r["season_year"]),
-                aliases.get(key, key))
+    flag_rows = [r for r in existing if honours.is_premiership_award(r["achievement"])]
 
-    out = {"create": [], "link": [], "update_detail": [], "delete": [], "unlink": [],
-           "covered": 0, "unresolved": unresolved,
-           "wins": len(wins)}
+    # A typed row that names a person but carries no player id is that person by name (the same fallback the
+    # profile and the website use), so a link written to it holds on the next run instead of being undone.
+    won_games = {w["game_id"] for w in wins}
+    by_game_name: dict[tuple[str, str], str] = {}
+    for (g, pid), d in desired.items():
+        by_game_name[(g, _norm(d["player"]["name"]))] = pid
 
-    # 1. Rows that already point at a game.
-    covered: set[tuple[str, str]] = set()
+    # 1. Rows that already point at a game: keep what still holds, drop or unlink what does not.
+    typed_linked: set[tuple[str, str]] = set()
     auto_row_for: dict[tuple[str, str], int] = {}
-    for r in existing:
+    for r in flag_rows:
         g = r["linked_game_id"]
-        if not g or not honours.is_premiership_award(r["achievement"]):
+        if not g:
             continue
-        pid = r["player_id"]
+        pid = r["player_id"] or by_game_name.get((g, _norm(r["player_name"])))
         d = desired.get((g, pid)) if pid else None
         if d is None:
-            (out["delete"] if r["auto_created"] else out["unlink"]).append(r["id"])
+            if r["auto_created"]:
+                out["delete"].append(r["id"])      # ours, and no longer true
+            elif g not in won_games:
+                out["unlink"].append(r["id"])      # theirs: only let go of it when the game is no longer a win
+            # (a person added to the card by hand who is not on the scorecard stays on it)
             continue
-        covered.add((g, pid))
         if r["auto_created"]:
             auto_row_for.setdefault((g, pid), r["id"])
-        want = "Captain" if d["player"]["is_captain"] else None
-        if r["auto_created"] and (r["detail"] or None) != want:
-            out["update_detail"].append({"id": r["id"], "detail": want})
+            want = "Captain" if d["player"]["is_captain"] else None
+            if (r["detail"] or None) != want:
+                out["update_detail"].append({"id": r["id"], "detail": want})
+        else:
+            typed_linked.add((g, pid))
 
-    # 2. Hand-typed flag rows with no link yet: link to the one game they match.
-    manual_by_person: dict[tuple, list[dict]] = {}
-    for r in existing:
-        if r["linked_game_id"] or not honours.is_premiership_award(r["achievement"]):
+    # 2. Typed, unlinked flags by person and year (a row with no player id is keyed by name).
+    typed_open: dict[tuple, list[dict]] = {}
+    for r in flag_rows:
+        if r["linked_game_id"] or r["auto_created"]:
             continue
-        manual_by_person.setdefault((_person(r["player_id"], r["player_name"]), row_slot(r)), []).append(r)
+        year = honours.year_of(honours.season_label(r["season_name"]), r["season_year"])
+        typed_open.setdefault((_person(r["player_id"], r["player_name"]), year), []).append(r)
 
+    def rows_for(pid: str, name: str, year) -> list[dict]:
+        return typed_open.get((_person(pid, name), year)) or typed_open.get((_person(None, name), year)) or []
+
+    def row_matches(r: dict, w: dict) -> bool:
+        return (_words_prefix(fold(grade_key(r["subcategory"])), w["grade_key"])
+                or _words_prefix(fold(_label_key(r["achievement"])), w["grade_key"]))
+
+    by_person: dict[tuple, list[tuple[str, str]]] = {}
     for (g, pid), d in desired.items():
-        w = d["win"]
-        slot = (w["year"], w["grade_key"])
-        hand = manual_by_person.get((_person(pid, d["player"]["name"]), slot), [])
-        if (g, pid) in covered:
-            # A club typed the honour in (or imported it) after the automatic one was
-            # written: the typed row stands and takes the link, ours goes.
-            if hand and len(by_slot[slot]) == 1 and (g, pid) in auto_row_for:
-                out["delete"].append(auto_row_for[(g, pid)])
-                out["link"].append({"id": hand[0]["id"], "game_id": g})
-            continue
-        if hand:
-            if len(by_slot[slot]) == 1:
-                out["link"].append({"id": hand[0]["id"], "game_id": g})
-                covered.add((g, pid))
+        by_person.setdefault((pid, d["win"]["year"]), []).append((g, pid))
+
+    def cover(item: tuple[str, str], row: Optional[dict]) -> None:
+        """This win is the club's typed flag: our row for it goes, the typed one takes the link."""
+        if item in auto_row_for:
+            out["supersede"].append(auto_row_for[item])
+        if row is not None:
+            out["link"].append({"id": row["id"], "game_id": item[0]})
+
+    for (pid, year), items in by_person.items():
+        name = desired[items[0]]["player"]["name"]
+        open_items = []
+        for it in items:
+            if it in typed_linked:
+                cover(it, None)      # a typed row already points here; any automatic twin goes
             else:
-                out["covered"] += 1  # ambiguous: theirs stands, nothing added
+                open_items.append(it)
+        if not open_items:
             continue
-        if (g, pid) in excluded:
+        rows = list(rows_for(pid, name, year))
+        if not rows:
+            for it in open_items:
+                if it in auto_row_for or it in excluded:
+                    continue
+                d = desired[it]
+                out["create"].append({
+                    "game_id": it[0], "player_id": pid, "player_name": d["player"]["name"],
+                    "season": d["win"]["season_value"], "subcategory": d["win"]["team"],
+                    "detail": "Captain" if d["player"]["is_captain"] else None,
+                    "season_label": d["win"]["season_label"],
+                })
             continue
-        out["create"].append({
-            "game_id": g, "player_id": pid, "player_name": d["player"]["name"],
-            "season": w["season_value"], "subcategory": w["team"],
-            "detail": "Captain" if d["player"]["is_captain"] else None,
-            "season_label": w["season_label"],
-        })
+
+        # a) a typed flag that names exactly this win's grade, and only this one.
+        left = []
+        for it in open_items:
+            w = desired[it]["win"]
+            hits = [r for r in rows if row_matches(r, w)]
+            rivals = [o for o in open_items if o != it and hits and row_matches(hits[0], desired[o]["win"])]
+            if len(hits) == 1 and not rivals:
+                cover(it, hits[0])
+                rows.remove(hits[0])
+            else:
+                left.append(it)
+        if not left:
+            continue
+        # b) what is left: typed flags at least as many as wins are those wins.
+        if len(rows) >= len(left):
+            only = len(rows) == 1 and len(left) == 1
+            for it in left:
+                cover(it, rows[0] if only else None)
+            if not only:
+                out["covered"] += len(left)
+        else:
+            out["ambiguous"] += len(left)
     return out
 
 
@@ -322,6 +395,7 @@ async def reconcile(db: AsyncSession, org_id, apply: bool = True) -> dict:
     report["preview"] = {
         "create": p["create"][:200],
         "delete": p["delete"][:200],
+        "supersede": p["supersede"][:200],
     }
     if not apply:
         return report
@@ -365,6 +439,13 @@ async def reconcile(db: AsyncSession, org_id, apply: bool = True) -> dict:
             "DELETE FROM player_achievements WHERE id = ANY(:ids) "
             "AND org_id = CAST(:org AS UUID) AND auto_created = TRUE"),
             {"ids": p["delete"], "org": org})
+    if p["supersede"]:
+        # Our row replaced by a typed one that says the same thing. Not part of the mass-removal guard: it is
+        # not a damaged read, it is the same honour once. The predicate still limits it to rows we wrote.
+        await db.execute(text(
+            "DELETE FROM player_achievements WHERE id = ANY(:ids) "
+            "AND org_id = CAST(:org AS UUID) AND auto_created = TRUE"),
+            {"ids": p["supersede"], "org": org})
     if p["unlink"]:
         await db.execute(text(
             "UPDATE player_achievements SET linked_game_id = NULL "
@@ -450,3 +531,111 @@ async def game_cards(db: AsyncSession, club: Organisation, game_ids: list[str]) 
         out[r["id"]] = {"id": r["id"], "played_at": r["played_at"].isoformat() if r["played_at"] else None,
                         "opponent": theirs, "round_name": r["round_name"]}
     return out
+
+
+# ── the squad editor ──────────────────────────────────────────────────────
+
+# What an admin can mark on a card. A 12th or 13th man did not play, so the role row alone puts them on the
+# card; Player of the Match is only for somebody already in the squad.
+SQUAD_ROLES = {"player of the match": "Player of the Match", "12th man": "12th Man", "13th man": "13th Man"}
+NON_PLAYING_ROLES = {"12th Man", "13th Man"}
+
+
+class SquadEditError(ValueError):
+    """Something an admin asked for that this card cannot do. The message is shown to them."""
+
+
+async def edit_squad(db: AsyncSession, club: Organisation, *, game_id, action: str, player_id,
+                     role: Optional[str] = None, on: bool = True) -> dict:
+    """Change who is on one premiership card (a grand final the club won) and what each person did.
+
+    Every change is a row in ``player_achievements`` linked to the game, so the card, the profile, the
+    yearbook and the website all read it the way they read anything else. Role rows are the club's own
+    (``auto_created`` stays FALSE), so a later sync never removes them. Commits.
+
+    action ``role``    mark or unmark a role on a player already on the card
+           ``add``     put a player on the card: with a 12th/13th Man role they did not play; with no role
+                       they played and the sheet missed them
+           ``remove``  take a player off: their automatic honour is remembered as removed so the next sync
+                       does not write it back, and any roles go with it
+    """
+    org = str(club.id)
+    gid, pid = str(game_id), str(player_id)
+    flag = None
+    for r in (await db.execute(text("""
+        SELECT id, season, subcategory, achievement, auto_created FROM player_achievements
+        WHERE org_id = CAST(:org AS UUID) AND linked_game_id = CAST(:g AS UUID) AND category = :cat
+        ORDER BY auto_created DESC, id"""), {"org": org, "g": gid, "cat": CATEGORY})).mappings().all():
+        if honours.is_premiership_award(r["achievement"]):
+            flag = r
+            break
+    if flag is None:
+        raise SquadEditError("This game is not one of the club's premiership cards.")
+    player = (await db.execute(text(
+        "SELECT COALESCE(display_name_override, name) AS name, organisation_id FROM players WHERE id = CAST(:p AS UUID)"
+    ), {"p": pid})).mappings().first()
+    if player is None or str(player["organisation_id"]) != org:
+        raise SquadEditError("That player is not on this club's roster.")
+
+    mine = (await db.execute(text("""
+        SELECT id, achievement, auto_created FROM player_achievements
+        WHERE org_id = CAST(:org AS UUID) AND linked_game_id = CAST(:g AS UUID) AND category = :cat
+          AND player_id = CAST(:p AS UUID)"""), {"org": org, "g": gid, "cat": CATEGORY, "p": pid})).mappings().all()
+    has_flag = any(honours.is_premiership_award(r["achievement"]) for r in mine)
+    role_name = SQUAD_ROLES.get((role or "").strip().lower()) if role else None
+    if role and role_name is None:
+        raise SquadEditError("Choose Player of the Match, 12th Man or 13th Man.")
+
+    async def put(achievement: str) -> None:
+        await db.execute(text("""
+            INSERT INTO player_achievements (org_id, player_id, player_name, season, category, subcategory,
+                                             achievement, linked_game_id, auto_created)
+            SELECT CAST(:org AS UUID), CAST(:p AS UUID), :name, :season, :cat, :sub, :ach, CAST(:g AS UUID), FALSE
+            WHERE NOT EXISTS (SELECT 1 FROM player_achievements x
+                              WHERE x.org_id = CAST(:org AS UUID) AND x.player_id = CAST(:p AS UUID)
+                                AND x.linked_game_id = CAST(:g AS UUID) AND x.category = :cat
+                                AND lower(x.achievement) = lower(:ach))"""),
+                         {"org": org, "p": pid, "name": player["name"], "season": flag["season"], "cat": CATEGORY,
+                          "sub": flag["subcategory"], "ach": achievement, "g": gid})
+
+    if action == "role":
+        if role_name is None:
+            raise SquadEditError("Choose a role.")
+        in_squad = bool(mine)
+        if on:
+            if role_name not in NON_PLAYING_ROLES and not has_flag:
+                raise SquadEditError("Player of the Match goes to somebody who played: add them to the squad first.")
+            if not in_squad and role_name not in NON_PLAYING_ROLES:
+                raise SquadEditError("That player is not on this card.")
+            await put(role_name)
+        else:
+            await db.execute(text("""
+                DELETE FROM player_achievements
+                WHERE org_id = CAST(:org AS UUID) AND linked_game_id = CAST(:g AS UUID) AND category = :cat
+                  AND player_id = CAST(:p AS UUID) AND lower(achievement) = lower(:ach)"""),
+                             {"org": org, "g": gid, "cat": CATEGORY, "p": pid, "ach": role_name})
+    elif action == "add":
+        if role_name in NON_PLAYING_ROLES:
+            await put(role_name)
+        else:
+            if has_flag:
+                raise SquadEditError("That player is already on this card.")
+            await put(ACHIEVEMENT)
+            if role_name:
+                await put(role_name)
+    elif action == "remove":
+        if not mine:
+            raise SquadEditError("That player is not on this card.")
+        if any(r["auto_created"] for r in mine):
+            await db.execute(text("""
+                INSERT INTO premiership_auto_exclusions (org_id, game_id, player_id)
+                VALUES (CAST(:org AS UUID), CAST(:g AS UUID), CAST(:p AS UUID)) ON CONFLICT DO NOTHING"""),
+                             {"org": org, "g": gid, "p": pid})
+        await db.execute(text("""
+            DELETE FROM player_achievements
+            WHERE org_id = CAST(:org AS UUID) AND linked_game_id = CAST(:g AS UUID) AND category = :cat
+              AND player_id = CAST(:p AS UUID)"""), {"org": org, "g": gid, "cat": CATEGORY, "p": pid})
+    else:
+        raise SquadEditError("Unknown change.")
+    await db.commit()
+    return {"ok": True}

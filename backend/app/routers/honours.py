@@ -8,7 +8,10 @@ one part of its history it most wants read.
 """
 import uuid
 
+from typing import Literal, Optional
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,3 +86,30 @@ async def get_office_bearers(org_id: uuid.UUID, db: AsyncSession = Depends(get_d
     return await honours.office_bearer_boards(
         db, org_id, include_life_members=True,
         layout=honour_layout.clean_layout(stored))
+
+
+class SquadEdit(BaseModel):
+    game_id: uuid.UUID
+    action: Literal["role", "add", "remove"]
+    player_id: uuid.UUID
+    role: Optional[str] = None
+    on: bool = True
+
+
+@router.post("/{org_id}/premierships/squad")
+async def edit_premiership_squad(
+    org_id: uuid.UUID,
+    body: SquadEdit,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_cap(MANAGE_AWARDS)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Mark Player of the Match / 12th Man / 13th Man on a premiership card, add a player the sheet missed,
+    or take one off. Only for a card linked to a scorecard (a grand final the club won)."""
+    _same_club(club, org_id)
+    try:
+        return await premierships.edit_squad(
+            db, club, game_id=body.game_id, action=body.action, player_id=body.player_id,
+            role=body.role, on=body.on)
+    except premierships.SquadEditError as e:
+        raise HTTPException(status_code=400, detail=str(e))
