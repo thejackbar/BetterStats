@@ -535,7 +535,7 @@ Reported off Leederville CC (20 Oct 2026, the club president's email): after the
 - See the stats guide rule 14e and the stats archive entry for the report, the evidence and the checks.
 
 
-## A win stored as a loss, no winner (v9.132.3)
+## A win stored as a loss, no winner (v9.132.4)
 
 Reported by Shoalwater Bay: the 2025/26 Senior Female B Grade (SBCC Ladies B Grade) Grand Final shows as a loss on BetterCricket and a win on Play-Cricket.
 
