@@ -16,7 +16,9 @@ HOW IT KEEPS THE CALL COUNT DOWN
 * A CA grade is competition-wide: every club in it shares ONE match list. With ``all``, each distinct
   grade is fetched once and the answer is used for every club that has a game in it.
 * ``--max-grades N`` stops the run before it would fetch more than N grades (default 400), finishing
-  whole clubs only, and ``--pause SECONDS`` (default 0.5) spaces the calls. Both bound a single run.
+  whole clubs only. ``--concurrency N`` (default 3, at most 6) reads that many grades at once and
+  ``--pause SECONDS`` (default 0.5) is the gap each reader leaves between its own calls, so the call
+  rate is about N / (latency + pause). All three bound a single run.
 * It resumes by itself: a club whose finals are all named is no longer a candidate, so running it again
   carries on where the last run stopped. Ctrl-C is safe: every club is committed before the next starts.
 
@@ -36,7 +38,7 @@ USAGE
     python -m app.scripts.backfill_round_names <org-id-or-slug>                       # dry run
     python -m app.scripts.backfill_round_names <org-id-or-slug> --apply --premierships
     python -m app.scripts.backfill_round_names all                                    # dry run, every club
-    python -m app.scripts.backfill_round_names all --apply --premierships --max-grades 400
+    python -m app.scripts.backfill_round_names all --apply --premierships --max-grades 400 --concurrency 4
     (run the last one again until it says nothing is left; then `sync_premierships all --apply`)
 """
 from __future__ import annotations
@@ -53,6 +55,8 @@ from app.services import premierships
 
 DEFAULT_MAX_GRADES = 400
 DEFAULT_PAUSE = 0.5
+DEFAULT_CONCURRENCY = 3
+MAX_CONCURRENCY = 6   # the CA client itself never has more than six calls in flight
 
 
 async def _clubs(db, org_ref: str) -> list[dict]:
@@ -93,33 +97,45 @@ async def _grades_needing_names(db, org_id) -> list[dict]:
 class Fetcher:
     """One CA call per distinct grade for the whole run, spaced, with a budget."""
 
-    def __init__(self, max_grades: int, pause: float):
+    def __init__(self, max_grades: int, pause: float, concurrency: int = 1):
         self.max_grades, self.pause = max_grades, pause
         self.names: dict[str, str] = {}      # match id -> round label, from every grade read so far
         self.seen: set[str] = set()          # grade guids already read this run
         self.failed: set[str] = set()        # grades CA returned nothing for (blip or empty): retried next run
+        self._slots = asyncio.Semaphore(max(1, min(concurrency, MAX_CONCURRENCY)))
+        self._tasks: dict[str, asyncio.Task] = {}   # grade guid -> its read, so two askers share one call
 
     def cost(self, guids) -> int:
         return len({g for g in guids if g not in self.seen})
 
     async def read(self, gd: dict) -> None:
+        """Read one grade. A second asker for the same grade waits for the first read, never makes a call."""
         guid = gd["guid"]
-        if guid in self.seen:
-            return
-        self.seen.add(guid)
-        try:
-            matches = await gr.get_grade_matches(guid)
-        except Exception as e:  # a grade CA no longer serves is not fatal
-            print(f"  ! {gd['season_name']} / {gd['grade_name']}: {e}")
-            self.failed.add(guid)
-            return
-        if not matches:
-            self.failed.add(guid)
-        for m in matches:
-            mid, rn = m.get("id"), ((m.get("round") or {}).get("name") or "").strip()
-            if mid and rn:
-                self.names[mid] = rn
-        await asyncio.sleep(self.pause)
+        task = self._tasks.get(guid)
+        if task is None:
+            self.seen.add(guid)
+            task = self._tasks[guid] = asyncio.ensure_future(self._fetch(gd))
+        await task
+
+    async def read_all(self, grades: list[dict]) -> None:
+        await asyncio.gather(*(self.read(gd) for gd in grades))
+
+    async def _fetch(self, gd: dict) -> None:
+        guid = gd["guid"]
+        async with self._slots:
+            try:
+                matches = await gr.get_grade_matches(guid)
+            except Exception as e:  # a grade CA no longer serves is not fatal
+                print(f"  ! {gd['season_name']} / {gd['grade_name']}: {e}")
+                self.failed.add(guid)
+                return
+            if not matches:
+                self.failed.add(guid)
+            for m in matches:
+                mid, rn = m.get("id"), ((m.get("round") or {}).get("name") or "").strip()
+                if mid and rn:
+                    self.names[mid] = rn
+            await asyncio.sleep(self.pause)   # inside the slot: each worker leaves a gap between its calls
 
 
 async def run_one(db, org: dict, fetcher: Fetcher, apply: bool, with_premierships: bool) -> dict:
@@ -128,8 +144,7 @@ async def run_one(db, org: dict, fetcher: Fetcher, apply: bool, with_premiership
     fresh = fetcher.cost(g["guid"] for g in grades)
     print(f"  {len(grades)} grade(s) hold a final with no round name yet"
           f" ({fresh} not already read this run, one CA call each) …")
-    for gd in grades:
-        await fetcher.read(gd)
+    await fetcher.read_all(grades)
 
     ids = []
     for mid in fetcher.names:
@@ -159,7 +174,8 @@ async def run_one(db, org: dict, fetcher: Fetcher, apply: bool, with_premiership
     return out
 
 
-async def run(org_ref: str, apply: bool, with_premierships: bool, max_grades: int, pause: float) -> int:
+async def run(org_ref: str, apply: bool, with_premierships: bool, max_grades: int, pause: float,
+              concurrency: int = DEFAULT_CONCURRENCY) -> int:
     async with async_session_maker() as db:
         clubs = await _clubs(db, org_ref)
         if not clubs:
@@ -169,7 +185,7 @@ async def run(org_ref: str, apply: bool, with_premierships: bool, max_grades: in
             print(f"No club found for {org_ref!r} (pass an organisation id, public slug, or 'all').")
             return 1
 
-        fetcher = Fetcher(max_grades, pause)
+        fetcher = Fetcher(max_grades, pause, concurrency)
         totals = {"games": 0, "grand_finals": 0, "create": 0, "wins": 0}
         done = 0
         try:
@@ -225,11 +241,12 @@ def main() -> None:
     with_prem = "--premierships" in args
     max_grades = _opt(args, "--max-grades", int, DEFAULT_MAX_GRADES)
     pause = _opt(args, "--pause", float, DEFAULT_PAUSE)
+    concurrency = _opt(args, "--concurrency", int, DEFAULT_CONCURRENCY)
     positional = [a for a in args if not a.startswith("--")]
     if not positional:
         print(__doc__)
         raise SystemExit(2)
-    raise SystemExit(asyncio.run(run(positional[0], apply, with_prem, max_grades, pause)))
+    raise SystemExit(asyncio.run(run(positional[0], apply, with_prem, max_grades, pause, concurrency)))
 
 
 if __name__ == "__main__":
