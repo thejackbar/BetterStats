@@ -146,6 +146,67 @@ async def swap_people(db: AsyncSession, club: Organisation, snap: dict, me: str)
     return out
 
 
+FIND_MAX = 30   # cards one search returns
+FIND_MIN = 2    # shortest search
+
+
+def _tokens(q: str) -> list[str]:
+    return [t for t in (q or "").lower().replace(",", " ").split() if t]
+
+
+async def find_cards(db: AsyncSession, club: Organisation, snap: dict, me: str, q: str) -> dict:
+    """Cards matching a search (a player's name, a special card's title or kind, a season or grade), each with who
+    holds copies that could be swapped: `{cards: [{...card, holders: [{player_id, name, tradeable}]}], unheld: [names]}`.
+    Only players in the pool are listed as holders, never the asker, and never how many copies a person holds
+    beyond what could go. `unheld` names matching players nobody holds a card of yet."""
+    tokens = _tokens(q)
+    if not tokens or sum(len(t) for t in tokens) < FIND_MIN:
+        raise SwapError(f"Type at least {FIND_MIN} letters to search.", 422)
+    everyone = await _rows_by_card(db, club.id)
+    holders: dict[Card, list[dict]] = {}
+    for owner, held in everyone.items():
+        if owner == me or owner not in snap["people"]:
+            continue
+        for card, rows in held.items():
+            n = tradeable(owner, card, rows)
+            if n > 0 and (card[1] or card[0] in snap["people"]):
+                holders.setdefault(card, []).append({"player_id": owner, "name": snap["people"][owner]["display_name"], "tradeable": n})
+    special_ids = [c[1] for c in holders if c[1]]
+    specials: dict[str, dict] = {}
+    if special_ids:
+        rows = await db.execute(text(
+            "SELECT id::text AS id, player_id::text AS player_id, kind, title, occurred_on, detail FROM player_special_cards "
+            "WHERE organisation_id = CAST(:o AS UUID) AND id = ANY(CAST(:ids AS uuid[]))"
+        ), {"o": str(club.id), "ids": special_ids})
+        specials = {r["id"]: dict(r) for r in rows.mappings()}
+
+    def haystack(card: Card) -> str:
+        subject, special_id = card
+        if special_id:
+            row = specials.get(special_id) or {}
+            detail = row.get("detail") or {}
+            extra = " ".join(str(detail.get(k) or "") for k in ("season", "grade", "opposition"))
+            name = (snap["people"].get(str(row.get("player_id"))) or {}).get("display_name", "")
+            return f"{name} {row.get('title') or ''} {cards.SPECIAL_KINDS.get(row.get('kind'), '')} {extra}".lower()
+        return (snap["people"].get(subject) or {}).get("display_name", "").lower()
+
+    found = [c for c in holders if all(t in haystack(c) for t in tokens)]
+    out = []
+    for card in found:
+        payload = _payload(snap, card, specials)
+        if payload:
+            hs = sorted(holders[card], key=lambda h: h["name"].lower())
+            out.append({**payload, "key": key_of(*card), "holders": hs, "tradeable": max(h["tradeable"] for h in hs)})
+    # Players first (best tier first), then special cards by name; a stable order a search can be re-run into.
+    rank = {"legendary": 0, "epic": 1, "rare": 2, "common": 3}
+    out.sort(key=lambda c: (c["kind"] == "special", rank.get(c.get("tier"), 4) if c["kind"] != "special" else 0, (c.get("name") or "").lower(), c.get("title") or ""))
+    unheld = sorted(
+        p["display_name"] for pid, p in snap["people"].items()
+        if pid != me and all(t in p["display_name"].lower() for t in tokens) and (pid, None) not in holders
+    )
+    return {"cards": out[:FIND_MAX], "more": max(0, len(out) - FIND_MAX), "unheld": unheld[:5]}
+
+
 def _live_sql(alias: str = "s") -> str:
     return f"({alias}.status = 'pending' AND {alias}.created_at > NOW() - INTERVAL '{SWAP_DAYS} days')"
 

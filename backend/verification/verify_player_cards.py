@@ -755,6 +755,38 @@ async def main() -> None:
             await swaps.respond(db, club, snap, a, first, "cancel")
             await db.commit()
 
+            # ── finding a card ───────────────────────────────────────────────────────────────────────────────
+            find = getattr(swaps, "find_cards", None)
+            if find is None:
+                check("find a card: the search exists", False, "swaps.find_cards missing")
+            else:
+                await db.execute(text("DELETE FROM player_card_copies WHERE source IN ('pack', 'swap') AND organisation_id = :o"), {"o": ORG})
+                await db.commit()
+                await give(DELTA, BRAVO, 2)
+                await give(CHARLIE, BRAVO, 1)
+                await give(ALPHA, BRAVO, 1)
+                await give(HOTEL, BRAVO, 3)        # out of the pool
+                cards.forget(ORG)
+                snap = await cards.club_snapshot(db, club, fresh=True)
+                copies_before = (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE organisation_id = :o"), {"o": ORG})).scalar()
+                r = await find(db, club, snap, a, "bravo")
+                bravo = next((c for c in r["cards"] if c["key"] == f"p:{BRAVO}"), None)
+                check("a search finds the card by the player's name", bravo is not None, str([c["key"] for c in r["cards"]]))
+                hs = {h["player_id"]: h["tradeable"] for h in (bravo or {}).get("holders", [])}
+                check("...with everyone who holds a copy and how many could go", hs == {str(DELTA): 2, str(CHARLIE): 1}, str(hs))
+                check("...never the asker, and never a player out of the pool", a not in hs and str(HOTEL) not in hs)
+                check("...holders come in name order", [h["name"] for h in (bravo or {}).get("holders", [])] == sorted([h["name"] for h in (bravo or {}).get("holders", [])], key=str.lower))
+                check("a search is not case sensitive and takes the words in any order", {c["key"] for c in (await find(db, club, snap, a, "B BRAVO"))["cards"]} >= {f"p:{BRAVO}"} and {c["key"] for c in (await find(db, club, snap, a, "BrAvO"))["cards"]} >= {f"p:{BRAVO}"})
+                r2 = await find(db, club, snap, str(DELTA), "century")
+                cent = [c for c in r2["cards"] if c["kind"] == "special"]
+                check("a special card is found by its kind", any(c["special_kind"] == "century" for c in cent) and any(h["player_id"] == a for c in cent for h in c["holders"]), str(r2)[:300])
+                check("...and by the player's name with its title", any(c["kind"] == "special" for c in (await find(db, club, snap, str(DELTA), "alpha century"))["cards"]))
+                check("a card nobody holds is not offered, and the player is named as not found yet", f"p:{CHARLIE}" not in {c["key"] for c in (await find(db, club, snap, a, "charlie"))["cards"]} and any("Charlie" in n for n in (await find(db, club, snap, a, "charlie"))["unheld"]), str(await find(db, club, snap, a, "charlie"))[:200])
+                check("a word that matches nothing says so", (await find(db, club, snap, a, "zzzzqq")) == {"cards": [], "more": 0, "unheld": []})
+                check("a search that is too short is refused (422)", await refused(find(db, club, snap, a, "b")) == 422 and await refused(find(db, club, snap, a, "  ")) == 422)
+                check("searching writes nothing", (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE organisation_id = :o"), {"o": ORG})).scalar() == copies_before)
+
+
             # ── many cards each way ──────────────────────────────────────────────────────────────────────────
             await db.execute(text("DELETE FROM player_card_copies WHERE source IN ('pack', 'swap') AND organisation_id = :o"), {"o": ORG})
             await db.commit()

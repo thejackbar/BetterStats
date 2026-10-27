@@ -137,6 +137,18 @@ async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(
     }
 
 
+@router.get("/{token}/me/cards/swaps/find")
+async def find_swap_cards(token: str, q: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Search every card in the club for who holds a copy that could be swapped."""
+    club, player, snap = await _ready(db, request, token)
+    rate_limit.enforce(f"cards-find:{player.id}:{_client_ip(request)}", SWAP_LIMIT, SWAP_WINDOW,
+                       detail="Slow down. Give it a few seconds and try again.")
+    try:
+        return await swaps.find_cards(db, club, snap, str(player.id), q[:80])
+    except swaps.SwapError as exc:
+        raise _refuse(exc)
+
+
 @router.get("/{token}/me/cards/swaps/players/{player_id}")
 async def get_swap_player(token: str, player_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """The cards one other player could offer, and nothing else of their collection."""

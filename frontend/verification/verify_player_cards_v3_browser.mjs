@@ -40,6 +40,7 @@ const CARDS = [
 const totals = { regular_owned: CARDS.filter((c) => c.kind === 'player').length, regular_total: 40, special_owned: 7, special_total: 20, copies: CARDS.length }
 const swapCard = (c, tradeable) => ({ ...c, tradeable, copies: undefined })
 const posted = []
+const finds = []
 const inReq = { id: 'w9', direction: 'in', status: 'pending', other: { player_id: 'p7', name: 'Dave, Dan' }, created_at: new Date().toISOString(), resolved_at: null,
   give: MANY.slice(0, 4).map((c, i) => ({ ...swapCard(c, 1), qty: i === 0 ? 2 : 1 })), want: [{ ...swapCard(CARDS[1], 1), qty: 1 }] }
 const board = { incoming: [inReq], outgoing: [], recent: [], mine: [CARDS[1], ...CARDS.slice(2, 4), ...MANY].map((c, i) => swapCard(c, i === 4 ? 2 : 1)), people: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 30 }], expires_days: 14, max_open: 10 }
@@ -57,7 +58,8 @@ const run = async () => {
       const url = route.request().url()
       const json = (b, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(b) })
       if (!url.includes('/public/availability/')) return json({})
-      if (/\/me\/cards\/swaps\/players\//.test(url)) return json({ player: { player_id: 'p7', name: 'Dave, Dan' }, cards: MANY.map((c, i) => swapCard(c, i === 0 ? 3 : 1)) })
+      if (/\/me\/cards\/swaps\/players\//.test(url)) return json({ player: { player_id: 'p7', name: 'Dave, Dan' }, cards: [swapCard(CARDS[1], 2), ...MANY.map((c, i) => swapCard(c, i === 0 ? 3 : 1))] })
+      if (/\/me\/cards\/swaps\/find/.test(url)) { finds.push(decodeURIComponent(url.split('q=')[1])); return json({ cards: [{ ...swapCard(CARDS[1], 2), holders: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 2 }, { player_id: 'p9', name: 'Smith, Sue', tradeable: 1 }] }], more: 0, unheld: ['Eagle, Ed'] }) }
       if (/\/me\/cards\/swaps$/.test(url)) {
         if (route.request().method() === 'POST') { posted.push(JSON.parse(route.request().postData())); return json({ id: 'n1', status: 'pending' }) }
         return json(board)
@@ -135,17 +137,38 @@ const run = async () => {
     await page.waitForSelector('[data-swap-builder]')
     await page.locator('[data-swap-player="p7"]').click()
     await page.waitForSelector('[data-card-pick="theirs"]')
-    const first = await page.locator('[data-card-pick="theirs"] [data-swap-card]').count()
-    check('their 30 cards come a page at a time (24)', first === 24, String(first))
-    check('a search box shows once there are more than eight', (await page.locator('[data-card-pick="theirs"] input').count()) === 1)
-    await page.locator('[data-card-pick="theirs"] input').fill('Many07')
+    const theirs = page.locator('[data-card-pick="theirs"]')
+    check('their cards are shown as a card book, a page at a time', (await theirs.locator('[data-slot-card]').count()) === 4 && (await theirs.locator('[data-gallery-pages]').count()) === 1)
+    check("the count says how many they could offer", /31 cards/i.test(await theirs.locator('[data-browse-count]').textContent()))
+    const sorts = await theirs.locator('[data-gallery-sort] option').allTextContents()
+    check('it can be sorted, without a Newest option (their cards have no date)', sorts.length > 3 && !sorts.some((x) => /newest/i.test(x)), JSON.stringify(sorts))
+    check('there are no grey empty slots in someone else\'s book', (await theirs.locator('[data-empty-slot]').count()) === 0)
+    await theirs.locator('[data-gallery-search]').fill('Many07')
     await page.waitForTimeout(200)
-    const found = await page.locator('[data-card-pick="theirs"] [data-swap-card]').count()
-    check('searching narrows to the one name', found === 1, String(found))
-    await page.locator('[data-card-pick="theirs"] input').fill('')
-    await page.getByText(/Show more/).first().click()
+    check('searching narrows to the one name', (await theirs.locator('[data-slot-card]').count()) === 1 && /1 of 31/.test(await theirs.locator('[data-browse-count]').textContent()))
+    await theirs.locator('[data-gallery-search]').fill('nobody at all')
     await page.waitForTimeout(200)
-    check('Show more brings the rest', (await page.locator('[data-card-pick="theirs"] [data-swap-card]').count()) === 30)
+    check('a search with no match says so', (await theirs.locator('[data-gallery-empty]').count()) === 1)
+    await theirs.locator('[data-gallery-search]').fill('')
+    await theirs.locator('[data-gallery-next]').click()
+    await page.waitForTimeout(700)
+    check('Next turns the page', /Page 2 of/.test(await theirs.locator('[data-gallery-pages]').textContent()))
+    await theirs.locator('[data-gallery-sort]').selectOption('name')
+    await page.waitForTimeout(300)
+    const names = await theirs.locator('[data-slot-card]').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
+    check('sorting by name puts the cards in surname order', names.length === 4 && JSON.stringify(names) === JSON.stringify([...names].sort((x, y) => x.localeCompare(y))), JSON.stringify(names))
+    // hold a card up and add it from there
+    await theirs.locator('[data-slot-card]').first().click()
+    await page.waitForSelector('[data-card-viewer]')
+    check('holding a card up offers to add it', /Add to my request/i.test(await page.locator('[data-viewer-action]').textContent()))
+    await page.click('[data-viewer-action]')
+    await page.waitForTimeout(200)
+    check('...and it is ticked in the book and in the tray', (await theirs.locator('[data-quick-pick="on"]').count()) === 1 && (await page.locator('[data-swap-tray="theirs"] [data-swap-picked]').count()) === 1)
+    await theirs.locator('[data-slot-card]').first().click()
+    check('holding it up again offers to take it out', /Take out of my request/i.test(await page.locator('[data-viewer-action]').textContent()))
+    await page.click('[data-viewer-action]')
+    await page.waitForTimeout(200)
+    check('...and it goes', (await page.locator('[data-swap-tray="theirs"] [data-swap-picked]').count()) === 0)
     check('no horizontal scroll in the builder', (await overflow(page)) <= 0)
     await ctx.close()
   }
@@ -165,12 +188,19 @@ const run = async () => {
     await page.locator('[data-swap-player="p7"]').click()
     await page.waitForSelector('[data-card-pick="theirs"]')
     // three of theirs: the one they hold three of, and two others
-    for (const k of ['p:q0', 'p:q1', 'p:q2']) await page.locator(`[data-card-pick="theirs"] [data-swap-card="${k}"]`).click()
+    const dotFor = async (side, term) => {
+      const box = page.locator(`[data-card-pick="${side}"]`)
+      await box.locator('[data-gallery-search]').fill(term)
+      await page.waitForTimeout(150)
+      await box.locator('[data-quick-pick]').first().click()
+      await box.locator('[data-gallery-search]').fill('')
+    }
+    for (const t of ['Many00', 'Many01', 'Many02']) await dotFor('theirs', t)
     check('three cards can be picked, and each is in the tray', (await page.locator('[data-swap-tray="theirs"] [data-swap-picked]').count()) === 3)
     await page.locator('[data-swap-tray="theirs"] [data-swap-picked="p:q1"] [data-swap-remove]').click()
     check('a card can be taken back out', (await page.locator('[data-swap-tray="theirs"] [data-swap-picked]').count()) === 2)
-    await page.locator('[data-card-pick="theirs"] [data-swap-card="p:q1"]').click()
-    await page.locator('[data-card-pick="theirs"] [data-swap-card="p:q1"]').click()
+    await dotFor('theirs', 'Many01')
+    await dotFor('theirs', 'Many01')
     check('tapping a picked card again takes it out too', (await page.locator('[data-swap-tray="theirs"] [data-swap-picked="p:q1"]').count()) === 0)
     const row = page.locator('[data-swap-tray="theirs"] [data-swap-picked="p:q0"]')
     check('a card held three times has a count that starts at 1', /1 of 3/.test(await row.locator('[data-qty]').textContent()))
@@ -180,8 +210,8 @@ const run = async () => {
     check('...and back down, never below 1', /2 of 3/.test(await row.locator('[data-qty]').textContent()))
     check('a card held once has no count to change', (await page.locator('[data-swap-tray="theirs"] [data-swap-picked="p:q2"] [data-qty]').count()) === 0)
     // yours: Zed and the card held twice (index 4 in the list is MANY[0]'s slot in mine)
-    await page.locator('[data-card-pick="yours"] [data-swap-card="p:p2"]').click()
-    await page.locator('[data-card-pick="yours"] [data-swap-card="p:q0"]').click()
+    await dotFor('yours', 'Zed')
+    await dotFor('yours', 'Many00')
     await page.waitForSelector('[data-swap-confirm]')
     const text = await page.locator('[data-swap-confirm]').textContent()
     check('the confirm line counts both sides', /You give 2 for 3 from Dave, Dan/.test(text), text)
@@ -191,6 +221,46 @@ const run = async () => {
     await page.waitForSelector('[data-swap-builder]', { state: 'detached' })
     const body = posted[posted.length - 1]
     check('Send posts every card with its count', JSON.stringify(body) === JSON.stringify({ to_player_id: 'p7', give: [{ key: 'p:p2', qty: 1 }, { key: 'p:q0', qty: 1 }], want: [{ key: 'p:q0', qty: 2 }, { key: 'p:q2', qty: 1 }] }), JSON.stringify(body))
+    await ctx.close()
+  }
+
+  console.log('\nfinding a card')
+  {
+    const { ctx, page } = await open(390)
+    await page.click('[data-cards-tab="swaps"]')
+    await page.waitForSelector('[data-find-input]')
+    finds.length = 0
+    await page.fill('[data-find-input]', 'z')
+    await page.waitForTimeout(600)
+    check('one letter does not search', finds.length === 0 && (await page.locator('[data-find-results]').count()) === 0)
+    await page.fill('[data-find-input]', 'zed')
+    await page.waitForSelector('[data-find-card="p:p2"]')
+    check('a search asks the server once, for exactly what was typed', finds.length === 1 && finds[0] === 'zed', JSON.stringify(finds))
+    const card = page.locator('[data-find-card="p:p2"]')
+    const asks = await card.locator('[data-find-ask]').allTextContents()
+    check('every holder gets an Ask button, with how many could go', asks.length === 2 && /Ask Dave, Dan \(×2\)/.test(asks[0]) && /Ask Smith, Sue$/.test(asks[1].trim()), JSON.stringify(asks))
+    check('players nobody has pulled yet are named', /Nobody has pulled Eagle, Ed yet/.test(await page.locator('[data-find-unheld]').textContent()))
+    check('no horizontal scroll with results', (await overflow(page)) <= 0)
+    if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/find.png` })
+    await card.locator('[data-find-ask="p7"]').click()
+    await page.waitForSelector('[data-swap-builder]')
+    await page.waitForSelector('[data-card-pick="theirs"] [data-slot-card]')
+    check('Ask opens a request with that player and that card already chosen', (await page.locator('[data-swap-player]').count()) === 0 && /Dave, Dan/.test(await page.locator('[data-swap-builder]').textContent()) && (await page.locator('[data-swap-tray="theirs"] [data-swap-picked="p:p2"]').count()) === 1)
+    check('...and goes on to what you give', (await page.locator('[data-card-pick="yours"]').count()) === 1)
+    if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/find-builder.png` })
+    await ctx.close()
+  }
+
+  console.log('\nthe builder on a wide screen, 1280')
+  {
+    const { ctx, page } = await open(1280)
+    await page.click('[data-cards-tab="swaps"]')
+    await page.click('[data-swap-start]')
+    await page.locator('[data-swap-player="p7"]').click()
+    await page.waitForSelector('[data-card-pick="theirs"] [data-slot-card]')
+    check('their cards open as a book with several to a page', (await page.locator('[data-card-pick="theirs"] [data-slot-card]').count()) >= 6)
+    check('no horizontal scroll at 1280', (await overflow(page)) <= 0)
+    if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/builder-1280.png` })
     await ctx.close()
   }
 

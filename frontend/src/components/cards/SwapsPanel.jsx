@@ -1,14 +1,17 @@
 // Swapping cards with another player of the club. Any card a player holds can go (their own card stays theirs); a
 // request is as many cards each way as the player likes (one for four, six for two), and nothing moves until the
-// person asked says yes. The builder walks it through: who, which of their cards, which of yours, each a tap to
-// add and a tap to take out again, with a count where a card is held more than once. The server checks it all
+// person asked says yes. The builder walks it through: who, which of their cards, which of yours. Each side is the
+// card book (`CardGallery` in browse mode: sort, filters, search, stacks, a quick pick button on every card), so
+// another player's cards are looked through the way your own are. A card is a tap to add and a tap to take out
+// again, with a count where it is held more than once. Find a card searches the whole club for who holds a card
+// that could be swapped and goes straight to a request for it. The server checks it all
 // again when the request is answered, and moves all of it or none of it, so a stale request is told so instead
 // of taking a card that is no longer there.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import { onColor } from '../PlayerTradingCard'
 import { CardView, ScaledCard } from './CardFaces'
-import { Modal } from './CardGallery'
+import CardGallery, { Modal } from './CardGallery'
 import { TIERS } from './cardTheme'
 
 const MONO = "'JetBrains Mono', monospace"
@@ -38,31 +41,6 @@ function Mini({ card, club, accent, display, sponsor, selected, onClick, label, 
       {badge(count ?? card.tradeable)}
       {selected && <span aria-hidden style={{ position: 'absolute', left: 4, top: 4, width: 20, height: 20, borderRadius: 10, background: accent, color: onColor(accent), font: `800 12px ${MONO}`, display: 'grid', placeItems: 'center' }}>✓</span>}
     </button>
-  )
-}
-
-// A grid of cards to pick from, any number of them, with a search and a "show more" because a collection can
-// run to hundreds. `chosen` is the map of what is picked so far (key to { card, qty }).
-const PICK_PAGE = 24
-function CardPick({ cards, chosen, onToggle, ui, label }) {
-  const [q, setQ] = useState('')
-  const [shown, setShown] = useState(PICK_PAGE)
-  const list = useMemo(() => {
-    const needle = q.trim().toLowerCase()
-    return needle ? cards.filter((c) => `${c.name} ${c.title || ''}`.toLowerCase().includes(needle)) : cards
-  }, [cards, q])
-  return (
-    <div data-card-pick={label}>
-      {cards.length > 8 && (
-        <input value={q} onChange={(e) => { setQ(e.target.value); setShown(PICK_PAGE) }} placeholder="Find a card" aria-label={`Find a card: ${label}`}
-          style={{ width: '100%', boxSizing: 'border-box', marginBottom: 8, background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.25)', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 15 }} />
-      )}
-      {list.length === 0 && <div style={{ fontSize: 13, opacity: 0.7 }}>No card matches.</div>}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-        {list.slice(0, shown).map((c) => <Mini key={c.key} card={c} {...ui} selected={chosen.size ? chosen.has(c.key) : undefined} onClick={() => onToggle(c)} />)}
-      </div>
-      {list.length > shown && <button type="button" onClick={() => setShown((n) => n + PICK_PAGE)} style={{ ...btn, marginTop: 10 }}>Show more ({list.length - shown} left)</button>}
-    </div>
   )
 }
 
@@ -133,7 +111,7 @@ function Request({ swap, ...ui }) {
   )
 }
 
-function Builder({ token, board, give: preGive, club, accent, display, sponsor, onClose, onSent }) {
+function Builder({ token, board, give: preGive, prefill, club, accent, display, sponsor, onClose, onSent }) {
   const [player, setPlayer] = useState(null)
   const [theirs, setTheirs] = useState(null)
   const [want, setWant] = useState(() => new Map())
@@ -157,10 +135,15 @@ function Builder({ token, board, give: preGive, club, accent, display, sponsor, 
   const remove = (set) => (card) => set((m) => { const next = new Map(m); next.delete(card.key); return next })
   const asList = (m) => [...m.values()].map((r) => ({ key: r.card.key, qty: r.qty }))
 
-  const pick = async (p) => {
-    setPlayer(p); setWant(new Map()); setTheirs(null); setErr('')
+  const pick = async (p, initial) => {
+    setPlayer(p); setWant(initial || new Map()); setTheirs(null); setErr('')
     try { setTheirs((await api.availPublicSwapPlayer(token, p.player_id)).cards) } catch (e) { setErr(e?.message || 'Could not load their cards.') }
   }
+  // Coming from a card search: the person and the card are already chosen.
+  useEffect(() => {
+    if (prefill) pick(prefill.player, new Map([[prefill.card.key, { card: prefill.card, qty: 1 }]]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const send = async () => {
     setBusy(true); setErr('')
     try {
@@ -173,15 +156,15 @@ function Builder({ token, board, give: preGive, club, accent, display, sponsor, 
   const ready = !!player && want.size > 0 && give.size > 0
   const h = { font: `700 11px ${MONO}`, letterSpacing: 1.4, textTransform: 'uppercase', opacity: 0.8, margin: '14px 0 8px' }
   return (
-    <Modal label="Start a swap" onClose={onClose} zIndex={85}>
-      <div data-swap-builder onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 560, padding: '52px 14px 28px', boxSizing: 'border-box', color: '#fff' }}>
+    <Modal label="Start a swap" onClose={onClose} zIndex={85} solid>
+      <div data-swap-builder onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 780, padding: '52px 14px 28px', boxSizing: 'border-box', color: '#fff' }}>
         <button type="button" onClick={onClose} aria-label="Close" style={{ position: 'fixed', right: 14, top: 14, width: 38, height: 38, borderRadius: 19, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(255,255,255,.08)', color: '#fff' }}>✕</button>
         <div style={{ font: `800 italic 26px ${display}`, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>Start a swap</div>
         <div style={{ textAlign: 'center', fontSize: 12.5, opacity: 0.75, marginTop: 4 }}>As many cards each way as you like: one for four, six for two. They have to say yes.</div>
 
-        {board.mine.length === 0 && !preGive && <p data-no-doubles style={{ textAlign: 'center', marginTop: 18 }}>You have no cards to offer yet. Open a pack and whatever you pull can go in a swap. Your own card always stays yours.</p>}
+        {board.mine.length === 0 && !preGive && !prefill && <p data-no-doubles style={{ textAlign: 'center', marginTop: 18 }}>You have no cards to offer yet. Open a pack and whatever you pull can go in a swap. Your own card always stays yours.</p>}
 
-        {(board.mine.length > 0 || preGive) && (
+        {(board.mine.length > 0 || preGive || prefill) && (
           <>
             <div style={h}>1. Who with</div>
             {player ? (
@@ -210,7 +193,12 @@ function Builder({ token, board, give: preGive, club, accent, display, sponsor, 
             <div style={h}>2. The cards you want from {player.name}</div>
             {!theirs && !err && <div style={{ fontSize: 13, opacity: 0.7 }}>Loading…</div>}
             {theirs && theirs.length === 0 && <div style={{ fontSize: 13, opacity: 0.7 }}>They have no card to offer just now.</div>}
-            {theirs && theirs.length > 0 && <CardPick cards={theirs} chosen={want} onToggle={toggle(setWant)} ui={ui} label="theirs" />}
+            {theirs && theirs.length > 0 && (
+              <div data-card-pick="theirs">
+                <CardGallery browse cards={theirs} club={club} accent={accent} display={display} sponsor={sponsor} marked={new Set(want.keys())} zBase={90}
+                  onAction={toggle(setWant)} actionLabel={(c) => (want.has(c.key) ? 'Take out of my request' : 'Add to my request')} />
+              </div>
+            )}
             <Tray chosen={want} onQty={setQty(setWant)} onRemove={remove(setWant)} label="theirs" />
           </>
         )}
@@ -218,7 +206,10 @@ function Builder({ token, board, give: preGive, club, accent, display, sponsor, 
         {player && want.size > 0 && (
           <>
             <div style={h}>3. The cards you give{preGive ? ' (add more if you like)' : ''}</div>
-            <CardPick cards={board.mine} chosen={give} onToggle={toggle(setGive)} ui={ui} label="yours" />
+            <div data-card-pick="yours">
+              <CardGallery browse cards={board.mine} club={club} accent={accent} display={display} sponsor={sponsor} marked={new Set(give.keys())} zBase={90}
+                onAction={toggle(setGive)} actionLabel={(c) => (give.has(c.key) ? 'Take out of my request' : 'Add to my request')} />
+            </div>
             <Tray chosen={give} onQty={setQty(setGive)} onRemove={remove(setGive)} label="yours" />
           </>
         )}
@@ -235,12 +226,64 @@ function Builder({ token, board, give: preGive, club, accent, display, sponsor, 
   )
 }
 
+// Search every card in the club for who holds a copy that could be swapped, and ask for it in one tap.
+function FindCards({ token, onAsk, ...ui }) {
+  const [q, setQ] = useState('')
+  const [res, setRes] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    const term = q.trim()
+    if (term.length < 2) { setRes(null); setErr(''); return undefined }
+    let live = true
+    const t = setTimeout(async () => {
+      setBusy(true); setErr('')
+      try { const r = await api.availPublicSwapFind(token, term); if (live) setRes(r) } catch (e) { if (live) { setRes(null); setErr(e?.message || 'Could not search.') } } finally { if (live) setBusy(false) }
+    }, 300)
+    return () => { live = false; clearTimeout(t) }
+  }, [q, token])
+  return (
+    <div data-find-cards style={{ margin: '0 0 16px' }}>
+      <div style={{ font: `700 11px ${MONO}`, letterSpacing: 1.4, textTransform: 'uppercase', opacity: 0.8, marginBottom: 6 }}>Find a card</div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="A player, or a card like century or 1,000 runs" aria-label="Find a card someone has pulled" data-find-input
+        style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.25)', borderRadius: 10, padding: '10px 12px', color: 'inherit', fontSize: 15 }} />
+      {busy && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>Looking…</div>}
+      {err && <div role="alert" style={{ fontSize: 13, marginTop: 6, color: '#fecaca' }}>{err}</div>}
+      {res && (
+        <div data-find-results style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {res.cards.length === 0 && <div data-find-none style={{ fontSize: 13, opacity: 0.8 }}>No one has a card like that to swap right now.</div>}
+          {res.unheld.length > 0 && <div data-find-unheld style={{ fontSize: 12.5, opacity: 0.8 }}>Nobody has pulled {res.unheld.join(', ')} yet.</div>}
+          {res.cards.map((c) => (
+            <div key={c.key} data-find-card={c.key} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', border: '1px solid var(--pb-hairline, rgba(255,255,255,.2))', borderRadius: 12, padding: 10 }}>
+              <Mini card={c} {...ui} width={78} count={1} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, overflowWrap: 'anywhere' }}>{cardLine(c)}</div>
+                <div style={{ font: `600 10px ${MONO}`, letterSpacing: 1, textTransform: 'uppercase', opacity: 0.65, margin: '2px 0 8px' }}>{c.holders.length} {c.holders.length === 1 ? 'player has' : 'players have'} one to swap</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {c.holders.map((h) => (
+                    <button key={h.player_id} type="button" data-find-ask={h.player_id} onClick={() => onAsk({ player: { player_id: h.player_id, name: h.name }, card: { ...c, tradeable: h.tradeable } })}
+                      style={{ ...btn, padding: '7px 11px', textTransform: 'none', letterSpacing: 0.2, fontSize: 12.5 }}>
+                      Ask {h.name}{h.tradeable > 1 ? ` (×${h.tradeable})` : ''}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))}
+          {res.more > 0 && <div style={{ fontSize: 12, opacity: 0.7 }}>{res.more} more match. Type more of the name to narrow it down.</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SwapsPanel({ token, club, accent, display, sponsor, offer, onOfferDone, onChanged }) {
   const [board, setBoard] = useState(null)
   const [failed, setFailed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [build, setBuild] = useState(false)
+  const [prefill, setPrefill] = useState(null)
 
   const load = useCallback(() => api.availPublicSwaps(token).then((b) => { setBoard(b); return b }).catch(() => setFailed(true)), [token])
   useEffect(() => { load() }, [load])
@@ -273,6 +316,7 @@ export default function SwapsPanel({ token, club, accent, display, sponsor, offe
         <button type="button" onClick={() => setBuild(true)} data-swap-start style={{ ...btn, padding: '11px 18px', background: accent, color: onColor(accent), border: 0 }}>Start a swap</button>
         <span data-doubles-count style={{ font: `600 11px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase', opacity: 0.75 }}>{offerable === 0 ? 'No cards to offer yet' : `${offerable} ${offerable === 1 ? 'card' : 'cards'} you could offer`}</span>
       </div>
+      <FindCards token={token} onAsk={(p) => { setPrefill(p); setBuild(true) }} {...ui} />
       {msg && <div role="status" data-swap-msg style={{ fontSize: 13, marginBottom: 10 }}>{msg}</div>}
 
       {board.incoming.length > 0 && <div style={{ font: `700 11px ${MONO}`, letterSpacing: 1.4, textTransform: 'uppercase', margin: '4px 0 8px', color: 'var(--pb-amber, #fbbf24)' }}>Asking you ({board.incoming.length})</div>}
@@ -292,9 +336,9 @@ export default function SwapsPanel({ token, club, accent, display, sponsor, offe
         </div>
       )}
 
-      {build && <Builder token={token} board={board} give={offer || null} club={club} accent={accent} display={display} sponsor={sponsor}
-        onClose={() => { setBuild(false); onOfferDone?.() }}
-        onSent={() => { setBuild(false); onOfferDone?.(); setMsg('Swap request sent.'); load(); onChanged?.() }} />}
+      {build && <Builder token={token} board={board} give={prefill ? null : (offer || null)} prefill={prefill} club={club} accent={accent} display={display} sponsor={sponsor}
+        onClose={() => { setBuild(false); setPrefill(null); onOfferDone?.() }}
+        onSent={() => { setBuild(false); setPrefill(null); onOfferDone?.(); setMsg('Swap request sent.'); load(); onChanged?.() }} />}
     </div>
   )
 }

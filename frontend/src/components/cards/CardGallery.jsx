@@ -5,6 +5,11 @@
 // kind sit together as a stack on one slot, so fifty of someone's awards take one slot and not four pages.
 // Tap a stack to open it, tap a card to hold it up. Sort by any of the figures, rarity, name or newest;
 // filter to players, specials, one kind of special or doubles. Pages turn by button, key or swipe.
+//
+// `browse` shows someone else's cards the same way, for choosing what to ask for in a swap: no grey slots, a
+// search box, no Newest sort (their cards carry no date), the number shown on a card is how many could go, and
+// holding a card up offers an action instead of Share (`onAction`, labelled by `actionLabel(card)`), with `marked`
+// cards ticked in the book.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import gsap from 'gsap'
@@ -97,6 +102,23 @@ export function buildItems(cards, { filter, sort, meId }) {
   return items
 }
 
+// How many of a card to show on it: copies held, or (in someone else's book) how many could go.
+const countOf = (c, browse) => (browse ? c.tradeable : c.copies) || 1
+
+function Tick({ accent, n }) {
+  return <span data-marked aria-hidden style={{ position: 'absolute', left: 6, top: 6, minWidth: 22, height: 22, borderRadius: 11, padding: n > 1 ? '0 6px' : 0, background: accent, color: onColor(accent), font: `800 12px ${MONO}`, display: 'grid', placeItems: 'center', boxShadow: '0 1px 4px rgba(0,0,0,.5)' }}>{n > 1 ? `✓ ${n}` : '✓'}</span>
+}
+
+// The quick way to pick a card for a swap without holding it up: a round button on the card, a plus until it is picked.
+function PickDot({ on, accent, onClick, name }) {
+  return (
+    <button type="button" data-quick-pick={on ? 'on' : 'off'} aria-pressed={on} aria-label={`${on ? 'Take out' : 'Pick'} ${name}`} onClick={(e) => { e.stopPropagation(); onClick() }}
+      style={{ position: 'absolute', left: 5, top: '44%', width: 30, height: 30, borderRadius: 15, border: on ? 0 : '1.5px solid rgba(255,255,255,.85)', background: on ? accent : 'rgba(8,12,18,.78)', color: on ? onColor(accent) : '#fff', font: `800 16px ${MONO}`, lineHeight: 1, display: 'grid', placeItems: 'center', boxShadow: '0 1px 5px rgba(0,0,0,.55)', cursor: 'pointer', padding: 0 }}>
+      {on ? '✓' : '+'}
+    </button>
+  )
+}
+
 function EmptySlot({ width }) {
   return (
     <div data-empty-slot aria-label="Not collected yet" style={{ width, height: width * (CARD_H / CARD_W), borderRadius: width * 0.07, border: '2px dashed rgba(148,163,184,.4)', background: 'repeating-linear-gradient(45deg, rgba(148,163,184,.07) 0 6px, transparent 6px 14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
@@ -108,7 +130,7 @@ function EmptySlot({ width }) {
 }
 
 // A pile of one player's cards of one kind, on one slot.
-function StackSlot({ item, width, club, accent, display, sponsor, onOpen }) {
+function StackSlot({ item, width, club, accent, display, sponsor, onOpen, marked }) {
   const [a, b, c] = item.cards
   const label = catLabel(item.cat)
   return (
@@ -117,6 +139,7 @@ function StackSlot({ item, width, club, accent, display, sponsor, onOpen }) {
       {c && <div aria-hidden style={{ position: 'absolute', left: 0, top: 0, transform: 'translate(10px, -7px) rotate(4deg)', opacity: 0.8, filter: 'brightness(.7)' }}><ScaledCard width={width}><CardView card={c} club={club} accent={accent} display={display} holo={false} /></ScaledCard></div>}
       {b && <div aria-hidden style={{ position: 'absolute', left: 0, top: 0, transform: 'translate(5px, -3px) rotate(2deg)', opacity: 0.9, filter: 'brightness(.85)' }}><ScaledCard width={width}><CardView card={b} club={club} accent={accent} display={display} holo={false} /></ScaledCard></div>}
       <div style={{ position: 'absolute', left: 0, top: 0 }}><ScaledCard width={width}><CardView card={a} club={club} accent={accent} display={display} sponsor={sponsor} /></ScaledCard></div>
+      {marked && item.cards.some((c) => marked.has(c.key)) && <Tick accent={accent} n={item.cards.filter((c) => marked.has(c.key)).length} />}
       <span data-stack-count style={{ position: 'absolute', right: 6, bottom: '21%', padding: '2px 9px', borderRadius: 999, background: '#0b1018', border: '1px solid rgba(255,255,255,.55)', color: '#fff', font: `700 11px ${MONO}`, letterSpacing: 0.4 }}>×{item.count} {label}</span>
     </button>
   )
@@ -125,7 +148,7 @@ function StackSlot({ item, width, club, accent, display, sponsor, onOpen }) {
 // Open modals, innermost last: Escape closes only the one on top.
 const openModals = []
 
-export function Modal({ label, onClose, children, zIndex = 80 }) {
+export function Modal({ label, onClose, children, zIndex = 80, solid = false }) {
   // The latest onClose without re-running the effect: a parent that passes a new function each render must not
   // send an open modal to the back of the line.
   const closeRef = useRef(onClose)
@@ -145,7 +168,7 @@ export function Modal({ label, onClose, children, zIndex = 80 }) {
   }, [])
   return createPortal(
     <div role="dialog" aria-modal="true" aria-label={label} onClick={onClose}
-      style={{ position: 'fixed', inset: 0, zIndex, background: 'rgba(3,6,10,.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', overflowY: 'auto', overflowX: 'clip' }}>
+      style={{ position: 'fixed', inset: 0, zIndex, background: solid ? '#05080d' : 'rgba(3,6,10,.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', overflowY: 'auto', overflowX: 'clip' }}>
       {children}
     </div>,
     document.body,
@@ -155,7 +178,7 @@ export function Modal({ label, onClose, children, zIndex = 80 }) {
 const actionBtn = { padding: '9px 16px', borderRadius: 10, border: '1px solid rgba(255,255,255,.35)', background: 'rgba(255,255,255,.08)', color: '#fff', font: `700 11px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase' }
 
 // A card held up, with its flip side and the things a player can do with it.
-function Viewer({ card, club, accent, display, sponsor, onClose, onShare, onOffer }) {
+function Viewer({ card, club, accent, display, sponsor, onClose, onShare, onOffer, browse, action, zIndex = 82 }) {
   const [flipped, setFlipped] = useState(false)
   const [w, setW] = useState(300)
   useLayoutEffect(() => {
@@ -168,7 +191,7 @@ function Viewer({ card, club, accent, display, sponsor, onClose, onShare, onOffe
   // Any card held can be offered; a player's own card has no row, so only the copies of it they pulled count.
   const canOffer = (card.mine ? (card.copies || 1) - 1 : (card.copies || 1)) > 0
   return (
-    <Modal label={`${card.name} card`} onClose={onClose} zIndex={82}>
+    <Modal label={`${card.name} card`} onClose={onClose} zIndex={zIndex}>
       <div data-card-viewer style={{ margin: 'auto', padding: '56px 0 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
         <button type="button" onClick={(e) => { e.stopPropagation(); onClose() }} aria-label="Close" style={{ position: 'fixed', right: 14, top: 14, width: 38, height: 38, borderRadius: 19, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(255,255,255,.08)', color: '#fff' }}>✕</button>
         <div onClick={(e) => e.stopPropagation()} style={{ width: w, height: CARD_H * k }}>
@@ -180,10 +203,11 @@ function Viewer({ card, club, accent, display, sponsor, onClose, onShare, onOffe
           </div>
         </div>
         <div style={{ font: `600 11px ${MONO}`, letterSpacing: 1.6, textTransform: 'uppercase', color: 'rgba(255,255,255,.75)', textAlign: 'center' }}>
-          {(card.copies || 1) > 1 ? `${card.copies} copies  ·  ` : ''}Tap the card to turn it over
+          {countOf(card, browse) > 1 ? `${countOf(card, browse)} ${browse ? 'could go' : 'copies'}  ·  ` : ''}Tap the card to turn it over
         </div>
         <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
           {onShare && <button type="button" data-viewer-share onClick={() => onShare(card)} style={actionBtn}>Share</button>}
+          {action && <button type="button" data-viewer-action onClick={() => action.onClick(card)} style={{ ...actionBtn, background: action.primary ? action.accent : actionBtn.background, color: action.primary ? onColor(action.accent) : '#fff', border: action.primary ? 0 : actionBtn.border }}>{action.label}</button>}
           {onOffer && canOffer && <button type="button" data-viewer-offer onClick={() => onOffer(card)} style={actionBtn}>Offer in a swap</button>}
         </div>
       </div>
@@ -192,10 +216,10 @@ function Viewer({ card, club, accent, display, sponsor, onClose, onShare, onOffe
 }
 
 // A stack opened out.
-function StackViewer({ item, club, accent, display, sponsor, onPick, onClose }) {
+function StackViewer({ item, club, accent, display, sponsor, onPick, onClose, zIndex = 81, marked, onToggle }) {
   const w = Math.max(96, Math.min(150, (Math.min(window.innerWidth, 720) - 56) / 3))
   return (
-    <Modal label={`${item.name}, ${catLabel(item.cat)}`} onClose={onClose} zIndex={81}>
+    <Modal label={`${item.name}, ${catLabel(item.cat)}`} onClose={onClose} zIndex={zIndex}>
       <div data-stack-viewer style={{ width: '100%', maxWidth: 720, padding: '56px 14px 28px', boxSizing: 'border-box' }} onClick={(e) => e.stopPropagation()}>
         <button type="button" onClick={onClose} aria-label="Close" style={{ position: 'fixed', right: 14, top: 14, width: 38, height: 38, borderRadius: 19, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(255,255,255,.08)', color: '#fff' }}>✕</button>
         <div style={{ textAlign: 'center', color: '#fff', marginBottom: 16 }}>
@@ -204,9 +228,12 @@ function StackViewer({ item, club, accent, display, sponsor, onPick, onClose }) 
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 12 }}>
           {item.cards.map((c) => (
-            <button key={c.key} type="button" onClick={() => onPick(c)} data-stack-card={c.key} aria-label={`${c.name}, ${c.title}`} style={{ padding: 0, border: 0, background: 'none', cursor: 'pointer' }}>
+            <div key={c.key} style={{ position: 'relative' }}>
+            <button type="button" onClick={() => onPick(c)} data-stack-card={c.key} aria-label={`${c.name}, ${c.title}`} style={{ position: 'relative', padding: 0, border: 0, background: 'none', cursor: 'pointer' }}>
               <ScaledCard width={w}><CardView card={c} club={club} accent={accent} display={display} sponsor={sponsor} /></ScaledCard>
             </button>
+            {onToggle && <PickDot on={!!marked?.has(c.key)} accent={accent} name={`${c.name}, ${c.title}`} onClick={() => onToggle(c)} />}
+            </div>
           ))}
         </div>
       </div>
@@ -214,8 +241,9 @@ function StackViewer({ item, club, accent, display, sponsor, onPick, onClose }) 
   )
 }
 
-export default function CardGallery({ cards, totals, club, accent, display = DEFAULT_DISPLAY, sponsor, onShare, onOffer, meId }) {
-  const [sort, setSort] = useState('recent')
+export default function CardGallery({ cards, totals, club, accent, display = DEFAULT_DISPLAY, sponsor, onShare, onOffer, meId, browse = false, marked, onAction, actionLabel, zBase = 80 }) {
+  const [sort, setSort] = useState(browse ? 'rarity' : 'recent')
+  const [needle, setNeedle] = useState('')
   const [filter, setFilter] = useState('all')
   const [page, setPage] = useState(0)
   const [open, setOpen] = useState(null)
@@ -251,30 +279,35 @@ export default function CardGallery({ cards, totals, club, accent, display = DEF
     const out = { special: 0, doubles: 0 }
     for (const c of cards) {
       if (c.kind === 'special') { out.special += 1; const k = CAT_OF[c.special_kind]; out[k] = (out[k] || 0) + 1 }
-      if ((c.copies || 1) > 1) out.doubles += 1
+      if (countOf(c, browse) > 1) out.doubles += 1
     }
     return out
-  }, [cards])
+  }, [cards, browse])
   const filters = useMemo(() => [
     { key: 'all', label: 'All' },
     { key: 'regular', label: 'Players' },
     ...(counts.special ? [{ key: 'special', label: 'Specials', n: counts.special }] : []),
     ...CATEGORIES.filter((c) => counts[c.key]).map((c) => ({ key: c.key, label: c.label, n: counts[c.key] })),
-    { key: 'doubles', label: 'Doubles', n: counts.doubles },
-  ], [counts])
+    ...(browse ? [] : [{ key: 'doubles', label: 'Doubles', n: counts.doubles }]),
+  ], [counts, browse])
 
+  const shownCards = useMemo(() => {
+    const words = needle.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (!words.length) return cards
+    return cards.filter((c) => { const hay = `${c.name} ${c.title || ''} ${(c.detail && (c.detail.season || c.detail.grade)) || ''}`.toLowerCase(); return words.every((w) => hay.includes(w)) })
+  }, [cards, needle])
   const list = useMemo(() => {
-    const items = buildItems(cards, { filter, sort, meId })
+    const items = buildItems(shownCards, { filter, sort, meId })
     // Grey slots are for the players still to find. Special cards are counted in the header instead.
-    const empties = (filter === 'all' || filter === 'regular') ? Math.max(0, (totals?.regular_total || 0) - owned) : 0
+    const empties = !browse && (filter === 'all' || filter === 'regular') ? Math.max(0, (totals?.regular_total || 0) - owned) : 0
     return [...items, ...Array.from({ length: empties }, (_, i) => ({ empty: true, key: `empty-${i}` }))]
-  }, [cards, filter, sort, totals, owned, meId])
+  }, [shownCards, filter, sort, totals, owned, meId, browse])
 
   const slotsPerSpread = perPage * pagesShown
   const spreads = Math.max(1, Math.ceil(list.length / slotsPerSpread))
   const at = Math.min(page, spreads - 1)
   useEffect(() => { if (page > spreads - 1) setPage(spreads - 1) }, [page, spreads])
-  useEffect(() => { setPage(0) }, [sort, filter, mode])
+  useEffect(() => { setPage(0) }, [sort, filter, mode, needle])
 
   const turn = (dir) => {
     const next = Math.max(0, Math.min(spreads - 1, at + dir))
@@ -306,6 +339,16 @@ export default function CardGallery({ cards, totals, club, accent, display = DEF
   return (
     <div data-card-gallery ref={hostRef} style={{ width: '100%' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        {browse ? (
+          <div style={{ minWidth: 0, flex: '1 1 200px' }}>
+            <div data-browse-count style={{ font: `700 12px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase' }}>
+              {needle.trim() ? `${shownCards.length} of ${cards.length}` : cards.length} {cards.length === 1 ? 'card' : 'cards'}
+              {marked?.size > 0 && <span style={{ opacity: 0.7 }}>  ·  {marked.size} picked</span>}
+            </div>
+            <input value={needle} onChange={(e) => setNeedle(e.target.value)} placeholder="Search these cards" aria-label="Search these cards" data-gallery-search
+              style={{ width: '100%', boxSizing: 'border-box', marginTop: 6, background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.25)', borderRadius: 10, padding: '8px 12px', color: 'inherit', fontSize: 15 }} />
+          </div>
+        ) : (
         <div style={{ minWidth: 0, flex: '1 1 200px' }}>
           <div data-collected style={{ font: `700 12px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase' }}>
             Collected {owned} / {totals?.regular_total ?? 0}
@@ -315,10 +358,11 @@ export default function CardGallery({ cards, totals, club, accent, display = DEF
             <div style={{ width: `${pct}%`, height: '100%', background: accent }} />
           </div>
         </div>
+        )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <span style={{ opacity: 0.7 }}>Sort</span>
           <select aria-label="Sort cards" value={sort} onChange={(e) => setSort(e.target.value)} style={sel} data-gallery-sort>
-            {sortKeys.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            {sortKeys.filter((s) => !browse || s.key !== 'recent').map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
           </select>
         </label>
       </div>
@@ -341,13 +385,21 @@ export default function CardGallery({ cards, totals, club, accent, display = DEF
                 <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, ${cardW}px)`, gap, justifyContent: 'center' }}>
                   {slots.map((c) => {
                     if (c.empty) return <EmptySlot key={c.key} width={cardW} />
-                    if (c.stack) return <StackSlot key={c.key} item={c} width={cardW} club={club} accent={accent} display={display} sponsor={sponsor} onOpen={setStack} />
-                    return (
-                      <button key={c.key} type="button" onClick={() => setOpen(c)} data-slot-card={c.key} data-tier={c.tier} aria-label={`${c.name}${c.kind === 'special' ? `, ${c.title}` : `, ${(TIERS[c.tier] || TIERS.common).label}`}${(c.copies || 1) > 1 ? `, ${c.copies} copies` : ''}`}
-                        style={{ position: 'relative', padding: 0, border: 0, background: 'none', cursor: 'pointer', width: cardW, height: cardW * (CARD_H / CARD_W), flex: 'none', textAlign: 'left' }}>
+                    if (c.stack) return <StackSlot key={c.key} item={c} width={cardW} club={club} accent={accent} display={display} sponsor={sponsor} onOpen={setStack} marked={marked} />
+                    const dot = browse && onAction
+                    const slot = (
+                      <button key={dot ? undefined : c.key} type="button" onClick={() => setOpen(c)} data-slot-card={c.key} data-tier={c.tier} aria-label={`${c.name}${c.kind === 'special' ? `, ${c.title}` : `, ${(TIERS[c.tier] || TIERS.common).label}`}${countOf(c, browse) > 1 ? `, ${countOf(c, browse)} ${browse ? 'could go' : 'copies'}` : ''}${marked?.has(c.key) ? ', picked' : ''}`}
+                        style={{ position: 'relative', padding: 0, border: 0, background: 'none', cursor: 'pointer', width: cardW, height: cardW * (CARD_H / CARD_W), flex: 'none', textAlign: 'left', outline: marked?.has(c.key) ? `3px solid ${accent}` : 'none', outlineOffset: 2, borderRadius: cardW * 0.07 }}>
                         <ScaledCard width={cardW}><CardView card={c} club={club} accent={accent} display={display} sponsor={sponsor} /></ScaledCard>
-                        {(c.copies || 1) > 1 && <span data-copies style={{ position: 'absolute', right: 6, bottom: '22%', padding: '1px 7px', borderRadius: 999, background: '#0b1018', border: '1px solid rgba(255,255,255,.5)', color: '#fff', font: `700 11px ${MONO}` }}>×{c.copies}</span>}
+                        {countOf(c, browse) > 1 && <span data-copies style={{ position: 'absolute', right: 6, bottom: '22%', padding: '1px 7px', borderRadius: 999, background: '#0b1018', border: '1px solid rgba(255,255,255,.5)', color: '#fff', font: `700 11px ${MONO}` }}>×{countOf(c, browse)}</span>}
                       </button>
+                    )
+                    if (!dot) return slot
+                    return (
+                      <div key={c.key} style={{ position: 'relative', width: cardW, height: cardW * (CARD_H / CARD_W), flex: 'none' }}>
+                        {slot}
+                        <PickDot on={!!marked?.has(c.key)} accent={accent} name={c.kind === 'special' ? `${c.name}, ${c.title}` : c.name} onClick={() => onAction(c)} />
+                      </div>
                     )
                   })}
                 </div>
@@ -363,10 +415,11 @@ export default function CardGallery({ cards, totals, club, accent, display = DEF
         <span style={{ font: `600 11px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase', opacity: 0.8 }} data-gallery-pages>{pagesShown === 2 ? `Pages ${at * 2 + 1}-${at * 2 + 2}` : `Page ${at + 1}`} of {spreads * pagesShown}</span>
         <button type="button" onClick={() => turn(1)} disabled={at >= spreads - 1} data-gallery-next style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--pb-hairline, rgba(255,255,255,.2))', opacity: at >= spreads - 1 ? 0.4 : 1 }}>Next →</button>
       </div>
-      {list.length === 0 && <p style={{ textAlign: 'center', fontSize: 13, opacity: 0.7, marginTop: 10 }}>Nothing here yet.</p>}
+      {list.length === 0 && <p style={{ textAlign: 'center', fontSize: 13, opacity: 0.7, marginTop: 10 }} data-gallery-empty>{browse ? (needle.trim() ? 'No card matches that search.' : 'No cards to show.') : 'Nothing here yet.'}</p>}
 
-      {stack && <StackViewer item={stack} club={club} accent={accent} display={display} sponsor={sponsor} onPick={hold} onClose={() => setStack(null)} />}
-      {open && <Viewer card={open} club={club} accent={accent} display={display} sponsor={sponsor} onClose={() => setOpen(null)} onShare={onShare} onOffer={onOffer} />}
+      {stack && <StackViewer item={stack} club={club} accent={accent} display={display} sponsor={sponsor} onPick={hold} onClose={() => setStack(null)} zIndex={zBase + 1} marked={marked} onToggle={browse ? onAction : null} />}
+      {open && <Viewer card={open} club={club} accent={accent} display={display} sponsor={sponsor} onClose={() => setOpen(null)} onShare={onShare} onOffer={onOffer} browse={browse} zIndex={zBase + 2}
+        action={onAction ? { label: actionLabel ? actionLabel(open) : 'Choose', onClick: (c) => { onAction(c); setOpen(null) }, accent, primary: !marked?.has(open.key) } : null} />}
     </div>
   )
 }
