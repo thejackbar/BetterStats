@@ -117,6 +117,7 @@ async def main() -> None:
 
     async def fake_matches(grade_guid, *a, **k):
         CALLS.append(grade_guid)
+        await asyncio.sleep(0.05)   # latency, so concurrent readers genuinely overlap
         return [{"id": str(m), "round": {"name": r}} for m, r in LISTING.get(grade_guid, [])]
     gr.get_grade_matches = fake_matches
     bfn.async_session_maker = Session
@@ -168,6 +169,37 @@ async def main() -> None:
     await bfn.run("all", apply=True, with_premierships=True, max_grades=400, pause=0)
     check("only the failing grade is asked for again", CALLS == [GUID["W"]], str(CALLS))
     check("no honour changes", [await honours(ORGS[k]) for k in "ABC"] == [2, 0, 2])
+
+    print("\n-- CONCURRENT READERS --")
+    # Re-arm: clear names, honours and the exclusion of E's blip, then read three grades with three workers.
+    async with Session() as s:
+        await s.execute(text("UPDATE games SET round_name = NULL WHERE id <> :d"), {"d": G["GF_D"]})
+        await s.execute(text("DELETE FROM player_achievements"))
+        await s.commit()
+    CALLS.clear()
+    peak = {"now": 0, "max": 0}
+    inner = fake_matches
+
+    async def counting(grade_guid, *a, **k):
+        peak["now"] += 1
+        peak["max"] = max(peak["max"], peak["now"])
+        try:
+            return await inner(grade_guid, *a, **k)
+        finally:
+            peak["now"] -= 1
+    gr.get_grade_matches = counting
+    f = Fetcher(400, 0, 3)
+    await f.read_all([{"guid": g, "grade_name": "x", "season_name": "y"} for g in (GUID["X"], GUID["Y"], GUID["W"], GUID["X"])])
+    check("three grades were read at the same time", peak["max"] == 3, str(peak))
+    check("a grade asked for twice (X) is still one call", sorted(CALLS) == sorted([GUID["X"], GUID["Y"], GUID["W"]]), str(CALLS))
+    check("and every answer is there for whoever asked", f.names.get(str(G["GF_A"])) == "Grand Final"
+          and f.names.get(str(G["GF_C"])) == "Grand Final")
+    peak.update(now=0, max=0)
+    f1 = Fetcher(400, 0, 1)
+    await f1.read_all([{"guid": g, "grade_name": "x", "season_name": "y"} for g in (GUID["X"], GUID["Y"], GUID["W"])])
+    check("--concurrency 1 reads one at a time", peak["max"] == 1, str(peak))
+    f9 = Fetcher(400, 0, 99)
+    check("an absurd --concurrency is capped at the CA client's six", f9._slots._value == 6, str(f9._slots._value))
 
     print(f"\n{h.PASS} passed, {h.FAIL} failed")
     await h.engine.dispose()
