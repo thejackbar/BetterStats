@@ -2,7 +2,7 @@
 
 **Read this before**:
 - Touching `services/player_cards.py`, `player_cards_ddl.py`, `routers/public_player_cards.py`, `routers/player_cards_admin.py`, `components/cards/*`, `CardsModule.jsx`, `AdminPlayerCards.jsx`.
-- Changing what the player page (`/avail/:token`) needs from BetterSelect, or `player_dashboard.py` module defaults.
+- Changing what the player page (`/playerdash/:token`) needs from BetterSelect, or `player_dashboard.py` module defaults.
 - Adding a table that records what a person owns or earned (it goes on `merge_carry.CARRIED`).
 
 **Archive** (full history, do not load whole): `docs/dev-notes/archive/player-cards.md`.
@@ -27,10 +27,12 @@
 14. **The admin view** (`services/player_card_admin.py`) only reads. A card is drawn only for a player in the pool; anyone else appears as a line of text. "Expired" is derived from age and never written.
 15. **Frontend**: card faces are drawn flat at `CARD_W x CARD_H` and scaled with `ScaledCard`. The gallery measures its own width (phone 2x2, tablet 3x2, spread two pages), so the player page's cards section spans every column (`Group wide`). Every animation is off under reduced motion. `innerText` of a card returns capitals (CSS uppercase), write checks that way.
 
+16. **The page** (v9.132.0): Player Cards is `pages/playercards/PlayerCardsApp.jsx` at `/playerdash/:token/cards/*`, rendered by `PublicAvailability` (which does the PIN check) when the path under the token starts with `cards`. Screens: Home, `book`, `club`, `packs`, `swaps` (+ `sent`, `history`, `new`), `how`; shared state is `context.jsx` (cards, packs, swap count, the pack opening overlays live in the shell). Navigation is `nav.jsx`: sidebar at lg, rail at md, bottom bar of five below that, drawn on a dark ground (`data-theme="dark"`) whatever the site theme. A new screen is a route in `PlayerCardsApp`, an entry in `nav.NAV`, and a `data-screen` on its root (the browser suites wait on it). Links are always absolute (`basePath`). The dashboard section is only `CardsSummary`. The dashboard itself moved to `/playerdash/:token`; `/avail/:token/*` is `LegacyAvailRedirect` and must keep working (links are pinned in group chats and on posters); every link the app creates uses `/playerdash`. `playerdash` is on the four reserved-root lists, `clubPath`, and nginx's manifest map. The football silo keeps its own `/avail` route.
+
 ## Verify
 
-- `backend/verification/verify_player_cards.py` on its own database (249 checks); control: run it on the previous commit.
-- `frontend/verification/verify_player_cards_browser.mjs`, `_v2_browser.mjs`, `_v3_browser.mjs` and `_admin_browser.mjs` on the production build (`vite preview`); never rebuild `dist` under a running preview for a long run.
+- `backend/verification/verify_player_cards.py` on its own database (253 checks); control: run it on the previous commit.
+- `frontend/verification/verify_player_cards_browser.mjs`, `_v2_browser.mjs`, `_v3_browser.mjs`, `_page_browser.mjs` (the shell, every address, the three navs) and `_admin_browser.mjs` on the production build (`vite preview`); never rebuild `dist` under a running preview for a long run.
 - Also re-run `verify_merge_carry.py`, `verify_player_page_dashboard.py`, `verify_player_dashboard_and_fines.py`, `audit_route_access.py`.
 
 ## Open follow-ups

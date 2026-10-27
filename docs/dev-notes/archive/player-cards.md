@@ -103,3 +103,16 @@ Asked for: search a particular card and see it "almost exactly the same as your 
 
 Verified: `verify_player_cards.py` (249), the other backend suites, `audit_route_access.py`; browser `_v3_` (65: the exact query for the first window, next page, search, category and sort, badges, holders by key, Ask into a prefilled request) and the three older suites.
 
+## v9.132.0 (2026-10-27): Player Cards as a page of its own, and the dashboard moves to /playerdash
+
+Scope and design: the "Player Cards Page Scope" artifact the club owner approved ("build the plan which I like a lot"). This release is Phase 1 of three: the move, with nothing new in how cards, packs or swaps work.
+
+- Route: the whole player dashboard is `/playerdash/:token`, Player Cards is `/playerdash/:token/cards/*`. `/avail/:token/*` redirects (path, query and hash kept). `playerdash` was added to `og_preview.RESERVED_ROOT_SEGMENTS`, `SponsorFooter` and `Navbar` reserved lists, `clubPath.RESERVED_ROOTS` (which `FaviconManager` reads), nginx's manifest map and App's standalone list. Links the app builds (`clubs.player_page_path`, the self service panel, vote emails, the card admin page) use the new address.
+- `pages/playercards/*`: shell, context, nav (sidebar, rail, bottom bar with a More sheet, a My cards / Club cards switch on phones), Home, MyCards, ClubCards, Packs, Swaps (three tabs and Find a card), NewSwap (the builder as a page: `Builder inline`), HowItWorks. `CardsModule` is gone; `CardsSummary` is the dashboard section. `AllSummary` and `CardPanel` are components of their own.
+- Backend: `GET /me/cards/swaps?history=true` (a year, 100 finished swaps), and `have=not_mine|swappable` on the catalogue.
+- Club cards on a wide screen (1360px and up) holds a card up in a side panel (`CardGallery onHold`, `CardPanel`) instead of over the book.
+
+Verified: `verify_player_cards.py` (253), `verify_merge_carry.py`, `verify_player_page_dashboard.py` and `verify_vote_my_page_link.py` (paths updated), `verify_player_dashboard_and_fines.py`, `audit_route_access.py`; browser `_page_` (54: three navs, every address cold, the old address, unknown address, Home, Packs, How, Swaps tabs and builder, filters, the side panel), `_v3_` (65), `_v2_` (45), `_admin_` (51), the first suite (55: now the dashboard summary, the page and the old address).
+
+Phases 2 and 3 (wish list, spares, card page, counters; sets, showcase, board, feed) follow.
+

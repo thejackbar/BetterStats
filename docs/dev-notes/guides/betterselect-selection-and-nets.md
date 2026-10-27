@@ -5,7 +5,7 @@
 - `services/selection_rules.py`, `selection_pool.py`, `selection_clash.py`, `player_age.py`, `player_kit.py`, `profile_import.py`.
 - Squad membership (`squad_team_id`, `team_members`), marking a player inactive, `directory.set_squad`.
 - Nets live session, batting order, padding up, priority, check-in QR/NFC link, guests, `net_attendance`.
-- Self-service availability link (`/avail/:token`, `bs_avail`).
+- Self-service availability link (`/playerdash/:token`, with `/avail/:token` kept as an alias that redirects; cookie `bs_avail`).
 - Association rules (age, overseas, workload, finals), date of birth, `select_show_age`, shirt number / shirt size / pants size.
 - Symptoms: two devices showing different nets sessions, a player missing at the nets door, Selection header toggle painted over, a 402 naming "admin".
 
@@ -54,7 +54,7 @@
 29. Guests to players: `GET /nets/guests` groups by `_guest_key` (case and outer whitespace only, not fuzzy) and leaves out anyone with a PENDING registration; `POST /nets/guests/promote` moves the WHOLE history, collapses clashes, settles the registration, resolves the key server side. Gate: `require_any_cap` of `MANAGE_SELECTIONS` or `MANAGE_PLAYERS`. `UnrosteredGuests` renders nothing when empty and never calls the endpoint for a club without BetterSelect (402).
 
 **Self-service availability**
-- (v9.130.0) The player page `/avail/:token` is no longer BetterSelect-only: a club without it gets the page for its Player Cards and season, with no availability section (`_club_for_token(need_select=False)`, `has_availability`). The availability write still needs BetterSelect. See `guides/player-cards.md`.
+- (v9.130.0) The player page `/playerdash/:token` (was `/avail/:token`, still redirects) is no longer BetterSelect-only: a club without it gets the page for its Player Cards and season, with no availability section (`_club_for_token(need_select=False)`, `has_availability`). The availability write still needs BetterSelect. See `guides/player-cards.md`.
 30. Unauthenticated router, NOT under `require_module`: resolves the club from `availability_link_token`, checks `org_has_module(club,"select")` and the enabled flag itself (else 404). PIN = last-4 of `Player.phone`; cookie `bs_avail` (~30 days); lockout 5 wrong / 15 min per (token, player, IP) via `rate_limit.FailureTracker`; unknown player counts as a failure.
 31. Self answers are `player_availability` rows with `source='self'`, `recorded_by` NULL; an admin override re-stamps `'admin'`. Admin endpoints `GET/POST /availability/self-service`, `POST .../regenerate` (`MANAGE_SELECTIONS`).
 67. The self-service page (`/avail/:token`) is unauthenticated: its fixtures go through `squad_next_game.fixtures_for_player`, which drops `team_id`/`grade_id` and adds `team_name` and `mine` (the player's own squad, by `fixture_belongs_to_squad`, from `team_members`). Never send internal ids to it. A player in no squad, or any player when the club's `availability_show_squad` switch is off (default off, migration 325), gets no emphasis: the server does not read their squads at all, so nothing about a squad is in the response. The page opens on the first Monday to Sunday week with games and reveals one week per "See more games" tap; "next" is the calendar week, never the fixture `round` (grades run different rounds the same weekend). Check: `verify_squad_next_game.py` and `verify_public_availability_layout_browser.mjs`.
