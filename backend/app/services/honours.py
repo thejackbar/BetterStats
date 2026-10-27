@@ -77,6 +77,7 @@ _SQUAD_ROLE_PRIORITY = {
     "vice captain": 1,
     "player of the grand final": 2,
     "player of the final": 2,
+    "player of the match": 2,
     "best on ground — grand final": 2,
     "best on ground - grand final": 2,
     "coach": 3,
@@ -220,17 +221,27 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID,
     rows = await _rows(db, org_id, PREMIERSHIP_CATEGORY)
     renames = await _renames(db, org_id)
 
-    groups: dict[tuple, dict] = {}
+    prepared = []
     for r in rows:
         if not r["name"]:
             continue
-        season = season_label(r["season_name"])
         team = (r["subcategory"] or "").strip()
         # The club's own label for this award, where it has renamed one.
         label = (renames.get((PREMIERSHIP_CATEGORY, team, r["achievement"]))
                  or r["achievement"] or "").strip()
-        is_flag = is_premiership_award(label)
-        key = ((season or "").lower(), team.lower(), label.lower() if is_flag else "")
+        prepared.append((r, team, label, is_premiership_award(label)))
+    # The flag rows first, so a card is named for its flag and a role row (12th Man, Player of the Match)
+    # joins a card that already exists rather than starting its own.
+    prepared.sort(key=lambda t: not t[3])
+
+    groups: dict[tuple, dict] = {}
+    for r, team, label, is_flag in prepared:
+        season = season_label(r["season_name"])
+        # Every row linked to one scorecard is ONE card, whatever each row's own wording: a typed flag and
+        # the roles added to it from the squad editor belong to the same game.
+        gid = game_links.get(r["id"]) if game_links else None
+        key = (("\0game", gid, "x") if gid
+               else ((season or "").lower(), team.lower(), label.lower() if is_flag else ""))
         g = groups.get(key)
         if g is None:
             g = groups[key] = {
@@ -291,6 +302,10 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID,
     out = []
     for g in groups.values():
         players = list(g["players"].values())
+        for pl in players:
+            # "Captain" typed in the note beside a row that is also a Captain award is one part, said once.
+            if pl["detail"] and pl["detail"].strip().lower() in {x.strip().lower() for x in pl["roles"]}:
+                pl["detail"] = None
         players.sort(key=lambda p: (
             # A part played counts however the club recorded it — as its own
             # award row, or typed into the note as "Player of the Match /

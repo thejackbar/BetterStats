@@ -83,7 +83,7 @@ Asked for: "you should be able to trade multiple cards at once so you can add as
 
 Verified: `verify_player_cards.py` (220; the control on the previous commit fails the award checks and stops at the first multi-card request), `verify_merge_carry.py`, the two player page suites, `audit_route_access.py`; browser `verify_player_cards_browser.mjs` (51), `_v2_` (46), `_admin_` (51), and `_v3_` (30: trays, counts, limits, the exact body posted, a long request at 390px).
 
-## v9.131.4 (2026-10-27): browse other players' cards, and find who has a card
+## v9.131.5 (2026-10-27): browse other players' cards, and find who has a card
 
 Asked for: "make a gallery where you can see another player's cards in the same way you can see your own cards and sort them", and "search cards to see if anyone has pulled that card so you can find specific people and request swaps".
 
@@ -93,7 +93,7 @@ Asked for: "make a gallery where you can see another player's cards in the same 
 
 Verified: `verify_player_cards.py` (231), the other backend suites, `audit_route_access.py`; browser `_v3_` (47: book sort, search, paging, quick pick and viewer action, find with the exact query, 390px and 1280), `_v2_` (46), `_admin_` (51), the first suite (51).
 
-## v9.131.5 (2026-10-27): the Club cards tab
+## v9.131.6 (2026-10-27): the Club cards tab
 
 Asked for: search a particular card and see it "almost exactly the same as your own gallery", without having to start a trade, "sort of like the admin section has".
 

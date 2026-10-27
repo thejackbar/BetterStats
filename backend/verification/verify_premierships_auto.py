@@ -43,6 +43,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.db import Base, Organisation
+from app.services.session_safety import rollback_keeping
 from app.services import honours
 from app.routers import achievements as ach_router
 from app.routers import honours as honours_router
@@ -174,6 +175,15 @@ async def seed(conn) -> None:
                                              achievement, detail)
             VALUES (:o,:p,:n,:s,:c,:sub,:a,:d)"""),
             {"o": OURS, "p": P[k], "n": NAME[k], "s": season, "c": cat, "sub": sub, "a": ach, "d": detail})
+
+
+async def _expect_err(prem, db, club, game, pid):
+    from app.services.session_safety import rollback_keeping
+    try:
+        return await prem.edit_squad(db, club, game_id=game, action="add", player_id=pid, role="12th Man")
+    except Exception as e:
+        await rollback_keeping(db, club)
+        return e
 
 
 async def rows(db, org=None, **where) -> list[dict]:
@@ -412,6 +422,171 @@ async def main() -> None:
         rows_cache[0] = await rows(db)
         check("switched back off: they return", kids() == {P["kid1"], P["kid2"]}, str(kids()))
 
+        # ── 9c. flags typed by team and competition (Applecross) ──────────
+        print("\n9c. Typed by team and competition: no duplicate card")
+        S16, S21, S22 = u(), u(), u()
+        GR2, GRPS, GRA, GRB = u(), u(), u(), u()
+        G1, G2, G3A, G3B = u(), u(), u(), u()
+        for sid, nm, yr in ((S16, "2016/17", 2016), (S21, "2021/22", 2021), (S22, "2022/23", 2022)):
+            await db.execute(text("INSERT INTO seasons (id, organisation_id, name, year) VALUES (:i,:o,:n,:y)"),
+                             {"i": sid, "o": OURS, "n": nm, "y": yr})
+        for gid, sid, nm in ((GR2, S16, "2nd Grade"), (GRPS, S21, "PSWL South A"), (GRA, S22, "A Grade"), (GRB, S22, "B Grade")):
+            await db.execute(text("INSERT INTO grades (id, season_id, name) VALUES (:i,:s,:n)"), {"i": gid, "s": sid, "n": nm})
+        for gid, gr_, d in ((G1, GR2, date(2017, 3, 11)), (G2, GRPS, date(2022, 3, 12)),
+                            (G3A, GRA, date(2023, 3, 11)), (G3B, GRB, date(2023, 3, 12))):
+            await db.execute(text("""INSERT INTO games (id, grade_id, played_at, home_team, away_team, home_org_id, away_org_id,
+                                     winning_team, is_final, round_name, status)
+                                     VALUES (:g,:gr,:d,'Leederville F','Rivals F',:o,:t,'Leederville F',true,'Grand Final','COMPLETED')"""),
+                             {"g": gid, "gr": gr_, "d": d, "o": OURS, "t": OTHER})
+
+        async def newp(label):
+            pid = u()
+            await db.execute(text("INSERT INTO players (id, name, organisation_id) VALUES (:i,:n,:o)"),
+                             {"i": pid, "n": label, "o": OURS})
+            return pid
+
+        async def sheet(game, pid):
+            await db.execute(text("INSERT INTO game_appearances (game_id, player_id, team_name) VALUES (:g,:p,'Leederville F')"),
+                             {"g": game, "p": pid})
+
+        async def typed(pid, name, season, sub, ach, detail=None):
+            await db.execute(text("""INSERT INTO player_achievements (org_id, player_id, player_name, season, category, subcategory,
+                                     achievement, detail) VALUES (:o,:p,:n,:s,'Premiership',:sub,:a,:d)"""),
+                             {"o": OURS, "p": pid, "n": name, "s": season, "sub": sub, "a": ach, "d": detail})
+
+        a1, a2, a3 = await newp("Ann One"), await newp("Ann Two"), await newp("Ann Three")
+        crowd = [await newp(f"Crowd {i}") for i in range(8)]
+        for pid in [a1, a2, a3, *crowd]:
+            await sheet(G1, pid)
+        b1, b2 = await newp("Bea One"), await newp("Bea Two")
+        for pid in (b1, b2):
+            await sheet(G2, pid)
+        c1, c2 = await newp("Cy One"), await newp("Cy Two")
+        for pid in (c1, c2):
+            await sheet(G3A, pid); await sheet(G3B, pid)
+        await db.commit()
+
+        # The state production is in: the automatic rows exist FIRST, then the typed ones are seen.
+        await prem.reconcile(db, OURS, apply=True)
+        mine = lambda pid, **kw: [r for r in rows_cache9c[0] if r["player_id"] == pid and (not kw or all(r[k] == v for k, v in kw.items()))]
+        rows_cache9c = [await rows(db)]
+        check("before the typed flags are seen, every player has an automatic honour (two for a double winner)",
+              all(len(mine(p_)) == 1 and mine(p_)[0]["auto_created"] for p_ in (a1, a2, a3, b1, b2, *crowd))
+              and all(len(mine(p_)) == 2 and all(r["auto_created"] for r in mine(p_)) for p_ in (c1, c2)))
+
+        await typed(a1, "Ann One", "2016/17", "1st XI", "2nd Grade One Day Premiership")
+        await typed(a1, "Ann One", "2016/17", "1st XI", "2nd Grade Two Day Premiership")
+        await typed(a2, "Ann Two", "2016/17", "1st XI", "2nd Grade One Day Premiership", "Captain / Player of the Match")
+        for pid in crowd:
+            await typed(pid, "Crowd", "2016/17", "1st XI", "2nd Grade Two Day Premiership")
+        await typed(b1, "Bea One", "2021/22", "Womens A", "PSWL South Premiership")
+        await typed(None, "Bea Two", "2021/22", "Womens A", "PSWL South Premiership")
+        await typed(c1, "Cy One", "2022/23", "1st XI", "Premiership")
+        await db.commit()
+        n_typed = len(await rows(db, auto_created=False))
+        rep = await prem.reconcile(db, OURS, apply=True)
+        rows_cache9c[0] = await rows(db)
+
+        check("two typed flags (One Day, Two Day) for one win: the automatic duplicate is gone, both typed stay",
+              len(mine(a1)) == 2 and not any(r["auto_created"] for r in mine(a1)), str(mine(a1)))
+        check("a typed flag naming the grade is linked to the scorecard, its wording untouched",
+              len(mine(a2)) == 1 and mine(a2)[0]["linked_game_id"] == G1 and mine(a2)[0]["detail"] == "Captain / Player of the Match"
+              and not mine(a2)[0]["auto_created"], str(mine(a2)))
+        check("a player with no typed flag keeps the automatic honour", len(mine(a3)) == 1 and mine(a3)[0]["auto_created"])
+        check("eight more typed players: all eight automatic duplicates go in one run (not held back as a damaged read)",
+              all(len(mine(p_)) == 1 and not mine(p_)[0]["auto_created"] for p_ in crowd) and not rep.get("delete_blocked"),
+              str({k: rep.get(k) for k in ("supersede", "delete_blocked")}))
+        check("a competition named PSWL South matches the grade PSWL South A, one honour each",
+              len(mine(b1)) == 1 and mine(b1)[0]["linked_game_id"] == G2 and not mine(b1)[0]["auto_created"], str(mine(b1)))
+        bea2 = [r for r in rows_cache9c[0] if r["player_name"] == "Bea Two" and r["category"] == "Premiership"]
+        check("a typed row with no player id is matched by name and linked",
+              len(bea2) == 1 and bea2[0]["linked_game_id"] == G2 and not bea2[0]["auto_created"]
+              and len(mine(b2)) == 0, str((bea2, mine(b2))))
+        check("one typed flag against two wins it does not name: nothing is guessed (both automatic rows stay, the "
+              "typed one is untouched and unlinked) and the run says it was ambiguous",
+              len(mine(c1)) == 3 and [r["auto_created"] for r in mine(c1)].count(False) == 1
+              and [r for r in mine(c1) if not r["auto_created"]][0]["linked_game_id"] is None
+              and rep.get("ambiguous", 0) >= 2, f"{len(mine(c1))} rows, ambiguous={rep.get('ambiguous')}")
+        check("a player with the same two wins and no typed flag gets both honours",
+              len(mine(c2)) == 2 and all(r["auto_created"] for r in mine(c2)), str(mine(c2)))
+        check("no typed row was deleted or edited", len(await rows(db, auto_created=False)) == n_typed)
+        rep2 = await prem.reconcile(db, OURS, apply=True)
+        check("a second run changes nothing", all(rep2.get(k) == 0 for k in ("create", "supersede", "link", "delete")), str(rep2))
+
+        # ── 9d. the squad editor ──────────────────────────────────────────
+        print("\n9d. Squad editor")
+        S30, GRE, GE = u(), u(), u()
+        await db.execute(text("INSERT INTO seasons (id, organisation_id, name, year) VALUES (:i,:o,'2030/31',2030)"), {"i": S30, "o": OURS})
+        await db.execute(text("INSERT INTO grades (id, season_id, name) VALUES (:i,:s,'E Grade')"), {"i": GRE, "s": S30})
+        await db.execute(text("""INSERT INTO games (id, grade_id, played_at, home_team, away_team, home_org_id, away_org_id, winning_team,
+                                 is_final, round_name, status) VALUES (:g,:gr,:d,'Leederville F','Rivals F',:o,:t,'Leederville F',true,
+                                 'Grand Final','COMPLETED')"""), {"g": GE, "gr": GRE, "d": date(2031, 3, 15), "o": OURS, "t": OTHER})
+        e1, e2, e3, e4, e5 = [await newp(f"Edie {i}") for i in range(1, 6)]
+        foreign = u()
+        await db.execute(text("INSERT INTO players (id, name, organisation_id) VALUES (:i,'Someone Else',:o)"), {"i": foreign, "o": OTHER})
+        for pid in (e1, e2, e3):
+            await sheet(GE, pid)
+        await db.commit()
+        await prem.reconcile(db, OURS, apply=True)
+        club = (await db.execute(select(Organisation).where(Organisation.id == OURS))).scalar_one()
+
+        async def card():
+            links_ = await prem.achievement_game_links(db, OURS)
+            data_ = await honours.premiership_squads(db, OURS, game_links=links_)
+            cs = [c for c in data_["premierships"] if c.get("game_id") == str(GE)]
+            return cs, ({p_["name"]: p_ for p_ in cs[0]["players"]} if cs else {})
+
+        async def edit(**kw):
+            try:
+                return await prem.edit_squad(db, club, game_id=GE, **kw)
+            except Exception as e:
+                await rollback_keeping(db, club)   # rule 12: a rollback expires `club`
+                return e
+        SquadEditError = getattr(prem, "SquadEditError", ValueError)
+
+        cs, byname = await card()
+        check("the new grand final is one card of three", len(cs) == 1 and set(byname) == {"Edie 1", "Edie 2", "Edie 3"}, str(byname.keys()))
+        r = await edit(action="role", player_id=e1, role="Player of the Match", on=True)
+        cs, byname = await card()
+        check("Player of the Match is marked on a player who played", byname["Edie 1"]["roles"] == ["Player of the Match"], str(byname["Edie 1"]))
+        r = await edit(action="add", player_id=e4, role="12th Man")
+        cs, byname = await card()
+        check("a 12th Man is added to the card without a flag of their own",
+              byname.get("Edie 4", {}).get("roles") == ["12th Man"] and len(await rows(db, player_id=e4, achievement="Premiership")) == 0,
+              str(byname.get("Edie 4")))
+        check("and the card is still ONE card, now of four", len(cs) == 1 and cs[0]["player_count"] == 4, str(cs[0]["player_count"]))
+        await edit(action="add", player_id=e5)
+        cs, byname = await card()
+        check("somebody who played and was missed by the sheet is added as a squad member",
+              "Edie 5" in byname and len(await rows(db, player_id=e5, achievement="Premiership")) == 1)
+
+        check("Player of the Match for a 12th Man is refused (they did not play)",
+              isinstance(await edit(action="role", player_id=e4, role="Player of the Match", on=True), SquadEditError))
+        check("a player from another club is refused", isinstance(await edit(action="add", player_id=foreign, role="12th Man"), SquadEditError))
+        check("an unknown role is refused", isinstance(await edit(action="role", player_id=e1, role="Man of Steel", on=True), SquadEditError))
+        check("a game that is not a premiership card is refused",
+              isinstance(await _expect_err(prem, db, club, G_SEMI, e1), SquadEditError))
+
+        rep = await prem.reconcile(db, OURS, apply=True)
+        cs, byname = await card()
+        check("a sync after the edits removes nothing the club added and adds nothing twice",
+              set(byname) == {"Edie 1", "Edie 2", "Edie 3", "Edie 4", "Edie 5"} and byname["Edie 1"]["roles"] == ["Player of the Match"]
+              and byname["Edie 4"]["roles"] == ["12th Man"], str(byname.keys()))
+
+        await edit(action="remove", player_id=e2)
+        await prem.reconcile(db, OURS, apply=True)
+        cs, byname = await card()
+        check("a player taken off the card stays off after the next sync", "Edie 2" not in byname and "Edie 3" in byname)
+        await edit(action="role", player_id=e1, role="Player of the Match", on=False)
+        await edit(action="remove", player_id=e4)
+        cs, byname = await card()
+        check("a role can be unmarked, and a 12th Man removed entirely",
+              byname["Edie 1"]["roles"] == [] and "Edie 4" not in byname)
+        route = await honours_router.get_premierships(OURS, db)
+        c = [x for x in route["premierships"] if x.get("game_id") == str(GE)]
+        check("the public route shows the edited card with its scorecard link and opponent",
+              len(c) == 1 and (c[0].get("game") or {}).get("opponent") == "Rivals F")
+
         # ── 10. a damaged read does not wipe a club ──────────────────────
         print("\n10. Mass-removal guard")
         for i in range(8):
@@ -424,8 +599,7 @@ async def main() -> None:
         await prem.reconcile(db, OURS, apply=True)
         total_auto = len([r for r in await rows(db) if r["auto_created"]])
         # The home side's id is cleared, as a half-finished rebuild might leave it.
-        await db.execute(text("UPDATE games SET home_org_id = NULL WHERE id = ANY(:ids)"),
-                         {"ids": [G_GF, G_GF23, G_SPRING, G_SUMMER]})
+        await db.execute(text("UPDATE games SET home_org_id = NULL WHERE home_org_id = :o"), {"o": OURS})
         await db.commit()
         rep = await prem.reconcile(db, OURS, apply=True)
         check("a read that would remove most of the club's honours removes none",
