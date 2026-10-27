@@ -43,13 +43,16 @@ WHERE (o.slug ILIKE '%' || :'club' || '%' OR o.name ILIKE '%' || :'club' || '%')
 ORDER BY s.year DESC, g.name;
 
 -- Every later step works from this one temp table: the club's games in the
--- chosen grade and year, owned by the club's season OR played by it as a side.
+-- chosen grade and year, filed under the club's season OR played by it as a side.
+-- A fixture between two synced clubs is ONE row filed under whichever club synced
+-- first, so the club's own grade list can miss its finals; the side columns find them.
 CREATE TEMP TABLE t_games AS
 SELECT g.id, g.played_at, gr.name AS grade, s.year, g.round_name, g.is_final,
        g.status, g.ca_called_off, g.home_team, g.away_team,
        g.home_org_id, g.away_org_id, g.opp_org_id, g.opp_club_name,
        g.result, g.winning_team, g.innings_totals,
        o.id AS club_id, o.name AS club_name,
+       (SELECT fo.name FROM organisations fo WHERE fo.id = s.organisation_id) AS filed_under,
        CASE
          WHEN g.home_org_id = o.id THEN 'home'
          WHEN g.away_org_id = o.id THEN 'away'
@@ -57,9 +60,11 @@ SELECT g.id, g.played_at, gr.name AS grade, s.year, g.round_name, g.is_final,
          WHEN g.away_club ILIKE '%' || :'club' || '%' THEN 'away'
        END AS club_side
 FROM organisations o
-JOIN seasons s ON s.organisation_id = o.id
-JOIN grades gr ON gr.season_id = s.id
-JOIN games g ON g.grade_id = gr.id
+JOIN games g ON g.home_org_id = o.id OR g.away_org_id = o.id
+             OR g.grade_id IN (SELECT gx.id FROM grades gx JOIN seasons sx ON sx.id = gx.season_id
+                               WHERE sx.organisation_id = o.id)
+JOIN grades gr ON gr.id = g.grade_id
+JOIN seasons s ON s.id = gr.season_id
 WHERE (o.slug ILIKE '%' || :'club' || '%' OR o.name ILIKE '%' || :'club' || '%')
   AND gr.name ILIKE :'grade'
   AND s.year = :year;
@@ -77,7 +82,7 @@ SELECT t.*,
 FROM t_games t;
 
 \echo '== 3. Every game the club played in that grade and season, as stored'
-SELECT played_at, round_name, is_final AS fin, status, ca_called_off AS called_off,
+SELECT played_at, round_name, is_final AS fin, status, ca_called_off AS called_off, filed_under,
        home_team, away_team, club_side,
        result AS stored_result, winning_team AS stored_winner,
        by_winner_name, COALESCE(by_winner_name, result) AS what_page_shows,
