@@ -8,6 +8,8 @@ import ClubPinGate from './ClubPinGate'
 import { Label, PageHeader, PbSpinner } from '../lib/presskit'
 import { useNameFormat } from '../lib/nameFormat'
 import { useSectionNames } from '../lib/sectionNames'
+import { useAuth } from '../contexts/AuthContext'
+import { CAP } from '../lib/capabilities'
 
 // Every flag the club has recorded, as the squad that won it — read out of the
 // Premiership awards already sitting on players' profiles, so a club that has
@@ -83,6 +85,94 @@ function fmtDay(iso) {
   return `${d} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]} ${y}`
 }
 
+// What an admin can mark on a player of a card. A 12th or 13th man did not play: the mark alone puts them on it.
+const ROLES = ['Player of the Match', '12th Man', '13th Man']
+
+// Edits one premiership card in place: who is on it and what each person did. Only for a card linked to a
+// scorecard; a flag typed in by hand is edited from Admin, Awards. Every change is saved as it is made.
+function SquadEditor({ card, orgId, fmt, onChanged }) {
+  const [roster, setRoster] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [pick, setPick] = useState('')
+  const [pickRole, setPickRole] = useState('')
+
+  useEffect(() => {
+    let live = true
+    api.listPlayers(orgId).then(r => { if (live) setRoster(r || []) }).catch(() => { if (live) setRoster([]) })
+    return () => { live = false }
+  }, [orgId])
+
+  const send = async (body) => {
+    setBusy(true); setError(null)
+    try {
+      await api.editPremiershipSquad(orgId, { game_id: card.game_id, ...body })
+      await onChanged()
+    } catch (e) {
+      setError(e.message || 'That change could not be saved')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onCard = new Set(card.players.map(p => p.player_id).filter(Boolean))
+  const candidates = (roster || []).filter(p => !onCard.has(p.id))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+  const has = (pl, role) => (pl.roles || []).some(r => r.trim().toLowerCase() === role.toLowerCase())
+
+  return (
+    <div className="px-4 sm:px-5 py-4 pb-hairline-t bg-pb-surface2/30" data-testid="squad-editor">
+      <ul className="grid gap-y-2">
+        {card.players.map(pl => (
+          <li key={pl.player_id || pl.name} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="min-w-0 flex-1 basis-40 truncate text-[13px]" title={pl.name}>{fmt(pl.name)}</span>
+            <span className="flex flex-wrap gap-1.5">
+              {ROLES.map(role => {
+                const on = has(pl, role)
+                return (
+                  <button key={role} type="button" disabled={busy || !pl.player_id} aria-pressed={on}
+                          onClick={() => send({ action: 'role', player_id: pl.player_id, role, on: !on })}
+                          className="px-2 py-0.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline disabled:opacity-50"
+                          style={on ? { background: 'var(--pb-accent)', color: 'var(--pb-bg)', borderColor: 'var(--pb-accent)' } : undefined}>
+                    {role}
+                  </button>
+                )
+              })}
+              <button type="button" disabled={busy || !pl.player_id}
+                      onClick={() => { if (window.confirm(`Take ${fmt(pl.name)} off this premiership?`)) send({ action: 'remove', player_id: pl.player_id }) }}
+                      className="px-2 py-0.5 rounded font-mono text-[10px] text-pb-red/80 hover:text-pb-red disabled:opacity-50"
+                      aria-label={`Remove ${pl.name}`}>
+                Remove
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <select value={pick} onChange={e => setPick(e.target.value)} aria-label="Player to add"
+                className="min-w-0 max-w-full bg-pb-surface2 pb-hairline rounded px-3 py-1.5 text-sm text-pb-text">
+          <option value="">{roster === null ? 'Loading players…' : 'Add a player…'}</option>
+          {candidates.map(p => <option key={p.id} value={p.id}>{fmt(p.name)}</option>)}
+        </select>
+        <select value={pickRole} onChange={e => setPickRole(e.target.value)} aria-label="Their part"
+                className="bg-pb-surface2 pb-hairline rounded px-3 py-1.5 text-sm text-pb-text">
+          <option value="">Played</option>
+          <option value="12th Man">12th Man</option>
+          <option value="13th Man">13th Man</option>
+        </select>
+        <button type="button" disabled={busy || !pick}
+                onClick={async () => { await send({ action: 'add', player_id: pick, role: pickRole || null }); setPick(''); setPickRole('') }}
+                className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
+                style={{ background: 'var(--pb-accent)' }}>
+          Add
+        </button>
+      </div>
+      {error && <p className="mt-2 text-[12px] text-pb-red" role="alert">{error}</p>}
+    </div>
+  )
+}
+
 export default function Premierships() {
   const { clubSlug } = useParams()
   const sec = useSectionNames(clubSlug)
@@ -93,6 +183,11 @@ export default function Premierships() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [team, setTeam] = useState(null)
+  const { hasCapability } = useAuth()
+  const canEdit = hasCapability(CAP.MANAGE_AWARDS)
+  const [editing, setEditing] = useState(null)   // the game id of the card being edited
+
+  const reload = () => api.getPremierships(orgId).then(setData).catch(() => {})
 
   useEffect(() => {
     if (!orgId) return
@@ -170,6 +265,13 @@ export default function Premierships() {
                       </span>
                     )}
                     <span className="sm:ml-auto flex items-baseline gap-3 font-mono text-[11px] text-pb-faint whitespace-nowrap">
+                      {canEdit && p.game_id && (
+                        <button type="button" onClick={() => setEditing(editing === p.game_id ? null : p.game_id)}
+                                aria-expanded={editing === p.game_id} className="hover:underline"
+                                style={{ color: 'var(--pb-accent)' }}>
+                          {editing === p.game_id ? 'Done' : 'Edit squad'}
+                        </button>
+                      )}
                       {p.game_id && (
                         <Link to={`/games/${p.game_id}?org=${orgId}`}
                               className="hover:underline" style={{ color: 'var(--pb-accent)' }}>
@@ -179,12 +281,16 @@ export default function Premierships() {
                       <span>{p.player_count} player{p.player_count === 1 ? '' : 's'}</span>
                     </span>
                   </div>
+                  {editing === p.game_id && p.game_id
+                    ? <SquadEditor card={p} orgId={orgId} fmt={fmt} onChanged={reload} />
+                    : (
                   <ul className="px-4 sm:px-5 py-4 grid gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-2 lg:grid-cols-3">
                     {p.players.map(pl => (
                       <PlayerLine key={pl.player_id || pl.name} player={pl}
                                   logoUrl={club?.logo_url} fmt={fmt} />
                     ))}
                   </ul>
+                    )}
                 </div>
               ))}
             </div>

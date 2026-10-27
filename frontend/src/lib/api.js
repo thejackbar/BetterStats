@@ -3241,6 +3241,9 @@ export const api = {
   // The clubs that recorded a premiership off this scorecard (the scorecard banner).
   getGamePremierships: (gameId) => request(`/honours/games/${gameId}/premierships`),
   // What the automatic premierships would write for the signed-in club, and writing them.
+  // Mark Player of the Match / 12th Man / 13th Man on a premiership card, add or remove a player.
+  editPremiershipSquad: (orgId, body) =>
+    request(`/honours/${orgId}/premierships/squad`, { method: 'POST', body: JSON.stringify(body) }),
   previewAutoPremierships: (orgId) => request(`/honours/${orgId}/premierships/auto`),
   applyAutoPremierships: (orgId) => request(`/honours/${orgId}/premierships/auto`, { method: 'POST' }),
   getOfficeBearers: (orgId) => request(`/honours/${orgId}/office-bearers`),
