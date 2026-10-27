@@ -11,7 +11,7 @@ import csv
 import logging
 
 from app.models.db import get_db
-from app.services import office_bearers
+from app.services import office_bearers, premierships
 from app.services.import_ingest import match_players
 
 logger = logging.getLogger(__name__)
@@ -171,7 +171,8 @@ async def list_achievements(
                    COALESCE(s.name, pa.season) AS season,
                    COALESCE(se.name, pa.season_end) AS season_end,
                    pa.category, pa.subcategory,
-                   pa.achievement, pa.detail, pa.created_at
+                   pa.achievement, pa.detail, pa.created_at,
+                   pa.linked_game_id AS game_id, pa.auto_created
             FROM player_achievements pa
             LEFT JOIN seasons s ON s.id = CASE
                 WHEN pa.season ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
@@ -284,6 +285,9 @@ async def update_achievement(
             params[field] = val
     if not sets:
         raise HTTPException(status_code=400, detail="No fields to update")
+    # A person who edits an automatic honour owns it from here: the premiership
+    # reconcile removes only rows still flagged auto_created.
+    sets.append("auto_created = FALSE")
     await db.execute(
         text(f"UPDATE player_achievements SET {', '.join(sets)} WHERE id = :id"),
         params,
@@ -315,6 +319,9 @@ async def update_achievement(
 
 @router.delete("/{achievement_id}")
 async def delete_achievement(achievement_id: int, org_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    # Deleting an automatic premiership is a decision: remember it so the next sync does not
+    # write it back (services/premierships.py).
+    await premierships.exclude_auto_honour(db, org_id, achievement_id)
     result = await db.execute(
         text("DELETE FROM player_achievements WHERE id = :id AND org_id = :org_id"),
         {"id": achievement_id, "org_id": org_id},

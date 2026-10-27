@@ -1582,6 +1582,10 @@ class Game(Base):
     raw_payload = Column(JSON)
     venue = Column(Text)
     match_format = Column(Text, nullable=True)
+    # Cricket Australia's own round label ("Grand Final", "Semi Final", "Round 7"), migration 365.
+    # `is_final` only says the label contains "final", so a grand final is read from this
+    # (services/premierships.is_grand_final_round). NULL until the sync has rediscovered the game.
+    round_name = Column(Text, nullable=True)
     # Cricket Australia's own match status, verbatim: COMPLETED, ABANDONED,
     # CANCELLED, UPCOMING, LIVE (migration 266). NULL means we have not been
     # told — every row predating that migration reads that way until a sync

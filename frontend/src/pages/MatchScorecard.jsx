@@ -9,6 +9,7 @@ import CardReviewBar from '../components/admin/cardReview/CardReviewBar'
 import { CAP } from '../lib/capabilities'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { rememberClubSlug, readClubSlug } from '../lib/clubSlug'
+import PremiershipBanner from '../components/PremiershipBanner'
 import TeamBadge from '../components/TeamBadge'
 import FallOfWicketsEditor from '../components/FallOfWicketsEditor'
 
@@ -1049,6 +1050,8 @@ export default function MatchScorecard() {
         </button>
 
         <MatchHeader game={game} innings={innings} />
+
+        <PremiershipBanner gameId={gameId} orgId={effectiveOrgId} />
 
         {orderKnownNote && (
           <p data-testid="innings-order-note" className="-mt-2 mb-4 text-[12px] text-pb-dim">

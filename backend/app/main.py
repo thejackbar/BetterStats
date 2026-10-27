@@ -4528,6 +4528,12 @@ async def lifespan(app: FastAPI):
         from app.services.player_card_swaps_ddl import STATEMENTS as _PLAYER_CARD_SWAPS_DDL
         for _stmt in _PLAYER_CARD_SWAPS_DDL:
             await conn.execute(text(_stmt))
+        # Migration 365: automatic premierships (round name, honour-to-scorecard link, auto marker,
+        # exclusions). Same one-copy rule: this list and alembic's 365 both run
+        # services/premierships_ddl.STATEMENTS.
+        from app.services.premierships_ddl import STATEMENTS as _PREMIERSHIPS_DDL
+        for _stmt in _PREMIERSHIPS_DDL:
+            await conn.execute(text(_stmt))
         # Every club with players has a player page link, so one without BetterSelect (whose admin
         # never switched self-service on) still has the page its Player Cards live on. Only a club
         # that has none gets one; BetterSelect clubs keep their own self-service switch, which

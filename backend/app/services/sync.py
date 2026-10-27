@@ -751,7 +751,21 @@ async def sync_organisation(
         # first, so the fee refresh charges the person once, on the kept record.
         await _merge_hand_added_players(org_id_str)
         await _refresh_fee_match_days(org_id_str)
+        await _reconcile_premierships(org_id_str)
     return result
+
+
+async def _reconcile_premierships(org_id_str: str) -> None:
+    """Write the premiership honours a won grand final earns (services/premierships.py).
+    After the sync so it reads the settled game, outside the governor because it is
+    database-only. Never raises."""
+    try:
+        from app.services import premierships
+        res = await premierships.maybe_reconcile(uuid.UUID(org_id_str))
+        if res.get("ran") and (res.get("create") or res.get("delete") or res.get("link")):
+            logger.info(f"Premierships after sync for {org_id_str}: {res}")
+    except Exception as e:
+        logger.warning(f"Premierships after sync failed for {org_id_str}: {e}")
 
 
 async def _merge_hand_added_players(org_id_str: str) -> None:
@@ -2102,6 +2116,7 @@ async def sync_grassroots_game_level_data(
             reread_ids = set()
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
+    match_to_round: dict[str, str] = {}  # match_id → CA's own round label ("Grand Final")
     match_to_format: dict[str, str] = {}  # match_id → CA's own matchType string
     match_to_status: dict[str, str] = {}  # match_id → CA's own status string
     match_to_opp: dict[str, tuple[str | None, str]] = {}  # match_id → (opp_org_id, opp_club_name)
@@ -2144,6 +2159,8 @@ async def sync_grassroots_game_level_data(
                     match_first_day[mid] = _days[0][0]
             round_name = (m.get("round") or {}).get("name", "")
             match_to_is_final[mid] = "final" in round_name.lower()
+            if round_name.strip():
+                match_to_round[mid] = round_name.strip()
             # The match list carries the format ("One Day" / "Two Day" / "T20")
             # per FIXTURE, and that granularity is the whole point: a WA turf
             # grade plays both across one season (Applecross 5th Grade 25/26 is
@@ -2228,6 +2245,27 @@ async def sync_grassroots_game_level_data(
                 )
             await upd_session.commit()
         logger.info(f"GR-sync: bulk-updated is_final ({len(finals_ids)} finals, {len(non_finals_ids)} non-finals)")
+
+    # And the round label itself, for the same reason as is_final and match_format above: an
+    # already-synced game never reaches the per-game block, and a grand final can only be told
+    # from a semi final by this. CA is the only writer of it. Only a non-empty label is written,
+    # so a match list that comes back without one never blanks what a game already holds.
+    if match_to_round:
+        by_round: dict[str, list[uuid.UUID]] = {}
+        for mid, rn in match_to_round.items():
+            try:
+                by_round.setdefault(rn, []).append(uuid.UUID(mid))
+            except ValueError:
+                pass
+        if by_round:
+            async with async_session_maker() as upd_session:
+                for rn, ids in by_round.items():
+                    await upd_session.execute(
+                        text("UPDATE games SET round_name = :rn WHERE id = ANY(:ids) "
+                             "AND round_name IS DISTINCT FROM :rn"),
+                        {"rn": rn, "ids": ids},
+                    )
+                await upd_session.commit()
 
     # Bulk-update match_format the same way, and for the same reason: an
     # already-synced game never reaches the per-game block below (the
@@ -2700,6 +2738,7 @@ async def sync_grassroots_game_level_data(
                         result=result_text,
                         winning_team=winner_name,
                         is_final=match_to_is_final.get(match_id_str, False),
+                        round_name=match_to_round.get(match_id_str),
                         match_format=match_to_format.get(match_id_str),
                         status=match_to_status.get(match_id_str),
                         ca_called_off=card_called_off(scorecard),

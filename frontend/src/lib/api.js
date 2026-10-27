@@ -3227,6 +3227,11 @@ export const api = {
   // Premiership squads and office-bearer boards, both read out of the
   // honours a club has already recorded against its players.
   getPremierships: (orgId) => request(`/honours/${orgId}/premierships`),
+  // The clubs that recorded a premiership off this scorecard (the scorecard banner).
+  getGamePremierships: (gameId) => request(`/honours/games/${gameId}/premierships`),
+  // What the automatic premierships would write for the signed-in club, and writing them.
+  previewAutoPremierships: (orgId) => request(`/honours/${orgId}/premierships/auto`),
+  applyAutoPremierships: (orgId) => request(`/honours/${orgId}/premierships/auto`, { method: 'POST' }),
   getOfficeBearers: (orgId) => request(`/honours/${orgId}/office-bearers`),
   getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender, categories, formats, competitions } = {}) => {
     const params = new URLSearchParams()

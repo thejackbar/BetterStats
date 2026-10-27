@@ -76,6 +76,13 @@ function PlayerLine({ player, logoUrl, fmt }) {
   )
 }
 
+// 2026-03-14 -> 14 Mar 2026. Built from the parts, so a date never shifts with the viewer's timezone.
+function fmtDay(iso) {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number)
+  if (!y || !m || !d) return ''
+  return `${d} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]} ${y}`
+}
+
 export default function Premierships() {
   const { clubSlug } = useParams()
   const sec = useSectionNames(clubSlug)
@@ -116,10 +123,10 @@ export default function Premierships() {
 
         {loading && !data ? <PbSpinner message="Loading premierships…" /> : all.length === 0 ? (
           <div className="pb-card p-6 text-sm text-pb-dim">
-            No premierships recorded yet. They come from the Premiership awards on
-            each player's profile — add them under Admin → Awards, or bring a whole
-            honour roll in at once with the awards import, and the squads build
-            themselves from there.
+            No premierships recorded yet. A grand final the club wins is added here by
+            itself once its scorecard has synced. Older flags come from the Premiership
+            awards on each player's profile: add them under Admin → Awards, or bring a
+            whole honour roll in at once with the awards import.
           </div>
         ) : (
           <>
@@ -154,8 +161,22 @@ export default function Premierships() {
                         {p.competition}
                       </span>
                     )}
-                    <span className="sm:ml-auto font-mono text-[11px] text-pb-faint whitespace-nowrap">
-                      {p.player_count} player{p.player_count === 1 ? '' : 's'}
+                    {/* The grand final itself, where the club's scorecards hold it. A flag typed in
+                        by hand with no match to a game just has no line. */}
+                    {p.game && p.game.opponent && (
+                      <span className="min-w-0 truncate text-[12px] text-pb-faint"
+                            title={`v ${p.game.opponent}`}>
+                        v {p.game.opponent}{p.game.played_at ? ` · ${fmtDay(p.game.played_at)}` : ''}
+                      </span>
+                    )}
+                    <span className="sm:ml-auto flex items-baseline gap-3 font-mono text-[11px] text-pb-faint whitespace-nowrap">
+                      {p.game_id && (
+                        <Link to={`/games/${p.game_id}?org=${orgId}`}
+                              className="hover:underline" style={{ color: 'var(--pb-accent)' }}>
+                          Scorecard →
+                        </Link>
+                      )}
+                      <span>{p.player_count} player{p.player_count === 1 ? '' : 's'}</span>
                     </span>
                   </div>
                   <ul className="px-4 sm:px-5 py-4 grid gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-2 lg:grid-cols-3">
