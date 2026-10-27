@@ -14,7 +14,7 @@ import uuid
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +23,7 @@ from app.auth.capabilities import MANAGE_SETTINGS, require_cap
 from app.models.db import Organisation, Player, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.public_availability import _club_branding
-from app.services import audit_log, player_card_admin as insight, player_cards as cards
+from app.services import audit_log, player_card_admin as insight, player_card_designs as pack_designs, player_cards as cards
 
 router = APIRouter(prefix="/player-cards", tags=["player-cards"])
 
@@ -60,6 +60,19 @@ class EventBody(BaseModel):
     starts_on: date
     ends_on: Optional[date] = None
     per_day: bool = True
+
+
+class DesignBody(BaseModel):
+    """Only the keys sent are changed; an explicit null clears a colour or the name."""
+    title: Optional[str] = None
+    color_a: Optional[str] = None
+    color_b: Optional[str] = None
+    color_on: Optional[str] = None
+    overlay: Optional[float] = None
+    show_name: Optional[bool] = None
+    show_logo: Optional[bool] = None
+    art_position: Optional[str] = None
+    art_size: Optional[str] = None
 
 
 class TrimBody(BaseModel):
@@ -110,6 +123,8 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
         },
         "timezones": [{"id": i, "label": n} for i, n in TIMEZONES],
         "events": await cards.list_events(db, club.id),
+        "designs": await pack_designs.load_all(db, club.id),
+        "design_targets": await pack_designs.targets(db, club.id),
         "max_weekly_packs": cards.MAX_WEEKLY_PACKS,
         "link": {"path": f"/playerdash/{club.availability_link_token}" if club.availability_link_token else None},
         "pool": {"size": sum(1 for r in rows if r["in_pool"]), "players": len(rows)},
@@ -210,10 +225,94 @@ async def delete_event(
         raise HTTPException(status_code=404, detail="Not found")
     if not await cards.delete_event(db, club.id, event_id):
         raise HTTPException(status_code=404, detail="Not found")
+    await pack_designs.drop_event(db, club.id, event_id)
     await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_event_removed",
                                  target_type="card_event", target_id=event_id)
     await db.commit()
     return await _payload(db, club)
+
+
+# ── Pack designs: a club's own look for its packs ────────────────────────────────────────────────────────────
+
+def _design_error(exc: "pack_designs.DesignError") -> HTTPException:
+    return HTTPException(status_code=exc.status, detail=str(exc))
+
+
+@router.put("/designs/{target}")
+async def save_design(
+    target: str,
+    body: DesignBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Change a design's colours, name and layout. Only what is sent changes."""
+    patch = {k: getattr(body, k) for k in body.model_fields_set}
+    try:
+        await pack_designs.save_style(db, club.id, target, patch)
+    except pack_designs.DesignError as exc:
+        await db.rollback()
+        raise _design_error(exc)
+    await db.commit()
+    return {"designs": await pack_designs.load_all(db, club.id)}
+
+
+@router.post("/designs/{target}/{kind}")
+async def upload_design_image(
+    target: str,
+    kind: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Set a design's background (`bg`) or centre image (`art`). The picture is checked, shrunk and re-encoded."""
+    raw = await file.read(pack_designs.MAX_UPLOAD_BYTES + 1)
+    try:
+        await pack_designs.set_image(db, club.id, target, kind, raw)
+    except pack_designs.DesignError as exc:
+        await db.rollback()
+        raise _design_error(exc)
+    await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_design_image",
+                                 target_type="card_pack_design", target_id=target, details={"kind": kind, "bytes": len(raw)})
+    await db.commit()
+    return {"designs": await pack_designs.load_all(db, club.id)}
+
+
+@router.delete("/designs/{target}/{kind}")
+async def remove_design_image(
+    target: str,
+    kind: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    try:
+        await pack_designs.clear_image(db, club.id, target, kind)
+    except pack_designs.DesignError as exc:
+        await db.rollback()
+        raise _design_error(exc)
+    await db.commit()
+    return {"designs": await pack_designs.load_all(db, club.id)}
+
+
+@router.delete("/designs/{target}")
+async def reset_design(
+    target: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Back to the built-in look for this kind of pack."""
+    try:
+        await pack_designs.reset(db, club.id, target)
+    except pack_designs.DesignError as exc:
+        await db.rollback()
+        raise _design_error(exc)
+    await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_design_reset",
+                                 target_type="card_pack_design", target_id=target)
+    await db.commit()
+    return {"designs": await pack_designs.load_all(db, club.id)}
 
 
 @router.post("/trim-gifts")

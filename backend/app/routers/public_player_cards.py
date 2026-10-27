@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.routers.public_availability import _club_branding, _club_for_token, _client_ip, _player_for_session
-from app.services import player_card_alerts as alerts, player_card_catalogue as catalogue, player_card_community as community, player_card_sets as card_sets, player_card_social as social, player_card_swaps as swaps, player_cards as cards, rate_limit
+from app.services import player_card_alerts as alerts, player_card_catalogue as catalogue, player_card_community as community, player_card_designs as pack_designs, player_card_sets as card_sets, player_card_social as social, player_card_swaps as swaps, player_cards as cards, rate_limit
 from app.services.session_safety import rollback_keeping
 
 router = APIRouter(prefix="/public/availability", tags=["public-player-cards"])
@@ -62,6 +62,8 @@ async def get_my_cards(token: str, request: Request, db: AsyncSession = Depends(
         "club": _club_branding(club),
         "week_resets_at": cards.week_ends_at(snap["settings"]).isoformat(),
         "packs": packs,
+        # Every design the club made, by target, for the "how packs arrive" screen (each pack also carries its own).
+        "pack_designs": await pack_designs.load_all(db, club.id),
         "pack_size": cards.PACK_SIZE,
         "season": snap["season_label"],
         "features": _features(snap),

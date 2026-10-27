@@ -1,5 +1,5 @@
 import { PackArt } from '../../components/cards/PackOpening'
-import { PACKS } from '../../components/cards/cardTheme'
+import { PACKS, designFor, designTitle } from '../../components/cards/cardTheme'
 import PageHead from './PageHead'
 import { PackBlock, weekdayLabel } from './Home'
 import { usePC } from './context'
@@ -61,9 +61,9 @@ export default function Packs() {
           <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))' }} data-pack-ways>
             {g.ways.map(([src, line]) => (
               <div key={src} data-way={src} className="flex gap-4 items-center rounded-2xl border pb-hairline bg-pb-surface p-4">
-                <PackArt source={src} club={club} accent={accent} display={display} width={88} />
+                <PackArt source={src} label={designTitle(data.pack_designs, src)} design={designFor(data.pack_designs, src)} club={club} accent={accent} display={display} width={88} />
                 <div className="min-w-0">
-                  <div className="font-bold">{PACKS[src].label}</div>
+                  <div className="font-bold">{designTitle(data.pack_designs, src) || PACKS[src].label}</div>
                   <div className="text-sm text-pb-dim mt-0.5">{src === 'weekly' ? `A fresh one every Monday. The next arrives ${weekdayLabel(data.week_resets_at)}.` : line}</div>
                 </div>
               </div>

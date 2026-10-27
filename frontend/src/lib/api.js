@@ -3427,6 +3427,12 @@ export const api = {
   refreshPlayerCardSpecials: () => request('/player-cards/refresh-specials', { method: 'POST' }),
   addPlayerCardEvent: (data) => request('/player-cards/events', { method: 'POST', body: JSON.stringify(data) }),
   deletePlayerCardEvent: (id) => request(`/player-cards/events/${id}`, { method: 'DELETE' }),
+  savePlayerCardDesign: (target, data) =>
+    request(`/player-cards/designs/${encodeURIComponent(target)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  uploadPlayerCardDesignImage: (target, kind, file) => uploadFile(`/player-cards/designs/${encodeURIComponent(target)}/${kind}`, file),
+  removePlayerCardDesignImage: (target, kind) =>
+    request(`/player-cards/designs/${encodeURIComponent(target)}/${kind}`, { method: 'DELETE' }),
+  resetPlayerCardDesign: (target) => request(`/player-cards/designs/${encodeURIComponent(target)}`, { method: 'DELETE' }),
   trimPlayerCardGifts: (apply) => request('/player-cards/trim-gifts', { method: 'POST', body: JSON.stringify({ apply: !!apply }) }),
   getPlayerCardOverview: () => request('/player-cards/overview'),
   getPlayerCardActivity: () => request('/player-cards/activity'),

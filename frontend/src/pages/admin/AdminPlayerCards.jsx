@@ -7,15 +7,16 @@ import { CardView, ScaledCard } from '../../components/cards/CardFaces'
 import { useCardStyle } from '../../components/cards/useCardStyle'
 import { CATEGORIES } from '../../components/cards/CardGallery'
 import { PACKS, TIERS } from '../../components/cards/cardTheme'
+import PackDesigns from './PackDesigns'
 
-// Player Cards, for the club's admin. Six tabs: how the cards are being used (Overview), every player and what
+// Player Cards, for the club's admin. Eight tabs: how the cards are being used (Overview), every player and what
 // they hold (Players, then a click for their whole collection), what came in lately (Activity), every card that
 // exists and how many are out there (All cards), who has opened packs (Packs), an audit of swaps (Swaps), and the
 // club's switches (Settings). Everything but Settings only reads.
 
 const TABS = [
   ['overview', 'Overview'], ['players', 'Players'], ['activity', 'Activity'], ['cards', 'All cards'],
-  ['packs', 'Packs'], ['swaps', 'Swaps'], ['settings', 'Settings'],
+  ['packs', 'Packs'], ['designs', 'Pack designs'], ['swaps', 'Swaps'], ['settings', 'Settings'],
 ]
 const EXCLUDED = {
   private: 'Hidden from the public site (or removed at their request)',
@@ -661,6 +662,7 @@ export default function AdminPlayerCards() {
   const body = () => {
     if (tab === 'settings') return <SettingsTab data={data} setData={setData} />
     if (tab === 'cards') return <CatalogueTab club={data.club} />
+    if (tab === 'designs') return <PackDesigns data={data} setData={setData} />
     if (tab === 'swaps') return <SwapsTab />
     if (!ov) return <div className="text-sm text-pb-faint">Loading…</div>
     if (tab === 'activity') return <ActivityTab a={activity} open={open} />

@@ -78,6 +78,10 @@ if HAVE_SWAPS:
     except ImportError:   # the control run on the commit before the new packs
         PACKS_DDL = []
     try:
+        from app.services.player_card_designs_ddl import STATEMENTS as DESIGNS_DDL
+    except ImportError:   # the control run on the commit before pack designs
+        DESIGNS_DDL = []
+    try:
         from app.services.player_card_social_ddl import STATEMENTS as SOCIAL_DDL
     except ImportError:   # the control run on the commit before the social side
         SOCIAL_DDL = []
@@ -88,6 +92,7 @@ else:
     SOCIAL_DDL = []
     COMMUNITY_DDL = []
     PACKS_DDL = []
+    DESIGNS_DDL = []
     ITEM_DDL = []
 
 DB = os.environ["DATABASE_URL"]
@@ -165,7 +170,7 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
-        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL:
+        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL:
             await conn.execute(text(stmt))
 
 
@@ -1756,6 +1761,163 @@ async def main() -> None:
     else:
         check("(the control run has no new packs to test)", True)
 
+    # ── Pack designs: a club's own look for its packs ─────────────────────────────
+    print("\npack designs")
+    if HAVE and DESIGNS_DDL:
+        from io import BytesIO
+        from PIL import Image
+        from starlette.datastructures import UploadFile as _Upload
+        from app.services import player_card_designs as D
+        from app.routers import images as images_routes, player_cards_admin as adm2, public_player_cards as pcr3
+
+        def png(w, h, alpha=False):
+            out = BytesIO()
+            Image.new("RGBA" if alpha else "RGB", (w, h), (200, 30, 30, 120) if alpha else (30, 90, 200)).save(out, "PNG")
+            return out.getvalue()
+
+        def jpg(w, h):
+            out = BytesIO()
+            Image.new("RGB", (w, h), (10, 160, 60)).save(out, "JPEG")
+            return out.getvalue()
+
+        def dims(raw):
+            with Image.open(BytesIO(raw)) as im:
+                return im.size, im.format
+
+        async def raises(coro):
+            try:
+                await coro
+                return None
+            except D.DesignError as exc:
+                return exc.status
+
+        async with Session() as db:
+            club = await db.get(Organisation, ORG)
+            admin_user = User(id=uuid.uuid4(), email="admin@example.com")
+            await db.execute(text("DELETE FROM club_card_pack_designs"))
+            await db.commit()
+            check("a club has no design to begin with", await D.load_all(db, ORG) == {})
+
+            # the style
+            d1 = await D.save_style(db, ORG, "default", {"color_a": "#B91C1C", "overlay": 0.4, "show_logo": False, "art_size": "l", "art_position": "bottom"})
+            await db.commit()
+            check("a design is made on first save, colours lower-cased, and the rest of it stays as built", d1["a"] == "#b91c1c" and d1["overlay"] == 0.4 and d1["show_logo"] is False and d1["show_name"] is True and d1["art_size"] == "l" and d1["art_position"] == "bottom" and d1["b"] is None and d1["background_url"] is None, str(d1))
+            d2 = await D.save_style(db, ORG, "default", {"title": "  Club   pack  "})
+            check("a key that is not sent is left alone", d2["a"] == "#b91c1c" and d2["overlay"] == 0.4 and d2["title"] == "Club pack", str(d2))
+            d3 = await D.save_style(db, ORG, "default", {"color_a": None, "title": None})
+            check("an explicit null clears a colour and the name", d3["a"] is None and d3["title"] is None and d3["overlay"] == 0.4)
+            check("the name is cut to 40 characters", len((await D.save_style(db, ORG, "default", {"title": "x" * 90}))["title"]) == 40)
+            await db.commit()
+            for label, patch in (("a colour that is not six digit hex", {"color_b": "red"}), ("a colour that is style in disguise", {"color_on": "#fff;background:url(x)"}), ("a background darker than 0.8", {"overlay": 0.95}),
+                                 ("a negative darkness", {"overlay": -0.1}), ("a darkness that is not a number", {"overlay": "lots"}), ("a position that is not offered", {"art_position": "left"}), ("a size that is not offered", {"art_size": "xl"})):
+                check(f"{label} is refused (422)", await raises(D.save_style(db, ORG, "default", patch)) == 422)
+                await db.rollback()
+            check("nothing a refused save sent was kept", (await D.get_one(db, ORG, "default"))["a"] is None)
+
+            # which things can be designed
+            ev = await cards.add_event(db, ORG, "Boxing Day Test", date.today() + timedelta(days=60), None, True)
+            other_ev = await cards.add_event(db, ORG_SELECT, "Someone else's day", date.today() + timedelta(days=61), None, True)
+            await db.commit()
+            check("a pack kind and a scheduled event of this club can be designed", await D.check_target(db, ORG, "century") == "century" and await D.check_target(db, ORG, f"event:{ev['id']}") == f"event:{ev['id']}")
+            check("a made-up kind, a made-up event and another club's event are a 404", all([await raises(D.check_target(db, ORG, t)) == 404 for t in ("nonsense", f"event:{uuid.uuid4()}", f"event:{other_ev['id']}", "event:nope")]))
+            tg = await D.targets(db, ORG)
+            check("the list of targets is every pack kind and the club's own events, with a name each", tg[0]["key"] == "default" and {t["key"] for t in tg} >= set(K.KINDS) | {f"event:{ev['id']}"} and all(t["label"] for t in tg) and f"event:{other_ev['id']}" not in {t["key"] for t in tg})
+
+            # the images
+            big = await D.set_image(db, ORG, "default", "bg", jpg(3000, 2000))
+            await db.commit()
+            raw, mime = await D.image_bytes(db, big["id"], "bg")
+            check("a large photo is shrunk to 1200 on its long side and kept as a JPEG", dims(raw) == ((1200, 800), "JPEG") and mime == "image/jpeg", str(dims(raw)))
+            art = await D.set_image(db, ORG, "default", "art", png(1800, 900, alpha=True))
+            raw2, mime2 = await D.image_bytes(db, art["id"], "art")
+            check("a picture with see-through parts stays a PNG, shrunk to 900", dims(raw2) == ((900, 450), "PNG") and mime2 == "image/png")
+            check("the design lists both with a versioned URL, and no picture bytes", art["background_url"].startswith(f"/api/images/card-packs/{art['id']}/bg?v=") and art["art_url"].startswith(f"/api/images/card-packs/{art['id']}/art?v=") and all(isinstance(v, (str, int, float, bool, type(None))) for v in art.values()))
+            exif = BytesIO()
+            im = Image.new("RGB", (400, 300), (5, 5, 5))
+            ex = Image.Exif(); ex[0x010F] = "SecretCamera"; ex[0x0110] = "Model X"
+            im.save(exif, "JPEG", exif=ex)
+            await D.set_image(db, ORG, "default", "art", exif.getvalue())
+            raw3, _ = await D.image_bytes(db, art["id"], "art")
+            check("what a phone writes into a photo (camera, location) is dropped", b"SecretCamera" not in raw3 and not Image.open(BytesIO(raw3)).getexif())
+            check("a GIF is accepted", await raises(D.set_image(db, ORG, "default", "art", (lambda b: (Image.new("RGB", (40, 40), (1, 2, 3)).save(b, "GIF"), b.getvalue())[1])(BytesIO()))) is None)
+            svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+            check("an SVG is refused (it could run script from our domain)", await raises(D.set_image(db, ORG, "default", "bg", svg)) == 422)
+            check("a file that is not a picture is refused", await raises(D.set_image(db, ORG, "default", "bg", b"hello, this is text")) == 422)
+            check("an empty file is refused", await raises(D.set_image(db, ORG, "default", "bg", b"")) == 422)
+            check("an upload over 6 MB is refused (413)", await raises(D.set_image(db, ORG, "default", "bg", b"\x89PNG" + b"0" * (7 * 1024 * 1024))) == 413)
+            check("a picture with an absurd number of pixels is refused before it is decoded", await raises(D.set_image(db, ORG, "default", "bg", png(7000, 7000))) == 422)
+            check("an unknown image slot is a 404", await raises(D.set_image(db, ORG, "default", "logo", png(10, 10))) == 404)
+            await db.rollback()
+            check("a refused upload left the earlier pictures alone", (await D.get_one(db, ORG, "default"))["background_url"] is not None)
+
+            # serving
+            r = await images_routes.get_card_pack_image(big["id"], "bg", db)
+            check("the image route serves the stored picture, cached hard, with its own type and no sniffing", r.media_type == "image/jpeg" and dims(r.body)[0] == (1200, 800) and "max-age" in r.headers["cache-control"] and r.headers["x-content-type-options"] == "nosniff")
+            check("a design with no such picture, an unknown id and an unknown slot are 404s", all([await status_of(images_routes.get_card_pack_image(i, k, db)) == 404 for i, k in ((str(uuid.uuid4()), "bg"), (big["id"], "logo"), ("nope", "bg"))]))
+            await D.clear_image(db, ORG, "default", "art"); await db.commit()
+            check("removing a picture removes it (URL and bytes)", (await D.get_one(db, ORG, "default"))["art_url"] is None and await status_of(images_routes.get_card_pack_image(big["id"], "art", db)) == 404)
+
+            # which design a pack takes
+            await D.save_style(db, ORG, "century", {"title": "Ton Up", "color_a": "#112233"})
+            await D.save_style(db, ORG, f"event:{ev['id']}", {"color_a": "#445566", "title": "ignored for events"})
+            await D.save_style(db, ORG_SELECT, "weekly", {"color_a": "#999999", "title": "Other club"})
+            await db.commit()
+            all_d = await D.load_all(db, ORG)
+            check("a pack takes its event's design, then its kind's, then the club default, then none",
+                  D.resolve(all_d, "event", ev["id"])["a"] == "#445566" and D.resolve(all_d, "century")["a"] == "#112233" and D.resolve(all_d, "weekly")["target"] == "default" and D.resolve({}, "weekly") is None)
+            check("a club never sees another club's designs", "weekly" not in all_d and (await D.load_all(db, ORG_SELECT)).keys() == {"weekly"})
+            check("the event id is read from a pack's ref (one a day, or one for the run) and from nothing else", D.event_id_of("event", f"{ev['id']}:2026-12-03") == ev["id"] and D.event_id_of("event", ev["id"]) == ev["id"] and D.event_id_of("weekly", f"{ev['id']}:x") is None and D.event_id_of("event", "junk") is None)
+            club = await db.get(Organisation, ORG)
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            Q = uuid.uuid4()
+            await db.execute(text("INSERT INTO players (id, organisation_id, name, is_player, status, is_public) VALUES (:i, :o, 'Quebec, Q', true, 'active', true)"), {"i": Q, "o": ORG})
+            for src, ref, label in (("century", "x1", None), ("weekly", "2031-W01:1", None), ("event", f"{ev['id']}:2031-01-01", "Boxing Day Test")):
+                await db.execute(text("INSERT INTO player_card_packs (organisation_id, player_id, source, ref_key, label) VALUES (:o, :p, :s, :r, :l)"), {"o": ORG, "p": Q, "s": src, "r": ref, "l": label})
+            await db.commit()
+            cards.week_key_real = cards.week_key
+            cards.week_key = lambda settings, now=None: "2031-W01"
+            try:
+                listed = {p["source"]: p for p in await cards.available_packs(db, str(Q), snap)}
+            finally:
+                cards.week_key = cards.week_key_real
+            check("each unopened pack carries its design", listed["century"]["design"]["a"] == "#112233" and listed["event"]["design"]["a"] == "#445566" and listed["weekly"]["design"]["target"] == "default")
+            check("the club's name for a kind of pack is used (Ton Up), the default's name never is, and a scheduled event keeps its own", listed["century"]["label"] == "Ton Up" and listed["weekly"]["label"] == "Weekly pack" and listed["event"]["label"] == "Boxing Day Test", str({k: v["label"] for k, v in listed.items()}))
+            check("a club with no designs gets the built-in look (design is null)", all(p["design"] is None for p in await cards.available_packs(db, str(Q), {**snap, "org_id": str(ORG_SELECT)} if False else {**snap, "org_id": str(uuid.uuid4())})))
+
+            # the admin routes
+            pay = await adm2.get_settings(db, club, admin_user)
+            check("the settings payload has the club's designs and what can be designed", "century" in pay["designs"] and any(t["key"] == "default" for t in pay["design_targets"]))
+            up = await adm2.upload_design_image("weekly", "bg", _Upload(file=BytesIO(jpg(900, 1200)), filename="bg.jpg"), db, club, admin_user)
+            check("the upload route stores a background and returns every design", up["designs"]["weekly"]["background_url"] is not None)
+            check("...and the upload is on the audit trail", (await db.execute(text("SELECT count(*) FROM audit_logs WHERE action = 'player_card_design_image'"))).scalar() >= 1)
+            st1 = await status_of(adm2.upload_design_image("weekly", "bg", _Upload(file=BytesIO(svg), filename="x.svg"), db, club, admin_user))
+            club = await db.get(Organisation, ORG)
+            st2 = await status_of(adm2.upload_design_image("weekly", "nope", _Upload(file=BytesIO(jpg(10, 10)), filename="x.jpg"), db, club, admin_user))
+            club = await db.get(Organisation, ORG)
+            check("a bad upload through the route is a 422 and a bad slot a 404", (st1, st2) == (422, 404), str((st1, st2)))
+            club = await db.get(Organisation, ORG)
+            sv = await adm2.save_design("weekly", adm2.DesignBody(color_a="#abcdef"), db, club, admin_user)
+            check("the style route sends back every design, changing only what was sent", sv["designs"]["weekly"]["a"] == "#abcdef" and sv["designs"]["weekly"]["background_url"] is not None)
+            st1 = await status_of(adm2.save_design("weekly", adm2.DesignBody(color_a="blue"), db, club, admin_user))
+            club = await db.get(Organisation, ORG)
+            st2 = await status_of(adm2.save_design("zzz", adm2.DesignBody(), db, club, admin_user))
+            check("a bad colour through the route is a 422 and an unknown target a 404", (st1, st2) == (422, 404), str((st1, st2)))
+            club = await db.get(Organisation, ORG)
+            rm = await adm2.remove_design_image("weekly", "bg", db, club, admin_user)
+            check("the delete route removes a picture", rm["designs"]["weekly"]["background_url"] is None)
+            rs = await adm2.reset_design("weekly", db, club, admin_user)
+            check("reset takes a design back to the built-in look, and is on the audit trail", "weekly" not in rs["designs"] and (await db.execute(text("SELECT count(*) FROM audit_logs WHERE action = 'player_card_design_reset'"))).scalar() >= 1)
+            await adm2.delete_event(ev["id"], db, club, admin_user)
+            check("removing a scheduled event removes its design", f"event:{ev['id']}" not in await D.load_all(db, ORG))
+
+            # the player's payload
+            who = await db.get(Player, ALPHA)
+            mine = await pcr3.get_my_cards(TOKEN, request_for(ALPHA, ORG), db)
+            check("the player's cards payload carries the club's designs, and each pack its own", "pack_designs" in mine and "century" in mine["pack_designs"] and all("design" in p for p in mine["packs"]))
+            await db.rollback()
+    else:
+        check("(the control run has no pack designs to test)", True)
+
     print("\nmigration")
     async with engine.begin() as conn:
         for stmt in CARD_DDL:
@@ -1770,6 +1932,9 @@ async def main() -> None:
         check("the items migration follows 365, runs its own shared list, and drops only its own table", "down_revision = \"365\"" in mig3 and "ITEM_STATEMENTS" in mig3 and "ITEM_DOWNGRADE" in mig3)
     main_src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
     check("the lifespan mirrors the same list", "from app.services.player_cards_ddl import STATEMENTS" in main_src)
+    if DESIGNS_DDL:
+        mig5 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "371_player_card_pack_designs.py").read_text()
+        check("the designs migration follows 370, runs the shared list, and its lifespan mirror runs it too", 'down_revision = "370"' in mig5 and "STATEMENTS" in mig5 and "player_card_designs_ddl" in main_src)
     if PACKS_DDL:
         mig4 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "370_player_card_packs.py").read_text()
         check("the packs migration follows 369, runs the shared list, and its lifespan mirror runs it too",

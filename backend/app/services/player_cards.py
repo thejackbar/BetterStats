@@ -60,7 +60,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation, Player
-from app.services import player_card_pack_kinds as kinds
+from app.services import player_card_designs as pack_designs, player_card_pack_kinds as kinds
 from app.services.game_status import NOT_PLAYED_SQL_LIST
 from app.services.season_kind import season_key_sql
 
@@ -445,7 +445,7 @@ async def club_snapshot(db: AsyncSession, club: Organisation, *, fresh: bool = F
 
     season_ids, season_label = await _current_season(db, club.id, list(people))
     snap = {
-        "settings": settings, "people": people, "figs": figs, "rating": rating, "pool": pool,
+        "org_id": key, "settings": settings, "people": people, "figs": figs, "rating": rating, "pool": pool,
         "current_season_ids": season_ids, "season_label": season_label,
     }
     if len(_SNAP) >= _SNAP_MAX:
@@ -1064,7 +1064,15 @@ async def available_packs(db: AsyncSession, pid: str, snap: dict) -> list[dict]:
            AND (source <> 'weekly' OR ref_key LIKE :wk)
     """), {"pid": pid, "wk": f"{wk}:%"})
     packs = sorted(rows.fetchall(), key=lambda r: (_PACK_ORDER.get(r[1], 4), r[3], r[2]))
-    return [{"id": r[0], "source": r[1], "label": r[4] or kinds.label_for(r[1])} for r in packs]
+    designs = await pack_designs.load_all(db, snap["org_id"]) if snap.get("org_id") else {}
+    out = []
+    for r in packs:
+        ev = pack_designs.event_id_of(r[1], r[2])
+        design = pack_designs.resolve(designs, r[1], ev)
+        # A pack with a name of its own (a scheduled event) keeps it; otherwise the club's name for that kind of pack, then ours.
+        own = (design or {}).get("title") if design and design["target"] != pack_designs.DEFAULT_TARGET else None
+        out.append({"id": r[0], "source": r[1], "label": r[4] or own or kinds.label_for(r[1]), "design": design})
+    return out
 
 
 # ── Drawing a pack ────────────────────────────────────────────────────────────

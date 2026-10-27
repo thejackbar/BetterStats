@@ -152,3 +152,16 @@ Asked for after the collectors and Open packs screens looked wrong.
 
 Verified: `verify_player_cards.py` (425, control on the previous commit fails on the email and board defaults), `verify_merge_carry.py`, `verify_player_page_dashboard.py`, `verify_player_dashboard_and_fines.py`, `audit_route_access.py`; browser `_page_` (66), `_admin_` (69), `_community_` (36), `_social_`, `_v3_`, `_v2_`, first suite.
 
+## v9.132.5 (2026-10-27): club pack designs
+
+Asked for: let clubs make their own designs for packs, with uploaded images or backgrounds.
+
+- Migration 371 (`player_card_designs_ddl.py`): `club_card_pack_designs`, unique on (organisation, target). Style columns, plus `bg_*` and `art_*` bytea, mime and a revision (epoch ms) used as the cache-buster.
+- Scope taken as suggested: a design per target (all packs, a kind of pack, a scheduled event) rather than one per pack, so a club does not design 28 packs to get started. Two image slots (background, centre picture) rather than a free layer editor: enough to make a pack feel the club's, and nothing a club types can break the layout.
+- Images are re-encoded server side (see guide rule 20) and SVG is refused. Colours are validated hex. Uploads and resets are audited (`player_card_design_image`, `player_card_design_reset`).
+- Routes: `PUT /player-cards/designs/{target}`, `POST` and `DELETE /designs/{target}/{bg|art}`, `DELETE /designs/{target}`, `GET /api/images/card-packs/{id}/{kind}`; `designs` and `design_targets` on the admin settings payload; `pack_designs` on `/me/cards`.
+- Not done: a design does not change the cards inside a pack or the opening animation, only the pack's face. Pack art is not yet on the public share page.
+- Moderation: a club's pictures show only to its own players, and the club is the author. There is no review step. If one is wanted it belongs on the upload route.
+
+Verified: `verify_player_cards.py` (473; the control run on the previous commit has no pack designs to test, so the new section is skipped there), `verify_merge_carry.py`, `verify_player_page_dashboard.py`, `verify_player_dashboard_and_fines.py`, `audit_route_access.py`; browser `_designs_` (33), `_admin_`, `_page_`, `_community_`, `_social_`, first suite.
+

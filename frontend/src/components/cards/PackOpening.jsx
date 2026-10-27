@@ -15,15 +15,15 @@ import { hexWithAlpha, onColor } from '../PlayerTradingCard'
 const reduced = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 const MONO = "'JetBrains Mono', monospace"
 
-function packLook(source, accent, label) {
+function packLook(source, accent, label, design) {
   const p = PACKS[source] || PACKS.weekly
   return {
     label: label || p.label,
     line: p.line,
     stars: p.stars || 0,
-    a: p.a || `color-mix(in srgb, ${accent} 70%, #fff)`,
-    b: p.b || `color-mix(in srgb, ${accent} 55%, #000)`,
-    on: p.on || onColor(accent),
+    a: design?.a || p.a || `color-mix(in srgb, ${accent} 70%, #fff)`,
+    b: design?.b || p.b || `color-mix(in srgb, ${accent} 55%, #000)`,
+    on: design?.on || p.on || onColor(accent),
   }
 }
 
@@ -31,6 +31,8 @@ function packLook(source, accent, label) {
 // list of ways to earn a pack and the big one that tears open. (Sizing the type from the width squashed the names.)
 const DESIGN_W = 220
 const DESIGN_H = 330
+// How big a club's centre image is, as a box inside the pack's 192px of room.
+const ART_BOX = { s: 84, m: 126, l: 176 }
 
 // A name that fits: the longer it is the smaller it sets, down to a floor, and it may wrap onto a second or third line.
 function nameSize(text) {
@@ -42,28 +44,49 @@ function nameSize(text) {
 }
 
 // A sealed foil pack. `stripRef` is the crimped top that tears away. `label` overrides the name (a scheduled event).
-export function PackArt({ source, club, accent, display = DEFAULT_DISPLAY, width = 220, stripRef, bodyRef, glow = false, label }) {
-  const look = packLook(source, accent, label)
+// `design` is the club's own look for this pack (services/player_card_designs.py): a background image, a centre image, its
+// colours, how dark the background is laid down, whether the name and the club logo are drawn, and where the centre image sits.
+export function PackArt({ source, club, accent, display = DEFAULT_DISPLAY, width = 220, stripRef, bodyRef, glow = false, label, design }) {
+  const look = packLook(source, accent, label, design)
   const scale = width / DESIGN_W
   const strip = Math.round(DESIGN_H * 0.075)
   const crimp = 'repeating-linear-gradient(90deg, rgba(255,255,255,.55) 0 3px, rgba(0,0,0,.18) 3px 6px)'
+  const bg = design?.background_url || null
+  const art = design?.art_url || null
+  const showName = design ? design.show_name !== false : true
+  const showLogo = design ? design.show_logo !== false : true
+  const pos = design?.art_position || 'center'
+  const box = ART_BOX[design?.art_size] || ART_BOX.m
+  const shade = bg ? { textShadow: '0 2px 10px rgba(0,0,0,.55)' } : null
+  const mark = art
+    ? <img src={art} alt="" data-pack-design-art style={{ width: box, height: box, objectFit: 'contain', filter: 'drop-shadow(0 6px 14px rgba(0,0,0,.4))' }} />
+    : !showLogo ? null
+      : source === 'duck'
+        ? <div style={{ font: `800 italic 100px/1 ${display}`, textShadow: '0 4px 14px rgba(0,0,0,.25)' }}>0</div>
+        : club?.logo_url
+          ? <img src={club.logo_url} alt="" style={{ width: 100, height: 100, objectFit: 'contain', filter: 'drop-shadow(0 6px 14px rgba(0,0,0,.35))' }} />
+          : <div style={{ font: `800 italic 64px/1 ${display}` }}>{initials(club?.name || club?.short_name)}</div>
+  const words = showName && (
+    <>
+      {look.stars > 0 && <div aria-hidden data-pack-stars={look.stars} style={{ font: `700 14px/1 ${MONO}`, letterSpacing: 4, opacity: 0.9, ...shade }}>{'★'.repeat(look.stars)}</div>}
+      <div data-pack-name style={{ font: `800 italic ${nameSize(look.label)}px/1.1 ${display}`, textTransform: 'uppercase', letterSpacing: 1, maxWidth: '100%', overflowWrap: 'anywhere', ...shade }}>{look.label}</div>
+      <div style={{ font: `600 11px/1.25 ${MONO}`, letterSpacing: 1.5, textTransform: 'uppercase', opacity: 0.85, maxWidth: '100%', ...shade }}>{look.line}</div>
+      <div style={{ font: `600 9px ${MONO}`, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.65, ...shade }}>5 cards</div>
+    </>
+  )
   return (
-    <div data-pack-art={source} style={{ position: 'relative', width, height: Math.round(DESIGN_H * scale), flex: 'none', filter: `drop-shadow(0 ${Math.round(18 * scale)}px ${Math.round(30 * scale)}px rgba(0,0,0,.5))${glow ? ` drop-shadow(0 0 ${Math.round(22 * scale)}px ${hexWithAlpha(accent, 0.7)})` : ''}` }}>
+    <div data-pack-art={source} data-pack-designed={design ? 'yes' : 'no'} style={{ position: 'relative', width, height: Math.round(DESIGN_H * scale), flex: 'none', filter: `drop-shadow(0 ${Math.round(18 * scale)}px ${Math.round(30 * scale)}px rgba(0,0,0,.5))${glow ? ` drop-shadow(0 0 ${Math.round(22 * scale)}px ${hexWithAlpha(accent, 0.7)})` : ''}` }}>
       <div style={{ position: 'absolute', left: 0, top: 0, width: DESIGN_W, height: DESIGN_H, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
         <div ref={stripRef} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: strip, background: `${crimp}, linear-gradient(180deg, ${look.a}, ${look.b})`, borderRadius: '10px 10px 0 0', zIndex: 2 }} />
         <div ref={bodyRef} style={{ position: 'absolute', left: 0, right: 0, top: strip - 1, bottom: 0, background: `linear-gradient(165deg, ${look.a} 0%, ${look.b} 100%)`, borderRadius: '0 0 12px 12px', overflow: 'hidden', color: look.on }}>
-          <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(115deg, rgba(255,255,255,.14) 0 14px, transparent 14px 34px)' }} />
+          {bg
+            ? <div data-pack-design-bg style={{ position: 'absolute', inset: 0, background: `center / cover no-repeat url("${bg}")` }} />
+            : <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(115deg, rgba(255,255,255,.14) 0 14px, transparent 14px 34px)' }} />}
+          {bg && design.overlay > 0 && <div aria-hidden style={{ position: 'absolute', inset: 0, background: `rgba(0,0,0,${design.overlay})` }} />}
           <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: strip, background: crimp, opacity: 0.8 }} />
-          <div style={{ position: 'absolute', inset: `0 14px ${strip}px`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, textAlign: 'center', minWidth: 0 }}>
-            {source === 'duck'
-              ? <div style={{ font: `800 italic 100px/1 ${display}`, textShadow: '0 4px 14px rgba(0,0,0,.25)' }}>0</div>
-              : club?.logo_url
-                ? <img src={club.logo_url} alt="" style={{ width: 100, height: 100, objectFit: 'contain', filter: 'drop-shadow(0 6px 14px rgba(0,0,0,.35))' }} />
-                : <div style={{ font: `800 italic 64px/1 ${display}` }}>{initials(club?.name || club?.short_name)}</div>}
-            {look.stars > 0 && <div aria-hidden data-pack-stars={look.stars} style={{ font: `700 14px/1 ${MONO}`, letterSpacing: 4, opacity: 0.9 }}>{'★'.repeat(look.stars)}</div>}
-            <div data-pack-name style={{ font: `800 italic ${nameSize(look.label)}px/1.1 ${display}`, textTransform: 'uppercase', letterSpacing: 1, maxWidth: '100%', overflowWrap: 'anywhere' }}>{look.label}</div>
-            <div style={{ font: `600 11px/1.25 ${MONO}`, letterSpacing: 1.5, textTransform: 'uppercase', opacity: 0.85, maxWidth: '100%' }}>{look.line}</div>
-            <div style={{ font: `600 9px ${MONO}`, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.65 }}>5 cards</div>
+          <div style={{ position: 'absolute', inset: `0 14px ${strip}px`, display: 'flex', flexDirection: pos === 'bottom' ? 'column-reverse' : 'column', alignItems: 'center', justifyContent: pos === 'center' ? 'center' : pos === 'top' ? 'flex-start' : 'flex-end', gap: 10, textAlign: 'center', minWidth: 0, paddingTop: pos === 'top' ? 16 : 0, paddingBottom: pos === 'bottom' ? 16 : 0 }}>
+            {mark}
+            {words && <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, maxWidth: '100%', minWidth: 0 }}>{words}</div>}
           </div>
           <div className="cc-sheen" aria-hidden />
         </div>
@@ -250,7 +273,7 @@ export default function PackOpening({ pack, packsLeft, club, accent, display = D
           <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22 }}>
             <button type="button" ref={refs.pack} onClick={start} disabled={stage === 'opening'} data-pack-sealed aria-label="Open this pack"
               style={{ position: 'relative', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}>
-              <PackArt source={pack.source} label={pack.label} club={club} accent={accent} display={display} width={Math.min(240, cardW * 0.8)} stripRef={refs.strip} bodyRef={refs.body} glow />
+              <PackArt source={pack.source} label={pack.label} design={pack.design} club={club} accent={accent} display={display} width={Math.min(240, cardW * 0.8)} stripRef={refs.strip} bodyRef={refs.body} glow />
               <div ref={refs.flash} style={{ position: 'absolute', left: '50%', top: '30%', width: 180, height: 180, marginLeft: -90, marginTop: -90, borderRadius: '50%', opacity: 0, background: 'radial-gradient(circle, #fff, rgba(255,255,255,0) 68%)', pointerEvents: 'none' }} />
             </button>
             {stage === 'ready' && <div className="cc-pulse" style={{ font: `700 12px ${MONO}`, letterSpacing: 2, textTransform: 'uppercase' }}>Tap the pack to open it</div>}
