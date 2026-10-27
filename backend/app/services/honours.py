@@ -240,8 +240,8 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID,
         # Every row linked to one scorecard is ONE card, whatever each row's own wording: a typed flag and
         # the roles added to it from the squad editor belong to the same game.
         gid = game_links.get(r["id"]) if game_links else None
-        key = (("\0game", gid, "x") if gid
-               else ((season or "").lower(), team.lower(), label.lower() if is_flag else ""))
+        row_key = ((season or "").lower(), team.lower(), label.lower() if is_flag else "")
+        key = ("\0game", gid, "x") if gid else row_key
         g = groups.get(key)
         if g is None:
             g = groups[key] = {
@@ -253,6 +253,9 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID,
             }
             if game_links is not None:
                 g["game_id"] = None
+                g["_src"] = set()
+        if gid:
+            g["_src"].add(row_key)
         if game_links is not None and not g.get("game_id"):
             g["game_id"] = game_links.get(r["id"])
         pkey = _person_key(r["player_id"], r["name"])
@@ -272,6 +275,29 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID,
         # somebody played, so it is read as a role rather than a footnote.
         if r["detail"] and not p["detail"]:
             p["detail"] = r["detail"]
+
+    # A card made of the rows linked to a scorecard also takes in the rows with the SAME wording that could not
+    # be linked: a 12th or 13th man typed against the flag was never on the scorecard, so no game can claim
+    # them, and leaving them out would split one flag into a linked card and a small one.
+    if game_links is not None:
+        game_keys = [k for k in groups if k[0] == "\0game"]
+        for key in [k for k in groups if k[0] != "\0game"]:
+            owners = [gk for gk in game_keys
+                      if key in groups[gk]["_src"]
+                      or (not key[2] and any(src[0] == key[0] and src[1] == key[1] for src in groups[gk]["_src"]))]
+            if len(owners) != 1:
+                continue
+            loose, target = groups.pop(key), groups[owners[0]]
+            for pkey, p in loose["players"].items():
+                existing = target["players"].get(pkey)
+                if existing is None:
+                    target["players"][pkey] = p
+                    continue
+                for role in p["roles"]:
+                    if role not in existing["roles"]:
+                        existing["roles"].append(role)
+                if p["detail"] and not existing["detail"]:
+                    existing["detail"] = p["detail"]
 
     # A club that records a side's captain as its own award row leaves that
     # row with no competition of its own. Where the (season, team) has exactly
@@ -301,6 +327,7 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID,
 
     out = []
     for g in groups.values():
+        g.pop("_src", None)
         players = list(g["players"].values())
         for pl in players:
             # "Captain" typed in the note beside a row that is also a Captain award is one part, said once.

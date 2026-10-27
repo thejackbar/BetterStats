@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import Organisation, async_session_maker
 from app.services import honours, junior_hiding
 from app.services.club_match import fixture_side
-from app.services.grade_labels import grade_alias_map, grade_key, strip_sponsor_suffix
+from app.services.grade_labels import format_from_match_type, grade_alias_map, grade_key, strip_sponsor_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ async def grand_final_wins(db: AsyncSession, club: Organisation) -> tuple[list[d
     org_id = club.id
     rows = (await db.execute(text("""
         SELECT g.id, g.grade_id, g.played_at, g.home_team, g.away_team, g.home_org_id, g.away_org_id,
-               g.winning_team, g.round_name, g.status, g.ca_called_off,
+               g.winning_team, g.round_name, g.status, g.ca_called_off, g.match_format,
                gr.name AS grade_name,
                s.id AS season_id, s.name AS season_name, s.year AS season_year,
                s.organisation_id AS season_org
@@ -154,6 +154,7 @@ async def grand_final_wins(db: AsyncSession, club: Organisation) -> tuple[list[d
         candidates.append({
             **base,
             "grade_key": key,
+            "fmt": format_from_match_type(r["match_format"]),
             "team": display,
             "year": honours.year_of(label, r["season_year"]),
             "season_label": label,
@@ -224,6 +225,18 @@ def _label_key(achievement: Optional[str]) -> str:
     Premiership" -> "2nd grade one day". Applecross types a flag against the team ("1st XI") and names the
     competition in the award, so the subcategory alone says nothing about the grade Cricket Australia calls it."""
     return grade_key(_FLAG_SUFFIX_RE.sub("", (achievement or "").strip()))
+
+
+_FORMAT_WORD_RE = re.compile(r"\b(one[\s\-]?day|two[\s\-]?day|t20|twenty20)\b", re.I)
+
+
+def _text_format(*texts) -> Optional[str]:
+    """The match format a typed flag names ("2nd Grade Two Day Premiership" -> two_day), or None."""
+    for t in texts:
+        m = _FORMAT_WORD_RE.search(t or "")
+        if m:
+            return format_from_match_type(m.group(1))
+    return None
 
 
 def _words_prefix(a: str, b: str) -> bool:
@@ -311,8 +324,12 @@ async def plan(db: AsyncSession, club: Organisation) -> dict:
         return typed_open.get((_person(pid, name), year)) or typed_open.get((_person(None, name), year)) or []
 
     def row_matches(r: dict, w: dict) -> bool:
-        return (_words_prefix(fold(grade_key(r["subcategory"])), w["grade_key"])
-                or _words_prefix(fold(_label_key(r["achievement"])), w["grade_key"]))
+        if not (_words_prefix(fold(grade_key(r["subcategory"])), w["grade_key"])
+                or _words_prefix(fold(_label_key(r["achievement"])), w["grade_key"])):
+            return False
+        # A One Day flag is not the Two Day grand final, when both the flag and the game say which they are.
+        named = _text_format(r["achievement"], r["subcategory"])
+        return not (named and w.get("fmt") and named != w["fmt"])
 
     by_person: dict[tuple, list[tuple[str, str]]] = {}
     for (g, pid), d in desired.items():

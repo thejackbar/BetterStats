@@ -2672,3 +2672,9 @@ Asked for: on the partnerships leaderboard, click a row and land on the scorecar
 - Ask: the club must be able to add 12th and 13th man and Player of the Match to a card. `edit_squad` and the Edit squad panel do it for a card linked to a scorecard; a flag with no link is still edited from Admin, Awards.
 - Checks: `verify_premierships_auto.py` 89 (sections 9c and 9d; the control on the previous `premierships.py` fails 7 of the Applecross checks), `verify_premierships_auto_browser.mjs` 68 (editor requests on the wire, public sees no editor, 390px), the honour board, club room and sync suites unchanged.
 - Not verified: live Applecross. After deploy run `sync_premierships applecross-cricket-club` (dry run), read `supersede` against the 310 automatic rows written, then `--apply`.
+
+## v9.131.4 follow-up: what the Applecross apply left behind
+
+- Finding: after `sync_premierships applecross --apply` the page went from 63 cards and 731 player rows to 54 and 452, but 14 of 21 flag years still had a linked card and a smaller typed card for the same flag. Two causes. A typed 12th or 13th man was never on the scorecard, so no game could claim the row; the first version of per-game grouping then split them off the card. And a player typed for both the One Day and the Two Day flag was left unlinked because either could be the win.
+- Fix: a typed row with the same season, team and award wording as a card's linked rows joins that card (`premiership_squads`). A flag that names a format only matches a game whose `match_format` says the same, so the Two Day flag links to the Two Day final. Re-running `sync_premierships <club> --apply` re-links, and the card merge is on read.
+- Checks: `verify_premierships_auto.py` 94 (section 9e; the control on the code then on main fails 3).

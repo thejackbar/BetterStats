@@ -513,6 +513,48 @@ async def main() -> None:
         rep2 = await prem.reconcile(db, OURS, apply=True)
         check("a second run changes nothing", all(rep2.get(k) == 0 for k in ("create", "supersede", "link", "delete")), str(rep2))
 
+        # ── 9e. one flag stays one card; a One Day flag is not the Two Day final ──
+        print("\n9e. Typed 12th/13th men stay on the card; format picks the right typed flag")
+        S18, GRT, GRF = u(), u(), u()
+        GT, GFMT = u(), u()
+        await db.execute(text("INSERT INTO seasons (id, organisation_id, name, year) VALUES (:i,:o,'2018/19',2018)"), {"i": S18, "o": OURS})
+        for gid_, nm in ((GRT, "3rd Grade"), (GRF, "4th Grade")):
+            await db.execute(text("INSERT INTO grades (id, season_id, name) VALUES (:i,:s,:n)"), {"i": gid_, "s": S18, "n": nm})
+        for gid_, gr_, fmt_, d_ in ((GT, GRT, None, date(2019, 3, 16)), (GFMT, GRF, "Two Day", date(2019, 3, 17))):
+            await db.execute(text("""INSERT INTO games (id, grade_id, played_at, home_team, away_team, home_org_id, away_org_id, winning_team,
+                                     is_final, round_name, status, match_format) VALUES (:g,:gr,:d,'Leederville F','Rivals F',:o,:t,
+                                     'Leederville F',true,'Grand Final','COMPLETED',:f)"""),
+                             {"g": gid_, "gr": gr_, "d": d_, "o": OURS, "t": OTHER, "f": fmt_})
+        t1, t2, t3, f1 = await newp("Tess One"), await newp("Tess Two"), await newp("Tess Twelfth"), await newp("Finn One")
+        for pid in (t1, t2):
+            await sheet(GT, pid)
+        await sheet(GFMT, f1)
+        await db.commit()
+        await prem.reconcile(db, OURS, apply=True)           # automatic rows exist first, as in production
+        for pid, nm in ((t1, "Tess One"), (t2, "Tess Two")):
+            await typed(pid, nm, "2018/19", "3rd XI", "3rd Grade Two Day Premiership")
+        await typed(t3, "Tess Twelfth", "2018/19", "3rd XI", "3rd Grade Two Day Premiership", "12th Man")   # never on the sheet
+        await typed(f1, "Finn One", "2018/19", "1st XI", "4th Grade One Day Premiership")
+        await typed(f1, "Finn One", "2018/19", "1st XI", "4th Grade Two Day Premiership")
+        await db.commit()
+        await prem.reconcile(db, OURS, apply=True)
+        links_ = await prem.achievement_game_links(db, OURS)
+        data_ = await honours.premiership_squads(db, OURS, game_links=links_)
+        cards = [c for c in data_["premierships"] if c.get("game_id") == str(GT)]
+        check("the flag is ONE card: the two who played and the typed 12th man together",
+              len(cards) == 1 and {p_["name"] for p_ in cards[0]["players"]} == {"Tess One", "Tess Two", "Tess Twelfth"},
+              str([{p_["name"] for p_ in c["players"]} for c in cards]))
+        loose = [c for c in data_["premierships"] if c.get("game_id") is None and any(p_["name"] == "Tess Twelfth" for p_ in c["players"])]
+        check("and the 12th man is not left on a card of their own", loose == [], str(loose))
+        finn = [r for r in await rows(db, player_id=f1)]
+        two = [r for r in finn if "Two Day" in r["achievement"]]
+        one = [r for r in finn if "One Day" in r["achievement"]]
+        check("a Two Day grand final links the typed Two Day flag, not the One Day one",
+              len(two) == 1 and two[0]["linked_game_id"] == GFMT and len(one) == 1 and one[0]["linked_game_id"] is None, str(finn))
+        check("and the player has no automatic honour beside them", not any(r["auto_created"] for r in finn))
+        check("the 12th man's typed row is untouched", len(await rows(db, player_id=t3)) == 1
+              and (await rows(db, player_id=t3))[0]["detail"] == "12th Man")
+
         # ── 9d. the squad editor ──────────────────────────────────────────
         print("\n9d. Squad editor")
         S30, GRE, GE = u(), u(), u()
