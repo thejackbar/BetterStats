@@ -16,7 +16,7 @@ import { setAllowMaybe } from '../../../lib/useAvailabilityConfig'
 // player sees the same set. A module can be ticked while something it depends on
 // is off (the fees module needs BetterAdmin fees and the PIN); the page simply
 // leaves it out until that is sorted, and the note here says what is missing.
-function PageModules({ modules, canEdit, busy, onChange }) {
+export function PageModules({ modules, canEdit, busy, onChange }) {
   const on = modules.filter((m) => m.enabled)
   const off = modules.filter((m) => !m.enabled)
   const keys = on.map((m) => m.key)
@@ -55,7 +55,7 @@ function PageModules({ modules, canEdit, busy, onChange }) {
     <div data-page-modules>
       <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Player dashboard</div>
       <p className="text-[12px] text-pb-faintest mb-1.5">
-        What players see on their dashboard after they sign in, below their availability. Tick what you want and use the arrows to set the order. It is the same for every player.
+        What players see on their dashboard after they sign in. Tick what you want and use the arrows to set the order. It is the same for every player.
       </p>
       {on.map(row)}
       {off.map((m) => row(m, -1))}
@@ -207,6 +207,11 @@ export default function SelfServiceLinkPanel() {
                 : 'Players are not told which squad they are in. They see every game, in time order.'}
             </p>
           )}
+
+          <p className="text-[11.5px] text-pb-faintest -mt-2" data-dashboard-pointer>
+            This switch is for availability and votes. The Player Dashboard (Player Cards, season) has its own switch in{' '}
+            <a href="/admin/player-dashboard" className="underline">BetterStats &gt; Player Dashboard</a>.
+          </p>
 
           {!enabled ? (
             <p className="text-sm text-pb-faint">

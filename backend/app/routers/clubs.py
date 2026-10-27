@@ -10,9 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.models.db import ClubUnpauseRequest, Organisation, Season, Sponsor, get_db
-from app.services import sponsor_tiers, section_names, card_sponsors
+from app.services import sponsor_tiers, section_names, card_sponsors, player_dashboard
 from app.routers.organisations import _season_sort_key
-from app.auth.modules import MODULE_SELECT, org_core_live, org_has_module
+from app.auth.modules import org_core_live
 from app.services import club_lock, email_service, rate_limit
 from app.services import fonts as font_service
 from app.config.settings import settings
@@ -96,13 +96,12 @@ async def get_club_by_slug(slug: str, request: Request, db: AsyncSession = Depen
 
 
 def _player_page_path(org: Organisation) -> str | None:
-    """The link to the club's player page. A club with BetterSelect keeps its self-service switch;
-    a club without it has the page for its Player Cards and season, on whenever the site shows it."""
+    """The link to the club's player page. The button is for the DASHBOARD, so it follows that switch
+    (`player_dashboard.dashboard_live`, set in BetterStats settings), not the availability switch.
+    Either way the club can hide the button."""
     if not org.availability_link_token or org.availability_show_on_site is False:
         return None
-    if org_has_module(org, MODULE_SELECT):
-        return f"/playerdash/{org.availability_link_token}" if org.availability_self_service_enabled else None
-    return f"/playerdash/{org.availability_link_token}"
+    return f"/playerdash/{org.availability_link_token}" if player_dashboard.dashboard_live(org) else None
 
 
 @router.get("/{slug}/manifest")

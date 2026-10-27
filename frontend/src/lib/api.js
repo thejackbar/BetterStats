@@ -3418,6 +3418,12 @@ export const api = {
   bsDeleteAvailabilityPeriod: (id) =>
     request(`/availability/periods/${id}`, { method: 'DELETE' }),
 
+  // ─── Player Dashboard (BetterStats): the page's switches, behind MANAGE_SETTINGS ───
+  getPlayerDashboardSettings: () => request('/player-dashboard/settings'),
+  setPlayerDashboardSettings: (data) =>
+    request('/player-dashboard/settings', { method: 'POST', body: JSON.stringify(data) }),
+  regeneratePlayerDashboardLink: () => request('/player-dashboard/regenerate', { method: 'POST' }),
+
   // ─── Player Cards (BetterStats): the club's settings, behind MANAGE_SETTINGS ───
   getPlayerCardSettings: () => request('/player-cards/settings'),
   updatePlayerCardSettings: (data) =>
