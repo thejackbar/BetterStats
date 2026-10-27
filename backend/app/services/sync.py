@@ -17,7 +17,7 @@ from app.models.db import (
     PlayerSeasonStats, PlayerSeasonGradeStats, Milestone,
     SyncRun, async_session_maker
 )
-from app.services import auto_sync, dismissal, merge_redirects, participant_names, playhq_client, reserve_players
+from app.services import auto_sync, dismissal, game_winner, merge_redirects, participant_names, playhq_client, reserve_players
 from app.services.boundary_counts import clean as _bounds
 from app.services.game_status import NOT_PLAYED_STATUSES, card_called_off, not_played_game_sql
 from app.services.grade_labels import suggest_categories, suggest_category
@@ -2109,8 +2109,15 @@ async def sync_grassroots_game_level_data(
                 reread_ids = await participant_relink.recent_games_without_detail(_s, org_uuid)
                 # A game stored while CA still had it in play: read again to put its figures right.
                 reread_ids |= await participant_relink.recent_unfinished_games(_s, org_uuid)
+                # A finished game that holds a WIN or LOSS and no winner reads backwards to the
+                # other club (services/game_winner). Any age: the backfill below fills it in.
+                try:
+                    reread_ids |= await game_winner.games_missing_winner(_s, org_uuid)
+                except Exception as _e:
+                    await _s.rollback()
+                    logger.warning(f"GR-sync: missing-winner check failed: {_e}")
             if reread_ids:
-                logger.info(f"GR-sync: {len(reread_ids)} recent game(s) without player detail will be re-read")
+                logger.info(f"GR-sync: {len(reread_ids)} game(s) will be re-read (no player detail, unfinished, or no winner)")
         except Exception as _e:
             logger.warning(f"GR-sync: recent-game check failed: {_e}")
             reread_ids = set()
