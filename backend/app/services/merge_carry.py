@@ -113,6 +113,8 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     ("player_card_swaps", "to_player_id", "uuid", None),
     ("player_card_swaps", "give_subject_player_id", "uuid", None),
     ("player_card_swaps", "want_subject_player_id", "uuid", None),
+    # The cards on each side of a swap (migration 365): the subject of each card.
+    ("player_card_swap_items", "subject_player_id", "uuid", None),
 )
 
 # Tables whose primary key is not an `id` column: the column that identifies one
@@ -155,7 +157,7 @@ _OWN_CLUB_TABLES = {
     "fantasy_pool_players", "fantasy_drafts", "fantasy_waiver_claims",
     "fine_entries", "fine_payments",
     "player_card_packs", "player_card_copies", "player_special_cards", "player_card_hidden",
-    "player_card_swaps",
+    "player_card_swaps", "player_card_swap_items",
 }
 
 _CAST = {"int": "int[]", "uuid": "uuid[]"}

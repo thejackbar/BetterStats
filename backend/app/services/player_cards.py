@@ -578,15 +578,38 @@ async def _insert_five_fors(db, org: str, pids: list[str]) -> int:
     return res.rowcount or 0
 
 
+# A club types its award's name and its season in more than one way: `player_achievements.season` holds a
+# seasons id (what the Awards screen writes) or a plain label like "2015_16" (what an import writes), and the
+# club may have given the award a display name under Award definitions. A card reads both the way the honour
+# board does (`services/honours.py`): the seasons row's name, "_" read as "/", and the club's own name for the
+# award. The definition is picked with a scalar subquery so two definitions under one name cannot fan a row out.
+_AWARD_SEASON_JOIN = """
+          LEFT JOIN seasons se ON se.organisation_id = pa.org_id AND se.id = CASE
+               WHEN pa.season ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+               THEN CAST(pa.season AS UUID) ELSE NULL END"""
+_AWARD_SEASON = ("NULLIF(REGEXP_REPLACE(BTRIM(COALESCE(se.name, pa.season, '')), "
+                 "'^([0-9]{4})_([0-9]{2}|[0-9]{4})$', '\\1/\\2'), '')")
+_AWARD_TITLE = """LEFT(COALESCE(
+                 (SELECT NULLIF(BTRIM(d.display_name), '') FROM org_award_definitions d
+                   WHERE d.org_id = pa.org_id AND d.category = pa.category
+                     AND COALESCE(d.subcategory, '') = COALESCE(pa.subcategory, '') AND d.achievement = pa.achievement
+                     AND NULLIF(BTRIM(d.display_name), '') IS NOT NULL
+                   ORDER BY d.sort_order, d.id LIMIT 1),
+                 pa.achievement), 120)"""
+
+
 async def _insert_achievements(db, org: str, pids: list[str]) -> int:
-    """Hat-tricks and club awards the club recorded against a player. One card per recorded row."""
+    """Hat-tricks and club awards the club recorded against a player. One card per recorded row, titled with the
+    club's own name for the award and dated with the season as the club writes it. A card made earlier is brought
+    in line (title and detail only; the card, its copies and its date stay), so a rename or a corrected season
+    reaches it."""
     total = 0
     res = await db.execute(text(
-        _INSERT_PREFIX + """
+        _INSERT_PREFIX + f"""
         SELECT CAST(:org AS UUID), pa.player_id, 'hat_trick', 'hat_trick:achievement:' || pa.id::text,
                NULL, NULL, 'Hat-trick',
-               jsonb_build_object('season', pa.season, 'note', pa.detail)
-          FROM player_achievements pa
+               jsonb_build_object('season', {_AWARD_SEASON}, 'note', pa.detail)
+          FROM player_achievements pa {_AWARD_SEASON_JOIN}
          WHERE pa.org_id = CAST(:org AS UUID) AND pa.player_id = ANY(CAST(:pids AS uuid[]))
            AND (LOWER(COALESCE(pa.subcategory, '')) = 'hat tricks'
                 OR LOWER(pa.achievement) = 'hat trick'
@@ -594,15 +617,39 @@ async def _insert_achievements(db, org: str, pids: list[str]) -> int:
         """ + _INSERT_SUFFIX), {"org": org, "pids": pids})
     total += res.rowcount or 0
     res = await db.execute(text(
-        _INSERT_PREFIX + """
+        _INSERT_PREFIX + f"""
         SELECT CAST(:org AS UUID), pa.player_id, 'award', 'award:achievement:' || pa.id::text,
-               NULL, NULL, LEFT(pa.achievement, 120),
-               jsonb_build_object('season', pa.season, 'grade', pa.subcategory, 'note', pa.detail)
-          FROM player_achievements pa
+               NULL, NULL, {_AWARD_TITLE},
+               jsonb_build_object('season', {_AWARD_SEASON}, 'grade', pa.subcategory, 'note', pa.detail)
+          FROM player_achievements pa {_AWARD_SEASON_JOIN}
          WHERE pa.org_id = CAST(:org AS UUID) AND pa.player_id = ANY(CAST(:pids AS uuid[]))
            AND LOWER(pa.category) = 'club award'
         """ + _INSERT_SUFFIX), {"org": org, "pids": pids})
-    return total + (res.rowcount or 0)
+    total += res.rowcount or 0
+    # Existing award and hat-trick cards read the same way. Only a row that still exists is touched, and only
+    # where the wording differs, so a refresh with nothing changed writes nothing.
+    await db.execute(text(f"""
+        UPDATE player_special_cards c
+           SET title = x.title, detail = x.detail
+          FROM (SELECT 'award:achievement:' || pa.id::text AS event_key, {_AWARD_TITLE} AS title,
+                       jsonb_build_object('season', {_AWARD_SEASON}, 'grade', pa.subcategory, 'note', pa.detail) AS detail
+                  FROM player_achievements pa {_AWARD_SEASON_JOIN}
+                 WHERE pa.org_id = CAST(:org AS UUID) AND pa.player_id = ANY(CAST(:pids AS uuid[]))
+                   AND LOWER(pa.category) = 'club award') x
+         WHERE c.organisation_id = CAST(:org AS UUID) AND c.kind = 'award' AND c.event_key = x.event_key
+           AND (c.title IS DISTINCT FROM x.title OR c.detail IS DISTINCT FROM x.detail)
+    """), {"org": org, "pids": pids})
+    await db.execute(text(f"""
+        UPDATE player_special_cards c
+           SET detail = x.detail
+          FROM (SELECT 'hat_trick:achievement:' || pa.id::text AS event_key,
+                       jsonb_build_object('season', {_AWARD_SEASON}, 'note', pa.detail) AS detail
+                  FROM player_achievements pa {_AWARD_SEASON_JOIN}
+                 WHERE pa.org_id = CAST(:org AS UUID) AND pa.player_id = ANY(CAST(:pids AS uuid[]))) x
+         WHERE c.organisation_id = CAST(:org AS UUID) AND c.kind = 'hat_trick' AND c.event_key = x.event_key
+           AND c.detail IS DISTINCT FROM x.detail
+    """), {"org": org, "pids": pids})
+    return total
 
 
 async def _insert_game_milestones(db, org: str, snap: dict) -> int:

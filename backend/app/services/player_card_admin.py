@@ -279,12 +279,12 @@ async def player_view(db: AsyncSession, club: Organisation, snap: dict, player: 
     """), {"p": pid})).mappings().all()
     specials = await _specials(db, club.id, [r["special_id"] for r in got])
     sw = (await db.execute(text("""
-        SELECT s.id::text AS id, s.from_player_id::text AS f, s.to_player_id::text AS t, s.status, s.created_at, s.resolved_at, NOW() AS now,
-               s.give_subject_player_id::text AS gs, s.give_special_id::text AS gsp, s.want_subject_player_id::text AS ws, s.want_special_id::text AS wsp
+        SELECT s.id::text AS id, s.from_player_id::text AS f, s.to_player_id::text AS t, s.status, s.created_at, s.resolved_at, NOW() AS now
           FROM player_card_swaps s WHERE s.from_player_id = CAST(:p AS UUID) OR s.to_player_id = CAST(:p AS UUID)
          ORDER BY s.created_at DESC LIMIT 25
     """), {"p": pid})).mappings().all()
-    sp2 = await _specials(db, club.id, [r[k] for r in sw for k in ("gsp", "wsp")])
+    sw_items = await swaps._items_of(db, [r["id"] for r in sw])
+    sp2 = await _specials(db, club.id, [c[1] for sides in sw_items.values() for side in sides.values() for c, _ in side if c[1]])
     return {
         "player": {"id": pid, "name": nm.get(pid), "in_pool": pid in snap["people"],
                    "rarity": (snap["rating"].get(pid) or {}).get("score"), "tier": (snap["rating"].get(pid) or {}).get("tier")},
@@ -297,21 +297,26 @@ async def player_view(db: AsyncSession, club: Organisation, snap: dict, player: 
         },
         "recent_cards": [{"source": r["source"], "obtained_at": r["obtained_at"].isoformat(),
                           **_label(nm, snap, r["subject"], r["special_id"], specials)} for r in got],
-        "swaps": [_swap_row(r, nm, snap, sp2) for r in sw],
+        "swaps": [_swap_row(r, nm, snap, sp2, sw_items[r["id"]]) for r in sw],
     }
 
 
 # ── The swap audit ────────────────────────────────────────────────────────────────────────────────────────────
 
-def _swap_row(r, nm: dict, snap: dict, specials: dict) -> dict:
+def _swap_row(r, nm: dict, snap: dict, specials: dict, sides: dict) -> dict:
+    """One request. `give` and `want` are lists of cards (each with `qty`), as lines of text."""
     status = r["status"]
     if status == "pending":
         if (r["now"] - r["created_at"]).days >= swaps.SWAP_DAYS:
             status = "expired"
+
+    def side(items):
+        return [{**_label(nm, snap, c[0], c[1], specials), "qty": qty} for c, qty in items]
+
     return {
         "id": r["id"], "status": status,
         "from": {"id": r["f"], "name": nm.get(r["f"])}, "to": {"id": r["t"], "name": nm.get(r["t"])},
-        "give": _label(nm, snap, r["gs"], r["gsp"], specials), "want": _label(nm, snap, r["ws"], r["wsp"], specials),
+        "give": side(sides["give"]), "want": side(sides["want"]),
         "created_at": r["created_at"].isoformat(), "resolved_at": r["resolved_at"].isoformat() if r["resolved_at"] else None,
     }
 
@@ -330,16 +335,16 @@ async def swap_audit(db: AsyncSession, club: Organisation, snap: dict, *, status
     elif status == "expired":
         cond = f" AND s.status = 'pending' AND s.created_at <= NOW() - INTERVAL '{swaps.SWAP_DAYS} days'"
     rows = (await db.execute(text(f"""
-        SELECT s.id::text AS id, s.from_player_id::text AS f, s.to_player_id::text AS t, s.status, s.created_at, s.resolved_at, NOW() AS now,
-               s.give_subject_player_id::text AS gs, s.give_special_id::text AS gsp, s.want_subject_player_id::text AS ws, s.want_special_id::text AS wsp
+        SELECT s.id::text AS id, s.from_player_id::text AS f, s.to_player_id::text AS t, s.status, s.created_at, s.resolved_at, NOW() AS now
           FROM player_card_swaps s WHERE s.organisation_id = CAST(:o AS UUID){cond} ORDER BY s.created_at DESC
     """), params)).mappings().all()
-    specials = await _specials(db, club.id, [r[k] for r in rows for k in ("gsp", "wsp")])
-    shaped = [_swap_row(r, nm, snap, specials) for r in rows]
+    items = await swaps._items_of(db, [r["id"] for r in rows])
+    specials = await _specials(db, club.id, [c[1] for sides in items.values() for side in sides.values() for c, _ in side if c[1]])
+    shaped = [_swap_row(r, nm, snap, specials, items[r["id"]]) for r in rows]
     needle = (q or "").strip().lower()
     if needle:
         shaped = [s for s in shaped if needle in (s["from"]["name"] or "").lower() or needle in (s["to"]["name"] or "").lower()
-                  or needle in s["give"]["player"].lower() or needle in s["want"]["player"].lower()]
+                  or any(needle in c["player"].lower() for c in s["give"] + s["want"])]
     counts = (await db.execute(text(f"""
         SELECT COUNT(*) FILTER (WHERE status = 'accepted') AS accepted, COUNT(*) FILTER (WHERE status = 'declined') AS declined,
                COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled,

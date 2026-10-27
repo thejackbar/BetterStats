@@ -377,7 +377,8 @@ function PacksTab({ ov, open }) {
 const STATUS_TONE = { accepted: 'var(--pb-positive)', declined: 'var(--pb-red)', cancelled: 'var(--pb-faint)', pending: 'var(--pb-amber)', expired: 'var(--pb-faint)' }
 function SwapTable({ rows }) {
   if (!rows.length) return <div className="text-sm text-pb-faint">No swaps.</div>
-  const line = (c) => (c.kind === 'special' ? `${c.player}: ${c.title}` : `${c.player} (${tierLabel(c.tier)})`)
+  const one = (c) => `${c.kind === 'special' ? `${c.player}: ${c.title}` : `${c.player} (${tierLabel(c.tier)})`}${(c.qty || 1) > 1 ? ` ×${c.qty}` : ''}`
+  const line = (list) => (Array.isArray(list) ? list : [list]).map(one).join('; ')
   return (
     <div className="overflow-x-auto"><table className="w-full text-sm" data-swap-table>
       <thead><tr className="text-left font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest"><th className="px-2 py-1">When</th><th className="px-2 py-1">Asked</th><th className="px-2 py-1">Gave</th><th className="px-2 py-1">Asked of</th><th className="px-2 py-1">Wanted</th><th className="px-2 py-1">Result</th></tr></thead>

@@ -5,9 +5,11 @@ The rules, kept small on purpose:
 * ANY card a player holds can be offered, a single copy as well as a double. What a swap cannot do is take
   away a player's own card: it is theirs without a row, so there is nothing to hand over, and only the extra
   copies of it they have pulled can go. `tradeable()` is the one definition.
-* A request is one card for one card, from one player to one other. Nothing moves until the person asked
-  accepts, and the check that both players still hold their card is made again at that moment, under row
-  locks, because either of them may have swapped since the request was made.
+* A request is any number of cards each way (a card at a time, or several copies of one), from one player to
+  one other: one card for four of theirs, or six for two. Nothing moves until the person asked accepts, and
+  the check that both players still hold every card is made again at that moment, under row locks, because
+  either of them may have swapped since the request was made. It is all or nothing: if any one card has gone,
+  none moves.
 * Requests expire after `SWAP_DAYS` (read from the age, nothing is stored), a player may have
   `MAX_OUTGOING` open at once, and a request is never deleted: it ends accepted, declined or cancelled.
 * Another player can see the cards a person could offer, a card at a time. Nobody can see how many copies
@@ -32,6 +34,8 @@ SWAP_DAYS = 14
 MAX_OUTGOING = 10
 RECENT_SHOWN = 15
 RECENT_DAYS = 30
+MAX_CARDS = 50   # different cards on one side of a request
+MAX_COPIES = 99  # copies of one card
 
 
 class SwapError(Exception):
@@ -146,6 +150,48 @@ def _live_sql(alias: str = "s") -> str:
     return f"({alias}.status = 'pending' AND {alias}.created_at > NOW() - INTERVAL '{SWAP_DAYS} days')"
 
 
+Item = tuple[Card, int]  # (card, how many copies)
+
+
+async def _items_of(db: AsyncSession, swap_ids: list[str]) -> dict[str, dict[str, list[Item]]]:
+    """`{swap id: {"give": [(card, qty)], "want": [...]}}`, in a steady order."""
+    out: dict[str, dict[str, list[Item]]] = {i: {"give": [], "want": []} for i in swap_ids}
+    if not swap_ids:
+        return out
+    rows = (await db.execute(text(
+        "SELECT swap_id::text, side, subject_player_id::text, special_id::text, qty FROM player_card_swap_items "
+        "WHERE swap_id = ANY(CAST(:ids AS uuid[])) ORDER BY side, special_id NULLS FIRST, subject_player_id"
+    ), {"ids": swap_ids})).fetchall()
+    for sid, side, subject, special_id, qty in rows:
+        if side in ("give", "want"):
+            out[sid][side].append(((subject, special_id), int(qty)))
+    return out
+
+
+async def _parse_items(db: AsyncSession, club: Organisation, snap: dict, raw) -> list[Item]:
+    """The cards one side of a request names, as `[{key, qty}]`. A card named twice is added up."""
+    if not isinstance(raw, list) or not raw:
+        raise SwapError("Pick at least one card on each side.", 422)
+    wanted: dict[Card, int] = {}
+    for entry in raw:
+        key = entry.get("key") if isinstance(entry, dict) else entry
+        try:
+            qty = int(entry.get("qty", 1)) if isinstance(entry, dict) else 1
+        except (TypeError, ValueError):
+            raise SwapError("That quantity is not a number.", 422)
+        if qty < 1 or qty > MAX_COPIES:
+            raise SwapError(f"Swap between 1 and {MAX_COPIES} copies of a card.", 422)
+        card, _ = await _resolve(db, club.id, snap, key)
+        wanted[card] = wanted.get(card, 0) + qty
+    if len(wanted) > MAX_CARDS:
+        raise SwapError(f"A swap can carry up to {MAX_CARDS} different cards on each side.", 422)
+    return list(wanted.items())
+
+
+def _signature(give: list[Item], want: list[Item]) -> tuple:
+    return (tuple(sorted(((c, n) for c, n in give), key=repr)), tuple(sorted(((c, n) for c, n in want), key=repr)))
+
+
 async def waiting_count(db: AsyncSession, me: str) -> int:
     return int((await db.execute(text(
         "SELECT COUNT(*) FROM player_card_swaps s WHERE s.to_player_id = CAST(:me AS UUID) AND " + _live_sql()
@@ -155,8 +201,6 @@ async def waiting_count(db: AsyncSession, me: str) -> int:
 async def list_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str) -> dict:
     rows = (await db.execute(text(f"""
         SELECT s.id::text AS id, s.from_player_id::text AS from_id, s.to_player_id::text AS to_id,
-               s.give_subject_player_id::text AS give_subject, s.give_special_id::text AS give_special,
-               s.want_subject_player_id::text AS want_subject, s.want_special_id::text AS want_special,
                s.status, s.created_at, s.resolved_at, {_live_sql()} AS live
           FROM player_card_swaps s
          WHERE s.organisation_id = CAST(:org AS UUID)
@@ -164,11 +208,19 @@ async def list_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str) 
            AND (s.status = 'pending' OR s.created_at > NOW() - INTERVAL '{RECENT_DAYS} days')
          ORDER BY s.created_at DESC
     """), {"org": str(club.id), "me": me})).mappings().all()
-    special_ids = [r[k] for r in rows for k in ("give_special", "want_special") if r[k]]
+    items = await _items_of(db, [r["id"] for r in rows])
+    special_ids = [c[1] for sides in items.values() for side in sides.values() for c, _ in side if c[1]]
     specials = await _special_subjects(db, club.id, special_ids)
 
-    def card_of(r, side):
-        return _payload(snap, (r[f"{side}_subject"], r[f"{side}_special"]), specials)
+    def cards_of(r, side) -> Optional[list[dict]]:
+        """The cards on a side, or None if any of them can no longer be drawn (out of the pool)."""
+        out = []
+        for card, qty in items[r["id"]][side]:
+            payload = _payload(snap, card, specials)
+            if payload is None:
+                return None
+            out.append({**payload, "qty": qty, "key": key_of(*card)})
+        return out
 
     def shape(r):
         outgoing = r["from_id"] == me
@@ -177,7 +229,7 @@ async def list_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str) 
         return {
             "id": r["id"], "direction": "out" if outgoing else "in", "status": status,
             "other": {"player_id": other, "name": (snap["people"].get(other) or {}).get("display_name") or "A player"},
-            "give": card_of(r, "give"), "want": card_of(r, "want"),
+            "give": cards_of(r, "give"), "want": cards_of(r, "want"),
             "created_at": r["created_at"].isoformat(), "resolved_at": r["resolved_at"].isoformat() if r["resolved_at"] else None,
         }
 
@@ -190,55 +242,62 @@ async def list_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str) 
     }
 
 
-async def create_swap(db: AsyncSession, club: Organisation, snap: dict, me: str, to_id: str, give_key: str, want_key: str) -> str:
+async def create_swap(db: AsyncSession, club: Organisation, snap: dict, me: str, to_id: str, give_raw, want_raw) -> str:
+    """`give_raw` and `want_raw` are lists of `{key, qty}`."""
     if to_id == me or to_id not in snap["people"]:
         raise SwapError("That player is not available to swap with.", 404)
-    give, _ = await _resolve(db, club.id, snap, give_key)
-    want, _ = await _resolve(db, club.id, snap, want_key)
-    if give == want:
-        raise SwapError("Pick two different cards.", 422)
+    give = await _parse_items(db, club, snap, give_raw)
+    want = await _parse_items(db, club, snap, want_raw)
+    if {c for c, _ in give} & {c for c, _ in want}:
+        raise SwapError("A card cannot be on both sides of a swap.", 422)
     mine = (await _rows_by_card(db, club.id, me)).get(me, {})
-    if tradeable(me, give, mine.get(give, 0)) < 1:
-        raise SwapError("You can only offer a card you hold.")
+    for card, qty in give:
+        if tradeable(me, card, mine.get(card, 0)) < qty:
+            raise SwapError("You can only offer cards you hold, and no more copies than you have.")
     theirs = (await _rows_by_card(db, club.id, to_id)).get(to_id, {})
-    if tradeable(to_id, want, theirs.get(want, 0)) < 1:
-        raise SwapError("They no longer have that card.")
+    for card, qty in want:
+        if tradeable(to_id, card, theirs.get(card, 0)) < qty:
+            raise SwapError("They no longer have all of those cards.")
     open_out = int((await db.execute(text(
         "SELECT COUNT(*) FROM player_card_swaps s WHERE s.from_player_id = CAST(:me AS UUID) AND " + _live_sql()
     ), {"me": me})).scalar() or 0)
     if open_out >= MAX_OUTGOING:
         raise SwapError(f"You have {MAX_OUTGOING} swap requests open already. Cancel one or wait for an answer.")
-    same = (await db.execute(text(
-        "SELECT 1 FROM player_card_swaps s WHERE s.from_player_id = CAST(:me AS UUID) AND s.to_player_id = CAST(:to AS UUID) "
-        "AND s.give_subject_player_id = CAST(:gs AS UUID) AND s.give_special_id IS NOT DISTINCT FROM CAST(:gsp AS UUID) "
-        "AND s.want_subject_player_id = CAST(:ws AS UUID) AND s.want_special_id IS NOT DISTINCT FROM CAST(:wsp AS UUID) "
-        "AND " + _live_sql() + " LIMIT 1"
-    ), {"me": me, "to": to_id, "gs": give[0], "gsp": give[1], "ws": want[0], "wsp": want[1]})).first()
-    if same:
-        raise SwapError("You have already asked them for that swap.")
+    live = (await db.execute(text(
+        "SELECT s.id::text FROM player_card_swaps s WHERE s.from_player_id = CAST(:me AS UUID) "
+        "AND s.to_player_id = CAST(:to AS UUID) AND " + _live_sql()
+    ), {"me": me, "to": to_id})).scalars().all()
+    if live:
+        mine_sig = _signature(give, want)
+        for sid, sides in (await _items_of(db, list(live))).items():
+            if _signature(sides["give"], sides["want"]) == mine_sig:
+                raise SwapError("You have already asked them for that swap.")
     new_id = (await db.execute(text("""
-        INSERT INTO player_card_swaps (organisation_id, from_player_id, to_player_id,
-            give_subject_player_id, give_special_id, want_subject_player_id, want_special_id)
-        VALUES (CAST(:org AS UUID), CAST(:me AS UUID), CAST(:to AS UUID), CAST(:gs AS UUID), CAST(:gsp AS UUID),
-                CAST(:ws AS UUID), CAST(:wsp AS UUID))
+        INSERT INTO player_card_swaps (organisation_id, from_player_id, to_player_id)
+        VALUES (CAST(:org AS UUID), CAST(:me AS UUID), CAST(:to AS UUID))
         RETURNING id::text
-    """), {"org": str(club.id), "me": me, "to": to_id, "gs": give[0], "gsp": give[1], "ws": want[0], "wsp": want[1]})).scalar()
+    """), {"org": str(club.id), "me": me, "to": to_id})).scalar()
+    for side, side_items in (("give", give), ("want", want)):
+        for (subject, special_id), qty in side_items:
+            await db.execute(text("""
+                INSERT INTO player_card_swap_items (organisation_id, swap_id, side, subject_player_id, special_id, qty)
+                VALUES (CAST(:org AS UUID), CAST(:sw AS UUID), :side, CAST(:s AS UUID), CAST(:sp AS UUID), :q)
+            """), {"org": str(club.id), "sw": new_id, "side": side, "s": subject, "sp": special_id, "q": qty})
     return new_id
 
 
-async def _lock_copy(db: AsyncSession, org_id, owner: str, card: Card) -> Optional[str]:
-    """Lock the owner's copies of a card and return the id of one that can go, or None if they hold none.
-    A pulled copy goes before a gifted one."""
+async def _lock_copies(db: AsyncSession, org_id, owner: str, card: Card) -> list[str]:
+    """Lock the owner's copies of a card and return the ids of those that can go, a pulled copy before a gifted
+    one. Fewer than the quantity asked for means the owner no longer holds enough."""
     rows = (await db.execute(text("""
         SELECT id::text FROM player_card_copies
          WHERE organisation_id = CAST(:org AS UUID) AND owner_player_id = CAST(:o AS UUID)
            AND subject_player_id = CAST(:s AS UUID) AND special_id IS NOT DISTINCT FROM CAST(:sp AS UUID)
-         ORDER BY (source = 'gift') ASC, obtained_at DESC
+         ORDER BY (source = 'gift') ASC, obtained_at DESC, id
          FOR UPDATE
     """), {"org": str(org_id), "o": owner, "s": card[0], "sp": card[1]})).fetchall()
-    if tradeable(owner, card, len(rows)) < 1:
-        return None
-    return rows[0][0]
+    n = tradeable(owner, card, len(rows))
+    return [r[0] for r in rows][:n]
 
 
 async def respond(db: AsyncSession, club: Organisation, snap: dict, me: str, swap_id: str, action: str) -> str:
@@ -251,8 +310,6 @@ async def respond(db: AsyncSession, club: Organisation, snap: dict, me: str, swa
         raise SwapError("That swap could not be found.", 404)
     s = (await db.execute(text(f"""
         SELECT s.from_player_id::text AS from_id, s.to_player_id::text AS to_id,
-               s.give_subject_player_id::text AS gs, s.give_special_id::text AS gsp,
-               s.want_subject_player_id::text AS ws, s.want_special_id::text AS wsp,
                {_live_sql()} AS live, s.status
           FROM player_card_swaps s
          WHERE s.id = CAST(:id AS UUID) AND s.organisation_id = CAST(:org AS UUID)
@@ -276,27 +333,31 @@ async def respond(db: AsyncSession, club: Organisation, snap: dict, me: str, swa
     else:
         if s["to_id"] != me:
             raise SwapError("Only the person asked can accept it.", 403)
-        give, want = (s["gs"], s["gsp"]), (s["ws"], s["wsp"])
-        for owner, card in ((s["from_id"], give), (s["to_id"], want)):
-            if owner not in snap["people"] or (card[1] is None and card[0] not in snap["people"]):
-                raise SwapError("One of those players is no longer in the card pool, so this swap cannot go ahead.")
-        # Lock in a fixed order (lower player id first) so two swaps over the same cards cannot deadlock.
-        order = sorted([(s["from_id"], give), (s["to_id"], want)], key=lambda t: t[0])
-        found: dict[str, Optional[str]] = {}
-        for owner, card in order:
-            found[owner] = await _lock_copy(db, club.id, owner, card)
-        if found.get(s["from_id"]) is None:
-            raise SwapError("The card they offered is no longer theirs to give, so this swap cannot go ahead. You can decline it.")
-        if found.get(s["to_id"]) is None:
-            raise SwapError("The card they asked for is no longer yours to give, so this swap cannot go ahead. You can decline it.")
-        await db.execute(text(
-            "UPDATE player_card_copies SET owner_player_id = CAST(:new AS UUID), source = 'swap', obtained_at = NOW() "
-            "WHERE id = CAST(:id AS UUID)"
-        ), {"new": s["to_id"], "id": found[s["from_id"]]})
-        await db.execute(text(
-            "UPDATE player_card_copies SET owner_player_id = CAST(:new AS UUID), source = 'swap', obtained_at = NOW() "
-            "WHERE id = CAST(:id AS UUID)"
-        ), {"new": s["from_id"], "id": found[s["to_id"]]})
+        sides = (await _items_of(db, [swap_id]))[swap_id]
+        if not sides["give"] or not sides["want"]:
+            raise SwapError("That swap has no cards in it, so it cannot go ahead.")
+        # [(owner, new owner, [(card, qty)])]: what each of them hands over.
+        legs = [(s["from_id"], s["to_id"], sides["give"]), (s["to_id"], s["from_id"], sides["want"])]
+        for owner, _, items in legs:
+            if owner not in snap["people"] or any(c[1] is None and c[0] not in snap["people"] for c, _ in items):
+                raise SwapError("One of those players, or a player on one of the cards, is no longer in the card pool, so this swap cannot go ahead.")
+        # Lock in a fixed order (lower player id first, and each person's cards in a fixed order) so two swaps
+        # over the same cards cannot deadlock. Nothing moves until every card is found.
+        found: dict[tuple[str, Card], list[str]] = {}
+        for owner, _, items in sorted(legs, key=lambda leg: leg[0]):
+            for card, _qty in sorted(items, key=lambda it: repr(it[0])):
+                found[(owner, card)] = await _lock_copies(db, club.id, owner, card)
+        for owner, _, items in legs:
+            if any(len(found[(owner, card)]) < qty for card, qty in items):
+                if owner == s["from_id"]:
+                    raise SwapError("Some of the cards they offered are no longer theirs to give, so this swap cannot go ahead. You can decline it.")
+                raise SwapError("Some of the cards they asked for are no longer yours to give, so this swap cannot go ahead. You can decline it.")
+        for owner, new_owner, items in legs:
+            for card, qty in items:
+                await db.execute(text(
+                    "UPDATE player_card_copies SET owner_player_id = CAST(:new AS UUID), source = 'swap', obtained_at = NOW() "
+                    "WHERE id = ANY(CAST(:ids AS uuid[]))"
+                ), {"new": new_owner, "ids": found[(owner, card)][:qty]})
         new = "accepted"
     await db.execute(text(
         "UPDATE player_card_swaps SET status = :st, resolved_at = NOW() WHERE id = CAST(:id AS UUID)"

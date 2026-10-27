@@ -7,7 +7,7 @@ Revises: 363
 """
 from alembic import op
 
-from app.services.player_card_swaps_ddl import STATEMENTS, DOWNGRADE
+from app.services.player_card_swaps_ddl import BASE_STATEMENTS as STATEMENTS, DOWNGRADE
 
 revision = "364"
 down_revision = "363"

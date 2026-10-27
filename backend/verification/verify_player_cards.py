@@ -67,10 +67,13 @@ else:  # the control run
 HAVE_SWAPS = importlib.util.find_spec("app.services.player_card_swaps") is not None
 if HAVE_SWAPS:
     from app.services import player_card_swaps as swaps
-    from app.services.player_card_swaps_ddl import STATEMENTS as SWAP_DDL
+    from app.services import player_card_swaps_ddl as _swap_ddl
+    SWAP_DDL = _swap_ddl.STATEMENTS
+    ITEM_DDL = getattr(_swap_ddl, "ITEM_STATEMENTS", [])  # absent before migration 365
 else:
     swaps = None
     SWAP_DDL = []
+    ITEM_DDL = []
 
 DB = os.environ["DATABASE_URL"]
 engine = create_async_engine(DB, echo=False)
@@ -130,6 +133,12 @@ async def build_schema() -> None:
                 id SERIAL PRIMARY KEY, org_id UUID NOT NULL, player_id UUID, player_name TEXT NOT NULL,
                 season TEXT, category TEXT NOT NULL, subcategory TEXT, achievement TEXT NOT NULL,
                 detail TEXT, created_at TIMESTAMPTZ DEFAULT NOW())"""))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS org_award_definitions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(), org_id UUID NOT NULL,
+                category TEXT NOT NULL, subcategory TEXT, achievement TEXT, display_name TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"""))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id SERIAL PRIMARY KEY, org_id UUID, user_id UUID, action TEXT, target_type TEXT,
@@ -227,6 +236,15 @@ async def seed() -> None:
                  "VALUES (:o, :p, 'Charlie, C', '2025', 'Statistics', 'Hat Tricks', 'Hat trick v Rovers')", o=ORG, p=CHARLIE)
         await ex("INSERT INTO player_achievements (org_id, player_id, player_name, season, category, subcategory, achievement) "
                  "VALUES (:o, :p, 'Bravo, B', '2025', 'Club Award', '1st XI', 'Best & Fairest')", o=ORG, p=BRAVO)
+        # Awards written two ways: a seasons id with a club rename (two definitions under one name, which must
+        # not fan the row out) and an imported "2015_16" label with no rename.
+        await ex("INSERT INTO player_achievements (org_id, player_id, player_name, season, category, subcategory, achievement) "
+                 "VALUES (:o, :p, 'Delta, D', :s, 'Club Award', 'Perpetual', 'Best Bowler')", o=ORG, p=DELTA, s=str(S_OLD))
+        await ex("INSERT INTO player_achievements (org_id, player_id, player_name, season, category, subcategory, achievement) "
+                 "VALUES (:o, :p, 'Delta, D', '2015_16', 'Club Award', NULL, 'Best Batter')", o=ORG, p=DELTA)
+        await ex("INSERT INTO org_award_definitions (org_id, category, subcategory, achievement, display_name, sort_order) VALUES "
+                 "(:o, 'Club Award', 'Perpetual', 'Best Bowler', 'Bowler of the Year', 0), "
+                 "(:o, 'Club Award', 'Perpetual', 'Best Bowler', 'Second Name', 1)", o=ORG)
         # Cards launched a month ago: a duck before then earns no pack.
         if HAVE:
             await ex("INSERT INTO club_card_settings (organisation_id, launched_at, weekly_packs) "
@@ -500,6 +518,14 @@ async def main() -> None:
         check("a five-for makes a card", len(await specials_of(BRAVO, "five_for")) == 1)
         check("a hat-trick the club recorded makes a card", len(await specials_of(CHARLIE, "hat_trick")) == 1)
         check("a club award makes a card", len(await specials_of(BRAVO, "award")) == 1)
+        async def awards_of(pid):
+            return {r["title"]: r["detail"] for r in (await db.execute(text(
+                "SELECT title, detail FROM player_special_cards WHERE player_id = :p AND kind = 'award'"), {"p": pid})).mappings().all()}
+        aw = await awards_of(DELTA)
+        check("an award takes the club's display name, one card even with two definitions under it", set(aw) == {"Bowler of the Year", "Best Batter"}, str(aw))
+        check("a season id is shown as the season's name, not the id", aw.get("Bowler of the Year", {}).get("season") == "Summer 2015/16", str(aw))
+        check("an imported 2015_16 label is shown as 2015/16", aw.get("Best Batter", {}).get("season") == "2015/16", str(aw))
+        check("the grade stays on the card", aw.get("Bowler of the Year", {}).get("grade") == "Perpetual", str(aw))
         debuts = [len(await specials_of(p, "debut")) for p in (ALPHA, BRAVO, CHARLIE, DELTA)]
         check("everyone with a match has a debut card", debuts == [1, 1, 1, 1], str(debuts))
         gm = {r["detail"]["games"] for r in await specials_of(ALPHA, "games")}
@@ -524,6 +550,18 @@ async def main() -> None:
         check("a second look makes no new card", total_before == total_after and total_before > 8, f"{total_before} {total_after}")
         gifts = (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE source = 'gift' AND organisation_id = :o"), {"o": ORG})).scalar()
         check("every player is gifted the cards that commemorate them (one copy each)", gifts == total_after, f"{gifts} vs {total_after}")
+        # a rename and a corrected season reach a card that already exists; nothing is added or taken
+        await db.execute(text("UPDATE org_award_definitions SET display_name = 'Bowling Champion' WHERE sort_order = 0"))
+        await db.execute(text("UPDATE player_achievements SET season = :s WHERE achievement = 'Best Batter'"), {"s": str(S_NOW)})
+        await db.commit()
+        await cards.refresh_specials(db, club, force=True)
+        await db.commit()
+        aw2 = await awards_of(DELTA)
+        check("a renamed award reaches the card already made", set(aw2) == {"Bowling Champion", "Best Batter"}, str(aw2))
+        check("a corrected season reaches it too", aw2.get("Best Batter", {}).get("season") == f"Summer {YEAR}/{str(YEAR + 1)[2:]}", str(aw2))
+        gifts2 = (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE source = 'gift' AND organisation_id = :o"), {"o": ORG})).scalar()
+        total2 = (await db.execute(text("SELECT count(*) FROM player_special_cards WHERE organisation_id = :o"), {"o": ORG})).scalar()
+        check("...with no new card and no copy lost", gifts2 == gifts and total2 == total_after, f"{gifts2}/{gifts} {total2}/{total_after}")
         await db.execute(text("UPDATE batting_innings SET runs = 98 WHERE player_id = :p AND runs = 112"), {"p": ALPHA})
         await db.commit()
         await cards.refresh_specials(db, club, force=True)
@@ -581,6 +619,11 @@ async def main() -> None:
         async def _tcards(*a):
             fn = getattr(swaps, "tradeable_cards", None)
             return await fn(*a) if fn else []
+        def _L(k):
+            return [{"key": x, "qty": 1} for x in ([k] if isinstance(k, str) else k)] if not (isinstance(k, list) and k and isinstance(k[0], dict)) else k
+
+        def mk_swap(db, club, snap, me, to, g, w):
+            return swaps.create_swap(db, club, snap, me, to, _L(g), _L(w))
         check("any card held can go, a single copy as well as a double", _tr("o", ("x", None), 3) == 3 and _tr("o", ("x", None), 1) == 1 and _tr("o", ("x", None), 0) == 0)
         check("...but their own card is theirs without a row, so only copies of it they have pulled can go", _tr("o", ("o", None), 1) == 1 and _tr("o", ("o", None), 0) == 0)
         async with Session() as db:
@@ -629,27 +672,27 @@ async def main() -> None:
                     await db.commit()   # nothing was written; this only releases any row locks (a rollback would expire the club)
                     return exc.status if status is None else (exc.status == status)
 
-            check("asking someone out of the pool is a 404", await refused(swaps.create_swap(db, club, snap, a, str(HOTEL), f"p:{CHARLIE}", f"p:{BRAVO}")) == 404)
-            check("asking yourself is refused", await refused(swaps.create_swap(db, club, snap, a, a, f"p:{CHARLIE}", f"p:{BRAVO}")) == 404)
-            check("offering a card you do not hold (your own, which has no row) is refused", (await refused(swaps.create_swap(db, club, snap, a, d, f"p:{ALPHA}", f"p:{BRAVO}"))) == 409)
-            check("asking for a card they do not hold is refused", (await refused(swaps.create_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{INDIA}"))) == 409)
-            check("the same card both ways is refused", (await refused(swaps.create_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{CHARLIE}"))) == 422)
-            check("a made-up card is refused", (await refused(swaps.create_swap(db, club, snap, a, d, "p:not-a-uuid", f"p:{BRAVO}"))) == 422)
+            check("asking someone out of the pool is a 404", await refused(mk_swap(db, club, snap, a, str(HOTEL), f"p:{CHARLIE}", f"p:{BRAVO}")) == 404)
+            check("asking yourself is refused", await refused(mk_swap(db, club, snap, a, a, f"p:{CHARLIE}", f"p:{BRAVO}")) == 404)
+            check("offering a card you do not hold (your own, which has no row) is refused", (await refused(mk_swap(db, club, snap, a, d, f"p:{ALPHA}", f"p:{BRAVO}"))) == 409)
+            check("asking for a card they do not hold is refused", (await refused(mk_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{INDIA}"))) == 409)
+            check("the same card both ways is refused", (await refused(mk_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{CHARLIE}"))) == 422)
+            check("a made-up card is refused", (await refused(mk_swap(db, club, snap, a, d, "p:not-a-uuid", f"p:{BRAVO}"))) == 422)
             gift_special = (await db.execute(text("SELECT id::text FROM player_special_cards WHERE player_id = :p AND kind = 'century'"), {"p": ALPHA})).scalar()
-            gift_swap = await swaps.create_swap(db, club, snap, a, d, f"s:{gift_special}", f"p:{BRAVO}")
+            gift_swap = await mk_swap(db, club, snap, a, d, f"s:{gift_special}", f"p:{BRAVO}")
             await db.commit()
             check("a gifted special held once can be offered", bool(gift_swap))
             await swaps.respond(db, club, snap, a, gift_swap, "cancel")
             await db.commit()
 
-            sid = await swaps.create_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}")
+            sid = await mk_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}")
             await db.commit()
             check("a swap request is made", bool(sid))
-            check("asking again for the same swap is refused", (await refused(swaps.create_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}"))) == 409)
+            check("asking again for the same swap is refused", (await refused(mk_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}"))) == 409)
             check("nothing has moved yet", await held(ALPHA, CHARLIE) == 1 and await held(DELTA, BRAVO) == 1)
             li = await swaps.list_swaps(db, club, snap, d)
             lo = await swaps.list_swaps(db, club, snap, a)
-            check("the person asked sees it coming in, with both cards", len(li["incoming"]) == 1 and li["incoming"][0]["give"]["player_id"] == str(CHARLIE) and li["incoming"][0]["want"]["player_id"] == str(BRAVO), str(li)[:200])
+            check("the person asked sees it coming in, with both cards", len(li["incoming"]) == 1 and [c["player_id"] for c in li["incoming"][0]["give"]] == [str(CHARLIE)] and [c["player_id"] for c in li["incoming"][0]["want"]] == [str(BRAVO)], str(li)[:200])
             check("the person who asked sees it going out", len(lo["outgoing"]) == 1 and not lo["incoming"])
             check("a third player sees nothing of it", not (await swaps.list_swaps(db, club, snap, str(CHARLIE)))["incoming"])
             check("the dashboard counts requests waiting", await swaps.waiting_count(db, d) == 1 and await swaps.waiting_count(db, a) == 0)
@@ -663,9 +706,12 @@ async def main() -> None:
             check("nothing moved from those refusals", await held(ALPHA, CHARLIE) == 1 and await held(DELTA, BRAVO) == 1)
 
             # a second request offering the SAME spare Charlie, so the first accept makes it stale
-            sid2 = await swaps.create_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}") if False else None
-            await db.execute(text("INSERT INTO player_card_swaps (organisation_id, from_player_id, to_player_id, give_subject_player_id, want_subject_player_id) "
-                                  "VALUES (:o, :a, :d, :c, :b)"), {"o": ORG, "a": ALPHA, "d": DELTA, "c": CHARLIE, "b": BRAVO})
+            sid2 = await mk_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}") if False else None
+            stale_id = (await db.execute(text("INSERT INTO player_card_swaps (organisation_id, from_player_id, to_player_id) "
+                                              "VALUES (:o, :a, :d) RETURNING id::text"), {"o": ORG, "a": ALPHA, "d": DELTA})).scalar()
+            for side, subj in (("give", CHARLIE), ("want", BRAVO)):
+                await db.execute(text("INSERT INTO player_card_swap_items (organisation_id, swap_id, side, subject_player_id) VALUES (:o, :i, :s, :p)"),
+                                 {"o": ORG, "i": stale_id, "s": side, "p": subj})
             await db.commit()
             total_before = (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE organisation_id = :o"), {"o": ORG})).scalar()
             res = await swaps.respond(db, club, snap, d, sid, "accept")
@@ -687,11 +733,11 @@ async def main() -> None:
             # cancel, and expiry
             await give(DELTA, BRAVO, 1)
             await give(ALPHA, CHARLIE, 1)
-            s3 = await swaps.create_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}")
+            s3 = await mk_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}")
             await db.commit()
             check("the asker can cancel", await swaps.respond(db, club, snap, a, s3, "cancel") == "cancelled")
             await db.commit()
-            s4 = await swaps.create_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}")
+            s4 = await mk_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}")
             await db.execute(text("UPDATE player_card_swaps SET created_at = NOW() - INTERVAL '20 days' WHERE id = CAST(:i AS UUID)"), {"i": s4})
             await db.commit()
             check("an old request has expired and is not offered", not (await swaps.list_swaps(db, club, snap, d))["incoming"] and await swaps.waiting_count(db, d) == 0)
@@ -702,11 +748,76 @@ async def main() -> None:
             swaps.MAX_OUTGOING = 1
             await give(ALPHA, DELTA, 2)
             await give(DELTA, ALPHA, 1)
-            first = await swaps.create_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}")
+            first = await mk_swap(db, club, snap, a, d, f"p:{CHARLIE}", f"p:{BRAVO}")
             await db.commit()
-            check("the number of open requests is capped", (await refused(swaps.create_swap(db, club, snap, a, d, f"p:{DELTA}", f"p:{ALPHA}"))) == 409)
+            check("the number of open requests is capped", (await refused(mk_swap(db, club, snap, a, d, f"p:{DELTA}", f"p:{ALPHA}"))) == 409)
             swaps.MAX_OUTGOING = old_cap
             await swaps.respond(db, club, snap, a, first, "cancel")
+            await db.commit()
+
+            # ── many cards each way ──────────────────────────────────────────────────────────────────────────
+            await db.execute(text("DELETE FROM player_card_copies WHERE source IN ('pack', 'swap') AND organisation_id = :o"), {"o": ORG})
+            await db.commit()
+            await give(ALPHA, CHARLIE, 3)
+            await give(ALPHA, DELTA, 1)
+            await give(DELTA, BRAVO, 2)
+            await give(DELTA, ALPHA, 1)
+            cards.forget(ORG)
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            total0 = (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE organisation_id = :o"), {"o": ORG})).scalar()
+            G = [{"key": f"p:{CHARLIE}", "qty": 2}, {"key": f"p:{DELTA}", "qty": 1}]
+            W = [{"key": f"p:{BRAVO}", "qty": 2}, {"key": f"p:{ALPHA}", "qty": 1}]
+            check("more copies than the giver holds is refused", await refused(mk_swap(db, club, snap, a, d, [{"key": f"p:{CHARLIE}", "qty": 4}], W)) == 409)
+            check("more copies than they hold is refused", await refused(mk_swap(db, club, snap, a, d, G, [{"key": f"p:{BRAVO}", "qty": 3}])) == 409)
+            check("a side with nothing on it is refused", await refused(mk_swap(db, club, snap, a, d, [], W)) == 422 and await refused(mk_swap(db, club, snap, a, d, G, [])) == 422)
+            check("a card on both sides is refused", await refused(mk_swap(db, club, snap, a, d, [{"key": f"p:{BRAVO}", "qty": 1}], [{"key": f"p:{BRAVO}", "qty": 1}])) == 422)
+            check("zero copies is refused", await refused(mk_swap(db, club, snap, a, d, [{"key": f"p:{CHARLIE}", "qty": 0}], W)) == 422)
+            multi_id = await mk_swap(db, club, snap, a, d, G, W)
+            await db.commit()
+            n_items = (await db.execute(text("SELECT count(*) FROM player_card_swap_items WHERE swap_id = :i"), {"i": multi_id})).scalar()
+            check("one request carries all four cards, two a side", n_items == 4, str(n_items))
+            check("asking for exactly the same again is refused", await refused(mk_swap(db, club, snap, a, d, G, W)) == 409)
+            other_qty = await mk_swap(db, club, snap, a, d, [{"key": f"p:{CHARLIE}", "qty": 1}, {"key": f"p:{DELTA}", "qty": 1}], W)
+            await db.commit()
+            check("...but a different number of copies is a different request", bool(other_qty))
+            li = await swaps.list_swaps(db, club, snap, d)
+            first = next(r for r in li["incoming"] if r["id"] == multi_id)
+            check("the person asked sees every card with how many", sorted((c["player_id"], c["qty"]) for c in first["give"]) == sorted([(str(CHARLIE), 2), (str(DELTA), 1)])
+                  and sorted((c["player_id"], c["qty"]) for c in first["want"]) == sorted([(str(BRAVO), 2), (str(ALPHA), 1)]), str(first)[:240])
+            check("nothing moved yet", await held(ALPHA, CHARLIE) == 3 and await held(DELTA, BRAVO) == 2)
+            res = await swaps.respond(db, club, snap, d, multi_id, "accept")
+            await db.commit()
+            check("accepting moves every card at once", res == "accepted"
+                  and await held(ALPHA, CHARLIE) == 1 and await held(ALPHA, DELTA) == 0 and await held(ALPHA, BRAVO) == 2 and await held(ALPHA, ALPHA) == 1
+                  and await held(DELTA, CHARLIE) == 2 and await held(DELTA, DELTA) == 1 and await held(DELTA, BRAVO) == 0 and await held(DELTA, ALPHA) == 0,
+                  f"A: C{await held(ALPHA, CHARLIE)} D{await held(ALPHA, DELTA)} B{await held(ALPHA, BRAVO)} A{await held(ALPHA, ALPHA)}")
+            check("no card was made or lost, and six copies are marked swapped", (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE organisation_id = :o"), {"o": ORG})).scalar() == total0
+                  and (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE source = 'swap' AND organisation_id = :o"), {"o": ORG})).scalar() == 6)
+            # all or nothing: the second request offers a Delta card Alpha no longer holds
+            before = (await held(ALPHA, CHARLIE), await held(DELTA, BRAVO), await held(ALPHA, BRAVO))
+            check("a request with one card gone cannot go ahead (409)", await refused(swaps.respond(db, club, snap, d, other_qty, "accept")) == 409)
+            check("...and none of its other cards moved", (await held(ALPHA, CHARLIE), await held(DELTA, BRAVO), await held(ALPHA, BRAVO)) == before, str(before))
+            await swaps.respond(db, club, snap, d, other_qty, "decline")
+            await db.commit()
+            # one for four, and four for one
+            await give(DELTA, CHARLIE, 1)
+            cards.forget(ORG)
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            one_for_four = await mk_swap(db, club, snap, a, d, [f"p:{BRAVO}"], [f"p:{CHARLIE}", f"p:{DELTA}", f"p:{ALPHA}"] if await held(DELTA, ALPHA) else [f"p:{CHARLIE}", f"p:{DELTA}"])
+            await db.commit()
+            check("one card can be asked for several of theirs", bool(one_for_four))
+            await swaps.respond(db, club, snap, a, one_for_four, "cancel")
+            await db.commit()
+            # a request made before migration 365 (its cards in the old columns) is carried across, once
+            old_id = (await db.execute(text("INSERT INTO player_card_swaps (organisation_id, from_player_id, to_player_id, give_subject_player_id, want_subject_player_id) "
+                                            "VALUES (:o, :a, :d, :c, :b) RETURNING id::text"), {"o": ORG, "a": ALPHA, "d": DELTA, "c": CHARLIE, "b": BRAVO})).scalar()
+            for _ in range(2):
+                for stmt in ITEM_DDL:
+                    await db.execute(text(stmt))
+            await db.commit()
+            moved = (await db.execute(text("SELECT side, count(*) FROM player_card_swap_items WHERE swap_id = :i GROUP BY side ORDER BY side"), {"i": old_id})).fetchall()
+            check("an old one-card request becomes one card each way, and a second run adds nothing", [tuple(r) for r in moved] == [("give", 1), ("want", 1)], str(moved))
+            await swaps.respond(db, club, snap, a, old_id, "cancel")
             await db.commit()
 
     # ── What the admin can see ───────────────────────────────────────────────────────────────────────────────
@@ -765,13 +876,13 @@ async def main() -> None:
             aud = await admin_routes.swap_audit("all", "", 50, 0, db, club, user)
             counts = aud["counts"]
             check("the audit counts every kind of ending", counts["accepted"] >= 1 and counts["declined"] >= 1 and counts["cancelled"] >= 1 and counts["expired"] >= 1, str(counts))
-            check("each row names who asked, who was asked and both cards", all(r["from"]["name"] and r["to"]["name"] and r["give"]["player"] and r["want"]["player"] for r in aud["swaps"]), str(aud["swaps"][:1]))
+            check("each row names who asked, who was asked and both cards", all(r["from"]["name"] and r["to"]["name"] and r["give"] and r["want"] and all(c["player"] for c in r["give"] + r["want"]) for r in aud["swaps"]), str(aud["swaps"][:1]))
             done = await admin_routes.swap_audit("accepted", "", 50, 0, db, club, user)
             check("it filters to one outcome", done["swaps"] and all(r["status"] == "accepted" for r in done["swaps"]))
             exp = await admin_routes.swap_audit("expired", "", 50, 0, db, club, user)
             check("an old unanswered request shows as expired", exp["swaps"] and all(r["status"] == "expired" for r in exp["swaps"]))
             who = await admin_routes.swap_audit("all", "delta", 50, 0, db, club, user)
-            check("it searches by player", who["swaps"] and all("Delta" in (r["from"]["name"] or "") + (r["to"]["name"] or "") or "Delta" in r["give"]["player"] + r["want"]["player"] for r in who["swaps"]))
+            check("it searches by player", who["swaps"] and all("Delta" in (r["from"]["name"] or "") + (r["to"]["name"] or "") or any("Delta" in c["player"] for c in r["give"] + r["want"]) for r in who["swaps"]))
             check("nothing in the audit was written to by reading it", (await db.execute(text("SELECT count(*) FROM player_card_swaps WHERE status = 'expired'"))).scalar() == 0)
 
     # ── Route bodies ─────────────────────────────────────────────────────────
@@ -805,6 +916,9 @@ async def main() -> None:
             check("the asker accepting their own is a 403", await status_of(pcr.answer_swap(TOKEN, made["id"], "accept", request_for(ALPHA, ORG), db)) == 403)
             done = await pcr.answer_swap(TOKEN, made["id"], "accept", request_for(DELTA, ORG), db)
             check("POST accept as the person asked", done["status"] == "accepted")
+            back = await pcr.ask_for_swap(TOKEN, pcr.SwapBody(to_player_id=str(DELTA), give=[pcr.SwapCard(key=f"p:{BRAVO}", qty=1)], want=[pcr.SwapCard(key=f"p:{CHARLIE}", qty=1)]), request_for(ALPHA, ORG), db)
+            check("POST a swap as lists of cards with a quantity each", back["status"] == "pending")
+            check("POST with an empty side is a 422", await status_of(pcr.ask_for_swap(TOKEN, pcr.SwapBody(to_player_id=str(DELTA), give=[], want=[pcr.SwapCard(key=f"p:{CHARLIE}")]), request_for(ALPHA, ORG), db)) == 422)
             check("no cookie, no swaps (401)", await status_of(pcr.get_my_swaps(TOKEN, Request({"type": "http", "method": "GET", "path": "/", "headers": [], "client": ("1.1.1.1", 1)}), db)) == 401)
         prof = await pa.get_my_profile(TOKEN, request_for(ALPHA, ORG), None, db)
         check("the profile carries the cards line and no availability", prof["cards"] is not None and prof["has_availability"] is False and "cards" in prof["modules"], str(prof.get("modules")))
@@ -894,7 +1008,9 @@ async def main() -> None:
     check("the migration runs the shared DDL list (one copy)", "from app.services.player_cards_ddl import STATEMENTS" in mig)
     if HAVE_SWAPS:
         mig2 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "364_player_card_swaps.py").read_text()
-        check("the swaps migration follows 363 and runs its own shared list", "down_revision = \"363\"" in mig2 and "player_card_swaps_ddl import STATEMENTS" in mig2 and "player_card_swaps_ddl import STATEMENTS" in main_src_swaps())
+        check("the swaps migration follows 363 and runs its own shared list", "down_revision = \"363\"" in mig2 and "player_card_swaps_ddl import BASE_STATEMENTS" in mig2 and "player_card_swaps_ddl import STATEMENTS" in main_src_swaps())
+        mig3 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "365_player_card_swap_items.py").read_text()
+        check("the items migration follows 364, runs its own shared list, and drops only its own table", "down_revision = \"364\"" in mig3 and "ITEM_STATEMENTS" in mig3 and "ITEM_DOWNGRADE" in mig3)
     main_src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
     check("the lifespan mirrors the same list", "from app.services.player_cards_ddl import STATEMENTS" in main_src)
 

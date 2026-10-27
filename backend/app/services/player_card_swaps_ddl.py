@@ -7,11 +7,15 @@ card, its special card id. A request is never deleted: it ends as accepted, decl
 
 Every player column is on `merge_carry.CARRIED`, so a player merge moves the requests with the person.
 
-ONE copy of the DDL: alembic's 364 and main.py's lifespan mirror both run STATEMENTS. Every
-statement is idempotent.
+Migration 365 makes a request many cards each way: `player_card_swap_items` holds the cards on each side
+(`side` give or want, with a quantity), and the single `give_*` / `want_*` columns above become optional (a
+request made before 365 is copied into items once and keeps its old columns; a newer one leaves them empty).
+
+ONE copy of the DDL: alembic's 364 runs BASE_STATEMENTS, 365 runs ITEM_STATEMENTS, and main.py's lifespan
+mirror (and the test harnesses) run STATEMENTS, which is both. Every statement is idempotent.
 """
 
-STATEMENTS = [
+BASE_STATEMENTS = [
     """
     CREATE TABLE IF NOT EXISTS player_card_swaps (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -31,7 +35,42 @@ STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS ix_card_swaps_from ON player_card_swaps (from_player_id) WHERE status = 'pending'",
 ]
 
-# Drops only what this migration added.
+ITEM_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS player_card_swap_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+        swap_id UUID NOT NULL REFERENCES player_card_swaps(id) ON DELETE CASCADE,
+        side TEXT NOT NULL,
+        subject_player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        special_id UUID REFERENCES player_special_cards(id) ON DELETE CASCADE,
+        qty INTEGER NOT NULL DEFAULT 1
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_card_swap_items_swap ON player_card_swap_items (swap_id)",
+    # A request made before 365 carried one card each way in its own columns: copy each across once.
+    """
+    INSERT INTO player_card_swap_items (organisation_id, swap_id, side, subject_player_id, special_id)
+    SELECT s.organisation_id, s.id, 'give', s.give_subject_player_id, s.give_special_id FROM player_card_swaps s
+     WHERE s.give_subject_player_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM player_card_swap_items i WHERE i.swap_id = s.id AND i.side = 'give')
+    """,
+    """
+    INSERT INTO player_card_swap_items (organisation_id, swap_id, side, subject_player_id, special_id)
+    SELECT s.organisation_id, s.id, 'want', s.want_subject_player_id, s.want_special_id FROM player_card_swaps s
+     WHERE s.want_subject_player_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM player_card_swap_items i WHERE i.swap_id = s.id AND i.side = 'want')
+    """,
+    "ALTER TABLE player_card_swaps ALTER COLUMN give_subject_player_id DROP NOT NULL",
+    "ALTER TABLE player_card_swaps ALTER COLUMN want_subject_player_id DROP NOT NULL",
+]
+
+STATEMENTS = BASE_STATEMENTS + ITEM_STATEMENTS
+
+# Each drops only what its own migration added.
 DOWNGRADE = [
     "DROP TABLE IF EXISTS player_card_swaps",
+]
+ITEM_DOWNGRADE = [
+    "DROP TABLE IF EXISTS player_card_swap_items",
 ]

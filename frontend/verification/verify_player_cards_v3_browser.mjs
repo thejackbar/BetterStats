@@ -39,7 +39,10 @@ const CARDS = [
 ]
 const totals = { regular_owned: CARDS.filter((c) => c.kind === 'player').length, regular_total: 40, special_owned: 7, special_total: 20, copies: CARDS.length }
 const swapCard = (c, tradeable) => ({ ...c, tradeable, copies: undefined })
-const board = { incoming: [], outgoing: [], recent: [], mine: [CARDS[1], ...CARDS.slice(2, 4), ...MANY].map((c) => swapCard(c, 1)), people: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 30 }], expires_days: 14, max_open: 10 }
+const posted = []
+const inReq = { id: 'w9', direction: 'in', status: 'pending', other: { player_id: 'p7', name: 'Dave, Dan' }, created_at: new Date().toISOString(), resolved_at: null,
+  give: MANY.slice(0, 4).map((c, i) => ({ ...swapCard(c, 1), qty: i === 0 ? 2 : 1 })), want: [{ ...swapCard(CARDS[1], 1), qty: 1 }] }
+const board = { incoming: [inReq], outgoing: [], recent: [], mine: [CARDS[1], ...CARDS.slice(2, 4), ...MANY].map((c, i) => swapCard(c, i === 4 ? 2 : 1)), people: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 30 }], expires_days: 14, max_open: 10 }
 
 const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium' })
@@ -54,8 +57,11 @@ const run = async () => {
       const url = route.request().url()
       const json = (b, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(b) })
       if (!url.includes('/public/availability/')) return json({})
-      if (/\/me\/cards\/swaps\/players\//.test(url)) return json({ player: { player_id: 'p7', name: 'Dave, Dan' }, cards: MANY.map((c) => swapCard(c, 1)) })
-      if (/\/me\/cards\/swaps$/.test(url)) return json(board)
+      if (/\/me\/cards\/swaps\/players\//.test(url)) return json({ player: { player_id: 'p7', name: 'Dave, Dan' }, cards: MANY.map((c, i) => swapCard(c, i === 0 ? 3 : 1)) })
+      if (/\/me\/cards\/swaps$/.test(url)) {
+        if (route.request().method() === 'POST') { posted.push(JSON.parse(route.request().postData())); return json({ id: 'n1', status: 'pending' }) }
+        return json(board)
+      }
       if (/\/me\/cards$/.test(url)) return json({ club: CLUB, week_resets_at: '2026-10-26T16:00:00+00:00', packs: [], pack_size: 5, season: 'Summer', cards: CARDS, totals })
       if (/\/me\/profile/.test(url)) return json({ club: CLUB, player: { id: ME, display_name: 'Barendse, Jack' }, modules: ['cards'], cards: { ready: 0, swaps_waiting: 0 }, has_availability: false, squads: [], selected: [], training: { upcoming: [] }, can_update_details: false })
       if (/\/me(\?|$)/.test(url)) return json({ club: CLUB, player: { id: ME, display_name: 'Barendse, Jack' }, dates: [], availability: {}, has_squad: false, squads: [], has_availability: false })
@@ -141,6 +147,50 @@ const run = async () => {
     await page.waitForTimeout(200)
     check('Show more brings the rest', (await page.locator('[data-card-pick="theirs"] [data-swap-card]').count()) === 30)
     check('no horizontal scroll in the builder', (await overflow(page)) <= 0)
+    await ctx.close()
+  }
+
+  console.log('\nmany cards each way')
+  {
+    const { ctx, page } = await open(390)
+    await page.click('[data-cards-tab="swaps"]')
+    await page.waitForSelector('[data-swap-request="w9"]')
+    const req = page.locator('[data-swap-request="w9"]')
+    check('a request lists every card on each side, with counts', (await req.locator('[data-swap-side="You would get"] [aria-label]').count()) === 4 && /5 cards/.test(await req.locator('[data-swap-side="You would get"]').textContent()) && (await req.locator('[data-swap-side="You give"] [aria-label]').count()) === 1, (await req.textContent()).slice(0, 200))
+    check('a card offered twice shows its count', /×2/.test(await req.locator('[data-swap-side="You would get"] [data-card-count]').first().textContent()))
+    check('no horizontal scroll with a long request', (await overflow(page)) <= 0)
+    if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/many-request.png` })
+    await page.click('[data-swap-start]')
+    await page.waitForSelector('[data-swap-builder]')
+    await page.locator('[data-swap-player="p7"]').click()
+    await page.waitForSelector('[data-card-pick="theirs"]')
+    // three of theirs: the one they hold three of, and two others
+    for (const k of ['p:q0', 'p:q1', 'p:q2']) await page.locator(`[data-card-pick="theirs"] [data-swap-card="${k}"]`).click()
+    check('three cards can be picked, and each is in the tray', (await page.locator('[data-swap-tray="theirs"] [data-swap-picked]').count()) === 3)
+    await page.locator('[data-swap-tray="theirs"] [data-swap-picked="p:q1"] [data-swap-remove]').click()
+    check('a card can be taken back out', (await page.locator('[data-swap-tray="theirs"] [data-swap-picked]').count()) === 2)
+    await page.locator('[data-card-pick="theirs"] [data-swap-card="p:q1"]').click()
+    await page.locator('[data-card-pick="theirs"] [data-swap-card="p:q1"]').click()
+    check('tapping a picked card again takes it out too', (await page.locator('[data-swap-tray="theirs"] [data-swap-picked="p:q1"]').count()) === 0)
+    const row = page.locator('[data-swap-tray="theirs"] [data-swap-picked="p:q0"]')
+    check('a card held three times has a count that starts at 1', /1 of 3/.test(await row.locator('[data-qty]').textContent()))
+    await row.locator('[data-qty-up]').click(); await row.locator('[data-qty-up]').click()
+    check('...goes up to 3 and no further', /3 of 3/.test(await row.locator('[data-qty]').textContent()) && (await row.locator('[data-qty-up]').isDisabled()))
+    await row.locator('[data-qty-down]').click()
+    check('...and back down, never below 1', /2 of 3/.test(await row.locator('[data-qty]').textContent()))
+    check('a card held once has no count to change', (await page.locator('[data-swap-tray="theirs"] [data-swap-picked="p:q2"] [data-qty]').count()) === 0)
+    // yours: Zed and the card held twice (index 4 in the list is MANY[0]'s slot in mine)
+    await page.locator('[data-card-pick="yours"] [data-swap-card="p:p2"]').click()
+    await page.locator('[data-card-pick="yours"] [data-swap-card="p:q0"]').click()
+    await page.waitForSelector('[data-swap-confirm]')
+    const text = await page.locator('[data-swap-confirm]').textContent()
+    check('the confirm line counts both sides', /You give 2 for 3 from Dave, Dan/.test(text), text)
+    check('no horizontal scroll with the trays full', (await overflow(page)) <= 0)
+    if (process.env.SHOT_DIR) await page.screenshot({ path: `${process.env.SHOT_DIR}/many-builder.png`, fullPage: true })
+    await page.click('[data-swap-send]')
+    await page.waitForSelector('[data-swap-builder]', { state: 'detached' })
+    const body = posted[posted.length - 1]
+    check('Send posts every card with its count', JSON.stringify(body) === JSON.stringify({ to_player_id: 'p7', give: [{ key: 'p:p2', qty: 1 }, { key: 'p:q0', qty: 1 }], want: [{ key: 'p:q0', qty: 2 }, { key: 'p:q2', qty: 1 }] }), JSON.stringify(body))
     await ctx.close()
   }
 

@@ -104,10 +104,19 @@ SWAP_LIMIT = 30
 SWAP_WINDOW = 60
 
 
+class SwapCard(BaseModel):
+    key: str
+    qty: int = 1
+
+
 class SwapBody(BaseModel):
+    """Many cards each way: `give` and `want` are lists of `{key, qty}`. The single `give_key` / `want_key` of
+    the first release are still read, so a page that was open before the change can finish what it started."""
     to_player_id: str
-    give_key: str
-    want_key: str
+    give: Optional[list[SwapCard]] = None
+    want: Optional[list[SwapCard]] = None
+    give_key: Optional[str] = None
+    want_key: Optional[str] = None
 
 
 def _refuse(exc: swaps.SwapError):
@@ -146,7 +155,9 @@ async def ask_for_swap(token: str, body: SwapBody, request: Request, db: AsyncSe
     rate_limit.enforce(f"cards-swap:{player.id}:{_client_ip(request)}", SWAP_LIMIT, SWAP_WINDOW,
                        detail="Slow down. Give it a few seconds and try again.")
     try:
-        new_id = await swaps.create_swap(db, club, snap, str(player.id), body.to_player_id, body.give_key, body.want_key)
+        give = [c.model_dump() for c in body.give] if body.give is not None else ([{"key": body.give_key}] if body.give_key else [])
+        want = [c.model_dump() for c in body.want] if body.want is not None else ([{"key": body.want_key}] if body.want_key else [])
+        new_id = await swaps.create_swap(db, club, snap, str(player.id), body.to_player_id, give, want)
     except swaps.SwapError as exc:
         await db.rollback()
         raise _refuse(exc)

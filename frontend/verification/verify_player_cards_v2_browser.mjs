@@ -61,7 +61,7 @@ const PACKS = [{ id: 'k1', source: 'weekly', label: 'Weekly pack' }]
 const swapCard = (c, tradeable) => ({ ...c, tradeable, copies: undefined })
 const REQ = {
   id: 'w1', direction: 'in', status: 'pending', other: { player_id: 'p7', name: 'Dave, Dan' }, created_at: new Date().toISOString(), resolved_at: null,
-  give: swapCard(base('p8', 'Other, Olly', 'rare', 66), 1), want: swapCard(base('p2', 'Zed, Alan', 'common', 18), 2),
+  give: [{ ...swapCard(base('p8', 'Other, Olly', 'rare', 66), 1), qty: 1 }], want: [{ ...swapCard(base('p2', 'Zed, Alan', 'common', 18), 2), qty: 1 }],
 }
 
 const run = async () => {
@@ -285,7 +285,7 @@ const run = async () => {
     await page.click('[data-swap-send]')
     await page.waitForSelector('[data-swap-builder]', { state: 'detached' })
     const post = calls.find((c) => typeof c === 'object')
-    check('Send posts exactly who, what you give and what you want', JSON.stringify(post) === JSON.stringify({ method: 'POST', path: '/public/availability/tok123/me/cards/swaps', body: { to_player_id: 'p7', give_key: 'p:p2', want_key: 'p:p10' } }), JSON.stringify(post))
+    check('Send posts exactly who, what you give and what you want', JSON.stringify(post) === JSON.stringify({ method: 'POST', path: '/public/availability/tok123/me/cards/swaps', body: { to_player_id: 'p7', give: [{ key: 'p:p2', qty: 1 }], want: [{ key: 'p:p10', qty: 1 }] } }), JSON.stringify(post))
     await page.waitForSelector('[data-swap-request="o1"]')
     check('it then shows as a request you made, with a Cancel', (await page.locator('[data-swap-cancel]').count()) === 1 && /Swap request sent/.test(await page.locator('[data-swap-msg]').textContent()))
 
@@ -295,11 +295,11 @@ const run = async () => {
     await page.locator('[data-slot-card="p:p2"]').click()
     await page.click('[data-viewer-offer]')
     await page.waitForSelector('[data-swap-builder]')
-    check('offering a held card opens the builder with it already chosen (no step to pick yours)', (await page.locator('[data-swap-player]').count()) === 2 && !/3\. The one you give/.test(await page.locator('[data-swap-builder]').textContent()))
+    check('offering a held card opens the builder with it already chosen', (await page.locator('[data-swap-player]').count()) === 2)
     await page.locator('[data-swap-player="p7"]').click()
     await page.locator('[data-swap-card="p:p10"]').click()
     await page.waitForSelector('[data-swap-confirm]')
-    check('...and goes straight to confirm after their card', true)
+    check('...its card is already in the tray of cards you give, and it goes straight to confirm after theirs', (await page.locator('[data-swap-tray="yours"] [data-swap-picked="p:p2"]').count()) === 1)
     await ctx.close()
 
     // a player with nothing to offer
