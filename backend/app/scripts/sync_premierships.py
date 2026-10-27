@@ -24,8 +24,14 @@ from app.services import premierships
 async def run(org_ref: str, apply: bool) -> int:
     async with async_session_maker() as db:
         if org_ref.lower() == "all":
-            clubs = (await db.execute(text(
-                "SELECT id, name FROM organisations WHERE archived_at IS NULL ORDER BY name"))).mappings().all()
+            # Only clubs that have a named final or an automatic honour: the rest have nothing to do.
+            clubs = (await db.execute(text("""
+                SELECT o.id, o.name FROM organisations o
+                 WHERE o.archived_at IS NULL
+                   AND (o.id IN (SELECT home_org_id FROM games WHERE is_final = TRUE AND round_name IS NOT NULL
+                                 UNION SELECT away_org_id FROM games WHERE is_final = TRUE AND round_name IS NOT NULL)
+                        OR o.id IN (SELECT org_id FROM player_achievements WHERE auto_created = TRUE))
+                 ORDER BY o.name"""))).mappings().all()
         else:
             try:
                 where, param = "id = CAST(:r AS UUID)", str(uuid.UUID(org_ref))

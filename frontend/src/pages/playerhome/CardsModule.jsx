@@ -62,7 +62,7 @@ export default function CardsModule({ token, club, onReady }) {
   const [offer, setOffer] = useState(null)
   const [swapsWaiting, setSwapsWaiting] = useState(0)
   const { accent, display } = useCardStyle(club)
-  const sponsor = cardSponsor(useClubSponsors(club?.slug))
+  const sponsor = cardSponsor(useClubSponsors(club?.slug), 'player_cards')
 
   const load = useCallback(() => api.availPublicCards(token)
     .then((d) => { setData(d); onReady?.(d.packs.length) })

@@ -80,6 +80,8 @@
 52a. Scope (`all`/`junior`/`senior`) is applied to the MATCHES before `_pool_round`, never to the pool after it: a player who played up is pooled among the matches in scope. Junior is `'junior' in categories`, senior is everything else. A date period beats a pasted link (31 days, 80 matches, current season's grades only).
 52b. `kind` (WK/AR/BAT/BOWL) is added in `social_totw`, not `_rank_our_side`, so the player of the match stays byte for byte. Seats are filled by the pure `social/totwMakeup.js`: scarce seats first, best of the rest last, a short seat is backfilled and warned, never refused. Hand swaps are lost on a rebuild (Teams switch, make-up change); the stepper's rule 50 holds in Best performers mode.
 52c. The post's JUNIOR/SENIOR line reads `totwImport.data.scope` (what the pool was pulled with), never the button, so it cannot disagree with the team shown. `meta.heading` is absent when unscoped.
+52d. Team of the week or of the round is `mode` (`week` finished games only, `round` also LIVE ones). Games in play are re-read (`force=True`), carry `live: True` and never touch `_rank_our_side`. Any new round source must pass the same `include_live`. The heading follows `totwImport.data.mode`.
+52e. A Results row for a game in play has `outcome: 'LIVE'`; a results layout must treat that as neither a win nor a loss (`isLive`, amber, `V` not `DEF`/`LOST TO`) and never drop it (RR6 has its own column). A new results layout needs the same, and a check that the text carries no loss wording against a live row.
 
 **Split Poster, debut tags and the hero-row mark (v9.102.16, `social/split-template.jsx`, `services/social_debuts.py`)**
 53. A debut is "nothing on record before the match date", read from appearances, batting and bowling lines (abandoned games excluded) and earlier seasons' summaries and this season's summary beyond the games on or after the match date (so an unsynced earlier round counts and the match itself does not), scoped by `players.organisation_id`. It is a suggestion: `sp.debut` is the admin's to flip, and an id the club cannot answer for is left as it was.
@@ -184,7 +186,7 @@
 - SC1-SC3 have no portrait design or size picker. EV2's square panel clips; EV5/EV8 hide inner layers.
 - Final Score picker: manual and scorebook-imported games have no live card, so the social scorecard 404s for them. Needs a DB fallback adapting `games.get_scorecard` to `{meta, home, away}`.
 - Videos: no draft state, no transcoding (`.mov` refused with a message).
-- Team of the Week: a period reads the current season only (a past round needs a pasted link); the phone quick-post has no round pull for Fixtures, Results or Team of the Week.
+- Results rows for games in play have only the score so far; there is no live result line or run rate. Team of the Week: a period reads the current season only (a past round needs a pasted link); the phone quick-post has no round pull for Fixtures, Results or Team of the Week.
 - Story slots on some footers sit at the very bottom, not lifted clear of the app's reply bar.
 
 ## Flags: conflicting, superseded or possibly obsolete guidance

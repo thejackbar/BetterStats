@@ -49,10 +49,21 @@ export function bestRank(rankings) {
   return all.sort((a, b) => a.rank - b.rank)[0] || null
 }
 
-// The sponsor shown on a card: the club's top tier sponsor that has a logo.
-export function cardSponsor(data) {
-  const list = ((data && data.sponsors) || []).filter(s => s.logo_url)
-  return list.find(s => s.tier === 'major') || list[0] || null
+// Sponsor choice values for a single share: '' follows the club's pick, NO_SPONSOR leaves the sponsor off.
+export const NO_SPONSOR = 'none'
+
+// The sponsors a card can show: the ones with a logo (the public list returns every sponsor).
+export function cardSponsorOptions(data) {
+  return ((data && data.sponsors) || []).filter(s => s.logo_url)
+}
+
+// The sponsor shown on a card. `surface` is 'share_card' or 'player_cards'. A `choice` made while sharing wins,
+// then the sponsor the club picked for that surface, then the club's top tier sponsor that has a logo.
+export function cardSponsor(data, surface, choice) {
+  const list = cardSponsorOptions(data)
+  if (choice === NO_SPONSOR) return null
+  const byId = (id) => (id ? list.find(s => s.id === id) : null)
+  return byId(choice) || byId(data?.card_sponsors?.[surface]) || list.find(s => s.tier === 'major') || list[0] || null
 }
 
 // Hero photo first, then the headshot, then nothing (the club logo stands in). A photo that fails to load drops a step.

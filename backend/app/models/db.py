@@ -361,6 +361,11 @@ class Organisation(Base):
     # (migration 320). NULL means none pinned. Read through
     # services/post_sponsors.py, never directly.
     post_sponsor_defaults = Column(JSONB, nullable=True)
+    # The sponsor picked for each player card surface (migration 367), e.g.
+    # {"share_card": "<uuid>", "player_cards": "<uuid>"}. NULL means no pick, and
+    # the card shows the top sponsor with a logo. Read through
+    # services/card_sponsors.py, never directly.
+    card_sponsors = Column(JSONB, nullable=True)
     # Which grade categories count towards this club's stats by default — a
     # JSONB list of grade_labels.GRADE_CATEGORIES keys (migration 228). NULL
     # means no club preference, and the platform default applies: everything

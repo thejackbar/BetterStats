@@ -60,7 +60,9 @@ const totwFor = (search) => {
   const scope = q.get('scope') || 'all'
   const players = scope === 'junior' ? POOL.slice(0, 6) : scope === 'senior' ? POOL.slice(6) : POOL
   const label = q.get('date_from') ? 'TUE 13 TO SUN 18 OCT' : TOTW.label
-  return { ...TOTW, scope, label, players, matches: scope === 'all' ? 5 : scope === 'junior' ? 2 : 3 }
+  // A team of the round also counts the games still in play (two of them here), and says it did.
+  const round = q.get('mode') === 'round'
+  return { ...TOTW, scope, label, players, matches: scope === 'all' ? 5 : scope === 'junior' ? 2 : 3, mode: round ? 'round' : 'week', liveMatches: round ? 2 : 0 }
 }
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mP8z8BQz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC', 'base64')
 
@@ -411,6 +413,51 @@ const pickSize = async (page, label) => { await press(page.getByRole('button', {
   const sized = await page.evaluate(() => [...document.querySelectorAll('[data-testid="totw-makeup"] button, [data-testid="totw-range"] button, [data-testid="totw-scope"] button')].map((b) => b.getBoundingClientRect().height))
   ck('  ... with every control tappable', sized.length >= 15 && sized.every((h) => h >= 28), `${sized.length} controls, smallest ${Math.min(...sized)}`)
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/controls-390.png`, fullPage: true }).catch(() => {})
+  await ctx.close()
+}
+
+// ── 7. Team of the week or team of the round ───────────────────────────────
+{
+  const { ctx, page, errors, totwCalls } = await openEditor('?type=totw')
+  // The post as exported says which it is: read the masthead off the off-screen node.
+  const heading = () => page.evaluate(() => {
+    const holder = [...document.querySelectorAll('div')].find((d) => d.style.left === '-9999px' && d.style.position === 'absolute')
+    const m = holder && holder.querySelector('[data-layer="Masthead"]')
+    return m ? m.innerText.replace(/\s+/g, ' ').toUpperCase() : ''
+  })
+  ck('the basis picker offers week and round, week first', await seen(page.getByTestId('totw-basis-week')) && await seen(page.getByTestId('totw-basis-round')))
+  ck('  ... week is chosen by default', (await page.getByTestId('totw-basis-week').first().getAttribute('aria-pressed').catch(() => null)) === 'true')
+  await press(page.getByRole('button', { name: 'Pull latest round' }))
+  await page.getByTestId('totw-count').first().waitFor({ timeout: 8000 }).catch(() => {})
+  ck('a week pull sends no mode', totwCalls.length === 1 && totwCalls[0] === '', JSON.stringify(totwCalls))
+  ck('  ... and says nothing about games in play', !(await seen(page.getByTestId('totw-live-note'))))
+  await press(page.getByRole('button', { name: /Continue to editor/ }))
+  await page.waitForTimeout(200)
+  ck('the post reads TEAM OF THE WEEK', /TEAM OF THE WEEK/.test(await heading()), await heading())
+  await press(page.getByRole('button', { name: 'Data', exact: true }))
+  await page.waitForTimeout(150)
+
+  await press(page.getByTestId('totw-basis-round'))
+  await page.waitForTimeout(400)
+  ck('choosing the round pulls the same round again with mode=round', totwCalls.length === 2 && totwCalls[1] === '?mode=round', JSON.stringify(totwCalls))
+  const note = await textOf(page.getByTestId('totw-live-note'))
+  ck('  ... and warns that two games are still in play', /2 of those matches are still in play/.test(note), note)
+  ck('  ... the picker now holds round', (await page.getByTestId('totw-basis-round').first().getAttribute('aria-pressed').catch(() => null)) === 'true')
+  await press(page.getByRole('button', { name: /Continue to editor/ }))
+  await page.waitForTimeout(200)
+  ck('the post reads TEAM OF THE ROUND', /TEAM OF THE ROUND/.test(await heading()), await heading())
+  await press(page.getByRole('button', { name: 'Data', exact: true }))
+  await page.waitForTimeout(150)
+
+  // The scope and the link keep the basis they were pulled with.
+  await press(page.getByRole('button', { name: /^Juniors/ }))
+  await page.waitForTimeout(300)
+  ck('changing the teams keeps counting games in play', totwCalls.length === 3 && /mode=round/.test(totwCalls[2]) && /scope=junior/.test(totwCalls[2]), JSON.stringify(totwCalls))
+  await press(page.getByTestId('totw-basis-week'))
+  await page.waitForTimeout(300)
+  ck('going back to week drops the mode', totwCalls.length === 4 && !/mode=/.test(totwCalls[3]) && /scope=junior/.test(totwCalls[3]), JSON.stringify(totwCalls))
+  ck('  ... and the warning goes', !(await seen(page.getByTestId('totw-live-note'))))
+  ck('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
   await ctx.close()
 }
 

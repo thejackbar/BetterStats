@@ -4432,6 +4432,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _POST_SPONSORS_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 367: the sponsor a club picked for its player cards. Same
+        # one-copy rule: this list and alembic's 367 both run
+        # services/card_sponsors_ddl.STATEMENTS.
+        from app.services.card_sponsors_ddl import STATEMENTS as _CARD_SPONSORS_DDL
+        for _stmt in _CARD_SPONSORS_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 321: a club's own run and wicket milestone increments.
         # Same one-copy rule: this list and alembic's 321 both run
         # services/milestone_scheme_ddl.STATEMENTS.

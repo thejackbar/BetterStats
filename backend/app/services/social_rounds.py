@@ -22,7 +22,8 @@ Two more builds sit alongside them:
   - social_potm     : our side's performances in one match ranked into a
                       player-of-the-match shortlist.
   - social_totw     : the same ranking run over every completed club match in
-                      one round and pooled into a team-of-the-week shortlist.
+                      one round and pooled into a team-of-the-week shortlist; as
+                      a team of the ROUND it also counts matches still in play.
 """
 from __future__ import annotations
 
@@ -339,9 +340,16 @@ def _match_logos(m: dict) -> tuple[str | None, str | None, str | None, str | Non
     return home_org.get("id"), home_org.get("logoUrl"), away_org.get("id"), away_org.get("logoUrl")
 
 
-def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: int | None = None) -> dict | None:
+def _result_row(
+    sc: dict, org, keys: list[str], grade_name: str, grade_order: int | None = None, live: bool = False,
+) -> dict | None:
     """One results-roundup row from a raw Grassroots scorecard, from the club's
-    perspective (us / them / W·L·T / margin)."""
+    perspective (us / them / W·L·T / margin).
+
+    ``live`` is a match still in play: a side that has not batted yet reads ``-``
+    instead of dropping the row, the outcome is ``LIVE`` (neither a win nor a
+    loss) and the margin says so. A live match with no innings at all has
+    nothing to show and is skipped. A completed row carries none of this."""
     ms = sc.get("matchSummary") or {}
     summary_teams = ms.get("teams") or []
     teams_raw = sc.get("teams") or []
@@ -364,7 +372,11 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
             inn_by_team[tid] = i
     us = _score_str(inn_by_team.get(our_id))
     them = _score_str(inn_by_team.get(opp_id))
-    if us is None or them is None:
+    if live:
+        if us is None and them is None:
+            return None
+        us, them = us or "-", them or "-"
+    elif us is None or them is None:
         return None
 
     our_inn = inn_by_team.get(our_id) or {}
@@ -391,10 +403,12 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
         else:
             outcome = "T"
         break
+    if live:
+        outcome = "LIVE"
 
     opp_org = (opp_team or {}).get("owningOrganisation") or {}
     opp_name = (opp_team.get("displayName") if opp_team else None) or opp_org.get("name") or "OPPONENT"
-    return {
+    row = {
         "grade": (grade_name or "").upper(),
         "gradeOrder": grade_order,
         "opp": strip_team_suffix(opp_name).upper(),
@@ -402,7 +416,7 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
         "us": us,
         "them": them,
         "outcome": outcome,
-        "margin": _margin_from_text(ms.get("result") or ms.get("statusText")),
+        "margin": "IN PROGRESS" if live else _margin_from_text(ms.get("result") or ms.get("statusText")),
         "topBat": top_bat,
         "topBowl": top_bowl,
         # The same two lists for the other side, for a post that shows them.
@@ -413,6 +427,9 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: in
         "_oppOrgId": opp_org.get("id"),
         "_oppLogoRaw": opp_org.get("logoUrl"),
     }
+    if live:
+        row["live"] = True
+    return row
 
 
 async def social_fixtures(db: AsyncSession, org) -> dict:
@@ -453,14 +470,15 @@ async def social_fixtures(db: AsyncSession, org) -> dict:
     return {"season": season, "club": _club_dict(org), "dates": dates}
 
 
-async def _recent_club_matches(db: AsyncSession, org) -> dict | None:
+async def _recent_club_matches(db: AsyncSession, org, include_live: bool = False) -> dict | None:
     """The org's completed club matches from the last few match-days of its
     current season, newest first and bounded (a few match-days, a couple of
     dozen matches) so the scorecard fan-out behind them stays small. ``None``
     when the org has no current-season grades at all.
 
     Shared by the Results roundup and the team of the week, so the two agree on
-    which matches "the latest round" means."""
+    which matches "the latest round" means. ``include_live`` (team of the round
+    only) also keeps matches still in play, flagged ``live``."""
     rows = await current_grade_rows_with_live(db, org.id)
     if not rows:
         return None
@@ -473,7 +491,7 @@ async def _recent_club_matches(db: AsyncSession, org) -> dict | None:
     since = (date.today() - timedelta(days=_RESULT_WINDOW_DAYS)).isoformat()
 
     discovered = await asyncio.gather(
-        *[gr.get_grade_results(guid, since=since) for guid, *_ in rows],
+        *[gr.get_grade_results(guid, since=since, include_live=include_live) for guid, *_ in rows],
         return_exceptions=True,
     )
     club_matches: list[dict] = []
@@ -511,11 +529,12 @@ async def _recent_club_matches(db: AsyncSession, org) -> dict | None:
     }
 
 
-async def social_results(db: AsyncSession, org) -> dict:
+async def social_results(db: AsyncSession, org, include_live: bool = False) -> dict:
     """Recent completed results for the org, grouped by match-day (most-recent
     first), shaped for the Results roundup posts. Scores/result come from each
-    match's scorecard — the same source as the single-scorecard import."""
-    recent = await _recent_club_matches(db, org)
+    match's scorecard — the same source as the single-scorecard import.
+    ``include_live`` adds matches still in play as ``LIVE`` rows."""
+    recent = await _recent_club_matches(db, org, include_live=include_live)
     if recent is None:
         return {"season": None, "club": _club_dict(org), "dates": []}
     keys = recent["keys"]
@@ -525,13 +544,16 @@ async def social_results(db: AsyncSession, org) -> dict:
     kept = recent["kept"]
 
     cats_of = await _category_lookup(db, org.id)
-    cards = await asyncio.gather(*[gr.get_match_scorecard(m["id"]) for m in kept], return_exceptions=True)
+    # A match in play changes under us, so its card is always read fresh.
+    cards = await asyncio.gather(
+        *[gr.get_match_scorecard(m["id"], force=bool(m.get("live"))) for m in kept], return_exceptions=True,
+    )
     by_date: dict[str, dict] = {}
     for m, sc in zip(kept, cards):
         if not isinstance(sc, dict):
             continue
         gid = m.get("grade_id")
-        row = _result_row(sc, org, keys, grade_name_by_guid.get(gid) or "", grade_orders.get(gid))
+        row = _result_row(sc, org, keys, grade_name_by_guid.get(gid) or "", grade_orders.get(gid), live=bool(m.get("live")))
         if not row:
             continue
         row["categories"] = cats_of(grade_name_by_guid.get(gid))
@@ -797,24 +819,26 @@ async def social_fixtures_for_reference(db: AsyncSession, org, raw: str) -> dict
     return {"kind": "round", "season": ctx["season"], "club": _club_dict(org), "dates": [bucket]}
 
 
-async def social_results_for_reference(db: AsyncSession, org, raw: str) -> dict:
+async def social_results_for_reference(db: AsyncSession, org, raw: str, include_live: bool = False) -> dict:
     """The whole round's completed club results, anchored on one pasted match
     link. Scores come from each match's scorecard, exactly like social_results;
-    only completed matches (statusId 3) in the round window are fetched. The
-    anchor itself doesn't have to be completed — whatever the window holds is
-    returned."""
+    only completed matches (statusId 3) in the round window are fetched, plus
+    those still in play (statusId 2) when ``include_live``. The anchor itself
+    doesn't have to be completed — whatever the window holds is returned."""
     err, ctx = await _reference_round(db, org, raw)
     if err is not None:
         return err
+    statuses = {"3", "2"} if include_live else {"3"}
     completed = [
         (guid, m) for guid, m in ctx["matches"]
-        if str(m.get("statusId")) == "3"
+        if str(m.get("statusId")) in statuses
     ][:_RESULT_MAX_MATCHES]
+    no_round = _NO_ROUND_MESSAGE_LIVE if include_live else "No completed matches found for that round yet."
     if not completed:
-        return {"kind": "no_results", "message": "No completed matches found for that round yet."}
+        return {"kind": "no_results", "message": no_round}
 
     cards = await asyncio.gather(
-        *[gr.get_match_scorecard(m.get("id")) for _, m in completed],
+        *[gr.get_match_scorecard(m.get("id"), force=str(m.get("statusId")) == "2") for _, m in completed],
         return_exceptions=True,
     )
     results = []
@@ -822,12 +846,15 @@ async def social_results_for_reference(db: AsyncSession, org, raw: str) -> dict:
     for (guid, m), sc in zip(completed, cards):
         if not isinstance(sc, dict):
             continue
-        row = _result_row(sc, org, ctx["keys"], ctx["grade_name_by_guid"].get(guid) or "", ctx["grade_orders"].get(guid))
+        row = _result_row(
+            sc, org, ctx["keys"], ctx["grade_name_by_guid"].get(guid) or "", ctx["grade_orders"].get(guid),
+            live=str(m.get("statusId")) == "2",
+        )
         if row:
             row["categories"] = cats_of(ctx["grade_name_by_guid"].get(guid))
             results.append(row)
     if not results:
-        return {"kind": "no_results", "message": "No completed matches found for that round yet."}
+        return {"kind": "no_results", "message": no_round}
     results.sort(key=lambda r: r["grade"])
     await _finalize_opp_logos(db, results)
     bucket = {
@@ -1123,6 +1150,7 @@ async def _rank_our_side(db: AsyncSession, org, raw: dict) -> dict:
 
 _TOTW_POOL = 150
 _NO_ROUND_MESSAGE = "No completed matches found for that round yet."
+_NO_ROUND_MESSAGE_LIVE = "No completed or in-progress matches found for that round yet."
 
 # A date range is one club "round" that does not line up with a weekend (a
 # Tuesday under-17s game through to the Sunday women's final). Bounded so the
@@ -1135,6 +1163,12 @@ _TOTW_RANGE_MAX_MATCHES = 80
 # classes as junior (a "Girls Under 15" is junior AND women's, so it counts
 # here). Senior is everything else: men's, women's, masters and mixed.
 TOTW_SCOPES = ("all", "junior", "senior")
+
+# What a pull counts. ``week`` is finished matches only, so every figure is
+# final. ``round`` also counts matches still in play (and a two-day game that
+# is only half played), so a round can be posted before its last game ends. The
+# figures of a game in play are provisional and are re-read, never cached.
+TOTW_MODES = ("week", "round")
 
 # A player is an all-rounder for the week when they made both a real score and
 # took a wicket in the same performance. Anything less is a batter or a bowler
@@ -1173,6 +1207,10 @@ def _pool_round(scored: list[tuple[dict, dict]]) -> list[dict]:
                 "outcome": match.get("outcome") or "",
                 "categories": list(match.get("categories") or []),
             }
+            if match.get("live"):
+                # Present only on a performance from a game still in play, so a
+                # team of the week stays byte for byte what it was.
+                entry["live"] = True
             held = best.get(key)
             if held is None or _totw_sort_key(entry) < _totw_sort_key(held):
                 best[key] = entry
@@ -1238,17 +1276,20 @@ def _range_label(start: str, end: str) -> str:
     return f"{left} TO {_label(end)}"
 
 
-async def _totw_range_matches(db: AsyncSession, org, date_from: str, date_to: str) -> dict | None:
+async def _totw_range_matches(
+    db: AsyncSession, org, date_from: str, date_to: str, include_live: bool = False,
+) -> dict | None:
     """The club's completed matches played from ``date_from`` to ``date_to``
-    (inclusive), across the current season's grades, newest first. ``None`` when
-    the club has no current-season grades."""
+    (inclusive), across the current season's grades, newest first; with
+    ``include_live`` also the ones still in play. ``None`` when the club has no
+    current-season grades."""
     rows = await current_grade_rows_with_live(db, org.id)
     if not rows:
         return None
     grade_name_by_guid = {guid: gname for guid, _, gname, _ in rows}
     season = next((sname for *_, sname in rows if sname), None)
     discovered = await asyncio.gather(
-        *[gr.get_grade_results(guid, since=date_from) for guid, *_ in rows],
+        *[gr.get_grade_results(guid, since=date_from, include_live=include_live) for guid, *_ in rows],
         return_exceptions=True,
     )
     seen: set = set()
@@ -1283,7 +1324,7 @@ def _parse_range(date_from: str, date_to: str) -> tuple[str, str] | dict:
 
 async def social_totw(
     db: AsyncSession, org, q: str = "",
-    date_from: str = "", date_to: str = "", scope: str = "all",
+    date_from: str = "", date_to: str = "", scope: str = "all", mode: str = "week",
 ) -> dict:
     """The round's best performers across the grades the club played.
 
@@ -1301,13 +1342,23 @@ async def social_totw(
     on the junior team for their junior game rather than being pooled away by
     a better senior one.
 
+    ``mode`` is ``week`` (finished matches only, the default) or ``round``,
+    which also counts matches still in play. A performance from a match in play
+    carries ``live: True``, its scorecard is re-read rather than served from the
+    cache, and the reply counts them in ``liveMatches``.
+
     Returns ``{kind: 'round', season, club, round, date, label, matches, scope,
-    scopeMatches, players: [...]}`` with ``players`` ranked best first, each
-    carrying the ``kind`` seat it fills (WK, BAT, AR, BOWL); or a
-    ``{kind, message}`` for a link or period that cannot name a round."""
+    mode, liveMatches, scopeMatches, players: [...]}`` with ``players`` ranked
+    best first, each carrying the ``kind`` seat it fills (WK, BAT, AR, BOWL); or
+    a ``{kind, message}`` for a link or period that cannot name a round."""
     scope = (scope or "all").strip().lower()
     if scope not in TOTW_SCOPES:
         scope = "all"
+    mode = (mode or "week").strip().lower()
+    if mode not in TOTW_MODES:
+        mode = "week"
+    live_ok = mode == "round"
+    no_round = _NO_ROUND_MESSAGE_LIVE if live_ok else _NO_ROUND_MESSAGE
     cats_of = await _category_lookup(db, org.id)
     date_range = None
     if (date_from or "").strip() or (date_to or "").strip():
@@ -1317,36 +1368,44 @@ async def social_totw(
         date_range = parsed
 
     if date_range:
-        recent = await _totw_range_matches(db, org, *date_range)
+        recent = await _totw_range_matches(db, org, *date_range, include_live=live_ok)
         kept = (recent or {}).get("kept") or []
         if not kept:
-            return {"kind": "no_results", "message": "No completed matches found in that period."}
+            return {
+                "kind": "no_results",
+                "message": "No completed or in-progress matches found in that period." if live_ok
+                else "No completed matches found in that period.",
+            }
         grade_name_by_guid = recent["grade_name_by_guid"]
         season = recent["season"]
         day = date_range[1]
         rounds = [_round_label(m.get("round")) for m in kept if m.get("round")]
         round_label = max(set(rounds), key=rounds.count) if rounds else ""
         label = _range_label(*date_range)
-        pairs = [(m.get("id"), grade_name_by_guid.get(m.get("grade_id")) or "") for m in kept]
+        pairs = [(m.get("id"), grade_name_by_guid.get(m.get("grade_id")) or "", bool(m.get("live"))) for m in kept]
     elif q.strip():
         err, ctx = await _reference_round(db, org, q)
         if err is not None:
             return err
+        statuses = {"3", "2"} if live_ok else {"3"}
         completed = [
             (guid, m) for guid, m in ctx["matches"]
-            if str(m.get("statusId")) == "3"
+            if str(m.get("statusId")) in statuses
         ][:_RESULT_MAX_MATCHES]
         grade_name_by_guid = ctx["grade_name_by_guid"]
         season = ctx["season"]
         day = ctx["anchor_day"]
         round_label = _round_label(ctx["anchor_round"])
         label = _label(day)
-        pairs = [(m.get("id"), grade_name_by_guid.get(guid) or "") for guid, m in completed]
+        pairs = [
+            (m.get("id"), grade_name_by_guid.get(guid) or "", str(m.get("statusId")) == "2")
+            for guid, m in completed
+        ]
     else:
-        recent = await _recent_club_matches(db, org)
+        recent = await _recent_club_matches(db, org, include_live=live_ok)
         kept = (recent or {}).get("kept") or []
         if not kept:
-            return {"kind": "no_results", "message": _NO_ROUND_MESSAGE}
+            return {"kind": "no_results", "message": no_round}
         grade_name_by_guid = recent["grade_name_by_guid"]
         season = recent["season"]
         # `kept` is newest first. The round is the newest match-day plus any
@@ -1368,18 +1427,22 @@ async def social_totw(
                 round_matches.append(m)
         round_label = _round_label(round_matches[0].get("round") if round_matches else "")
         label = _label(day)
-        pairs = [(m.get("id"), grade_name_by_guid.get(m.get("grade_id")) or "") for m in round_matches]
+        pairs = [(m.get("id"), grade_name_by_guid.get(m.get("grade_id")) or "", bool(m.get("live"))) for m in round_matches]
 
-    pairs = [(mid, g) for mid, g in pairs if mid]
+    pairs = [(mid, g, live) for mid, g, live in pairs if mid]
     if not pairs:
-        return {"kind": "no_results", "message": _NO_ROUND_MESSAGE}
+        return {"kind": "no_results", "message": no_round}
 
-    cards = await asyncio.gather(*[gr.get_match_scorecard(mid) for mid, _ in pairs], return_exceptions=True)
+    # A match in play changes under us, so its card is always read fresh.
+    cards = await asyncio.gather(
+        *[gr.get_match_scorecard(mid, force=live) for mid, _, live in pairs], return_exceptions=True,
+    )
     scored: list[tuple[dict, dict]] = []
     # How many matches each scope holds, counted before the scope is applied, so
     # an empty junior team can say whether any junior match was played at all.
     scope_matches = {"junior": 0, "senior": 0}
-    for (mid, grade_name), sc in zip(pairs, cards):
+    live_matches = 0
+    for (mid, grade_name, live), sc in zip(pairs, cards):
         if not isinstance(sc, dict):
             continue
         try:
@@ -1389,6 +1452,8 @@ async def social_totw(
             # discovery let through) contributes nobody.
             continue
         match = ranked["match"]
+        if live:
+            match["live"] = True
         if grade_name:
             match["grade"] = grade_name.upper()
         cats = cats_of(grade_name or match["grade"])
@@ -1396,6 +1461,8 @@ async def social_totw(
         scope_matches["junior" if "junior" in cats else "senior"] += 1
         if not _scope_matches(scope, cats):
             continue
+        if live:
+            live_matches += 1
         keepers = _our_keeper_guids(org, sc)
         for p in ranked["players"]:
             fld = p.get("fielding") or {}
@@ -1408,10 +1475,11 @@ async def social_totw(
         if scope != "all" and scope_matches[scope] == 0:
             return {
                 "kind": "no_results",
-                "message": f"No completed {scope} matches found for that round yet.",
+                "message": f"No completed {scope} matches found for that round yet."
+                if not live_ok else f"No completed or in-progress {scope} matches found for that round yet.",
                 "scopeMatches": scope_matches,
             }
-        return {"kind": "no_results", "message": _NO_ROUND_MESSAGE}
+        return {"kind": "no_results", "message": no_round}
     return {
         "kind": "round",
         "season": season,
@@ -1421,6 +1489,8 @@ async def social_totw(
         "label": label,
         "matches": len(scored),
         "scope": scope,
+        "mode": mode,
+        "liveMatches": live_matches,
         "scopeMatches": scope_matches,
         "players": pool[:_TOTW_POOL],
     }

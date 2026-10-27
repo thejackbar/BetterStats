@@ -76,11 +76,12 @@ def u() -> uuid.UUID:
 OURS, OTHER = u(), u()
 S25, S23, SOTHER = u(), u(), u()
 GR_F25, GR_H23, GR_B23, GR_ONE, GR_OTHER25 = u(), u(), u(), u(), u()
-G_GF, G_SEMI, G_LOST, G_DRAW, G_PRELIM, G_GF23, G_SPRING, G_SUMMER = (u() for _ in range(8))
-P = {n: u() for n in ("cap", "bob", "cat", "dan", "twelfth", "eve", "foe", "hist", "other1", "hidden")}
+G_GF, G_SEMI, G_LOST, G_DRAW, G_PRELIM, G_GF23, G_SPRING, G_SUMMER, G_JUN = (u() for _ in range(9))
+GR_U13, COMP_JUN = u(), u()
+P = {n: u() for n in ("cap", "bob", "cat", "dan", "twelfth", "eve", "foe", "hist", "other1", "hidden", "kid1", "kid2")}
 NAME = {"cap": "Caden Smith", "bob": "Bob Bell", "cat": "Cat Cole", "dan": "Dan Day",
         "twelfth": "Tim Twelfth", "eve": "Eve East", "foe": "Fred Foe", "hist": "Hal Hist",
-        "other1": "Oscar Other", "hidden": "Hugh Hidden"}
+        "other1": "Oscar Other", "hidden": "Hugh Hidden", "kid1": "Kit Kidd", "kid2": "Kip Kidd"}
 
 
 async def seed(conn) -> None:
@@ -97,8 +98,13 @@ async def seed(conn) -> None:
                            (GR_ONE, S25, "A Grade"), (GR_OTHER25, SOTHER, "F Grade")):
         await conn.execute(text("INSERT INTO grades (id, season_id, name) VALUES (:i,:s,:n)"),
                            {"i": gid, "s": sid, "n": name})
+    await conn.execute(text("INSERT INTO club_competitions (id, organisation_id, name, is_junior) "
+                            "VALUES (:c, :o, 'Junior Cricket Association', true)"), {"c": COMP_JUN, "o": OURS})
+    await conn.execute(text("INSERT INTO grades (id, season_id, name, competition_id) VALUES (:i,:s,'Under 13',:c)"),
+                       {"i": GR_U13, "s": S25, "c": COMP_JUN})
     for k, org in (("cap", OURS), ("bob", OURS), ("cat", OURS), ("dan", OURS), ("twelfth", OURS),
-                   ("eve", OURS), ("hist", OURS), ("foe", OTHER), ("other1", OTHER), ("hidden", OURS)):
+                   ("eve", OURS), ("hist", OURS), ("foe", OTHER), ("other1", OTHER), ("hidden", OURS),
+                 ("kid1", OURS), ("kid2", OURS)):
         await conn.execute(text("INSERT INTO players (id, name, organisation_id) VALUES (:i,:n,:o)"),
                            {"i": P[k], "n": NAME[k], "o": org})
 
@@ -110,6 +116,7 @@ async def seed(conn) -> None:
                 "winner": winner}
     games = [
         game(G_GF, GR_F25, date(2026, 3, 14), "Grand Final", True, "Leederville F"),
+        game(G_JUN, GR_U13, date(2026, 3, 15), "Grand Final", True, "Leederville F"),
         game(G_SEMI, GR_F25, date(2026, 3, 1), "Semi Final", True, "Leederville F"),
         game(G_LOST, GR_ONE, date(2026, 3, 14), "Grand Final", True, "Rivals F"),
         game(G_DRAW, GR_ONE, date(2026, 3, 21), "Grand Final", True, None),
@@ -137,6 +144,7 @@ async def seed(conn) -> None:
         app(G_GF, "cat", "Leederville F"), app(G_GF, "twelfth", "Leederville F", reserve=True),
         app(G_GF, "foe", "Rivals F"), app(G_GF, "other1", "Rivals F"),
         app(G_GF, "hidden", "Leederville F"),
+        app(G_JUN, "kid1", "Leederville F", cap=True), app(G_JUN, "kid2", "Leederville F"),
         app(G_SEMI, "cap", "Leederville F"), app(G_LOST, "bob", "Leederville F"),
         app(G_DRAW, "bob", "Leederville F"), app(G_PRELIM, "bob", "Leederville F"),
         app(G_GF23, "cap", "Leederville F", cap=True), app(G_GF23, "dan", "Leederville F"),
@@ -214,6 +222,9 @@ async def main() -> None:
             STATEMENTS = []
         for stmt in STATEMENTS:
             await conn.execute(text(stmt))
+        from app.services.junior_hiding_ddl import STATEMENTS as JUNIOR_DDL
+        for stmt in JUNIOR_DDL:
+            await conn.execute(text(stmt))
         await seed(conn)
 
     # ── 1. what counts as a grand final ──────────────────────────────────
@@ -244,8 +255,8 @@ async def main() -> None:
         before = await rows(db)
         rep = await prem.reconcile(db, OURS, apply=False)
         check("dry run writes nothing", len(await rows(db)) == len(before))
-        check("dry run reports the grand finals won (2025 F + 2023 H + spring + summer = 4)",
-              rep.get("wins") == 4, str(rep.get("wins")))
+        check("dry run reports the grand finals won (2025 F + 2023 H + spring + summer + Under 13 = 5)",
+              rep.get("wins") == 5, str(rep.get("wins")))
         check("a grand final with no winner is reported, not awarded",
               [x["grade_name"] for x in rep.get("unresolved", [])] == ["A Grade"], str(rep.get("unresolved")))
 
@@ -378,6 +389,28 @@ async def main() -> None:
               [r for r in await rows(db, player_id=P["cap"]) if r["linked_game_id"] == G_GF] == [])
         await db.execute(text("UPDATE games SET winning_team = 'Leederville F' WHERE id = :g"), {"g": G_GF})
         await db.commit()
+
+        # ── 9b. a club that hides its juniors gets no junior honours ─────
+        print("\n9b. Junior programme hidden")
+        from app.services import junior_hiding
+        kids = lambda: pids([r for r in rows_cache[0] if r["linked_game_id"] == G_JUN])
+        rows_cache = [await rows(db)]
+        check("with juniors shown, the Under 13 grand final earns its honours",
+              kids() == {P["kid1"], P["kid2"]}, str(kids()))
+        await db.execute(text("UPDATE organisations SET hide_juniors = true WHERE id = :o"), {"o": OURS})
+        await db.commit(); junior_hiding.forget(OURS)
+        rep = await prem.reconcile(db, OURS, apply=True)
+        rows_cache[0] = await rows(db)
+        check("hide_juniors on: the junior honours are removed (they were ours)", kids() == set(), str(kids()))
+        check("and the senior flag beside them is untouched",
+              pids([r for r in rows_cache[0] if r["linked_game_id"] == G_GF]) == {P["cap"], P["cat"]},
+              str(pids([r for r in rows_cache[0] if r["linked_game_id"] == G_GF])))
+        check("the junior grand final is not counted among the wins", rep.get("wins") == 4, str(rep.get("wins")))
+        await db.execute(text("UPDATE organisations SET hide_juniors = false WHERE id = :o"), {"o": OURS})
+        await db.commit(); junior_hiding.forget(OURS)
+        await prem.reconcile(db, OURS, apply=True)
+        rows_cache[0] = await rows(db)
+        check("switched back off: they return", kids() == {P["kid1"], P["kid2"]}, str(kids()))
 
         # ── 10. a damaged read does not wipe a club ──────────────────────
         print("\n10. Mass-removal guard")
