@@ -139,3 +139,16 @@ Phase 3 of the Player Cards page plan.
 
 Verified: `verify_player_cards.py` (344), `verify_merge_carry.py`, the player page suites, `audit_route_access.py`; browser `_community_` (33), `_social_` (39), `_page_` (54), `_v3_` (65), `_v2_` (45), `_admin_` (59), the first suite (55).
 
+## v9.132.3 (2026-10-27): more packs, a lighter start, everyone on the board, emails off
+
+Asked for after the collectors and Open packs screens looked wrong.
+
+- Pack art: `PackArt` is drawn at a fixed 220x330 and scaled, with the name sized by length, so no pack is squashed at 54px. A pack row can carry its own `label`. New looks in `cardTheme.PACKS` for every source, with stars for the better packs.
+- New pack sources (odds in `player_card_pack_kinds.py`): `match_day` (team sheet or scorecard today), `birthday`, `mystery` (one day in twelve per club), `halloween`, `melbourne_cup` (first Tuesday of November), `christmas`, `boxing_day`, `new_year`, `australia_day`, `anzac_day`, `event` (club scheduled), and the achievement packs `century`, `five_for`, `hat_trick`, `fifty`, `milestone`. "Australia v South Africa Test" is not hard coded: dates are not known in advance, so a club schedules each day or run in Settings (`club_card_event_packs`).
+- Migration 370: `player_card_packs.label`, `club_card_event_packs`, `club_card_settings.event_packs_enabled` and `.starter_gifts`, `player_card_prefs.board_hidden`, alert columns default off. The alembic file alone switches existing alert rows off once (a data step, not in the lifespan list).
+- Starting gifts: minimal by default (debut and the latest landmark card). `POST /player-cards/trim-gifts` counts, then removes, the extra gifted copies (audited as `player_card_gifts_trimmed`).
+- Board: `community.board` now lists every pool player with a match, minus `board_hidden`, top 50, plus the viewer's own entry and rank.
+- Open decisions, taken as suggested: the club's own alert switch stays on (players default off); day packs need the page to be opened that day; achievement packs count from `launched_at`, so a club already live gets packs for events since then.
+
+Verified: `verify_player_cards.py` (425, control on the previous commit fails on the email and board defaults), `verify_merge_carry.py`, `verify_player_page_dashboard.py`, `verify_player_dashboard_and_fines.py`, `audit_route_access.py`; browser `_page_` (66), `_admin_` (69), `_community_` (36), `_social_`, `_v3_`, `_v2_`, first suite.
+

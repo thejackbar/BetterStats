@@ -9,7 +9,7 @@ import { api } from '../../lib/api'
 import { Mini } from '../../components/cards/SwapsPanel'
 import { Week } from './Sets'
 import { CARD_H, CARD_W, CardInfoBack, CardView } from '../../components/cards/CardFaces'
-import { PACKS } from '../../components/cards/cardTheme'
+import { packName } from '../../components/cards/cardTheme'
 import PageHead, { ghostBtn } from './PageHead'
 import { usePC } from './context'
 
@@ -27,7 +27,12 @@ export function PackBlock({ big = false }) {
   const next = packs[0]
   const byWeekly = useMemo(() => {
     const n = {}
-    for (const p of packs) n[p.source] = (n[p.source] || 0) + 1
+    for (const p of packs) {
+      // A scheduled event has a name of its own, so two of them are two lines.
+      const key = p.source === 'event' ? `event:${p.label}` : p.source
+      n[key] = n[key] || { n: 0, source: p.source, label: p.label }
+      n[key].n += 1
+    }
     return n
   }, [packs])
   if (!packs.length) {
@@ -44,13 +49,13 @@ export function PackBlock({ big = false }) {
         {packs.length} {packs.length === 1 ? 'pack' : 'packs'} to open
       </div>
       <div className="flex flex-wrap gap-1.5 my-2.5">
-        {Object.entries(byWeekly).map(([src, n]) => (
-          <span key={src} data-pack-count={src} style={{ padding: '3px 10px', borderRadius: 999, border: '1px solid var(--pb-hairline, rgba(255,255,255,.25))', font: `600 11px ${MONO}`, letterSpacing: 0.8, textTransform: 'uppercase' }}>{n} {(PACKS[src] || PACKS.weekly).label.replace(' pack', '')}</span>
+        {Object.entries(byWeekly).map(([key, g]) => (
+          <span key={key} data-pack-count={g.source} style={{ padding: '3px 10px', borderRadius: 999, border: '1px solid var(--pb-hairline, rgba(255,255,255,.25))', font: `600 11px ${MONO}`, letterSpacing: 0.8, textTransform: 'uppercase' }}>{g.n} {packName(g.source, g.label).replace(/ pack$/i, '')}</span>
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-4">
         <button type="button" onClick={() => startPack(next)} data-open-pack aria-label="Open a pack" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer' }}>
-          <div className="cc-float"><PackArt source={next.source} club={club} accent={accent} display={display} width={big ? 130 : 110} glow /></div>
+          <div className="cc-float"><PackArt source={next.source} label={next.label} club={club} accent={accent} display={display} width={big ? 130 : 110} glow /></div>
         </button>
         <div className="flex flex-col gap-2">
           <button type="button" onClick={() => startPack(next)} data-open-next style={{ padding: '11px 18px', borderRadius: 12, background: accent, color: onColor(accent), font: `700 12px ${MONO}`, letterSpacing: 1.4, textTransform: 'uppercase' }}>Open a pack</button>

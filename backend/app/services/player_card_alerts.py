@@ -6,7 +6,7 @@ Rules this module holds to (the same ones the selection notices keep):
 * Every address goes through `email_suppression.deliverable` as operational mail, so a bounce, a complaint or a person who
   asked to be removed is skipped.
 * A player under 18 with a date of birth on file is not emailed directly.
-* A club can switch all of it off (`club_card_settings.alerts_enabled`) and a player can switch each kind off (`player_card_prefs`).
+* A club can switch all of it off (`club_card_settings.alerts_enabled`) and a player switches each kind ON for themselves (`player_card_prefs`; both default off, so nobody is emailed until they ask).
 * A wish list alert goes once per card until nobody could swap that card any more (the live row in `player_card_alerts` is the
   memory; clearing it re-arms the alert), so a card that stays available is not announced again and again.
 * Both entry points run after the request that caused them has committed, on their own session, and never raise.
@@ -77,7 +77,7 @@ async def _gate(db, club, player_id: str, pref: str) -> tuple[Optional[dict], Op
         "SELECT alerts_enabled FROM club_card_settings WHERE organisation_id = CAST(:o AS UUID)"), {"o": str(club.id)})).scalar()
     if enabled is False:
         return dict(row), "club_off"
-    if not (await load_prefs(db, player_id)).get(pref, True):
+    if not (await load_prefs(db, player_id)).get(pref, False):
         return dict(row), "player_off"
     email = (row["email"] or "").strip()
     if not email:

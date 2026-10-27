@@ -25,7 +25,7 @@ function WantRow({ w, ui, onAsk, onRemove, cardHref }) {
               </button>
             ))}
           </div>
-        ) : <div className="text-sm text-pb-dim mt-1.5">Nobody has one to swap yet. You will get an email when someone does, if you have those switched on.</div>}
+        ) : <div className="text-sm text-pb-dim mt-1.5">Nobody has one to swap yet. You can get an email when someone does, if you switch that on in Settings.</div>}
         <button type="button" onClick={() => onRemove(w)} data-want-remove className="text-[12.5px] text-pb-faint underline mt-2">Take off my list</button>
       </div>
     </div>

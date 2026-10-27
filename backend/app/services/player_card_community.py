@@ -87,19 +87,19 @@ async def set_showcase(db: AsyncSession, club: Organisation, snap: dict, me: str
 # ── The collectors board ──────────────────────────────────────────────────────────────────────────────────────
 
 async def board(db: AsyncSession, club: Organisation, snap: dict, me: str) -> dict:
-    """Players who opted in, by share of the set held. `me` says whether the viewer is on it and where."""
-    opted = [r[0] for r in (await db.execute(text(
-        "SELECT p.player_id::text FROM player_card_prefs p WHERE p.organisation_id = CAST(:o AS UUID) AND p.board_opt_in"
-    ), {"o": str(club.id)})).fetchall() if r[0] in snap["people"]]
+    """Every player in the card pool who has not left it, by share of the set held. `me` says whether the viewer is on it and where."""
+    left = {r[0] for r in (await db.execute(text(
+        "SELECT player_id::text FROM player_card_prefs WHERE organisation_id = CAST(:o AS UUID) AND board_hidden"), {"o": str(club.id)})).fetchall()}
     drawable = [pid for pid, f in snap["figs"].items() if f["matches"] > 0 and pid in snap["people"]]
+    # The pool is everyone with a card others can pull, plus the viewer even if they have not played yet.
+    listed = [pid for pid in dict.fromkeys([*drawable, *([me] if me in snap["people"] else [])]) if pid not in left]
     spec_rows = (await db.execute(text("SELECT id::text, player_id::text FROM player_special_cards WHERE organisation_id = CAST(:o AS UUID)"),
                                   {"o": str(club.id)})).fetchall()
     special_ids = {r[0] for r in spec_rows if r[1] in snap["people"]}
     total = len(drawable) + len(special_ids)
     everyone = await swaps._rows_by_card(db, club.id)
-    shown = await showcase_for(db, club, snap, opted)
     entries = []
-    for pid in opted:
+    for pid in listed:
         held = everyone.get(pid, {})
         distinct = {c for c, n in held.items() if n > 0 and ((c[1] and c[1] in special_ids) or (not c[1] and c[0] in drawable))}
         if pid in drawable:
@@ -110,14 +110,18 @@ async def board(db: AsyncSession, club: Organisation, snap: dict, me: str) -> di
             "player_id": pid, "name": snap["people"][pid]["display_name"],
             "percent": round(100 * len(distinct) / total, 1) if total else 0.0, "held": len(distinct),
             "rarest": ({**cards.regular_card(snap, best), "key": f"p:{best}"} if best else None),
-            "showcase": shown.get(pid, []),
         })
     entries.sort(key=lambda e: (-e["percent"], e["name"].lower()))
     for i, e in enumerate(entries, 1):
         e["rank"] = i
+    top = entries[:BOARD_MAX]
+    # The showcase is read only for the rows sent, not for a whole club.
+    shown = await showcase_for(db, club, snap, [e["player_id"] for e in top])
+    for e in top:
+        e["showcase"] = shown.get(e["player_id"], [])
     mine_entry = next((e for e in entries if e["player_id"] == me), None)
-    return {"entries": entries[:BOARD_MAX], "total_cards": total, "me_opted_in": mine_entry is not None, "me_rank": mine_entry["rank"] if mine_entry else None,
-            "count": len(entries)}
+    return {"entries": top, "total_cards": total, "me_on_board": mine_entry is not None, "me_hidden": me in left,
+            "me_rank": mine_entry["rank"] if mine_entry else None, "me": mine_entry, "count": len(entries)}
 
 
 # ── The club feed ─────────────────────────────────────────────────────────────────────────────────────────────

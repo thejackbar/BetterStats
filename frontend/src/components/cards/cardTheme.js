@@ -171,7 +171,28 @@ export const PACKS = {
   wickets: { label: 'Wickets pack', line: 'Earned with the ball', a: '#c4a1ff', b: '#4c1d95', on: '#ffffff' },
   dismissals: { label: 'Dismissals pack', line: 'Earned in the field', a: '#86efac', b: '#14532d', on: '#052e16' },
   duck: { label: 'Duck pack', line: 'Better luck next time', a: '#fef08a', b: '#ca8a04', on: '#3b2a00' },
+  // For a day. These match the odds in services/player_card_pack_kinds.py (better than a weekly pack, short of an achievement).
+  match_day: { label: 'Match Day pack', line: 'You are playing today', a: '#bbf7d0', b: '#166534', on: '#052e16', stars: 2 },
+  birthday: { label: 'Birthday pack', line: 'Many happy returns', a: '#fbcfe8', b: '#be185d', on: '#500724', stars: 2 },
+  mystery: { label: 'Surprise pack', line: 'A random drop', a: '#a5b4fc', b: '#312e81', on: '#ffffff', stars: 2 },
+  halloween: { label: 'Halloween pack', line: 'Trick or treat', a: '#fb923c', b: '#1c1917', on: '#ffedd5', stars: 2 },
+  melbourne_cup: { label: 'Melbourne Cup pack', line: 'The race that stops a nation', a: '#fcd34d', b: '#7f1d1d', on: '#fffbeb', stars: 2 },
+  christmas: { label: 'Christmas pack', line: 'Merry Christmas', a: '#fca5a5', b: '#14532d', on: '#ffffff', stars: 2 },
+  boxing_day: { label: 'Boxing Day pack', line: 'Test cricket day', a: '#a5f3fc', b: '#155e75', on: '#ffffff', stars: 2 },
+  new_year: { label: 'New Year pack', line: 'A fresh start', a: '#fde047', b: '#1e1b4b', on: '#fffbeb', stars: 2 },
+  australia_day: { label: 'Australia Day pack', line: 'Good on ya', a: '#fde68a', b: '#065f46', on: '#ffffff', stars: 2 },
+  anzac_day: { label: 'Anzac Day pack', line: 'Lest we forget', a: '#e7e5e4', b: '#7f1d1d', on: '#ffffff', stars: 2 },
+  event: { label: 'Event pack', line: 'Today only', a: '#7dd3fc', b: '#0c4a6e', on: '#ffffff', stars: 2 },
+  // For something the player did: the more stars, the better the cards.
+  fifty: { label: 'Fifty pack', line: 'Fifty up', a: '#bfdbfe', b: '#1d4ed8', on: '#ffffff', stars: 3 },
+  milestone: { label: 'Milestone pack', line: 'A landmark reached', a: '#a7f3d0', b: '#047857', on: '#022c22', stars: 3 },
+  five_for: { label: 'Five-for pack', line: 'Five wickets or more', a: '#5eead4', b: '#134e4a', on: '#ffffff', stars: 4 },
+  hat_trick: { label: 'Hat-trick pack', line: 'Three in three', a: '#f0abfc', b: '#701a75', on: '#ffffff', stars: 4 },
+  century: { label: 'Century pack', line: 'A hundred. Take a bow', a: '#fff7ad', b: '#a16207', on: '#2a1802', stars: 5 },
 }
+
+// How a pack reads in a sentence. A pack with a name of its own (a scheduled event) carries it as `label`.
+export const packName = (source, label) => label || (PACKS[source] || PACKS.weekly).label
 
 export const sortKeys = [
   { key: 'recent', label: 'Newest first' },

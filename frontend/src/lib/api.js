@@ -3425,6 +3425,9 @@ export const api = {
   setPlayerCardHidden: (playerId, hidden) =>
     request(`/player-cards/players/${playerId}/hidden`, { method: 'POST', body: JSON.stringify({ hidden }) }),
   refreshPlayerCardSpecials: () => request('/player-cards/refresh-specials', { method: 'POST' }),
+  addPlayerCardEvent: (data) => request('/player-cards/events', { method: 'POST', body: JSON.stringify(data) }),
+  deletePlayerCardEvent: (id) => request(`/player-cards/events/${id}`, { method: 'DELETE' }),
+  trimPlayerCardGifts: (apply) => request('/player-cards/trim-gifts', { method: 'POST', body: JSON.stringify({ apply: !!apply }) }),
   getPlayerCardOverview: () => request('/player-cards/overview'),
   getPlayerCardActivity: () => request('/player-cards/activity'),
   getPlayerCardWanted: () => request('/player-cards/wanted'),

@@ -34,10 +34,11 @@ export default function HowItWorks() {
             </div>
           ))}
         </div>
-        <p>About one card in twenty is a special card instead (below). Packs come from the weekly pack every Monday, from your runs, wickets and dismissals this season, and a Duck Pack if it goes wrong. There are no paid packs.</p>
+        <p>About one card in twenty is a special card instead (below). Those odds are for the everyday packs: the weekly pack every Monday, packs for your runs, wickets and dismissals this season, and a Duck Pack if it goes wrong.</p>
+        <p>Some packs are better. A Match Day pack, a holiday pack (Halloween, the Melbourne Cup, Christmas and more), a birthday pack, a surprise drop and any big day your club schedules, like a Test match, give two Rare or better cards at least and lean towards the better tiers. A pack for something you did is better again: a half century, a landmark, a five-for or hat-trick, and best of all a century, which is nearly all Rare or better. You get those for achievements from the day your club started using cards, and the Packs screen shows the full list. There are no paid packs.</p>
       </Section>
       <Section id="specials" title="Special cards">
-        <p>Special cards mark real moments: a century, a half century, a five wicket haul, a hat-trick, a debut, a games milestone (10, 50, 100 and on), a career milestone (every 1,000 runs, 200 wickets and 50 dismissals) and the club's awards. Each kind has its own colour. The player it is about is given a copy of their own, and the rest turn up in packs.</p>
+        <p>Special cards mark real moments: a century, a half century, a five wicket haul, a hat-trick, a debut, a games milestone (10, 50, 100 and on), a career milestone (every 1,000 runs, 200 wickets and 50 dismissals) and the club's awards. Each kind has its own colour. The player it is about starts with their debut card and their latest milestone card, and the rest turn up in packs.</p>
       </Section>
       <Section id="swaps" title="Swaps">
         <ul>
@@ -52,14 +53,14 @@ export default function HowItWorks() {
         <ul>
           <li>Put any card on your wish list from Club cards. Only you can see the list. It shows who could swap you each card now, and you can ask them from there.</li>
           <li>A spare is a copy beyond the one you keep. The Spares page gathers them so you can offer several at once. If you switch a spare to open to offers, you will see how many players want that card, as a number, never as names.</li>
-          <li>You can be emailed when someone asks you for a swap and when a card on your wish list becomes available. You choose which in Settings, and your club can switch the emails off.</li>
+          <li>No emails are sent unless you ask for them. In Settings you can switch on an email for when someone asks you for a swap and for when a card on your wish list becomes available, and your club can switch the emails off for everyone.</li>
         </ul>
       </Section>
       <Section id="club" title="Sets, showcase and the collectors board">
         <ul>
           <li>A set is a group of cards you can work towards completing, such as every century at the club or a season's awards. Finishing one earns a banner and bragging rights, nothing more.</li>
           <li>Your showcase is up to six cards you hold, pinned for the club to see next to your name.</li>
-          <li>The collectors board ranks only players who chose to be on it, by how much of the club's set they hold. It counts different cards, never copies, so hoarding doubles does not help.</li>
+          <li>The collectors board ranks everyone in the club, by how much of the club's set they hold. You can leave it in Settings. It counts different cards, never copies, so hoarding doubles does not help.</li>
           <li>This week lists what has happened in the club's cards lately. You can leave your name out of it in Settings.</li>
         </ul>
       </Section>

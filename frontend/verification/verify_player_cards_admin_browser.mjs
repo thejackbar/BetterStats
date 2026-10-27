@@ -19,7 +19,8 @@ const check = (name, cond, detail = '') => {
 
 const CLUB = { name: 'Verify CC', short_name: 'Verify', slug: 'verify-cc', logo_url: null, accent_color: '#b91c1c', primary_color: '#b91c1c', font_config: {} }
 const state = {
-  settings: { enabled: true, include_juniors: false, weekly_packs: 1, timezone: null, effective_timezone: 'Australia/Perth' },
+  settings: { enabled: true, include_juniors: false, weekly_packs: 1, timezone: null, effective_timezone: 'Australia/Perth', event_packs_enabled: true, starter_gifts: 'minimal' },
+  events: [],
   players: [
     { id: 'a1', display_name: 'Adams, Brian', hidden: false, in_pool: true, matches: 260, rarity: 81, tier: 'epic', excluded: null },
     { id: 'b2', display_name: 'Baker, Chris', hidden: false, in_pool: true, matches: 12, rarity: 22, tier: 'common', excluded: null },
@@ -29,7 +30,7 @@ const state = {
   ],
 }
 const settingsPayload = () => ({
-  club: CLUB, settings: state.settings,
+  club: CLUB, settings: state.settings, events: state.events,
   timezones: [{ id: 'Australia/Perth', label: 'Western Australia' }, { id: 'Australia/Sydney', label: 'New South Wales, ACT' }],
   max_weekly_packs: 10, link: { path: '/playerdash/tok123' },
   pool: { size: state.players.filter((p) => p.in_pool).length, players: state.players.length }, players: state.players,
@@ -113,6 +114,10 @@ const run = async () => {
       const rows = SWAPS.filter((s) => (st === 'all' ? true : s.status === st)).filter((s) => !u.searchParams.get('q') || (s.from.name + s.to.name).toLowerCase().includes(u.searchParams.get('q').toLowerCase()))
       return json({ total: rows.length, counts: { accepted: 1, declined: 1, cancelled: 1, pending: 1, expired: 1 }, swaps: rows, offset: 0, limit: 50 })
     }
+    if (path === '/player-cards/events' && method === 'POST') { state.events.push({ id: `e${state.events.length + 1}`, title: body.title, starts_on: body.starts_on, ends_on: body.ends_on || body.starts_on, per_day: body.per_day }); return json(settingsPayload()) }
+    const evDel = path.match(/\/player-cards\/events\/([^/]+)$/)
+    if (evDel && method === 'DELETE') { state.events = state.events.filter((e) => e.id !== evDel[1]); return json(settingsPayload()) }
+    if (path === '/player-cards/trim-gifts') return json(body.apply ? { cards: 14, players: 6, applied: true } : { cards: 14, players: 6, applied: false })
     if (method === 'PATCH') Object.assign(state.settings, body)
     const hide = path.match(/\/players\/([^/]+)\/hidden$/)
     if (hide) { const p = state.players.find((x) => x.id === hide[1]); p.hidden = body.hidden; p.in_pool = !body.hidden && p.matches > 0 }
@@ -249,6 +254,34 @@ const run = async () => {
   await page.waitForFunction(() => document.querySelector('[role="switch"][aria-label="Card emails are on"]').getAttribute('aria-checked') === 'false')
   check('turning card emails off sends alerts_enabled false and nothing else', JSON.stringify(calls.filter((c) => c.method === 'PATCH').pop().body) === '{"alerts_enabled":false}')
   await page.getByRole('switch', { name: 'Card emails are on' }).click()
+  check('day packs are on by default, and the switch sends only event_packs_enabled', (await page.getByRole('switch', { name: 'Day packs are on' }).getAttribute('aria-checked')) === 'true')
+  await page.getByRole('switch', { name: 'Day packs are on' }).click()
+  await page.waitForFunction(() => document.querySelector('[role="switch"][aria-label="Day packs are on"]').getAttribute('aria-checked') === 'false')
+  check('turning them off sends event_packs_enabled false only', JSON.stringify(calls.filter((c) => c.method === 'PATCH').pop().body) === '{"event_packs_enabled":false}')
+  await page.getByRole('switch', { name: 'Day packs are on' }).click()
+  check('starting cards default to the minimal set', (await page.getByLabel('Starting cards').inputValue()) === 'minimal')
+  await page.getByLabel('Starting cards').selectOption('all')
+  await page.waitForFunction(() => document.querySelector('select[aria-label="Starting cards"]').value === 'all')
+  check('changing them sends starter_gifts only', JSON.stringify(calls.filter((c) => c.method === 'PATCH').pop().body) === '{"starter_gifts":"all"}')
+  await page.getByLabel('Starting cards').selectOption('minimal')
+  await page.locator('[data-trim-check]').click()
+  await page.waitForSelector('[data-trim-result]')
+  check('tidying counts first and removes nothing (a dry run)', /14 starting cards held by 6 players would be removed/.test(await page.locator('[data-trim-result]').innerText()) && JSON.stringify(calls.filter((c) => /trim-gifts/.test(c.path)).pop().body) === '{"apply":false}')
+  await page.locator('[data-trim-apply]').click()
+  await page.waitForFunction(() => /Done\./.test(document.querySelector('[data-trim-result]').innerText))
+  check('...and only a second, deliberate click applies it', JSON.stringify(calls.filter((c) => /trim-gifts/.test(c.path)).pop().body) === '{"apply":true}')
+  check('scheduling needs a name and a first day', await page.getByRole('button', { name: 'Schedule it' }).isDisabled())
+  await page.getByLabel('Name of the pack').fill('Australia v South Africa, First Test')
+  await page.getByLabel('First day').fill('2026-12-03')
+  await page.getByLabel('Last day').fill('2026-12-07')
+  await page.getByRole('button', { name: 'Schedule it' }).click()
+  await page.waitForSelector('[data-event="e1"]')
+  const ev = calls.filter((c) => /\/player-cards\/events$/.test(c.path)).pop()
+  check('a scheduled pack sends its name, both days and one a day', JSON.stringify(ev.body) === '{"title":"Australia v South Africa, First Test","starts_on":"2026-12-03","ends_on":"2026-12-07","per_day":true}', JSON.stringify(ev.body))
+  check('it is listed with its days', /First Test/.test(await page.locator('[data-event="e1"]').innerText()) && /a pack each day/.test(await page.locator('[data-event="e1"]').innerText()))
+  await page.locator('[data-event="e1"] button', { hasText: 'Remove' }).click()
+  await page.waitForFunction(() => !document.querySelector('[data-event="e1"]'))
+  check('removing it sends a DELETE', calls.some((c) => c.method === 'DELETE' && /events\/e1$/.test(c.path)))
   await page.getByLabel('Weekly packs per player').selectOption('3')
   await page.waitForFunction(() => document.querySelector('select[aria-label="Weekly packs per player"]').value === '3')
   check('the weekly count sends weekly_packs only', JSON.stringify(calls.filter((c) => c.method === 'PATCH').pop().body) === '{"weekly_packs":3}')

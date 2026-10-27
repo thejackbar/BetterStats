@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import secrets
 import uuid
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -50,6 +51,19 @@ class SettingsBody(BaseModel):
     showcase_enabled: Optional[bool] = None
     board_enabled: Optional[bool] = None
     feed_enabled: Optional[bool] = None
+    event_packs_enabled: Optional[bool] = None
+    starter_gifts: Optional[str] = None
+
+
+class EventBody(BaseModel):
+    title: str
+    starts_on: date
+    ends_on: Optional[date] = None
+    per_day: bool = True
+
+
+class TrimBody(BaseModel):
+    apply: bool = False
 
 
 class HiddenBody(BaseModel):
@@ -89,10 +103,13 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
             "weekly_packs": settings["weekly_packs"],
             "timezone": settings["timezone"],
             "alerts_enabled": settings.get("alerts_enabled", True) is not False,
-            **{k: settings.get(k, True) is not False for k in ("sets_enabled", "showcase_enabled", "board_enabled", "feed_enabled")},
+            **{k: settings.get(k, True) is not False for k in ("sets_enabled", "showcase_enabled", "board_enabled", "feed_enabled",
+                                                         "event_packs_enabled")},
+            "starter_gifts": settings.get("starter_gifts") or "minimal",
             "effective_timezone": str(cards.club_zone(settings)),
         },
         "timezones": [{"id": i, "label": n} for i, n in TIMEZONES],
+        "events": await cards.list_events(db, club.id),
         "max_weekly_packs": cards.MAX_WEEKLY_PACKS,
         "link": {"path": f"/playerdash/{club.availability_link_token}" if club.availability_link_token else None},
         "pool": {"size": sum(1 for r in rows if r["in_pool"]), "players": len(rows)},
@@ -158,6 +175,62 @@ async def hide_player(
     )
     await db.commit()
     return await _payload(db, club)
+
+
+@router.post("/events")
+async def add_event(
+    body: EventBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Schedule a pack for a day or a run of days (a Test match, a club day). Players get it the day they open their page."""
+    await cards.ensure_launched(db, club.id)
+    try:
+        ev = await cards.add_event(db, club.id, body.title, body.starts_on, body.ends_on, body.per_day)
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_event_added",
+                                 target_type="card_event", target_id=ev["id"], details=ev)
+    await db.commit()
+    return await _payload(db, club)
+
+
+@router.delete("/events/{event_id}")
+async def delete_event(
+    event_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    try:
+        uuid.UUID(event_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not await cards.delete_event(db, club.id, event_id):
+        raise HTTPException(status_code=404, detail="Not found")
+    await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_event_removed",
+                                 target_type="card_event", target_id=event_id)
+    await db.commit()
+    return await _payload(db, club)
+
+
+@router.post("/trim-gifts")
+async def trim_gifts(
+    body: TrimBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Take the starting cards back to the minimal set (debut and latest landmark). `apply` false only counts what would go."""
+    await cards.refresh_specials(db, club, force=True)
+    out = await cards.trim_gifts(db, str(club.id), apply=body.apply)
+    if out["applied"]:
+        await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_gifts_trimmed",
+                                     target_type="organisation", target_id=str(club.id), details=out)
+    await db.commit()
+    return out
 
 
 @router.post("/refresh-specials")

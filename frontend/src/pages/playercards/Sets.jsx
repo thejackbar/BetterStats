@@ -61,23 +61,20 @@ export function Board() {
   const { token, basePath, accent, display, club, sponsor } = usePC()
   const [data, setData] = useState(null)
   const [failed, setFailed] = useState(false)
-  const [busy, setBusy] = useState(false)
   const read = () => api.availPublicBoard(token).then(setData).catch(() => setFailed(true))
   useEffect(() => { read() }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
-  const join = async () => { setBusy(true); try { await api.availPublicSaveCardPrefs(token, { board_opt_in: true }); await read() } finally { setBusy(false) } }
   if (failed) return <div className="text-sm text-pb-faint" data-board-failed>The board could not load. Reload to try again.</div>
   if (!data) return <div className="text-sm text-pb-faint" data-board-loading>Loading the board…</div>
   const ui = { club, accent, display, sponsor }
   return (
     <div data-board>
-      <p className="text-sm text-pb-dim mb-4 max-w-prose">Players ranked by how much of the club's set they hold. It counts different cards, never copies, so collecting doubles does not move anyone up. Only players who chose to be here are listed, and only their name, their showcase and their rarest player card are shown.</p>
-      {!data.me_opted_in ? (
-        <div data-board-join className="rounded-2xl border pb-hairline bg-pb-surface p-4 mb-5 flex flex-wrap items-center gap-3">
-          <span className="text-sm flex-1 min-w-[200px]">You are not on the board. Join to see where you stand. You can leave in Settings.</span>
-          <button type="button" disabled={busy} onClick={join} data-board-join-go style={{ padding: '10px 16px', borderRadius: 10, background: accent, color: onColor(accent), font: `700 12px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase' }}>Put me on the board</button>
-        </div>
-      ) : <div data-board-me className="text-sm mb-4">You are number <strong>{data.me_rank}</strong> of {data.count}.</div>}
-      {data.entries.length === 0 && <div className="text-sm text-pb-dim" data-no-board>Nobody has joined yet.</div>}
+      <p className="text-sm text-pb-dim mb-4 max-w-prose">Players ranked by how much of the club's set they hold. It counts different cards, never copies, so collecting doubles does not move anyone up. Everyone in the club is on it, and only their name, their showcase and their rarest player card are shown. Anyone can leave in Settings.</p>
+      {data.me_hidden ? (
+        <div data-board-hidden className="rounded-2xl border pb-hairline bg-pb-surface p-4 mb-5 text-sm">You have left the board, so nobody sees where you stand. You can come back in Settings.</div>
+      ) : data.me_rank ? (
+        <div data-board-me className="text-sm mb-4">You are number <strong>{data.me_rank}</strong> of {data.count}.</div>
+      ) : null}
+      {data.entries.length === 0 && <div className="text-sm text-pb-dim" data-no-board>Nobody has a card to rank yet.</div>}
       <div className="flex flex-col gap-2">
         {data.entries.map((e) => (
           <div key={e.player_id} data-board-row={e.player_id} className="rounded-2xl border pb-hairline bg-pb-surface p-3 flex flex-wrap gap-3 items-center">
