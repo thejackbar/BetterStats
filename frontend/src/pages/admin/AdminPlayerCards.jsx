@@ -21,7 +21,7 @@ const EXCLUDED = {
   private: 'Hidden from the public site (or removed at their request)',
   junior: 'Junior player, and juniors are switched off',
 }
-const KIND_LABEL = { century: 'Century', fifty: 'Half century', five_for: 'Five wicket haul', hat_trick: 'Hat-trick', debut: 'Debut', games: 'Games milestone', award: 'Club award' }
+const KIND_LABEL = { century: 'Century', fifty: 'Half century', five_for: 'Five wicket haul', hat_trick: 'Hat-trick', debut: 'Debut', games: 'Games milestone', runs_milestone: 'Runs milestone', wickets_milestone: 'Wickets milestone', dismissals_milestone: 'Dismissals milestone', award: 'Club award' }
 const packLabel = (s) => (PACKS[s] || PACKS.weekly).label
 const tierLabel = (t) => (TIERS[t] || TIERS.common).label
 

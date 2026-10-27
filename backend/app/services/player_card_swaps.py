@@ -1,17 +1,17 @@
-"""Player Cards: swapping doubles between two players of a club.
+"""Player Cards: swapping cards between two players of a club.
 
 The rules, kept small on purpose:
 
-* Only a DOUBLE can change hands. A player always keeps one of every card they hold, so a swap can never
-  empty a collection or take a card away from the person it commemorates. Their own card is theirs
-  without a row, so every copy of it they have pulled is spare. `spare()` is the one definition.
+* ANY card a player holds can be offered, a single copy as well as a double. What a swap cannot do is take
+  away a player's own card: it is theirs without a row, so there is nothing to hand over, and only the extra
+  copies of it they have pulled can go. `tradeable()` is the one definition.
 * A request is one card for one card, from one player to one other. Nothing moves until the person asked
-  accepts, and the check that both cards are still doubles is made again at that moment, under row locks,
-  because either player may have swapped or been swapped with since the request was made.
+  accepts, and the check that both players still hold their card is made again at that moment, under row
+  locks, because either of them may have swapped since the request was made.
 * Requests expire after `SWAP_DAYS` (read from the age, nothing is stored), a player may have
   `MAX_OUTGOING` open at once, and a request is never deleted: it ends accepted, declined or cancelled.
-* Only the cards a person has spare are ever shown to another player. Nobody can read another player's
-  whole collection through this.
+* Another player can see the cards a person could offer, a card at a time. Nobody can see how many copies
+  they hold, or anything about their packs.
 * Both people are known by the same PIN cookie as the rest of the page (no separate sign-in); the safeguard is
   that nothing happens without the second person's yes.
 
@@ -63,13 +63,10 @@ def key_of(subject: str, special_id: Optional[str]) -> str:
     return f"s:{special_id}" if special_id else f"p:{subject}"
 
 
-def spare(owner: str, card: Card, rows: int) -> int:
-    """How many copies of `card` the owner could part with. One is always kept; for their own card the
-    kept one is implied, so every row is spare."""
-    subject, special_id = card
-    if special_id is None and subject == owner:
-        return max(rows, 0)
-    return max(rows - 1, 0)
+def tradeable(owner: str, card: Card, rows: int) -> int:
+    """How many copies of `card` the owner could part with: every row they hold. A player's own card is
+    theirs without a row, so it never counts, and only the copies of it they have pulled can go."""
+    return max(rows, 0)
 
 
 async def _rows_by_card(db: AsyncSession, org_id, owner: Optional[str] = None) -> dict[str, dict[Card, int]]:
@@ -115,32 +112,32 @@ async def _resolve(db: AsyncSession, org_id, snap: dict, key: str) -> tuple[Card
     return card, payload
 
 
-async def spare_cards(db: AsyncSession, club: Organisation, snap: dict, owner: str) -> list[dict]:
-    """The owner's doubles as card payloads, each with `spare` (how many could go)."""
+async def tradeable_cards(db: AsyncSession, club: Organisation, snap: dict, owner: str) -> list[dict]:
+    """The cards the owner could offer, as payloads, each with `tradeable` (how many copies could go)."""
     held = (await _rows_by_card(db, club.id, owner)).get(owner, {})
-    wanted = {c: spare(owner, c, n) for c, n in held.items()}
+    wanted = {c: tradeable(owner, c, n) for c, n in held.items()}
     wanted = {c: n for c, n in wanted.items() if n > 0}
     specials = await _special_subjects(db, club.id, [c[1] for c in wanted if c[1]])
     out = []
     for card, n in wanted.items():
         payload = _payload(snap, card, specials)
         if payload:
-            out.append({**payload, "spare": n, "key": key_of(*card)})
+            out.append({**payload, "tradeable": n, "key": key_of(*card)})
     out.sort(key=lambda c: (c["kind"] != "special", (c.get("name") or "")))
     return out
 
 
 async def swap_people(db: AsyncSession, club: Organisation, snap: dict, me: str) -> list[dict]:
-    """Who has doubles to offer: `[{player_id, name, spare}]`, for the players in the pool."""
+    """Who has cards to offer: `[{player_id, name, tradeable}]`, for the players in the pool."""
     everyone = await _rows_by_card(db, club.id)
     out = []
     for owner, held in everyone.items():
         if owner == me or owner not in snap["people"]:
             continue
-        n = sum(spare(owner, c, rows) for c, rows in held.items()
+        n = sum(tradeable(owner, c, rows) for c, rows in held.items()
                 if (c[1] or c[0] in snap["people"]))
         if n > 0:
-            out.append({"player_id": owner, "name": snap["people"][owner]["display_name"], "spare": n})
+            out.append({"player_id": owner, "name": snap["people"][owner]["display_name"], "tradeable": n})
     out.sort(key=lambda p: p["name"].lower())
     return out
 
@@ -201,11 +198,11 @@ async def create_swap(db: AsyncSession, club: Organisation, snap: dict, me: str,
     if give == want:
         raise SwapError("Pick two different cards.", 422)
     mine = (await _rows_by_card(db, club.id, me)).get(me, {})
-    if spare(me, give, mine.get(give, 0)) < 1:
-        raise SwapError("You can only offer a double. You keep one of every card.")
+    if tradeable(me, give, mine.get(give, 0)) < 1:
+        raise SwapError("You can only offer a card you hold.")
     theirs = (await _rows_by_card(db, club.id, to_id)).get(to_id, {})
-    if spare(to_id, want, theirs.get(want, 0)) < 1:
-        raise SwapError("They no longer have that card as a double.")
+    if tradeable(to_id, want, theirs.get(want, 0)) < 1:
+        raise SwapError("They no longer have that card.")
     open_out = int((await db.execute(text(
         "SELECT COUNT(*) FROM player_card_swaps s WHERE s.from_player_id = CAST(:me AS UUID) AND " + _live_sql()
     ), {"me": me})).scalar() or 0)
@@ -229,8 +226,8 @@ async def create_swap(db: AsyncSession, club: Organisation, snap: dict, me: str,
     return new_id
 
 
-async def _lock_spare_copy(db: AsyncSession, org_id, owner: str, card: Card) -> Optional[str]:
-    """Lock the owner's copies of a card and return the id of one that can go, or None if none is spare.
+async def _lock_copy(db: AsyncSession, org_id, owner: str, card: Card) -> Optional[str]:
+    """Lock the owner's copies of a card and return the id of one that can go, or None if they hold none.
     A pulled copy goes before a gifted one."""
     rows = (await db.execute(text("""
         SELECT id::text FROM player_card_copies
@@ -239,7 +236,7 @@ async def _lock_spare_copy(db: AsyncSession, org_id, owner: str, card: Card) -> 
          ORDER BY (source = 'gift') ASC, obtained_at DESC
          FOR UPDATE
     """), {"org": str(org_id), "o": owner, "s": card[0], "sp": card[1]})).fetchall()
-    if spare(owner, card, len(rows)) < 1:
+    if tradeable(owner, card, len(rows)) < 1:
         return None
     return rows[0][0]
 
@@ -287,11 +284,11 @@ async def respond(db: AsyncSession, club: Organisation, snap: dict, me: str, swa
         order = sorted([(s["from_id"], give), (s["to_id"], want)], key=lambda t: t[0])
         found: dict[str, Optional[str]] = {}
         for owner, card in order:
-            found[owner] = await _lock_spare_copy(db, club.id, owner, card)
+            found[owner] = await _lock_copy(db, club.id, owner, card)
         if found.get(s["from_id"]) is None:
-            raise SwapError("The card they offered is no longer a double, so this swap cannot go ahead. You can decline it.")
+            raise SwapError("The card they offered is no longer theirs to give, so this swap cannot go ahead. You can decline it.")
         if found.get(s["to_id"]) is None:
-            raise SwapError("The card they asked for is no longer your double, so this swap cannot go ahead. You can decline it.")
+            raise SwapError("The card they asked for is no longer yours to give, so this swap cannot go ahead. You can decline it.")
         await db.execute(text(
             "UPDATE player_card_copies SET owner_player_id = CAST(:new AS UUID), source = 'swap', obtained_at = NOW() "
             "WHERE id = CAST(:id AS UUID)"

@@ -58,3 +58,17 @@ What was built:
 Verified: `verify_player_cards.py` (186 checks; the control on the previous commit fails exactly the swap and admin checks and nothing else), `verify_merge_carry.py`, the two older player page suites (their harnesses now load the swaps DDL), `audit_route_access.py`; browser: `verify_player_cards_browser.mjs` (51), `verify_player_cards_v2_browser.mjs` (46: stacks and order, full photo, no clipping, club font, a real PNG and two real GIFs downloaded and read back, swaps down to the exact requests), `verify_player_cards_admin_browser.mjs` (51: every tab, the exact query each filter sends, 390px on every tab).
 
 Not built: an email or push when a swap is asked (the page header says "1 swap request" instead); a GIF of someone else's card; special cards for club records.
+
+## v9.130.3 (2026-10-27): swap any card you hold, and run, wicket and dismissal milestones
+
+Asked for: swaps should work for any card a player holds, not only doubles, still agreed by both people; and milestones for runs, wickets and dismissals ("every 1000 runs, 200 wickets and 50 dismissals").
+
+What changed:
+
+- The swap rule: `spare()` became `tradeable()`. Every row a player holds can be offered, a single copy included. Their own card is still implied and never a row, so it cannot be given away; copies of it they pulled can. Errors read "You can only offer a card you hold" and "The card they offered is no longer theirs to give". The accept still locks both cards in a fixed order and re-checks. No migration. A swapped-away gift also removes the subject's commemorative copy, which is their call to make.
+- `STAT_MILESTONES` in `services/player_cards.py` and `_insert_stat_milestones`: one card per step of career runs (1,000), wickets (200) and dismissals (50, catches plus run outs plus stumpings), capped at 30, 10 and 20 cards per player. The total is the unfiltered career block; the date is the held innings in which the running total first crossed the step, and stays empty where the held scorecards cannot place it (older season totals), never a guess. `event_key` is `kind:player:threshold`, so a corrected score does not make a second card and nothing is taken back.
+- Volume: a player earns floor(runs/1000) + floor(wickets/200) + floor(dismissals/50) cards, so a long career of 4,114 runs, 211 wickets and 98 dismissals is 6 cards. Most players hold a few or none. A pool of cards grows by the sum of that across the club, and specials stay 5% of pack slots, so each special is diluted rather than packs being flooded. In the book one player's milestones are one stack.
+- Frontend: three new `SPECIALS` themes (blue, pink, lime) with the number as the headline; the book files runs, wickets and dismissals under Milestones after the games card; the viewer offers a card whenever the player holds a copy to give; the swap builder pages 24 at a time with a search over eight cards.
+
+Verified: `verify_player_cards.py` (194; the control on the previous commit fails exactly the milestone and swap checks), the other suites unchanged, browser `verify_player_cards_v2_browser.mjs` (46), new `verify_player_cards_v3_browser.mjs` (17: stack order, the three new faces without clipping, the offer button rule, search and paging at 390px).
+

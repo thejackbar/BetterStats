@@ -193,7 +193,7 @@ async def activity(
 @router.get("/catalogue")
 async def catalogue(
     kind: str = Query("all", pattern="^(all|player|special)$"),
-    special_kind: Optional[str] = Query(None, pattern="^[a-z_]{1,20}$"),
+    special_kind: Optional[str] = Query(None, pattern="^[a-z_]{1,30}$"),
     q: str = Query("", max_length=80),
     sort: str = Query("rarity", pattern="^(rarity|name|recent|held)$"),
     limit: int = Query(60, ge=1, le=insight.PAGE_MAX),

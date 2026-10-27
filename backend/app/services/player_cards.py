@@ -92,8 +92,19 @@ SPECIAL_KINDS = {
     "hat_trick": "Hat-trick",
     "debut": "Debut",
     "games": "Games milestone",
+    "runs_milestone": "Runs milestone",
+    "wickets_milestone": "Wickets milestone",
+    "dismissals_milestone": "Dismissals milestone",
     "award": "Club award",
 }
+
+# A card for every step of a career figure: 1,000 runs, 2,000 runs and so on. (kind, figure in `figs`, step, the most
+# cards one player can get for it). The cap keeps a bad imported total from making dozens of cards.
+STAT_MILESTONES = (
+    ("runs_milestone", "runs", 1000, 30),
+    ("wickets_milestone", "wickets", 200, 10),
+    ("dismissals_milestone", "dismissals", 50, 20),
+)
 
 _rng = secrets.SystemRandom()
 
@@ -639,6 +650,61 @@ async def _insert_game_milestones(db, org: str, snap: dict) -> int:
     return len(batch)
 
 
+# Where a career figure grew, game by game, so a milestone card can say when it was reached. Each kind reads one
+# per-game view and says how much a row adds.
+_MILESTONE_SOURCES = {
+    "runs_milestone": ("v_effective_batting_innings", "x.runs", "x.runs IS NOT NULL AND COALESCE(x.did_not_bat, FALSE) = FALSE", "x.innings_number"),
+    "wickets_milestone": ("v_effective_bowling_spells", "COALESCE(x.wickets, 0)", "TRUE", "x.innings_number"),
+    "dismissals_milestone": ("v_effective_fielding_stats", "COALESCE(x.catches, 0) + COALESCE(x.run_outs, 0) + COALESCE(x.stumpings, 0)", "TRUE", "x.id"),
+}
+_NOUN = {"runs_milestone": "runs", "wickets_milestone": "wickets", "dismissals_milestone": "dismissals"}
+
+
+async def _insert_stat_milestones(db, org: str, snap: dict) -> int:
+    """A card for each step of a player's career runs, wickets and dismissals (see `STAT_MILESTONES`).
+
+    Reached is the profile's own career figure, so a career held only as season totals still earns its cards.
+    The date is the game the figure crossed the step in, worked out from the scorecards we hold and offset by
+    whatever part of the career they do not cover (the older, season-total part is assumed to come first). A
+    step the held scorecards cannot place is left without a date rather than given a wrong one."""
+    total = 0
+    figs = snap["figs"]
+    for kind, key, step, cap in STAT_MILESTONES:
+        reached = [(pid, int(f[key])) for pid, f in figs.items() if f.get(key, 0) >= step]
+        if not reached:
+            continue
+        table, add, where, order = _MILESTONE_SOURCES[kind]
+        res = await db.execute(text(f"""
+            WITH career AS (
+                SELECT c.pid, c.total FROM unnest(CAST(:pids AS uuid[]), CAST(:totals AS int[])) AS c(pid, total)
+            ), inn AS (
+                SELECT x.player_id AS pid, g.id AS game_id, g.played_at,
+                       SUM({add}) OVER w AS cum
+                  FROM {table} x JOIN v_effective_games g ON g.id = x.game_id
+                 WHERE x.player_id = ANY(CAST(:pids AS uuid[])) AND g.played_at IS NOT NULL AND {where}
+                WINDOW w AS (PARTITION BY x.player_id ORDER BY g.played_at, g.id, {order})
+            ), base AS (
+                SELECT c.pid, c.total, GREATEST(c.total - COALESCE((SELECT MAX(i.cum) FROM inn i WHERE i.pid = c.pid), 0), 0) AS base
+                  FROM career c
+            )
+            {_INSERT_PREFIX}
+            SELECT CAST(:org AS UUID), b.pid, :kind, :kind || ':' || b.pid::text || ':' || t.t::text,
+                   ev.game_id, ev.played_at, to_char(t.t, 'FM999,999,999') || ' ' || :noun,
+                   jsonb_build_object('threshold', t.t, 'total', b.total)
+              FROM base b
+              CROSS JOIN LATERAL generate_series(CAST(:step AS int), LEAST(b.total, CAST(:step AS int) * CAST(:cap AS int)), CAST(:step AS int)) AS t(t)
+              LEFT JOIN LATERAL (
+                  SELECT i.game_id, i.played_at FROM inn i
+                   WHERE i.pid = b.pid AND t.t > b.base AND b.base + i.cum >= t.t
+                   ORDER BY i.cum LIMIT 1
+              ) ev ON TRUE
+            {_INSERT_SUFFIX}
+        """), {"org": org, "kind": kind, "noun": _NOUN[kind], "step": step, "cap": cap,
+               "pids": [p for p, _ in reached], "totals": [v for _, v in reached]})
+        total += res.rowcount or 0
+    return total
+
+
 async def _gift_new_specials(db, org: str) -> int:
     """Everyone gets a copy of the special cards that commemorate them. Only adds."""
     res = await db.execute(text("""
@@ -673,6 +739,7 @@ async def refresh_specials(db: AsyncSession, club: Organisation, *, force: bool 
         made["five_for"] = await _insert_five_fors(db, org, pids)
         made["achievements"] = await _insert_achievements(db, org, pids)
         made["games"] = await _insert_game_milestones(db, org, snap)
+        made["stat_milestones"] = await _insert_stat_milestones(db, org, snap)
         made["gifted"] = await _gift_new_specials(db, org)
     _SPECIAL_REFRESH[key] = now
     return made

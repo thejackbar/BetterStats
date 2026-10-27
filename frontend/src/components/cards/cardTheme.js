@@ -77,6 +77,24 @@ export const SPECIALS = {
     ],
     pattern: 'repeating-linear-gradient(45deg, rgba(255,255,255,.15) 0 3px, transparent 3px 14px)',
   },
+  runs_milestone: {
+    label: 'Runs milestone', tag: 'Runs',
+    panel: 'linear-gradient(165deg, #bae6fd 0%, #0ea5e9 40%, #0c3a5e 100%)', accent: '#ffffff', on: '#04263d',
+    band: 'linear-gradient(180deg, #8bd8fd, #0b8ad0)',
+    pattern: 'repeating-linear-gradient(0deg, rgba(255,255,255,.16) 0 3px, transparent 3px 18px)',
+  },
+  wickets_milestone: {
+    label: 'Wickets milestone', tag: 'Wickets',
+    panel: 'linear-gradient(165deg, #fbcfe8 0%, #db2777 42%, #500724 100%)', accent: '#ffffff', on: '#ffffff',
+    band: 'linear-gradient(180deg, #ec4899, #9d174d)',
+    pattern: 'repeating-linear-gradient(90deg, rgba(255,255,255,.16) 0 4px, transparent 4px 26px)',
+  },
+  dismissals_milestone: {
+    label: 'Dismissals milestone', tag: 'Dismissals',
+    panel: 'linear-gradient(165deg, #ecfccb 0%, #84cc16 40%, #1a2e05 100%)', accent: '#ffffff', on: '#14230a',
+    band: 'linear-gradient(180deg, #c3f56a, #6aa812)',
+    pattern: 'radial-gradient(circle at 50% 100%, rgba(255,255,255,.22) 0 40px, transparent 41px), radial-gradient(circle at 50% 100%, rgba(255,255,255,.14) 0 80px, transparent 81px)',
+  },
   award: {
     label: 'Club award', tag: 'Award',
     panel: null, // the club's own colours
@@ -125,6 +143,12 @@ export function specialHeadline(card) {
       return { big: 'DEBUT', sub: 'First game for the club', small: true }
     case 'games':
       return { big: String(d.games ?? ''), sub: 'games for the club' }
+    case 'runs_milestone':
+      return { big: Number(d.threshold || 0).toLocaleString('en-AU'), sub: 'career runs' }
+    case 'wickets_milestone':
+      return { big: Number(d.threshold || 0).toLocaleString('en-AU'), sub: 'career wickets' }
+    case 'dismissals_milestone':
+      return { big: Number(d.threshold || 0).toLocaleString('en-AU'), sub: 'career dismissals' }
     case 'award':
       return { big: card.title || 'Award', sub: [d.season, d.grade].filter(Boolean).join(' · '), small: true, long: true }
     default:

@@ -116,12 +116,12 @@ def _refuse(exc: swaps.SwapError):
 
 @router.get("/{token}/me/cards/swaps")
 async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """Swap requests in and out, the player's own doubles, and who has doubles to offer."""
+    """Swap requests in and out, the cards the player could offer, and who has cards to offer."""
     club, player, snap = await _ready(db, request, token)
     me = str(player.id)
     return {
         **await swaps.list_swaps(db, club, snap, me),
-        "mine": await swaps.spare_cards(db, club, snap, me),
+        "mine": await swaps.tradeable_cards(db, club, snap, me),
         "people": await swaps.swap_people(db, club, snap, me),
         "expires_days": swaps.SWAP_DAYS,
         "max_open": swaps.MAX_OUTGOING,
@@ -130,13 +130,13 @@ async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(
 
 @router.get("/{token}/me/cards/swaps/players/{player_id}")
 async def get_swap_player(token: str, player_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """One other player's doubles, and nothing else of their collection."""
+    """The cards one other player could offer, and nothing else of their collection."""
     club, player, snap = await _ready(db, request, token)
     if player_id == str(player.id) or player_id not in snap["people"]:
         raise HTTPException(status_code=404, detail="That player is not available to swap with.")
     return {
         "player": {"player_id": player_id, "name": snap["people"][player_id]["display_name"]},
-        "cards": await swaps.spare_cards(db, club, snap, player_id),
+        "cards": await swaps.tradeable_cards(db, club, snap, player_id),
     }
 
 

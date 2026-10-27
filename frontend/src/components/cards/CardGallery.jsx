@@ -19,7 +19,7 @@ const reduced = () => typeof window !== 'undefined' && !!window.matchMedia?.('(p
 // The order special cards are filed in.
 export const CATEGORIES = [
   { key: 'awards', label: 'Club awards', one: 'award', kinds: ['award'] },
-  { key: 'milestones', label: 'Milestones', one: 'milestone', kinds: ['games'] },
+  { key: 'milestones', label: 'Milestones', one: 'milestone', kinds: ['games', 'runs_milestone', 'wickets_milestone', 'dismissals_milestone'] },
   { key: 'centuries', label: 'Centuries', one: 'century', kinds: ['century'] },
   { key: 'fifties', label: 'Half centuries', one: 'half century', kinds: ['fifty'] },
   { key: 'wickets', label: 'Wickets', one: 'wicket card', kinds: ['five_for', 'hat_trick'] },
@@ -50,7 +50,15 @@ const SORTERS = {
   dismissals: num('dismissals', -1),
 }
 // Newest first inside a stack: the event's date, then its title.
-const byEvent = (a, b) => (b.occurred_on || '').localeCompare(a.occurred_on || '') || (a.title || '').localeCompare(b.title || '')
+const MILESTONE_ORDER = ['games', 'runs_milestone', 'wickets_milestone', 'dismissals_milestone']
+const milestoneValue = (c) => Number((c.detail || {}).threshold ?? (c.detail || {}).games ?? 0)
+const byEvent = (a, b) => {
+  // Milestones read in order, games then runs then wickets then dismissals, smallest step first.
+  if (CAT_OF[a.special_kind] === 'milestones' && CAT_OF[b.special_kind] === 'milestones') {
+    return (MILESTONE_ORDER.indexOf(a.special_kind) - MILESTONE_ORDER.indexOf(b.special_kind)) || (milestoneValue(a) - milestoneValue(b))
+  }
+  return (b.occurred_on || '').localeCompare(a.occurred_on || '') || (a.title || '').localeCompare(b.title || '')
+}
 
 // What the book shows for a filter: the player cards, then the special cards grouped by kind and player.
 export function buildItems(cards, { filter, sort, meId }) {
@@ -157,7 +165,8 @@ function Viewer({ card, club, accent, display, sponsor, onClose, onShare, onOffe
     return () => window.removeEventListener('resize', fit)
   }, [])
   const k = w / CARD_W
-  const spare = Math.max(0, (card.copies || 1) - 1)
+  // Any card held can be offered; a player's own card has no row, so only the copies of it they pulled count.
+  const canOffer = (card.mine ? (card.copies || 1) - 1 : (card.copies || 1)) > 0
   return (
     <Modal label={`${card.name} card`} onClose={onClose} zIndex={82}>
       <div data-card-viewer style={{ margin: 'auto', padding: '56px 0 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
@@ -175,7 +184,7 @@ function Viewer({ card, club, accent, display, sponsor, onClose, onShare, onOffe
         </div>
         <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
           {onShare && <button type="button" data-viewer-share onClick={() => onShare(card)} style={actionBtn}>Share</button>}
-          {onOffer && spare > 0 && <button type="button" data-viewer-offer onClick={() => onOffer(card)} style={actionBtn}>Offer a spare in a swap</button>}
+          {onOffer && canOffer && <button type="button" data-viewer-offer onClick={() => onOffer(card)} style={actionBtn}>Offer in a swap</button>}
         </div>
       </div>
     </Modal>

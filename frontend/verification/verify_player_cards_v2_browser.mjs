@@ -58,7 +58,7 @@ const CARDS = [
 const totals = { regular_owned: 4, regular_total: 12, special_owned: 12, special_total: 20, copies: 16 }
 const PACKS = [{ id: 'k1', source: 'weekly', label: 'Weekly pack' }]
 
-const swapCard = (c, spare) => ({ ...c, spare, copies: undefined })
+const swapCard = (c, tradeable) => ({ ...c, tradeable, copies: undefined })
 const REQ = {
   id: 'w1', direction: 'in', status: 'pending', other: { player_id: 'p7', name: 'Dave, Dan' }, created_at: new Date().toISOString(), resolved_at: null,
   give: swapCard(base('p8', 'Other, Olly', 'rare', 66), 1), want: swapCard(base('p2', 'Zed, Alan', 'common', 18), 2),
@@ -68,7 +68,7 @@ const run = async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium' })
   const errors = [], calls = []
   let board, swapFails = false
-  const resetBoard = () => { board = { incoming: [REQ], outgoing: [], recent: [], mine: [swapCard(base('p2', 'Zed, Alan', 'common', 18), 2)], people: [{ player_id: 'p7', name: 'Dave, Dan', spare: 1 }, { player_id: 'p9', name: 'Smith, Sue', spare: 3 }], expires_days: 14, max_open: 10 } }
+  const resetBoard = () => { board = { incoming: [REQ], outgoing: [], recent: [], mine: [swapCard(base('p2', 'Zed, Alan', 'common', 18), 2)], people: [{ player_id: 'p7', name: 'Dave, Dan', tradeable: 1 }, { player_id: 'p9', name: 'Smith, Sue', tradeable: 3 }], expires_days: 14, max_open: 10 } }
   resetBoard()
 
   const open = async (width, { height = 900 } = {}) => {
@@ -86,7 +86,7 @@ const run = async () => {
       if (/\/me\/cards\/swaps\/players\//.test(url)) { calls.push(`${method} ${path}`); return json({ player: { player_id: 'p7', name: 'Dave, Dan' }, cards: [swapCard(base('p10', 'Wanted, Wes', 'epic', 80), 1)] }) }
       if (/\/me\/cards\/swaps\/[^/]+\/(accept|decline|cancel)$/.test(url)) {
         calls.push(`${method} ${path}`)
-        if (swapFails) return json({ detail: 'The card they offered is no longer a double, so this swap cannot go ahead.' }, 409)
+        if (swapFails) return json({ detail: 'The card they offered is no longer theirs to give, so this swap cannot go ahead.' }, 409)
         board.incoming = []
         return json({ status: 'ok' })
       }
@@ -242,7 +242,7 @@ const run = async () => {
     await page.click('[data-cards-tab="swaps"]')
     await page.waitForSelector('[data-swaps-panel]')
     check('a request asked of the player is shown with both cards', (await page.locator('[data-swap-request="w1"]').count()) === 1 && /Dave, Dan/.test(await page.locator('[data-swap-request="w1"]').textContent()))
-    check('their doubles are counted for them', /2 doubles to swap/.test(await page.locator('[data-doubles-count]').textContent()))
+    check('the cards you could offer are counted', /2 cards you could offer/.test(await page.locator('[data-doubles-count]').textContent()))
     check('no horizontal scroll on the swaps tab', (await overflow(page)) <= 0)
     await shot(page, '06-swaps-390')
     calls.length = 0
@@ -256,7 +256,7 @@ const run = async () => {
     await page.reload(); await page.waitForSelector('[data-cards-module]')
     await page.click('[data-cards-tab="swaps"]')
     await page.click('[data-swap-accept]')
-    await page.waitForFunction(() => /no longer a double/.test(document.querySelector('[data-swap-msg]')?.textContent || ''))
+    await page.waitForFunction(() => /no longer theirs to give/.test(document.querySelector('[data-swap-msg]')?.textContent || ''))
     check('a swap the server refuses says why and stays on the list', (await page.locator('[data-swap-request="w1"]').count()) === 1)
     swapFails = false
     calls.length = 0
@@ -276,7 +276,7 @@ const run = async () => {
     await page.waitForSelector('[data-swap-card="p:p10"]')
     await page.locator('[data-swap-card="p:p10"]').click()
     await page.waitForSelector('[data-swap-card="p:p2"]')
-    check('then their doubles, then yours', (await page.locator('[data-swap-card]').count()) === 2)
+    check('then their cards, then yours', (await page.locator('[data-swap-card]').count()) === 2)
     await page.locator('[data-swap-card="p:p2"]').click()
     await page.waitForSelector('[data-swap-confirm]')
     await shot(page, '08-builder-confirm-390')
@@ -289,26 +289,26 @@ const run = async () => {
     await page.waitForSelector('[data-swap-request="o1"]')
     check('it then shows as a request you made, with a Cancel', (await page.locator('[data-swap-cancel]').count()) === 1 && /Swap request sent/.test(await page.locator('[data-swap-msg]').textContent()))
 
-    // offered straight from a held double
+    // offered straight from a held card
     await page.click('[data-cards-tab="book"]')
     await page.click('[data-gallery-filter="regular"]')
     await page.locator('[data-slot-card="p:p2"]').click()
     await page.click('[data-viewer-offer]')
     await page.waitForSelector('[data-swap-builder]')
-    check('offering a held double opens the builder with it already chosen (no step to pick yours)', (await page.locator('[data-swap-player]').count()) === 2 && !/3\. The one you give/.test(await page.locator('[data-swap-builder]').textContent()))
+    check('offering a held card opens the builder with it already chosen (no step to pick yours)', (await page.locator('[data-swap-player]').count()) === 2 && !/3\. The one you give/.test(await page.locator('[data-swap-builder]').textContent()))
     await page.locator('[data-swap-player="p7"]').click()
     await page.locator('[data-swap-card="p:p10"]').click()
     await page.waitForSelector('[data-swap-confirm]')
     check('...and goes straight to confirm after their card', true)
     await ctx.close()
 
-    // a player with nothing spare
+    // a player with nothing to offer
     resetBoard(); board.mine = []; board.incoming = []
     const b = await open(390)
     await b.page.click('[data-cards-tab="swaps"]')
     await b.page.click('[data-swap-start]')
     await b.page.waitForSelector('[data-swap-builder]')
-    check('with no doubles the builder says so instead of offering a swap', (await b.page.locator('[data-no-doubles]').count()) === 1 && (await b.page.locator('[data-swap-player]').count()) === 0)
+    check('with no cards the builder says so instead of offering a swap', (await b.page.locator('[data-no-doubles]').count()) === 1 && (await b.page.locator('[data-swap-player]').count()) === 0)
     await b.ctx.close()
   }
 

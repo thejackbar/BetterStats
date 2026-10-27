@@ -1,7 +1,7 @@
-// Swapping doubles with another player of the club. A player always keeps one of every card, so only doubles can
-// go; a request is one card for one card, and nothing moves until the person asked says yes. The builder walks it
-// through in three taps: who, which of their doubles, which of yours. The server checks it all again when the
-// request is answered, so a stale request is told so instead of taking a card it should not.
+// Swapping cards with another player of the club. Any card a player holds can go (their own card stays theirs); a
+// request is one card for one card, and nothing moves until the person asked says yes. The builder walks it through
+// in three taps: who, which of their cards, which of yours. The server checks it all again when the request is
+// answered, so a stale request is told so instead of taking a card that is no longer there.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import { onColor } from '../PlayerTradingCard'
@@ -25,8 +25,32 @@ function Mini({ card, club, accent, display, sponsor, selected, onClick, label, 
     <button type="button" onClick={onClick} aria-pressed={!!selected} aria-label={label || cardLine(card)} data-swap-card={card.key}
       style={{ position: 'relative', padding: 0, border: 0, background: 'none', cursor: 'pointer', borderRadius: width * 0.08, outline: selected ? `3px solid ${accent}` : 'none', outlineOffset: 2, opacity: selected === false ? 0.55 : 1 }}>
       {inner}
-      {card.spare > 1 && <span style={{ position: 'absolute', right: 4, bottom: '22%', padding: '1px 6px', borderRadius: 999, background: '#0b1018', border: '1px solid rgba(255,255,255,.5)', color: '#fff', font: `700 10px ${MONO}` }}>{card.spare} spare</span>}
+      {card.tradeable > 1 && <span style={{ position: 'absolute', right: 4, bottom: '22%', padding: '1px 6px', borderRadius: 999, background: '#0b1018', border: '1px solid rgba(255,255,255,.5)', color: '#fff', font: `700 10px ${MONO}` }}>×{card.tradeable}</span>}
     </button>
+  )
+}
+
+// A grid of cards to pick one from, with a search and a "show more", because a collection can run to hundreds.
+const PICK_PAGE = 24
+function CardPick({ cards, selectedKey, onPick, ui, label }) {
+  const [q, setQ] = useState('')
+  const [shown, setShown] = useState(PICK_PAGE)
+  const list = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return needle ? cards.filter((c) => `${c.name} ${c.title || ''}`.toLowerCase().includes(needle)) : cards
+  }, [cards, q])
+  return (
+    <div data-card-pick={label}>
+      {cards.length > 8 && (
+        <input value={q} onChange={(e) => { setQ(e.target.value); setShown(PICK_PAGE) }} placeholder="Find a card" aria-label={`Find a card: ${label}`}
+          style={{ width: '100%', boxSizing: 'border-box', marginBottom: 8, background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.25)', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 15 }} />
+      )}
+      {list.length === 0 && <div style={{ fontSize: 13, opacity: 0.7 }}>No card matches.</div>}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        {list.slice(0, shown).map((c) => <Mini key={c.key} card={c} {...ui} selected={selectedKey ? selectedKey === c.key : undefined} onClick={() => onPick(c)} />)}
+      </div>
+      {list.length > shown && <button type="button" onClick={() => setShown((n) => n + PICK_PAGE)} style={{ ...btn, marginTop: 10 }}>Show more ({list.length - shown} left)</button>}
+    </div>
   )
 }
 
@@ -78,7 +102,7 @@ function Builder({ token, board, give: preGive, club, accent, display, sponsor, 
 
   const pick = async (p) => {
     setPlayer(p); setWant(null); setTheirs(null); setErr('')
-    try { setTheirs((await api.availPublicSwapPlayer(token, p.player_id)).cards) } catch (e) { setErr(e?.message || 'Could not load their doubles.') }
+    try { setTheirs((await api.availPublicSwapPlayer(token, p.player_id)).cards) } catch (e) { setErr(e?.message || 'Could not load their cards.') }
   }
   const send = async () => {
     setBusy(true); setErr('')
@@ -96,9 +120,9 @@ function Builder({ token, board, give: preGive, club, accent, display, sponsor, 
       <div data-swap-builder onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 560, padding: '52px 14px 28px', boxSizing: 'border-box', color: '#fff' }}>
         <button type="button" onClick={onClose} aria-label="Close" style={{ position: 'fixed', right: 14, top: 14, width: 38, height: 38, borderRadius: 19, border: '1px solid rgba(255,255,255,.3)', background: 'rgba(255,255,255,.08)', color: '#fff' }}>✕</button>
         <div style={{ font: `800 italic 26px ${display}`, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center' }}>Start a swap</div>
-        <div style={{ textAlign: 'center', fontSize: 12.5, opacity: 0.75, marginTop: 4 }}>One of your doubles for one of theirs. They have to say yes.</div>
+        <div style={{ textAlign: 'center', fontSize: 12.5, opacity: 0.75, marginTop: 4 }}>One of your cards for one of theirs. They have to say yes.</div>
 
-        {board.mine.length === 0 && !preGive && <p data-no-doubles style={{ textAlign: 'center', marginTop: 18 }}>You have no doubles to offer yet. When a pack gives you a card you already hold, the spare can go in a swap.</p>}
+        {board.mine.length === 0 && !preGive && <p data-no-doubles style={{ textAlign: 'center', marginTop: 18 }}>You have no cards to offer yet. Open a pack and whatever you pull can go in a swap. Your own card always stays yours.</p>}
 
         {(board.mine.length > 0 || preGive) && (
           <>
@@ -112,10 +136,10 @@ function Builder({ token, board, give: preGive, club, accent, display, sponsor, 
               <>
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a player" aria-label="Find a player" style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.25)', borderRadius: 10, padding: '10px 12px', color: '#fff', fontSize: 15 }} />
                 <div style={{ marginTop: 8, maxHeight: 260, overflowY: 'auto', borderRadius: 10, border: '1px solid rgba(255,255,255,.18)' }}>
-                  {people.length === 0 && <div style={{ padding: 14, fontSize: 13, opacity: 0.7 }}>{board.people.length ? 'No one by that name.' : 'No one has a double to swap yet.'}</div>}
+                  {people.length === 0 && <div style={{ padding: 14, fontSize: 13, opacity: 0.7 }}>{board.people.length ? 'No one by that name.' : 'No one has a card to swap yet.'}</div>}
                   {people.map((p) => (
                     <button key={p.player_id} type="button" onClick={() => pick(p)} data-swap-player={p.player_id} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', padding: '11px 14px', background: 'none', border: 0, borderBottom: '1px solid rgba(255,255,255,.1)', color: '#fff', textAlign: 'left' }}>
-                      <span>{p.name}</span><span style={{ opacity: 0.65, font: `600 11px ${MONO}` }}>{p.spare} to swap</span>
+                      <span>{p.name}</span><span style={{ opacity: 0.65, font: `600 11px ${MONO}` }}>{p.tradeable} {p.tradeable === 1 ? 'card' : 'cards'}</span>
                     </button>
                   ))}
                 </div>
@@ -126,21 +150,17 @@ function Builder({ token, board, give: preGive, club, accent, display, sponsor, 
 
         {player && (
           <>
-            <div style={h}>2. The one you want</div>
+            <div style={h}>2. The card you want</div>
             {!theirs && !err && <div style={{ fontSize: 13, opacity: 0.7 }}>Loading…</div>}
-            {theirs && theirs.length === 0 && <div style={{ fontSize: 13, opacity: 0.7 }}>They no longer have a double.</div>}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-              {(theirs || []).map((c) => <Mini key={c.key} card={c} {...ui} selected={want ? want.key === c.key : undefined} onClick={() => setWant(c)} />)}
-            </div>
+            {theirs && theirs.length === 0 && <div style={{ fontSize: 13, opacity: 0.7 }}>They have no card to offer just now.</div>}
+            {theirs && theirs.length > 0 && <CardPick cards={theirs} selectedKey={want?.key} onPick={setWant} ui={ui} label="theirs" />}
           </>
         )}
 
         {player && want && !preGive && (
           <>
-            <div style={h}>3. The one you give</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-              {board.mine.map((c) => <Mini key={c.key} card={c} {...ui} selected={give ? give.key === c.key : undefined} onClick={() => setGive(c)} />)}
-            </div>
+            <div style={h}>3. The card you give</div>
+            <CardPick cards={board.mine} selectedKey={give?.key} onPick={setGive} ui={ui} label="yours" />
           </>
         )}
 
@@ -188,15 +208,15 @@ export default function SwapsPanel({ token, club, accent, display, sponsor, offe
   if (failed) return <div className="text-sm text-pb-faint">Swaps could not load. Reload to try again.</div>
   if (!board) return <div className="text-sm text-pb-faint" data-swaps-loading>Loading swaps…</div>
   const ui = { club, accent, display, sponsor, busy, answer }
-  const doubles = board.mine.reduce((n, c) => n + c.spare, 0)
+  const offerable = board.mine.reduce((n, c) => n + c.tradeable, 0)
   return (
     <div data-swaps-panel>
       <p style={{ fontSize: 13, opacity: 0.8, margin: '0 0 10px', lineHeight: 1.5 }}>
-        Swap a double for a double. You always keep one of every card, so only the spares can go, and nothing moves until the other player says yes. Requests lapse after {board.expires_days} days.
+        Swap any card you hold for any card another player holds. Nothing moves until the other player says yes, and they can say no. Your own card always stays yours. Requests lapse after {board.expires_days} days.
       </p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
         <button type="button" onClick={() => setBuild(true)} data-swap-start style={{ ...btn, padding: '11px 18px', background: accent, color: onColor(accent), border: 0 }}>Start a swap</button>
-        <span data-doubles-count style={{ font: `600 11px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase', opacity: 0.75 }}>{doubles === 0 ? 'No doubles yet' : `${doubles} ${doubles === 1 ? 'double' : 'doubles'} to swap`}</span>
+        <span data-doubles-count style={{ font: `600 11px ${MONO}`, letterSpacing: 1.2, textTransform: 'uppercase', opacity: 0.75 }}>{offerable === 0 ? 'No cards to offer yet' : `${offerable} ${offerable === 1 ? 'card' : 'cards'} you could offer`}</span>
       </div>
       {msg && <div role="status" data-swap-msg style={{ fontSize: 13, marginBottom: 10 }}>{msg}</div>}
 
