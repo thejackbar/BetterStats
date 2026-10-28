@@ -106,6 +106,12 @@ STAT_MILESTONES = (
     ("dismissals_milestone", "dismissals", 50, 20),
 )
 
+# Which cards get a full-card photo (club setting `big_photos`), and which of the player's shots a card uses.
+PHOTO_MODES = ("top", "specials", "all")
+# Special cards made of a moment in play get the ACTION shot; the ones that mark a person or a total get the HERO photo.
+ACTION_SPECIALS = ("century", "fifty", "five_for", "hat_trick")
+BIG_PHOTO_TIERS = ("epic", "legendary")
+
 # What a player is given when a card is made about them: their debut and their latest landmark, or every one.
 GIFT_MODES = ("minimal", "all")
 LANDMARK_KINDS = ("games", "runs_milestone", "wickets_milestone", "dismissals_milestone")
@@ -129,6 +135,7 @@ def default_settings() -> dict:
         "feed_enabled": True,
         "event_packs_enabled": True,
         "starter_gifts": "minimal",
+        "big_photos": "top",
     }
 
 
@@ -163,7 +170,7 @@ def week_ends_at(settings: dict, now: Optional[datetime] = None) -> datetime:
 async def load_settings(db: AsyncSession, org_id) -> dict:
     row = (await db.execute(text(
         "SELECT enabled, include_juniors, weekly_packs, timezone, launched_at, alerts_enabled, "
-        "sets_enabled, showcase_enabled, board_enabled, feed_enabled, event_packs_enabled, starter_gifts "
+        "sets_enabled, showcase_enabled, board_enabled, feed_enabled, event_packs_enabled, starter_gifts, big_photos "
         "FROM club_card_settings WHERE organisation_id = CAST(:o AS UUID)"
     ), {"o": str(org_id)})).mappings().first()
     if not row:
@@ -172,6 +179,8 @@ async def load_settings(db: AsyncSession, org_id) -> dict:
     out["weekly_packs"] = max(0, min(int(out.get("weekly_packs") or 0), MAX_WEEKLY_PACKS))
     if out.get("starter_gifts") not in GIFT_MODES:
         out["starter_gifts"] = "minimal"
+    if out.get("big_photos") not in PHOTO_MODES:
+        out["big_photos"] = "top"
     return out
 
 
@@ -209,6 +218,11 @@ async def save_settings(db: AsyncSession, org_id, patch: dict) -> dict:
             raise ValueError("Starting cards are either minimal or all.")
         sets.append("starter_gifts = :starter_gifts")
         params["starter_gifts"] = patch["starter_gifts"]
+    if "big_photos" in patch and patch["big_photos"] is not None:
+        if patch["big_photos"] not in PHOTO_MODES:
+            raise ValueError("Pick which cards get the big photo: top, specials or all.")
+        sets.append("big_photos = :big_photos")
+        params["big_photos"] = patch["big_photos"]
     if "timezone" in patch:
         tz = (patch["timezone"] or "").strip() or None
         if tz:
@@ -495,6 +509,32 @@ async def _current_season(db: AsyncSession, org_id, pids: list[str]) -> tuple[li
 
 # ── Card payloads ─────────────────────────────────────────────────────────────
 
+def card_shot(person: dict, tier: str, special_kind: Optional[str], mode: str) -> str:
+    """Which of the player's photos a card shows: `hero`, `action` (both fill the card) or `profile` (the circle).
+
+    A card that is not special enough for the big photo shows the profile photo; a card that is shows the shot that suits it: a
+    moment in play (a century, a five-for, a Legendary card) the ACTION shot, a person or a total (a debut, a milestone, an award, an
+    Epic card) the HERO photo. A club's per-player pin (`hero_source`) beats that choice, because somebody decided it for this player.
+    Whatever is wanted but missing falls to the other big shot, and a card with no big shot (or no profile photo) uses what there is, so a
+    photo is never left unused."""
+    shots = {"hero": person.get("hero_photo_url"), "action": person.get("action_photo_url")}
+    special = special_kind is not None
+    big = special or mode == "all" or (mode == "top" and tier in BIG_PHOTO_TIERS)
+    if not big and person.get("photo_url"):
+        return "profile"
+    pin = person.get("hero_source")
+    if pin in shots:
+        want = pin
+    elif special:
+        want = "action" if special_kind in ACTION_SPECIALS else "hero"
+    else:
+        want = "action" if tier == "legendary" else "hero"
+    for k in (want, "hero" if want == "action" else "action"):
+        if shots[k]:
+            return k
+    return "profile"
+
+
 def regular_card(snap: dict, pid: str) -> Optional[dict]:
     person = snap["people"].get(pid)
     if not person:
@@ -518,6 +558,7 @@ def regular_card(snap: dict, pid: str) -> Optional[dict]:
         "dismissals": f.get("dismissals", 0),
         "rarity": r["score"],
         "tier": r["tier"],
+        "shot": card_shot(person, r["tier"], None, snap["settings"].get("big_photos") or "top"),
     }
 
 
@@ -540,6 +581,7 @@ def special_card(snap: dict, row: dict) -> Optional[dict]:
         "occurred_on": row["occurred_on"].isoformat() if row["occurred_on"] else None,
         "detail": row["detail"] or {},
         "tier": "special",
+        "shot": card_shot(person, "special", row["kind"], snap["settings"].get("big_photos") or "top"),
     }
 
 
@@ -1354,6 +1396,9 @@ def _own_card_outside_pool(player: Player, snap: dict) -> dict:
         "action_photo_url": getattr(player, "action_photo_url", None), "hero_source": getattr(player, "hero_source", None),
         "matches": 0, "runs": 0, "bat_avg": None, "wickets": 0, "bowl_avg": None, "dismissals": 0,
         "rarity": 1, "tier": "common",
+        "shot": card_shot({"photo_url": player.photo_url, "hero_photo_url": getattr(player, "hero_photo_url", None),
+                           "action_photo_url": getattr(player, "action_photo_url", None), "hero_source": getattr(player, "hero_source", None)},
+                          "common", None, snap["settings"].get("big_photos") or "top"),
     }
 
 

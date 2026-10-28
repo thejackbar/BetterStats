@@ -1,4 +1,5 @@
-// A card with a full-length photo keeps the top of the head clear of the name: the picture starts 64px down the card (of 478), fades in
+// Which photo a card shows follows the card's `shot` (the server decides it by card type): 'profile' is the circle, 'hero' and 'action'
+// fill the card with that photo, and a payload without `shot` keeps the old answer. A card with a full-length photo keeps the top of the head clear of the name: the picture starts 64px down the card (of 478), fades in
 // at its top, ends where it always did (under the band), and the name and the head do not share a row. Chromium, the API stubbed.
 //
 //   APP_URL=http://localhost:4173 node verification/verify_player_cards_hero_browser.mjs
@@ -50,6 +51,39 @@ const run = async () => {
     check(`${label}: the picture still ends 40px above the card's bottom edge, where it always did`, m.every((x) => Math.abs(x.bottom - 40) < 1.5), JSON.stringify(m))
     check(`${label}: it fades in at the top, and shows the top of the photo (not a middle crop)`, m.every((x) => /linear-gradient/.test(x.mask) && /^50% 0%|^50% 0px/.test(x.pos)), JSON.stringify(m))
     if (SHOT) { fs.mkdirSync(SHOT, { recursive: true }); await p.screenshot({ path: `${SHOT}/hero-${width}.png` }) }
+    await ctx.close()
+  }
+
+  // ── Which photo each kind of card shows ────────────────────────────────────
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+    const p = await ctx.newPage()
+    p.on('pageerror', (e) => errors.push(String(e)))
+    const mk = (pid, name, shot, tier, x = {}) => ({ ...card(pid, name, { tier }), photo_url: '/api/images/head.jpg', hero_photo_url: '/api/images/hero.jpg', action_photo_url: '/api/images/action.jpg', shot, ...x })
+    const MIXED = [mk('p1', 'Barendse, Jack', 'profile', 'common', { mine: true }), mk('p2', 'Kumar, Sanjay', 'profile', 'rare'), mk('p3', 'Ryan, Andrew', 'hero', 'epic'), mk('p4', 'Lyall, Josh', 'action', 'legendary'), mk('p5', 'Old, Server', undefined, 'rare')]
+    await p.route('**/api/**', async (r) => {
+      const url = r.request().url()
+      const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) })
+      if (/\/api\/images\/.*\.jpg$/.test(url)) return r.fulfill({ status: 200, contentType: 'image/jpeg', body: HERO })
+      if (!url.includes('/public/availability/')) return json({})
+      if (/\/me\/cards\/(showcase|feed|board|sets|swaps|wants)/.test(url)) return json({ cards: [], events: [], entries: [], sets: [], max: 6, incoming: [], outgoing: [], recent: [], mine: [], people: [], wants: [], ready: 0, limit: 100 })
+      if (/\/me\/cards$/.test(url)) return json({ club: CLUB, week_resets_at: '2026-10-26T16:00:00+00:00', packs: [], pack_designs: {}, cards: MIXED, totals: { regular_owned: 5, regular_total: 14, special_owned: 0, special_total: 0, copies: 5 }, features: {} })
+      if (/\/me\/profile/.test(url)) return json({ club: CLUB, player: { id: 'p1', display_name: 'Barendse, Jack' }, modules: ['cards'], cards: { ready: 0, swaps_waiting: 0 }, has_availability: false, squads: [], selected: [], training: { upcoming: [] }, can_update_details: false })
+      if (/\/me(\?|$)/.test(url)) return json({ club: CLUB, player: { id: 'p1', display_name: 'Barendse, Jack' }, dates: [], availability: {}, has_squad: false, squads: [], has_availability: false })
+      return json({ club: CLUB, require_pin: true, has_availability: false, players: [{ id: 'p1', display_name: 'Barendse, Jack', has_phone: true }] })
+    })
+    await p.goto(cardsUrl(BASE, 'tok123', '/book'))
+    await p.waitForSelector('[data-card-hero], [data-card-head]', { timeout: 20000 })
+    await p.waitForTimeout(600)
+    const seen = await p.evaluate(() => ({
+      hero: [...document.querySelectorAll('[data-card-hero]')].map((i) => [i.getAttribute('data-card-hero'), i.getAttribute('src')]),
+      head: [...document.querySelectorAll('[data-card-head]')].map((i) => i.getAttribute('src')),
+    }))
+    check('plain cards show the profile photo in the circle, and nothing fills the card', seen.head.length === 2 && seen.head.every((u) => /head\.jpg/.test(u)), JSON.stringify(seen))
+    check('an Epic card fills with the hero photo', seen.hero.some(([k, u]) => k === 'hero' && /hero\.jpg/.test(u)), JSON.stringify(seen))
+    check('a Legendary card fills with the action shot', seen.hero.some(([k, u]) => k === 'action' && /action\.jpg/.test(u)), JSON.stringify(seen))
+    check('a card from a server that does not say (no shot) keeps the old behaviour: the hero position', seen.hero.some(([k]) => k === 'legacy') && seen.hero.length === 3, JSON.stringify(seen))
+    if (SHOT) await p.screenshot({ path: `${SHOT}/hero-by-type.png` })
     await ctx.close()
   }
   check('no page errors', errors.length === 0, errors.join(' | '))

@@ -21,6 +21,7 @@ export default function HowItWorks() {
       <PageHead title="How it works" sub="Cards of the players in your club, built from the real scorebook." />
       <Section id="cards" title="The cards">
         <p>Every player in the club has a card with their career figures: matches, runs, batting average, wickets, bowling average and dismissals, across every grade. The cards update as the stats do. The number in the corner is the card's rarity, from 1 to 99, worked out from how the player's figures compare with the rest of the club.</p>
+        <p>A Common or Rare card shows the player's profile photo in a circle. The better cards, Epic and Legendary, and every special card, fill with a full-card photo of the player when the club has one.</p>
         <p>You always have your own card. Everyone else's you collect from packs and swaps.</p>
       </Section>
       <Section id="packs" title="Packs and the odds">
@@ -38,7 +39,7 @@ export default function HowItWorks() {
         <p>Some packs are better. A Match Day pack, a holiday pack (Halloween, the Melbourne Cup, Christmas and more), a birthday pack, a surprise drop and any big day your club schedules, like a Test match, give two Rare or better cards at least and lean towards the better tiers. A pack for something you did is better again: a half century, a landmark, a five-for or hat-trick, and best of all a century, which is nearly all Rare or better. You get those for achievements from the day your club started using cards, and the Packs screen shows the full list. There are no paid packs.</p>
       </Section>
       <Section id="specials" title="Special cards">
-        <p>Special cards mark real moments: a century, a half century, a five wicket haul, a hat-trick, a debut, a games milestone (10, 50, 100 and on), a career milestone (every 1,000 runs, 200 wickets and 50 dismissals) and the club's awards. Each kind has its own colour. The player it is about starts with their debut card and their latest milestone card, and the rest turn up in packs.</p>
+        <p>Special cards mark real moments: a century, a half century, a five wicket haul, a hat-trick, a debut, a games milestone (10, 50, 100 and on), a career milestone (every 1,000 runs, 200 wickets and 50 dismissals) and the club's awards. Each kind has its own colour, and a special card shows the player in a full-card photo: an action shot for a moment in play like a century or a five-for, a hero portrait for a debut, a milestone or an award. The player it is about starts with their debut card and their latest milestone card, and the rest turn up in packs.</p>
       </Section>
       <Section id="swaps" title="Swaps">
         <ul>

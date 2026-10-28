@@ -444,6 +444,27 @@ function SwapsTab() {
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────────────────────────────────────────
+// Which cards get a full-card photo. The photo itself (hero or action shot) is chosen by the kind of card; this is how far it goes.
+const PHOTO_CHOICES = [
+  ['top', 'Special, Epic and Legendary cards (recommended)', 'Common and Rare cards show the profile photo in a circle. Epic cards use the hero photo, Legendary cards the action shot.'],
+  ['specials', 'Special cards only', 'Every regular card shows the profile photo in a circle. Special cards fill with a photo.'],
+  ['all', 'Every card that has one', 'How cards looked before. Any card whose player has a hero photo or action shot fills with it.'],
+]
+function BigPhotos({ s, saving, save }) {
+  const now = s.big_photos || 'top'
+  return (
+    <Card title="Photos on cards">
+      <Field label="Cards that fill with a photo">
+        <Select value={now} disabled={saving} onChange={(e) => save({ big_photos: e.target.value })} aria-label="Cards that fill with a photo">
+          {PHOTO_CHOICES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+        </Select>
+      </Field>
+      <p className="text-[12.5px] text-pb-faint mt-2" data-photo-note>{PHOTO_CHOICES.find(([k]) => k === now)?.[2]}</p>
+      <p className="text-[12.5px] text-pb-faint mt-2">A special card for a moment in play (a century, fifty, five-for or hat-trick) uses the action shot. One for a person or a total (a debut, a milestone, an award) uses the hero photo. Where a player lacks the shot a card wants, it uses the other, then the profile photo. A shot you pinned on a player's profile is used instead of all this.</p>
+    </Card>
+  )
+}
+
 // What a player starts with. A club on the minimal setting gives the debut card and the latest milestone card; older gifts can be tidied.
 function StartingCards({ s, saving, save }) {
   const toast = useToast()
@@ -552,6 +573,7 @@ function SettingsTab({ data, setData }) {
           <p className="text-[12.5px] text-pb-faint">A weekly pack that is not opened by the end of the week is gone. Packs earned for runs, wickets and dismissals wait until they are opened.</p>
         </div>
       </Card>
+      <BigPhotos s={s} saving={saving} save={save} />
       <StartingCards s={s} saving={saving} save={save} />
       <CreatePacks data={data} setData={setData} />
       <Card title="Where players find them">

@@ -19,7 +19,7 @@ const check = (name, cond, detail = '') => {
 
 const CLUB = { name: 'Verify CC', short_name: 'Verify', slug: 'verify-cc', logo_url: null, accent_color: '#b91c1c', primary_color: '#b91c1c', font_config: {} }
 const state = {
-  settings: { enabled: true, include_juniors: false, weekly_packs: 1, timezone: null, effective_timezone: 'Australia/Perth', event_packs_enabled: true, starter_gifts: 'minimal' },
+  settings: { enabled: true, include_juniors: false, weekly_packs: 1, timezone: null, effective_timezone: 'Australia/Perth', event_packs_enabled: true, starter_gifts: 'minimal', big_photos: 'top' },
   events: [],
   gifts: [],
   players: [
@@ -268,6 +268,12 @@ const run = async () => {
   await page.waitForFunction(() => document.querySelector('[role="switch"][aria-label="Day packs are on"]').getAttribute('aria-checked') === 'false')
   check('turning them off sends event_packs_enabled false only', JSON.stringify(calls.filter((c) => c.method === 'PATCH').pop().body) === '{"event_packs_enabled":false}')
   await page.getByRole('switch', { name: 'Day packs are on' }).click()
+  check('photos on cards default to special, Epic and Legendary, and say what that means', (await page.getByLabel('Cards that fill with a photo').inputValue()) === 'top' && /Epic cards use the hero photo, Legendary cards the action shot/.test(await page.locator('[data-photo-note]').innerText()))
+  await page.getByLabel('Cards that fill with a photo').selectOption('specials')
+  await page.waitForFunction(() => document.querySelector('select[aria-label="Cards that fill with a photo"]').value === 'specials')
+  check('changing it sends big_photos only', JSON.stringify(calls.filter((c) => c.method === 'PATCH').pop().body) === '{"big_photos":"specials"}')
+  check('the note follows the choice', /Every regular card shows the profile photo/.test(await page.locator('[data-photo-note]').innerText()))
+  await page.getByLabel('Cards that fill with a photo').selectOption('top')
   check('starting cards default to the minimal set', (await page.getByLabel('Starting cards').inputValue()) === 'minimal')
   await page.getByLabel('Starting cards').selectOption('all')
   await page.waitForFunction(() => document.querySelector('select[aria-label="Starting cards"]').value === 'all')

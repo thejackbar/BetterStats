@@ -209,3 +209,12 @@ A player now has three photographs: the profile photo (`photo_*`), the hero phot
 
 Check: `verify_player_action_photo.py` (own database), plus the added checks in `verify_player_privacy.py` and `verify_merge_profile_carry.py`.
 
+## v9.134.1 (2026-10-28): action and hero shots by card type
+
+Asked for: now that a player has a hero photo and an action shot, use them for particular kinds of card so those cards feel special.
+
+- Rule (`card_shot`, guide rule 26): plain cards keep the profile photo in a circle; Epic uses the hero photo, Legendary the action shot; specials use the action shot for a moment in play and the hero photo for a person or a total. The per-player pin from v9.134.0 still wins where set. Chosen so the rare things are the ones that fill the card, and so a player who only has one big shot still gets it used.
+- Behaviour change for existing clubs: Common and Rare cards that used to fill with a hero photo now show the circle, unless the club sets "Every card that has one" in Settings (the old behaviour). `big_photos` in `club_card_settings` (migration 376).
+- Not done: a different framing for the action shot (mid-shots are wider than the hero crop). Both use the same top offset and fade; revisit once real action shots are on cards.
+- Verified: `verify_player_cards.py` (535), `verify_player_action_photo.py`, `verify_player_privacy.py`, `verify_merge_carry.py`, the page suites and `_hero_`/`_admin_` browser suites (see the Verify list).
+

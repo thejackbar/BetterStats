@@ -86,6 +86,10 @@ if HAVE_SWAPS:
     except ImportError:   # the control run on the commit before admin-created packs
         GIFTS_DDL = []
     try:
+        from app.services.player_card_photos_ddl import STATEMENTS as PHOTOS_DDL
+    except ImportError:   # the control run on the commit before photos by card type
+        PHOTOS_DDL = []
+    try:
         from app.services.player_card_social_ddl import STATEMENTS as SOCIAL_DDL
     except ImportError:   # the control run on the commit before the social side
         SOCIAL_DDL = []
@@ -98,6 +102,7 @@ else:
     PACKS_DDL = []
     DESIGNS_DDL = []
     GIFTS_DDL = []
+    PHOTOS_DDL = []
     ITEM_DDL = []
 
 DB = os.environ["DATABASE_URL"]
@@ -175,7 +180,7 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
-        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL:
+        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL:
             await conn.execute(text(stmt))
 
 
@@ -2126,6 +2131,59 @@ async def main() -> None:
     else:
         check("(the control run has no admin-created packs to test)", True)
 
+    # ── Which photo a card shows ──────────────────────────────────────────────────
+    print("\nphotos by card type")
+    if HAVE and PHOTOS_DDL:
+        P = {"photo_url": "/p.jpg", "hero_photo_url": "/h.jpg", "action_photo_url": "/a.jpg", "hero_source": None}
+        shot = cards.card_shot
+        check("a plain card (Common, Rare) shows the profile photo in the circle, even when the player has big photos", shot(P, "common", None, "top") == "profile" and shot(P, "rare", None, "top") == "profile")
+        check("an Epic card gets the hero photo and a Legendary card the action shot", shot(P, "epic", None, "top") == "hero" and shot(P, "legendary", None, "top") == "action")
+        check("a special card for a moment in play gets the action shot", all(shot(P, "special", k, "top") == "action" for k in ("century", "fifty", "five_for", "hat_trick")))
+        check("a special card for a person or a total gets the hero photo", all(shot(P, "special", k, "top") == "hero" for k in ("debut", "games", "runs_milestone", "wickets_milestone", "dismissals_milestone", "award")))
+        check("special cards get a big photo in every mode, plain cards only when the club says all", all(shot(P, "special", "century", m) == "action" for m in ("top", "specials", "all")) and shot(P, "epic", None, "specials") == "profile" and shot(P, "common", None, "all") == "hero" and shot(P, "legendary", None, "all") == "action")
+        check("a wanted shot the player does not have falls to the other big one", shot({**P, "action_photo_url": None}, "special", "century", "top") == "hero" and shot({**P, "hero_photo_url": None}, "special", "debut", "top") == "action")
+        check("a big card with no big shot shows the profile photo", shot({**P, "hero_photo_url": None, "action_photo_url": None}, "legendary", None, "top") == "profile" and shot({"photo_url": "/p.jpg"}, "special", "century", "top") == "profile")
+        check("a plain card with no profile photo uses a big shot rather than the logo", shot({**P, "photo_url": None}, "common", None, "top") == "hero" and shot({"photo_url": None}, "common", None, "top") == "profile")
+        check("a per-player pin beats the card's own choice, but never makes a plain card big", shot({**P, "hero_source": "hero"}, "legendary", None, "top") == "hero" and shot({**P, "hero_source": "action"}, "special", "debut", "top") == "action" and shot({**P, "hero_source": "action"}, "common", None, "top") == "profile")
+        check("a pin to a shot the player does not have falls to the other", shot({**P, "hero_source": "action", "action_photo_url": None}, "legendary", None, "top") == "hero")
+        async with Session() as db:
+            club = await db.get(Organisation, ORG)
+            await db.execute(text("UPDATE players SET photo_url = '/p.jpg', hero_photo_url = '/h.jpg', action_photo_url = '/a.jpg', hero_source = NULL WHERE id = :p"), {"p": ALPHA})
+            await db.commit()
+            cards.forget(ORG)
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            reg = cards.regular_card(snap, str(ALPHA))
+            check("a regular card carries its shot, from the player's tier and the club's setting", reg["shot"] == {"common": "profile", "rare": "profile", "epic": "hero", "legendary": "action"}[reg["tier"]], str((reg["tier"], reg["shot"])))
+            srow = (await db.execute(text("SELECT id::text AS id, player_id, kind, title, occurred_on, detail FROM player_special_cards WHERE player_id = :p AND kind = 'century' LIMIT 1"), {"p": ALPHA})).mappings().first()
+            check("a special card carries its shot too (a century: the action shot)", cards.special_card(snap, dict(srow))["shot"] == "action")
+            d0 = (await cards.load_settings(db, ORG))["big_photos"]
+            check("the club setting defaults to top", cards.default_settings()["big_photos"] == "top" and d0 == "top", str(d0))
+            await cards.save_settings(db, ORG, {"big_photos": "all"}); await db.commit()
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            check("changing it reaches the cards at once", cards.regular_card(snap, str(ALPHA))["shot"] in ("hero", "action"))
+            await cards.save_settings(db, ORG, {"big_photos": "specials"}); await db.commit()
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            check("...'specials' keeps every regular card on the circle, whatever its tier", cards.regular_card(snap, str(ALPHA))["shot"] == "profile")
+            try:
+                await cards.save_settings(db, ORG, {"big_photos": "everything"}); bad_p = False
+            except ValueError:
+                bad_p = True
+                await db.rollback()
+            check("an unknown choice is refused", bad_p)
+            club = await db.get(Organisation, ORG)
+            await cards.save_settings(db, ORG, {"big_photos": "top"}); await db.commit()
+            from app.routers import player_cards_admin as adm4
+            adm_user = User(id=uuid.uuid4(), email="admin@example.com")
+            got = await adm4.update_settings(adm4.SettingsBody(big_photos="all"), db, club, adm_user)
+            check("PATCH settings takes big_photos, and the payload reports it", got["settings"]["big_photos"] == "all")
+            club = await db.get(Organisation, ORG)
+            check("...an unknown one is a 422", await status_of(adm4.update_settings(adm4.SettingsBody(big_photos="some"), db, club, adm_user)) == 422)
+            club = await db.get(Organisation, ORG)
+            await adm4.update_settings(adm4.SettingsBody(big_photos="top"), db, club, adm_user)
+            await db.rollback()
+    else:
+        check("(the control run has no photo rule to test)", True)
+
     print("\nmigration")
     async with engine.begin() as conn:
         for stmt in CARD_DDL:
@@ -2140,6 +2198,9 @@ async def main() -> None:
         check("the items migration follows 365, runs its own shared list, and drops only its own table", "down_revision = \"365\"" in mig3 and "ITEM_STATEMENTS" in mig3 and "ITEM_DOWNGRADE" in mig3)
     main_src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
     check("the lifespan mirrors the same list", "from app.services.player_cards_ddl import STATEMENTS" in main_src)
+    if PHOTOS_DDL:
+        mig7 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "376_player_card_big_photos.py").read_text()
+        check("the photos migration follows 375, runs the shared list, and its lifespan mirror runs it too", 'down_revision = "375"' in mig7 and "STATEMENTS" in mig7 and "player_card_photos_ddl" in main_src)
     if GIFTS_DDL:
         mig6 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "374_player_card_pack_gifts.py").read_text()
         check("the admin packs migration follows 373, runs the shared list, and its lifespan mirror runs it too", 'down_revision = "373"' in mig6 and "STATEMENTS" in mig6 and "player_card_gifts_ddl" in main_src)
