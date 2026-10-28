@@ -1414,6 +1414,13 @@ _PLAYER_PHOTO_KINDS = {
 }
 
 
+def _forget_cards(player: Player) -> None:
+    """The collectable cards keep a snapshot of the club's players for a few minutes, photos included. A new photo has to
+    show on the card now, not after that runs out, so the snapshot is dropped."""
+    from app.services import player_cards
+    player_cards.forget(player.organisation_id)
+
+
 async def _player_for_photo(db: AsyncSession, player_id: str, club: Organisation) -> Player:
     import uuid as _uuid
     try:
@@ -1450,6 +1457,7 @@ async def _store_player_photo(db, player: Player, file: UploadFile, kind: str) -
     setattr(player, mime_col, _IMAGE_MIME.get(ext, "image/png"))
     setattr(player, url_col, url)
     await db.commit()
+    _forget_cards(player)
     return {url_col: url}
 
 
@@ -1461,6 +1469,7 @@ async def _clear_player_photo(db, player: Player, kind: str) -> dict:
     setattr(player, mime_col, None)
     setattr(player, url_col, None)
     await db.commit()
+    _forget_cards(player)
     return {"status": "cleared"}
 
 

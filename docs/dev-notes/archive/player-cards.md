@@ -189,3 +189,8 @@ Reported by North Perth players on `/playerdash/:token`. v9.132.2 (616950d) adde
 ## v9.132.8 (2026-10-28): heads behind the name
 
 Reported from a screenshot of the book: on full-photo cards the top of the head was hidden by the player's name. `CardFaces.Portrait` now starts the hero photo 64px down with a 22px fade-in; the bottom edge is unchanged. Applies to regular and special cards. The public share card has the same crop and was left alone (not reported). Verified with the new `_hero_` browser suite (7) plus the page, first and v2 suites.
+
+## v9.132.9 (2026-10-28): a new photo shows on the card
+
+Reported: a player's picture updated in the admin Players profile did not change his card. Two causes were possible and the second is by design. (1) The card snapshot kept the old photo URL for up to 5 minutes; fixed by dropping the snapshot on photo upload and delete. (2) A player with an action shot keeps showing it on the card, whatever the headshot is; the profile hints now say so. Verified in `verify_player_cards.py` (478; the control run without the fix fails the four new photo checks).
+

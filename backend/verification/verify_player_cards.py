@@ -1918,6 +1918,37 @@ async def main() -> None:
     else:
         check("(the control run has no pack designs to test)", True)
 
+    # ── A new photo shows on the card at once ─────────────────────────────────────
+    print("\nplayer photos")
+    if HAVE and DESIGNS_DDL:
+        from io import BytesIO as _B
+        from starlette.datastructures import UploadFile as _Up
+        from PIL import Image as _Im
+        from app.routers import club_admin as ca
+        buf = _B(); _Im.new("RGB", (30, 40), (9, 9, 9)).save(buf, "PNG")
+        async with Session() as db:
+            club = await db.get(Organisation, ORG)
+            snap0 = await cards.club_snapshot(db, club, fresh=True)
+            before = snap0["people"][str(BRAVO)]["photo_url"]
+            again = await cards.club_snapshot(db, club)
+            check("the snapshot is cached between visits (so the next check means something)", again is snap0)
+            who = await db.get(Player, BRAVO)
+            out = await ca._store_player_photo(db, who, _Up(file=_B(buf.getvalue()), filename="new.png"), "photo")
+            snap1 = await cards.club_snapshot(db, club)
+            check("a new headshot is on the card straight away, without waiting for the snapshot to expire", snap1["people"][str(BRAVO)]["photo_url"] == out["photo_url"] != before, f"{before} -> {out}")
+            check("...and in the card the player is drawn from", cards.regular_card(snap1, str(BRAVO))["photo_url"] == out["photo_url"])
+            who = await db.get(Player, BRAVO)
+            hero = await ca._store_player_photo(db, who, _Up(file=_B(buf.getvalue()), filename="act.png"), "hero")
+            snap2 = await cards.club_snapshot(db, club)
+            check("a new action shot is on the card straight away too", snap2["people"][str(BRAVO)]["hero_photo_url"] == hero["hero_photo_url"])
+            who = await db.get(Player, BRAVO)
+            await ca._clear_player_photo(db, who, "hero")
+            snap3 = await cards.club_snapshot(db, club)
+            check("removing the action shot takes it off the card at once (back to the headshot circle)", snap3["people"][str(BRAVO)]["hero_photo_url"] is None and snap3["people"][str(BRAVO)]["photo_url"] == out["photo_url"])
+            await db.rollback()
+    else:
+        check("(the control run has no photo cache fix to test)", True)
+
     print("\nmigration")
     async with engine.begin() as conn:
         for stmt in CARD_DDL:

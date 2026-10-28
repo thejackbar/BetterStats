@@ -74,7 +74,7 @@ function PToggle({ on, onChange, label }) {
 const PHOTO_KINDS = {
   photo: {
     label: 'Headshot',
-    hint: 'Square. Used on rosters, squad grids and beside a name.',
+    hint: 'Square. Used on rosters, squad grids and beside a name, and sits in a circle on the player\u2019s card when there is no action shot.',
     aspect: 1,
     thumb: 'w-11 h-11',
     addLabel: 'Upload photo',
@@ -86,7 +86,7 @@ const PHOTO_KINDS = {
   },
   hero: {
     label: 'Action shot',
-    hint: 'Tall. Fills the big photo on match-day posts. Free crop \u2014 the post\u2019s own Framing control does the final positioning.',
+    hint: 'Tall. Fills the big photo on match-day posts and the whole of the player\u2019s card, in place of the headshot. Free crop \u2014 the post\u2019s own Framing control does the final positioning.',
     // Free crop on purpose: forcing a ratio here would crop twice and fight
     // the Framing control on the post itself.
     aspect: null,
