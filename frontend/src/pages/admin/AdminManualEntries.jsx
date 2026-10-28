@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import Dropdown from '../../components/Dropdown'
 import { formatSeason } from '../../lib/cricketFormat'
+import { GRAND_FINAL_HELP, grandFinalMessage, withFinalTick, withGrandFinalTick } from '../../lib/grandFinal'
 import ManualGamesImportWizard from '../../components/admin/ManualGamesImportWizard'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
@@ -1094,7 +1095,7 @@ function emptyInningsRow(n = 1) {
 
 const EMPTY_GAME_FORM = {
   season_id: '', grade_id: '', played_at: '', home_team: '', away_team: '', opposition: '',
-  venue: '', result: '', winning_team: '', is_final: false, match_format: '', notes: '',
+  venue: '', result: '', winning_team: '', is_final: false, is_grand_final: false, match_format: '', notes: '',
   batting_innings: [], bowling_spells: [], fielding_stats: [], innings: [],
 }
 
@@ -1106,13 +1107,157 @@ const GAME_FORM_SECTIONS = [
   { key: 'fielding', label: 'Fielding' },
 ]
 
-function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onPending, onSeasonCreated, onGradeCreated }) {
+// The match's own details, edited on their own. It never reads or sends the scorecard: only the fields
+// changed here go to the server (PATCH .../details), so a field left alone is left alone, and setting the
+// grand final on an imported scorebook match cannot lose its fall of wickets or the opposition's innings.
+// Declared at module level (never inside a render function) so typing keeps its caret.
+const DETAIL_TEXT_KEYS = ['home_team', 'away_team', 'opposition', 'venue', 'result', 'winning_team', 'match_format', 'notes']
+
+function detailsFormOf(game) {
+  return {
+    season_id: game.season_id || '',
+    grade_id: game.grade_id || '',
+    played_at: game.played_at ? String(game.played_at).split('T')[0] : '',
+    ...Object.fromEntries(DETAIL_TEXT_KEYS.map(k => [k, game[k] || ''])),
+    is_final: !!game.is_final,
+    is_grand_final: !!game.is_grand_final,
+  }
+}
+
+function MatchDetailsEditor({ game, seasons, grades, knownValues, onPending, onNotice, onSeasonCreated, onGradeCreated, onClose, onSaved }) {
+  const initial = useMemo(() => detailsFormOf(game), [game])
+  const [form, setForm] = useState(initial)
+  const [err, setErr] = useState(null)
+  const seasonGrades = useMemo(() => (grades || []).filter(g => g.season_id === form.season_id), [grades, form.season_id])
+
+  // Only what the person actually changed.
+  const changes = () => {
+    const out = {}
+    for (const k of Object.keys(initial)) {
+      if (form[k] !== initial[k]) out[k] = form[k]
+    }
+    if ('played_at' in out && !out.played_at) out.played_at = null
+    // A new season needs its grade said too (a grade belongs to one season); the quick editor clears it.
+    if ('season_id' in out && !('grade_id' in out)) out.grade_id = form.grade_id || null
+    if ('grade_id' in out && !out.grade_id) out.grade_id = null
+    return out
+  }
+
+  const save = () => {
+    setErr(null)
+    const diff = changes()
+    if (Object.keys(diff).length === 0) return setErr('Nothing has changed.')
+    onPending({
+      title: 'Save these match details?',
+      body: 'Only the details you changed are saved. The scorecard (innings, batting, bowling, fall of wickets) is not touched. '
+        + 'The change is logged and can be undone from the Audit tab.',
+      confirmLabel: 'Save',
+      action: async () => {
+        try {
+          const saved = await api.adminPatchManualGameDetails(game.id, diff)
+          onNotice(grandFinalMessage(saved?.grand_final))
+          await onSaved(saved)
+        } catch (e) { setErr(e.message) }
+      },
+    })
+  }
+
+  return (
+    <div className="bg-pb-surface border pb-hairline rounded-lg p-4" data-testid="match-details">
+      <h3 className="text-base font-semibold text-pb-text mb-1">Edit match details</h3>
+      <p className="text-xs text-pb-faint mb-3">
+        {game.played_at ? String(game.played_at).split('T')[0] : 'No date'}{game.opposition ? ` v ${game.opposition}` : ''}.
+        {' '}This changes the match&apos;s own details only. Its scorecard is not touched, so it is safe on an imported match.
+      </p>
+      {err && <p className="text-xs text-red-400 mb-2" role="alert">{err}</p>}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label className={LABEL_CLS}>Season</label>
+          <SeasonSelect
+            seasons={seasons}
+            value={form.season_id}
+            onChange={id => setForm(f => ({ ...f, season_id: id, grade_id: id === f.season_id ? f.grade_id : '' }))}
+            onCreated={onSeasonCreated}
+          />
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Grade</label>
+          <GradeSelect
+            grades={seasonGrades}
+            seasonId={form.season_id}
+            value={form.grade_id || ''}
+            onChange={id => setForm(f => ({ ...f, grade_id: id }))}
+            onCreated={onGradeCreated}
+            emptyLabel="— None —"
+          />
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Date</label>
+          <input type="date" data-testid="d-played_at" value={form.played_at} onChange={e => setForm(f => ({ ...f, played_at: e.target.value }))} className={INPUT_CLS} />
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Opposition</label>
+          <ComboInput value={form.opposition} onChange={v => setForm(f => ({ ...f, opposition: v }))} suggestions={knownValues?.oppositions || []} placeholder="Start typing…" />
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Home team</label>
+          <input type="text" data-testid="d-home_team" value={form.home_team} onChange={e => setForm(f => ({ ...f, home_team: e.target.value }))} className={INPUT_CLS} />
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Away team</label>
+          <input type="text" data-testid="d-away_team" value={form.away_team} onChange={e => setForm(f => ({ ...f, away_team: e.target.value }))} className={INPUT_CLS} />
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Venue</label>
+          <ComboInput value={form.venue} onChange={v => setForm(f => ({ ...f, venue: v }))} suggestions={knownValues?.venues || []} placeholder="Start typing…" />
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Result</label>
+          <input type="text" data-testid="d-result" value={form.result} onChange={e => setForm(f => ({ ...f, result: e.target.value }))} className={INPUT_CLS} />
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Winning team</label>
+          <input type="text" data-testid="d-winning_team" value={form.winning_team} onChange={e => setForm(f => ({ ...f, winning_team: e.target.value }))} className={INPUT_CLS} />
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Match format</label>
+          <input type="text" data-testid="d-match_format" value={form.match_format} onChange={e => setForm(f => ({ ...f, match_format: e.target.value }))} placeholder="T20 / 40-over / 2-day" className={INPUT_CLS} />
+        </div>
+        <div className="md:col-span-2">
+          <label className={LABEL_CLS}>Notes (admin only)</label>
+          <input type="text" data-testid="d-notes" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className={INPUT_CLS} />
+        </div>
+        <div className="space-y-1">
+          <label className="flex items-center gap-2 text-xs text-pb-text">
+            <input type="checkbox" data-testid="d-is_final" checked={form.is_final} onChange={e => setForm(f => withFinalTick(f, e.target.checked))} />
+            Final
+          </label>
+          <label className="flex items-center gap-2 text-xs text-pb-text">
+            <input type="checkbox" data-testid="d-is_grand_final" checked={form.is_grand_final} onChange={e => setForm(f => withGrandFinalTick(f, e.target.checked))} />
+            Grand Final
+          </label>
+        </div>
+        {form.is_grand_final && (
+          <p className="text-xs text-pb-faint md:col-span-3" data-testid="gf-help">{GRAND_FINAL_HELP}</p>
+        )}
+      </div>
+      <div className="flex gap-2 mt-4">
+        <button className={BTN_PRIMARY} data-testid="details-save" onClick={save}>Save details</button>
+        <button className={BTN_SECONDARY} onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onPending, onNotice, onSeasonCreated, onGradeCreated }) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_GAME_FORM)
   const [editingId, setEditingId] = useState(null)
   const [err, setErr] = useState(null)
   const [formSection, setFormSection] = useState('match')
+  // The match whose own details are open in the quick editor (the full match, as the server holds it).
+  const [detailsGame, setDetailsGame] = useState(null)
 
   const seasonGrades = useMemo(
     () => (grades || []).filter(g => g.season_id === form.season_id),
@@ -1146,6 +1291,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
       result: form.result || null,
       winning_team: form.winning_team || null,
       is_final: !!form.is_final,
+      is_grand_final: !!form.is_grand_final,
       match_format: form.match_format || null,
       notes: form.notes || null,
       batting_innings: sanitize(form.batting_innings, r => ({ ...r, innings_number: Number(r.innings_number) || 1, runs: r.runs || 0, fours: r.fours || 0, sixes: r.sixes || 0 })),
@@ -1205,8 +1351,12 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
       confirmLabel: editingId ? 'Update' : 'Save',
       action: async () => {
         try {
-          if (editingId) await api.adminPatchManualGame(editingId, payload)
-          else await api.adminCreateManualGame(payload)
+          const saved = editingId
+            ? await api.adminPatchManualGame(editingId, payload)
+            : await api.adminCreateManualGame(payload)
+          // Said straight away, because the tick only earns a premiership when the winner is clear, and a
+          // refresh below remounts this tab, so the parent holds the words.
+          onNotice(grandFinalMessage(saved?.grand_final))
           await refresh(); refreshAll(); resetForm()
         } catch (e) { setErr(e.message) }
       },
@@ -1234,6 +1384,15 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
         }),
       })
       window.scrollTo({ top: 0, behavior: 'smooth' })
+    } catch (e) { setErr(e.message) }
+  }
+
+  const handleDetails = async (row) => {
+    try {
+      setErr(null)
+      setDetailsGame(await api.adminGetManualGame(row.id))
+      // The editor sits above the list; bring it into view so a click far down the page is not silent.
+      setTimeout(() => document.querySelector('[data-testid=match-details]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
     } catch (e) { setErr(e.message) }
   }
 
@@ -1376,10 +1535,19 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
             <label className={LABEL_CLS}>Match format</label>
             <input type="text" value={form.match_format || ''} onChange={e => setForm({ ...form, match_format: e.target.value })} placeholder="T20 / 40-over / 2-day" className={INPUT_CLS} />
           </div>
-          <label className="flex items-center gap-2 text-xs text-pb-text mt-5">
-            <input type="checkbox" checked={!!form.is_final} onChange={e => setForm({ ...form, is_final: e.target.checked })} />
-            Final
-          </label>
+          <div className="mt-5 space-y-1">
+            <label className="flex items-center gap-2 text-xs text-pb-text">
+              <input type="checkbox" checked={!!form.is_final} onChange={e => setForm(withFinalTick(form, e.target.checked))} />
+              Final
+            </label>
+            <label className="flex items-center gap-2 text-xs text-pb-text">
+              <input type="checkbox" data-testid="gf-tick" checked={!!form.is_grand_final} onChange={e => setForm(withGrandFinalTick(form, e.target.checked))} />
+              Grand Final
+            </label>
+          </div>
+          {form.is_grand_final && (
+            <p className="text-xs text-pb-faint md:col-span-3" data-testid="gf-help">{GRAND_FINAL_HELP}</p>
+          )}
         </div>
 
         <div className="mt-3">
@@ -1551,18 +1719,38 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
         </div>
       </div>
 
+      {detailsGame && (
+        <MatchDetailsEditor
+          key={detailsGame.id}
+          game={detailsGame}
+          seasons={seasons}
+          grades={grades}
+          knownValues={knownValues}
+          onPending={onPending}
+          onNotice={onNotice}
+          onSeasonCreated={onSeasonCreated}
+          onGradeCreated={onGradeCreated}
+          onClose={() => setDetailsGame(null)}
+          onSaved={async () => { setDetailsGame(null); await refresh(); refreshAll() }}
+        />
+      )}
+
       <div className="bg-pb-surface border pb-hairline rounded-lg p-4">
         <h3 className="text-base font-semibold text-pb-text mb-3">Existing manual games</h3>
         {loading ? <p className="text-sm text-pb-faint">Loading…</p> : (
           list.length === 0 ? (
             <p className="text-sm text-pb-faint">No manual games yet.</p>
           ) : (
+            // The table scrolls inside its card at phone width, never the page: it holds a date, the
+            // opposition, season, match kind, players and three buttons.
+            <div className="overflow-x-auto" data-testid="games-table-scroll">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-pb-faint font-mono text-[10px] border-b pb-hairline">
                   <th className="text-left py-2 pr-3">Date</th>
                   <th className="text-left py-2 pr-3">Opposition</th>
                   <th className="text-left py-2 pr-3">Season</th>
+                  <th className="text-left py-2 pr-3">Match</th>
                   <th className="text-right py-2 pr-3">Players</th>
                   <th className="py-2"></th>
                 </tr>
@@ -1573,8 +1761,12 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
                     <td className="py-2 pr-3 text-pb-text">{r.played_at ? r.played_at.split('T')[0] : '—'}</td>
                     <td className="py-2 pr-3 text-pb-faint">{r.opposition || '—'}</td>
                     <td className="py-2 pr-3 text-pb-faint">{formatSeason(r.season_name)}</td>
+                    <td className="py-2 pr-3 text-pb-text text-xs" data-testid="match-kind">
+                      {r.is_grand_final ? 'Grand Final' : r.is_final ? 'Final' : ''}
+                    </td>
                     <td className="py-2 pr-3 text-right text-pb-text">{r.batting_count}</td>
-                    <td className="py-2 text-right">
+                    <td className="py-2 text-right whitespace-nowrap">
+                      <button className={BTN_SECONDARY + ' mr-2'} data-testid="details-btn" onClick={() => handleDetails(r)}>Details</button>
                       <button className={BTN_SECONDARY + ' mr-2'} onClick={() => handleEdit(r)}>Edit</button>
                       <button className={BTN_DANGER} onClick={() => handleDelete(r)}>Delete</button>
                     </td>
@@ -1582,6 +1774,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
                 ))}
               </tbody>
             </table>
+            </div>
           )
         )}
       </div>
@@ -1645,7 +1838,7 @@ function AuditTab({ refreshAll, onPending }) {
                       {r.created_at ? new Date(r.created_at).toLocaleString() : '—'}
                     </td>
                     <td className="py-2 pr-3 text-pb-text text-xs">{r.user_name || '—'}</td>
-                    <td className="py-2 pr-3 text-pb-faint text-xs uppercase font-mono">{r.action}</td>
+                    <td className="py-2 pr-3 text-pb-faint text-xs uppercase font-mono">{String(r.action || '').replace(/_/g, ' ')}</td>
                     <td className="py-2 pr-3 text-pb-text">{r.summary}</td>
                     <td className="py-2 pr-3">
                       {r.undone_at
@@ -1711,6 +1904,7 @@ export default function AdminManualEntries() {
   }, [activeTab])
 
   const onPending = (p) => setPending(p)
+  const [notice, setNotice] = useState(null)
   const confirmPending = async () => {
     if (!pending) return
     const action = pending.action
@@ -1741,11 +1935,18 @@ export default function AdminManualEntries() {
 
         <p className="text-xs text-pb-faintest mb-4">{TABS.find(t => t.key === activeTab)?.hint}</p>
 
+        {notice && (
+          <div className="mb-4 flex items-start justify-between gap-3 border pb-hairline rounded-lg bg-pb-surface px-4 py-3" role="status" data-testid="manual-notice">
+            <p className="text-sm text-pb-text">{notice}</p>
+            <button className={BTN_SECONDARY} onClick={() => setNotice(null)}>Dismiss</button>
+          </div>
+        )}
+
         {activeTab === 'season' && (
           <SeasonAdjustmentsTab key={tick + ':season'} players={players} seasons={seasons} grades={grades} refreshAll={refreshAll} onPending={onPending} onSeasonCreated={onSeasonCreated} onGradeCreated={onGradeCreated} />
         )}
         {activeTab === 'game' && (
-          <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} knownValues={knownValues} refreshAll={refreshAll} onPending={onPending} onSeasonCreated={onSeasonCreated} onGradeCreated={onGradeCreated} />
+          <ManualGamesTab key={tick + ':game'} players={players} seasons={seasons} grades={grades} knownValues={knownValues} refreshAll={refreshAll} onPending={onPending} onNotice={setNotice} onSeasonCreated={onSeasonCreated} onGradeCreated={onGradeCreated} />
         )}
         {activeTab === 'import' && (
           // A STABLE key, deliberately: the wizard owns its own state and
