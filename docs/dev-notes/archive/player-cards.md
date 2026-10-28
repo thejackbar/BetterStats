@@ -165,3 +165,6 @@ Asked for: let clubs make their own designs for packs, with uploaded images or b
 
 Verified: `verify_player_cards.py` (473; the control run on the previous commit has no pack designs to test, so the new section is skipped there), `verify_merge_carry.py`, `verify_player_page_dashboard.py`, `verify_player_dashboard_and_fines.py`, `audit_route_access.py`; browser `_designs_` (33), `_admin_`, `_page_`, `_community_`, `_social_`, first suite.
 
+## v9.132.8 (2026-10-28): heads behind the name
+
+Reported from a screenshot of the book: on full-photo cards the top of the head was hidden by the player's name. `CardFaces.Portrait` now starts the hero photo 64px down with a 22px fade-in; the bottom edge is unchanged. Applies to regular and special cards. The public share card has the same crop and was left alone (not reported). Verified with the new `_hero_` browser suite (7) plus the page, first and v2 suites.

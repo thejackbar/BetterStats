@@ -20,6 +20,8 @@ const FRAME = 7
 const PANEL_W = CARD_W - FRAME * 2
 const PANEL_H = CARD_H - FRAME * 2
 const BAND_H = 92
+const HERO_TOP = 64    // how far down a full-photo card the picture starts, so heads are not hidden behind the name
+const HERO_FADE = 22   // how far the top of that picture takes to fade in
 const MONO = "'JetBrains Mono', monospace"
 const SANS = "'Inter', sans-serif"
 const INK = '#050a0c'
@@ -83,7 +85,10 @@ function Portrait({ card, club, accent, dim }) {
   const photo = usePhotoMode(card.hero_photo_url, card.photo_url)
   const light = `color-mix(in srgb, ${accent} 55%, #fff)`
   if (photo.mode === 'hero') {
-    return <img src={photo.src} alt="" onError={photo.fail} style={{ position: 'absolute', left: 0, top: 0, width: PANEL_W, height: PANEL_H - 40, objectFit: 'cover', objectPosition: '50% 18%', opacity: dim ? 0.92 : 1 }} />
+    // The photo starts HERO_TOP down the card so the top of the head clears the name (the photos are tight crops, with the head
+    // touching their top edge), and fades in over HERO_FADE so it has no hard edge against the card. The bottom stays where it was,
+    // under the band, so only that hidden part of the picture is lost.
+    return <img src={photo.src} alt="" data-card-hero onError={photo.fail} style={{ position: 'absolute', left: 0, top: HERO_TOP, width: PANEL_W, height: PANEL_H - 40 - HERO_TOP, objectFit: 'cover', objectPosition: '50% 0%', opacity: dim ? 0.92 : 1, WebkitMaskImage: `linear-gradient(to bottom, transparent 0, #000 ${HERO_FADE}px)`, maskImage: `linear-gradient(to bottom, transparent 0, #000 ${HERO_FADE}px)` }} />
   }
   const C = 176
   if (photo.mode === 'head') {
