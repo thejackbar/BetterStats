@@ -198,3 +198,4 @@
 | &nbsp;&nbsp;The review, and what it changed (v9.64.1) | rules extracted | Rules 30, 31; Flag 7 |
 | &nbsp;&nbsp;Hamilton's second ask was unmet (v9.64.2) | rules extracted | Rule 6; Verify |
 | &nbsp;&nbsp;The order of the competition pills (v9.65.0) | rules extracted | Rule 32; Verify |
+- A fixture CA marks ABANDONED counts as a match for a named player once play started (a scored innings, a real batting line or a bowling spell); a washout and CANCELLED never do. One predicate: `game_status.abandoned_without_play_sql`, injected into the `superseded_ddl` views as `__OFF_*__` placeholders. `ca_called_off` (COMPLETED, both teams ABANDONED) is deliberately unchanged. Fees follow it (v9.134.5).
