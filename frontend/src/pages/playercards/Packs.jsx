@@ -42,6 +42,7 @@ const GROUPS = [
       ['anzac_day', '25 April.'],
       ['mystery', 'Now and then, on a day nobody sees coming.'],
       ['event', 'Your club can also hand one out for a big day, like a Test match: one on each day it runs.'],
+      ['custom', 'Your club can create a pack for any reason and give it to everyone, or to a few players.'],
     ],
   },
 ]

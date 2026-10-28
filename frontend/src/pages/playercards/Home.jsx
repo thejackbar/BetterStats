@@ -55,7 +55,7 @@ export function PackBlock({ big = false }) {
       </div>
       <div className="flex flex-wrap items-center gap-4">
         <button type="button" onClick={() => startPack(next)} data-open-pack aria-label="Open a pack" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer' }}>
-          <div className="cc-float"><PackArt source={next.source} label={next.label} design={next.design} club={club} accent={accent} display={display} width={big ? 130 : 110} glow /></div>
+          <div className="cc-float"><PackArt source={next.source} label={next.label} design={next.design} quality={next.quality} club={club} accent={accent} display={display} width={big ? 130 : 110} glow /></div>
         </button>
         <div className="flex flex-col gap-2">
           <button type="button" onClick={() => startPack(next)} data-open-next style={{ padding: '11px 18px', borderRadius: 12, background: accent, color: onColor(accent), font: `700 12px ${MONO}`, letterSpacing: 1.4, textTransform: 'uppercase' }}>Open a pack</button>

@@ -21,6 +21,7 @@ const CLUB = { name: 'Verify CC', short_name: 'Verify', slug: 'verify-cc', logo_
 const state = {
   settings: { enabled: true, include_juniors: false, weekly_packs: 1, timezone: null, effective_timezone: 'Australia/Perth', event_packs_enabled: true, starter_gifts: 'minimal' },
   events: [],
+  gifts: [],
   players: [
     { id: 'a1', display_name: 'Adams, Brian', hidden: false, in_pool: true, matches: 260, rarity: 81, tier: 'epic', excluded: null },
     { id: 'b2', display_name: 'Baker, Chris', hidden: false, in_pool: true, matches: 12, rarity: 22, tier: 'common', excluded: null },
@@ -29,8 +30,10 @@ const state = {
     { id: 'e5', display_name: 'New, Nick', hidden: false, in_pool: false, matches: 0, rarity: 1, tier: 'common', excluded: null },
   ],
 }
+const QUALITIES = [['standard', 'Standard', 1, 5], ['boosted', 'Boosted', 2, 8], ['special', 'Special', 2, 10], ['premium', 'Premium', 3, 10], ['elite', 'Elite', 4, 15], ['legendary', 'Legendary', 4, 15]]
+  .map(([key, label, rare_plus, special_pct]) => ({ key, label, line: `${label} line`, rare_plus, special_pct, odds: { common: 40, rare: 35, epic: 20, legendary: 5 } }))
 const settingsPayload = () => ({
-  club: CLUB, settings: state.settings, events: state.events,
+  club: CLUB, settings: state.settings, events: state.events, gifts: state.gifts, max_gift_qty: 10, qualities: QUALITIES,
   timezones: [{ id: 'Australia/Perth', label: 'Western Australia' }, { id: 'Australia/Sydney', label: 'New South Wales, ACT' }],
   max_weekly_packs: 10, link: { path: '/playerdash/tok123' },
   pool: { size: state.players.filter((p) => p.in_pool).length, players: state.players.length }, players: state.players,
@@ -114,7 +117,13 @@ const run = async () => {
       const rows = SWAPS.filter((s) => (st === 'all' ? true : s.status === st)).filter((s) => !u.searchParams.get('q') || (s.from.name + s.to.name).toLowerCase().includes(u.searchParams.get('q').toLowerCase()))
       return json({ total: rows.length, counts: { accepted: 1, declined: 1, cancelled: 1, pending: 1, expired: 1 }, swaps: rows, offset: 0, limit: 50 })
     }
-    if (path === '/player-cards/events' && method === 'POST') { state.events.push({ id: `e${state.events.length + 1}`, title: body.title, starts_on: body.starts_on, ends_on: body.ends_on || body.starts_on, per_day: body.per_day }); return json(settingsPayload()) }
+    if (path === '/player-cards/events' && method === 'POST') { state.events.push({ id: `e${state.events.length + 1}`, title: body.title, starts_on: body.starts_on, ends_on: body.ends_on || body.starts_on, per_day: body.per_day, quality: body.quality }); return json(settingsPayload()) }
+    if (path === '/player-cards/gifts' && method === 'POST') {
+      const n = body.audience === 'all' ? 3 : body.player_ids.length
+      const gift = { id: `g${state.gifts.length + 1}`, title: body.title, quality: body.quality, qty: body.qty, audience: body.audience, players: n, packs: n * body.qty, opened: 0, created_at: '2026-10-28T01:00:00Z' }
+      state.gifts.unshift(gift)
+      return json({ gift, ...settingsPayload() })
+    }
     const evDel = path.match(/\/player-cards\/events\/([^/]+)$/)
     if (evDel && method === 'DELETE') { state.events = state.events.filter((e) => e.id !== evDel[1]); return json(settingsPayload()) }
     if (path === '/player-cards/trim-gifts') return json(body.apply ? { cards: 14, players: 6, applied: true } : { cards: 14, players: 6, applied: false })
@@ -270,15 +279,47 @@ const run = async () => {
   await page.locator('[data-trim-apply]').click()
   await page.waitForFunction(() => /Done\./.test(document.querySelector('[data-trim-result]').innerText))
   check('...and only a second, deliberate click applies it', JSON.stringify(calls.filter((c) => /trim-gifts/.test(c.path)).pop().body) === '{"apply":true}')
+  await page.locator('[data-create-pack]').scrollIntoViewIfNeeded()
+  await shot('09-make-a-pack')
+  check('the create form starts on "give them out now" with nothing to press until it has a name', (await page.locator('[data-when-now]').isChecked()) && (await page.getByRole('button', { name: /^Give .* now$/ }).isDisabled()))
+  check('every quality is offered with what it guarantees and how it is weighted', (await page.locator('[data-quality]').count()) === 6 && /At least 4 of 5 Rare or better/.test(await page.locator('[data-quality="legendary"]').innerText()) && /Epic 20%/.test(await page.locator('[data-quality="elite"]').innerText()))
+  check('special is picked to begin with', (await page.locator('[data-quality="special"]').getAttribute('aria-checked')) === 'true')
+  await page.getByLabel('Name of the pack').fill('Grand Final winners')
+  await page.locator('[data-quality="legendary"]').click()
+  await page.getByLabel('Packs for each player').selectOption('2')
+  check('the button says how many packs go out to how many players', (await page.getByRole('button', { name: /^Give 6 packs now$/ }).count()) === 1 && /2 packs each to 3 players/.test(await page.locator('[data-create-pack]').innerText()))
+  check('the preview pack takes the name and shows the quality in stars', /Grand Final winners/i.test(await page.locator('[data-create-preview] [data-pack-name]').innerText()) && (await page.locator('[data-create-preview] [data-pack-stars]').getAttribute('data-pack-stars')) === '5')
+  calls.length = 0
+  await page.getByRole('button', { name: /^Give 6 packs now$/ }).click()
+  await page.waitForSelector('[data-create-done]')
+  const gift = calls.find((c) => c.path === '/player-cards/gifts')
+  check('giving sends the name, quality, quantity, audience and a request id, and nothing else', gift && JSON.stringify(Object.keys(gift.body)) === JSON.stringify(['title', 'quality', 'qty', 'audience', 'player_ids', 'request_id']) && gift.body.title === 'Grand Final winners' && gift.body.quality === 'legendary' && gift.body.qty === 2 && gift.body.audience === 'all' && gift.body.player_ids.length === 0 && /^[0-9a-f-]{36}$/.test(gift.body.request_id), JSON.stringify(gift?.body))
+  check('it says what happened, and the gift is listed with its quality', /Gave 6 packs to 3 players/.test(await page.locator('[data-create-done]').innerText()) && /Grand Final winners/.test(await page.locator('[data-gift="g1"]').innerText()) && /Legendary/.test(await page.locator('[data-gift="g1"]').innerText()))
+  check('the name is cleared ready for the next', (await page.getByLabel('Name of the pack').inputValue()) === '')
+  await page.getByLabel('Name of the pack').fill('Thanks')
+  await page.getByLabel('Who gets them').selectOption('players')
+  check('choosing players shows a list, and nothing can be given until one is picked', (await page.locator('[data-player-picker]').count()) === 1 && (await page.getByRole('button', { name: /^Give .* now$/ }).isDisabled()))
+  check('players who cannot have cards (a junior with juniors off, a privacy-hidden player) are not offered', (await page.locator('[data-pick-player]').count()) === 3 && (await page.locator('[data-pick-player="c3"]').count()) === 0 && (await page.locator('[data-pick-player="d4"]').count()) === 0)
+  await page.locator('[data-pick-player="a1"] input').check()
+  check('picking updates the count', /1 player chosen/.test(await page.locator('[data-picked-count]').innerText()))
+  calls.length = 0
+  const first = gift.body.request_id
+  await page.getByRole('button', { name: /^Give 2 packs now$/ }).click()
+  await page.waitForFunction(() => document.querySelectorAll('[data-gift]').length === 2)
+  const g2 = calls.find((c) => c.path === '/player-cards/gifts')
+  check('a gift to chosen players sends their ids, with a fresh request id', g2 && g2.body.audience === 'players' && JSON.stringify(g2.body.player_ids) === '["a1"]' && g2.body.request_id !== first, JSON.stringify(g2?.body))
+  await page.getByLabel('Who gets them').selectOption('all')
+  await page.locator('[data-when-later]').click()
   check('scheduling needs a name and a first day', await page.getByRole('button', { name: 'Schedule it' }).isDisabled())
   await page.getByLabel('Name of the pack').fill('Australia v South Africa, First Test')
+  await page.locator('[data-quality="elite"]').click()
   await page.getByLabel('First day').fill('2026-12-03')
   await page.getByLabel('Last day').fill('2026-12-07')
   await page.getByRole('button', { name: 'Schedule it' }).click()
   await page.waitForSelector('[data-event="e1"]')
   const ev = calls.filter((c) => /\/player-cards\/events$/.test(c.path)).pop()
-  check('a scheduled pack sends its name, both days and one a day', JSON.stringify(ev.body) === '{"title":"Australia v South Africa, First Test","starts_on":"2026-12-03","ends_on":"2026-12-07","per_day":true}', JSON.stringify(ev.body))
-  check('it is listed with its days', /First Test/.test(await page.locator('[data-event="e1"]').innerText()) && /a pack each day/.test(await page.locator('[data-event="e1"]').innerText()))
+  check('a scheduled pack sends its name, both days, one a day and its quality', JSON.stringify(ev.body) === '{"title":"Australia v South Africa, First Test","starts_on":"2026-12-03","ends_on":"2026-12-07","per_day":true,"quality":"elite"}', JSON.stringify(ev.body))
+  check('it is listed with its days and its quality', /Elite/.test(await page.locator('[data-event="e1"]').innerText()) && /First Test/.test(await page.locator('[data-event="e1"]').innerText()) && /a pack each day/.test(await page.locator('[data-event="e1"]').innerText()))
   await page.locator('[data-event="e1"] button', { hasText: 'Remove' }).click()
   await page.waitForFunction(() => !document.querySelector('[data-event="e1"]'))
   check('removing it sends a DELETE', calls.some((c) => c.method === 'DELETE' && /events\/e1$/.test(c.path)))

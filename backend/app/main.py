@@ -4554,6 +4554,10 @@ async def lifespan(app: FastAPI):
         from app.services.player_card_designs_ddl import STATEMENTS as _PLAYER_CARD_DESIGNS_DDL
         for _stmt in _PLAYER_CARD_DESIGNS_DDL:
             await conn.execute(text(_stmt))
+        # Migration 374: packs a club creates by hand, and a quality for any pack. Same one-copy rule.
+        from app.services.player_card_gifts_ddl import STATEMENTS as _PLAYER_CARD_GIFTS_DDL
+        for _stmt in _PLAYER_CARD_GIFTS_DDL:
+            await conn.execute(text(_stmt))
         # Migration 365: automatic premierships (round name, honour-to-scorecard link, auto marker,
         # exclusions). Same one-copy rule: this list and alembic's 365 both run
         # services/premierships_ddl.STATEMENTS.

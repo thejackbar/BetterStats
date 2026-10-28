@@ -8,6 +8,7 @@ import { useCardStyle } from '../../components/cards/useCardStyle'
 import { CATEGORIES } from '../../components/cards/CardGallery'
 import { PACKS, TIERS } from '../../components/cards/cardTheme'
 import PackDesigns from './PackDesigns'
+import CreatePacks from './CreatePacks'
 
 // Player Cards, for the club's admin. Eight tabs: how the cards are being used (Overview), every player and what
 // they hold (Players, then a click for their whole collection), what came in lately (Activity), every card that
@@ -443,57 +444,6 @@ function SwapsTab() {
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────────────────────────────────────────
-const dayLabel = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
-
-// Packs the club schedules itself for a big day: a Test match, a club day. Players pick one up the day they open their page.
-function EventPacks({ events, setData }) {
-  const toast = useToast()
-  const [title, setTitle] = useState('')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const [perDay, setPerDay] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const add = async (e) => {
-    e.preventDefault()
-    if (!title.trim() || !from) return
-    setBusy(true)
-    try {
-      setData(await api.addPlayerCardEvent({ title: title.trim(), starts_on: from, ends_on: to || null, per_day: perDay }))
-      setTitle(''); setFrom(''); setTo('')
-      toast?.success?.('Scheduled')
-    } catch (err) { toast?.error?.(err?.message || 'Could not schedule that.') } finally { setBusy(false) }
-  }
-  const remove = async (ev) => {
-    try { setData(await api.deletePlayerCardEvent(ev.id)) } catch (err) { toast?.error?.(err?.message || 'Could not remove that.') }
-  }
-  return (
-    <Card title="Scheduled packs">
-      <p className="text-[12.5px] text-pb-faint mb-3">Hand out a pack on a big day, like a Test match: Australia v South Africa, First Test, for each day it runs. Players pick one up the day they open their page. A pack already given stays with the player if you remove the day.</p>
-      <form onSubmit={add} className="grid gap-3 sm:grid-cols-2" data-event-form>
-        <Field label="Name of the pack"><input value={title} maxLength={80} onChange={(e) => setTitle(e.target.value)} placeholder="Australia v South Africa, First Test" aria-label="Name of the pack" className="w-full bg-pb-surface2 border border-pb-hairline2 rounded px-2.5 py-1.5 text-sm" /></Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="First day"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="First day" className="w-full bg-pb-surface2 border border-pb-hairline2 rounded px-2.5 py-1.5 text-sm" /></Field>
-          <Field label="Last day"><input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} aria-label="Last day" className="w-full bg-pb-surface2 border border-pb-hairline2 rounded px-2.5 py-1.5 text-sm" /></Field>
-        </div>
-        <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={perDay} onChange={(e) => setPerDay(e.target.checked)} data-event-per-day /> One pack on each day (otherwise one for the whole run)</label>
-        <div className="sm:col-span-2"><Btn type="submit" disabled={busy || !title.trim() || !from}>{busy ? 'Scheduling…' : 'Schedule it'}</Btn></div>
-      </form>
-      <div className="mt-4 rounded border pb-hairline divide-y divide-pb-hairline" data-event-list>
-        {events.length === 0 && <div className="p-3 text-sm text-pb-faint">Nothing scheduled.</div>}
-        {events.map((ev) => (
-          <div key={ev.id} className="flex items-center gap-3 px-3 py-2" data-event={ev.id}>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm text-pb-text">{ev.title}</div>
-              <div className="text-[11.5px] text-pb-faint">{ev.starts_on === ev.ends_on ? dayLabel(ev.starts_on) : `${dayLabel(ev.starts_on)} to ${dayLabel(ev.ends_on)}`} · {ev.per_day ? 'a pack each day' : 'one pack'}</div>
-            </div>
-            <Btn sm onClick={() => remove(ev)}>Remove</Btn>
-          </div>
-        ))}
-      </div>
-    </Card>
-  )
-}
-
 // What a player starts with. A club on the minimal setting gives the debut card and the latest milestone card; older gifts can be tidied.
 function StartingCards({ s, saving, save }) {
   const toast = useToast()
@@ -603,7 +553,7 @@ function SettingsTab({ data, setData }) {
         </div>
       </Card>
       <StartingCards s={s} saving={saving} save={save} />
-      <EventPacks events={data.events || []} setData={setData} />
+      <CreatePacks data={data} setData={setData} />
       <Card title="Where players find them">
         {link ? (
           <div className="flex flex-wrap items-center gap-2">

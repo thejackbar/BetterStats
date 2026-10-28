@@ -194,3 +194,12 @@ Reported from a screenshot of the book: on full-photo cards the top of the head 
 
 Reported: a player's picture updated in the admin Players profile did not change his card. Two causes were possible and the second is by design. (1) The card snapshot kept the old photo URL for up to 5 minutes; fixed by dropping the snapshot on photo upload and delete. (2) A player with an action shot keeps showing it on the card, whatever the headshot is; the profile hints now say so. Verified in `verify_player_cards.py` (478; the control run without the fix fails the four new photo checks).
 
+## v9.133.1 (2026-10-28): make a pack, quality, and Match Day on match days only
+
+Asked for: replace the Scheduled packs form with a way to quickly create packs, with weighting so special packs give better results; and Match Day packs went out on a day that was not a match day.
+
+- Migration 374 (`player_card_gifts_ddl.py`): `player_card_packs.quality`, `club_card_event_packs.quality`, `club_card_pack_gifts`. Admin: the Make a pack card (`pages/admin/CreatePacks.jsx`) with name, quality ladder (guarantee and odds shown), packs each (1 to 10), everyone or chosen players, and now or on a day or run of days. Recent gifts (with how many are opened) and the scheduled list sit under it.
+- Reading "weighting" as a quality ladder an admin picks from rather than free-form odds: it can be explained to players and compared, and a club cannot make a pack that breaks the economy. Raising the top step is a change in `QUALITIES`.
+- Match Day bug: `_playing_today` treated `played_on` to `end_on` as one run, and a game played over two Saturdays stores the second Saturday in `end_on`, so every day between counted. Now only the first and last day. Repair: `python -m app.scripts.fix_match_day_packs <club|all> [--apply]` takes back the unopened strays (opened ones stay).
+- Verified: `verify_player_cards.py` (512; the control with the old SQL fails "NOT Match Day on the days between"), the other backend suites, browser `_admin_` (82), `_page_`, `_designs_`, `_community_`, `_social_`, first suite.
+

@@ -147,7 +147,7 @@ const run = async () => {
     check('the swaps tile says one is asking you', /1 asking you/.test(await page.locator('[data-tile="swaps"]').textContent()))
     check('the collection tile counts the set', /3\s*\/\s*14/.test(await page.locator('[data-tile="collection"]').textContent()))
     await goNav(page, 'packs')
-    check('Packs lists every way a pack arrives, in three groups', (await page.locator('[data-way]').count()) === 22 && (await page.locator('[data-pack-group]').count()) === 3 && /2 packs to open/.test(await page.locator('[data-packs-ready]').textContent()))
+    check('Packs lists every way a pack arrives, in three groups', (await page.locator('[data-way]').count()) === 23 && (await page.locator('[data-pack-group]').count()) === 3 && /2 packs to open/.test(await page.locator('[data-packs-ready]').textContent()))
     await goNav(page, 'how')
     check('How it works has the odds for each tier and seven sections', (await page.locator('[data-odds]').count()) === 4 && (await page.locator('[data-how]').count()) === 7)
     check('...with the odds that the pack uses (60, 28, 10, 2)', /60 in 100/.test(await page.locator('[data-how="packs"]').textContent()) && /2 in 100/.test(await page.locator('[data-how="packs"]').textContent()))

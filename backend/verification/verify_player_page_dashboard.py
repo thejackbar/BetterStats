@@ -73,7 +73,7 @@ async def main():
     await base.build_schema()
     async with engine.begin() as conn:
         for mod in ("selection_lock_ddl", "team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl", "audit_ddl",
-                    "availability_maybe_ddl", "availability_site_link_ddl", "player_contact_ddl", "fines_ddl", "fines_cap_ddl", "fantasy_queue_ddl", "player_cards_ddl", "player_card_swaps_ddl", "player_card_social_ddl", "player_card_community_ddl", "player_card_packs_ddl", "player_card_designs_ddl"):
+                    "availability_maybe_ddl", "availability_site_link_ddl", "player_contact_ddl", "fines_ddl", "fines_cap_ddl", "fantasy_queue_ddl", "player_cards_ddl", "player_card_swaps_ddl", "player_card_social_ddl", "player_card_community_ddl", "player_card_packs_ddl", "player_card_designs_ddl", "player_card_gifts_ddl"):
             m = guarded(f"app.services.{mod}")
             for stmt in (m.STATEMENTS if m else []):
                 await conn.execute(text(stmt))
