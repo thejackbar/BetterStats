@@ -30,6 +30,7 @@ async def run(org_ref: str, apply: bool) -> int:
                  WHERE o.archived_at IS NULL
                    AND (o.id IN (SELECT home_org_id FROM games WHERE is_final = TRUE AND round_name IS NOT NULL
                                  UNION SELECT away_org_id FROM games WHERE is_final = TRUE AND round_name IS NOT NULL)
+                        OR o.id IN (SELECT organisation_id FROM manual_games WHERE is_grand_final = TRUE)
                         OR o.id IN (SELECT org_id FROM player_achievements WHERE auto_created = TRUE))
                  ORDER BY o.name"""))).mappings().all()
         else:
@@ -54,7 +55,8 @@ async def run(org_ref: str, apply: bool) -> int:
             print(f"\n{c['name']}: " + ", ".join(
                 f"{k}={v}" for k, v in rep.items() if k not in ("preview", "unresolved")))
             for u in rep.get("unresolved", []):
-                print(f"   no winner on the card: {u['played_at']} {u['grade_name']} v {u['opponent']}")
+                why = u.get('reason') or 'no winner on the card'
+                print(f"   {why}: {u['played_at']} {u['grade_name']} v {u['opponent']}")
         if not apply:
             print("\nDry run — re-run with --apply to write.")
         return 0

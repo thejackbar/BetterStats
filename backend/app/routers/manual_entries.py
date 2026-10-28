@@ -19,6 +19,7 @@ import io
 import json
 import re
 import uuid
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone, date as date_cls
 from typing import Optional
 
@@ -52,7 +53,7 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.services import dismissal, game_import_staging, import_cleanup, manual_game_check, manual_result, scorebook_innings
+from app.services import dismissal, game_import_staging, import_cleanup, manual_game_check, manual_premiership, manual_result, premierships, scorebook_innings
 from app.services import import_ingest as ingest
 from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.season_resolve import (
@@ -226,6 +227,10 @@ class ManualGameIn(BaseModel):
     result: Optional[str] = None
     winning_team: Optional[str] = None
     is_final: bool = False
+    # This match was the grand final. None (or left out) means "not said": a create stores False
+    # and an edit leaves the stored value alone, so a form that predates the field cannot clear a
+    # flag somebody set. An explicit true or false is a decision. A grand final is always a final.
+    is_grand_final: Optional[bool] = None
     match_format: Optional[str] = None
     notes: Optional[str] = None
     # Opposition club's Grassroots org GUID (from the CA club search) — links the manual
@@ -243,7 +248,66 @@ class ManualGameIn(BaseModel):
     innings: list[ManualInningsIn] = Field(default_factory=list)
 
 
+class ManualGameDetailsIn(BaseModel):
+    """The match's own fields, edited without touching its scorecard.
+
+    Every field is optional and only a field the caller SENDS is applied (``model_fields_set``):
+    a field left out is left alone, and an explicit null or empty text clears a text field. The
+    two flags and the season cannot be cleared by null, which reads as "not sent". The innings,
+    batting, bowling, fielding, fall of wickets and the stored scorecard are never read or changed
+    here, so setting a grand final on an imported scorebook match cannot lose any of it.
+    """
+    played_at: Optional[str] = None  # YYYY-MM-DD
+    home_team: Optional[str] = None
+    away_team: Optional[str] = None
+    opposition: Optional[str] = None
+    venue: Optional[str] = None
+    result: Optional[str] = None
+    winning_team: Optional[str] = None
+    is_final: Optional[bool] = None
+    is_grand_final: Optional[bool] = None
+    match_format: Optional[str] = None
+    notes: Optional[str] = None
+    season_id: Optional[str] = None
+    grade_id: Optional[str] = None
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+
+
+async def _premiership_follow_up(club_id: uuid.UUID, *, was: bool, now: bool) -> None:
+    """Bring the club's automatic premierships in line after a game's grand-final state may have changed.
+
+    Runs only when the game was, or now is, marked a grand final: setting the flag earns the
+    honours, clearing it (or deleting the game) takes the automatic ones back, and a game never
+    marked costs nothing. On its own session after the caller's commit, and never raises, so a
+    premiership problem cannot fail a scorecard save.
+    """
+    if was or now:
+        await premierships.maybe_reconcile(club_id)
+
+
+async def _grand_final_status(db: AsyncSession, club: Organisation, game: ManualGame) -> Optional[dict]:
+    """What marking this game as the grand final does for the club's premierships, in words.
+
+    None for a game that is not marked. Otherwise ``state`` is ``won`` (the players on the card get
+    the premiership), ``lost`` (our side did not win it, so nothing is written), ``undecided`` (the
+    winner and result line do not say, ``reason`` names why) or ``no_grade`` (the honour is filed
+    under a grade and the game has none). It reads the same rules the honours are written by, so
+    what a person is told cannot differ from what happens.
+    """
+    if not game.is_grand_final:
+        return None
+    outcome, reason = manual_premiership.manual_outcome(game, club)
+    if outcome == manual_premiership.LOST:
+        return {"state": "lost", "players": 0, "reason": ""}
+    if outcome is None:
+        return {"state": "undecided", "players": 0, "reason": reason}
+    if game.grade_id is None:
+        return {"state": "no_grade", "players": 0,
+                "reason": "the game has no grade, so the premiership has no team to name"}
+    squad = await manual_premiership.squad(db, [game.id], club.id)
+    return {"state": "won", "players": len(squad.get(str(game.id), [])), "reason": ""}
 
 
 def _to_uuid(s: str, label: str) -> uuid.UUID:
@@ -1059,7 +1123,7 @@ async def games_template(
     match = {
         "game_key": "G1", "played_at": "2010-11-13", "opposition": "Bayswater",
         "venue": "Hyde Park", "season_name": "Summer 2010/11", "grade_name": "1st Grade",
-        "is_final": "false", "match_format": "40-over", "home_team": ours,
+        "is_final": "false", "is_grand_final": "false", "match_format": "40-over", "home_team": ours,
         "away_team": "Bayswater", "winning_team": ours, "result": "Won by 70 runs",
     }
     rows = [
@@ -1701,7 +1765,9 @@ async def create_manual_game(
         venue=data.venue,
         result=data.result,
         winning_team=data.winning_team,
-        is_final=data.is_final,
+        # A grand final is always a final.
+        is_final=bool(data.is_final or data.is_grand_final),
+        is_grand_final=bool(data.is_grand_final),
         match_format=data.match_format,
         notes=data.notes,
         opp_org_id=data.opp_org_id,
@@ -1741,6 +1807,8 @@ async def create_manual_game(
         data.batting_innings + data.bowling_spells + data.fielding_stats
     ))
     out = _row_to_dict(game)
+    await _premiership_follow_up(club.id, was=False, now=bool(out.get("is_grand_final")))
+    out["grand_final"] = await _grand_final_status(db, club, game)
     if settled:
         out["winner_corrected"] = manual_result.describe(settled)
     return out
@@ -1794,6 +1862,12 @@ async def update_manual_game(
     game.result = data.result
     game.winning_team = data.winning_team
     game.is_final = data.is_final
+    # Only a flag the form actually sent is a decision (an absent key is not a clear).
+    was_grand_final = bool(before.get("is_grand_final"))
+    if "is_grand_final" in data.model_fields_set and data.is_grand_final is not None:
+        game.is_grand_final = data.is_grand_final
+    if game.is_grand_final:
+        game.is_final = True     # a grand final is always a final
     game.match_format = data.match_format
     game.notes = data.notes
     # Only overwrite the scorecard-upload fields when the caller actually sends them,
@@ -1836,9 +1910,106 @@ async def update_manual_game(
         db, club.id,
         old_player_ids + _extract_player_ids(data.batting_innings + data.bowling_spells + data.fielding_stats)
     )
+    await _premiership_follow_up(club.id, was=was_grand_final, now=bool(after.get("is_grand_final")))
+    after = {**after, "grand_final": await _grand_final_status(db, club, game)}
     if settled:
         return {**after, "winner_corrected": manual_result.describe(settled)}
     return after
+
+
+# The header fields the match-details edit can change, in the order they are logged.
+_DETAIL_TEXT_FIELDS = ("home_team", "away_team", "opposition", "venue", "result", "winning_team",
+                       "match_format", "notes")
+_DETAIL_FIELDS = ("played_at", *_DETAIL_TEXT_FIELDS, "is_final", "is_grand_final", "season_id", "grade_id")
+
+
+@router.patch("/games/{game_id}/details")
+async def update_manual_game_details(
+    game_id: str,
+    data: ManualGameDetailsIn,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit a hand-entered or imported match's own fields, leaving its scorecard exactly as it is.
+
+    The full edit (PATCH /games/{id}) replaces the batting, bowling, fielding and innings rows from
+    the form, which is right for correcting a card and wrong for "set this as the grand final" on
+    a scorebook import whose fall of wickets and opposition innings the form does not carry. This
+    changes only the fields the caller sends. It is logged as its own kind of change
+    (``update_details``) holding only what changed, and undone by putting only that back.
+    """
+    gid = _to_uuid(game_id, "manual game")
+    game = await db.get(ManualGame, gid)
+    if not game or game.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Manual game not found")
+    sent = data.model_fields_set
+
+    old = {k: getattr(game, k) for k in _DETAIL_FIELDS}
+
+    if "played_at" in sent:
+        game.played_at = _parse_date(data.played_at) if data.played_at else None
+    for k in _DETAIL_TEXT_FIELDS:
+        if k in sent:
+            v = getattr(data, k)
+            setattr(game, k, (v.strip() or None) if isinstance(v, str) else None)
+    for k in ("is_final", "is_grand_final"):
+        if k in sent and getattr(data, k) is not None:
+            setattr(game, k, bool(getattr(data, k)))
+    if game.is_grand_final:
+        game.is_final = True     # a grand final is always a final
+
+    if "season_id" in sent and data.season_id:
+        new_season = _to_uuid(data.season_id, "season")
+        await _assert_season_in_org(db, new_season, club.id)
+        if new_season != game.season_id:
+            if "grade_id" not in sent and game.grade_id is not None:
+                raise HTTPException(status_code=422,
+                                    detail="Choose a grade in the new season, or clear the grade, when you move a game to another season.")
+            game.season_id = new_season
+    if "grade_id" in sent:
+        if data.grade_id:
+            new_grade = _to_uuid(data.grade_id, "grade")
+            await _assert_grade_in_season(db, new_grade, game.season_id)
+            game.grade_id = new_grade
+        else:
+            game.grade_id = None
+
+    settled = None
+    if "winning_team" in sent or "result" in sent:
+        # The same one winner rule every other manual-game write applies (services/manual_result).
+        settled = await manual_result.settle_manual_game(db, game, club)
+
+    def _plain(v):
+        return str(v) if isinstance(v, uuid.UUID) else (v.isoformat() if hasattr(v, "isoformat") else v)
+
+    changed = [k for k in _DETAIL_FIELDS if getattr(game, k) != old[k]]
+    if not changed:
+        return {**_row_to_dict(game), "changed": [], "grand_final": await _grand_final_status(db, club, game)}
+    game.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    await _log_edit(
+        db,
+        org_id=club.id,
+        user_id=current_user.id,
+        action="update_details",
+        target_table="manual_games",
+        target_id=str(gid),
+        summary=(f"Updated match details ({game.played_at or 'date unknown'}"
+                 + (f" vs {game.opposition}" if game.opposition else "")
+                 + f"): {', '.join(changed)}"),
+        before={k: _plain(old[k]) for k in changed},
+        after={k: _plain(getattr(game, k)) for k in changed},
+    )
+    await db.commit()
+    await db.refresh(game)
+    out = {**_row_to_dict(game), "changed": changed}
+    if settled:
+        out["winner_corrected"] = manual_result.describe(settled)
+    # The honours follow the flag, and a change to who won or which grade it was also moves them.
+    await _premiership_follow_up(club.id, was=bool(old["is_grand_final"]), now=bool(game.is_grand_final))
+    out["grand_final"] = await _grand_final_status(db, club, game)
+    return out
 
 
 @router.delete("/games/{game_id}")
@@ -1886,6 +2057,7 @@ async def delete_manual_game(
     )
     await db.commit()
     await _recompute_milestones(db, club.id, affected_player_ids)
+    await _premiership_follow_up(club.id, was=bool(before.get("is_grand_final")), now=False)
     return {"deleted": True}
 
 
@@ -2174,6 +2346,24 @@ async def undo_edit(
             ))
         else:
             raise HTTPException(status_code=400, detail=f"Cannot undo delete on {table}")
+    elif action == "update_details":
+        # A match-details edit holds only the fields it changed, so undoing it puts only those back.
+        # The scorecard is never read or touched: it was not part of the edit.
+        if table != "manual_games" or not log.before_json:
+            raise HTTPException(status_code=400, detail="No snapshot available for this entry")
+        row = await db.get(ManualGame, _to_uuid(target_id, "manual game"))
+        if not row or row.organisation_id != club.id:
+            raise HTTPException(status_code=404, detail="Target row no longer exists")
+        from datetime import date as _date
+        for k, v in log.before_json.items():
+            if k not in _DETAIL_FIELDS:
+                continue
+            if k == "played_at":
+                v = _date.fromisoformat(v) if isinstance(v, str) and v else None
+            elif k in {"season_id", "grade_id"}:
+                v = uuid.UUID(v) if isinstance(v, str) and v else None
+            setattr(row, k, v)
+        row.updated_at = datetime.now(timezone.utc)
     elif action == "update":
         # Undo update → restore before snapshot
         if not log.before_json:
@@ -2261,6 +2451,10 @@ async def undo_edit(
     log.undone_by_user_id = current_user.id
     await db.commit()
     await _recompute_milestones(db, club.id, undo_player_ids)
+    if table == "manual_games":
+        # Any undo of a game can move a grand final (a flag set, a game back, a game gone), and a
+        # club with no finals costs this one cheap check.
+        await premierships.maybe_reconcile(club.id)
     return {"undone": True, **({"removed": removed_refs} if removed_refs else {})}
 
 
@@ -2311,6 +2505,20 @@ def _parse_bool(v) -> bool:
     if v is None or v == "":
         return False
     return str(v).strip().lower() in {"1", "true", "yes", "y", "t"}
+
+
+def _parse_flag(v) -> Optional[bool]:
+    """A yes/no cell where blank means "the sheet did not say": None, never False.
+
+    ``_parse_bool`` reads a blank as False, which is right for a column the sheet always fills.
+    A column added later (the grand final) is often left blank on rows that predate it, and a
+    re-import that overwrites a game must not read that as a decision to clear the flag.
+    """
+    if isinstance(v, bool):
+        return v
+    if v is None or str(v).strip() == "":
+        return None
+    return _parse_bool(v)
 
 
 _BOWLING_FIGURES_RE = re.compile(r"^\s*(\d+)\s*[-/]\s*(\d+)\s*$")
@@ -2522,7 +2730,7 @@ async def import_season_adjustments(
 
 GAME_CSV_COLUMNS = [
     "game_key", "played_at", "opposition", "venue", "season_name", "grade_name",
-    "is_final", "match_format", "home_team", "away_team", "winning_team", "result",
+    "is_final", "is_grand_final", "match_format", "home_team", "away_team", "winning_team", "result",
     "player_name", "innings_number", "batting_position",
     "batting_runs", "batting_balls", "batting_fours", "batting_sixes",
     "batting_not_out", "did_not_bat", "dismissal_type", "batting_caught_behind",
@@ -2740,6 +2948,7 @@ async def _write_games(
     ignored = 0
     ignored_synced = 0
     winners_corrected: list[dict] = []
+    grand_finals = 0
 
     for game_key, group in by_game.items():
         dup = existing_by_game.get(game_key)
@@ -2793,6 +3002,11 @@ async def _write_games(
                     except Exception:
                         raise ValueError(f"Invalid played_at date: {first['played_at']!r}")
 
+                # The grand-final column: a blank cell is "the sheet did not say", so a match this
+                # import replaces keeps the flag it had; only an explicit yes or no is a decision.
+                grand_final = _parse_flag(first.get("is_grand_final"))
+                if grand_final is None:
+                    grand_final = bool((snapshot or {}).get("is_grand_final"))
                 game = ManualGame(
                     organisation_id=club.id,
                     season_id=season.id,
@@ -2804,7 +3018,8 @@ async def _write_games(
                     venue=(first.get("venue") or "").strip() or None,
                     result=(first.get("result") or "").strip() or None,
                     winning_team=(first.get("winning_team") or "").strip() or None,
-                    is_final=_parse_bool(first.get("is_final")),
+                    is_final=_parse_bool(first.get("is_final")) or grand_final,
+                    is_grand_final=grand_final,
                     match_format=(first.get("match_format") or "").strip() or None,
                     notes=None,
                     created_by_user_id=user_id,
@@ -2979,6 +3194,8 @@ async def _write_games(
 
         created_game_ids.append(game_id)
         affected_player_ids |= game_player_ids
+        if grand_final or (snapshot or {}).get("is_grand_final"):
+            grand_finals += 1
         if settled:
             winners_corrected.append(settled)
         if snapshot is not None:
@@ -3007,6 +3224,9 @@ async def _write_games(
         "errors": errors,
         "player_ids": affected_player_ids,
         "winners_corrected": winners_corrected,
+        # Games written that are, or replaced, a marked grand final: the callers bring the club's
+        # automatic premierships in line once they have committed.
+        "grand_finals": grand_finals,
     }
 
 
@@ -3087,6 +3307,8 @@ async def import_manual_games(
         )
         await db.commit()
         await _recompute_milestones(db, club.id, affected_player_ids)
+        if written.get("grand_finals"):
+            await premierships.maybe_reconcile(club.id)
     return summary
 
 
@@ -3194,6 +3416,8 @@ def _canon_header(h: str) -> str:
 
 
 _GAME_HEADER_BY_CANON = {_canon_header(c): c for c in GAME_CSV_COLUMNS}
+# A club writing "Grand Final" as the heading means the grand-final column.
+_GAME_HEADER_BY_CANON["grand_final"] = "is_grand_final"
 _GAME_REQUIRED = ("game_key", "season_name", "player_name")
 
 
@@ -3492,6 +3716,39 @@ async def _match_unmatched_by_scores(
     return matched
 
 
+def _grand_final_notes(by_game: dict, club: Organisation) -> tuple[int, list[dict]]:
+    """``(marked, undecided)`` for the sheet's matches marked as a grand final.
+
+    ``undecided`` are the marked matches whose own winner and result line do not say our side won
+    or lost, so no premiership can be written for them: the same reading the premiership code
+    makes (``services/manual_premiership``), so the review and the honours cannot disagree. A
+    marked match we LOST is fine and not listed. Nothing here refuses an import.
+    """
+    marked = 0
+    undecided: list[dict] = []
+    for key, group in by_game.items():
+        first = group[0][1]
+        if not _parse_flag(first.get("is_grand_final")):
+            continue
+        marked += 1
+        outcome, reason = manual_premiership.manual_outcome(SimpleNamespace(
+            home_team=first.get("home_team"), away_team=first.get("away_team"),
+            opposition=first.get("opposition"), winning_team=first.get("winning_team"),
+            result=first.get("result")), club)
+        if outcome is None:
+            undecided.append({"game_key": key, "reason": reason,
+                              "played_at": (first.get("played_at") or "").strip() or None})
+    return marked, undecided
+
+
+def _grand_final_warning(undecided: list[dict]) -> str:
+    names = ", ".join(f"{u['game_key']}" + (f" ({u['played_at']})" if u.get("played_at") else "")
+                      for u in undecided[:6]) + ("…" if len(undecided) > 6 else "")
+    return (f"{len(undecided)} match(es) marked as a grand final do not say who won ({names}). "
+            "No premiership is written for them until the winning team or the result line names "
+            "your side. They import either way.")
+
+
 async def _resolve_games(
     db: AsyncSession,
     club: Organisation,
@@ -3696,9 +3953,14 @@ async def _resolve_games(
                         + ", ".join(ambiguous[:5]))
     if group_errors:
         warnings.append(f"{len(group_errors)} row(s) have no game_key and will be skipped.")
+    gf_marked, gf_undecided = _grand_final_notes(by_game, club)
+    if gf_undecided:
+        warnings.append(_grand_final_warning(gf_undecided))
 
     return {
         "games": len(by_game),
+        "grand_finals": gf_marked,
+        "grand_finals_undecided": gf_undecided,
         "rows": len(rows),
         "seasons": [{"raw_label": lb, **m} for lb, m in smatch.items()],
         "grades": [{"raw_label": lb, "used_in_seasons": sorted(grade_pairs.get(lb, ())), **m}
@@ -4000,6 +4262,8 @@ async def commit_manual_games(
 
     for change in written.get("winners_corrected") or []:
         warnings.append(manual_result.describe(change))
+    if resolved.get("grand_finals_undecided"):
+        warnings.append(_grand_final_warning(resolved["grand_finals_undecided"]))
 
     parts = [f"{games_new} games"]
     if overwritten:
@@ -4042,7 +4306,11 @@ async def commit_manual_games(
         await game_import_staging.discard(db, token=req.token, org_id=club.id)
     await db.commit()
     await _recompute_milestones(db, club.id, affected_player_ids)
+    if written.get("grand_finals"):
+        # A marked grand final earns its honours now, not at the next sync.
+        await premierships.maybe_reconcile(club.id)
     return {
+        "grand_finals": written.get("grand_finals", 0),
         "games_created": games_new,
         "games_overwritten": len(overwritten),
         "games_superseded": len(superseded),

@@ -25,6 +25,11 @@ What is stored, and what is not:
 * A player who asked to be removed (``players.privacy_hidden_at``) gets no automatic honour.
 * Nothing is guessed. A grand final with no winner on the card (a draw, a
   no-result, a missing round name) writes nothing and is reported.
+* A hand-entered or imported game counts too, when somebody marked it as the grand final
+  (``manual_games.is_grand_final``): the squad is the players its card records, and whether the
+  club won is read by ``services/manual_premiership`` from the winner and result line the club
+  typed. Its honours link to the manual game's id, so the scorecard page and the Premierships
+  page work the same way.
 
 ``reconcile`` is idempotent and takes an advisory lock, so a sync finishing
 while an admin presses the button cannot write a player twice.
@@ -34,13 +39,14 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from types import SimpleNamespace
 from typing import Optional
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation, async_session_maker
-from app.services import honours, junior_hiding
+from app.services import honours, junior_hiding, manual_premiership
 from app.services.club_match import fixture_side
 from app.services.grade_labels import grade_alias_map, grade_key, strip_sponsor_suffix
 
@@ -89,13 +95,99 @@ async def _own_grade_names(db: AsyncSession, org_id) -> dict[str, str]:
 
 
 async def grand_final_wins(db: AsyncSession, club: Organisation) -> tuple[list[dict], list[dict]]:
-    """``(wins, unresolved)``.
+    """``(wins, unresolved)``, from Cricket Australia's games and from the club's own marked ones.
 
     A win is a completed grand final one of the club's sides won, with the
     players who played for that side. ``unresolved`` is a grand final the club
-    was in where the card names no winner (a draw, a tie, no result): nothing
-    is awarded for those, and an admin can add the honour by hand.
+    was in that nothing can be awarded for (the card names no winner, a hand-entered
+    final cannot be read as a win or a loss): each carries a ``reason``, and an admin
+    can add the honour by hand.
     """
+    wins, unresolved = await _synced_grand_final_wins(db, club)
+    m_wins, m_unresolved = await _manual_grand_final_wins(
+        db, club, counted_synced={w["game_id"] for w in wins})
+    return wins + m_wins, unresolved + m_unresolved
+
+
+async def _manual_grand_final_wins(db: AsyncSession, club: Organisation,
+                                   counted_synced: set[str]) -> tuple[list[dict], list[dict]]:
+    """The same answer for the games the club typed in or imported and marked as the grand final."""
+    org_id = club.id
+    rows = (await db.execute(text("""
+        SELECT g.id, g.grade_id, g.played_at, g.home_team, g.away_team, g.opposition, g.winning_team,
+               g.result, g.superseded_by_game_id,
+               gr.name AS grade_name, s.id AS season_id, s.name AS season_name, s.year AS season_year
+        FROM manual_games g
+        JOIN seasons s ON s.id = g.season_id
+        LEFT JOIN grades gr ON gr.id = g.grade_id
+        WHERE g.organisation_id = CAST(:org AS UUID) AND g.is_grand_final = TRUE
+        ORDER BY g.played_at NULLS LAST, g.id
+    """), {"org": str(org_id)})).mappings().all()
+    if not rows:
+        return [], []
+
+    own_names = await _own_grade_names(db, org_id)
+    aliases = await grade_alias_map(db, org_id)
+    hiding = await junior_hiding.resolve(db, org_id, with_players=False)
+    hidden_grades = {str(g) for g in hiding.grade_ids} if hiding.active else set()
+
+    candidates: list[dict] = []
+    unresolved: list[dict] = []
+    for r in rows:
+        if r["grade_id"] is not None and str(r["grade_id"]) in hidden_grades:
+            continue
+        # An imported match that IS a Cricket Australia game is counted from that game when it is
+        # itself a counted grand final, never from both (one match, one premiership).
+        if r["superseded_by_game_id"] is not None and str(r["superseded_by_game_id"]) in counted_synced:
+            continue
+        game = SimpleNamespace(**dict(r))
+        outcome, reason = manual_premiership.manual_outcome(game, club)
+        ours, theirs = _manual_sides(game, club)
+        base = {
+            "game_id": str(r["id"]), "played_at": r["played_at"],
+            "grade_name": r["grade_name"], "opponent": theirs, "our_team": ours,
+            "round_name": "Grand Final",
+        }
+        if outcome == manual_premiership.LOST:
+            continue
+        if outcome is None:
+            unresolved.append({**base, "reason": reason})
+            continue
+        if r["grade_id"] is None or not (r["grade_name"] or "").strip():
+            # The honour is filed under a grade, and a typed-in game may have none: say so.
+            unresolved.append({**base, "reason": "the game has no grade, so the flag has no team to name"})
+            continue
+        key = grade_key(r["grade_name"])
+        key = aliases.get(key, key)
+        display = own_names.get(key) or strip_sponsor_suffix(r["grade_name"])
+        label = honours.season_label(r["season_name"])
+        candidates.append({
+            **base,
+            "grade_key": key,
+            "team": display,
+            "year": honours.year_of(label, r["season_year"]),
+            "season_label": label,
+            # The club's own season, so the honour holds the season's id like one recorded by hand.
+            "season_value": str(r["season_id"]),
+        })
+    if not candidates:
+        return [], unresolved
+
+    squads = await manual_premiership.squad(db, [c["game_id"] for c in candidates], org_id)
+    wins = []
+    for c in candidates:
+        c["players"] = squads.get(c["game_id"], [])
+        wins.append(c)
+    return wins, unresolved
+
+
+def _manual_sides(game, club) -> tuple[str, str]:
+    from app.routers.games import _manual_side_names
+    return _manual_side_names(game, club)
+
+
+async def _synced_grand_final_wins(db: AsyncSession, club: Organisation) -> tuple[list[dict], list[dict]]:
+    """``(wins, unresolved)`` for Cricket Australia's synced games (the round name says which is the decider)."""
     org_id = club.id
     rows = (await db.execute(text("""
         SELECT g.id, g.grade_id, g.played_at, g.home_team, g.away_team, g.home_org_id, g.away_org_id,
@@ -465,6 +557,9 @@ async def maybe_reconcile(org_id) -> dict:
                 WHERE g.is_final = TRUE AND g.round_name IS NOT NULL
                   AND (g.home_org_id = CAST(:org AS UUID) OR g.away_org_id = CAST(:org AS UUID))
                 UNION ALL
+                SELECT 1 FROM manual_games
+                WHERE organisation_id = CAST(:org AS UUID) AND is_grand_final = TRUE
+                UNION ALL
                 SELECT 1 FROM player_achievements
                 WHERE org_id = CAST(:org AS UUID) AND auto_created = TRUE LIMIT 1
             """), {"org": str(org_id)})).first()
@@ -518,11 +613,21 @@ async def game_cards(db: AsyncSession, club: Organisation, game_ids: list[str]) 
     """The one-line story of each grand final, as the club saw it: date, opponent, round."""
     if not game_ids:
         return {}
+    uuids = [uuid.UUID(g) for g in game_ids]
     rows = (await db.execute(text("""
         SELECT id::text AS id, played_at, home_team, away_team, home_org_id, away_org_id, round_name
         FROM games WHERE id = ANY(:ids)
-    """), {"ids": [uuid.UUID(g) for g in game_ids]})).mappings().all()
+    """), {"ids": uuids})).mappings().all()
     out = {}
+    # Games the club typed in or imported: the same one-line story, from the club's own record.
+    manual = (await db.execute(text("""
+        SELECT id::text AS id, played_at, home_team, away_team, opposition, winning_team, result
+        FROM manual_games WHERE id = ANY(:ids) AND organisation_id = CAST(:org AS UUID)
+    """), {"ids": uuids, "org": str(club.id)})).mappings().all()
+    for m in manual:
+        _ours, theirs = _manual_sides(SimpleNamespace(**dict(m)), club)
+        out[m["id"]] = {"id": m["id"], "played_at": m["played_at"].isoformat() if m["played_at"] else None,
+                        "opponent": theirs, "round_name": "Grand Final"}
     for r in rows:
         side = fixture_side(club, r["home_team"], r["away_team"], r["home_org_id"], r["away_org_id"])
         theirs = None
