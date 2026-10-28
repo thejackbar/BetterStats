@@ -135,7 +135,7 @@ const run = async () => {
   await page.waitForSelector('[data-stat]')
 
   console.log('\noverview')
-  check('seven tabs', (await page.locator('[data-pc-tab]').count()) === 7)
+  check('eight tabs', (await page.locator('[data-pc-tab]').count()) === 8)
   const stat = (n) => page.locator(`[data-stat="${n}"]`).innerText()
   check('players who have opened a pack, and who have not', /2/.test(await stat('Have opened a pack')) && /1 have not/.test(await stat('Have opened a pack')))
   check('packs opened and cards held', /14/.test(await stat('Packs opened')) && /40 cards held/.test(await stat('Packs opened')))
@@ -302,7 +302,7 @@ const run = async () => {
 
   console.log('\nthe phone')
   await page.setViewportSize({ width: 390, height: 900 })
-  for (const k of ['overview', 'players', 'activity', 'cards', 'packs', 'swaps', 'settings']) {
+  for (const k of ['overview', 'players', 'activity', 'cards', 'packs', 'designs', 'swaps', 'settings']) {
     await tab(k)
     await page.waitForTimeout(200)
     check(`no horizontal scroll on ${k} at 390px`, (await overflow()) <= 0, `over by ${await overflow()}px`)

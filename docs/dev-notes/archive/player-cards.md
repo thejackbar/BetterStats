@@ -152,3 +152,40 @@ Asked for after the collectors and Open packs screens looked wrong.
 
 Verified: `verify_player_cards.py` (425, control on the previous commit fails on the email and board defaults), `verify_merge_carry.py`, `verify_player_page_dashboard.py`, `verify_player_dashboard_and_fines.py`, `audit_route_access.py`; browser `_page_` (66), `_admin_` (69), `_community_` (36), `_social_`, `_v3_`, `_v2_`, first suite.
 
+## v9.132.5 (2026-10-27): club pack designs
+
+Asked for: let clubs make their own designs for packs, with uploaded images or backgrounds.
+
+- Migration 371 (`player_card_designs_ddl.py`): `club_card_pack_designs`, unique on (organisation, target). Style columns, plus `bg_*` and `art_*` bytea, mime and a revision (epoch ms) used as the cache-buster.
+- Scope taken as suggested: a design per target (all packs, a kind of pack, a scheduled event) rather than one per pack, so a club does not design 28 packs to get started. Two image slots (background, centre picture) rather than a free layer editor: enough to make a pack feel the club's, and nothing a club types can break the layout.
+- Images are re-encoded server side (see guide rule 20) and SVG is refused. Colours are validated hex. Uploads and resets are audited (`player_card_design_image`, `player_card_design_reset`).
+- Routes: `PUT /player-cards/designs/{target}`, `POST` and `DELETE /designs/{target}/{bg|art}`, `DELETE /designs/{target}`, `GET /api/images/card-packs/{id}/{kind}`; `designs` and `design_targets` on the admin settings payload; `pack_designs` on `/me/cards`.
+- Not done: a design does not change the cards inside a pack or the opening animation, only the pack's face. Pack art is not yet on the public share page.
+- Moderation: a club's pictures show only to its own players, and the club is the author. There is no review step. If one is wanted it belongs on the upload route.
+
+Verified: `verify_player_cards.py` (473; the control run on the previous commit has no pack designs to test, so the new section is skipped there), `verify_merge_carry.py`, `verify_player_page_dashboard.py`, `verify_player_dashboard_and_fines.py`, `audit_route_access.py`; browser `_designs_` (33), `_admin_`, `_page_`, `_community_`, `_social_`, first suite.
+
+## v9.132.6 (2026-10-27): the Player Dashboard is switched on from BetterStats
+
+Asked for: "to turn on the Player Dashboard you need BetterSelect, but it should be through club settings, as cards and stats only need BetterStats." Then: "there should still be just a dedicated link for things like availability and votes etc but player dash should be turned on/off from BetterStats."
+
+The page itself already worked without BetterSelect (`_club_for_token(need_select=False)`). What did not: every control for it lived under `/availability/self-service`, mounted with `require_module("select")`, so a BetterStats-only club got a 402 and had no way to turn it off, hide the club site button, set the PIN, pick modules or copy the link. And for a club WITH BetterSelect the one self-service switch also governed Player Cards and the season.
+
+- Migration 372 (`player_dashboard_ddl.py`, mirrored in the lifespan and `cricket_schema_mirror`): `organisations.player_dashboard_enabled`, nullable. NULL is "never chosen" and keeps today's behaviour, so nothing is backfilled and no link changes on deploy.
+- Two sides of the one link, one switch each (`services/player_dashboard`): `availability_live(club)` is BetterSelect's `availability_self_service_enabled` (answers, votes, squad, selected, training, ladder, fines: `AVAILABILITY_SIDE`, only for a club that has BetterSelect); `dashboard_live(club)` is `player_dashboard_enabled` once chosen, else the old rule (a club with BetterSelect follows its self-service switch, a club without it is on unless hidden from its site). The link opens when either is on (`link_live`) and `served_modules` keeps only the modules whose side is on; `blocked_reason` says which switch is missing.
+- `_club_for_token(need_select=True)` now means the availability side must be on, and a new `need_dashboard=True` (Player Cards routes) means the dashboard side must be on. Landing and `/me` `has_availability` read `availability_live`, so a dashboard-only link shows no availability section.
+- The club site button follows `dashboard_live` and the club's Hidden choice. Behaviour change: for a club without BetterSelect, hiding the button used to close the link as well (`show_on_site` doubled as the on switch). Once the club has an explicit dashboard value, hiding the button leaves the link working. A club with the old hidden flag and no explicit choice stays closed until it chooses.
+- Routes: `GET`/`POST /player-dashboard/settings`, `POST /player-dashboard/regenerate`, all `MANAGE_SETTINGS`, not module gated (`routers/player_dashboard_admin.py`). `set_dashboard_live` writes only the dashboard column and mints a link if there is none. The BetterSelect panel and its routes are unchanged (it now points at the new screen). Show squad and the Maybe answer stay BetterSelect settings.
+- Frontend: `pages/admin/AdminPlayerDashboard.jsx` at `/admin/player-dashboard`, nav item in `BetterStatsLayout` (Records & content, beside Player Cards). It reuses the exported `PageModules` from `SelfServiceLinkPanel.jsx`.
+- Not done: availability and votes still share the dashboard's URL (`/playerdash/:token`) and token. A truly separate availability address would need a second token and a focused view; the two switches already stop either side leaking into the other. Say so if a separate address is wanted.
+- Known edge: a club that adds BetterSelect later while its dashboard value is NULL starts following `availability_self_service_enabled` (default off), so its link closes until it chooses a dashboard value or turns availability on. That was already true before this change.
+
+Verified: `verify_player_dashboard_switch.py` (52, real HTTP through the mounted app; the control on the previous commit passes 16 and fails 36: the new route is a 404, nothing can be turned off, and Select clubs cannot split the sides), `verify_player_cards.py` (473), `verify_player_page_dashboard.py` (104), `verify_player_dashboard_and_fines.py` (130), `verify_merge_carry.py` (31), `audit_route_access.py`; browser `verify_player_dashboard_switch_browser.mjs` (33, exact request bodies, 390px).
+
+## v9.132.7.1: availability answers failed on the player page ("That set could not be found.")
+
+Reported by North Perth players on `/playerdash/:token`. v9.132.2 (616950d) added `availPublicSet(token, key)` for the card set page to `api.js` while `availPublicSet(token, data)` (the availability answer, POST `/public/availability/{token}/me`) already existed. In an object literal the later key wins, so every Available/Unavailable tap sent `GET /me/cards/sets/[object Object]`, the set route returned 404 and the page showed the error. The button looked pressed (optimistic) but nothing was saved. Fix: the card reader is now `availPublicCardSet` (one caller, `SetPage.jsx`). Answers given while the bug was live were never written, so players need to answer again; no data was changed or lost. Verified: `verify_avail_answer_request.mjs` runs the real `api.js` with `fetch` stubbed; fixed build 6/6, control on the previous `api.js` 0/6 with the request recorded as `GET .../me/cards/sets/%5Bobject%20Object%5D`. Only one duplicate key existed in `api.js`.
+
+## v9.132.8 (2026-10-28): heads behind the name
+
+Reported from a screenshot of the book: on full-photo cards the top of the head was hidden by the player's name. `CardFaces.Portrait` now starts the hero photo 64px down with a 22px fade-in; the bottom edge is unchanged. Applies to regular and special cards. The public share card has the same crop and was left alone (not reported). Verified with the new `_hero_` browser suite (7) plus the page, first and v2 suites.

@@ -16,7 +16,7 @@ export default function SetPage() {
   useEffect(() => {
     let live = true
     setSet(null); setErr('')
-    api.availPublicSet(token, key).then((s) => { if (live) setSet(s) }).catch((e) => { if (live) setErr(e?.message || 'That set could not be found.') })
+    api.availPublicCardSet(token, key).then((s) => { if (live) setSet(s) }).catch((e) => { if (live) setErr(e?.message || 'That set could not be found.') })
     return () => { live = false }
   }, [token, key])
   if (err) return <div data-set-error className="text-sm" style={{ color: 'var(--pb-red, #f87171)' }}>{err} <Link to={`${basePath}/sets`} className="underline">Back to sets</Link></div>

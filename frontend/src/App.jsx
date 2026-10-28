@@ -177,6 +177,7 @@ const SalesManagement = lazy(() => import('./pages/admin/SalesManagement'))
 const SuperWizardClubs = lazy(() => import('./pages/admin/SuperWizardClubs'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
 const AdminPlayerCards = lazy(() => import('./pages/admin/AdminPlayerCards'))
+const AdminPlayerDashboard = lazy(() => import('./pages/admin/AdminPlayerDashboard'))
 const AdminClubRoom = lazy(() => import('./pages/admin/AdminClubRoom'))
 const ClubRoomPlayer = lazy(() => import('./pages/admin/ClubRoomPlayer'))
 const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
@@ -571,6 +572,7 @@ export default function App() {
           <Route path="/admin/notifications" element={<ProtectedRoute><AdminNotifications /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute requireCore><AdminSponsors /></ProtectedRoute>} />
           <Route path="/admin/player-cards" element={<ProtectedRoute requireCore><AdminPlayerCards /></ProtectedRoute>} />
+          <Route path="/admin/player-dashboard" element={<ProtectedRoute requireCore><AdminPlayerDashboard /></ProtectedRoute>} />
           <Route path="/admin/club-room" element={<ProtectedRoute requireCore><AdminClubRoom /></ProtectedRoute>} />
           {/* Standalone full-screen player, no surrounding sidebar — same pattern as
               /admin/yearbook: a club leaves this open on a TV, so a refresh must land

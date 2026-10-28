@@ -3418,6 +3418,12 @@ export const api = {
   bsDeleteAvailabilityPeriod: (id) =>
     request(`/availability/periods/${id}`, { method: 'DELETE' }),
 
+  // ─── Player Dashboard (BetterStats): the page's switches, behind MANAGE_SETTINGS ───
+  getPlayerDashboardSettings: () => request('/player-dashboard/settings'),
+  setPlayerDashboardSettings: (data) =>
+    request('/player-dashboard/settings', { method: 'POST', body: JSON.stringify(data) }),
+  regeneratePlayerDashboardLink: () => request('/player-dashboard/regenerate', { method: 'POST' }),
+
   // ─── Player Cards (BetterStats): the club's settings, behind MANAGE_SETTINGS ───
   getPlayerCardSettings: () => request('/player-cards/settings'),
   updatePlayerCardSettings: (data) =>
@@ -3427,6 +3433,12 @@ export const api = {
   refreshPlayerCardSpecials: () => request('/player-cards/refresh-specials', { method: 'POST' }),
   addPlayerCardEvent: (data) => request('/player-cards/events', { method: 'POST', body: JSON.stringify(data) }),
   deletePlayerCardEvent: (id) => request(`/player-cards/events/${id}`, { method: 'DELETE' }),
+  savePlayerCardDesign: (target, data) =>
+    request(`/player-cards/designs/${encodeURIComponent(target)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  uploadPlayerCardDesignImage: (target, kind, file) => uploadFile(`/player-cards/designs/${encodeURIComponent(target)}/${kind}`, file),
+  removePlayerCardDesignImage: (target, kind) =>
+    request(`/player-cards/designs/${encodeURIComponent(target)}/${kind}`, { method: 'DELETE' }),
+  resetPlayerCardDesign: (target) => request(`/player-cards/designs/${encodeURIComponent(target)}`, { method: 'DELETE' }),
   trimPlayerCardGifts: (apply) => request('/player-cards/trim-gifts', { method: 'POST', body: JSON.stringify({ apply: !!apply }) }),
   getPlayerCardOverview: () => request('/player-cards/overview'),
   getPlayerCardActivity: () => request('/player-cards/activity'),
@@ -3503,7 +3515,8 @@ export const api = {
   availPublicSwaps: (token, { history = false } = {}) => request(`/public/availability/${token}/me/cards/swaps${history ? '?history=true' : ''}`),
   availPublicSwapPlayer: (token, playerId) => request(`/public/availability/${token}/me/cards/swaps/players/${playerId}`),
   availPublicSets: (token) => request(`/public/availability/${token}/me/cards/sets`),
-  availPublicSet: (token, key) => request(`/public/availability/${token}/me/cards/sets/${encodeURIComponent(key)}`),
+  // Named CardSet, not availPublicSet: that name is the availability answer write above, and a second key of the same name silently replaces it.
+  availPublicCardSet: (token, key) => request(`/public/availability/${token}/me/cards/sets/${encodeURIComponent(key)}`),
   availPublicShowcase: (token) => request(`/public/availability/${token}/me/cards/showcase`),
   availPublicPutShowcase: (token, keys) => request(`/public/availability/${token}/me/cards/showcase`, { method: 'PUT', body: JSON.stringify({ keys }) }),
   availPublicBoard: (token) => request(`/public/availability/${token}/me/cards/board`),

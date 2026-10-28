@@ -127,6 +127,17 @@ async def get_gallery_image(image_id: str, db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.get("/card-packs/{design_id}/{kind}")
+async def get_card_pack_image(design_id: str, kind: str, db: AsyncSession = Depends(get_db)):
+    """A club's pack background or centre image. The ?v= in its URL changes on every upload, so the bytes at a URL never change."""
+    from app.services import player_card_designs
+
+    found = await player_card_designs.image_bytes(db, str(_parse_uuid(design_id)), kind)
+    if not found:
+        raise HTTPException(404, "No image")
+    return Response(content=found[0], media_type=found[1], headers={**_CACHE_HEADERS, "X-Content-Type-Options": "nosniff"})
+
+
 @router.get("/players/{player_id}/photo")
 async def get_player_photo(player_id: str, db: AsyncSession = Depends(get_db)):
     player = await db.get(Player, _parse_uuid(player_id))

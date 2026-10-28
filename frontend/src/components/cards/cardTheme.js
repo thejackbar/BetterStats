@@ -192,6 +192,11 @@ export const PACKS = {
 }
 
 // How a pack reads in a sentence. A pack with a name of its own (a scheduled event) carries it as `label`.
+// The design a kind of pack uses on the "how packs arrive" screen: its own, then the club's default, else the built-in look.
+export const designFor = (designs, source) => (designs && (designs[source] || designs.default)) || null
+// The name a club gave this kind of pack, if it did (the default design's name is never used).
+export const designTitle = (designs, source) => (designs?.[source]?.title || null)
+
 export const packName = (source, label) => label || (PACKS[source] || PACKS.weekly).label
 
 export const sortKeys = [

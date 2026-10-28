@@ -35,7 +35,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
-from app.services import selection_audit, selection_clash, selection_notify, selection_rules, selection_seed, squad_sides
+from app.services import grade_move, selection_audit, selection_clash, selection_notify, selection_rules, selection_seed, squad_sides
 from app.services.fixture_days import combine_status, fixture_days
 from app.services.junior_fixtures import junior_fixture_ids
 from app.services.selection_pool import assemble_selection, rule_context, side_size
@@ -540,7 +540,8 @@ async def previous_xi(
     re-linked, so reading by squad mixed two sides' players together: the grade is
     what says which side played. Only when the grade has no saved XI of its own does
     it fall back to the SAME squad's last fixture (the same team of a multi-team
-    squad), then to the same grade for a fixture with no squad. It never borrows
+    squad), then to the same grade for a fixture with no squad, and last to our own
+    team's name, which survives a move to another grade. It never borrows
     another team's XI: a women's side with no history of its own used to be filled
     with the men's last XI, because the lookup fell back to "any of the club's prior
     fixtures". Returns player ids in batting order plus the captain/keeper, so the
@@ -577,6 +578,19 @@ async def previous_xi(
         scopes.append(scope)
     elif fx.grade_id:
         scopes.append(Fixture.grade_id == fx.grade_id)
+
+    # 3. The association moved the team to another grade, so neither the grade nor
+    # a squad that now covers one team finds its history: our own team's NAME does
+    # ("Applecross 8th XI" in Grade 6 last month, Grade 5 now).
+    ours = grade_move.our_side_name(fx.home_away, fx.home_team, fx.away_team)
+    if ours:
+        def _same_name(col):
+            return func.lower(func.trim(col)) == ours
+        by_name = or_(
+            and_(Fixture.home_away == "HOME", _same_name(Fixture.home_team)),
+            and_(Fixture.home_away == "AWAY", _same_name(Fixture.away_team)),
+        )
+        scopes.append(and_(Fixture.team_id == fx.team_id, by_name) if fx.team_id else by_name)
 
     if not scopes:
         return empty  # nothing says which side this is, so there is no "last week"
