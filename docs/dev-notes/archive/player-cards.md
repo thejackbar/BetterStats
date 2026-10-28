@@ -209,7 +209,7 @@ A player now has three photographs: the profile photo (`photo_*`), the hero phot
 
 Check: `verify_player_action_photo.py` (own database), plus the added checks in `verify_player_privacy.py` and `verify_merge_profile_carry.py`.
 
-## v9.134.1 (2026-10-28): action and hero shots by card type
+## v9.134.2 (2026-10-28): action and hero shots by card type
 
 Asked for: now that a player has a hero photo and an action shot, use them for particular kinds of card so those cards feel special.
 

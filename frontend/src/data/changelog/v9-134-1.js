@@ -2,12 +2,11 @@ export default {
   version: 'v9.134.1',
   date: '2026-10-28',
   // Above v9.134.0's sortKey. Check origin/main at merge time.
-  sortKey: '2026-11-11T13:00:00Z',
-  title: 'Player Cards: action and hero shots for the cards that matter',
+  sortKey: '2026-11-11T12:30:00Z',
+  title: 'Games between two of your own teams now count for both sides',
   items: [
-    'Changed: cards now use a player\'s photos by what kind of card it is. Common and Rare cards show the profile photo in the circle. Epic cards fill with the hero photo and Legendary cards with the action shot.',
-    'Changed: special cards fill with a photo too. A century, fifty, five-for or hat-trick uses the action shot, because it marks a moment in play. A debut, a milestone or an award uses the hero photo.',
-    'If a player lacks the shot a card wants, it uses the other one, then the profile photo. A shot pinned on a player\'s profile still wins.',
-    'Clubs can choose how far this goes in Settings: special, Epic and Legendary cards (the default), special cards only, or every card that has a big photo, as before.',
+    'When two of your teams played each other (Applecross Red v Applecross Pink, say), only one side was stored. The other side\'s players got no batting, bowling or fielding for that game, and it did not count in their match total. Both sides are now stored.',
+    'Shaylyn Wijesinghe is the case that showed it: Cricket Australia lists 98 games for her, and six of the ones we were missing were games between two Applecross teams.',
+    'A Full Rebuild fixes games already stored one-sided. An ordinary sync also adds the missing side to a game it has already stored, and leaves the side it holds alone.',
   ],
 }
