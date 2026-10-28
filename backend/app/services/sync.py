@@ -2346,12 +2346,18 @@ async def sync_grassroots_game_level_data(
         # attached", since a shared match between two clubs we both sync
         # would otherwise look identical to one we've already done ourselves.
         teams_data = scorecard.get("teams") or []
-        our_team = next(
-            (t for t in teams_data if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id_str.lower()),
-            None,
-        )
+        # Both teams carry our organisation id when a club plays itself (Applecross Red v
+        # Pink). `our_team` stays the first, as it always was, for the fields that name ONE
+        # side; every roster and innings gate below reads `our_teams`, so the other side's
+        # players are not dropped from their own game.
+        our_teams = [t for t in teams_data
+                     if ((t.get("owningOrganisation") or {}).get("id") or "").lower() == org_id_str.lower()]
+        our_team = our_teams[0] if our_teams else None
         our_team_name = ""
         our_team_pids: set[uuid.UUID] = set()
+        # One set of resolved players per team of ours in this fixture (two when both
+        # teams are the club's), so "already synced" can be judged per side.
+        our_side_pids: list[tuple[dict, set[uuid.UUID]]] = []
         # Participants this game attached to a player by full name (see below).
         name_attached: dict[str, uuid.UUID] = {}
         # Raw participantId strings for our roster, resolved or not — lets the
@@ -2365,7 +2371,7 @@ async def sync_grassroots_game_level_data(
             # one per registration, or the player is new to the club) is attached by
             # full name when exactly one of our players has it. Without this their
             # whole game is dropped and they score nothing in Fantasy.
-            _sheet = our_team.get("players") or []
+            _sheet = [_rp for _ot in our_teams for _rp in (_ot.get("players") or [])]
             _known = {}
             for _rp in _sheet:
                 _g = _rp.get("participantId") or ""
@@ -2378,13 +2384,18 @@ async def sync_grassroots_game_level_data(
                     pid_by_guid[_gu] = _kp
                     name_attached[str(_gu)] = _kp
                     logger.info(f"GR-sync: attached unknown participant {_g} to player {_kp} by full name")
-            for roster_p in (our_team.get("players") or []):
-                raw_guid = roster_p.get("participantId") or ""
-                rpid = _team_pid(_parse_uuid(raw_guid))
-                if rpid is not None:
-                    our_team_pids.add(rpid)
-                if raw_guid:
-                    our_team_roster_guids.add(raw_guid)
+            for _ot in our_teams:
+                _side_pids: set[uuid.UUID] = set()
+                for roster_p in (_ot.get("players") or []):
+                    raw_guid = roster_p.get("participantId") or ""
+                    rpid = _team_pid(_parse_uuid(raw_guid))
+                    if rpid is not None:
+                        our_team_pids.add(rpid)
+                        _side_pids.add(rpid)
+                    if raw_guid:
+                        our_team_roster_guids.add(raw_guid)
+                if _side_pids:
+                    our_side_pids.append((_ot, _side_pids))
 
         # Home/away team names, resolved up front (ahead of the game-exists
         # check below, not just at Game-insert time) — needed both for a new
@@ -2477,14 +2488,25 @@ async def sync_grassroots_game_level_data(
 
                 our_appearances_done = True
                 if game_exists and our_team_pids:
-                    our_appear_check = await session.execute(
-                        text(
-                            "SELECT 1 FROM game_appearances "
-                            "WHERE game_id=:gid AND player_id = ANY(:pids) LIMIT 1"
-                        ),
-                        {"gid": match_id_str, "pids": list(our_team_pids)},
-                    )
-                    our_appearances_done = our_appear_check.first() is not None
+                    # Every side of ours must hold an appearance: a game the club plays
+                    # against itself that was stored with one side only is not done. Only
+                    # the side(s) still missing are stored below, so the side already held
+                    # is not inserted twice.
+                    _missing_sides = []
+                    for _ot, _side in (our_side_pids or [(our_team, our_team_pids)]):
+                        our_appear_check = await session.execute(
+                            text(
+                                "SELECT 1 FROM game_appearances "
+                                "WHERE game_id=:gid AND player_id = ANY(:pids) LIMIT 1"
+                            ),
+                            {"gid": match_id_str, "pids": list(_side)},
+                        )
+                        if our_appear_check.first() is None:
+                            _missing_sides.append((_ot, _side))
+                    our_appearances_done = not _missing_sides
+                    if _missing_sides and len(our_side_pids) > 1:
+                        our_teams = [_t for _t, _ in _missing_sides]
+                        our_team_pids = set().union(*(_p for _, _p in _missing_sides))
 
                 if game_exists:
                     existing_venue, existing_result, existing_innings_totals, existing_winner = existing_row
@@ -2727,14 +2749,15 @@ async def sync_grassroots_game_level_data(
                 # dismissal (forfeits, washouts, late-order batters who didn't
                 # get a hit, fielders with no chances). Matches play.cricket's
                 # match-count which is based on selection, not stat lines.
-                if our_team:
+                seen_appear_pids: set[uuid.UUID] = set()
+                for _ot in our_teams:
                     # A 12th man or substitute fielder is on this list and nowhere else on the card
                     # (services/reserve_players.py). Judged only once CA calls the game COMPLETED:
                     # a card read mid-game has no batting yet, which would read as "the side never
                     # batted" and stamp a judgement that is never revisited. NULL means not judged.
-                    _reserve = reserve_players.sync_flags(scorecard, our_team)
-                    seen_appear_pids: set[uuid.UUID] = set()
-                    for roster_p in (our_team.get("players") or []):
+                    _reserve = reserve_players.sync_flags(scorecard, _ot)
+                    _ot_name = _ot.get("displayName") or _ot.get("name") or our_team_name
+                    for roster_p in (_ot.get("players") or []):
                         rpid = _team_pid(_parse_uuid(roster_p.get("participantId") or ""))
                         if rpid is None:
                             continue
@@ -2747,7 +2770,7 @@ async def sync_grassroots_game_level_data(
                         _flag = _reserve.get(str(roster_p.get("participantId") or "").lower())
                         session.add(GameAppearance(
                             game_id=match_uuid, player_id=rpid,
-                            team_name=our_team_name,
+                            team_name=_ot_name,
                             is_captain=is_captain, is_wicket_keeper=is_wk,
                             is_reserve=_flag["is_reserve"] if _flag else None,
                             sheet_slot=_flag["slot"] if _flag else None,
@@ -2922,8 +2945,8 @@ async def sync_grassroots_game_level_data(
                             if isinstance(_to, dict) and _to.get("id"):
                                 inn_team_id = str(_to["id"]).lower()
                                 break
-                    if inn_team_id is not None and our_team and our_team.get("id"):
-                        is_club_innings = inn_team_id == str(our_team["id"]).lower()
+                    if inn_team_id is not None and our_teams and our_team.get("id"):
+                        is_club_innings = inn_team_id in {str(_ot.get("id") or "").lower() for _ot in our_teams}
                     else:
                         club_n = total_n = 0
                         for _br in batting_rows:
