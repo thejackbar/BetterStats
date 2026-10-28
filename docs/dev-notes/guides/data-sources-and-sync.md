@@ -108,7 +108,7 @@
 - `python -m app.scripts.backfill_caught_behind <org_id|all>`: re-reads scorecards, sets `batting_innings.caught_behind` (Full Rebuild network cost).
 - `python -m app.scripts.rebuild_bowler_wickets <org_id|all>`: re-derives `bowler_wickets` with the flag.
 - `python -m app.scripts.list_skipped_matches`: lists matches the scores API 204'd (no fallback).
-- `/admin/sync` buttons: Quick Sync = `POST /organisations/{id}/sync/quick` (last 7 days, kind `org_quick`); Sync Now = `POST /organisations/{id}/sync`; Fix Missing Totals = `POST /club-admin/backfill-aggregates` (recomputes `player_season_stats` from per-game rows, no CA fetch); Full Rebuild = `POST /club-admin/hard-refresh` (wipes per-game tables, re-pulls, an hour or more). Internal names and `sync_runs.kind` are unchanged from the old labels.
+- `/admin/sync` buttons: Quick Sync = `POST /organisations/{id}/sync/quick` (last 7 days, kind `org_quick`); Sync Now = `POST /organisations/{id}/sync`; Fix Missing Totals (under a collapsed Repairs heading; sync already runs the same backfill) = `POST /club-admin/backfill-aggregates` (recomputes `player_season_stats` from per-game rows, no CA fetch); Full Rebuild = `POST /club-admin/hard-refresh` (wipes per-game tables, re-pulls, an hour or more). Internal names and `sync_runs.kind` are unchanged from the old labels. Clean Opposition Stats is retired (v9.134.3); do not reintroduce a button that deletes per-game rows by team sheet.
 
 ## Open follow-ups
 
