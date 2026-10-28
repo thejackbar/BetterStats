@@ -3515,7 +3515,8 @@ export const api = {
   availPublicSwaps: (token, { history = false } = {}) => request(`/public/availability/${token}/me/cards/swaps${history ? '?history=true' : ''}`),
   availPublicSwapPlayer: (token, playerId) => request(`/public/availability/${token}/me/cards/swaps/players/${playerId}`),
   availPublicSets: (token) => request(`/public/availability/${token}/me/cards/sets`),
-  availPublicSet: (token, key) => request(`/public/availability/${token}/me/cards/sets/${encodeURIComponent(key)}`),
+  // Named CardSet, not availPublicSet: that name is the availability answer write above, and a second key of the same name silently replaces it.
+  availPublicCardSet: (token, key) => request(`/public/availability/${token}/me/cards/sets/${encodeURIComponent(key)}`),
   availPublicShowcase: (token) => request(`/public/availability/${token}/me/cards/showcase`),
   availPublicPutShowcase: (token, keys) => request(`/public/availability/${token}/me/cards/showcase`, { method: 'PUT', body: JSON.stringify({ keys }) }),
   availPublicBoard: (token) => request(`/public/availability/${token}/me/cards/board`),

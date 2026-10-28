@@ -47,3 +47,4 @@
 ## Open follow-ups
 
 - Club record special cards; an email or push for a swap request; a season rollover rule for banked packs; figures are not raised to held scorecards. Swaps rest on the PIN, so a club that wants trading to carry weight needs real sign-in first.
+- `frontend/src/lib/api.js` is one object literal: a second key with the same name silently replaces the first, with no error. `availPublicSet` (the player's availability answer, POST `/me`) was shadowed by a card-set reader in v9.132.2 and every availability tap on the player page failed with "That set could not be found." Card routes take a `availPublicCard*` name. Check: `frontend/verification/verify_avail_answer_request.mjs` (also fails on any duplicate key).
