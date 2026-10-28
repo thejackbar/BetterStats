@@ -529,6 +529,7 @@ async def sync_fixtures(
     if not synced and not rec.changed:
         return {
             "synced": 0, "teams_assigned": 0, "rekeyed": 0, "removed": 0, "cancelled": 0,
+            "moved": 0, "medals_extended": [],
             "detail": "No upcoming Grassroots fixtures found for this club.",
         }
     detail = f"Synced {synced} fixture{'' if synced == 1 else 's'}"
@@ -541,6 +542,12 @@ async def sync_fixtures(
         detail += f". Removed {n_removed} that {'is' if n_removed == 1 else 'are'} no longer on the draw"
     if rec.rekeyed:
         detail += f". Updated {len(rec.rekeyed)} that Cricket Australia re-listed"
+    if rec.moved:
+        n = len(rec.moved)
+        detail += (f". Moved {n} game{'' if n == 1 else 's'} to the grade Cricket Australia put the team in, "
+                   "with the team, picked XI, votes and notes")
+    if rec.medals_extended:
+        detail += f". Vote medal{'' if len(rec.medals_extended) == 1 else 's'} {', '.join(rec.medals_extended)} now count the new grade too"
     if rec.cancelled:
         n = len(rec.cancelled)
         detail += f". Marked {n} cancelled (you had picked a team or recorded votes, so {'it is' if n == 1 else 'they are'} kept)"
@@ -550,5 +557,7 @@ async def sync_fixtures(
         "rekeyed": len(rec.rekeyed),
         "removed": n_removed,
         "cancelled": len(rec.cancelled),
+        "moved": len(rec.moved),
+        "medals_extended": rec.medals_extended,
         "detail": detail,
     }

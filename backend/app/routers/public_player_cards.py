@@ -6,8 +6,8 @@ collection. The cards themselves carry only what the club already shows publicly
 photo and career figures); nothing about contact details, fees or availability.
 
 Unauthenticated routers are not under `require_module` (the caller has no session): the club comes
-from the link token and `_club_for_token(need_select=False)` decides if the link works, so a
-club without BetterSelect still has cards.
+from the link token and `_club_for_token(need_dashboard=True)` decides if the link works, so a
+club without BetterSelect still has cards, and a club whose Player Dashboard is off has none.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ OPEN_WINDOW = 60
 
 async def _ready(db: AsyncSession, request: Request, token: str):
     """(club, player, snapshot) for a verified player of a club with cards on, else 404 / 401."""
-    club = await _club_for_token(db, token, need_select=False)
+    club = await _club_for_token(db, token, need_select=False, need_dashboard=True)
     player = await _player_for_session(db, request, club)
     snap = await cards.club_snapshot(db, club)
     if not snap["settings"]["enabled"] or str(player.id) not in snap["people"]:

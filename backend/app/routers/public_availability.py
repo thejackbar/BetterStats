@@ -141,17 +141,23 @@ def _read_session(request: Request, club_id) -> Optional[uuid.UUID]:
         return None
 
 
-async def _club_for_token(db: AsyncSession, token: str, need_select: bool = True) -> Organisation:
+async def _club_for_token(db: AsyncSession, token: str, need_select: bool = True, need_dashboard: bool = False) -> Organisation:
     """Resolve the club behind a self-service token, or 404.
 
-    404 (not 403) for every "this link isn't usable" case — unknown token,
-    disabled, or the club no longer entitled to BetterSelect — so a leaked or
-    rotated link reveals nothing about why it stopped working.
+    404 (not 403) for every "this link isn't usable" case: unknown token, switched
+    off, or the club no longer entitled to BetterSelect. A leaked or rotated link
+    reveals nothing about why it stopped working.
 
-    `need_select` False is the player's own page for a club WITHOUT BetterSelect
-    (their cards and season, no availability): the link then works whenever the club
-    has it on its site settings, and the availability answers stay refused. A club
-    that does hold BetterSelect keeps its own self-service switch either way.
+    The link has two sides with a switch each (`services/player_dashboard`): the
+    availability side (answers, votes, the BetterSelect sections), switched in
+    BetterSelect, and the dashboard side (Player Cards, season, fantasy, fees),
+    switched in BetterStats. The link opens when either is on, and what a route may
+    serve follows its own side:
+
+    * `need_select` (the default): the availability side must be on. Every availability
+      and vote write is this.
+    * `need_dashboard`: the dashboard side must be on (Player Cards).
+    * neither: the player's own page, which then draws only the sides that are on.
     """
     if not token:
         raise HTTPException(status_code=404, detail="Unknown link")
@@ -159,13 +165,13 @@ async def _club_for_token(db: AsyncSession, token: str, need_select: bool = True
         select(Organisation).where(Organisation.availability_link_token == token)
     )
     club = res.scalar_one_or_none()
-    has_select = club is not None and org_has_module(club, MODULE_SELECT)
     if club is None:
         raise HTTPException(status_code=404, detail="This availability link isn't active")
-    if has_select:
-        if not club.availability_self_service_enabled:
-            raise HTTPException(status_code=404, detail="This availability link isn't active")
-    elif need_select or club.availability_show_on_site is False:
+    if (
+        not player_dashboard.link_live(club)
+        or (need_select and not player_dashboard.availability_live(club))
+        or (need_dashboard and not player_dashboard.dashboard_live(club))
+    ):
         raise HTTPException(status_code=404, detail="This availability link isn't active")
     return club
 
@@ -216,7 +222,7 @@ async def get_landing(token: str, db: AsyncSession = Depends(get_db)):
     return {
         "club": _club_branding(club),
         "require_pin": bool(club.availability_require_pin),
-        "has_availability": org_has_module(club, MODULE_SELECT),
+        "has_availability": player_dashboard.availability_live(club),
         "allow_maybe": allow_maybe(club),
         "week_names": rules_svc.club_config(club)["week_names"],
         "players": [
@@ -364,8 +370,8 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
     answers. Date-keyed: one answer covers every fixture that day."""
     club = await _club_for_token(db, token, need_select=False)
     player = await _player_for_session(db, request, club)
-    if not org_has_module(club, MODULE_SELECT):
-        # No BetterSelect, so no fixtures to answer: the page leaves the Availability section out.
+    if not player_dashboard.availability_live(club):
+        # No BetterSelect or its link is off, so no fixtures to answer: the page leaves the Availability section out.
         return {
             "club": _club_branding(club), "player": _player_card(player), "allow_maybe": False,
             "week_names": [], "dates": [], "availability": {}, "has_squad": False, "squads": [],
@@ -736,7 +742,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         "votes": votes,
         "votes_cast": votes_cast,
         "cards": cards,
-        "has_availability": org_has_module(club, MODULE_SELECT),
+        "has_availability": player_dashboard.availability_live(club),
     }
 
 

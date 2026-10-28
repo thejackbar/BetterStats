@@ -245,7 +245,8 @@ async def main():
     print("\n# B. Availability is the page, not a module")
     cat = {c["key"]: c for c in pd.catalogue_for(type("C", (), {"player_dashboard_modules": None, "availability_show_squad": False,
                                                                 "availability_require_pin": True, "module_overrides": ["select", "fantasy"],
-                                                                "fantasy_link_token": "x"})())}
+                                                                "fantasy_link_token": "x", "player_dashboard_enabled": None,
+                                                                "availability_self_service_enabled": True, "availability_show_on_site": True})())}
     check("the admin list no longer offers Availability", "availability" in cat, False)
     check("it offers Fantasy", "fantasy" in cat, True)
     mods = (await profile("sam"))["modules"]
