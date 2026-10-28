@@ -1,4 +1,4 @@
-"""A player's third photograph, the action shot, and which shot fills the hero position (migration 374).
+"""A player's third photograph, the action shot, and which shot fills the hero position (migration 375).
 
 A player now has three photographs, each doing its own job:
 
@@ -12,7 +12,7 @@ A player now has three photographs, each doing its own job:
 share card and a post: NULL means automatic (the hero photo, else the action shot), `hero` and `action` pin one. A pinned
 shot the player does not have falls back to the other, then to the profile photo, so a choice can never leave a hole.
 
-ONE copy of the DDL: alembic's 374 and main.py's lifespan mirror both run STATEMENTS. Every statement is idempotent.
+ONE copy of the DDL: alembic's 375 and main.py's lifespan mirror both run STATEMENTS. Every statement is idempotent.
 """
 
 STATEMENTS = [

@@ -1096,7 +1096,7 @@ class PlayerProfileUpdate(BaseModel):
     # intent.
     shirt_number: Optional[str] = None
     # Which of the hero photo and the action shot fills the hero position on a card, a share
-    # card and a post (migration 374). "hero" or "action" pins one; null (or "auto") is
+    # card and a post (migration 375). "hero" or "action" pins one; null (or "auto") is
     # automatic. Read through exclude_unset like the rest, so an absent key leaves it alone.
     hero_source: Optional[str] = None
     # Where they live and who to call (migration 356). Plain text, "" or null clears.
@@ -1416,6 +1416,11 @@ async def update_player_profile(
     if old_display_name and old_display_name != player.display_name:
         await seed_alias_on_rename(db, player.organisation_id, player.id, old_display_name)
     await db.commit()
+    if "hero_source" in data:
+        # The collectable cards keep a snapshot of the club's players, the pick included, for a few
+        # minutes. A new pick has to show on the card now.
+        from app.services import player_cards
+        player_cards.forget(player.organisation_id)
     await db.refresh(player)
     return await _full_profile(db, player)
 

@@ -167,7 +167,7 @@ async def get_player_hero_photo(player_id: str, db: AsyncSession = Depends(get_d
 
 @router.get("/players/{player_id}/action-photo")
 async def get_player_action_photo(player_id: str, db: AsyncSession = Depends(get_db)):
-    """The player's action shot (migration 374), a third photograph beside the
+    """The player's action shot (migration 375), a third photograph beside the
     headshot and the hero photo. Same no-auth posture as those: a low-sensitivity
     image behind an unguessable id, and a privacy removal clears it."""
     player = await db.get(Player, _parse_uuid(player_id))

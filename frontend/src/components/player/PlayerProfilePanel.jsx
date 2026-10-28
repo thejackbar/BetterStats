@@ -69,14 +69,14 @@ function PToggle({ on, onChange, label }) {
    Three photographs, one row component. The PROFILE PHOTO is the square
    headshot that reads at 44px on a roster row; the HERO PHOTO fills the big
    slot on a card, a share card and a match-day post; the ACTION SHOT (migration
-   374) is the player mid-shot, for that same big slot when the club picks it.
+   375) is the player mid-shot, for that same big slot when the club picks it.
    None crops into another's slot, which is why they are stored separately
    (migration 274) rather than one being derived from another. `kind` picks
-   which. The hero photo was labelled "Action shot" before 374; same bytes. ── */
+   which. The hero photo was labelled "Action shot" before 375; same bytes. ── */
 const PHOTO_KINDS = {
   photo: {
     label: 'Profile photo',
-    hint: 'Square. Used on rosters, squad grids and beside a name.',
+    hint: 'Square. Used on rosters, squad grids and beside a name, and sits in a circle on the player\u2019s card when there is no hero photo or action shot.',
     aspect: 1,
     thumb: 'w-11 h-11',
     addLabel: 'Upload photo',
@@ -88,7 +88,7 @@ const PHOTO_KINDS = {
   },
   hero: {
     label: 'Hero photo',
-    hint: 'Tall. Fills the big photo on player cards, share cards and match-day posts. Free crop \u2014 the post\u2019s own Framing control does the final positioning.',
+    hint: 'Tall. Fills the big photo on match-day posts, share cards and the whole of the player\u2019s card, in place of the profile photo. Free crop \u2014 the post\u2019s own Framing control does the final positioning.',
     // Free crop on purpose: forcing a ratio here would crop twice and fight
     // the Framing control on the post itself.
     aspect: null,

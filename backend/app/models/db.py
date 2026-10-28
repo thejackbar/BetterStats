@@ -1450,13 +1450,13 @@ class Player(Base):
     photo_url = Column(Text, nullable=True)
     photo_data = Column(LargeBinary, nullable=True)
     photo_mime = Column(Text, nullable=True)
-    # The hero photo (migration 274, labelled "Action shot" until migration 374) — a separate
+    # The hero photo (migration 274, labelled "Action shot" until migration 375) — a separate
     # photograph from the headshot above, for the full-bleed hero slot on a card, a share card
     # and a match-day post.
     hero_photo_url = Column(Text, nullable=True)
     hero_photo_data = Column(LargeBinary, nullable=True)
     hero_photo_mime = Column(Text, nullable=True)
-    # The action shot (migration 374): the player mid-shot, a third photograph for the same
+    # The action shot (migration 375): the player mid-shot, a third photograph for the same
     # hero position. `hero_source` is the club's per-player pick of which one fills it:
     # NULL = automatic (hero photo, else action shot), 'hero' or 'action' pins one.
     action_photo_url = Column(Text, nullable=True)

@@ -5,15 +5,15 @@
 Defined once in services/player_action_photo_ddl.py, which main.py's lifespan mirror also runs. Every statement is idempotent.
 The downgrade drops only the four columns added here; the hero photo columns belong to migration 274.
 
-Revision ID: 374
-Revises: 373
+Revision ID: 375
+Revises: 374
 """
 from alembic import op
 
 from app.services.player_action_photo_ddl import STATEMENTS, DOWNGRADE
 
-revision = "374"
-down_revision = "373"
+revision = "375"
+down_revision = "374"
 branch_labels = None
 depends_on = None
 

@@ -183,6 +183,7 @@ export const PACKS = {
   australia_day: { label: 'Australia Day pack', line: 'Good on ya', a: '#fde68a', b: '#065f46', on: '#ffffff', stars: 2 },
   anzac_day: { label: 'Anzac Day pack', line: 'Lest we forget', a: '#e7e5e4', b: '#7f1d1d', on: '#ffffff', stars: 2 },
   event: { label: 'Event pack', line: 'Today only', a: '#7dd3fc', b: '#0c4a6e', on: '#ffffff', stars: 2 },
+  custom: { label: 'Club pack', line: 'A gift from your club', a: '#fecdd3', b: '#9f1239', on: '#ffffff', stars: 2 },
   // For something the player did: the more stars, the better the cards.
   fifty: { label: 'Fifty pack', line: 'Fifty up', a: '#bfdbfe', b: '#1d4ed8', on: '#ffffff', stars: 3 },
   milestone: { label: 'Milestone pack', line: 'A landmark reached', a: '#a7f3d0', b: '#047857', on: '#022c22', stars: 3 },
@@ -192,6 +193,9 @@ export const PACKS = {
 }
 
 // How a pack reads in a sentence. A pack with a name of its own (a scheduled event) carries it as `label`.
+// The quality a club gave a pack it made (or scheduled), as stars: more stars, better cards. Matches services/player_card_pack_kinds.QUALITIES.
+export const QUALITY_STARS = { standard: 0, boosted: 1, special: 2, premium: 3, elite: 4, legendary: 5 }
+
 // The design a kind of pack uses on the "how packs arrive" screen: its own, then the club's default, else the built-in look.
 export const designFor = (designs, source) => (designs && (designs[source] || designs.default)) || null
 // The name a club gave this kind of pack, if it did (the default design's name is never used).

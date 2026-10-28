@@ -1411,7 +1411,7 @@ def _remove_player_photo(photo_url: Optional[str]) -> None:
 
 # The three photographs a player can have, and the columns each lands in. A
 # headshot reads at 44px on a roster row; the hero photo fills the big slot on a
-# card, a share card and a match-day post; the action shot (migration 374) is the
+# card, a share card and a match-day post; the action shot (migration 375) is the
 # player mid-shot, for the same big slot when the club picks it. Cropping one into
 # another's slot is what asked for the split (migration 274) — one set of
 # handlers, keyed on which.
@@ -1420,6 +1420,13 @@ _PLAYER_PHOTO_KINDS = {
     "hero": ("hero_photo_data", "hero_photo_mime", "hero_photo_url", "hero-photo"),
     "action": ("action_photo_data", "action_photo_mime", "action_photo_url", "action-photo"),
 }
+
+
+def _forget_cards(player: Player) -> None:
+    """The collectable cards keep a snapshot of the club's players for a few minutes, photos included. A new photo has to
+    show on the card now, not after that runs out, so the snapshot is dropped."""
+    from app.services import player_cards
+    player_cards.forget(player.organisation_id)
 
 
 async def _player_for_photo(db: AsyncSession, player_id: str, club: Organisation) -> Player:
@@ -1458,6 +1465,7 @@ async def _store_player_photo(db, player: Player, file: UploadFile, kind: str) -
     setattr(player, mime_col, _IMAGE_MIME.get(ext, "image/png"))
     setattr(player, url_col, url)
     await db.commit()
+    _forget_cards(player)
     return {url_col: url}
 
 
@@ -1469,6 +1477,7 @@ async def _clear_player_photo(db, player: Player, kind: str) -> dict:
     setattr(player, mime_col, None)
     setattr(player, url_col, None)
     await db.commit()
+    _forget_cards(player)
     return {"status": "cleared"}
 
 

@@ -63,7 +63,27 @@ KINDS: dict[str, Kind] = {
     "fifty": Kind("Fifty pack", "Fifty up", FIFTY, 3, 0.10),
     "milestone": Kind("Milestone pack", "A landmark reached", MILESTONE, 3, 0.12),
 }
+# Packs a club creates by hand. Its name and quality are the club's; the source only names how it arrived.
+KINDS["custom"] = Kind("Club pack", "A gift from your club", EVENT, 2, 0.10)
 DEFAULT_KIND = KINDS["weekly"]
+
+# The quality ladder an admin picks from when they create a pack (and for a scheduled one). Each step is better than the last:
+# more of the five cards are guaranteed Rare or better, the odds lean harder to Epic and Legendary, and a special card turns up
+# more often. The achievement and day packs above use the same profiles, so a "Premium" pack is a "Fifty" pack's odds.
+QUALITIES: dict[str, Kind] = {
+    "standard": Kind("Standard", "The everyday odds", STANDARD, 1, 0.05),
+    "boosted": Kind("Boosted", "A step up", DAY, 2, 0.08),
+    "special": Kind("Special", "Made for the occasion", EVENT, 2, 0.10),
+    "premium": Kind("Premium", "Mostly Rare or better", FIFTY, 3, 0.10),
+    "elite": Kind("Elite", "Epic cards are common", FIVE_FOR, 4, 0.15),
+    "legendary": Kind("Legendary", "Nearly all Rare or better", CENTURY, 4, 0.15),
+}
+DEFAULT_QUALITY = "special"
+
+
+def quality_kind(quality: Optional[str], source: Optional[str] = None) -> Kind:
+    """What a pack is drawn with: the quality it was made at, else its own kind's odds."""
+    return QUALITIES.get(quality or "") or kind_for(source)
 
 # Special card kinds that earn a pack the day the card is made for a recent event, and the pack each earns.
 ACHIEVEMENT_PACKS = {

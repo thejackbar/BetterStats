@@ -1948,7 +1948,7 @@ export const api = {
       })
   },
   adminDeletePlayerHeroPhoto: (playerId) => request(`/club-admin/players/${playerId}/hero-photo`, { method: 'DELETE' }),
-  // The action shot (migration 374), a third photograph beside the headshot and the hero photo.
+  // The action shot (migration 375), a third photograph beside the headshot and the hero photo.
   adminUploadPlayerActionPhoto: (playerId, file) => {
     const form = new FormData()
     form.append('file', file)
@@ -3449,6 +3449,7 @@ export const api = {
   setPlayerCardHidden: (playerId, hidden) =>
     request(`/player-cards/players/${playerId}/hidden`, { method: 'POST', body: JSON.stringify({ hidden }) }),
   refreshPlayerCardSpecials: () => request('/player-cards/refresh-specials', { method: 'POST' }),
+  createPlayerCardGift: (data) => request('/player-cards/gifts', { method: 'POST', body: JSON.stringify(data) }),
   addPlayerCardEvent: (data) => request('/player-cards/events', { method: 'POST', body: JSON.stringify(data) }),
   deletePlayerCardEvent: (id) => request(`/player-cards/events/${id}`, { method: 'DELETE' }),
   savePlayerCardDesign: (target, data) =>

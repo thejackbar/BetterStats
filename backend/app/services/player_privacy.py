@@ -339,7 +339,7 @@ async def _hide_one(
             player.hero_photo_mime = None
             player.hero_photo_url = None
             changed["photos_removed"].append("hero photo")
-        # The third photograph (migration 374). A removal request takes every picture of the person.
+        # The third photograph (migration 375). A removal request takes every picture of the person.
         if player.action_photo_data or player.action_photo_url:
             player.action_photo_data = None
             player.action_photo_mime = None

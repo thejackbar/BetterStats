@@ -1,4 +1,4 @@
-"""A player's third photograph (the action shot) and the pick of which shot fills the hero position (migration 374).
+"""A player's third photograph (the action shot) and the pick of which shot fills the hero position (migration 375).
 
 Runs the SHIPPED upload, delete and serve routes, the profile PATCH, the club and public player lists, the Player Cards
 snapshot and the DDL against a real Postgres. Nothing here replays their logic.
@@ -173,7 +173,10 @@ async def main() -> None:
                 return (await db.execute(text("SELECT hero_source FROM players WHERE id=:i"), {"i": pid})).scalar()
             except Exception:
                 return MISSING
+    from app.services import player_cards
+    player_cards._SNAP[str(OURS)] = (0, {"stale": True})  # a cached club snapshot, as a card page would have left
     res, err = await patch(P_ACTION, hero_source="action")
+    check("changing the pick drops the cached card snapshot so the card updates now", str(OURS) not in player_cards._SNAP)
     check("pinning the action shot is stored", await stored(P_ACTION) == "action", str(err))
     check("and comes back on the profile payload", get(res, "hero_source") == "action" if res else False)
     res, err = await patch(P_ACTION, shirt_number="9")
