@@ -14,6 +14,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import './cards.css'
 import { CARD_W, CARD_H, hexWithAlpha, onColor, splitName, usePhotoMode } from '../PlayerTradingCard'
 import { TIERS, specialLook, specialHeadline, fmtDate } from './cardTheme'
+import { heroShotUrl } from '../../lib/playerShots'
 
 export { CARD_W, CARD_H }
 const FRAME = 7
@@ -82,7 +83,7 @@ function initialsOf(name) {
 
 // The player, or the club's badge when there is no photo, or their initials when there is no badge either.
 function Portrait({ card, club, accent, dim }) {
-  const photo = usePhotoMode(card.hero_photo_url, card.photo_url)
+  const photo = usePhotoMode(heroShotUrl(card), card.photo_url)
   const light = `color-mix(in srgb, ${accent} 55%, #fff)`
   if (photo.mode === 'hero') {
     // The photo starts HERO_TOP down the card so the top of the head clears the name (the photos are tight crops, with the head
@@ -194,7 +195,7 @@ export function CardInfoBack({ card, club, accent, display = DEFAULT_DISPLAY }) 
 export function CardFront({ card, club, accent, display = DEFAULT_DISPLAY, sponsor, label = 'Career Statistics' }) {
   const { first, last } = splitName(card.name)
   const tier = TIERS[card.tier] || TIERS.common
-  const hero = !!card.hero_photo_url
+  const hero = !!heroShotUrl(card)
   const items = [
     { label: 'Matches', value: num(card.matches) },
     { label: 'Runs', value: num(card.runs) },
@@ -247,7 +248,7 @@ export function SpecialFront({ card, club, accent, display = DEFAULT_DISPLAY }) 
   const opp = d.opposition ? `v ${d.opposition}` : ''
   const when = fmtDate(card.occurred_on)
   const pill = [opp, when].filter(Boolean).join('  ·  ')
-  const hero = !!card.hero_photo_url
+  const hero = !!heroShotUrl(card)
   const BAND = 168
   const numeric = !head.small && String(head.big).length <= 6
   return (

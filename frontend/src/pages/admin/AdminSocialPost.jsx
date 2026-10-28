@@ -19,12 +19,13 @@ import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPane
 import LayersPanel from '../../components/admin/socialpost/panels/LayersPanel'
 import SponsorsPanel from '../../components/admin/socialpost/panels/SponsorsPanel'
 import { api, setPublishingContext } from '../../lib/api'
+import { pickHero } from '../../lib/playerShots'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
   T5_Brutalist, T6_Diagonal, T7_CaptainSpotlight, T8_Mosaic, T9_Flyer, T10_TeamSheet,
   C1_CaptainAnnounce, C2_TossWon, C3_ManOfMatch, C4_FinalScore,
   SC1_Broadcast, SC2_Brutalist, SC3_Dashboard,
-  PALETTES, orgAccent, orgAccent2, orgToPalette, featuredOf, DEFAULT_HERO_FOCUS, LINEUP_MAX,
+  PALETTES, orgAccent, orgAccent2, orgToPalette, featuredOf, heroSrcOf, DEFAULT_HERO_FOCUS, LINEUP_MAX,
 } from '../../social/cricket-templates'
 import {
   FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
@@ -433,16 +434,53 @@ function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keepe
     // The club milestone this player is about to reach (lineup posts only), or null.
     milestone,
     headshot: p.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null,
-    // The action shot, when the club has one. Only the big hero slot reaches
-    // for it — grids and card fronts stay on the headshot, which is the photo
-    // that actually reads at that size.
+    // The hero photo and the action shot, when the club has them. Only the big
+    // hero slot reaches for them — grids and card fronts stay on the headshot,
+    // which is the photo that actually reads at that size. `heroSource` is the
+    // club's saved pick between the two for this player (null = hero photo
+    // first); the editor can override it per post (`withHeroSource`).
     hero: p.hero_photo_url ? `${BASE_URL}/images/players/${p.id}/hero-photo` : null,
+    action: p.action_photo_url ? footballAsset(p.action_photo_url) : null,
+    heroSource: p.hero_source || null,
     _id: p.id,
     _name: p.display_name || p.name,
     // Team of the week only: what this player did in the round (stat line,
     // grade, opponent, points). Every other post leaves it null.
     totw,
   }
+}
+
+// The editor's own pick of which photograph a post draws, over each player's saved `hero_source`. '' leaves every
+// layout on its usual photo; 'photo' is the profile photo, 'hero' the hero photo, 'action' the action shot.
+const SHOT_CHOICES = [['', 'Automatic'], ['photo', 'Profile photo'], ['hero', 'Hero photo'], ['action', 'Action shot']]
+function withHeroSource(tp, choice) {
+  return tp && choice ? { ...tp, heroSource: choice } : tp
+}
+// A layout that draws the player's one picture as their headshot (announcement, man of the match) takes the chosen
+// shot there; the hero slot reads `heroSource` as before.
+function asPicture(tp, choice) {
+  if (!tp || !choice) return tp
+  const url = choice === 'photo' ? tp.headshot : pickHero({ hero: tp.hero, action: tp.action }, choice)
+  return { ...tp, heroSource: choice, headshot: url || tp.headshot }
+}
+
+// Which photograph of the player the post draws. Disabled, with the reason, until a player on the post has a hero photo
+// or an action shot, so the control is never silently missing.
+function HeroShotPicker({ value, onChange, hasAlt }) {
+  return (
+    <div className="mb-3" data-testid="hero-shot-picker">
+      <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Player Photo</label>
+      <select value={value} onChange={e => onChange(e.target.value)} disabled={!hasAlt}
+        className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text disabled:opacity-60">
+        {SHOT_CHOICES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+      </select>
+      <p className="text-[11px] text-pb-faintest mt-1">
+        {hasAlt
+          ? 'Applies to every player on this post. Automatic uses each player\u2019s saved choice, the hero photo first.'
+          : 'None of these players has a hero photo or an action shot yet. Add them on the player\u2019s profile to choose between them.'}
+      </p>
+    </div>
+  )
 }
 
 // The one-line performance under a name on a team-of-the-week post. Only what
@@ -1732,6 +1770,9 @@ export default function AdminSocialPost() {
   // Which selected player's photo fills the hero slot on lineup templates
   // (T1 / T3 / T6). '' = auto (captain, else first in the order).
   const [heroPlayerId, setHeroPlayerId] = useState('')
+  // Which photograph the post draws for a player, over their saved pick: '' = each layout's usual one,
+  // else 'photo' | 'hero' | 'action'. Per post, never saved to the player.
+  const [shotChoice, setShotChoice] = useState('')
   // Shade the row of the player who is in the photo, so the post says whose
   // picture it is. Off until asked for: a post made before this existed, or one
   // whose photo is not of anyone on the list, must not suddenly mark a row.
@@ -3483,12 +3524,12 @@ export default function AdminSocialPost() {
       unit: milestone.unit || 'GAMES',
       reason: milestone.reason || 'MILESTONE',
       detail: milestone.detail,
-      player: milestonePlayer ? playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat, swapNames) : undefined,
+      player: milestonePlayer ? withHeroSource(playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat, swapNames), shotChoice) : undefined,
     }
   }
   if (templateId === 'C1' || templateId === 'C5') {
     const annPlayer = selectedPlayers[announcement.playerIdx]
-    let annTemplatePlayer = annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat, swapNames) : undefined
+    let annTemplatePlayer = annPlayer ? asPicture(playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat, swapNames), shotChoice) : undefined
     if (annTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
       annTemplatePlayer = { ...annTemplatePlayer, headshot: heroImage.blobUrl }
     }
@@ -3500,7 +3541,7 @@ export default function AdminSocialPost() {
   if (templateId === 'C2') extraProps.toss = { winner: toss.winner, decision: toss.decision }
   if (templateId === 'C3') {
     const motmPlayer = selectedPlayers[motm.playerIdx]
-    let motmTemplatePlayer = motmPlayer ? playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat, swapNames) : undefined
+    let motmTemplatePlayer = motmPlayer ? asPicture(playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat, swapNames), shotChoice) : undefined
     if (motmTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
       motmTemplatePlayer = { ...motmTemplatePlayer, headshot: heroImage.blobUrl }
     }
@@ -3563,7 +3604,7 @@ export default function AdminSocialPost() {
   const templatePlayers = selectedPlayers.map((sp, i) => {
     const badge = watchLive?.badges?.[String(sp.player.id)] || null
     const base = playerToTemplatePlayer(sp.player, badge ? { ...sp, milestone: badge } : sp, nameFormat, swapNames)
-    return base
+    return withHeroSource(base, shotChoice)
   })
   const watchItems = (watchLive?.items || []).map((it) => {
     const tp = templatePlayers.find((t) => String(t._id) === String(it.player_id))
@@ -3618,14 +3659,14 @@ export default function AdminSocialPost() {
       }
       case 'motm': {
         const sp = selectedPlayers[motm.playerIdx]
-        const player = sp ? playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames) : undefined
+        const player = sp ? asPicture(playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames), shotChoice) : undefined
         return motmBundle(motm, player, (heroMode === 'hero' && heroImage.blobUrl) || player?.headshot || '')
       }
       case 'totw': return totwBundle(templatePlayers, { junior: 'JUNIOR', senior: 'SENIOR' }[totwImport.data?.scope] || '')
       case 'milestones': return milestoneBundle(milestoneCards, msOpts.title)
       case 'announcement': {
         const sp = selectedPlayers[announcement.playerIdx]
-        const player = sp ? playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames) : undefined
+        const player = sp ? asPicture(playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames), shotChoice) : undefined
         return announceBundle(announcement, player, (heroMode === 'hero' && heroImage.blobUrl) || player?.headshot || '')
       }
       case 'toss': return tossBundle(toss, tossNames)
@@ -3815,6 +3856,7 @@ export default function AdminSocialPost() {
     setHeroFocus(DEFAULT_HERO_FOCUS)
     setHeroMode('player')
     setHeroPlayerId('')
+    setShotChoice('')
     setMarkHero(false)
     setSplitPanel('')
     setMilestone({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
@@ -5866,6 +5908,10 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Hero Image</h2>
                 <p className="text-[11px] text-pb-faint mb-3">Transparent PNG recommended for best results. Any image with a solid background can be cut out with Edit.</p>
+                {!IS_AFL && selectedPlayers.length > 0 && (!['C1', 'C3', 'C5'].includes(panelId) || heroMode === 'player') && (
+                  <HeroShotPicker value={shotChoice} onChange={setShotChoice}
+                    hasAlt={selectedPlayers.some(sp => sp.player.hero_photo_url || sp.player.action_photo_url)} />
+                )}
                 {HERO_PLAYER_TEMPLATES.includes(templateId) && selectedPlayers.length > 0 && (
                   <div className="mb-3">
                     <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Hero Player</label>
@@ -5947,7 +5993,7 @@ export default function AdminSocialPost() {
                         there is no upload to override it. */}
                     {HERO_FOCUS_TEMPLATES.includes(templateId) && (
                       <HeroFocusControl
-                        src={heroImage.blobUrl || featuredOf(templatePlayers, heroPlayerId)?.headshot || null}
+                        src={heroImage.blobUrl || heroSrcOf(featuredOf(templatePlayers, heroPlayerId)) || null}
                         value={heroFocus}
                         onChange={setHeroFocus}
                         defaults={DEFAULT_HERO_FOCUS}

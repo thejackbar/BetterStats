@@ -4571,6 +4571,11 @@ async def lifespan(app: FastAPI):
         from app.services.manual_grand_final_ddl import STATEMENTS as _MANUAL_GF_DDL
         for _stmt in _MANUAL_GF_DDL:
             await conn.execute(text(_stmt))
+        # Migration 374: a player's action shot and which shot fills the hero position. Same one-copy
+        # rule: this list and alembic's 374 both run services/player_action_photo_ddl.STATEMENTS.
+        from app.services.player_action_photo_ddl import STATEMENTS as _PLAYER_ACTION_PHOTO_DDL
+        for _stmt in _PLAYER_ACTION_PHOTO_DDL:
+            await conn.execute(text(_stmt))
         # Every club with players has a player page link, so one without BetterSelect (whose admin
         # never switched self-service on) still has the page its Player Cards live on. Only a club
         # that has none gets one; BetterSelect clubs keep their own self-service switch, which

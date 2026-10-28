@@ -1948,6 +1948,20 @@ export const api = {
       })
   },
   adminDeletePlayerHeroPhoto: (playerId) => request(`/club-admin/players/${playerId}/hero-photo`, { method: 'DELETE' }),
+  // The action shot (migration 374), a third photograph beside the headshot and the hero photo.
+  adminUploadPlayerActionPhoto: (playerId, file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/club-admin/players/${playerId}/action-photo`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  adminDeletePlayerActionPhoto: (playerId) => request(`/club-admin/players/${playerId}/action-photo`, { method: 'DELETE' }),
   adminListPartnershipRecords: () => request('/club-admin/partnership-records'),
   adminCreatePartnershipRecord: (data) =>
     request('/club-admin/partnership-records', { method: 'POST', body: JSON.stringify(data) }),

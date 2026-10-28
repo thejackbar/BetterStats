@@ -391,6 +391,34 @@ async def main() -> None:
               and cards.tier_for(55) == "rare" and cards.tier_for(54) == "common")
         check("the pool lists a player under their own tier", str(ALPHA) in snap["pool"][a["tier"]])
 
+    # ── The three photographs (migration 374) ────────────────────────────────
+    # A card carries the hero photo, the action shot and the club's pick between them; the frontend resolves it
+    # (lib/playerShots.js). Read through .get so the control run (the commit before 374) reports instead of crashing.
+    print("\nthe three photographs")
+    async with Session() as db:
+        try:
+            await db.execute(text("UPDATE players SET action_photo_url = '/api/images/players/x/action-photo?v=1', "
+                                  "hero_source = 'action' WHERE id = :i"), {"i": ALPHA})
+            await db.commit()
+        except Exception:
+            await db.rollback()  # the control run's schema has no such columns
+        club = await db.get(Organisation, ORG)
+        snap = await cards.club_snapshot(db, club, fresh=True)
+        a = cards.regular_card(snap, str(ALPHA))
+        d = cards.regular_card(snap, str(DELTA))
+        NO = object()
+        check("a regular card carries the action shot", a.get("action_photo_url", NO) == "/api/images/players/x/action-photo?v=1", str(a.get("action_photo_url", NO)))
+        check("and the club's pick between the hero photo and the action shot", a.get("hero_source", NO) == "action", str(a.get("hero_source", NO)))
+        check("a player with neither carries null for both, not a missing key", d.get("action_photo_url", NO) is None and d.get("hero_source", NO) is None)
+        own = cards._own_card_outside_pool(await db.get(Player, ALPHA), snap)
+        check("an own card outside the pool carries them too", own.get("action_photo_url", NO) == "/api/images/players/x/action-photo?v=1" and own.get("hero_source", NO) == "action")
+        try:
+            await db.execute(text("UPDATE players SET action_photo_url = NULL, hero_source = NULL WHERE id = :i"), {"i": ALPHA})
+            await db.commit()
+        except Exception:
+            await db.rollback()
+        cards.forget(ORG)
+
     # ── Week boundaries ──────────────────────────────────────────────────────
     print("\nthe weekly reset")
     st = cards.default_settings()

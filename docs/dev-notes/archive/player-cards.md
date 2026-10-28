@@ -189,3 +189,10 @@ Reported by North Perth players on `/playerdash/:token`. v9.132.2 (616950d) adde
 ## v9.132.8 (2026-10-28): heads behind the name
 
 Reported from a screenshot of the book: on full-photo cards the top of the head was hidden by the player's name. `CardFaces.Portrait` now starts the hero photo 64px down with a 22px fade-in; the bottom edge is unchanged. Applies to regular and special cards. The public share card has the same crop and was left alone (not reported). Verified with the new `_hero_` browser suite (7) plus the page, first and v2 suites.
+
+## v9.134.0 (2026-10-28): action shot and the hero pick
+
+A player now has three photographs: the profile photo (`photo_*`), the hero photo (`hero_photo_*`, migration 274, labelled "Action shot" in the admin until now; bytes, routes and column names untouched) and the new action shot (`action_photo_*`, migration 374, `services/player_action_photo_ddl.py`, served at `/api/images/players/{id}/action-photo`). `players.hero_source` (NULL, `hero` or `action`) is the club's per-player pick of which of the last two fills the big photo. `lib/playerShots.js` (`pickHero`, `heroShotUrl`) is the one resolver: the pinned shot, else the hero photo, else the action shot; the caller falls back to the profile photo. Cards (`CardFaces`), the public share card (`ShareCard`) and the post designer (`heroSrcOf` in `cricket-templates.jsx`, plus a per-post Player Photo picker in `AdminSocialPost.jsx`) all use it. A privacy removal clears the action shot and the pin; a merge carries the action shot and the pin; the data report and evidence pack list it.
+
+Check: `verify_player_action_photo.py` (own database), plus the added checks in `verify_player_privacy.py` and `verify_merge_profile_carry.py`.
+

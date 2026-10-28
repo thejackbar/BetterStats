@@ -248,9 +248,12 @@ async def list_players(
             "display_name_override": p.display_name_override,
             "playhq_id": p.playhq_id,
             "photo_url": p.photo_url,
-            # The post designer builds its lineup from THIS list, so the action
-            # shot has to ride along here or the hero slot never sees one.
+            # The post designer builds its lineup from THIS list, so the hero
+            # photo, the action shot and the club's pick between them have to
+            # ride along here or the hero slot never sees them.
             "hero_photo_url": p.hero_photo_url,
+            "action_photo_url": p.action_photo_url,
+            "hero_source": p.hero_source,
             "gender": p.gender,
             "is_player": p.is_player,
             "player_role": p.player_role,
@@ -461,6 +464,8 @@ async def create_player(
         "skill_positions": player.skill_positions or [],
         "photo_url": player.photo_url,
         "hero_photo_url": player.hero_photo_url,
+        "action_photo_url": player.action_photo_url,
+        "hero_source": player.hero_source,
         "is_player": player.is_player,
     }
 
@@ -1404,13 +1409,16 @@ def _remove_player_photo(photo_url: Optional[str]) -> None:
     p.unlink(missing_ok=True)
 
 
-# The two photographs a player can have, and the columns each lands in. A
-# headshot reads at 44px on a roster row; an action shot fills the hero slot on
-# a match-day post. Cropping either into the other's slot is what asked for the
-# split (migration 274) — one set of handlers, keyed on which.
+# The three photographs a player can have, and the columns each lands in. A
+# headshot reads at 44px on a roster row; the hero photo fills the big slot on a
+# card, a share card and a match-day post; the action shot (migration 374) is the
+# player mid-shot, for the same big slot when the club picks it. Cropping one into
+# another's slot is what asked for the split (migration 274) — one set of
+# handlers, keyed on which.
 _PLAYER_PHOTO_KINDS = {
     "photo": ("photo_data", "photo_mime", "photo_url", "photo"),
     "hero": ("hero_photo_data", "hero_photo_mime", "hero_photo_url", "hero-photo"),
+    "action": ("action_photo_data", "action_photo_mime", "action_photo_url", "action-photo"),
 }
 
 
@@ -1441,8 +1449,8 @@ async def _store_player_photo(db, player: Player, file: UploadFile, kind: str) -
     if len(data) > PHOTO_MAX_BYTES:
         raise HTTPException(400, "Photo must be 8 MB or smaller")
 
-    # Only the headshot ever had an on-disk form to clean up; the action shot
-    # has been in-table since the day it existed.
+    # Only the headshot ever had an on-disk form to clean up; the other two
+    # have been in-table since the day they existed.
     if kind == "photo":
         _remove_player_photo(player.photo_url)
     url = f"/api/images/players/{player.id}/{route}?v={_uuid.uuid4().hex[:8]}"
@@ -1508,6 +1516,29 @@ async def delete_player_hero_photo(
 ):
     player = await _player_for_photo(db, player_id, club)
     return await _clear_player_photo(db, player, "hero")
+
+
+@router.post("/players/{player_id}/action-photo", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
+async def upload_player_action_photo(
+    player_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await _player_for_photo(db, player_id, club)
+    return await _store_player_photo(db, player, file, "action")
+
+
+@router.delete("/players/{player_id}/action-photo", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
+async def delete_player_action_photo(
+    player_id: str,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await _player_for_photo(db, player_id, club)
+    return await _clear_player_photo(db, player, "action")
 
 
 # ---------------------------------------------------------------------------

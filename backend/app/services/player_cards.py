@@ -415,6 +415,8 @@ async def club_snapshot(db: AsyncSession, club: Organisation, *, fresh: bool = F
             "display_name": p.display_name,
             "photo_url": p.photo_url,
             "hero_photo_url": getattr(p, "hero_photo_url", None),
+            "action_photo_url": getattr(p, "action_photo_url", None),
+            "hero_source": getattr(p, "hero_source", None),
         }
 
     figs: dict[str, dict] = {}
@@ -506,6 +508,8 @@ def regular_card(snap: dict, pid: str) -> Optional[dict]:
         "name": person["display_name"],
         "photo_url": person["photo_url"],
         "hero_photo_url": person["hero_photo_url"],
+        "action_photo_url": person["action_photo_url"],
+        "hero_source": person["hero_source"],
         "matches": f.get("matches", 0),
         "runs": f.get("runs", 0),
         "bat_avg": f.get("bat_avg"),
@@ -530,6 +534,8 @@ def special_card(snap: dict, row: dict) -> Optional[dict]:
         "name": person["display_name"],
         "photo_url": person["photo_url"],
         "hero_photo_url": person["hero_photo_url"],
+        "action_photo_url": person["action_photo_url"],
+        "hero_source": person["hero_source"],
         "title": row["title"],
         "occurred_on": row["occurred_on"].isoformat() if row["occurred_on"] else None,
         "detail": row["detail"] or {},
@@ -1236,6 +1242,7 @@ def _own_card_outside_pool(player: Player, snap: dict) -> dict:
     return {
         "kind": "player", "key": f"p:{player.id}", "player_id": str(player.id), "name": player.display_name,
         "photo_url": player.photo_url, "hero_photo_url": getattr(player, "hero_photo_url", None),
+        "action_photo_url": getattr(player, "action_photo_url", None), "hero_source": getattr(player, "hero_source", None),
         "matches": 0, "runs": 0, "bat_avg": None, "wickets": 0, "bowl_avg": None, "dismissals": 0,
         "rarity": 1, "tier": "common",
     }

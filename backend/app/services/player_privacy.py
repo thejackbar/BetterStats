@@ -143,7 +143,8 @@ async def holdings(session: AsyncSession, player: Player) -> dict:
             "organisation_id": str(player.organisation_id) if player.organisation_id else None,
             "is_public": player.is_public is not False,
             "has_photo": bool(player.photo_data or player.photo_url),
-            "has_action_photo": bool(player.hero_photo_data or player.hero_photo_url),
+            "has_action_photo": bool(
+                player.hero_photo_data or player.hero_photo_url or player.action_photo_data or player.action_photo_url),
             "has_email": bool(player.email),
             "has_phone": bool(player.phone),
             "has_date_of_birth": player.date_of_birth is not None,
@@ -316,7 +317,8 @@ async def _hide_one(
         "is_public": player.is_public is not False,
         "privacy_hidden_at": player.privacy_hidden_at.isoformat() if player.privacy_hidden_at else None,
         "had_photo": bool(player.photo_data or player.photo_url),
-        "had_action_photo": bool(player.hero_photo_data or player.hero_photo_url),
+        "had_action_photo": bool(
+            player.hero_photo_data or player.hero_photo_url or player.action_photo_data or player.action_photo_url),
     }
 
     player.is_public = False
@@ -336,7 +338,14 @@ async def _hide_one(
             player.hero_photo_data = None
             player.hero_photo_mime = None
             player.hero_photo_url = None
-            changed["photos_removed"].append("action photo")
+            changed["photos_removed"].append("hero photo")
+        # The third photograph (migration 374). A removal request takes every picture of the person.
+        if player.action_photo_data or player.action_photo_url:
+            player.action_photo_data = None
+            player.action_photo_mime = None
+            player.action_photo_url = None
+            changed["photos_removed"].append("action shot")
+        player.hero_source = None
 
         # BetterIQ keeps its own copy for a scouted opponent, keyed on the
         # Cricket Australia participant id and, for a club's own player, on
