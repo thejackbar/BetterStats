@@ -165,12 +165,6 @@ Asked for: let clubs make their own designs for packs, with uploaded images or b
 
 Verified: `verify_player_cards.py` (473; the control run on the previous commit has no pack designs to test, so the new section is skipped there), `verify_merge_carry.py`, `verify_player_page_dashboard.py`, `verify_player_dashboard_and_fines.py`, `audit_route_access.py`; browser `_designs_` (33), `_admin_`, `_page_`, `_community_`, `_social_`, first suite.
 
-<<<<<<< HEAD
-## v9.132.8 (2026-10-28): heads behind the name
-
-Reported from a screenshot of the book: on full-photo cards the top of the head was hidden by the player's name. `CardFaces.Portrait` now starts the hero photo 64px down with a 22px fade-in; the bottom edge is unchanged. Applies to regular and special cards. The public share card has the same crop and was left alone (not reported). Verified with the new `_hero_` browser suite (7) plus the page, first and v2 suites.
-=======
-
 ## v9.132.6 (2026-10-27): the Player Dashboard is switched on from BetterStats
 
 Asked for: "to turn on the Player Dashboard you need BetterSelect, but it should be through club settings, as cards and stats only need BetterStats." Then: "there should still be just a dedicated link for things like availability and votes etc but player dash should be turned on/off from BetterStats."
@@ -191,4 +185,7 @@ Verified: `verify_player_dashboard_switch.py` (52, real HTTP through the mounted
 ## v9.132.7.1: availability answers failed on the player page ("That set could not be found.")
 
 Reported by North Perth players on `/playerdash/:token`. v9.132.2 (616950d) added `availPublicSet(token, key)` for the card set page to `api.js` while `availPublicSet(token, data)` (the availability answer, POST `/public/availability/{token}/me`) already existed. In an object literal the later key wins, so every Available/Unavailable tap sent `GET /me/cards/sets/[object Object]`, the set route returned 404 and the page showed the error. The button looked pressed (optimistic) but nothing was saved. Fix: the card reader is now `availPublicCardSet` (one caller, `SetPage.jsx`). Answers given while the bug was live were never written, so players need to answer again; no data was changed or lost. Verified: `verify_avail_answer_request.mjs` runs the real `api.js` with `fetch` stubbed; fixed build 6/6, control on the previous `api.js` 0/6 with the request recorded as `GET .../me/cards/sets/%5Bobject%20Object%5D`. Only one duplicate key existed in `api.js`.
->>>>>>> origin/main
+
+## v9.132.8 (2026-10-28): heads behind the name
+
+Reported from a screenshot of the book: on full-photo cards the top of the head was hidden by the player's name. `CardFaces.Portrait` now starts the hero photo 64px down with a 22px fade-in; the bottom edge is unchanged. Applies to regular and special cards. The public share card has the same crop and was left alone (not reported). Verified with the new `_hero_` browser suite (7) plus the page, first and v2 suites.
