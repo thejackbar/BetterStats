@@ -4565,6 +4565,12 @@ async def lifespan(app: FastAPI):
         from app.services.player_dashboard_ddl import STATEMENTS as _PLAYER_DASHBOARD_DDL
         for _stmt in _PLAYER_DASHBOARD_DDL:
             await conn.execute(text(_stmt))
+        # Migration 373: a hand-entered game can be marked as the grand final, which the automatic
+        # premierships read. Same one-copy rule: this list and alembic's 373 both run
+        # services/manual_grand_final_ddl.STATEMENTS.
+        from app.services.manual_grand_final_ddl import STATEMENTS as _MANUAL_GF_DDL
+        for _stmt in _MANUAL_GF_DDL:
+            await conn.execute(text(_stmt))
         # Every club with players has a player page link, so one without BetterSelect (whose admin
         # never switched self-service on) still has the page its Player Cards live on. Only a club
         # that has none gets one; BetterSelect clubs keep their own self-service switch, which

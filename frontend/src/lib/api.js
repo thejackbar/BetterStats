@@ -2120,6 +2120,10 @@ export const api = {
     request('/club-admin/manual-entries/games/check', { method: 'POST', body: JSON.stringify(data) }),
   adminPatchManualGame: (id, data) =>
     request(`/club-admin/manual-entries/games/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // The match's own fields only (date, teams, result, winner, grade, Final, Grand Final), never its scorecard.
+  // Only a field that is sent changes; a field left out is left alone.
+  adminPatchManualGameDetails: (id, data) =>
+    request(`/club-admin/manual-entries/games/${id}/details`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminDeleteManualGame: (id) =>
     request(`/club-admin/manual-entries/games/${id}`, { method: 'DELETE' }),
 

@@ -2375,6 +2375,10 @@ class ManualGame(Base):
     result = Column(Text, nullable=True)
     winning_team = Column(Text, nullable=True)
     is_final = Column(Boolean, server_default="false", nullable=False)
+    # A person's own statement that this match was the grand final (migration 373). A hand-entered
+    # game has no round name, so this is what the automatic premierships read for it. Mapped here as
+    # well as in the DDL so a read through the ORM does not fail at request time.
+    is_grand_final = Column(Boolean, server_default="false", nullable=False)
     match_format = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     # Opposition club's Grassroots org GUID (from the CA club search), so the manual
