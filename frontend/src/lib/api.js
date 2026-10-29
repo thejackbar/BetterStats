@@ -132,6 +132,11 @@ function mktQS(params) {
 async function uploadFile(path, file, field = 'file') {
   const form = new FormData()
   form.append(field, file)
+  return postForm(path, form)
+}
+
+// POST a FormData (a file or several, with fields) and read the JSON answer.
+async function postForm(path, form) {
   const res = await fetch(`${BASE}${path}`, { method: 'POST', body: form, credentials: 'include' })
   if (!res.ok) {
     const e = await res.json().catch(() => ({}))
@@ -3447,6 +3452,7 @@ export const api = {
   setPlayerCardHidden: (playerId, hidden) =>
     request(`/player-cards/players/${playerId}/hidden`, { method: 'POST', body: JSON.stringify({ hidden }) }),
   refreshPlayerCardSpecials: () => request('/player-cards/refresh-specials', { method: 'POST' }),
+  createPlayerCardGiftDesigned: (form) => postForm('/player-cards/gifts/designed', form),
   createPlayerCardGift: (data) => request('/player-cards/gifts', { method: 'POST', body: JSON.stringify(data) }),
   addPlayerCardEvent: (data) => request('/player-cards/events', { method: 'POST', body: JSON.stringify(data) }),
   deletePlayerCardEvent: (id) => request(`/player-cards/events/${id}`, { method: 'DELETE' }),

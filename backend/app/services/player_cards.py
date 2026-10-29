@@ -67,6 +67,8 @@ from app.services.season_kind import season_key_sql
 logger = logging.getLogger(__name__)
 
 PACK_SIZE = 5
+MIN_PACK_SIZE = 1
+MAX_PACK_SIZE = 12
 STARTER_PACKS = 2
 DEFAULT_TIMEZONE = "Australia/Perth"
 DEFAULT_WEEKLY_PACKS = 1
@@ -1137,7 +1139,7 @@ async def available_packs(db: AsyncSession, pid: str, snap: dict) -> list[dict]:
     """Unopened packs the player can open now. A weekly pack is only good in the week it was granted."""
     wk = week_key(snap["settings"])
     rows = await db.execute(text("""
-        SELECT id::text, source, ref_key, granted_at, label, quality FROM player_card_packs
+        SELECT id::text, source, ref_key, granted_at, label, quality, size FROM player_card_packs
          WHERE player_id = CAST(:pid AS UUID) AND opened_at IS NULL
            AND (source <> 'weekly' OR ref_key LIKE :wk)
     """), {"pid": pid, "wk": f"{wk}:%"})
@@ -1149,7 +1151,7 @@ async def available_packs(db: AsyncSession, pid: str, snap: dict) -> list[dict]:
         design = pack_designs.resolve(designs, r[1], ev, pack_designs.gift_id_of(r[1], r[2]))
         # A pack with a name of its own (a scheduled event) keeps it; otherwise the club's name for that kind of pack, then ours.
         own = (design or {}).get("title") if design and design["target"] != pack_designs.DEFAULT_TARGET else None
-        out.append({"id": r[0], "source": r[1], "label": r[4] or own or kinds.label_for(r[1]), "quality": r[5], "design": design})
+        out.append({"id": r[0], "source": r[1], "label": r[4] or own or kinds.label_for(r[1]), "quality": r[5], "size": r[6] or PACK_SIZE, "design": design})
     return out
 
 
@@ -1171,7 +1173,8 @@ def quality_options() -> list[dict]:
 
 
 async def create_gift(db, club: Organisation, snap: dict, *, title: str, quality: str, qty: int = 1, audience: str = "all",
-                      player_ids: Optional[list[str]] = None, request_id: Optional[str] = None, by: Optional[str] = None) -> dict:
+                      player_ids: Optional[list[str]] = None, request_id: Optional[str] = None, by: Optional[str] = None,
+                      size: int = PACK_SIZE) -> dict:
     """Hand out packs now: `qty` packs of `quality`, named `title`, to everyone with a card or to the players chosen. They arrive as
     ordinary unopened packs (opened from the player's page, banked until opened, never expiring). `request_id` is the screen's own
     id for this click: sending the same one twice grants once. Raises ValueError with a message the admin can read."""
@@ -1182,6 +1185,8 @@ async def create_gift(db, club: Organisation, snap: dict, *, title: str, quality
         raise ValueError("Pick one of the pack qualities.")
     if not isinstance(qty, int) or isinstance(qty, bool) or not 1 <= qty <= MAX_GIFT_QTY:
         raise ValueError(f"Each player can be given from 1 to {MAX_GIFT_QTY} packs.")
+    if not isinstance(size, int) or isinstance(size, bool) or not MIN_PACK_SIZE <= size <= MAX_PACK_SIZE:
+        raise ValueError(f"A pack holds from {MIN_PACK_SIZE} to {MAX_PACK_SIZE} cards.")
     if audience == "all":
         pids = sorted(snap["people"])
     elif audience == "players":
@@ -1198,38 +1203,38 @@ async def create_gift(db, club: Organisation, snap: dict, *, title: str, quality
         gift_id = str(uuid.uuid4())
     org = str(club.id)
     made = (await db.execute(text("""
-        INSERT INTO club_card_pack_gifts (id, organisation_id, title, quality, qty, audience, players, created_by)
-        VALUES (CAST(:id AS UUID), CAST(:org AS UUID), :title, :quality, :qty, :audience, :players, :by)
+        INSERT INTO club_card_pack_gifts (id, organisation_id, title, quality, qty, audience, players, created_by, size)
+        VALUES (CAST(:id AS UUID), CAST(:org AS UUID), :title, :quality, :qty, :audience, :players, :by, :size)
         ON CONFLICT (id) DO NOTHING RETURNING id::text
-    """), {"id": gift_id, "org": org, "title": title, "quality": quality, "qty": qty, "audience": audience, "players": len(pids), "by": by})).first()
+    """), {"id": gift_id, "org": org, "title": title, "quality": quality, "qty": qty, "audience": audience, "players": len(pids), "by": by, "size": size})).first()
     if not made:
         existing = (await db.execute(text(
-            "SELECT title, quality, qty, players FROM club_card_pack_gifts WHERE id = CAST(:id AS UUID) AND organisation_id = CAST(:org AS UUID)"),
+            "SELECT title, quality, qty, players, size FROM club_card_pack_gifts WHERE id = CAST(:id AS UUID) AND organisation_id = CAST(:org AS UUID)"),
             {"id": gift_id, "org": org})).mappings().first()
         if not existing:
             raise ValueError("That request belongs to another club.")
         return {"id": gift_id, "title": existing["title"], "quality": existing["quality"], "qty": existing["qty"],
-                "players": existing["players"], "packs": existing["players"] * existing["qty"], "repeat": True}
+                "players": existing["players"], "packs": existing["players"] * existing["qty"], "size": existing["size"], "repeat": True}
     await db.execute(text("""
-        INSERT INTO player_card_packs (organisation_id, player_id, source, ref_key, label, quality)
-        SELECT CAST(:org AS UUID), CAST(p AS UUID), 'custom', :gid || ':' || n::text, :title, :quality
+        INSERT INTO player_card_packs (organisation_id, player_id, source, ref_key, label, quality, size)
+        SELECT CAST(:org AS UUID), CAST(p AS UUID), 'custom', :gid || ':' || n::text, :title, :quality, CAST(:size AS INT)
           FROM unnest(CAST(:pids AS text[])) AS p, generate_series(1, CAST(:qty AS INT)) AS n
         ON CONFLICT (player_id, source, ref_key) DO NOTHING
-    """), {"org": org, "gid": gift_id, "title": title, "quality": quality, "pids": pids, "qty": qty})
-    return {"id": gift_id, "title": title, "quality": quality, "qty": qty, "players": len(pids), "packs": len(pids) * qty, "repeat": False}
+    """), {"org": org, "gid": gift_id, "title": title, "quality": quality, "pids": pids, "qty": qty, "size": size})
+    return {"id": gift_id, "title": title, "quality": quality, "qty": qty, "players": len(pids), "packs": len(pids) * qty, "size": size, "repeat": False}
 
 
 async def list_gifts(db, org_id) -> list[dict]:
     """The packs the club has handed out lately, with how many have been opened."""
     rows = (await db.execute(text("""
-        SELECT g.id::text AS id, g.title, g.quality, g.qty, g.audience, g.players, g.created_at,
+        SELECT g.id::text AS id, g.title, g.quality, g.qty, g.audience, g.players, g.created_at, g.size,
                (SELECT COUNT(*) FROM player_card_packs p WHERE p.organisation_id = g.organisation_id AND p.source = 'custom'
                    AND p.ref_key LIKE g.id::text || ':%' AND p.opened_at IS NOT NULL) AS opened
           FROM club_card_pack_gifts g WHERE g.organisation_id = CAST(:org AS UUID)
          ORDER BY g.created_at DESC LIMIT :n
     """), {"org": str(org_id), "n": RECENT_GIFTS})).mappings().all()
     return [{"id": r["id"], "title": r["title"], "quality": r["quality"], "qty": r["qty"], "audience": r["audience"], "players": r["players"],
-             "packs": r["players"] * r["qty"], "opened": int(r["opened"] or 0), "created_at": r["created_at"].isoformat()} for r in rows]
+             "packs": r["players"] * r["qty"], "size": r["size"] or PACK_SIZE, "opened": int(r["opened"] or 0), "created_at": r["created_at"].isoformat()} for r in rows]
 
 
 # ── Drawing a pack ────────────────────────────────────────────────────────────
@@ -1276,6 +1281,20 @@ def draw_cards(pool: dict[str, list[str]], specials: list[str], size: int = PACK
             if ("player", ident) not in seen:
                 seen.add(("player", ident))
                 return {"kind": "player", "id": ident, "tier": tier}
+        # Twelve random tries all landed on cards already in the pack (a small club, a big pack): take any card still unseen, the
+        # best tiers first when a Rare or better is wanted, so a pack is never short of cards the club actually has.
+        order = ("legendary", "epic", "rare") if rare_plus else TIERS
+        left = [(t, i) for t in order for i in pool.get(t, []) if ("player", i) not in seen]
+        if left:
+            t, ident = _rng.choice(left)
+            seen.add(("player", ident))
+            return {"kind": "player", "id": ident, "tier": t}
+        if not rare_plus:
+            unseen = [sp for sp in specials if ("special", sp) not in seen]
+            if unseen:
+                ident = _rng.choice(unseen)
+                seen.add(("special", ident))
+                return {"kind": "special", "id": ident, "tier": "special"}
         return None
 
     for _ in range(size):
@@ -1283,7 +1302,9 @@ def draw_cards(pool: dict[str, list[str]], specials: list[str], size: int = PACK
         if pick:
             picks.append(pick)
     # The guarantee: at least `rare_plus` cards are Rare or better (a special card counts). Weakest slots are redrawn.
-    want = min(kind.rare_plus, len(picks))
+    # (The guarantee is written for five cards; a bigger or smaller pack scales it, never below one.)
+    scaled = max(1, -(-kind.rare_plus * size // PACK_SIZE)) if kind.rare_plus else 0
+    want = min(scaled, len(picks))
     for _ in range(want):
         good = sum(1 for p in picks if p["tier"] != "common")
         if good >= want:
@@ -1302,7 +1323,7 @@ async def open_pack(db: AsyncSession, club: Organisation, player: Player, pack_i
     """Open one pack: lock it, draw, record the copies. Returns the cards, or None when the pack is not
     this player's, is already open, or was a weekly pack that has expired. The caller commits."""
     row = (await db.execute(text("""
-        SELECT id::text, source, ref_key, quality FROM player_card_packs
+        SELECT id::text, source, ref_key, quality, size FROM player_card_packs
          WHERE id = CAST(:id AS UUID) AND player_id = CAST(:pid AS UUID) AND opened_at IS NULL
          FOR UPDATE
     """), {"id": pack_id, "pid": str(player.id)})).first()
@@ -1311,7 +1332,7 @@ async def open_pack(db: AsyncSession, club: Organisation, player: Player, pack_i
     if row[1] == "weekly" and not str(row[2]).startswith(week_key(snap["settings"]) + ":"):
         return None
     specials = [sid for sid, owner in await _all_special_ids(db, club.id) if owner in snap["people"]]
-    picks = draw_cards(snap["pool"], specials, kind=kinds.quality_kind(row[3], row[1]))
+    picks = draw_cards(snap["pool"], specials, size=max(MIN_PACK_SIZE, min(int(row[4] or PACK_SIZE), MAX_PACK_SIZE)), kind=kinds.quality_kind(row[3], row[1]))
     await db.execute(text("UPDATE player_card_packs SET opened_at = NOW() WHERE id = CAST(:id AS UUID)"), {"id": pack_id})
     special_rows = await _specials_by_id(db, club.id, [p["id"] for p in picks if p["kind"] == "special"])
     cards: list[dict] = []

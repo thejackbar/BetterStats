@@ -73,6 +73,7 @@ class GiftBody(BaseModel):
     audience: str = "all"
     player_ids: list[str] = []
     request_id: Optional[str] = None
+    size: int = 5
 
 
 class DesignBody(BaseModel):
@@ -140,6 +141,7 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
         "gifts": await cards.list_gifts(db, club.id),
         "qualities": cards.quality_options(),
         "max_gift_qty": cards.MAX_GIFT_QTY,
+        "pack_size": {"default": cards.PACK_SIZE, "min": cards.MIN_PACK_SIZE, "max": cards.MAX_PACK_SIZE},
         "designs": await pack_designs.load_all(db, club.id),
         "design_targets": await pack_designs.targets(db, club.id),
         "max_weekly_packs": cards.MAX_WEEKLY_PACKS,
@@ -241,7 +243,7 @@ async def create_gift(
     await cards.ensure_launched(db, club.id)
     try:
         out = await cards.create_gift(db, club, snap, title=body.title, quality=body.quality, qty=body.qty, audience=body.audience,
-                                      player_ids=body.player_ids, request_id=body.request_id, by=getattr(user, "email", None))
+                                      player_ids=body.player_ids, request_id=body.request_id, by=getattr(user, "email", None), size=body.size)
     except ValueError as exc:
         await db.rollback()
         raise HTTPException(status_code=422, detail=str(exc))
@@ -260,6 +262,7 @@ async def create_designed_gift(
     audience: str = Form("all"),
     player_ids: str = Form("[]"),
     request_id: Optional[str] = Form(None),
+    size: int = Form(5),
     style: str = Form("{}"),
     bg: Optional[UploadFile] = File(None),
     art: Optional[UploadFile] = File(None),
@@ -288,7 +291,7 @@ async def create_designed_gift(
     await cards.ensure_launched(db, club.id)
     try:
         out = await cards.create_gift(db, club, snap, title=title, quality=quality, qty=qty, audience=audience,
-                                      player_ids=[str(i) for i in ids], request_id=request_id, by=getattr(user, "email", None))
+                                      player_ids=[str(i) for i in ids], request_id=request_id, by=getattr(user, "email", None), size=size)
     except ValueError as exc:
         await db.rollback()
         raise HTTPException(status_code=422, detail=str(exc))
@@ -299,7 +302,7 @@ async def create_designed_gift(
         for kind, (data, mime) in images.items():
             await pack_designs.put_image(db, club.id, target, kind, data, mime)
         await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_pack_gift", target_type="card_pack_gift",
-                                     target_id=out["id"], details={**{k: out[k] for k in ("title", "quality", "qty", "players", "packs")},
+                                     target_id=out["id"], details={**{k: out[k] for k in ("title", "quality", "qty", "players", "packs", "size")},
                                                                    "designed": bool(clean or images)})
     await db.commit()
     return {"gift": out, **await _payload(db, club)}

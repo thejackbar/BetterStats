@@ -34,11 +34,12 @@ ALLOWED_FORMATS = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp
 POSITIONS = ("top", "center", "bottom")
 SIZES = ("s", "m", "l")
 MAX_TITLE = 40
+MAX_LINE = 36
 MAX_PIXELS = 40_000_000                    # refuse a decompression bomb before decoding it
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
-_STYLE_KEYS = ("title", "color_a", "color_b", "color_on", "overlay", "show_name", "show_logo", "art_position", "art_size")
+_STYLE_KEYS = ("title", "line", "color_a", "color_b", "color_on", "overlay", "show_name", "show_logo", "art_position", "art_size")
 
-COLUMNS = ("id, target, title, color_a, color_b, color_on, overlay, show_name, show_logo, art_position, art_size, "
+COLUMNS = ("id, target, title, line, color_a, color_b, color_on, overlay, show_name, show_logo, art_position, art_size, "
            "bg_rev, art_rev, bg_mime IS NOT NULL AS has_bg, art_mime IS NOT NULL AS has_art")
 
 
@@ -64,7 +65,7 @@ def image_url(design_id, kind: str, rev) -> str:
 def row_dict(r) -> dict:
     """A design as the page uses it. Image URLs only when there is an image."""
     return {
-        "id": str(r["id"]), "target": r["target"], "title": r["title"],
+        "id": str(r["id"]), "target": r["target"], "title": r["title"], "line": r["line"],
         "a": r["color_a"], "b": r["color_b"], "on": r["color_on"],
         "overlay": float(r["overlay"] if r["overlay"] is not None else 0.25),
         "show_name": r["show_name"] is not False, "show_logo": r["show_logo"] is not False,
@@ -173,6 +174,9 @@ def clean_style(patch: dict) -> dict:
             out[k] = v.lower() if v else None
         elif k == "title":
             t = " ".join(str(v or "").split())[:MAX_TITLE]
+            out[k] = t or None
+        elif k == "line":
+            t = " ".join(str(v or "").split())[:MAX_LINE]
             out[k] = t or None
         elif k == "overlay":
             try:

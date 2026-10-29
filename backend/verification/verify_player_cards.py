@@ -91,6 +91,10 @@ if HAVE_SWAPS:
     except ImportError:   # the control run on the commit before photos by card type
         PHOTOS_DDL = []
     try:
+        from app.services.player_card_looks_ddl import STATEMENTS as LOOKS_DDL
+    except ImportError:   # the control run on the commit before packs could be designed and sized as they are made
+        LOOKS_DDL = []
+    try:
         from app.services.player_card_social_ddl import STATEMENTS as SOCIAL_DDL
     except ImportError:   # the control run on the commit before the social side
         SOCIAL_DDL = []
@@ -103,6 +107,7 @@ else:
     PACKS_DDL = []
     DESIGNS_DDL = []
     GIFTS_DDL = []
+    LOOKS_DDL = []
     PHOTOS_DDL = []
     ITEM_DDL = []
 
@@ -181,7 +186,7 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
-        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL:
+        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL + LOOKS_DDL:
             await conn.execute(text(stmt))
 
 
@@ -1539,7 +1544,7 @@ async def main() -> None:
         pool = {"common": [f"c{i}" for i in range(80)], "rare": [f"r{i}" for i in range(40)],
                 "epic": [f"e{i}" for i in range(20)], "legendary": [f"l{i}" for i in range(10)]}
 
-        def rare_share(source, n=400):
+        def rare_share(source, n=1500):
             hits = total = least = 0
             least = 99
             for _ in range(n):
@@ -2015,7 +2020,7 @@ async def main() -> None:
         from app.services import player_card_pack_kinds as K3
         pool3 = {"common": [f"c{i}" for i in range(80)], "rare": [f"r{i}" for i in range(40)], "epic": [f"e{i}" for i in range(20)], "legendary": [f"l{i}" for i in range(10)]}
 
-        def share(q, n=500):
+        def share(q, n=1500):
             good = tot = least = 0
             least = 99
             for _ in range(n):
@@ -2141,7 +2146,7 @@ async def main() -> None:
                 n_gifts = lambda: db.execute(text("SELECT count(*) FROM club_card_pack_gifts WHERE organisation_id = :o"), {"o": ORG})
                 before_n = (await n_gifts()).scalar()
                 rid2 = str(uuid.uuid4())
-                made = await adm3.create_designed_gift(title="Cup Day Special", quality="elite", qty=1, audience="players", player_ids=json.dumps(pick[:1]), request_id=rid2,
+                made = await adm3.create_designed_gift(size=5, title="Cup Day Special", quality="elite", qty=1, audience="players", player_ids=json.dumps(pick[:1]), request_id=rid2,
                                                        style=json.dumps({"color_a": "#112233", "overlay": 0.5, "show_name": False, "art_position": "bottom"}),
                                                        bg=_U2(file=_BI(_png(900, 1200)), filename="bg.png"), art=_U2(file=_BI(_png(300, 300)), filename="art.png"),
                                                        db=db, club=club, user=admin_user)
@@ -2155,7 +2160,7 @@ async def main() -> None:
                 check("the player's pack has that design", mine_p and mine_p[0]["design"] and mine_p[0]["design"]["target"] == f"gift:{gid}" and mine_p[0]["design"]["a"] == "#112233", str(mine_p))
                 await D2.save_style(db, ORG, "custom", {"color_a": "#aa0000"}); await db.commit()
                 snap = await cards.club_snapshot(db, club, fresh=True)
-                plain_p = [p for p in await cards.available_packs(db, pick[0], snap) if p["label"] == "Thanks"]
+                plain_p = [p for p in await cards.available_packs(db, pick[1], snap) if p["label"] == "Thanks"]
                 mine_p = [p for p in await cards.available_packs(db, pick[0], snap) if p["label"] == "Cup Day Special"]
                 check("another club pack without its own design takes the club's 'club pack' design, and the designed one keeps its own", plain_p[0]["design"]["target"] == "custom" and mine_p[0]["design"]["target"] == f"gift:{gid}")
                 check("the gift's design can be changed later like any other (it is listed under From the club)", f"gift:{gid}" in {t["key"] for t in await D2.targets(db, ORG)} and (await D2.save_style(db, ORG, f"gift:{gid}", {"color_a": "#00ff00"}))["a"] == "#00ff00")
@@ -2165,7 +2170,7 @@ async def main() -> None:
 
                 after_n = (await n_gifts()).scalar()
                 async def refuse(**kw):
-                    base = dict(title="Bad design", quality="elite", qty=1, audience="all", player_ids="[]", request_id=None, style="{}", bg=None, art=None, db=db, club=club, user=admin_user)
+                    base = dict(size=5, title="Bad design", quality="elite", qty=1, audience="all", player_ids="[]", request_id=None, style="{}", bg=None, art=None, db=db, club=club, user=admin_user)
                     return await status_of(adm3.create_designed_gift(**{**base, **kw}))
                 codes2 = []
                 for kw in ({"style": json.dumps({"color_a": "red"})}, {"bg": _U2(file=_BI(svg), filename="x.svg")}, {"art": _U2(file=_BI(b"not a picture"), filename="x.png")},
@@ -2173,11 +2178,46 @@ async def main() -> None:
                     codes2.append(await refuse(**kw)); club = await db.get(Organisation, ORG)
                 check("a bad colour, picture, request or quality is refused (422) each time", codes2 == [422] * 6, str(codes2))
                 check("...and makes NO packs and no half design (nothing is made if anything is wrong)", (await n_gifts()).scalar() == after_n and (await db.execute(text("SELECT count(*) FROM club_card_pack_designs WHERE organisation_id = :o AND target LIKE 'gift:%'"), {"o": ORG})).scalar() == 1)
-                again2 = await adm3.create_designed_gift(title="Cup Day Special", quality="elite", qty=1, audience="players", player_ids=json.dumps(pick[:1]), request_id=rid2,
+                again2 = await adm3.create_designed_gift(size=5, title="Cup Day Special", quality="elite", qty=1, audience="players", player_ids=json.dumps(pick[:1]), request_id=rid2,
                                                          style=json.dumps({"color_a": "#ff00ff"}), bg=None, art=None, db=db, club=club, user=admin_user)
                 check("sending the same request again changes neither the packs nor the design", again2["gift"]["repeat"] is True and again2["designs"][f"gift:{gid}"]["a"] == "#00ff00" and (await n_gifts()).scalar() == after_n)
-                plain = await adm3.create_designed_gift(title="No design here", quality="standard", qty=1, audience="players", player_ids=json.dumps(pick[:1]), request_id=None, style="{}", bg=None, art=None, db=db, club=club, user=admin_user)
+                plain = await adm3.create_designed_gift(size=5, title="No design here", quality="standard", qty=1, audience="players", player_ids=json.dumps(pick[:1]), request_id=None, style="{}", bg=None, art=None, db=db, club=club, user=admin_user)
                 check("a gift sent with no design makes no design row", f"gift:{plain['gift']['id']}" not in plain["designs"])
+                # the words under the name, and how many cards
+                if LOOKS_DDL:
+                    lk = await adm3.create_designed_gift(title="Ten Card Special", quality="legendary", qty=1, audience="players", player_ids=json.dumps(pick[:1]), request_id=None, size=10,
+                                                         style=json.dumps({"line": "  Dig   deep, champions  ", "color_b": "#0a0a0a"}), bg=None, art=None, db=db, club=club, user=admin_user)
+                    lg = lk["designs"][f"gift:{lk['gift']['id']}"]
+                    check("the few words under the pack's name are kept, tidied", lg["line"] == "Dig deep, champions", str(lg))
+                    club = await db.get(Organisation, ORG)
+                    check("the line is cut to 36 characters, and an empty one clears it", len((await D2.save_style(db, ORG, f"gift:{lk['gift']['id']}", {"line": "x" * 90}))["line"]) == 36 and (await D2.save_style(db, ORG, f"gift:{lk['gift']['id']}", {"line": "  "}))["line"] is None)
+                    await db.commit()
+                    snap = await cards.club_snapshot(db, club, fresh=True)
+                    big = [p for p in await cards.available_packs(db, pick[0], snap) if p["label"] == "Ten Card Special"]
+                    check("a pack carries how many cards it holds, and an ordinary one says five", big and big[0]["size"] == 10 and all(p["size"] == 5 for p in await cards.available_packs(db, pick[0], snap) if p["label"] != "Ten Card Special"), str(big))
+                    club = await db.get(Organisation, ORG)
+                    who2 = await db.get(Player, uuid.UUID(pick[0]))
+                    got10 = await cards.open_pack(db, club, who2, big[0]["id"], snap)
+                    await db.commit()
+                    check("opening it gives that many cards", got10 is not None and len(got10) == 10, str(len(got10 or [])))
+                    for sz, label in ((1, "one"), (3, "three"), (12, "twelve")):
+                        r1 = await adm3.create_designed_gift(title=f"{label} cards", quality="elite", qty=1, audience="players", player_ids=json.dumps(pick[1:2]), request_id=None, size=sz, style="{}", bg=None, art=None, db=db, club=club, user=admin_user)
+                        club = await db.get(Organisation, ORG)
+                        snap = await cards.club_snapshot(db, club, fresh=True)
+                        pk = next(p for p in await cards.available_packs(db, pick[1], snap) if p["label"] == f"{label} cards")
+                        res = await cards.open_pack(db, club, await db.get(Player, uuid.UUID(pick[1])), pk["id"], snap)
+                        await db.commit()
+                        check(f"a pack of {sz} gives {min(sz, 12)} cards", res is not None and len(res) == sz, str(len(res or [])))
+                    codes3 = []
+                    for sz in (0, 13, -2):
+                        codes3.append(await refuse(size=sz)); club = await db.get(Organisation, ORG)
+                    check("a pack of no cards, or more than twelve, is refused (422)", codes3 == [422, 422, 422], str(codes3))
+                    check("the guarantee scales with the size: an Elite pack (4 of 5) guarantees 8 of 10 and 3 of 3", all(min(sum(1 for x in cards.draw_cards(pool3, [], n, K3.QUALITIES["elite"]) if x["tier"] != "common") for _ in range(200)) >= need for n, need in ((10, 8), (3, 3), (5, 4), (1, 1))))
+                    check("...and a Standard pack always holds at least one Rare or better, whatever its size", all(min(sum(1 for x in cards.draw_cards(pool3, [], n, K3.QUALITIES["standard"]) if x["tier"] != "common") for _ in range(200)) >= 1 for n in (1, 3, 5, 10)))
+                    plainj = await adm3.create_gift(adm3.GiftBody(title="Json four", quality="boosted", qty=1, audience="players", player_ids=pick[:1], size=4), db, club, admin_user)
+                    check("the JSON create route takes a size too, and reports it", plainj["gift"]["size"] == 4 and any(g["title"] == "Json four" and g["size"] == 4 for g in plainj["gifts"]))
+                    club = await db.get(Organisation, ORG)
+                    check("the settings payload says the allowed pack sizes", (await adm3.get_settings(db, club, admin_user))["pack_size"] == {"default": 5, "min": 1, "max": 12})
                 check("the designed gift is on the audit trail as designed", (await db.execute(text("SELECT count(*) FROM audit_logs WHERE action = 'player_card_pack_gift' AND details->>'designed' = 'true'"))).scalar() >= 1)
             await db.rollback()
     else:

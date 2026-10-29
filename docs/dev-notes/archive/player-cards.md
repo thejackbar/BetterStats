@@ -218,3 +218,13 @@ Asked for: now that a player has a hero photo and an action shot, use them for p
 - Not done: a different framing for the action shot (mid-shots are wider than the hero crop). Both use the same top offset and fade; revisit once real action shots are on cards.
 - Verified: `verify_player_cards.py` (535), `verify_player_action_photo.py`, `verify_player_privacy.py`, `verify_merge_carry.py`, the page suites and `_hero_`/`_admin_` browser suites (see the Verify list).
 
+## v9.135.4 (2026-10-29): design a pack as you make it
+
+Asked for: design a custom pack on the spot, and set its name, the words under it and the number of cards.
+
+- Migration 378: `club_card_pack_designs.line`, `player_card_packs.size`, `club_card_pack_gifts.size`.
+- The design is held in the form (files plus a local preview) and sent once with the pack, as one multipart request; nothing is stored until the pack exists. Chosen over saving a draft design on each change, which would leave orphaned rows for every abandoned form.
+- The design is per pack (`gift:<id>`), so two club packs can look different. Scheduled packs are not designed in the form (they are made once and used on many days); they keep the Pack designs tab.
+- Not done: a size for a scheduled pack, and choosing a quality's guarantee. Both are small if wanted.
+- Verified: `verify_player_cards.py` (558), the other backend suites, route audit; browser `_admin_` (99), `_designs_` (35) and the rest of the Player Cards suites.
+

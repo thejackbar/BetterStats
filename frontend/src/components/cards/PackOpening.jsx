@@ -19,7 +19,7 @@ function packLook(source, accent, label, design, quality) {
   const p = PACKS[source] || PACKS.weekly
   return {
     label: label || p.label,
-    line: p.line,
+    line: design?.line || p.line,
     stars: quality in QUALITY_STARS ? QUALITY_STARS[quality] : (p.stars || 0),
     a: design?.a || p.a || `color-mix(in srgb, ${accent} 70%, #fff)`,
     b: design?.b || p.b || `color-mix(in srgb, ${accent} 55%, #000)`,
@@ -46,7 +46,7 @@ function nameSize(text) {
 // A sealed foil pack. `stripRef` is the crimped top that tears away. `label` overrides the name (a scheduled event).
 // `design` is the club's own look for this pack (services/player_card_designs.py): a background image, a centre image, its
 // colours, how dark the background is laid down, whether the name and the club logo are drawn, and where the centre image sits.
-export function PackArt({ source, club, accent, display = DEFAULT_DISPLAY, width = 220, stripRef, bodyRef, glow = false, label, design, quality }) {
+export function PackArt({ source, club, accent, display = DEFAULT_DISPLAY, width = 220, stripRef, bodyRef, glow = false, label, design, quality, size }) {
   const look = packLook(source, accent, label, design, quality)
   const scale = width / DESIGN_W
   const strip = Math.round(DESIGN_H * 0.075)
@@ -71,7 +71,7 @@ export function PackArt({ source, club, accent, display = DEFAULT_DISPLAY, width
       {look.stars > 0 && <div aria-hidden data-pack-stars={look.stars} style={{ font: `700 14px/1 ${MONO}`, letterSpacing: 4, opacity: 0.9, ...shade }}>{'★'.repeat(look.stars)}</div>}
       <div data-pack-name style={{ font: `800 italic ${nameSize(look.label)}px/1.1 ${display}`, textTransform: 'uppercase', letterSpacing: 1, maxWidth: '100%', overflowWrap: 'anywhere', ...shade }}>{look.label}</div>
       <div style={{ font: `600 11px/1.25 ${MONO}`, letterSpacing: 1.5, textTransform: 'uppercase', opacity: 0.85, maxWidth: '100%', ...shade }}>{look.line}</div>
-      <div style={{ font: `600 9px ${MONO}`, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.65, ...shade }}>5 cards</div>
+      <div style={{ font: `600 9px ${MONO}`, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.65, ...shade }}>{size || 5} cards</div>
     </>
   )
   return (
@@ -273,7 +273,7 @@ export default function PackOpening({ pack, packsLeft, club, accent, display = D
           <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22 }}>
             <button type="button" ref={refs.pack} onClick={start} disabled={stage === 'opening'} data-pack-sealed aria-label="Open this pack"
               style={{ position: 'relative', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}>
-              <PackArt source={pack.source} label={pack.label} design={pack.design} quality={pack.quality} club={club} accent={accent} display={display} width={Math.min(240, cardW * 0.8)} stripRef={refs.strip} bodyRef={refs.body} glow />
+              <PackArt source={pack.source} label={pack.label} design={pack.design} quality={pack.quality} size={pack.size} club={club} accent={accent} display={display} width={Math.min(240, cardW * 0.8)} stripRef={refs.strip} bodyRef={refs.body} glow />
               <div ref={refs.flash} style={{ position: 'absolute', left: '50%', top: '30%', width: 180, height: 180, marginLeft: -90, marginTop: -90, borderRadius: '50%', opacity: 0, background: 'radial-gradient(circle, #fff, rgba(255,255,255,0) 68%)', pointerEvents: 'none' }} />
             </button>
             {stage === 'ready' && <div className="cc-pulse" style={{ font: `700 12px ${MONO}`, letterSpacing: 2, textTransform: 'uppercase' }}>Tap the pack to open it</div>}
