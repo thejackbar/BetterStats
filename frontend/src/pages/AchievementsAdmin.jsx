@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
-import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
+import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel, addClubGrades, defaultTeamAwards } from '../lib/achievementOptions'
 import { PbSpinner } from '../lib/presskit'
 import { CATEGORY_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import Dropdown from '../components/Dropdown'
@@ -647,12 +647,18 @@ function ImportPanel({ orgId, onImported, players }) {
   )
 }
 
-function AchievementFields({ form, setForm, seasons, awardDefs }) {
+function AchievementFields({ form, setForm, seasons, awardDefs, clubGrades }) {
   const [customSubcat, setCustomSubcat] = useState(false)
   const [customAchievement, setCustomAchievement] = useState(false)
 
-  const subcatOptions = getSubcategoriesFromDefs(awardDefs, form.category)
-  const achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
+  const subcatOptions = addClubGrades(getSubcategoriesFromDefs(awardDefs, form.category), clubGrades, form.category)
+  let achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
+  // A club grade the award setup says nothing about still gets the usual team awards to choose from.
+  if (!achievementOptions.length && form.subcategory
+      && subcatOptions.some(o => o.value === form.subcategory)
+      && !getSubcategoriesFromDefs(awardDefs, form.category).some(o => o.value === form.subcategory)) {
+    achievementOptions = defaultTeamAwards(form.category)
+  }
   const seasonOpts = seasonOptionList(seasons, form.season, form.season_end)
 
   const setCategory = (cat) => {
@@ -736,7 +742,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
   )
 }
 
-function AchievementForm({ orgId, initial, players, seasons, awardDefs, onSave, onCancel }) {
+function AchievementForm({ orgId, initial, players, seasons, awardDefs, clubGrades, onSave, onCancel }) {
   const [form, setForm] = useState(initial || { season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', player_name: '', player_id: null, detail: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -779,7 +785,7 @@ function AchievementForm({ orgId, initial, players, seasons, awardDefs, onSave, 
             onChange={({ name, id }) => setForm(f => ({ ...f, player_name: name, player_id: id }))}
           />
         </div>
-        <AchievementFields form={form} setForm={setForm} seasons={seasons} awardDefs={awardDefs} />
+        <AchievementFields form={form} setForm={setForm} seasons={seasons} awardDefs={awardDefs} clubGrades={clubGrades} />
       </div>
       {error && <p className="font-mono text-[10px] text-pb-red mb-2">{error}</p>}
       <div className="flex gap-2">
@@ -802,7 +808,7 @@ function AchievementForm({ orgId, initial, players, seasons, awardDefs, onSave, 
   )
 }
 
-function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) {
+function BulkAddPanel({ orgId, players, seasons, awardDefs, clubGrades, onSave, onCancel }) {
   const [form, setForm] = useState({ season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
   const [selectedPlayers, setSelectedPlayers] = useState([])
   const [saving, setSaving] = useState(false)
@@ -842,7 +848,7 @@ function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) 
       <p className="font-mono text-[10px] text-pb-faintest mb-4">Select an achievement, then add all players who received it. One record is created per player.</p>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-        <AchievementFields form={form} setForm={setForm} seasons={seasons} awardDefs={awardDefs} />
+        <AchievementFields form={form} setForm={setForm} seasons={seasons} awardDefs={awardDefs} clubGrades={clubGrades} />
       </div>
 
       <div className="mb-4">
@@ -997,6 +1003,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
   const [players, setPlayers] = useState([])
   const [seasons, setSeasons] = useState(null)
   const [awardDefs, setAwardDefs] = useState([])
+  const [clubGrades, setClubGrades] = useState([])
   const [loading, setLoading] = useState(true)
   const [filterSeason, setFilterSeason] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
@@ -1018,6 +1025,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
     api.listPlayers(orgId, { includeHidden: true }).then(data => setPlayers(data || [])).catch(() => {})
     api.getOrgSeasons(orgId).then(data => setSeasons(data || [])).catch(() => {})
     api.listAwardDefinitions(orgId).then(data => setAwardDefs(data || [])).catch(() => {})
+    api.getOrgGrades(orgId).then(data => setClubGrades(data || [])).catch(() => {})
   }, [orgId])
 
   const handleDelete = async (id) => {
@@ -1102,11 +1110,11 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
       <ImportPanel orgId={orgId} onImported={load} players={players} />
 
       {showBulk && (
-        <BulkAddPanel orgId={orgId} players={players} seasons={seasons} awardDefs={awardDefs} onSave={handleSaved} onCancel={() => setShowBulk(false)} />
+        <BulkAddPanel orgId={orgId} players={players} seasons={seasons} awardDefs={awardDefs} clubGrades={clubGrades} onSave={handleSaved} onCancel={() => setShowBulk(false)} />
       )}
 
       {showAdd && !editItem && (
-        <AchievementForm orgId={orgId} players={players} seasons={seasons} awardDefs={awardDefs} onSave={handleSaved} onCancel={() => setShowAdd(false)} />
+        <AchievementForm orgId={orgId} players={players} seasons={seasons} awardDefs={awardDefs} clubGrades={clubGrades} onSave={handleSaved} onCancel={() => setShowAdd(false)} />
       )}
 
       {/* Filters */}
@@ -1207,6 +1215,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
                           players={players}
                           seasons={seasons}
                           awardDefs={awardDefs}
+                          clubGrades={clubGrades}
                           onSave={handleSaved}
                           onCancel={() => setEditItem(null)}
                         />

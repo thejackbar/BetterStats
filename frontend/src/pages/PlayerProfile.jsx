@@ -7,7 +7,7 @@ import { useClubTheme } from '../hooks/useClubTheme'
 import { rememberClubSlug } from '../lib/clubSlug'
 import { useNameFormat } from '../lib/nameFormat'
 import { usePageMeta } from '../hooks/usePageMeta'
-import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
+import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel, addClubGrades, defaultTeamAwards } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
 import { scopeNote, autoShownNote } from '../lib/gradeCategories'
 import { GradeFilterPills } from '../components/GradeFilterPills'
@@ -2539,6 +2539,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   const [achievements, setAchievements] = useState(null)
   const [seasons, setSeasons] = useState([])
   const [awardDefs, setAwardDefs] = useState([])
+  const [clubGrades, setClubGrades] = useState([])
   const [adding, setAdding] = useState(false)
   const [editId, setEditId] = useState(null)
   const [form, setForm] = useState({ season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
@@ -2552,10 +2553,17 @@ function AchievementsSection({ playerId, orgId, playerName }) {
     api.listAchievements(orgId, { playerId }).then(setAchievements).catch(() => setAchievements([]))
     api.getOrgSeasons(orgId).then(data => setSeasons(data || [])).catch(() => {})
     api.listAwardDefinitions(orgId).then(data => setAwardDefs(data || [])).catch(() => {})
+    api.getOrgGrades(orgId).then(data => setClubGrades(data || [])).catch(() => {})
   }, [playerId, orgId])
 
-  const subcatOptions = getSubcategoriesFromDefs(awardDefs, form.category)
-  const achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
+  const subcatOptions = addClubGrades(getSubcategoriesFromDefs(awardDefs, form.category), clubGrades, form.category)
+  let achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
+  // A club grade the award setup says nothing about still gets the usual team awards to choose from.
+  if (!achievementOptions.length && form.subcategory
+      && subcatOptions.some(o => o.value === form.subcategory)
+      && !getSubcategoriesFromDefs(awardDefs, form.category).some(o => o.value === form.subcategory)) {
+    achievementOptions = defaultTeamAwards(form.category)
+  }
   const seasonMap = Object.fromEntries(seasons.map(s => [s.id, s.name]))
   const seasonDisplay = (s) => !s || s === 'All Time' ? 'All Time' : (formatSeason(seasonMap[s] || s) || s)
 
