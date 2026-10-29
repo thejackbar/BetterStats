@@ -10,7 +10,7 @@
 // The size maths follows postAspect.js: all three post shapes are 1080 wide, so
 // the question is only where the extra height goes. The photo and the list take
 // it; the wordmark and the foot keep their pixels.
-import { Halftone, AutoFitText, CreditMark, RoleChip, DebutTag, featuredOf, heroSrcOf, heroRowMark, isHeroRow, LINEUP_MAX } from './cricket-templates'
+import { Halftone, AutoFitText, CreditMark, RoleChip, DebutTag, MilestoneBadge, watchStrip, watchStripH, featuredOf, heroSrcOf, heroRowMark, isHeroRow, LINEUP_MAX } from './cricket-templates'
 import { aspectOf, pick, share } from './postAspect'
 import { LayerRoot } from './postLayers'
 import { pc, pt, inkOn, registerParts, colorPart, textPart, colorPart as C, textPart as T, picked as partPicked } from './layoutParts'
@@ -83,7 +83,7 @@ export function splitSponsorSlot(width = 1080, height = 1080, _count = 1, opts) 
 
 export function SplitPoster({
   width = 1080, height = 1080, team, opponent, match, players, palette,
-  heroImage, headline, featuredId, panelColor, markHero, background, parts,
+  heroImage, headline, featuredId, panelColor, markHero, background, watch, parts,
 }) {
   const texture = usePostLook().texture !== false
   const P = (players || []).slice(0, LINEUP_MAX)
@@ -113,8 +113,13 @@ export function SplitPoster({
   const { LEFT_W, EDGE, DARK_W, headShift, footBottom, LIST_X, LIST_R, listTop, rowH } = splitGeo(width, height, P.length)
   const nameMax = Math.round(rowH * 0.52)
 
+  // The milestone watch sits in the pale panel just above the fixture and
+  // venue block at the foot. The photo stops short of it by the same amount, so
+  // the strip never covers the player (absent watch: the photo is as it was).
+  const watchH = watchStripH((watch || []).length, A)
+  const watchBottom = footBottom + 42 + 84
   const photoTop = share(height, 200)
-  const photoH = share(height, 690) - (A === 'story' ? 120 : 0)
+  const photoH = share(height, 690) - (A === 'story' ? 120 : 0) - (watchH ? watchH + 14 : 0)
 
   // The editor fills an empty competition with this word so other layouts have
   // something to print. Here it would sit above the round as if it were data.
@@ -212,7 +217,7 @@ export function SplitPoster({
               }}>{i + 1}.</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <AutoFitText max={nameMax} min={12} lines={1} pad={6}
-                  measureDeps={[p.captain, p.viceCaptain, p.keeper, p.debut]}
+                  measureDeps={[p.captain, p.viceCaptain, p.keeper, p.debut, p.milestone ? 1 : 0]}
                   style={{ fontFamily: NAME_FONT, fontWeight: 800, letterSpacing: 0.2, lineHeight: 1.1, color: pc(parts, 'nameColor', '#ffffff') }}>
                   {`${p.first || ''} ${p.last || ''}`.trim().toUpperCase()}
                 </AutoFitText>
@@ -222,11 +227,14 @@ export function SplitPoster({
                 {p.viceCaptain && <RoleChip kind="VC" accent={chipBg} ink={chipInk} />}
                 {p.keeper && <RoleChip kind="WK" accent={chipBg} ink={chipInk} />}
                 {p.debut && <DebutTag accent={tagBg} ink={tagInk} />}
+                {p.milestone && <MilestoneBadge m={p.milestone} />}
               </div>
             </div>
           )
         })}
       </div>
+
+      {watchStrip({ items: watch, A, ink: '#ffffff', style: { position: 'absolute', left: 32, width: LEFT_W - 64, bottom: watchBottom } })}
 
       {/* The fixture, foot left. */}
       <div data-layer="Fixture" style={{

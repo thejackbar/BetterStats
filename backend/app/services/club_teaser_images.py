@@ -331,7 +331,10 @@ async def render_club(renderer, token: str, *, base: Optional[str] = None,
     sizes = {}
     for fmt in formats:
         spec = FORMATS[fmt]
-        data = await renderer.shoot(card_url(token, fmt, base=base), spec["width"], spec["height"])
+        try:
+            data = await renderer.shoot(card_url(token, fmt, base=base), spec["width"], spec["height"])
+        except RuntimeError as e:
+            raise RuntimeError(f"{fmt}: {e}") from None
         if not data or data[:8] != b"\x89PNG\r\n\x1a\n":
             raise RuntimeError(f"{fmt}: the renderer did not return a PNG")
         _write_atomic(image_path(token, fmt), data)

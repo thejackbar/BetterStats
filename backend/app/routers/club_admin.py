@@ -49,6 +49,7 @@ from app.services import section_names
 from app.services import honour_layout
 from app.services import honours as honours_service
 from app.services import post_sponsors
+from app.services import card_sponsors
 from app.services import player_privacy
 from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
@@ -247,9 +248,12 @@ async def list_players(
             "display_name_override": p.display_name_override,
             "playhq_id": p.playhq_id,
             "photo_url": p.photo_url,
-            # The post designer builds its lineup from THIS list, so the action
-            # shot has to ride along here or the hero slot never sees one.
+            # The post designer builds its lineup from THIS list, so the hero
+            # photo, the action shot and the club's pick between them have to
+            # ride along here or the hero slot never sees them.
             "hero_photo_url": p.hero_photo_url,
+            "action_photo_url": p.action_photo_url,
+            "hero_source": p.hero_source,
             "gender": p.gender,
             "is_player": p.is_player,
             "player_role": p.player_role,
@@ -460,6 +464,8 @@ async def create_player(
         "skill_positions": player.skill_positions or [],
         "photo_url": player.photo_url,
         "hero_photo_url": player.hero_photo_url,
+        "action_photo_url": player.action_photo_url,
+        "hero_source": player.hero_source,
         "is_player": player.is_player,
     }
 
@@ -1403,14 +1409,24 @@ def _remove_player_photo(photo_url: Optional[str]) -> None:
     p.unlink(missing_ok=True)
 
 
-# The two photographs a player can have, and the columns each lands in. A
-# headshot reads at 44px on a roster row; an action shot fills the hero slot on
-# a match-day post. Cropping either into the other's slot is what asked for the
-# split (migration 274) — one set of handlers, keyed on which.
+# The three photographs a player can have, and the columns each lands in. A
+# headshot reads at 44px on a roster row; the hero photo fills the big slot on a
+# card, a share card and a match-day post; the action shot (migration 375) is the
+# player mid-shot, for the same big slot when the club picks it. Cropping one into
+# another's slot is what asked for the split (migration 274) — one set of
+# handlers, keyed on which.
 _PLAYER_PHOTO_KINDS = {
     "photo": ("photo_data", "photo_mime", "photo_url", "photo"),
     "hero": ("hero_photo_data", "hero_photo_mime", "hero_photo_url", "hero-photo"),
+    "action": ("action_photo_data", "action_photo_mime", "action_photo_url", "action-photo"),
 }
+
+
+def _forget_cards(player: Player) -> None:
+    """The collectable cards keep a snapshot of the club's players for a few minutes, photos included. A new photo has to
+    show on the card now, not after that runs out, so the snapshot is dropped."""
+    from app.services import player_cards
+    player_cards.forget(player.organisation_id)
 
 
 async def _player_for_photo(db: AsyncSession, player_id: str, club: Organisation) -> Player:
@@ -1440,8 +1456,8 @@ async def _store_player_photo(db, player: Player, file: UploadFile, kind: str) -
     if len(data) > PHOTO_MAX_BYTES:
         raise HTTPException(400, "Photo must be 8 MB or smaller")
 
-    # Only the headshot ever had an on-disk form to clean up; the action shot
-    # has been in-table since the day it existed.
+    # Only the headshot ever had an on-disk form to clean up; the other two
+    # have been in-table since the day they existed.
     if kind == "photo":
         _remove_player_photo(player.photo_url)
     url = f"/api/images/players/{player.id}/{route}?v={_uuid.uuid4().hex[:8]}"
@@ -1449,6 +1465,7 @@ async def _store_player_photo(db, player: Player, file: UploadFile, kind: str) -
     setattr(player, mime_col, _IMAGE_MIME.get(ext, "image/png"))
     setattr(player, url_col, url)
     await db.commit()
+    _forget_cards(player)
     return {url_col: url}
 
 
@@ -1460,6 +1477,7 @@ async def _clear_player_photo(db, player: Player, kind: str) -> dict:
     setattr(player, mime_col, None)
     setattr(player, url_col, None)
     await db.commit()
+    _forget_cards(player)
     return {"status": "cleared"}
 
 
@@ -1507,6 +1525,29 @@ async def delete_player_hero_photo(
 ):
     player = await _player_for_photo(db, player_id, club)
     return await _clear_player_photo(db, player, "hero")
+
+
+@router.post("/players/{player_id}/action-photo", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
+async def upload_player_action_photo(
+    player_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await _player_for_photo(db, player_id, club)
+    return await _store_player_photo(db, player, file, "action")
+
+
+@router.delete("/players/{player_id}/action-photo", dependencies=[Depends(require_cap(MANAGE_PLAYERS))])
+async def delete_player_action_photo(
+    player_id: str,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await _player_for_photo(db, player_id, club)
+    return await _clear_player_photo(db, player, "action")
 
 
 # ---------------------------------------------------------------------------
@@ -5317,177 +5358,6 @@ async def backfill_aggregates(
     return {"inserted": inserted, "org_id": str(club.id)}
 
 
-@router.post("/cleanup-opposition-stats")
-async def cleanup_opposition_stats(
-    current_user: User = Depends(require_cap(RUN_HARD_REFRESH)),
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    """Delete per-game stat rows belonging to opposition players.
-
-    Pre-fix, the GR scorecard parser gated stat inserts on "is this pid in
-    OUR org's players table" rather than "is this pid on OUR team in THIS
-    game". So a current club member who played AGAINST us in a match (on
-    another club's roster that season) had their opposition batting /
-    bowling / fielding picked up as ours, inflating their match count and
-    career stats.
-
-    This endpoint runs a one-off cleanup: for every game where the roster
-    was captured (>= 1 game_appearance), drop per-game rows whose player
-    isn't in that game's roster. Then deletes player_season_stats rows
-    that become orphaned (no per-game backing AND no appearance) so the
-    headline match count recomputes correctly.
-
-    Safe to re-run. Only operates on games whose grade → season belongs to
-    this org. Games where the roster was never captured (older syncs) are
-    left alone defensively — we can't tell what's opposition there.
-    """
-    org_id = str(club.id)
-    org_param = {"oid": org_id}
-
-    org_games_cte = """
-        WITH org_games AS (
-            SELECT g.id
-            FROM games g
-            JOIN grades gr ON gr.id = g.grade_id
-            JOIN seasons s ON s.id = gr.season_id
-            WHERE s.organisation_id = CAST(:oid AS UUID)
-        ),
-        roster_games AS (
-            SELECT DISTINCT game_id FROM game_appearances
-            WHERE game_id IN (SELECT id FROM org_games)
-        )
-    """
-
-    deleted = {}
-
-    for table in ("batting_innings", "bowling_spells", "fielding_stats"):
-        res = await db.execute(
-            _text(f"""
-                {org_games_cte}
-                DELETE FROM {table} t
-                WHERE t.game_id IN (SELECT game_id FROM roster_games)
-                  AND NOT EXISTS (
-                    SELECT 1 FROM game_appearances ga
-                    WHERE ga.game_id = t.game_id AND ga.player_id = t.player_id
-                  )
-            """),
-            org_param,
-        )
-        deleted[table] = res.rowcount
-
-    # FOW: clear pid attribution only (keep the row so opposition-innings
-    # wicket falls still render on the scorecard, just without a player tag).
-    res = await db.execute(
-        _text(f"""
-            {org_games_cte}
-            UPDATE fall_of_wickets fow
-            SET player_id = NULL
-            WHERE fow.game_id IN (SELECT game_id FROM roster_games)
-              AND fow.player_id IS NOT NULL
-              AND NOT EXISTS (
-                SELECT 1 FROM game_appearances ga
-                WHERE ga.game_id = fow.game_id AND ga.player_id = fow.player_id
-              )
-        """),
-        org_param,
-    )
-    deleted["fall_of_wickets_pid_cleared"] = res.rowcount
-
-    # Partnerships: drop rows where neither batter is on our team in that
-    # game. (Single-batter-unknown rows are kept — at least one tagged
-    # partner means it's our innings.)
-    res = await db.execute(
-        _text(f"""
-            {org_games_cte}
-            DELETE FROM partnerships p
-            WHERE p.game_id IN (SELECT game_id FROM roster_games)
-              AND NOT EXISTS (
-                SELECT 1 FROM game_appearances ga
-                WHERE ga.game_id = p.game_id
-                  AND ga.player_id IN (p.batter1_id, p.batter2_id)
-              )
-        """),
-        org_param,
-    )
-    deleted["partnerships"] = res.rowcount
-
-    # Bowler wickets: drop rows where the bowler wasn't on our team.
-    res = await db.execute(
-        _text(f"""
-            {org_games_cte}
-            DELETE FROM bowler_wickets bw
-            WHERE bw.game_id IN (SELECT game_id FROM roster_games)
-              AND NOT EXISTS (
-                SELECT 1 FROM game_appearances ga
-                WHERE ga.game_id = bw.game_id AND ga.player_id = bw.bowler_id
-              )
-        """),
-        org_param,
-    )
-    deleted["bowler_wickets"] = res.rowcount
-
-    # Drop phantom player_season_stats rows: (player, season) pairs that
-    # now have no per-game data AND no game_appearance backing AND were
-    # synthesised by the backfill (source='backfill'). API-sourced rows
-    # are spared even when they have no per-game backing — that's the
-    # legitimate shape for pre-PlayHQ-migration players whose data only
-    # exists as CA career summaries (e.g. MyCricket-era aggregate stats),
-    # no scorecard rows, no appearances. Without the source check this
-    # DELETE wipes them and the next aggregate sync can't restore them
-    # if CA's API no longer surfaces those old per-season totals.
-    res = await db.execute(
-        _text("""
-            DELETE FROM player_season_stats pss
-            USING players pl
-            WHERE pss.player_id = pl.id
-              AND pl.organisation_id = CAST(:oid AS UUID)
-              AND pss.source = 'backfill'
-              AND NOT EXISTS (
-                SELECT 1 FROM batting_innings bi
-                JOIN games g ON g.id = bi.game_id
-                JOIN grades gr ON gr.id = g.grade_id
-                WHERE bi.player_id = pss.player_id
-                  AND gr.season_id = pss.season_id
-              )
-              AND NOT EXISTS (
-                SELECT 1 FROM bowling_spells bs
-                JOIN games g ON g.id = bs.game_id
-                JOIN grades gr ON gr.id = g.grade_id
-                WHERE bs.player_id = pss.player_id
-                  AND gr.season_id = pss.season_id
-              )
-              AND NOT EXISTS (
-                SELECT 1 FROM fielding_stats fs
-                JOIN games g ON g.id = fs.game_id
-                JOIN grades gr ON gr.id = g.grade_id
-                WHERE fs.player_id = pss.player_id
-                  AND gr.season_id = pss.season_id
-              )
-              AND NOT EXISTS (
-                SELECT 1 FROM game_appearances ga
-                JOIN games g ON g.id = ga.game_id
-                JOIN grades gr ON gr.id = g.grade_id
-                WHERE ga.player_id = pss.player_id
-                  AND gr.season_id = pss.season_id
-              )
-        """),
-        org_param,
-    )
-    deleted["player_season_stats_phantom"] = res.rowcount
-
-    await db.commit()
-
-    # Re-run the per-game backfill so matches/runs/wickets are recomputed
-    # from the cleaned per-game tables for any pair that still has data
-    # but whose pss row was either deleted above or never existed.
-    from app.services.sync import _backfill_missing_season_stats
-    backfilled = await _backfill_missing_season_stats(org_id)
-    deleted["player_season_stats_backfilled"] = backfilled
-
-    return {"org_id": org_id, "deleted": deleted}
-
-
 @router.get("/sync-drift", dependencies=[Depends(require_any_cap(RUN_SYNC, MANAGE_MERGES))])
 async def get_sync_drift(
     current_user: User = Depends(get_current_user),
@@ -5853,6 +5723,53 @@ async def put_post_defaults(
         "assignments": post_sponsors.assignments_view(club.post_sponsor_defaults, ids),
         "club_default_ids": post_sponsors.club_default_ids(sponsors),
     }
+
+
+def _card_sponsors_payload(club: Organisation, sponsors: list[Sponsor]) -> dict:
+    return {
+        "surfaces": [{"key": k, "label": card_sponsors.SURFACE_LABELS[k]} for k in card_sponsors.SURFACES],
+        "picks": card_sponsors.view(club.card_sponsors, sponsors),
+    }
+
+
+@router.get("/sponsors/card-sponsors")
+async def get_card_sponsors(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The sponsor picked for the player share card and for the Player Cards. A
+    surface with no pick shows the club's top sponsor that has a logo."""
+    return _card_sponsors_payload(club, await _club_sponsor_rows(db, club))
+
+
+class CardSponsorsPut(BaseModel):
+    share_card: Optional[str] = None
+    player_cards: Optional[str] = None
+
+
+@router.put("/sponsors/card-sponsors")
+async def put_card_sponsors(
+    data: CardSponsorsPut,
+    current_user: User = Depends(require_cap(MANAGE_SPONSORS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pick the sponsor for a card surface. A surface not sent keeps its pick; sent
+    as null it goes back to the top sponsor. A sponsor that is not this club's, or
+    has no logo, is refused."""
+    sponsors = await _club_sponsor_rows(db, club)
+    usable = {str(s.id) for s in sponsors if s.logo_url}
+    merged = dict(card_sponsors.view(club.card_sponsors, sponsors))
+    for surface in data.model_fields_set:
+        val = getattr(data, surface)
+        if val is not None and val not in usable:
+            raise HTTPException(status_code=422, detail="Pick a sponsor of this club that has a logo")
+        merged[surface] = val
+    club.card_sponsors = card_sponsors.clean(merged, sponsors)
+    await db.commit()
+    await db.refresh(club)
+    return _card_sponsors_payload(club, sponsors)
 
 
 @router.get("/sponsors/post-default")
@@ -6622,36 +6539,48 @@ async def list_milestones_report(
     # ------------------------------------------------------------------
     # Achieved: computed grade_matches (all players, bulk SQL)
     # ------------------------------------------------------------------
+    # One row per game the player appeared in, so the Nth game (the date the
+    # milestone was reached) can be read off the list in date order.
     gm_rows = await db.execute(
         _text("""
+            WITH played AS (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS player_name,
+                    p.gender AS gender,
+                    COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                    ga.game_id AS game_id,
+                    MIN(g.played_at) AS played_at
+                FROM game_appearances ga
+                JOIN players p ON p.id = ga.player_id
+                JOIN games g ON g.id = ga.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                LEFT JOIN LATERAL (
+                    SELECT canonical_name FROM grade_merge_logs gml
+                    WHERE gml.org_id = CAST(:org_id AS UUID)
+                      AND gml.alias_name = gr.name AND gml.undone_at IS NULL
+                    LIMIT 1
+                ) am ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT gr2.display_name_override FROM grades gr2
+                    JOIN seasons s2 ON s2.id = gr2.season_id
+                    WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                      AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                      AND gr2.display_name_override IS NOT NULL
+                    LIMIT 1
+                ) gdn ON TRUE
+                WHERE p.organisation_id = :org_id AND p.is_player = TRUE
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender,
+                         COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)),
+                         ga.game_id
+            )
             SELECT
-                p.id::text AS player_id,
-                COALESCE(p.display_name_override, p.name) AS player_name,
-                p.gender AS gender,
-                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
-                COUNT(DISTINCT ga.game_id) AS matches
-            FROM game_appearances ga
-            JOIN players p ON p.id = ga.player_id
-            JOIN games g ON g.id = ga.game_id
-            JOIN grades gr ON gr.id = g.grade_id
-            LEFT JOIN LATERAL (
-                SELECT canonical_name FROM grade_merge_logs gml
-                WHERE gml.org_id = CAST(:org_id AS UUID)
-                  AND gml.alias_name = gr.name AND gml.undone_at IS NULL
-                LIMIT 1
-            ) am ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT gr2.display_name_override FROM grades gr2
-                JOIN seasons s2 ON s2.id = gr2.season_id
-                WHERE s2.organisation_id = CAST(:org_id AS UUID)
-                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
-                  AND gr2.display_name_override IS NOT NULL
-                LIMIT 1
-            ) gdn ON TRUE
-            WHERE p.organisation_id = :org_id AND p.is_player = TRUE
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender,
-                     COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
-            HAVING COUNT(DISTINCT ga.game_id) >= :min_step
+                player_id::text AS player_id, player_name, gender, grade_name,
+                COUNT(*) AS matches,
+                ARRAY_AGG(played_at ORDER BY played_at NULLS LAST, game_id) AS played_dates
+            FROM played
+            GROUP BY player_id, player_name, gender, grade_name
+            HAVING COUNT(*) >= :min_step
         """),
         {"org_id": org_id, "min_step": book.smallest_step("matches")},
     )
@@ -6660,7 +6589,10 @@ async def list_milestones_report(
         grade_name = r["grade_name"]
         if not grade_name:
             continue
+        dates = r["played_dates"] or []
         for threshold in crossed_thresholds("grade_matches", n, book.for_grade(grade_name)):
+            # The date of the Nth game in the grade; None when that game has no date.
+            reached = dates[threshold - 1] if 0 < threshold <= len(dates) else None
             achieved.append({
                 "player_id": r["player_id"],
                 "player_name": r["player_name"],
@@ -6668,7 +6600,7 @@ async def list_milestones_report(
                 "type": "grade_matches",
                 "category": "matches",
                 "milestone_value": threshold,
-                "achieved_at": None,
+                "achieved_at": reached.isoformat() if reached else None,
                 "detail": grade_name,
             })
 

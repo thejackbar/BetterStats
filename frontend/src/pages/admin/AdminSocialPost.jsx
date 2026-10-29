@@ -19,12 +19,13 @@ import ClubDataPanel from '../../components/admin/socialpost/panels/ClubDataPane
 import LayersPanel from '../../components/admin/socialpost/panels/LayersPanel'
 import SponsorsPanel from '../../components/admin/socialpost/panels/SponsorsPanel'
 import { api, setPublishingContext } from '../../lib/api'
+import { pickHero } from '../../lib/playerShots'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
   T5_Brutalist, T6_Diagonal, T7_CaptainSpotlight, T8_Mosaic, T9_Flyer, T10_TeamSheet,
   C1_CaptainAnnounce, C2_TossWon, C3_ManOfMatch, C4_FinalScore,
   SC1_Broadcast, SC2_Brutalist, SC3_Dashboard,
-  PALETTES, orgAccent, orgAccent2, orgToPalette, featuredOf, DEFAULT_HERO_FOCUS, LINEUP_MAX,
+  PALETTES, orgAccent, orgAccent2, orgToPalette, featuredOf, heroSrcOf, DEFAULT_HERO_FOCUS, LINEUP_MAX,
 } from '../../social/cricket-templates'
 import {
   FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
@@ -173,6 +174,13 @@ const HERO_PLAYER_TEMPLATES = ['T1', 'T3', 'T6', 'T10', 'T11', CUSTOM_LAYOUT_ID]
 // on the player either way, so switching layout never loses it.
 const DEBUT_TEMPLATES = ['T1', 'T3', 'T10', 'T11', 'T12']
 const DEBUT_TEMPLATE_NAMES = { T1: 'Hero List', T3: 'Side Numbered', T10: 'Team Sheet', T11: 'Split Poster', T12: 'Match Day Card' }
+// The layouts that draw the gold milestone badge and the Milestone watch strip. Same
+// reasoning as the debut tag: a lineup layout opts in once its rows and footer have been
+// made to hold them at every post size.
+const WATCH_TEMPLATES = ['T1', 'T2', 'T3', 'T10', 'T11', 'T12']
+const WATCH_TEMPLATE_NAMES = { T1: 'Hero List', T2: 'Card Grid', T3: 'Side Numbered', T10: 'Team Sheet', T11: 'Split Poster', T12: 'Match Day Card' }
+// A match day the server can read: ISO only. The editor's own date is often a display string.
+const matchDayIso = (v) => (/^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10) : null)
 
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
@@ -245,7 +253,7 @@ const SOURCE_HELP = {
   results: 'Pull the latest round\'s results for every grade straight from the results feed.',
   motm: 'Paste the match link and we\'ll work out the player of the match from the scorecard. You choose which of their batting, bowling and fielding stats go on the post.',
   milestones: 'Pick the milestones your club has recorded: a 100th game, 1,000 career runs, a 50th wicket. Choose a window, then tick or untick the ones to feature. Up to 12 go on the post.',
-  totw: 'Pull the latest round, or paste any match link from the round you want. Every grade\'s scorecard is scored the same way as the player of the match, and the best performers become the team. Choose 6 to 14 players.',
+  totw: 'Pull the latest round, or paste any match link from the round you want. Every grade\'s scorecard is scored the same way as the player of the match, and the best performers become the team. Choose 6 to 14 players. Pick Team of the round to count games that are still being played.',
 }
 if (IS_AFL) {
   SOURCE_HELP.lineup = 'Pick a recent game below to pull the side your club named on PlayHQ, with the captain and the match details. Or add players yourself in Content.'
@@ -413,7 +421,7 @@ const ROLE_LONG = IS_AFL
   ? { FB: 'Full Back', HB: 'Half Back', C: 'Centre', W: 'Wing', MID: 'Midfield', RUCK: 'Ruck', HF: 'Half Forward', FF: 'Full Forward', UTIL: 'Utility' }
   : { BAT: 'Batter', BOWL: 'Bowler', AR: 'All-Rounder', WK: 'Wicket-Keeper' }
 
-function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, debut = false, role = IS_AFL ? '' : 'BAT', totw = null } = {}, nameFormat = 'last_first', swap = false) {
+function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keeper = false, debut = false, role = IS_AFL ? '' : 'BAT', totw = null, milestone = null } = {}, nameFormat = 'last_first', swap = false) {
   const raw = splitName(p.display_name || p.name, nameFormat)
   const first = swap ? raw.last : raw.first
   const last  = swap ? raw.first.toUpperCase() : raw.last
@@ -423,17 +431,56 @@ function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keepe
     captain, viceCaptain, keeper,
     // First game for the club. Tagged on the lineup layouts that draw it.
     debut: !!debut,
+    // The club milestone this player is about to reach (lineup posts only), or null.
+    milestone,
     headshot: p.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null,
-    // The action shot, when the club has one. Only the big hero slot reaches
-    // for it — grids and card fronts stay on the headshot, which is the photo
-    // that actually reads at that size.
+    // The hero photo and the action shot, when the club has them. Only the big
+    // hero slot reaches for them — grids and card fronts stay on the headshot,
+    // which is the photo that actually reads at that size. `heroSource` is the
+    // club's saved pick between the two for this player (null = hero photo
+    // first); the editor can override it per post (`withHeroSource`).
     hero: p.hero_photo_url ? `${BASE_URL}/images/players/${p.id}/hero-photo` : null,
+    action: p.action_photo_url ? footballAsset(p.action_photo_url) : null,
+    heroSource: p.hero_source || null,
     _id: p.id,
     _name: p.display_name || p.name,
     // Team of the week only: what this player did in the round (stat line,
     // grade, opponent, points). Every other post leaves it null.
     totw,
   }
+}
+
+// The editor's own pick of which photograph a post draws, over each player's saved `hero_source`. '' leaves every
+// layout on its usual photo; 'photo' is the profile photo, 'hero' the hero photo, 'action' the action shot.
+const SHOT_CHOICES = [['', 'Automatic'], ['photo', 'Profile photo'], ['hero', 'Hero photo'], ['action', 'Action shot']]
+function withHeroSource(tp, choice) {
+  return tp && choice ? { ...tp, heroSource: choice } : tp
+}
+// A layout that draws the player's one picture as their headshot (announcement, man of the match) takes the chosen
+// shot there; the hero slot reads `heroSource` as before.
+function asPicture(tp, choice) {
+  if (!tp || !choice) return tp
+  const url = choice === 'photo' ? tp.headshot : pickHero({ hero: tp.hero, action: tp.action }, choice)
+  return { ...tp, heroSource: choice, headshot: url || tp.headshot }
+}
+
+// Which photograph of the player the post draws. Disabled, with the reason, until a player on the post has a hero photo
+// or an action shot, so the control is never silently missing.
+function HeroShotPicker({ value, onChange, hasAlt }) {
+  return (
+    <div className="mb-3" data-testid="hero-shot-picker">
+      <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Player Photo</label>
+      <select value={value} onChange={e => onChange(e.target.value)} disabled={!hasAlt}
+        className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text disabled:opacity-60">
+        {SHOT_CHOICES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+      </select>
+      <p className="text-[11px] text-pb-faintest mt-1">
+        {hasAlt
+          ? 'Applies to every player on this post. Automatic uses each player\u2019s saved choice, the hero photo first.'
+          : 'None of these players has a hero photo or an action shot yet. Add them on the player\u2019s profile to choose between them.'}
+      </p>
+    </div>
+  )
 }
 
 // The one-line performance under a name on a team-of-the-week post. Only what
@@ -972,7 +1019,7 @@ function OppLogoChip({ logo, loading, onClear }) {
 // live feed with no link, or a pasted match link resolves that link's own round
 // (onFetchLink). A pasted playhq.com link comes back as a `notice` — a different
 // id namespace, so the correction renders as its own amber box.
-function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice, off = [], onToggleCat }) {
+function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice, off = [], onToggleCat, inPlay, onInPlay }) {
   const [link, setLink] = useState('')
   const rowsOf = (d) => (d ? d[rowsKey] || [] : [])
   // Which categories the pull holds, counted on the day being shown.
@@ -988,6 +1035,14 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
           style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
           {status === 'loading' ? 'Loading…' : 'Pull latest round'}
         </button>
+        {onInPlay && (
+          <label className="flex items-start gap-2 text-xs font-mono text-pb-text cursor-pointer" data-testid="results-in-play">
+            <input type="checkbox" className="mt-0.5" checked={!!inPlay} disabled={status === 'loading'} onChange={e => onInPlay(e.target.checked)} />
+            <span>Include games in progress
+              <span className="block text-pb-faintest text-[10px] leading-relaxed font-sans">They show as IN PROGRESS with the score so far, and can be removed from the list.</span>
+            </span>
+          </label>
+        )}
         {dates.length > 1 && (
           <select value={idx} onChange={e => onPick(+e.target.value)} aria-label="Match-day"
             className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono">
@@ -1053,6 +1108,8 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onF
 // on, or the one a pasted match link names) and set how many of its best
 // performers go on the post.
 const TOTW_SCOPE_OPTS = [['all', 'All teams'], ['junior', 'Juniors'], ['senior', 'Seniors']]
+// What a pull counts: finished games only (a week), or games still in play too (a round).
+const TOTW_BASIS_OPTS = [['week', 'Team of the week'], ['round', 'Team of the round']]
 const TOTW_RANGE_KEY = 'bs_social_totw_range'
 const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 function lastSevenDays() {
@@ -1062,6 +1119,14 @@ function lastSevenDays() {
 }
 // The period a club last pulled, so a round that always runs Tuesday to Sunday
 // is not typed in again each week. Per browser, and only a convenience.
+const RR_LIVE_KEY = 'bs_social_results_live'
+function readRrLive() {
+  try { return localStorage.getItem(RR_LIVE_KEY) !== '0' } catch { return true }
+}
+function writeRrLive(on) {
+  try { localStorage.setItem(RR_LIVE_KEY, on ? '1' : '0') } catch { /* private window */ }
+}
+
 function readTotwRange() {
   try {
     const r = JSON.parse(localStorage.getItem(TOTW_RANGE_KEY) || 'null')
@@ -1131,11 +1196,47 @@ function TotwImportBox({ status, notice, data, onPull, onFetchLink, range, onRan
           ✓ {data.players.length} performers from {data.matches} {data.matches === 1 ? 'match' : 'matches'} · {[data.scope && data.scope !== 'all' ? (data.scope === 'junior' ? 'Juniors' : 'Seniors') : '', data.round, data.label].filter(Boolean).join(' · ')}
         </p>
       )}
+      {status === 'ok' && data?.liveMatches > 0 && (
+        <p className="font-mono text-[9px] mt-1 text-amber-400 leading-relaxed" data-testid="totw-live-note">
+          {data.liveMatches} of those {data.liveMatches === 1 ? 'match is' : 'matches are'} still in play, so {data.liveMatches === 1 ? 'its figures are' : 'their figures are'} not final. Pull again once {data.liveMatches === 1 ? 'it finishes' : 'they finish'}.
+        </p>
+      )}
       {status && status !== 'loading' && status !== 'ok' && (
         <p className="font-mono text-[9px] mt-1.5 text-pb-faint">✗ {status}</p>
       )}
       <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">
         Points are the same as the player of the match: 1 a run, 20 a wicket, 2 a maiden, 8 an outfield catch, stumping or run out, 4 a keeper catch. A player who played in two grades counts once, on their better day.
+      </p>
+    </div>
+  )
+}
+
+// Whether the pull counts finished games only (a team of the week) or games still
+// being played as well (a team of the round). Changing it pulls the same round
+// again, and the post's heading follows what the pull was made with.
+function TotwBasisPicker({ basis, onChange, busy }) {
+  return (
+    <div className="mb-4" data-testid="totw-basis">
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-1.5">Games counted</p>
+      <div className="flex flex-wrap gap-1.5">
+        {TOTW_BASIS_OPTS.map(([k, label]) => {
+          const on = basis === k
+          return (
+            <button key={k} type="button" onClick={() => onChange(k)} aria-pressed={on} disabled={busy}
+              data-testid={`totw-basis-${k}`}
+              className="px-3 min-h-8 rounded border font-mono text-[10px] tracking-wide2 transition-colors disabled:opacity-60"
+              style={on
+                ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent, var(--pb-bg))', borderColor: 'var(--pb-accent)' }
+                : { background: 'transparent', color: 'var(--pb-faint)', borderColor: 'var(--pb-hairline, currentColor)' }}>
+              {label}
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">
+        {basis === 'round'
+          ? 'Also counts games still being played, including a two-day game that is part way through, so you can post the round before its last game finishes. Those figures can still change.'
+          : 'Finished games only, so every figure is final.'}
       </p>
     </div>
   )
@@ -1252,6 +1353,7 @@ function TotwTeamShape({ mode, onMode, makeup, onMakeup, data, count, onSize }) 
 function TotwControls({ t }) {
   return (
     <>
+      <TotwBasisPicker basis={t.plan.basis} onChange={t.onBasis} busy={t.import.status === 'loading'} />
       <TotwScopePicker scope={t.plan.scope} onChange={t.onScope} data={t.import.data} busy={t.import.status === 'loading'} />
       <TotwImportBox status={t.import.status} notice={t.import.notice} data={t.import.data}
         onPull={t.onPull} onFetchLink={t.onFetchLink}
@@ -1668,6 +1770,9 @@ export default function AdminSocialPost() {
   // Which selected player's photo fills the hero slot on lineup templates
   // (T1 / T3 / T6). '' = auto (captain, else first in the order).
   const [heroPlayerId, setHeroPlayerId] = useState('')
+  // Which photograph the post draws for a player, over their saved pick: '' = each layout's usual one,
+  // else 'photo' | 'hero' | 'action'. Per post, never saved to the player.
+  const [shotChoice, setShotChoice] = useState('')
   // Shade the row of the player who is in the photo, so the post says whose
   // picture it is. Off until asked for: a post made before this existed, or one
   // whose photo is not of anyone on the list, must not suddenly mark a row.
@@ -1726,6 +1831,27 @@ export default function AdminSocialPost() {
     }
   }, [])
 
+  // Milestone watch: which of the lineup's players are about to reach a club milestone,
+  // read from the Milestones page's own figures. `watchOn` is the club's switch for this
+  // post; the strip and the badges draw only on the layouts in WATCH_TEMPLATES. A stale
+  // answer (the last round has not been pulled) stops the post being made until it is
+  // re-checked or the strip is switched off.
+  const [watchOn, setWatchOn] = useState(true)
+  const [watchDate, setWatchDate] = useState(null)
+  const [watchNonce, setWatchNonce] = useState(0)
+  const [watchState, setWatchState] = useState(null)
+  const watchIds = selectedPlayers.map((sp) => sp?.player?.id).filter(Boolean).map(String)
+  const watchKey = watchIds.join(',')
+  useEffect(() => {
+    if (IS_AFL || !WATCH_TEMPLATES.includes(templateId) || !watchOn || !watchKey) { setWatchState(null); return undefined }
+    let dead = false
+    setWatchState({ status: 'loading' })
+    api.getSocialMilestoneWatch(watchKey.split(','), watchDate)
+      .then((d) => { if (!dead) setWatchState({ status: 'ok', data: d }) })
+      .catch((e) => { if (!dead) setWatchState({ status: 'err', message: e?.message || 'Could not read milestones' }) })
+    return () => { dead = true }
+  }, [watchKey, watchDate, watchOn, templateId, watchNonce])
+
   const [scorecardMatch, setScorecardMatch] = useState(DEFAULT_SCORECARD)
   const [scUrlInput, setScUrlInput] = useState('')
   const [scUrlStatus, setScUrlStatus] = useState(null)
@@ -1782,7 +1908,7 @@ export default function AdminSocialPost() {
   const [totwOpts, setTotwOpts] = useState({ showPoints: false })
   // How the pool is pulled and shaped: which teams (all, juniors, seniors), the
   // period for a round that is not a weekend, and best performers or a set make-up.
-  const [totwPlan, setTotwPlan] = useState(() => ({ scope: 'all', range: readTotwRange(), mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
+  const [totwPlan, setTotwPlan] = useState(() => ({ scope: 'all', basis: 'week', range: readTotwRange(), mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
   // Milestones: the club's recorded list, which are ticked (in post order), the
   // window and search that narrow the picker, and what the post says about them.
   const [msImport, setMsImport] = useState({ status: null, report: null })
@@ -1802,6 +1928,9 @@ export default function AdminSocialPost() {
   // Play.cricket round import (the multi-match analogue of the scorecard import).
   const [fxImport, setFxImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
   const [rrImport, setRrImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
+  // Whether a Results pull also takes games still in play. On unless the club turned it off.
+  const [rrLive, setRrLive] = useState(readRrLive)
+  const rrLastQ = useRef('')
   // Categories switched OFF on each import (empty = everything the pull found).
   const [fxOff, setFxOff] = useState([])
   const [rrOff, setRrOff] = useState([])
@@ -2675,11 +2804,12 @@ export default function AdminSocialPost() {
   // the teams re-pulls the same round.
   const loadTotw = useCallback(async (q, over = {}) => {
     const scope = over.scope ?? totwPlan.scope
+    const basis = over.basis ?? totwPlan.basis
     const dateFrom = over.dateFrom || ''
     const dateTo = over.dateTo || ''
     setTotwImport(s => ({ ...s, status: 'loading', notice: null }))
     try {
-      const data = await api.getSocialTotw(q || '', { dateFrom, dateTo, scope })
+      const data = await api.getSocialTotw(q || '', { dateFrom, dateTo, scope, basis })
       if (data.kind === 'round' && data.players?.length) {
         setTotwImport({ status: 'ok', data, notice: null, source: { q: q || '', dateFrom, dateTo } })
         applyTotw(data, TOTW_DEFAULT, totwPlan.mode === 'makeup' ? totwPlan.makeup : null)
@@ -2706,6 +2836,13 @@ export default function AdminSocialPost() {
     setTotwPlan(pl => ({ ...pl, scope }))
     const src = totwImport.source
     if (src && totwImport.data) loadTotw(src.q, { dateFrom: src.dateFrom, dateTo: src.dateTo, scope })
+  }
+  // Same round, counted the other way: a new pull, since the pool changes.
+  const changeTotwBasis = (basis) => {
+    if (basis === totwPlan.basis) return
+    setTotwPlan(pl => ({ ...pl, basis }))
+    const src = totwImport.source
+    if (src && totwImport.data) loadTotw(src.q, { dateFrom: src.dateFrom, dateTo: src.dateTo, basis })
   }
   const changeTotwMode = (mode) => {
     if (mode === totwPlan.mode) return
@@ -2776,7 +2913,7 @@ export default function AdminSocialPost() {
   // Everything the Team of the Week panel needs, in one prop for TotwControls.
   const totwControls = {
     plan: totwPlan, import: totwImport, count: selectedPlayers.length,
-    onScope: changeTotwScope, onMode: changeTotwMode, onMakeup: changeTotwMakeup, onSize: changeTotwSize,
+    onScope: changeTotwScope, onBasis: changeTotwBasis, onMode: changeTotwMode, onMakeup: changeTotwMakeup, onSize: changeTotwSize,
     onRange: (range) => setTotwPlan(pl => ({ ...pl, range })),
     onPull: () => loadTotw(''), onFetchLink: (q) => loadTotw(q), onPullRange: pullTotwRange,
   }
@@ -2803,16 +2940,18 @@ export default function AdminSocialPost() {
     setResults(sortByGrade(filterByCats(d.results || [], off).map(r => ({ ...r }))))
     setMatch(m => ({ ...m, round: d.round || m.round, date: d.label || m.date, season: season || m.season }))
   }, [])
-  const importResults = useCallback(async () => {
+  // `live` is passed in (not read from state) so flipping the box can re-pull at once.
+  const runResultsPull = useCallback(async (live) => {
     setRrImport(s => ({ ...s, status: 'loading' }))
     try {
-      const data = await api.getSocialResults()
+      const data = await api.getSocialResults('', { live })
       const dates = data.dates || []
       if (!dates.length) { setRrImport({ status: 'empty', dates: [], idx: 0, season: data.season }); return }
       setRrImport({ status: 'ok', dates, idx: 0, season: data.season })
       applyRrDate(dates[0], data.season, rrOff)
     } catch (e) { setRrImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
   }, [applyRrDate, rrOff])
+  const importResults = useCallback(() => { rrLastQ.current = ''; return runResultsPull(rrLive) }, [runResultsPull, rrLive])
 
   // Same round pull, resolved from a pasted match link instead of the live
   // feed's latest — any one match link from a round names the whole round.
@@ -2839,10 +2978,10 @@ export default function AdminSocialPost() {
     }
   }, [applyFxDate, fxOff])
 
-  const importResultsFromLink = useCallback(async (q) => {
+  const runResultsLink = useCallback(async (q, live) => {
     setRrImport(s => ({ ...s, status: 'loading', notice: null }))
     try {
-      const data = await api.getSocialResults(q)
+      const data = await api.getSocialResults(q, { live })
       if (data.kind === 'round') {
         const dates = data.dates || []
         if (!dates.length) { setRrImport(s => ({ ...s, status: 'empty', notice: null })); return }
@@ -2859,6 +2998,13 @@ export default function AdminSocialPost() {
       setRrImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
     }
   }, [applyRrDate, rrOff])
+  const importResultsFromLink = useCallback((q) => { rrLastQ.current = q; return runResultsLink(q, rrLive) }, [runResultsLink, rrLive])
+  const changeRrLive = (live) => {
+    setRrLive(live)
+    writeRrLive(live)
+    // A pull already on screen is made again, counted the new way.
+    if (rrImport.status === 'ok') { if (rrLastQ.current) runResultsLink(rrLastQ.current, live); else runResultsPull(live) }
+  }
 
   // Switch a category on or off and re-fill from the day being shown.
   const toggleFxCat = (k) => {
@@ -3058,6 +3204,7 @@ export default function AdminSocialPost() {
   // with Google Fonts embedded so the display face survives the capture). The
   // render target is already mounted off-screen at full W×H.
   const handleExport = async () => {
+    if (watchBlock) { setExportError(watchBlock); return }
     setExporting(true)
     setExportError(null)
     try {
@@ -3105,6 +3252,7 @@ export default function AdminSocialPost() {
   // Blank-tab multi-slide carousel) to keep this additive and low-risk.
   const handleSaveToClubRoom = async () => {
     if (!renderRef.current) return
+    if (watchBlock) { setExportError(watchBlock); return }
     setSavingToClubRoom(true)
     setExportError(null)
     setClubRoomSaved(false)
@@ -3376,12 +3524,12 @@ export default function AdminSocialPost() {
       unit: milestone.unit || 'GAMES',
       reason: milestone.reason || 'MILESTONE',
       detail: milestone.detail,
-      player: milestonePlayer ? playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat, swapNames) : undefined,
+      player: milestonePlayer ? withHeroSource(playerToTemplatePlayer(milestonePlayer.player, milestonePlayer, nameFormat, swapNames), shotChoice) : undefined,
     }
   }
   if (templateId === 'C1' || templateId === 'C5') {
     const annPlayer = selectedPlayers[announcement.playerIdx]
-    let annTemplatePlayer = annPlayer ? playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat, swapNames) : undefined
+    let annTemplatePlayer = annPlayer ? asPicture(playerToTemplatePlayer(annPlayer.player, annPlayer, nameFormat, swapNames), shotChoice) : undefined
     if (annTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
       annTemplatePlayer = { ...annTemplatePlayer, headshot: heroImage.blobUrl }
     }
@@ -3393,7 +3541,7 @@ export default function AdminSocialPost() {
   if (templateId === 'C2') extraProps.toss = { winner: toss.winner, decision: toss.decision }
   if (templateId === 'C3') {
     const motmPlayer = selectedPlayers[motm.playerIdx]
-    let motmTemplatePlayer = motmPlayer ? playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat, swapNames) : undefined
+    let motmTemplatePlayer = motmPlayer ? asPicture(playerToTemplatePlayer(motmPlayer.player, motmPlayer, nameFormat, swapNames), shotChoice) : undefined
     if (motmTemplatePlayer && heroMode === 'hero' && heroImage.blobUrl) {
       motmTemplatePlayer = { ...motmTemplatePlayer, headshot: heroImage.blobUrl }
     }
@@ -3451,10 +3599,24 @@ export default function AdminSocialPost() {
     if (scSplitOn) { extraProps.square = true; extraProps.only = scSplitIdx === 0 ? 'home' : 'away' }
   }
 
+  // The watch answer for the open layout, only while it is switched on and drawn here.
+  const watchLive = !IS_AFL && watchOn && WATCH_TEMPLATES.includes(templateId) && watchState?.status === 'ok' ? watchState.data : null
   const templatePlayers = selectedPlayers.map((sp, i) => {
-    const base = playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames)
-    return base
+    const badge = watchLive?.badges?.[String(sp.player.id)] || null
+    const base = playerToTemplatePlayer(sp.player, badge ? { ...sp, milestone: badge } : sp, nameFormat, swapNames)
+    return withHeroSource(base, shotChoice)
   })
+  const watchItems = (watchLive?.items || []).map((it) => {
+    const tp = templatePlayers.find((t) => String(t._id) === String(it.player_id))
+    return tp ? { key: `${it.player_id}:${it.kind}`, name: [tp.first, tp.last].filter(Boolean).join(' '), label: it.label } : null
+  }).filter(Boolean)
+  // Making the post is refused while the figures may be a round behind (or still being read).
+  const watchBlock = !IS_AFL && watchOn && WATCH_TEMPLATES.includes(templateId) && watchKey
+    ? (watchState?.status === 'loading' ? 'Reading milestones'
+      : watchState?.status === 'ok' && watchState.data.stale ? (watchState.data.stale_reason || 'Milestone figures are out of date') : null)
+    : null
+  // Absent when there is nothing to say, so a lineup without milestones is as it was.
+  if (watchItems.length) extraProps.watch = watchItems
 
   const matchData = {
     competition: match.competition || 'COMPETITION',
@@ -3497,14 +3659,14 @@ export default function AdminSocialPost() {
       }
       case 'motm': {
         const sp = selectedPlayers[motm.playerIdx]
-        const player = sp ? playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames) : undefined
+        const player = sp ? asPicture(playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames), shotChoice) : undefined
         return motmBundle(motm, player, (heroMode === 'hero' && heroImage.blobUrl) || player?.headshot || '')
       }
       case 'totw': return totwBundle(templatePlayers, { junior: 'JUNIOR', senior: 'SENIOR' }[totwImport.data?.scope] || '')
       case 'milestones': return milestoneBundle(milestoneCards, msOpts.title)
       case 'announcement': {
         const sp = selectedPlayers[announcement.playerIdx]
-        const player = sp ? playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames) : undefined
+        const player = sp ? asPicture(playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames), shotChoice) : undefined
         return announceBundle(announcement, player, (heroMode === 'hero' && heroImage.blobUrl) || player?.headshot || '')
       }
       case 'toss': return tossBundle(toss, tossNames)
@@ -3610,6 +3772,8 @@ export default function AdminSocialPost() {
       round: matchData.round, date: matchData.date, comp: match.competition, showPoints: totwOpts.showPoints,
       // JUNIOR or SENIOR above the round on a scoped team, nothing on the club's whole week.
       heading: { junior: 'JUNIOR', senior: 'SENIOR' }[totwImport.data?.scope] || undefined,
+      // What the pull counted, not what the button says now (the heading cannot disagree with the team).
+      basis: totwImport.data?.mode === 'round' ? 'round' : undefined,
     }
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
@@ -3692,6 +3856,7 @@ export default function AdminSocialPost() {
     setHeroFocus(DEFAULT_HERO_FOCUS)
     setHeroMode('player')
     setHeroPlayerId('')
+    setShotChoice('')
     setMarkHero(false)
     setSplitPanel('')
     setMilestone({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
@@ -3713,7 +3878,7 @@ export default function AdminSocialPost() {
     setPotmImport({ status: null, data: null, playerIdx: 0, include: { bat: true, bowl: true, field: true } })
     setTotwImport({ status: null, data: null, notice: null })
     setTotwOpts({ showPoints: false })
-    setTotwPlan(pl => ({ scope: 'all', range: pl.range, mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
+    setTotwPlan(pl => ({ scope: 'all', basis: 'week', range: pl.range, mode: 'best', makeup: { ...FANTASY_MAKEUP } }))
     totwCursor.current = -1
     setMsImport({ status: null, report: null })
     setMsPicks([])
@@ -4137,6 +4302,7 @@ export default function AdminSocialPost() {
         return { player, role: IS_AFL ? ((pp?.skill_positions?.[0]) || '') : socialRole({ ...player, ...(pp || {}) }), captain: !!l.is_captain, viceCaptain: false, keeper: !!l.is_wicket_keeper }
       }).filter(Boolean)
       setSelectedPlayers(picked)
+      setWatchDate(matchDayIso(d.fixture?.played_on))
       checkDebuts(picked, d.fixture?.played_on || null)
       const fx = d.fixture
       if (fx) {
@@ -4174,6 +4340,7 @@ export default function AdminSocialPost() {
       }
     })
     setSelectedPlayers(picked)
+    setWatchDate(matchDayIso(fx.date))
     checkDebuts(picked, fx.date || null)
     setMatch((m) => ({ ...m, competition: fx.grade || m.competition, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
     if (oppTeam?.club || oppTeam?.name) setOpponent((o) => ({ ...o, name: oppTeam.club || oppTeam.name || o.name, logo: oppTeam.logo_url || o.logo }))
@@ -4462,12 +4629,13 @@ export default function AdminSocialPost() {
       <button onClick={openSaveDialog} title="Save this post as a reusable template" data-testid="save-as-template"
         className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">SAVE AS TEMPLATE</button>
       {!IS_AFL && !((isBlankTab && pages.count > 1) || roundPagesOn || scSplitOn) && (
-        <button onClick={handleSaveToClubRoom} disabled={savingToClubRoom} title="Add this post to the Club Room Mode TV slideshow"
+        <button onClick={handleSaveToClubRoom} disabled={savingToClubRoom || !!watchBlock} title={watchBlock ? `${watchBlock}. Check the Milestone watch under Players, or switch it off.` : 'Add this post to the Club Room Mode TV slideshow'}
           className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-60">
           {savingToClubRoom ? 'SAVING…' : clubRoomSaved ? '✓ SAVED' : 'SAVE TO CLUB ROOM'}
         </button>
       )}
-      <button onClick={handleExport} disabled={exporting}
+      <button onClick={handleExport} disabled={exporting || !!watchBlock} data-testid="download-png"
+        title={watchBlock ? `${watchBlock}. Check the Milestone watch under Players, or switch it off.` : undefined}
         className="px-3.5 h-8 rounded-md font-mono text-[10px] tracking-wide2 disabled:opacity-60 transition-colors"
         style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>{exporting ? 'EXPORTING…' : (isBlankTab && pages.count > 1 ? `↓ ${pages.count} SLIDES` : roundPagesOn ? `↓ ${roundPage.count} SLIDES` : scSplitOn ? '↓ 2 SLIDES' : '↓ DOWNLOAD PNG')}</button>
     </>
@@ -4844,7 +5012,7 @@ export default function AdminSocialPost() {
                   <div className="pb-card p-4">
                     <RoundImportBox hint="recent results" rowsKey="results"
                       status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
-                      onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
+                      onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice} inPlay={rrLive} onInPlay={IS_AFL ? undefined : changeRrLive}
                       onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
                       off={rrOff} onToggleCat={toggleRrCat} />
                   </div>
@@ -5571,6 +5739,49 @@ export default function AdminSocialPost() {
                     </p>
                   </div>
                 )}
+                {!IS_AFL && selectedPlayers.length > 0 && (
+                  <div className="mb-3 flex flex-col gap-1" data-testid="milestone-watch">
+                    <label className="flex items-center gap-2 text-[11px] text-pb-dim cursor-pointer select-none">
+                      <input type="checkbox" checked={watchOn} onChange={(e) => setWatchOn(e.target.checked)} data-testid="milestone-watch-toggle" />
+                      <span className="font-mono text-[10px] tracking-wide2">MILESTONE WATCH</span>
+                    </label>
+                    {watchOn && !WATCH_TEMPLATES.includes(templateId) && (
+                      <p className="text-[11px] text-pb-faint leading-relaxed" data-testid="milestone-unsupported">
+                        {tmpl.name} does not draw milestones. Layouts that do: <span className="text-pb-dim">{WATCH_TEMPLATES.map(id => WATCH_TEMPLATE_NAMES[id]).join(', ')}</span>.
+                      </p>
+                    )}
+                    {watchOn && WATCH_TEMPLATES.includes(templateId) && (
+                      <div className="text-[11px] leading-relaxed" data-testid="milestone-watch-status">
+                        {watchState?.status === 'loading' && <p className="text-pb-faintest">Reading the club's milestones…</p>}
+                        {watchState?.status === 'err' && (
+                          <p className="text-pb-red">{watchState.message}. The post has no milestones until this is read.</p>
+                        )}
+                        {watchState?.status === 'ok' && watchState.data.stale && (
+                          <p className="text-pb-red" data-testid="milestone-stale">
+                            Not making this post: {watchState.data.stale_reason}
+                          </p>
+                        )}
+                        {watchState?.status === 'ok' && !watchState.data.stale && (
+                          <p className="text-pb-faintest">
+                            {watchItems.length
+                              ? `${watchItems.length} on the strip, ${Object.keys(watchState.data.badges || {}).length} with a badge. `
+                              : 'Nobody in this XI is close to a club milestone. '}
+                            {watchState.data.freshness === 'unknown'
+                              ? 'The club has no sync history to check the figures against, so they are as the club last recorded them. '
+                              : watchState.data.as_of
+                                ? `Figures to the round of ${watchState.data.as_of}. `
+                                : ''}
+                            {watchState.data.known.length < watchIds.length
+                              ? `${watchIds.length - watchState.data.known.length} not in the club's player list, so left out. `
+                              : ''}
+                          </p>
+                        )}
+                        <button onClick={() => setWatchNonce((n) => n + 1)} data-testid="milestone-recheck"
+                          className="mt-1 font-mono text-[10px] tracking-wide2 px-2 py-1 rounded border pb-hairline text-pb-faint hover:text-pb-text">CHECK AGAIN</button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {!IS_AFL && selectedPlayers.length < playerCap && (
                   manualPlayerOpen
                     ? <ManualPlayerForm roster={allPlayers} onAdd={onManualPlayer} onClose={() => setManualPlayerOpen(false)} />
@@ -5697,6 +5908,10 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Hero Image</h2>
                 <p className="text-[11px] text-pb-faint mb-3">Transparent PNG recommended for best results. Any image with a solid background can be cut out with Edit.</p>
+                {!IS_AFL && selectedPlayers.length > 0 && (!['C1', 'C3', 'C5'].includes(panelId) || heroMode === 'player') && (
+                  <HeroShotPicker value={shotChoice} onChange={setShotChoice}
+                    hasAlt={selectedPlayers.some(sp => sp.player.hero_photo_url || sp.player.action_photo_url)} />
+                )}
                 {HERO_PLAYER_TEMPLATES.includes(templateId) && selectedPlayers.length > 0 && (
                   <div className="mb-3">
                     <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Hero Player</label>
@@ -5778,7 +5993,7 @@ export default function AdminSocialPost() {
                         there is no upload to override it. */}
                     {HERO_FOCUS_TEMPLATES.includes(templateId) && (
                       <HeroFocusControl
-                        src={heroImage.blobUrl || featuredOf(templatePlayers, heroPlayerId)?.headshot || null}
+                        src={heroImage.blobUrl || heroSrcOf(featuredOf(templatePlayers, heroPlayerId)) || null}
                         value={heroFocus}
                         onChange={setHeroFocus}
                         defaults={DEFAULT_HERO_FOCUS}
@@ -6295,7 +6510,7 @@ export default function AdminSocialPost() {
                 </div>
                 <RoundImportBox hint="recent results" rowsKey="results"
                   status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
-                  onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
+                  onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice} inPlay={rrLive} onInPlay={IS_AFL ? undefined : changeRrLive}
                   onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season, rrOff) }}
                   off={rrOff} onToggleCat={toggleRrCat} />
                 {tmpl.hasLeaders && (
@@ -6332,6 +6547,7 @@ export default function AdminSocialPost() {
                           <select value={r.outcome} onChange={e => set({ outcome: e.target.value })}
                             className="w-full min-w-0 bg-pb-surface border pb-hairline rounded px-1 py-1 text-xs text-pb-text">
                             <option value="W">Won</option><option value="L">Lost</option><option value="T">Tie/NR</option>
+                            {r.outcome === 'LIVE' && <option value="LIVE">In progress</option>}
                           </select>
                           <button onClick={() => setResults(rows => rows.filter((_, j) => j !== i))}
                             title="Remove this row" aria-label="Remove this row" className="text-pb-faintest hover:text-red-400 text-xs">✕</button>

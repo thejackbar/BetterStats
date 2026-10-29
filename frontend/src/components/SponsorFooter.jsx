@@ -10,7 +10,7 @@ const CLUB_SECTIONS = [
 ]
 // Single-segment paths that are NOT club slugs (must stay in sync with App.jsx routes)
 const RESERVED_ROOT_SEGMENTS = new Set([
-  'login', 'admin', 'onboard', 'club-inactive',
+  'login', 'admin', 'onboard', 'club-inactive', 'avail', 'playerdash',
   'games', 'match', 'scorecards', 'players',
   'features', 'pricing', 'compare', 'about', 'contact', 'faq',
   'terms', 'privacy', 'blog', 'videos', 'trial', 'demo', 'preview',

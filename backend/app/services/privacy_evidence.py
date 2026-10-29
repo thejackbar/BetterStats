@@ -93,7 +93,7 @@ async def gather(session, player, base_url: str = DEFAULT_BASE_URL) -> dict:
         "display_name": player.display_name,
         "ids": ids,
         "hidden_at": player.privacy_hidden_at,
-        "has_photo": any(bool(p.photo_data or p.photo_url or p.hero_photo_data or p.hero_photo_url) for p in people),
+        "has_photo": any(bool(p.photo_data or p.photo_url or p.hero_photo_data or p.hero_photo_url or p.action_photo_data or p.action_photo_url) for p in people),
         "profile_urls": [f"{base}/players/{i}" for i in ids],
         "profile_data_urls": [f"{base}/api/players/{i}" for i in ids],
         "matches": matches,

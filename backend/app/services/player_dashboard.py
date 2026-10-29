@@ -19,12 +19,13 @@ page cannot be trusted with them:
 """
 from __future__ import annotations
 
+import secrets
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.modules import MODULE_FANTASY, MODULE_FEES, org_has_module
+from app.auth.modules import MODULE_FANTASY, MODULE_FEES, MODULE_SELECT, org_has_module
 from app.models.db import FeeMember, FeeMemberSeason, FeePayment, Organisation, Player, Season
 from app.services import fees as fee_service
 from app.services import grade_scope, player_form, session_safety
@@ -35,6 +36,8 @@ from app.services.aggregations import get_season_by_season
 # Availability is not in this list: it is the point of the link, so the page
 # always opens with the next games and the Available / Unavailable buttons.
 CATALOGUE: list[dict] = [
+    {"key": "cards", "label": "Player Cards",
+     "blurb": "Their card collection: open the packs they have earned and keep the cards in a gallery. Works for every club."},
     {"key": "votes", "label": "Votes",
      "blurb": "Reminds them to vote on games they played that are still open. Shows only when a vote is due."},
     {"key": "squad", "label": "Your squad",
@@ -58,7 +61,54 @@ KEYS = [m["key"] for m in CATALOGUE]
 
 # What every club had before the club could choose: the original page, plus
 # fines (which draws nothing unless a squad switches Fines on).
-DEFAULT_MODULES = ["votes", "fantasy", "squad", "selected", "training", "fines"]
+DEFAULT_MODULES = ["cards", "votes", "fantasy", "squad", "selected", "training", "fines"]
+
+# A club without BetterSelect has no squads, selection or nets to show, so its page opens on the
+# player's cards and their season instead.
+NO_SELECT_DEFAULT_MODULES = ["cards", "season", "votes", "fantasy"]
+SELECT_ONLY = ("squad", "selected", "training", "ladder", "fines")
+# The availability side of a BetterSelect club's link: the modules that ride on its self-service switch.
+# Votes are BetterSelect's, so for a club WITH it they sit here; a club without it keeps them on the
+# dashboard side, where its page has always shown them.
+AVAILABILITY_SIDE = SELECT_ONLY + ("votes",)
+
+
+def on_availability_side(club: Organisation, key: str) -> bool:
+    return key in AVAILABILITY_SIDE and org_has_module(club, MODULE_SELECT)
+
+
+def availability_live(club: Organisation) -> bool:
+    """The availability side of the link: the answers, votes and the BetterSelect sections (squad,
+    selected, training, ladder, fines). It is the club's BetterSelect self-service switch, set in
+    BetterSelect > Availability, and a club without BetterSelect never has it."""
+    return org_has_module(club, MODULE_SELECT) and bool(club.availability_self_service_enabled)
+
+
+def dashboard_live(club: Organisation) -> bool:
+    """The dashboard side of the link: Player Cards, the season, fantasy and fees. The club's own
+    switch (``player_dashboard_enabled``, BetterStats > Player Dashboard) once it has chosen. Until
+    then it reads as it always did: a club with BetterSelect follows its self-service switch, and a
+    club without it is on unless the page was hidden from its site. So no link changes on deploy."""
+    if club.player_dashboard_enabled is not None:
+        return bool(club.player_dashboard_enabled)
+    if org_has_module(club, MODULE_SELECT):
+        return bool(club.availability_self_service_enabled)
+    return club.availability_show_on_site is not False
+
+
+def link_live(club: Organisation) -> bool:
+    """Whether the club's player page link opens at all (the answer for `_club_for_token`): either
+    side is on. What it then shows is cut down to the sides that are on."""
+    return availability_live(club) or dashboard_live(club)
+
+
+def set_dashboard_live(club: Organisation, on: bool) -> None:
+    """Switch the dashboard on or off from BetterStats, for any club. It never touches the BetterSelect
+    availability switch. Turning it on mints the link if the club has none yet; turning it off keeps
+    the token, so the same link works again when it is switched back on."""
+    club.player_dashboard_enabled = bool(on)
+    if on and not club.availability_link_token:
+        club.availability_link_token = secrets.token_urlsafe(24)
 
 
 def normalise(keys) -> list[str]:
@@ -75,7 +125,7 @@ def normalise(keys) -> list[str]:
 # was OFFERED, so one that arrived later is switched on for it rather than
 # silently missing: a club cannot have turned off what it never saw. Saving the
 # list records what was on offer.
-AUTO_ON_WHEN_NEW = ("votes", "fantasy")
+AUTO_ON_WHEN_NEW = ("cards", "votes", "fantasy")
 # What a list saved before `known` was recorded had been offered.
 LEGACY_KNOWN = [k for k in KEYS if k not in AUTO_ON_WHEN_NEW]
 
@@ -92,7 +142,7 @@ def enabled_modules(club: Organisation) -> list[str]:
     stored value is a bare list (saved before `known` existed) or `store()`'s dict."""
     raw = club.player_dashboard_modules
     if raw is None:
-        return list(DEFAULT_MODULES)
+        return list(DEFAULT_MODULES if org_has_module(club, MODULE_SELECT) else NO_SELECT_DEFAULT_MODULES)
     if isinstance(raw, dict):
         on, known = normalise(raw.get("on")), normalise(raw.get("known")) or list(LEGACY_KNOWN)
     else:
@@ -108,6 +158,13 @@ def enabled_modules(club: Organisation) -> list[str]:
 
 def blocked_reason(club: Organisation, key: str) -> Optional[str]:
     """Why a module cannot be shown to this club's players, or None."""
+    if key in SELECT_ONLY and not org_has_module(club, MODULE_SELECT):
+        return "Needs the BetterSelect module."
+    if on_availability_side(club, key):
+        if not availability_live(club):
+            return "Turn on the availability link in BetterSelect first."
+    elif not dashboard_live(club):
+        return "Turn the Player Dashboard on in BetterStats settings first."
     if key == "fees":
         if not org_has_module(club, MODULE_FEES):
             return "Needs the BetterAdmin fees module."

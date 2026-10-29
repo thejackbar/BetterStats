@@ -346,16 +346,23 @@ _FIXTURE_STATUS_LIVE = 2
 _FIXTURE_STATUS_COMPLETED = 3
 
 
-async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> list[dict]:
+async def get_grade_results(
+    grade_id: str, *, since: Optional[str] = None, include_live: bool = False,
+) -> list[dict]:
     """Completed matches for one grade, normalised (the results mirror of
     ``get_grade_fixtures``).
 
     Reuses ``get_grade_matches`` (same in-process cache). Returns
-    ``{id, home_team, away_team, played_at, round, venue, grade_id}`` for
+    ``{id, home_team, away_team, played_at, round, venue, grade_id, live}`` for
     matches in the terminal COMPLETED state (statusId 3). Scores/result are NOT
     in the match list — the caller fetches ``get_match_scorecard(id)`` for those,
     exactly like the single-scorecard import. ``since`` (YYYY-MM-DD) drops
     anything older, keeping the scorecard fan-out bounded to recent rounds.
+
+    ``include_live`` also returns matches still in play (statusId 2), flagged
+    ``live: True``, for a team of the round that counts games not yet finished.
+    Off by default so the Results roundup, which prints a final score, never
+    sees one.
     """
     matches = await get_grade_matches(grade_id)
     out: list[dict] = []
@@ -364,7 +371,7 @@ async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> li
             sid = int(m.get("statusId"))
         except (TypeError, ValueError):
             continue
-        if sid != _FIXTURE_STATUS_COMPLETED:
+        if sid != _FIXTURE_STATUS_COMPLETED and not (include_live and sid == _FIXTURE_STATUS_LIVE):
             continue
         sched = (m.get("matchSchedule") or [{}])
         dt = (sched[0].get("startDateTime") if sched else "") or ""
@@ -388,6 +395,7 @@ async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> li
             "round": (m.get("round") or {}).get("name"),
             "venue": (m.get("venue") or {}).get("name"),
             "grade_id": grade_id,
+            "live": sid == _FIXTURE_STATUS_LIVE,
         })
     return out
 

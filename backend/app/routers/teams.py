@@ -366,7 +366,8 @@ async def _apply_sides(db: AsyncSession, club_id, t: Team, sides_in: list, assig
     if assign and specs:
         await db.flush()
         assigned = await squad_sides.assign_fixtures(db, club_id, t.id)
-    return {"moved_from": out["moved_from"], "fixtures_assigned": assigned}
+    return {"moved_from": out["moved_from"], "fixtures_assigned": assigned,
+            "medals_extended": out.get("medals_extended", [])}
 
 
 async def _squad_response(db: AsyncSession, club_id, t: Team, extra: Optional[dict] = None) -> dict:

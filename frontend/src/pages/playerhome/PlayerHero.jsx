@@ -41,7 +41,7 @@ export default function PlayerHero({ club, player, squads, selected = [], onSwit
           {club?.logo_url && <img src={club.logo_url} alt="" className="w-6 h-6 rounded object-contain shrink-0" />}
           <span className="font-mono text-[10.5px] uppercase tracking-wide2 text-pb-faint truncate">{short}</span>
         </div>
-        <button onClick={onSwitch} className="text-pb-faint text-xs hover:text-pb-text underline shrink-0">Not you?</button>
+        <button onClick={onSwitch} className="text-pb-faint text-xs hover:text-pb-text underline shrink-0">Signed in as {player?.display_name}. Not you?</button>
       </div>
       <div className="flex items-center gap-4">
         <div className="relative shrink-0">

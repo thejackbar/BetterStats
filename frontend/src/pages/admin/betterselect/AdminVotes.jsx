@@ -8,9 +8,10 @@
 //
 // Three tabs:
 //   Hub         — every played game this medal counts, with its voting state,
-//                 ballot progress, bulk open/lock/nudge and sharing.
+//                 ballot progress and bulk open/lock/nudge.
 //   Leaderboard — this medal's season count, replayable "as at" any round,
 //                 with a podium, rank movement, form and awards-night mode.
+// The medal's voting link sits above the tabs, so it is one click from anywhere.
 //   Settings    — the medal itself: name, grades, who votes, ballot shape,
 //                 counting method, tie policy, eligibility source, auto-close
 //                 and the public link.
@@ -27,6 +28,7 @@ import VotesLeaderboard from './votes/VotesLeaderboard'
 import FixtureDetail from './votes/FixtureDetail'
 import VotesSettings from './votes/VotesSettings'
 import MedalBar from './votes/MedalBar'
+import ShareVotePanel from './votes/ShareVotePanel'
 
 export default function AdminVotes() {
   const { hasCapability } = useAuth()
@@ -83,6 +85,15 @@ export default function AdminVotes() {
     } catch (e) { toast.error(e.message || 'Could not add the medal') }
   }
 
+  const medal = medals?.find((m) => m.medal_id === medalId)
+  const [enabling, setEnabling] = useState(false)
+  const enableLink = async () => {
+    setEnabling(true)
+    try { await api.votesUpdateMedal(medalId, { enabled: true }); await loadMedals() }
+    catch (e) { toast.error(e.message || 'Could not turn the link on') }
+    finally { setEnabling(false) }
+  }
+
   const tabs = useMemo(() => [
     { key: 'hub', label: 'Games' },
     { key: 'leaderboard', label: 'Leaderboard' },
@@ -95,6 +106,8 @@ export default function AdminVotes() {
     <BetterSelectLayout title="Votes">
       <MedalBar medals={medals} medalId={medalId} onSelect={setMedal}
         onAdd={canManage ? addMedal : null} canManage={canManage} />
+
+      {medal && <ShareVotePanel settings={medal} busy={enabling} onEnable={canManage ? enableLink : undefined} />}
 
       <div className="flex items-center gap-1.5 mb-5 border-b pb-hairline">
         {tabs.map((t) => (

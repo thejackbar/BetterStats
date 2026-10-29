@@ -361,6 +361,11 @@ class Organisation(Base):
     # (migration 320). NULL means none pinned. Read through
     # services/post_sponsors.py, never directly.
     post_sponsor_defaults = Column(JSONB, nullable=True)
+    # The sponsor picked for each player card surface (migration 367), e.g.
+    # {"share_card": "<uuid>", "player_cards": "<uuid>"}. NULL means no pick, and
+    # the card shows the top sponsor with a logo. Read through
+    # services/card_sponsors.py, never directly.
+    card_sponsors = Column(JSONB, nullable=True)
     # Which grade categories count towards this club's stats by default — a
     # JSONB list of grade_labels.GRADE_CATEGORIES keys (migration 228). NULL
     # means no club preference, and the platform default applies: everything
@@ -551,6 +556,10 @@ class Organisation(Base):
     # The ordered module keys shown on a player's own page (migration 341).
     # NULL = never chosen, which reads as services/player_dashboard.DEFAULT_MODULES.
     player_dashboard_modules = Column(JSONB, nullable=True)
+    # The Player Dashboard switch for a club WITHOUT BetterSelect (migration 372). NULL = never
+    # chosen, which reads as on unless the club hid the page from its site. A club with
+    # BetterSelect ignores it and keeps availability_self_service_enabled.
+    player_dashboard_enabled = Column(Boolean, nullable=True)
     # ─── BetterFantasyCricket: public fantasy link (migration 087) ────────────
     # The per-club magic link members and supporters use to register and play
     # (mirrors availability_link_token). Rotatable; resolves to the club's
@@ -1441,11 +1450,19 @@ class Player(Base):
     photo_url = Column(Text, nullable=True)
     photo_data = Column(LargeBinary, nullable=True)
     photo_mime = Column(Text, nullable=True)
-    # The action shot (migration 274) — a separate photograph from the
-    # headshot above, for the full-bleed hero slot on a match-day post.
+    # The hero photo (migration 274, labelled "Action shot" until migration 375) — a separate
+    # photograph from the headshot above, for the full-bleed hero slot on a card, a share card
+    # and a match-day post.
     hero_photo_url = Column(Text, nullable=True)
     hero_photo_data = Column(LargeBinary, nullable=True)
     hero_photo_mime = Column(Text, nullable=True)
+    # The action shot (migration 375): the player mid-shot, a third photograph for the same
+    # hero position. `hero_source` is the club's per-player pick of which one fills it:
+    # NULL = automatic (hero photo, else action shot), 'hero' or 'action' pins one.
+    action_photo_url = Column(Text, nullable=True)
+    action_photo_data = Column(LargeBinary, nullable=True)
+    action_photo_mime = Column(Text, nullable=True)
+    hero_source = Column(Text, nullable=True)
     gender = Column(Text, nullable=True)
     is_player = Column(Boolean, default=True, nullable=True)
     player_role = Column(Text, nullable=True)
@@ -1582,6 +1599,10 @@ class Game(Base):
     raw_payload = Column(JSON)
     venue = Column(Text)
     match_format = Column(Text, nullable=True)
+    # Cricket Australia's own round label ("Grand Final", "Semi Final", "Round 7"), migration 365.
+    # `is_final` only says the label contains "final", so a grand final is read from this
+    # (services/premierships.is_grand_final_round). NULL until the sync has rediscovered the game.
+    round_name = Column(Text, nullable=True)
     # Cricket Australia's own match status, verbatim: COMPLETED, ABANDONED,
     # CANCELLED, UPCOMING, LIVE (migration 266). NULL means we have not been
     # told — every row predating that migration reads that way until a sync
@@ -1811,9 +1832,9 @@ class VoteMedal(Base):
     # Per-team override of ``voter_mode`` (migration 345): grade NAME ->
     # 'players' | 'captain'. A team with no entry follows ``voter_mode``.
     grade_voter_modes = Column(JSONB, nullable=False, default=dict, server_default="{}")
-    # Who counts a captain-only team's votes when the captain hands that job to
-    # someone else (migration 347): grade NAME -> player id (uuid string). The
-    # person need not be in the side. A team with no entry is the captain's.
+    # The people chosen to vote for a team on the 'chosen' voter mode (migration
+    # 347, a list since 362): grade NAME -> [player id, ...]. They need not be in
+    # the side. Ignored while the team is on any other mode.
     grade_vote_counters = Column(JSONB, nullable=False, default=dict, server_default="{}")
     # How the medal weights its grades (migration 346): {"mode": 'off' | 'auto'
     # | 'manual', "manual": {grade NAME: multiplier}}. Empty = unweighted.
@@ -2362,6 +2383,10 @@ class ManualGame(Base):
     result = Column(Text, nullable=True)
     winning_team = Column(Text, nullable=True)
     is_final = Column(Boolean, server_default="false", nullable=False)
+    # A person's own statement that this match was the grand final (migration 373). A hand-entered
+    # game has no round name, so this is what the automatic premierships read for it. Mapped here as
+    # well as in the DDL so a read through the ORM does not fail at request time.
+    is_grand_final = Column(Boolean, server_default="false", nullable=False)
     match_format = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     # Opposition club's Grassroots org GUID (from the CA club search), so the manual
@@ -2538,6 +2563,22 @@ class ManualFallOfWicket(Base):
     overs_at_fall = Column(Numeric(5, 1), nullable=True)
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
     batter_name = Column(Text, nullable=True)
+
+
+class ManualGameRole(Base):
+    """Who captained and who kept wicket in a hand-entered game (migration 377).
+
+    A row only for a player who held a role. The synced twin is ``game_appearances.is_captain`` and
+    ``is_wicket_keeper``. Mapped here as well as in the DDL so a read through the ORM does not fail.
+    """
+    __tablename__ = "manual_game_roles"
+    __table_args__ = (UniqueConstraint("manual_game_id", "player_id", name="manual_game_roles_manual_game_id_player_id_key"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    manual_game_id = Column(UUID(as_uuid=True), ForeignKey("manual_games.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    is_captain = Column(Boolean, nullable=False, server_default="false", default=False)
+    is_wicket_keeper = Column(Boolean, nullable=False, server_default="false", default=False)
 
 
 class ManualBowlerWicket(Base):

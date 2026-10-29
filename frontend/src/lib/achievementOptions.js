@@ -1,7 +1,7 @@
 // Static data tree: category → subcategory → [achievement options]
 // Sourced from ACC Honour Boards and Office Bearers spreadsheet
 
-const GRADE_AWARDS = [
+export const GRADE_AWARDS = [
   'Best & Fairest',
   'Best Batter',
   'Best Bowler',
@@ -15,7 +15,7 @@ const GRADE_AWARDS = [
   "Coaches Award",
 ]
 
-const PREMIERSHIP_AWARDS = [
+export const PREMIERSHIP_AWARDS = [
   'Premiership',
   'Player of the Grand Final',
   'Captain',
@@ -344,4 +344,31 @@ export function getAchievementsFromDefs(defs, category, subcategory) {
     }
   }
   return getAchievements(category, subcategory).map(a => ({ value: a, label: a }))
+}
+
+// The club's own grades ("A grade", "C grade", "C2 grade") as extra Subcategory / Grade choices for the
+// categories a team earns (a premiership, a grade award). The award setup lists a club's seeded teams
+// ("1st XI", "2nd XI"), which is not how every club names its sides, so a grade the club actually plays in
+// is offered too. Appended after the club's own definitions and never repeating one (case aside).
+// `grades` is what /organisations/{id}/grades returns: [{name, display_order}].
+export const TEAM_AWARD_CATEGORIES = ['Premiership', 'Club Award']
+
+export function addClubGrades(options, grades, category) {
+  if (!TEAM_AWARD_CATEGORIES.includes(category) || !grades?.length) return options
+  const have = new Set(options.map(o => String(o.value).trim().toLowerCase()))
+  const extra = []
+  for (const g of grades) {
+    const name = String(g?.name ?? g ?? '').trim()
+    if (name && !have.has(name.toLowerCase())) {
+      have.add(name.toLowerCase())
+      extra.push({ value: name, label: name })
+    }
+  }
+  return [...options, ...extra]
+}
+
+// What a team award on a club grade can be, when the club has defined nothing for that grade.
+export function defaultTeamAwards(category) {
+  const list = category === 'Premiership' ? PREMIERSHIP_AWARDS : category === 'Club Award' ? GRADE_AWARDS : []
+  return list.map(a => ({ value: a, label: a }))
 }

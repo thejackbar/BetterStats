@@ -19,7 +19,11 @@ leaves alone:
   SIDE_DID_NOT_BAT   the side never batted (rain, forfeit): there is no card to be missing from.
   INSIDE_XI          the side batted and the player is off the card, but sits in slots 1 to 11.
   HAS_STATS          the card carries a row for the player that our tables do not (drift).
-  NOT_ON_SHEET       neither the player nor an id merged into them is on the sheet.
+  NOT_ON_SHEET       neither the player nor an id merged into them is on the sheet, and the card cannot rule a
+                     name out (not COMPLETED, an empty sheet, nobody batted).
+  WITHDRAWN          as NOT_ON_SHEET on a settled card, and nobody on a sheet has the player's full name: a late
+                     withdrawal. The sync and `backfill_reserve_flags` take these off the match count.
+  SAME_NAME_ON_SHEET a sheet player has the full name under an id we do not hold: probably the same person.
   NO_CARD            CA returned nothing for the game (a PlayHQ-only match), or the card names nobody.
 
 The check is CA's own season total (`player_season_stats.matches`, source 'api'). For each
@@ -54,7 +58,8 @@ from app.models.db import async_session_maker
 from app.services import grassroots_scores_client as gr
 from app.services.club_grades import club_game_sql
 from app.services.game_status import appearance_counts_as_match, not_played_game_sql
-from app.services.reserve_players import CODES, TWELFTH_MAN, XI, classify  # noqa: F401  (re-exported for the suite)
+from app.services.reserve_players import (CODES, SAME_NAME_ON_SHEET, TWELFTH_MAN, WITHDRAWN, XI,  # noqa: F401  (re-exported for the suite)
+                                          classify, classify_withdrawal)
 
 def verdict(held: int, ca: int | None, flagged: int) -> str:
     """How the rule sits against CA's own season total for one player and season."""
@@ -247,7 +252,7 @@ async def audit_club(org: str, label: str, args, budget: list[int]) -> list[dict
             cards[gid] = await gr.get_match_scorecard(gid)
             await asyncio.sleep(args.pace)
         guids = {str(c["raw_guid"]).lower(), str(c["player_id"]).lower()} | merged.get(c["player_id"], set())
-        c.update(classify(cards[gid], guids))
+        c.update(classify_withdrawal(cards[gid], guids, c.get('player_name')))
 
     judged = [c for c in cands if c.get("code")]
     if skipped:
@@ -257,7 +262,7 @@ async def audit_club(org: str, label: str, args, budget: list[int]) -> list[dict
 
     print("\n-- how each named-only appearance reads on CA's card")
     counts = Counter(c["code"] for c in judged)
-    for code in CODES:
+    for code in CODES + (WITHDRAWN, SAME_NAME_ON_SHEET):
         if counts.get(code):
             print(f"  {code:<18} {counts[code]}")
 

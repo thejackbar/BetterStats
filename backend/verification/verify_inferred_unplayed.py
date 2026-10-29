@@ -111,6 +111,10 @@ GAMES = {
     "old_scorecard":      (None, "WIN", None, {"bat": [BATTER]}, True),
     # Called off outright: the existing rule, unchanged.
     "abandoned":          ("ABANDONED", None, None, {}, False),
+    # Abandoned AFTER play started (Applecross A 0 for 17, 19 Oct 2025): the game begun, so a
+    # player named in it keeps the match even with no line of their own. CANCELLED never counts.
+    "abandoned_after_play": ("ABANDONED", None, ONE_INNINGS, {"bat": [BATTER]}, True),
+    "cancelled_after_play": ("CANCELLED", None, ONE_INNINGS, {"bat": [BATTER]}, False),
     # The player recorded a real line in an otherwise empty game: keeps it.
     "no_play_but_player_bowled": ("COMPLETED", "WIN", None, {"bowl": [PLAYER]}, True),
     # Next round's XI, published mid-week. Sync stores the fixture and a

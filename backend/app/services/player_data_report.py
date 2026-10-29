@@ -150,7 +150,8 @@ async def gather(session, player) -> dict:
             ("PlayHQ ID", p.playhq_id),
             ("CricketStatz ID", getattr(p, "cricketstatz_player_id", None)),
             ("Photograph held", _yes(p.photo_data or p.photo_url)),
-            ("Action photograph held", _yes(p.hero_photo_data or p.hero_photo_url)),
+            ("Hero photograph held", _yes(p.hero_photo_data or p.hero_photo_url)),
+            ("Action photograph held", _yes(p.action_photo_data or p.action_photo_url)),
             ("Has claimed this profile with a sign-in", _yes(p.claimed or p.user_id)),
         ]
         records.append({
@@ -259,7 +260,7 @@ async def gather(session, player) -> dict:
         "matches": matches,
         "contact_summary": audit.get("summary", {}),
         "hidden_at": player.privacy_hidden_at,
-        "has_photo": any(bool(p.photo_data or p.photo_url or p.hero_photo_data or p.hero_photo_url) for p in people),
+        "has_photo": any(bool(p.photo_data or p.photo_url or p.hero_photo_data or p.hero_photo_url or p.action_photo_data or p.action_photo_url) for p in people),
         "removed_at_request": player_privacy.is_privacy_hidden(player) and not player_privacy.is_name_match_hold(player),
     }
 

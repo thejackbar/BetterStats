@@ -7,7 +7,7 @@ import { useClubTheme } from '../hooks/useClubTheme'
 import { rememberClubSlug } from '../lib/clubSlug'
 import { useNameFormat } from '../lib/nameFormat'
 import { usePageMeta } from '../hooks/usePageMeta'
-import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
+import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel, addClubGrades, defaultTeamAwards } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
 import { scopeNote, autoShownNote } from '../lib/gradeCategories'
 import { GradeFilterPills } from '../components/GradeFilterPills'
@@ -377,10 +377,11 @@ function BattingTab({ batting, seasonStats, seasons }) {
       {seasonStats?.length > 0 && (
         <Card title="SEASON BY SEASON" pad="p-0">
           <div className="overflow-x-auto pb-scroll">
-            <table className="w-full min-w-[700px] text-[13px]">
+            <table className="w-full min-w-[780px] text-[13px]">
               <thead className="text-pb-faint font-mono text-[10px] tracking-wide3">
                 <tr>
                   <th className="py-3 pl-5 text-left pb-2">SEASON</th>
+                  <SortTh label="MATCHES" sKey="matches" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="INN" sKey="batting_innings" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="RUNS" sKey="total_runs" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="AVG" sKey="batting_average" cur={sortKey} dir={sortDir} onSort={request} right />
@@ -395,6 +396,7 @@ function BattingTab({ batting, seasonStats, seasons }) {
                 {sorted.map((s, i) => (
                   <tr key={s.season_id || s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{formatSeason(s.season_name)}</td>
+                    <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.matches)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.batting_innings)}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_runs)}</td>
                     <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.batting_average, true)}</td>
@@ -450,10 +452,11 @@ function BowlingTab({ bowling, seasonStats }) {
       {seasonStats?.length > 0 && (
         <Card title="SEASON BY SEASON" pad="p-0">
           <div className="overflow-x-auto pb-scroll">
-            <table className="w-full min-w-[640px] text-[13px]">
+            <table className="w-full min-w-[720px] text-[13px]">
               <thead className="text-pb-faint font-mono text-[10px] tracking-wide3">
                 <tr>
                   <th className="py-3 pl-5 text-left pb-2">SEASON</th>
+                  <SortTh label="MATCHES" sKey="matches" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="WKTS" sKey="total_wickets" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="OV" sKey="total_overs" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="AVG" sKey="bowling_average" cur={sortKey} dir={sortDir} onSort={request} right />
@@ -466,6 +469,7 @@ function BowlingTab({ bowling, seasonStats }) {
                 {sorted.map((s, i) => (
                   <tr key={s.season_id || s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{formatSeason(s.season_name)}</td>
+                    <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.matches)}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_wickets)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmtOvers(s.total_overs)}</td>
                     <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.bowling_average, true)}</td>
@@ -518,10 +522,11 @@ function FieldingTab({ fielding, seasonStats }) {
       {seasonStats?.length > 0 && (
         <Card title="SEASON BY SEASON" pad="p-0">
           <div className="overflow-x-auto pb-scroll">
-            <table className="w-full min-w-[480px] text-[13px]">
+            <table className="w-full min-w-[600px] text-[13px]">
               <thead className="text-pb-faint font-mono text-[10px] tracking-wide3">
                 <tr>
                   <th className="py-3 pl-5 text-left pb-2">SEASON</th>
+                  <SortTh label="MATCHES" sKey="matches" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="CATCHES" sKey="total_catches_non_wk" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="CT (WK)" sKey="total_catches_wk" cur={sortKey} dir={sortDir} onSort={request} right />
                   <SortTh label="RUN OUTS" sKey="total_run_outs" cur={sortKey} dir={sortDir} onSort={request} right />
@@ -532,6 +537,7 @@ function FieldingTab({ fielding, seasonStats }) {
                 {sorted.map((s, i) => (
                   <tr key={s.season_id || s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{formatSeason(s.season_name)}</td>
+                    <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.matches)}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_catches_non_wk ?? (s.total_catches - (s.total_catches_wk ?? 0)))}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.total_catches_wk)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.total_run_outs)}</td>
@@ -2533,6 +2539,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   const [achievements, setAchievements] = useState(null)
   const [seasons, setSeasons] = useState([])
   const [awardDefs, setAwardDefs] = useState([])
+  const [clubGrades, setClubGrades] = useState([])
   const [adding, setAdding] = useState(false)
   const [editId, setEditId] = useState(null)
   const [form, setForm] = useState({ season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
@@ -2546,10 +2553,17 @@ function AchievementsSection({ playerId, orgId, playerName }) {
     api.listAchievements(orgId, { playerId }).then(setAchievements).catch(() => setAchievements([]))
     api.getOrgSeasons(orgId).then(data => setSeasons(data || [])).catch(() => {})
     api.listAwardDefinitions(orgId).then(data => setAwardDefs(data || [])).catch(() => {})
+    api.getOrgGrades(orgId).then(data => setClubGrades(data || [])).catch(() => {})
   }, [playerId, orgId])
 
-  const subcatOptions = getSubcategoriesFromDefs(awardDefs, form.category)
-  const achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
+  const subcatOptions = addClubGrades(getSubcategoriesFromDefs(awardDefs, form.category), clubGrades, form.category)
+  let achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
+  // A club grade the award setup says nothing about still gets the usual team awards to choose from.
+  if (!achievementOptions.length && form.subcategory
+      && subcatOptions.some(o => o.value === form.subcategory)
+      && !getSubcategoriesFromDefs(awardDefs, form.category).some(o => o.value === form.subcategory)) {
+    achievementOptions = defaultTeamAwards(form.category)
+  }
   const seasonMap = Object.fromEntries(seasons.map(s => [s.id, s.name]))
   const seasonDisplay = (s) => !s || s === 'All Time' ? 'All Time' : (formatSeason(seasonMap[s] || s) || s)
 
@@ -2635,7 +2649,15 @@ function AchievementsSection({ playerId, orgId, playerName }) {
               </span>
             )}
           </div>
-          <div className="hb-season">{season}</div>
+          <div className="hb-season">
+            <span className="truncate">{season}</span>
+            {a.game_id && (
+              <Link to={`/games/${a.game_id}${orgId ? `?org=${orgId}` : ''}`} className="hb-scorecard"
+                    title="The grand final scorecard this premiership came from">
+                Scorecard →
+              </Link>
+            )}
+          </div>
           {canEdit && (
             <div className="hb-admin-btns">
               {onEdit && <button className="hb-edit-btn" onClick={onEdit}>Edit</button>}

@@ -87,6 +87,7 @@ OPEN_TO_ANY_CLUB_USER: dict[tuple[str, str], str] = {
     ("GET", "/club-admin/seasons"): PUBLIC_EQUIVALENT,
     ("GET", "/club-admin/settings"): PUBLIC_EQUIVALENT,
     ("GET", "/club-admin/sponsors"): PUBLIC_EQUIVALENT,
+    ("GET", "/club-admin/sponsors/card-sponsors"): PUBLIC_EQUIVALENT,
     ("GET", "/club-admin/sponsors/post-default"): PUBLIC_EQUIVALENT,
     ("GET", "/club-admin/sponsors/post-defaults"): PUBLIC_EQUIVALENT,
     ("GET", "/club-admin/sponsors/section-names"): PUBLIC_EQUIVALENT,

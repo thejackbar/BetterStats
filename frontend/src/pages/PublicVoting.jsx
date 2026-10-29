@@ -6,6 +6,11 @@
 // fills the next empty slot; tapping a filled slot or a chosen name clears it.
 // Three taps and Submit — no stepper, no separate review screen.
 //
+// It is one portal: a player finds their name, enters their PIN, and is taken to
+// the next game they played that is open for voting and that they have not voted
+// on. After each ballot they are offered the next one, until none are left. The
+// games list stays for changing a ballot already cast.
+//
 // No tallies are ever shown here; the count stays with the club's admins.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
@@ -18,6 +23,10 @@ const fmtDay = (d) => {
   catch { return d }
 }
 
+// The game to take a player to: open, and nothing from them on it yet. The server
+// has already cut the list to the games a verified player is on, newest first.
+const nextToVote = (fixtures = [], skipId) => fixtures.find((f) => f.state === 'open' && !f.voted && f.id !== skipId)
+
 const STATE_LABEL = { open: null, awaiting_team: 'Team list not in yet', closed: 'Voting closed', locked: 'Voting closed' }
 const NOT_OPEN = {
   upcoming: 'This game hasn’t been played yet.',
@@ -27,7 +36,8 @@ const NOT_OPEN = {
 }
 const REASON = {
   captain_only: 'Only the captain submits votes for this club. Ask your skipper to cast them.',
-  counter_only: 'The captain has nominated someone to submit the votes for this team.',
+  chosen_only: 'The votes for this team are submitted by the people the club has chosen.',
+  no_voters_chosen: 'No one has been chosen to vote for this team yet. Ask your club admin.',
   did_not_play: 'Only players who played in this game can vote at this club.',
   verify_required: 'Find your name to vote on this game.',
 }
@@ -171,13 +181,18 @@ export default function PublicVoting() {
   const accent = club?.accent_color || club?.primary_color || null
   const values = fixture?.ballot_values || landing?.ballot_values || [3, 2, 1]
 
+  const fetchLanding = useCallback(
+    () => api.votePublicLanding(token, { team: teamParam || undefined, round_key: roundParam || undefined, q: qParam || undefined }),
+    [token, teamParam, roundParam, qParam],
+  )
+
   useEffect(() => {
     let alive = true
-    api.votePublicLanding(token, { team: teamParam || undefined, round_key: roundParam || undefined, q: qParam || undefined })
-      .then((d) => { if (!alive) return; setLanding(d); setMe(d.me); setStep((s) => (s === 'loading' ? 'games' : s)) })
+    fetchLanding()
+      .then((d) => { if (!alive) return; setLanding(d); setMe(d.me) })
       .catch(() => alive && setStep('dead'))
     return () => { alive = false }
-  }, [token, teamParam, roundParam, qParam, landingKey])
+  }, [fetchLanding, landingKey])
 
   useEffect(() => { if (step === 'pin') pinRef.current?.focus() }, [step])
 
@@ -201,12 +216,22 @@ export default function PublicVoting() {
       if (d.fixture?.state !== 'open' || d.role === 'none') { seedPicks(d); setStep('ballot'); return }
       if (!d.me && !supporterName) { seedPicks(d); setStep('pick'); return }
       seedPicks(d); setStep('ballot')
-    } catch (e) { setError(e.message || 'Something went wrong. Try again.') }
-    finally { setBusy(false) }
+    } catch (e) {
+      setError(e.message || 'Something went wrong. Try again.')
+      setStep((s) => (s === 'loading' ? 'games' : s))
+    } finally { setBusy(false) }
   }, [token, me, supporterName])
 
+  // First load: a link to one game opens that game. Otherwise someone already
+  // signed in goes straight to the next game they have to vote on, and everyone
+  // else starts at "find your name".
   useEffect(() => {
-    if (landing && fixtureParam && !autoOpened.current) { autoOpened.current = true; openFixture(fixtureParam) }
+    if (!landing || autoOpened.current) return
+    autoOpened.current = true
+    if (fixtureParam) { openFixture(fixtureParam); return }
+    const next = landing.me ? nextToVote(landing.fixtures) : null
+    if (next) openFixture(next.id)
+    else setStep(landing.me ? 'games' : 'pick')
   }, [landing, fixtureParam, openFixture])
 
   const updateFilter = useCallback((key, value) => {
@@ -229,11 +254,17 @@ export default function PublicVoting() {
     try {
       const r = await api.votePublicVerify(token, player.id, pinValue)
       setMe(r.player)
-      setLandingKey((k) => k + 1)
+      // Read again now they are known: the list is cut to the games they played.
+      const fresh = await fetchLanding()
+      setLanding(fresh)
       if (fixture) {
         const d = await api.votePublicFixture(token, fixture.fixture.id)
         setFixture(d); seedPicks(d); setStep('ballot')
-      } else setStep('games')
+      } else {
+        const next = nextToVote(fresh.fixtures)
+        if (next) await openFixture(next.id)
+        else setStep('games')
+      }
     } catch (e) { setError(e.message || 'That didn’t match. Please try again.') }
     finally { setBusy(false) }
   }
@@ -258,10 +289,15 @@ export default function PublicVoting() {
     setBusy(true); setError('')
     try {
       await api.votePublicSubmit(token, fixture.fixture.id, { picks, voter_name: me ? undefined : supporterName })
+      // So the next game offered is one they have not voted on.
+      try { setLanding(await fetchLanding()) } catch { /* the list is only refreshed for the next game */ }
       setStep('done')
     } catch (e) { setError(e.message || 'Couldn’t save your votes. Please try again.') }
     finally { setBusy(false) }
   }
+
+  // Only a verified player is offered "the next game"; a supporter's list is not cut to anything.
+  const nextGame = me ? nextToVote(landing?.fixtures, fixture?.fixture?.id) : null
 
   const filteredPlayers = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -306,7 +342,7 @@ export default function PublicVoting() {
                 )}
                 <button onClick={async () => {
                   try { await api.votePublicSwitch(token) } catch { /* cookie clear is best-effort */ }
-                  setMe(null); setChosen(null); setLandingKey((k) => k + 1); setStep('games')
+                  setMe(null); setChosen(null); setFixture(null); setLandingKey((k) => k + 1); setStep('pick')
                 }} className="text-xs text-pb-faint hover:text-pb-text underline">Not you?</button>
               </div>
             )}
@@ -333,6 +369,11 @@ export default function PublicVoting() {
                   </select>
                 )}
               </div>
+            )}
+            {me && landing.fixtures.some((f) => f.state === 'open') && !nextToVote(landing.fixtures) && (
+              <p className="text-center text-sm text-pb-faint mb-3.5" data-all-caught-up>
+                You’re all caught up. Tap a game to change your votes.
+              </p>
             )}
             {landing.fixtures.length === 0 && (
               <div className="rounded-xl border pb-hairline px-4 py-10 text-center text-pb-faint text-sm">
@@ -394,7 +435,6 @@ export default function PublicVoting() {
                 I didn’t play (coach / supporter)
               </button>
             )}
-            <button onClick={backToGames} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text">← Back to games</button>
           </div>
         )}
 
@@ -474,9 +514,9 @@ export default function PublicVoting() {
               </div>
             ) : (
               <>
-              {fixture.is_counter && (
+              {fixture.is_chosen && (
                 <p className="text-xs text-pb-faint mb-3">
-                  You are counting the votes for this team, in place of the captain.
+                  You are one of the people chosen to vote for this team.
                 </p>
               )}
               <Ballot fixture={fixture} values={values} votable={votable} picks={picks} setPicks={setPicks}
@@ -494,8 +534,25 @@ export default function PublicVoting() {
               Thanks{me ? `, ${me.display_name.split(' ')[0]}` : supporterName ? `, ${supporterName.split(' ')[0]}` : ''}.
               Your ballot is with the club. You can come back and change it while voting stays open.
             </p>
-            <button onClick={backToGames} className="mt-6 px-6 py-3 rounded-xl font-semibold text-pb-bg"
-              style={{ background: 'var(--pb-accent)' }}>Back to games</button>
+            {nextGame ? (
+              <>
+                <button onClick={() => openFixture(nextGame.id)} disabled={busy} data-next-game
+                  className="mt-6 px-6 py-3 rounded-xl font-semibold text-pb-bg w-full"
+                  style={{ background: 'var(--pb-accent)' }}>
+                  Vote on the next game
+                  <span className="block text-[12px] font-normal opacity-80">
+                    {nextGame.round} · {nextGame.home_away === 'AWAY' ? '@' : 'vs'} {nextGame.opponent || 'TBC'}
+                  </span>
+                </button>
+                <button onClick={backToGames} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text">See all my games</button>
+              </>
+            ) : (
+              <>
+                {me && <p className="text-pb-dim text-sm mt-4" data-all-caught-up>You’re all caught up.</p>}
+                <button onClick={backToGames} className="mt-6 px-6 py-3 rounded-xl font-semibold text-pb-bg"
+                  style={{ background: 'var(--pb-accent)' }}>{me ? 'See my games' : 'Back to games'}</button>
+              </>
+            )}
             {me?.my_page && (
               <div className="mt-4">
                 <a href={me.my_page} data-my-page-done className="text-sm underline text-pb-dim">Go to my page</a>

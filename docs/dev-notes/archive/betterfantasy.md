@@ -201,3 +201,45 @@ Verified. `verify_fantasy_team_view.py` (28 checks, local Postgres 16, shipped r
 
 `Ladder.jsx` cut the list at 20 (`rows.slice(0, 20)`) and added a jump-to-me row, so a club of 26 lost six teams and everyone between 20th and the signed-in manager. The API never truncated (`_league_standings` has no limit); only the screen did. The cap and the jump row are gone. `verify_fantasy_live_sync_browser.mjs` (53 checks) renders 26 teams at 1280px and 390px, asserts all 26 are listed and that neither width scrolls sideways; against the previous screen it renders 21 rows and fails both checks.
 
+## v9.129.32: Teams screen (list and card swap) and the player trading card
+
+Asked: now the round has finalised, registered players should be able to look at each other's teams, as a list and as a card swap, and share their own.
+
+Teams could already be opened one at a time from the ladder (`team_view`). The new `GET /teams` returns the whole league in one request. `team_view`'s body became `_locked_team`, called by both routes, so what a manager may see is decided in one place. The first version of the bulk route showed "?" for every player in a round still being played: it preloaded names from the stored lineups only, and a live-scored lineup has none. `verify_fantasy_team_view.py` section 8 caught it (the bulk team was compared field for field with the single team). The same section queues a transfer for B and checks it is absent from B's entry while the same player, held by A, is present, so the leak check can fail. Control run on the previous router: 28 pass, the two new checks fail, nothing crashes.
+
+Frontend: `pages/fantasy/Teams.jsx`, `components/CardSwap.jsx` (gsap, already a dependency), `lib/exportNodePng.js`. A swipe test failed once: after the first drag left text selected, the second drag began a native text drag and the browser sent `pointercancel`. Fixed with `user-select: none` and a `dragstart` guard on the stack.
+
+The player share card (`pages/ShareCard.jsx`, `components/PlayerTradingCard.jsx`, `components/FlipCard.jsx`) draws both faces at a fixed 360 x 492 and scales the wrapper to fit a phone, so the saved image matches the screen. It adds no new public data: the big number is the player's best club ranking (top 99 only), not a shirt number, because `shirt_number` is not in the public player payload and publishing it needs a club setting. Style chips read `styleChips()` over attributes the club already shows publicly. The page now calls `rememberClubSlug` because its URL has no slug and it reads the sponsor list. In the sandbox, `modern-screenshot` did not embed web fonts for any card (the older gameweek card too), so exported images fell back to the generic family; the new card names a `sans-serif` fallback. It is worth checking the export once in a browser that has the fonts.
+
+## v9.129.33: player cards on My Team, the share card redrawn, exported fonts
+
+Asked: the share card picture was too big (use the hero size for a hero image, a smaller centred picture for a headshot), clean up and shrink the back, take the layout from the Stat Attack card (front) and the Kohli player details card (back); and let My Team show each player as a card.
+
+`players/{id}/stats` now carries `hero_photo_url` (the public players list already did, and a privacy removal clears it). The share card front is `PlayerCardFront` (hero fills the panel, headshot is a 176px ring, none falls back to the club logo; the stat band's ink colour follows the club colour's brightness), the back is `PlayerCardBack`. Names go through `splitDisplayName`: the first version split "Barendse, Jack" on the last space and showed "Barendse," over "JACK".
+
+Exported text was clipping on the back and colliding in the stat band. Cause: the exporter freezes box sizes from the live page, but the fonts never reached the image. Three attempts: (1) a fixed family list passed as `font.cssText` made no difference; (2) adding the families the node uses made no difference; (3) the real cause, found by reading `embedWebFont` in modern-screenshot 4.7.0, is that `cssText` is added as it is with its `https:` URLs, which an image cannot load. Inlining each file as a data URL fixed it. The old gameweek and invite cards had the same problem and now use the shared exporter.
+
+My Team cards: `SquadCards` / `FantasyPlayerCard`. Browser check: `verify_fantasy_my_team_cards_browser.mjs` (20), `verify_player_share_card_browser.mjs` (hero and headshot sizes, comma names), `verify_fantasy_teams_browser.mjs`.
+
+
+## Round winners and round insights (v9.129.34)
+
+Asked: rankings for each round so the club can see round winners, backdated so it can go round by round; then more colour on the public page (top 10 players, most traded in and out, biggest price risers and fallers, filtered by round).
+
+Round winners: `services/fantasy_round_rank.py` ranks every scored round from `fantasy_squad_round_scores.points` for the club-wide league (net of any transfer hit, the same figure as the ladder's GW column). Nothing is stored, so rounds scored before this existed are covered and an unsettled round drops out. Competition ranking (1, 1, 3); a tie for first is a shared win; a round topped on 0 has no winner. A team is ranked only for rounds it had joined (`joined_round`) and where its row has a lineup or points, so a chip-only tally row never shows as a 0. Routes: `GET /public/fantasy/{token}/round-winners`, `/round-ranking/{n}`, admin `GET /club-admin/fantasy/season/{id}/round-winners`. Screens: Ladder "Round winners" tab (`RoundRanking.jsx`), admin Round winners page (`FantasyWinners.jsx`). Defaults chosen with the club: club-wide ladder only (mini leagues not covered), shared win on a tie, hits included.
+
+Round insights: `services/fantasy_round_insights.py`, `GET /public/fantasy/{token}/round-insights?round=n`, screen `Insights.jsx` (Insights in the quick links). Top 10 scorers from `fantasy_player_round_scores` with `picked_by` from the stored squad round lineups; trades from `fantasy_transactions` `transfer_in` / `transfer_out` by `round_id`; risers and fallers from `fantasy_pricing.season_history`. The picker offers scored rounds plus the open round, which shows trades only.
+
+Checks: `verify_fantasy_round_rank.py` (39), `verify_fantasy_round_insights.py` (29), `frontend/verification/verify_fantasy_round_winners_browser.mjs` (38). The admin page compiles and shares the endpoint's checks; it was not driven in a browser.
+
+## Transfers: sell several at once, live bank, sortable pool (v9.129.39)
+
+Asked: selecting a player to sell should update the bank so you can see what you can afford; the pool should sort by name, price, selected and total; and several players should be sellable together so replacements can be chosen to fit the budget instead of one swap at a time.
+
+One swap at a time cannot do this: selling A ($10) for X ($12) with a $1.1 bank is refused on its own, but is fine once B is sold in the same go. `public_fantasy._make_transfers` now takes a list of swaps, checks the budget over the whole set (sum of sell values less sum of current prices), validates every swap before writing any (all or nothing), and charges one free transfer or the hit per swap. `POST /{token}/transfer` still exists and calls it with one swap; `POST /{token}/transfers` (`{swaps: [{out_player_id, in_player_id}]}`, at most 15) is the batch. Behind a lock each swap is queued through `fantasy_queue.queue_transfer` as before.
+
+The queue had the same gap at settlement: `apply_pending` checked each queued swap's budget alone, in creation order, so a first swap that only the second sale paid for was cancelled ("0.9 short"). It now retries a swap that only the budget stops after the others have applied, and cancels it only when a whole pass applies nothing new. A set that cannot be afforded still cancels what does not fit, with the same reason.
+
+Frontend (`Transfers.jsx`): `outs` and `ins` arrays; `pairUp` matches each player going out to a pick of the same role in the order picked and `prune` drops a pick that has lost its slot. Bank (chip on desktop, tile on phone) is `bank + sales - picks` and turns red when negative. Pool sorting is `arrange` with `SORTS` (Player A to Z first, the figures biggest first, a second tap flips); with no column picked the mover chips still order Risers and Fallers, else Total (desktop) or Price (phone). On a phone the flow is two steps, sell then replace.
+
+Checks: `verify_fantasy_multi_transfer.py` (27; control against the previous commit fails on the missing route and on the first queued swap being cancelled), `verify_fantasy_lock_queue.py` (41) and `verify_fantasy_unsettle.py` (35) still pass, `frontend/verification/verify_fantasy_transfers_browser.mjs` (44; control against the previous build fails on Bank staying at $1.1). Local run notes: the pinned `asyncpg` does not build on Python 3.13, use 3.11 for the backend checks.

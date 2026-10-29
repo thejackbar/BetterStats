@@ -1862,3 +1862,55 @@ Done: `club_match.fixture_is_in_house` (both owning organisation ids present and
 Not done: `iq_review.list_recent_games` joins `fixtures` to `games` on `playhq_id` with `LIMIT 1`, so for an in-house game that has been played it names whichever of the two teams comes first. The played game is one shared `games` row, so there is no single right answer. BetterIQ's opposition lineup for an in-house fixture was not looked at (a club does not scout itself). A vote whose source is the synced scorecard (`votes.eligible_players`) lists every club player in the game, so once an in-house game is played both fixtures offer both teams' players; the BetterSelect XI and Play.Cricket sources are per side. Splitting the scorecard source by side needs the scorecard's own team roster, which the stored per-game tables do not keep.
 
 Checks: `verify_same_club_fixture.py` (35; control on the previous code fails 17 without crashing: one row, no AWAY side, no re-key of the second side, the home XI unlinked), `verify_in_house_lineup_browser.mjs` (10; control build of the previous page fails the two in-house checks). Existing fixture, squad, selection and lineup suites unchanged (`verify_fixture_sync_reconcile` 37, `verify_shared_grade_squads` 29, `verify_fixture_side` 25, `verify_foreign_fixtures_and_selection_templates` 42, `verify_two_day_availability` 52, `verify_squad_sides` 48, `verify_multi_squad` 44, `verify_squad_next_game` 77, `verify_iq_opponent_lineup` 60). Harness trap met on the way: `verify_selection_same_day.build_schema` leaves out `selection_drafts`, which `fixtures_with_work` reads, so a suite that runs reconcile loads `selection_draft_ddl` itself; and `find_stale` only judges a grade whose list CA was read for, so a stub that returns an empty listing never re-keys anything.
+
+## v9.129.29: the player page's login says who you are logging in as
+
+Clubs reported "my mobile does not work" on the player page. The cause was nearly always the wrong person picked (a wrong tap in the name list, or a `?player=<id>` link from a vote reminder that had someone else picked) with the player typing their own last 4 against it. The server's refusal was already correct; the screen never made the picked name loud enough.
+
+`PublicAvailability.jsx`: the PIN step opens with `SigningInAs` (module level, `[data-signing-in-as]`, name in `[data-signing-in-name]` at 30px, `[data-not-you]` button), the label reads "last 4 digits of {name}'s mobile", the submit button reads "Log in as {name}", and any error adds "You are logging in as {name}. If that is not you, pick your own name." The server's own message is kept above it. The name step has a "Who are you?" heading. `PlayerHero` reads "Signed in as {name}. Not you?". The no-mobile case still names the person.
+
+Not changed: `PublicVoting.jsx` has its own PIN step with the same wording ("Last 4 digits of your mobile") and the same trap. Voting links arrive with `?player=` from reminders, so it is the likelier place for the same mistake; it was left alone because the request was about the player page.
+
+Check: `verify_player_login_identity_browser.mjs` (14; control build of the previous page fails at the first check without crashing). `verify_vote_my_page_link_browser.mjs` updated for the new button and label (21).
+
+## v9.129.30: the shared player page link never carries a player
+
+Reported: every time the player dashboard link was shared, people had to tap "This isn't me". The only ways the page picks a name before a person does are a signed `bs_avail` cookie (per browser, so not on a recipient's own device) and `?player=<id>`, which `public_votes.my_page` and the vote reminder links add. An admin who arrived by one of those and copied the address bar shared their own name. The Self-service link panel and the club site button already give the plain `/avail/<token>`.
+
+`PublicAvailability.jsx` reads `player` once into a ref, then strips `player` and `tab` from the URL with `setSearchParams(..., { replace: true })`; other parameters are kept. The autopick still works for the first visit. Panel copy says to share from the panel. Links already pasted into chats with `?player=` still pick that player for whoever opens them; there is no way to tell them from a real reminder, and the PIN step now names the person loudly (v9.129.29).
+
+Check: `verify_player_login_identity_browser.mjs` (21; section "The link people share").
+
+### v9.129.35: Selection Whiteboard sideways scroll and team arrows
+
+Reported: people on iPad and phones struggled to scroll the Whiteboard sideways. The board already had `overflow-x-auto`, but the global scrollbar is 6px, which is hard to grab and hides on touch devices.
+
+`.pb-hscroll` (`styles/theme.css`) gives the board a 16px webkit scrollbar with a visible track. Firefox falls back to `scrollbar-width: auto` under `@supports not selector(::-webkit-scrollbar)`, since Chrome ignores the webkit rules once a standard scrollbar property is set. `Board` in `AdminSelectionDraftTable.jsx` adds a Previous and Next team pair above the scroller. A step goes to the next team whose left edge is past the current scroll position, measured from the DOM at click time (the pool is `sticky left-0`, so a team lines up at its offset minus the pool width and the 10px gap), clamping at the ends. The pair shows only while `scrollLeft` or the overflow says there is somewhere to go.
+
+The screen still shows the "needs a wider screen" note under 1024px (`isPhone`), so an iPad held upright does not get the board. That was left as it was.
+
+Check: `verify_whiteboard_scroll_arrows_browser.mjs` (15). Headless Chromium hides scrollbars by default, so it launches with `ignoreDefaultArgs: ['--hide-scrollbars']` to measure the bar. The Selection board Gender filter check in `verify_draft_table_browser.mjs` fails with and without this change.
+
+### v9.129.36: Selection Whiteboard on iPhone and iPad, and a hideable menu
+
+Reported: people on iPhone and iPad could not use the Whiteboard, and the 240px menu took room a tablet needed. Below 1024px the screen showed "needs a wider screen"; from `md` up the menu could not be hidden.
+
+The phone gate is gone. Under 768px (`phone`) the Pool stops being `sticky` and becomes a page like the teams, 86vw wide with `snap-x snap-mandatory`, so the next page shows a sliver. The arrows bar is always shown there and reads the page nearest the left edge from `data-col-label`. `useFitHeight` gets a 460px floor on a phone so the header above does not squeeze the rows; the page scrolls down to the board instead.
+
+Touch (`(hover: none)`) has no drag. A drag from a whole card was never going to work under a finger (the browser takes the gesture for a scroll), and the old engine treated the resulting `pointercancel` as a drop, which could place a player where the finger lifted. `selectionDnd` now ends a cancelled gesture without dropping, and the Whiteboard card ignores `pointerType === 'touch'` on pointer down, so mouse, trackpad and pen still drag on an iPad. Taps do the work: a Pool tap adds to the team in the "Tap a player to add them to" box (the active team, changed here without scrolling back to a team header), and a team player opens `SlotActionSheet`, built on the Selection board's `BottomSheet` and `SheetAction`. A move uses the same `onDrop` path as dropping on a column, so the same full, not-in-pool and already-in refusals apply; the sheet greys those rows out and says why. The hover-only captain, keeper and remove buttons are not drawn on touch.
+
+The menu button in `BetterSelectLayout` (`data-menu-toggle`) hides the sidebar from `md` up and keeps the choice in `usePersistedState('select.sidebarHidden')`. Below `md` the same button opens the existing slide-over.
+
+Check: `verify_whiteboard_phone_browser.mjs` (33), driven with real touch events through CDP (`Input.dispatchTouchEvent`; `Input.synthesizeScrollGesture` did not scroll even a plain div here). `verify_draft_table_browser.mjs`'s 390px check now expects the board. Checked in Chromium only; Edge and Chrome on iOS run on WebKit, which this sandbox does not have.
+
+## Past Lineups (v9.129.38)
+
+A selector wanted to look back at a team's earlier sides without opening fixtures one by one. New screen `/admin/betterselect/past-lineups` (`PastLineups.jsx`, Match Day menu, `SELECT_SELECTION`), backed by two read-only routes in `routers/selection.py`, declared before `/{fixture_id}`: `GET /selection/past-lineups/teams` and `GET /selection/past-lineups`.
+
+A "team" is the squad, or one team of a squad that covers several (`team` key is `<squad id>` or `<squad id>:<side key>`), resolved per fixture through `squad_sides.resolve`, the same as the board and `previous_xi`. Only games up to today, not cancelled, with a saved `fixture_lineups` row count. A game no squad claims belongs to no team. The feed is newest first, paged by `offset`/`limit` (8 default, 30 max). Each game carries `vs_previous` (who is in and out against the next older game of the SAME team); the window reads one game past the page so the oldest card of a page is never shown as all new. `fixture_id` in place of `team` means "this fixture's team" (the builder's Past sides button).
+
+Screen: team chips, year headings, an IntersectionObserver sentinel plus a button for the next page, tap a name to follow a player (`data-past-following`). The last team looked at is kept in `bs_pref:select.pastLineups.team`. It reads the `select.juniors` preference like the other BetterSelect screens.
+
+Not built: who actually played (the scorecard) against who was selected, and the result of each game.
+
+Checks: `backend/verification/verify_past_lineups.py` (43 checks, Postgres; control on the previous `selection.py` fails all of the feature checks, a mutant that drops the extra baseline game fails the two paging checks), `frontend/verification/verify_past_lineups_browser.mjs` (44 checks; locale-agnostic dates, the in/out label is CSS-uppercased so match with `/i`).

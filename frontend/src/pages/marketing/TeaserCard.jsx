@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import brandWhite from '../../assets/bettercricket-white.svg'
@@ -25,6 +25,12 @@ export const CARD_FORMATS = {
 }
 
 const LOGO_WAIT_MS = 5000
+// A card whose text is longer than the layout allows for is shrunk, in 5% steps,
+// until it fits. Below this it is left to overflow, and the renderer refuses it.
+// The margin kept clear on every side; the fit check holds the content inside it.
+const padFor = (spec) => (spec.width > spec.height ? 56 : 72)
+const FIT_STEP = 0.05
+const FIT_MIN = 0.6
 const fmtNum = (n) => Number(n || 0).toLocaleString()
 
 // Words that tell you nothing about which club it is, left out of the crest.
@@ -108,6 +114,9 @@ export default function TeaserCard() {
   const [data, setData] = useState(null)
   const [logoDone, setLogoDone] = useState(false)
   const [fontsDone, setFontsDone] = useState(false)
+  const [fit, setFit] = useState(1)          // how far the content has been shrunk to fit
+  const [fitted, setFitted] = useState(false) // the fit has been measured with the real fonts
+  const inner = useRef(null)
 
   useEffect(() => {
     let alive = true
@@ -138,6 +147,28 @@ export default function TeaserCard() {
 
   const facts = useMemo(() => (data && spec ? pickFacts(data, spec.names) : []), [data, spec])
 
+  // Measure once the fonts are in (a font changes line breaks): while the
+  // content is taller or wider than its frame, shrink it a step and measure
+  // again. Never grows back, so it settles.
+  useLayoutEffect(() => {
+    const el = inner.current
+    if (!el || !fontsDone || !spec) return
+    // Is any part of the content outside the padded area? Measured on the
+    // content's own boxes (not the frame's scroll size) so the margin survives:
+    // content that merely reaches into the bottom margin is shrunk too.
+    const pad = padFor(spec)
+    const box = el.getBoundingClientRect()
+    // All in the picture's real pixels: the margin is `pad` laid-out pixels and
+    // so shrinks with the zoom.
+    const margin = pad * fit
+    const over = [...el.children].some((c) => {
+      const r = c.getBoundingClientRect()
+      return r.bottom - box.top > box.height - margin + 1 || r.right - box.left > box.width - margin + 1
+    })
+    if (over && fit > FIT_MIN) setFit(Math.max(FIT_MIN, Math.round((fit - FIT_STEP) * 100) / 100))
+    else setFitted(true)
+  }, [data, fontsDone, fit, spec])
+
   if (!spec) return <div data-testid="teaser-card-unknown">Unknown card</div>
   if (data === false) return <div data-testid="teaser-card-missing">Not found</div>
   if (!data) return <div data-testid="teaser-card-loading" />
@@ -146,9 +177,9 @@ export default function TeaserCard() {
   const wide = W > H
   const { club, season, hero } = data
   const place = [club.suburb, club.state].filter(Boolean).join(', ')
-  const ready = fontsDone && logoDone
+  const ready = fontsDone && logoDone && fitted
   const unitLabel = hero ? (hero.kind === 'runs' ? 'Top run-scorer' : 'Leading wicket-taker') : null
-  const pad = wide ? 56 : 72
+  const pad = padFor(spec)
   const story = fmt === 'story'
   const heroSize = wide ? 150 : (story ? 260 : 190)
   const nameBase = wide ? 60 : (story ? 78 : 68)
@@ -156,13 +187,25 @@ export default function TeaserCard() {
 
   return (
     <div data-theme="dark" style={{ background: '#070b14', width: W, height: H, overflow: 'hidden' }}>
-      <div data-card data-card-ready={ready ? '1' : '0'} data-format={fmt}
+      <div data-card data-card-ready={ready ? '1' : '0'} data-format={fmt} data-card-fit={fit}
            style={{
-             width: W, height: H, boxSizing: 'border-box', padding: pad, position: 'relative', overflow: 'hidden',
+             width: W, height: H, position: 'relative', overflow: 'hidden',
+             background: 'radial-gradient(120% 90% at 0% 0%, #12332b 0%, #0d1117 55%, #070b14 100%)',
+           }}>
+       {/* The content is laid out in a box 1/fit larger than the frame and zoomed
+           back down, so shrinking it re-flows the text rather than just clipping.
+           (zoom, not a transform: a transform leaves the frame's scroll size at the
+           unscaled layout, and the renderer's clipping check reads that size.) */}
+       <div ref={inner}
+           style={{
+             width: W / fit, height: H / fit, zoom: fit,
+             boxSizing: 'border-box', padding: pad, position: 'relative',
              display: 'flex', flexDirection: wide ? 'row' : 'column', gap: wide ? 48 : 0,
              justifyContent: wide ? 'flex-start' : 'space-between',
              color: '#e8edf5', fontFamily: 'var(--pb-font-body)',
-             background: 'radial-gradient(120% 90% at 0% 0%, #12332b 0%, #0d1117 55%, #070b14 100%)',
+             // Free text with no break in it (a long name, a long code) wraps, so it
+             // makes its box taller and the fit sees it, instead of running off the side.
+             overflowWrap: 'anywhere',
            }}>
         {/* club + hero */}
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
@@ -228,6 +271,7 @@ export default function TeaserCard() {
             <img src={brandWhite} alt="BetterCricket" style={{ width: wide ? 64 : (story ? 120 : 104), height: wide ? 64 : (story ? 120 : 104), flex: 'none' }} />
           </div>
         </div>
+       </div>
       </div>
     </div>
   )

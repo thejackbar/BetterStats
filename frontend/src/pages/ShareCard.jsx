@@ -1,11 +1,16 @@
-import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useParams, useSearchParams, Link } from 'react-router-dom'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner } from '../lib/presskit'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { resolveClubFonts } from '../lib/theme'
-import { fmt2, fmtCount, formatSeason } from '../lib/cricketFormat'
-import betterStatsLogo from '../assets/bettercricket-white.svg'
+import { fmtCount, formatSeason } from '../lib/cricketFormat'
+import { rememberClubSlug } from '../lib/clubSlug'
+import { useClubSponsors } from '../lib/useClubSponsors'
+import { exportNodePng } from '../lib/exportNodePng'
+import { heroShotUrl } from '../lib/playerShots'
+import FlipCard from '../components/FlipCard'
+import { CARD_W, CARD_H, PlayerCardFront, PlayerCardBack, cardSponsor, cardSponsorOptions, NO_SPONSOR, splitName } from '../components/PlayerTradingCard'
 
 // The card's display face follows the club's chosen display font (useClubTheme
 // injects any uploaded @font-face); Barlow Condensed stays the default so a
@@ -14,282 +19,6 @@ const DEFAULT_DISPLAY = "'Barlow Condensed', sans-serif"
 function clubDisplayFamily(org) {
   if (!org) return DEFAULT_DISPLAY
   return resolveClubFonts(org).display.cssFamily || DEFAULT_DISPLAY
-}
-
-function hexWithAlpha(hex, alpha) {
-  if (!hex || hex[0] !== '#' || hex.length !== 7) return `rgba(22,199,132,${alpha})`
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return `rgba(${r},${g},${b},${alpha})`
-}
-
-function useIsMobile(breakpoint = 640) {
-  const [isMobile, setIsMobile] = useState(
-    typeof window !== 'undefined' && window.innerWidth < breakpoint
-  )
-  useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < breakpoint)
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [breakpoint])
-  return isMobile
-}
-
-function RankBadge({ rank, label, accent }) {
-  if (!rank) return null
-  const ordinal = rank === 1 ? '1st' : rank === 2 ? '2nd' : rank === 3 ? '3rd' : `${rank}th`
-  return (
-    <span style={{
-      background: hexWithAlpha(accent, 0.15),
-      border: `1px solid ${hexWithAlpha(accent, 0.4)}`,
-      borderRadius: 5,
-      padding: '2px 8px',
-      fontSize: 10,
-      color: accent,
-      fontFamily: "'JetBrains Mono', monospace",
-      letterSpacing: 0.5,
-    }}>
-      #{ordinal} {label}
-    </span>
-  )
-}
-
-function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl }) {
-  const isMobile = useIsMobile()
-  // theme_config.accent is what actually themes the club's site; the legacy
-  // accent_color column is the fallback for a club that never opened Branding.
-  const accent = org?.theme_config?.accent || org?.accent_color || '#16c784'
-  const displayFamily = clubDisplayFamily(org)
-
-  // Fallback chain: player photo → club logo → BetterStats logo.
-  // Rebuild when props change (org loads async after first render).
-  const fallbackChain = [photoUrl, org?.logo_url, betterStatsLogo].filter(Boolean)
-  const [imgSrc, setImgSrc] = useState(fallbackChain[0] || betterStatsLogo)
-  const [fallbackIdx, setFallbackIdx] = useState(0)
-
-  useEffect(() => {
-    const first = [photoUrl, org?.logo_url, betterStatsLogo].find(Boolean) || betterStatsLogo
-    setImgSrc(first)
-    setFallbackIdx(0)
-  }, [photoUrl, org?.logo_url])
-
-  const handleImgError = () => {
-    const next = fallbackIdx + 1
-    if (next < fallbackChain.length) {
-      setFallbackIdx(next)
-      setImgSrc(fallbackChain[next])
-    }
-  }
-
-  const statSize = (highlight) => highlight ? (isMobile ? 24 : 30) : (isMobile ? 18 : 22)
-
-  const fieldingHasData = cf && (
-    (cf.total_catches_non_wk ?? cf.total_catches ?? 0) > 0 ||
-    (cf.total_catches_wk ?? 0) > 0 ||
-    (cf.total_run_outs ?? 0) > 0 ||
-    (cf.total_stumpings ?? 0) > 0
-  )
-
-  return (
-    <div
-      id="share-card"
-      style={{
-        width: '100%',
-        maxWidth: 600,
-        boxSizing: 'border-box',
-        background: 'linear-gradient(135deg, #0d1b2a 0%, #0f2235 60%, #0d1b2a 100%)',
-        borderRadius: 16,
-        padding: isMobile ? '20px 16px' : '32px 36px',
-        fontFamily: "'Inter', sans-serif",
-        color: '#fff',
-        position: 'relative',
-        overflow: 'hidden',
-        border: `1px solid ${hexWithAlpha(accent, 0.2)}`,
-      }}
-    >
-      {/* Watermark */}
-      <div style={{
-        position: 'absolute', bottom: isMobile ? 14 : 20, right: isMobile ? 16 : 24,
-        fontFamily: displayFamily,
-        fontSize: 12, color: hexWithAlpha(accent, 0.3),
-        letterSpacing: 2, textTransform: 'uppercase',
-      }}>
-        BetterCricket
-      </div>
-
-      {/* Header: org + player photo */}
-      <div style={{ marginBottom: isMobile ? 12 : 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-          {org?.logo_url && (
-            <img src={org.logo_url} alt="" style={{ width: isMobile ? 28 : 32, height: isMobile ? 28 : 32, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />
-          )}
-          <div style={{ minWidth: 0 }}>
-            {org && (
-              <p style={{ fontFamily: displayFamily, fontSize: isMobile ? 11 : 13, color: accent, letterSpacing: 2, textTransform: 'uppercase', margin: 0 }}>
-                {org.name}
-              </p>
-            )}
-            {season && (
-              <p style={{ fontSize: isMobile ? 11 : 12, color: '#64748b', margin: '2px 0 0' }}>{season}</p>
-            )}
-          </div>
-        </div>
-
-        {/* Player photo */}
-        <img
-          src={imgSrc}
-          alt=""
-          onError={handleImgError}
-          style={{
-            width: isMobile ? 48 : 64,
-            height: isMobile ? 48 : 64,
-            objectFit: 'cover',
-            borderRadius: 8,
-            border: `2px solid ${hexWithAlpha(accent, 0.3)}`,
-            flexShrink: 0,
-          }}
-        />
-      </div>
-
-      {/* Player name */}
-      <h1 style={{
-        fontFamily: displayFamily,
-        fontSize: isMobile ? 36 : 52, fontWeight: 800, lineHeight: 1,
-        color: '#fff', margin: isMobile ? '0 0 8px' : '0 0 10px', textTransform: 'uppercase',
-        letterSpacing: 1,
-      }}>
-        {player?.name || ''}
-      </h1>
-
-      {/* Ranking badges */}
-      {rankings && (rankings.runs_rank || rankings.wickets_rank || rankings.catches_rank) && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: isMobile ? 14 : 18 }}>
-          <RankBadge rank={rankings.runs_rank} label="runs" accent={accent} />
-          <RankBadge rank={rankings.wickets_rank} label="wickets" accent={accent} />
-          <RankBadge rank={rankings.catches_rank} label="catches" accent={accent} />
-        </div>
-      )}
-
-      {/* Batting stats row */}
-      {cb && (
-        <div style={{ marginBottom: isMobile ? 14 : 20 }}>
-          <p style={{ fontFamily: displayFamily, fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 10px' }}>
-            Batting
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: isMobile ? 6 : 10 }}>
-            {[
-              { label: 'M', value: cb.games },
-              { label: 'Inns', value: cb.innings },
-              { label: 'Runs', value: cb.total_runs != null ? fmtCount(cb.total_runs) : null, highlight: true },
-              { label: 'HS', value: cb.high_score },
-              { label: 'Ave', value: cb.average != null ? fmt2(cb.average) : null },
-            ].map(({ label, value, highlight }) => (
-              <div key={label} style={{ textAlign: 'center' }}>
-                <div style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: statSize(highlight),
-                  fontWeight: 700,
-                  color: highlight ? accent : '#fff',
-                  lineHeight: 1,
-                }}>
-                  {value ?? '—'}
-                </div>
-                <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 4 }}>
-                  {label}
-                </div>
-              </div>
-            ))}
-          </div>
-          {(cb.hundreds > 0 || cb.fifties > 0) && (
-            <div style={{ display: 'flex', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
-              {cb.hundreds > 0 && (
-                <span style={{ background: hexWithAlpha(accent, 0.1), border: `1px solid ${hexWithAlpha(accent, 0.3)}`, borderRadius: 6, padding: '3px 10px', fontSize: 11, color: accent }}>
-                  {cb.hundreds} x {cb.hundreds === 1 ? '100' : '100s'}
-                </span>
-              )}
-              {cb.fifties > 0 && (
-                <span style={{ background: hexWithAlpha(accent, 0.1), border: `1px solid ${hexWithAlpha(accent, 0.3)}`, borderRadius: 6, padding: '3px 10px', fontSize: 11, color: accent }}>
-                  {cb.fifties} x {cb.fifties === 1 ? '50' : '50s'}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Bowling stats row */}
-      {cbw && cbw.total_wickets > 0 && (
-        <div style={{ borderTop: '1px solid rgba(30,41,59,0.8)', paddingTop: isMobile ? 12 : 16, marginBottom: isMobile ? 14 : 20 }}>
-          <p style={{ fontFamily: displayFamily, fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 10px' }}>
-            Bowling
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: isMobile ? 8 : 12 }}>
-            {[
-              { label: 'Wkts', value: cbw.total_wickets != null ? fmtCount(cbw.total_wickets) : null, highlight: true },
-              { label: 'Ave', value: cbw.average != null ? fmt2(cbw.average) : null },
-              { label: 'Econ', value: cbw.economy != null ? fmt2(cbw.economy) : null },
-              { label: 'Best', value: cbw.best_bowling_figures || (cbw.best_figures_wickets ? `${fmtCount(cbw.best_figures_wickets)} wickets` : '—') },
-            ].map(({ label, value, highlight }) => (
-              <div key={label} style={{ textAlign: 'center' }}>
-                <div style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: statSize(highlight),
-                  fontWeight: 700,
-                  color: highlight ? accent : '#fff',
-                  lineHeight: 1,
-                }}>
-                  {value ?? '—'}
-                </div>
-                <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 4 }}>
-                  {label}
-                </div>
-              </div>
-            ))}
-          </div>
-          {cbw.five_fors > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <span style={{ background: hexWithAlpha(accent, 0.1), border: `1px solid ${hexWithAlpha(accent, 0.3)}`, borderRadius: 6, padding: '3px 10px', fontSize: 11, color: accent }}>
-                {cbw.five_fors} x {cbw.five_fors === 1 ? '5fa' : '5fas'}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Fielding — same 4-col grid layout as Bowling so all three disciplines sit at the same visual weight */}
-      {fieldingHasData && (
-        <div style={{ borderTop: '1px solid rgba(30,41,59,0.8)', paddingTop: isMobile ? 12 : 16 }}>
-          <p style={{ fontFamily: displayFamily, fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 10px' }}>
-            Fielding
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: isMobile ? 8 : 12 }}>
-            {[
-              { label: 'Ct', value: fmtCount(cf.total_catches_non_wk ?? cf.total_catches), highlight: true },
-              { label: 'Ct (WK)', value: fmtCount(cf.total_catches_wk) },
-              { label: 'RO', value: fmtCount(cf.total_run_outs) },
-              { label: 'Stmps', value: fmtCount(cf.total_stumpings) },
-            ].map(({ label, value, highlight }) => (
-              <div key={label} style={{ textAlign: 'center' }}>
-                <div style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: statSize(highlight),
-                  fontWeight: 700,
-                  color: highlight ? accent : '#fff',
-                  lineHeight: 1,
-                }}>
-                  {value ?? '—'}
-                </div>
-                <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 4 }}>
-                  {label}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
 }
 
 export default function ShareCard() {
@@ -302,9 +31,40 @@ export default function ShareCard() {
   const [loading, setLoading] = useState(true)
   const [statsLoading, setStatsLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [flipped, setFlipped] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveErr, setSaveErr] = useState('')
+  const [scale, setScale] = useState(1)
+  const fitRef = useRef(null)
+  const exportRef = useRef(null)
   // Wear the club's white-label theme (palette + fonts, incl. any uploaded
   // @font-face) the same way the player profile behind this card does.
   useClubTheme(org)
+  // This URL carries no club slug, so tell the sponsor list whose sponsors to draw.
+  useEffect(() => { rememberClubSlug(org?.slug) }, [org?.slug])
+  const sponsorData = useClubSponsors(org?.slug)
+  // Who shares the card picks the sponsor on it. '' follows the club's pick; the choice rides in the link
+  // (?sponsor=<id> or ?sponsor=none) so the person who opens it sees the same card.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const sponsorChoice = searchParams.get('sponsor') || ''
+  const sponsorOptions = cardSponsorOptions(sponsorData)
+  const sponsor = cardSponsor(sponsorData, 'share_card', sponsorChoice)
+  const pickSponsor = (value) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev)
+    if (value) next.set('sponsor', value); else next.delete('sponsor')
+    return next
+  }, { replace: true })
+
+  // The card is drawn at one fixed size; shrink the whole thing to fit a phone rather than reflowing it.
+  useLayoutEffect(() => {
+    const el = fitRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return undefined
+    const fit = () => setScale(Math.min(1.12, el.clientWidth / CARD_W))
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [loading, !!data])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     api.getPlayerStats(playerId)
@@ -342,13 +102,16 @@ export default function ShareCard() {
     ? (seasons.find(s => s.id === selectedSeason)?.name ?? 'Season')
     : 'Career Statistics'
 
+  const { first: pFirst, last: pLast } = splitName(player.display_name || player.name)
+  const prettyName = [pFirst, pLast].filter(Boolean).join(' ')
+
   const handleShare = async () => {
     const url = window.location.href
-    const text = `${player.name} — ${fmtCount(cb?.total_runs ?? 0)} runs, ${fmtCount(cbw?.total_wickets ?? 0)} wickets | BetterCricket`
+    const text = `${prettyName} — ${fmtCount(cb?.total_runs ?? 0)} runs, ${fmtCount(cbw?.total_wickets ?? 0)} wickets | BetterCricket`
 
     if (navigator.share) {
       try {
-        await navigator.share({ title: `${player.name} — BetterCricket`, text, url })
+        await navigator.share({ title: `${prettyName} — BetterCricket`, text, url })
       } catch {}
     } else {
       await navigator.clipboard.writeText(`${text}\n${url}`)
@@ -357,13 +120,27 @@ export default function ShareCard() {
     }
   }
 
+  const accent = org?.theme_config?.accent || org?.accent_color || '#16c784'
+  const display = clubDisplayFamily(org)
+  const faceProps = { player, org, accent, display, rankings, photoUrl: player.photo_url, heroUrl: heroShotUrl(player), seasonLabel, cb, cbw, cf }
+  const front = <PlayerCardFront {...faceProps} sponsor={sponsor} />
+  const back = <PlayerCardBack {...faceProps} />
+
+  const handleSave = async () => {
+    setSaving(true); setSaveErr('')
+    try {
+      await exportNodePng(exportRef.current, `${(prettyName || 'player').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${flipped ? 'stats' : 'card'}`, { width: CARD_W, height: CARD_H, backgroundColor: 'transparent' })
+    } catch { setSaveErr('Could not make the image. Try again.') } finally { setSaving(false) }
+  }
+
+  const btn = 'px-5 py-2.5 rounded font-mono text-[11px] tracking-wide2 font-semibold transition'
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
       <main className="max-w-3xl mx-auto px-4 py-8">
         <div className="mb-6">
           <Link to={`/players/${playerId}`} className="font-mono text-[11px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">← BACK TO PROFILE</Link>
           <h1 className="font-display font-bold text-3xl text-pb-text mt-3 tracking-tight">Share Card</h1>
-          <p className="text-pb-faint text-sm mt-1">Screenshot this card to share on social media</p>
+          <p className="text-pb-faint text-sm mt-1">Tap the card to turn it over for the stats</p>
         </div>
 
         {seasons.length > 0 && (
@@ -380,62 +157,49 @@ export default function ShareCard() {
           </div>
         )}
 
-        <style>{`
-          .magic-glow-wrapper {
-            padding: 5px;
-            border-radius: 1rem;
-            overflow: visible;
-            background: var(--magic-gradient);
-            position: relative;
-            z-index: 1;
-          }
-          .magic-glow-wrapper::after {
-            position: absolute;
-            content: "";
-            top: 30px;
-            left: 0;
-            right: 0;
-            z-index: -1;
-            height: 100%;
-            width: 100%;
-            transform: scale(0.8);
-            filter: blur(28px);
-            background: var(--magic-gradient);
-            transition: opacity .5s;
-          }
-          .magic-glow-wrapper:hover::after {
-            opacity: 0;
-          }
-        `}</style>
-        <div className="flex justify-center pb-4">
-          <div
-            className="magic-glow-wrapper w-full max-w-[610px]"
-            style={{ '--magic-gradient': `linear-gradient(to left, ${org?.accent_color || '#16c784'} 0%, ${org?.theme_config?.accent2 || org?.theme_config?.dark?.surface2 || '#0d2a4e'} 100%)` }}
-          >
-            <ShareCardVisual
-              player={player}
-              cb={cb}
-              cbw={cbw}
-              cf={cf}
-              season={seasonLabel}
-              org={org}
-              rankings={rankings}
-              photoUrl={player.photo_url}
+        {sponsorOptions.length > 0 && (
+          <div className="mb-6 flex items-center gap-3">
+            <label htmlFor="card-sponsor" className="font-mono text-[10px] tracking-wide2 text-pb-faint">SPONSOR</label>
+            <select
+              id="card-sponsor"
+              value={sponsorChoice === NO_SPONSOR || sponsorOptions.some(o => o.id === sponsorChoice) ? sponsorChoice : ''}
+              onChange={e => pickSponsor(e.target.value)}
+              className="bg-pb-surface border pb-hairline text-pb-text text-sm rounded px-3 py-1.5 focus:outline-none focus:border-pb-accent"
+            >
+              <option value="">Club's choice</option>
+              {sponsorOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              <option value={NO_SPONSOR}>No sponsor</option>
+            </select>
+          </div>
+        )}
+
+        <div ref={fitRef} className="w-full mx-auto" style={{ maxWidth: CARD_W * 1.12, height: CARD_H * scale }}>
+          <div style={{ width: CARD_W, height: CARD_H, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+            <FlipCard
+              width={CARD_W} height={CARD_H} flipped={flipped} onFlip={() => setFlipped(f => !f)}
+              label={flipped ? 'Showing stats. Turn the card back over' : 'Showing the card. Turn it over for stats'}
+              front={front} back={back}
             />
           </div>
         </div>
 
-        <div className="mt-6 flex gap-3 items-center">
-          <button
-            onClick={handleShare}
-            className="px-5 py-2.5 rounded font-mono text-[11px] tracking-wide2 font-semibold transition text-pb-bg"
-            style={{ background: 'var(--pb-accent)' }}
-          >
-            {copied ? 'COPIED!' : (typeof navigator !== 'undefined' && navigator.share ? 'SHARE' : 'COPY LINK')}
+        <div className="mt-6 flex flex-wrap gap-3 items-center justify-center">
+          <button onClick={() => setFlipped(f => !f)} className={`${btn} border pb-hairline text-pb-text`}>
+            {flipped ? 'SHOW CARD' : 'SHOW STATS'}
           </button>
-          <p className="font-mono text-[10px] text-pb-faintest">
-            Take a screenshot of the card above to save as an image
-          </p>
+          <button onClick={handleSave} disabled={saving} className={`${btn} text-pb-bg`} style={{ background: 'var(--pb-accent)', opacity: saving ? 0.6 : 1 }}>
+            {saving ? 'RENDERING…' : 'SAVE IMAGE'}
+          </button>
+          <button onClick={handleShare} className={`${btn} border pb-hairline text-pb-text`}>
+            {copied ? 'COPIED!' : (typeof navigator !== 'undefined' && navigator.share ? 'SHARE LINK' : 'COPY LINK')}
+          </button>
+        </div>
+        {saveErr && <p className="mt-3 text-center font-mono text-[10px] text-pb-red">{saveErr}</p>}
+        <p className="mt-3 text-center font-mono text-[10px] text-pb-faintest">Save image keeps whichever side is showing</p>
+
+        {/* The copy that gets rendered to an image: flat, unscaled and off screen, so it always matches the design size. */}
+        <div aria-hidden style={{ position: 'fixed', left: -10000, top: 0, pointerEvents: 'none' }}>
+          <div ref={exportRef} style={{ width: CARD_W, height: CARD_H }}>{flipped ? back : front}</div>
         </div>
       </main>
     </div>

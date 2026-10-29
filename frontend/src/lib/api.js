@@ -233,20 +233,29 @@ export const api = {
   getSocialScorecard: (matchId) => request(`/admin/social/scorecard/${matchId}`),
   socialMatchLookup: (q) => request(`/admin/social/match-lookup?q=${encodeURIComponent(q)}`),
   getSocialFixtures: (q) => request(`/admin/social/fixtures${q ? `?q=${encodeURIComponent(q)}` : ''}`),
-  getSocialResults: (q) => request(`/admin/social/results${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  getSocialResults: (q, { live = false } = {}) => {
+    const p = new URLSearchParams()
+    if (q) p.set('q', q)
+    if (live) p.set('live', 'true')
+    const qs = p.toString()
+    return request(`/admin/social/results${qs ? `?${qs}` : ''}`)
+  },
   getSocialPotm: (matchId) => request(`/admin/social/potm/${matchId}`),
-  getSocialTotw: (q, { dateFrom = '', dateTo = '', scope = 'all' } = {}) => {
+  getSocialTotw: (q, { dateFrom = '', dateTo = '', scope = 'all', basis = 'week' } = {}) => {
     const p = new URLSearchParams()
     if (q) p.set('q', q)
     if (dateFrom) p.set('date_from', dateFrom)
     if (dateTo) p.set('date_to', dateTo)
     if (scope && scope !== 'all') p.set('scope', scope)
+    if (basis === 'round') p.set('mode', 'round')
     const qs = p.toString()
     return request(`/admin/social/totw${qs ? `?${qs}` : ''}`)
   },
   // Which of these players have no earlier game on the club's record (debuts).
   // `before` is the match day as an ISO date; absent means today.
   getSocialDebuts: (ids, before) => request(`/admin/social/debuts?player_ids=${encodeURIComponent((ids || []).join(','))}${before ? `&before=${encodeURIComponent(String(before).slice(0, 10))}` : ''}`),
+  // Upcoming club milestones for a lineup's players (a badge per player, up to three on the strip), with a freshness verdict.
+  getSocialMilestoneWatch: (ids, on) => request(`/admin/social/milestone-watch?player_ids=${encodeURIComponent((ids || []).join(','))}${on ? `&on=${encodeURIComponent(String(on).slice(0, 10))}` : ''}`),
 
   // BetterSocials — media library. `kind` is undefined for the ordinary Photos
   // pool, or 'background' for the small reusable post-background library —
@@ -1939,6 +1948,20 @@ export const api = {
       })
   },
   adminDeletePlayerHeroPhoto: (playerId) => request(`/club-admin/players/${playerId}/hero-photo`, { method: 'DELETE' }),
+  // The action shot (migration 375), a third photograph beside the headshot and the hero photo.
+  adminUploadPlayerActionPhoto: (playerId, file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/club-admin/players/${playerId}/action-photo`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  adminDeletePlayerActionPhoto: (playerId) => request(`/club-admin/players/${playerId}/action-photo`, { method: 'DELETE' }),
   adminListPartnershipRecords: () => request('/club-admin/partnership-records'),
   adminCreatePartnershipRecord: (data) =>
     request('/club-admin/partnership-records', { method: 'POST', body: JSON.stringify(data) }),
@@ -2002,8 +2025,6 @@ export const api = {
     request('/club-admin/hard-refresh', { method: 'POST' }),
   adminBackfillAggregates: () =>
     request('/club-admin/backfill-aggregates', { method: 'POST' }),
-  adminCleanupOppositionStats: () =>
-    request('/club-admin/cleanup-opposition-stats', { method: 'POST' }),
   adminListSyncRuns: (limit = 30) =>
     request(`/club-admin/sync-runs?limit=${limit}`),
   adminGetSyncRun: (runId) => request(`/club-admin/sync-runs/${runId}`),
@@ -2111,6 +2132,10 @@ export const api = {
     request('/club-admin/manual-entries/games/check', { method: 'POST', body: JSON.stringify(data) }),
   adminPatchManualGame: (id, data) =>
     request(`/club-admin/manual-entries/games/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // The match's own fields only (date, teams, result, winner, grade, Final, Grand Final), never its scorecard.
+  // Only a field that is sent changes; a field left out is left alone.
+  adminPatchManualGameDetails: (id, data) =>
+    request(`/club-admin/manual-entries/games/${id}/details`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminDeleteManualGame: (id) =>
     request(`/club-admin/manual-entries/games/${id}`, { method: 'DELETE' }),
 
@@ -3055,6 +3080,10 @@ export const api = {
   adminGetPostDefaults: () => request('/club-admin/sponsors/post-defaults'),
   adminPutPostDefaults: (data) =>
     request('/club-admin/sponsors/post-defaults', { method: 'PUT', body: JSON.stringify(data) }),
+  // The sponsor picked for the player share card and for the Player Cards.
+  adminGetCardSponsors: () => request('/club-admin/sponsors/card-sponsors'),
+  adminPutCardSponsors: (data) =>
+    request('/club-admin/sponsors/card-sponsors', { method: 'PUT', body: JSON.stringify(data) }),
   adminPostSponsorDefault: ({ team, grade } = {}) => {
     const params = new URLSearchParams()
     if (team) params.set('team', team)
@@ -3225,6 +3254,14 @@ export const api = {
   // Premiership squads and office-bearer boards, both read out of the
   // honours a club has already recorded against its players.
   getPremierships: (orgId) => request(`/honours/${orgId}/premierships`),
+  // The clubs that recorded a premiership off this scorecard (the scorecard banner).
+  getGamePremierships: (gameId) => request(`/honours/games/${gameId}/premierships`),
+  // What the automatic premierships would write for the signed-in club, and writing them.
+  // Mark Player of the Match / 12th Man / 13th Man on a premiership card, add or remove a player.
+  editPremiershipSquad: (orgId, body) =>
+    request(`/honours/${orgId}/premierships/squad`, { method: 'POST', body: JSON.stringify(body) }),
+  previewAutoPremierships: (orgId) => request(`/honours/${orgId}/premierships/auto`),
+  applyAutoPremierships: (orgId) => request(`/honours/${orgId}/premierships/auto`, { method: 'POST' }),
   getOfficeBearers: (orgId) => request(`/honours/${orgId}/office-bearers`),
   getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender, categories, formats, competitions } = {}) => {
     const params = new URLSearchParams()
@@ -3397,6 +3434,36 @@ export const api = {
   bsDeleteAvailabilityPeriod: (id) =>
     request(`/availability/periods/${id}`, { method: 'DELETE' }),
 
+  // ─── Player Dashboard (BetterStats): the page's switches, behind MANAGE_SETTINGS ───
+  getPlayerDashboardSettings: () => request('/player-dashboard/settings'),
+  setPlayerDashboardSettings: (data) =>
+    request('/player-dashboard/settings', { method: 'POST', body: JSON.stringify(data) }),
+  regeneratePlayerDashboardLink: () => request('/player-dashboard/regenerate', { method: 'POST' }),
+
+  // ─── Player Cards (BetterStats): the club's settings, behind MANAGE_SETTINGS ───
+  getPlayerCardSettings: () => request('/player-cards/settings'),
+  updatePlayerCardSettings: (data) =>
+    request('/player-cards/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  setPlayerCardHidden: (playerId, hidden) =>
+    request(`/player-cards/players/${playerId}/hidden`, { method: 'POST', body: JSON.stringify({ hidden }) }),
+  refreshPlayerCardSpecials: () => request('/player-cards/refresh-specials', { method: 'POST' }),
+  createPlayerCardGift: (data) => request('/player-cards/gifts', { method: 'POST', body: JSON.stringify(data) }),
+  addPlayerCardEvent: (data) => request('/player-cards/events', { method: 'POST', body: JSON.stringify(data) }),
+  deletePlayerCardEvent: (id) => request(`/player-cards/events/${id}`, { method: 'DELETE' }),
+  savePlayerCardDesign: (target, data) =>
+    request(`/player-cards/designs/${encodeURIComponent(target)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  uploadPlayerCardDesignImage: (target, kind, file) => uploadFile(`/player-cards/designs/${encodeURIComponent(target)}/${kind}`, file),
+  removePlayerCardDesignImage: (target, kind) =>
+    request(`/player-cards/designs/${encodeURIComponent(target)}/${kind}`, { method: 'DELETE' }),
+  resetPlayerCardDesign: (target) => request(`/player-cards/designs/${encodeURIComponent(target)}`, { method: 'DELETE' }),
+  trimPlayerCardGifts: (apply) => request('/player-cards/trim-gifts', { method: 'POST', body: JSON.stringify({ apply: !!apply }) }),
+  getPlayerCardOverview: () => request('/player-cards/overview'),
+  getPlayerCardActivity: () => request('/player-cards/activity'),
+  getPlayerCardWanted: () => request('/player-cards/wanted'),
+  getPlayerCardCatalogue: (params = {}) => request(`/player-cards/catalogue?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()}`),
+  getPlayerCardPlayer: (id) => request(`/player-cards/players/${id}`),
+  getPlayerCardSwaps: (params = {}) => request(`/player-cards/swaps?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()}`),
+
   // ─── BetterSelect: self-service availability link (admin) ───
   bsGetSelfService: () => request('/availability/self-service'),
   bsSetSelfService: (data) =>
@@ -3455,6 +3522,41 @@ export const api = {
   availPublicDetails: (token) => request(`/public/availability/${token}/me/details`),
   availPublicUpdateDetails: (token, data) =>
     request(`/public/availability/${token}/me/details`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // Player Cards on the player's own page: the collection and the packs ready, opening one, opening all.
+  availPublicCards: (token) => request(`/public/availability/${token}/me/cards`),
+  availPublicOpenCard: (token, packId) =>
+    request(`/public/availability/${token}/me/cards/packs/${packId}/open`, { method: 'POST' }),
+  availPublicOpenAllCards: (token) =>
+    request(`/public/availability/${token}/me/cards/open-all`, { method: 'POST' }),
+  // Swapping doubles with another player: the board, one player's doubles, asking, and answering.
+  availPublicSwaps: (token, { history = false } = {}) => request(`/public/availability/${token}/me/cards/swaps${history ? '?history=true' : ''}`),
+  availPublicSwapPlayer: (token, playerId) => request(`/public/availability/${token}/me/cards/swaps/players/${playerId}`),
+  availPublicSets: (token) => request(`/public/availability/${token}/me/cards/sets`),
+  // Named CardSet, not availPublicSet: that name is the availability answer write above, and a second key of the same name silently replaces it.
+  availPublicCardSet: (token, key) => request(`/public/availability/${token}/me/cards/sets/${encodeURIComponent(key)}`),
+  availPublicShowcase: (token) => request(`/public/availability/${token}/me/cards/showcase`),
+  availPublicPutShowcase: (token, keys) => request(`/public/availability/${token}/me/cards/showcase`, { method: 'PUT', body: JSON.stringify({ keys }) }),
+  availPublicBoard: (token) => request(`/public/availability/${token}/me/cards/board`),
+  availPublicFeed: (token) => request(`/public/availability/${token}/me/cards/feed`),
+  availPublicWants: (token) => request(`/public/availability/${token}/me/cards/wants`),
+  availPublicAddWant: (token, key) => request(`/public/availability/${token}/me/cards/wants`, { method: 'POST', body: JSON.stringify({ key }) }),
+  availPublicRemoveWant: (token, key) => request(`/public/availability/${token}/me/cards/wants?key=${encodeURIComponent(key)}`, { method: 'DELETE' }),
+  availPublicSpares: (token) => request(`/public/availability/${token}/me/cards/spares`),
+  availPublicSetSpareOpen: (token, key, open) => request(`/public/availability/${token}/me/cards/spares/open`, { method: 'POST', body: JSON.stringify({ key, open }) }),
+  availPublicCard: (token, key) => request(`/public/availability/${token}/me/cards/card?key=${encodeURIComponent(key)}`),
+  availPublicCardPrefs: (token) => request(`/public/availability/${token}/me/cards/prefs`),
+  availPublicSaveCardPrefs: (token, data) => request(`/public/availability/${token}/me/cards/prefs`, { method: 'PUT', body: JSON.stringify(data) }),
+  availPublicCounterSwap: (token, id, data) => request(`/public/availability/${token}/me/cards/swaps/${id}/counter`, { method: 'POST', body: JSON.stringify(data) }),
+  availPublicCatalogue: (token, params) =>
+    request(`/public/availability/${token}/me/cards/catalogue?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null)).toString()}`),
+  availPublicCatalogueHolders: (token, key) =>
+    request(`/public/availability/${token}/me/cards/catalogue/holders?key=${encodeURIComponent(key)}`),
+  availPublicSwapFind: (token, q) =>
+    request(`/public/availability/${token}/me/cards/swaps/find?q=${encodeURIComponent(q)}`),
+  availPublicAskSwap: (token, data) =>
+    request(`/public/availability/${token}/me/cards/swaps`, { method: 'POST', body: JSON.stringify(data) }),
+  availPublicAnswerSwap: (token, id, action) =>
+    request(`/public/availability/${token}/me/cards/swaps/${id}/${action}`, { method: 'POST' }),
 
   // ─── Public: net check-in (no admin auth; player cookie) ───
   // Reached by scanning the QR code on the fence or tapping the NFC tag —
@@ -3482,7 +3584,7 @@ export const api = {
     request(`/votes/medals/${medalId}${confirm ? '?confirm=true' : ''}`, { method: 'DELETE' }),
   votesRegenerateLink: (medalId) =>
     request(`/votes/medals/${medalId}/regenerate`, { method: 'POST' }),
-  votesCounterOptions: () => request('/votes/counter-options'),
+  votesVoterOptions: () => request('/votes/voter-options'),
   votesGetWeighting: (medalId) => request(`/votes/medals/${medalId}/weighting`),
   votesGetSettings: (medalId) => request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`),
   votesSetSettings: (data, medalId) =>
@@ -3563,6 +3665,9 @@ export const api = {
   fanSaveSquad: (token, data) => request(`/public/fantasy/${token}/squad`, { method: 'POST', body: JSON.stringify(data) }),
   fanTransfer: (token, out_player_id, in_player_id) =>
     request(`/public/fantasy/${token}/transfer`, { method: 'POST', body: JSON.stringify({ out_player_id, in_player_id }) }),
+  // Several swaps at once; the server checks the budget over the whole set.
+  fanTransfers: (token, swaps) =>
+    request(`/public/fantasy/${token}/transfers`, { method: 'POST', body: JSON.stringify({ swaps }) }),
   fanCancelQueuedTransfer: (token, id) =>
     request(`/public/fantasy/${token}/transfer/queued/${id}`, { method: 'DELETE' }),
   fanSetCaptain: (token, captain_player_id, vice_player_id) =>
@@ -3570,7 +3675,11 @@ export const api = {
   fanChip: (token, chip) => request(`/public/fantasy/${token}/chip`, { method: 'POST', body: JSON.stringify({ chip }) }),
   fanCancelChip: (token, chip) => request(`/public/fantasy/${token}/chip/cancel`, { method: 'POST', body: JSON.stringify({ chip }) }),
   fanLadder: (token) => request(`/public/fantasy/${token}/ladder`),
+  fanRoundWinners: (token) => request(`/public/fantasy/${token}/round-winners`),
+  fanRoundInsights: (token, n) => request(`/public/fantasy/${token}/round-insights${n != null ? `?round=${n}` : ''}`),
+  fanRoundRanking: (token, n) => request(`/public/fantasy/${token}/round-ranking/${n}`),
   fanTeam: (token, squadId) => request(`/public/fantasy/${token}/team/${squadId}`),
+  fanTeams: (token) => request(`/public/fantasy/${token}/teams`),
   fanLeagues: (token) => request(`/public/fantasy/${token}/leagues`),
   fanLeague: (token, leagueId) => request(`/public/fantasy/${token}/leagues/${leagueId}`),
   fanLeaveLeague: (token, leagueId) => request(`/public/fantasy/${token}/leagues/${leagueId}/leave`, { method: 'POST' }),
@@ -3618,6 +3727,19 @@ export const api = {
   bsLockSelection: (fixtureId) => request(`/selection/${fixtureId}/lock`, { method: 'POST' }),
   bsUnlockSelection: (fixtureId) => request(`/selection/${fixtureId}/unlock`, { method: 'POST' }),
   bsSelectionHistory: (fixtureId) => request(`/selection/${fixtureId}/history`),
+  // Past Lineups: one team's saved XIs going back in time. `team` is a key from
+  // bsPastLineupTeams; `fixtureId` means "the team this fixture belongs to".
+  bsPastLineupTeams: ({ hideJuniors = false } = {}) =>
+    request(`/selection/past-lineups/teams${hideJuniors ? '?hide_juniors=true' : ''}`),
+  bsPastLineups: ({ team, fixtureId, offset = 0, limit = 8, hideJuniors = false } = {}) => {
+    const q = new URLSearchParams()
+    if (team) q.set('team', team)
+    else if (fixtureId) q.set('fixture_id', fixtureId)
+    if (offset) q.set('offset', String(offset))
+    q.set('limit', String(limit))
+    if (hideJuniors) q.set('hide_juniors', 'true')
+    return request(`/selection/past-lineups?${q.toString()}`)
+  },
   // Audit History: the club-wide trail of changes to players.
   bsAuditEvents: (params = {}) => request(`/audit/events${auditQuery(params)}`),
   bsAuditFacets: () => request('/audit/facets'),
@@ -4095,6 +4217,7 @@ export const api = {
   fantasyPatchPool: (poolId, data) =>
     request(`/club-admin/fantasy/pool/${poolId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   fantasyListRounds: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/rounds`),
+  fantasyRoundWinners: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/round-winners`),
   fantasyPriceMovements: (seasonId) => request(`/club-admin/fantasy/season/${seasonId}/price-movements`),
   fantasySetRoundLock: (roundId, lock_at) =>
     request(`/club-admin/fantasy/rounds/${roundId}/lock`, { method: 'PATCH', body: JSON.stringify({ lock_at }) }),

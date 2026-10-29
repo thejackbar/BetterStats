@@ -29,10 +29,11 @@ export function useOpenSections() {
   return { isOpen, toggle, setAll }
 }
 
-export default function Group({ id, title, summary, tone, open, onToggle, hideTitle = false, children }) {
+// `wide` spans every column of the page's multi-column layout (the card book wants the whole width).
+export default function Group({ id, title, summary, tone, open, onToggle, hideTitle = false, wide = false, children }) {
   const panel = `group-${id}`
   return (
-    <section data-group={id} data-open={open ? 'yes' : 'no'} className="rounded-2xl border pb-hairline mb-3 min-w-0 break-inside-avoid">
+    <section data-group={id} data-open={open ? 'yes' : 'no'} className="rounded-2xl border pb-hairline mb-3 min-w-0 break-inside-avoid" style={wide ? { columnSpan: 'all' } : undefined}>
       <button type="button" onClick={() => onToggle(id)} aria-expanded={open} aria-controls={panel} data-group-toggle={id}
         className="w-full flex items-center gap-3 px-4 py-3 text-left">
         <span className="font-display font-bold text-[16px] shrink-0">{title}</span>

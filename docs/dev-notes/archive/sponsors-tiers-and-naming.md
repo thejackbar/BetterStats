@@ -40,3 +40,15 @@ Asked for by the club group: bigger, more prominent sponsor marks in BetterPosts
 ## Dashboard buttons on the filter row (v9.105.1)
 
 With the major sponsor slot in the header's right column, Sync and Leaderboard under it left the slot floating above the club name. When the slot (or the admin prompt) shows, `Dashboard.jsx` now passes `actions={null}` to `PageHeader` and renders the same buttons at the right of the Season filter row, so the slot's bottom edge matches the name block and the buttons match the filters. Without a slot nothing moves. Checked in `verify_sponsor_tiers_browser.mjs` by bounding boxes (28 checks), including 390px.
+
+## Sponsor on player cards (v9.131.2)
+
+A club can pick which sponsor sits on the public share card (`/players/:id/share`) and on the collectable Player Cards, and whoever shares a card can swap it for that share.
+
+- **Model.** Migration 367 (`services/card_sponsors_ddl.py`, lifespan mirror, football schema mirror): `organisations.card_sponsors` JSONB, `{share_card: id, player_cards: id}`, only what the club picked. NULL means no pick, and the card shows the top Major sponsor with a logo, as before, so no club changed on upgrade. It is a stored choice rather than a placement spot because a card shows exactly one sponsor.
+- **Valid picks** (`services/card_sponsors.py`): a sponsor of this club that has a logo. `clean` drops anything else, `view` reads a pick whose sponsor was deleted or lost its logo as not picked, so nothing goes stale.
+- **Routes.** `GET` and `PUT /club-admin/sponsors/card-sponsors`. PUT needs `MANAGE_SPONSORS`, reads `model_fields_set` (a surface not sent keeps its pick, null clears it) and answers 422 for a sponsor that is not this club's or has no logo. The GET is on the audit's open list, like the other sponsor reads, because the public `GET /clubs/{slug}/sponsors` now carries `card_sponsors` too.
+- **Which sponsor a card draws** (`cardSponsor(data, surface, choice)` in `PlayerTradingCard.jsx`): the choice made while sharing, else the club's pick for that surface, else the top Major with a logo. `''` follows the club, `NO_SPONSOR` ('none') draws none; an id that is not in the list falls back to the club's pick.
+- **Share page.** A Sponsor menu above the card (only when the club has a sponsor with a logo). The choice is the `?sponsor=` query parameter, so Share link and Copy link carry it.
+- **Player Cards share sheet.** The same menu, local to the sheet. It clears a GIF made before the change, and the copied card page link carries the choice.
+- **Verified.** `verify_card_sponsors.py` (real Postgres, shipped route bodies and the public endpoint, 28 checks; control on the previous commit fails the 5 that need the feature) and `verify_card_sponsors_browser.mjs` (production build, API stubbed, 29 checks, including the exact PUT bodies and 390px; control build fails the panel and picker checks). `verify_sponsor_tiers.py`, `verify_post_sponsors.py`, `audit_route_access.py`, `verify_sponsor_tiers_browser.mjs`, `verify_player_share_card_browser.mjs` (its season picker locator now skips the sponsor menu) and the four Player Cards browser suites still pass.

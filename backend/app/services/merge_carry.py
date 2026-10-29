@@ -40,6 +40,8 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
      ("manual_game_id", "innings_number")),
     ("manual_bowling_spells", "player_id", "int", None),
     ("manual_fielding_stats", "player_id", "int", ("manual_game_id",)),
+    # Captain and wicket keeper of a hand-entered game (migration 377): a record of what the player DID.
+    ("manual_game_roles", "player_id", "int", ("manual_game_id",)),
     ("manual_bowler_wickets", "bowler_id", "int", None),
     ("manual_bowler_wickets", "fielder_id", "int", None),
     ("manual_fall_of_wickets", "player_id", "int", None),
@@ -96,11 +98,40 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
     ("fantasy_waiver_claims", "drop_player_id", "uuid", None),
     ("fantasy_queued_transfers", "out_player_id", "uuid", None),
     ("fantasy_queued_transfers", "in_player_id", "uuid", None),
+    # Player Cards (migration 363). A collection is what a person has opened over
+    # months and cannot be re-earned, so it moves with them. The owner column moves
+    # the cards a player holds, the subject columns re-point a card at the keeper
+    # when the removed record was the person on it. Nothing here can clash on a
+    # unique key: a special card has one subject, a gift is keyed to it, and a
+    # pack's (source, ref_key) is dropped from the removed side when the keeper
+    # already earned the same one (the same person, the same week).
+    ("player_card_packs", "player_id", "uuid", ("source", "ref_key")),
+    ("player_card_copies", "owner_player_id", "uuid", None),
+    ("player_card_copies", "subject_player_id", "uuid", None),
+    ("player_special_cards", "player_id", "uuid", None),
+    ("player_card_hidden", "player_id", "uuid", ("organisation_id",)),
+    # Swap requests (migration 364): the two people and the two cards' subjects.
+    ("player_card_swaps", "from_player_id", "uuid", None),
+    ("player_card_swaps", "to_player_id", "uuid", None),
+    ("player_card_swaps", "give_subject_player_id", "uuid", None),
+    ("player_card_swaps", "want_subject_player_id", "uuid", None),
+    # The cards on each side of a swap (migration 366): the subject of each card.
+    ("player_card_swap_items", "subject_player_id", "uuid", None),
+    # The wish list, the cards a player is open to swapping, their alert settings and the alert log (migration 368).
+    ("player_card_wants", "player_id", "uuid", ("subject_player_id", "special_id")),
+    ("player_card_wants", "subject_player_id", "uuid", ("player_id", "special_id")),
+    ("player_card_open_offers", "player_id", "uuid", ("subject_player_id", "special_id")),
+    ("player_card_open_offers", "subject_player_id", "uuid", ("player_id", "special_id")),
+    ("player_card_prefs", "player_id", "uuid", ("organisation_id",)),
+    ("player_card_alerts", "player_id", "uuid", None),
+    # The showcase: the player who pinned and the subject of each pinned card (migration 369).
+    ("player_card_showcase", "player_id", "uuid", ("subject_player_id", "special_id")),
+    ("player_card_showcase", "subject_player_id", "uuid", ("player_id", "special_id")),
 )
 
 # Tables whose primary key is not an `id` column: the column that identifies one
 # row among this player's own (the other half of the key is the player).
-_ROW_KEY = {"fixture_lineups": "fixture_id", "team_members": "team_id"}
+_ROW_KEY = {"fixture_lineups": "fixture_id", "team_members": "team_id", "player_card_prefs": "player_id"}
 
 # A row somebody decided something about (a membership with payments and a role,
 # a contact who unsubscribed, a CRM link) is never deleted to settle a clash
@@ -137,6 +168,9 @@ _OWN_CLUB_TABLES = {
     "player_name_aliases", "comms_contacts", "crm_people", "fee_members",
     "fantasy_pool_players", "fantasy_drafts", "fantasy_waiver_claims",
     "fine_entries", "fine_payments",
+    "player_card_packs", "player_card_copies", "player_special_cards", "player_card_hidden",
+    "player_card_swaps", "player_card_swap_items",
+    "player_card_wants", "player_card_open_offers", "player_card_prefs", "player_card_alerts", "player_card_showcase",
 }
 
 _CAST = {"int": "int[]", "uuid": "uuid[]"}

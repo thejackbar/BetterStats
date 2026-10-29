@@ -179,6 +179,16 @@
 .pb-scroll::-webkit-scrollbar              { width: 8px; height: 8px; }
 .pb-scroll::-webkit-scrollbar-thumb        { background: var(--pb-hairline2); border-radius: 8px; }
 .pb-scroll::-webkit-scrollbar-track        { background: transparent; }
+/* A sideways scrollbar big enough to grab with a finger. Styling the webkit bar
+   also keeps it showing on iPad and Mac, where the default one hides until you
+   scroll. Do not add scrollbar-width or scrollbar-color here: current Chrome then
+   ignores these rules. */
+.pb-hscroll::-webkit-scrollbar              { width: 8px; height: 16px; }
+.pb-hscroll::-webkit-scrollbar-thumb        { background: var(--pb-hairline2); border-radius: 8px; border: 3px solid transparent; background-clip: content-box; min-width: 48px; }
+.pb-hscroll::-webkit-scrollbar-track        { background: var(--pb-surface2); border-radius: 8px; }
+@supports not selector(::-webkit-scrollbar) {
+  .pb-hscroll { scrollbar-width: auto; scrollbar-color: var(--pb-hairline2) var(--pb-surface2); }
+}
 .pb-no-scrollbar                           { scrollbar-width: none; -ms-overflow-style: none; }
 .pb-no-scrollbar::-webkit-scrollbar       { display: none; }
 

@@ -939,7 +939,7 @@ async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
         "dashboard_modules": player_dashboard.catalogue_for(club),
         "token": club.availability_link_token,
         # The link is a frontend route; the admin UI prefixes its own origin.
-        "path": f"/avail/{club.availability_link_token}" if club.availability_link_token else None,
+        "path": f"/playerdash/{club.availability_link_token}" if club.availability_link_token else None,
         "phone_coverage": {"with_phone": with_phone, "total": len(players)},
     }
 

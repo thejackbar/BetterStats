@@ -53,8 +53,9 @@ from app.routers.availability import (
     phone_last4,
     upcoming_fixtures_by_date,
 )
-from app.services import fines as fines_svc, player_dashboard, rate_limit, section_names, selection_rules as rules_svc, squad_sides
+from app.services import fines as fines_svc, player_cards as cards_svc, player_dashboard, rate_limit, section_names, selection_rules as rules_svc, squad_sides
 from app.services import votes as vote_svc
+from app.services.fonts import public_font_fields
 from app.services.grade_labels import categories_for_name, org_grade_category_sets
 from app.services.squad_next_game import fixtures_for_player
 from app.services.session_safety import rollback_keeping
@@ -140,12 +141,23 @@ def _read_session(request: Request, club_id) -> Optional[uuid.UUID]:
         return None
 
 
-async def _club_for_token(db: AsyncSession, token: str) -> Organisation:
+async def _club_for_token(db: AsyncSession, token: str, need_select: bool = True, need_dashboard: bool = False) -> Organisation:
     """Resolve the club behind a self-service token, or 404.
 
-    404 (not 403) for every "this link isn't usable" case — unknown token,
-    disabled, or the club no longer entitled to BetterSelect — so a leaked or
-    rotated link reveals nothing about why it stopped working.
+    404 (not 403) for every "this link isn't usable" case: unknown token, switched
+    off, or the club no longer entitled to BetterSelect. A leaked or rotated link
+    reveals nothing about why it stopped working.
+
+    The link has two sides with a switch each (`services/player_dashboard`): the
+    availability side (answers, votes, the BetterSelect sections), switched in
+    BetterSelect, and the dashboard side (Player Cards, season, fantasy, fees),
+    switched in BetterStats. The link opens when either is on, and what a route may
+    serve follows its own side:
+
+    * `need_select` (the default): the availability side must be on. Every availability
+      and vote write is this.
+    * `need_dashboard`: the dashboard side must be on (Player Cards).
+    * neither: the player's own page, which then draws only the sides that are on.
     """
     if not token:
         raise HTTPException(status_code=404, detail="Unknown link")
@@ -153,10 +165,12 @@ async def _club_for_token(db: AsyncSession, token: str) -> Organisation:
         select(Organisation).where(Organisation.availability_link_token == token)
     )
     club = res.scalar_one_or_none()
+    if club is None:
+        raise HTTPException(status_code=404, detail="This availability link isn't active")
     if (
-        club is None
-        or not club.availability_self_service_enabled
-        or not org_has_module(club, MODULE_SELECT)
+        not player_dashboard.link_live(club)
+        or (need_select and not player_dashboard.availability_live(club))
+        or (need_dashboard and not player_dashboard.dashboard_live(club))
     ):
         raise HTTPException(status_code=404, detail="This availability link isn't active")
     return club
@@ -164,6 +178,9 @@ async def _club_for_token(db: AsyncSession, token: str) -> Organisation:
 
 def _club_branding(club: Organisation) -> dict:
     return {
+        # The club's chosen fonts (and the address of an uploaded one), so the player's cards can be
+        # drawn in the club's own typeface, as its share card is.
+        **public_font_fields(club),
         "name": club.name,
         "short_name": club.short_name,
         "slug": club.slug,
@@ -200,11 +217,12 @@ def _player_card(player: Player) -> dict:
 async def get_landing(token: str, db: AsyncSession = Depends(get_db)):
     """Club branding + the active-player name list (id + display name only) for
     the type-to-search step. 404 if the link is disabled / unknown."""
-    club = await _club_for_token(db, token)
+    club = await _club_for_token(db, token, need_select=False)
     players = await active_self_service_players(db, club)
     return {
         "club": _club_branding(club),
         "require_pin": bool(club.availability_require_pin),
+        "has_availability": player_dashboard.availability_live(club),
         "allow_maybe": allow_maybe(club),
         "week_names": rules_svc.club_config(club)["week_names"],
         "players": [
@@ -218,7 +236,7 @@ async def get_landing(token: str, db: AsyncSession = Depends(get_db)):
 async def verify(token: str, body: VerifyBody, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     """Prove identity with the last 4 digits of the player's mobile, then issue
     the session cookie. Rate-limited per IP + locked out after repeated misses."""
-    club = await _club_for_token(db, token)
+    club = await _club_for_token(db, token, need_select=False)
     ip = _client_ip(request)
     rate_limit.enforce(
         f"avail-verify-ip:{token}:{ip}", VERIFY_IP_LIMIT, VERIFY_IP_WINDOW,
@@ -350,8 +368,15 @@ async def _fixtures_for_player(db: AsyncSession, club: Organisation, squads: lis
 async def get_me(token: str, request: Request, tz: Optional[str] = None, db: AsyncSession = Depends(get_db)):
     """This verified player's upcoming fixtures (grouped by date) + their current
     answers. Date-keyed: one answer covers every fixture that day."""
-    club = await _club_for_token(db, token)
+    club = await _club_for_token(db, token, need_select=False)
     player = await _player_for_session(db, request, club)
+    if not player_dashboard.availability_live(club):
+        # No BetterSelect or its link is off, so no fixtures to answer: the page leaves the Availability section out.
+        return {
+            "club": _club_branding(club), "player": _player_card(player), "allow_maybe": False,
+            "week_names": [], "dates": [], "availability": {}, "has_squad": False, "squads": [],
+            "has_availability": False,
+        }
     # A club may not want players to know their squad: with the switch off the
     # squads are never read, so nothing about them can reach the page.
     squads = await _player_squads(db, club, player) if club.availability_show_squad else []
@@ -381,6 +406,7 @@ async def get_me(token: str, request: Request, tz: Optional[str] = None, db: Asy
         "has_squad": bool(squads),
         # Their squads by name, only where the club lets players see them.
         "squads": await _squad_names(db, club, player) if club.availability_show_squad else [],
+        "has_availability": True,
     }
 
 
@@ -466,8 +492,8 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
         overrides = await vote_svc.overrides_by_fixture(db, medal.id, [f.id for f in todo])
 
         own = await pv.own_local_fixture_ids(db, player, todo)
-        # The person a captain nominated to count a team's votes is not in its side.
-        own |= await vote_svc.counter_fixture_ids(db, cfg, player.id, todo)
+        # A person chosen to vote for a team is not necessarily in its side.
+        own |= await vote_svc.chosen_fixture_ids(db, cfg, player.id, todo)
 
         for f in todo:
             ov = overrides.get(str(f.id))
@@ -620,7 +646,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
     A side shows only once it is LOCKED (confirmed). A draft or an unlocked side
     can still change, and telling a player they are in before the selector has
     finished is worse than telling them nothing."""
-    club = await _club_for_token(db, token)
+    club = await _club_for_token(db, token, need_select=False)
     player = await _player_for_session(db, request, club)
     now = local_now(tz)
     today = now.date() if now else date.today()
@@ -639,9 +665,18 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
 
     # The newer modules fail on their own: one that cannot be built is dropped
     # from this response and the rest of the page still loads.
-    season = fees = fines = fantasy = None
+    season = fees = fines = fantasy = cards = None
     votes: list[dict] = []
     votes_cast: list[dict] = []
+    if "cards" in modules:
+        try:
+            cards = await cards_svc.dashboard_summary(db, club, player)
+            await db.commit()
+        except Exception:
+            logger.exception("player page: cards failed for %s", player.id)
+            await rollback_keeping(db, club, player)
+        if cards is None:
+            modules = [m for m in modules if m != "cards"]
     if "votes" in modules:
         try:
             votes, votes_cast = await _votes_for_player(db, club, player)
@@ -706,6 +741,8 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         "fantasy": fantasy,
         "votes": votes,
         "votes_cast": votes_cast,
+        "cards": cards,
+        "has_availability": player_dashboard.availability_live(club),
     }
 
 
@@ -715,7 +752,7 @@ async def get_my_ranks(token: str, request: Request, db: AsyncSession = Depends(
     Read on its own when the Stats section opens, because it reads the club's
     leaderboards, which the rest of the page does not. 404 unless the club has the
     season module on. A failure answers with no ranks and the section still draws."""
-    club = await _club_for_token(db, token)
+    club = await _club_for_token(db, token, need_select=False)
     player = await _player_for_session(db, request, club)
     if "season" not in player_dashboard.served_modules(club):
         raise HTTPException(status_code=404, detail="Not available")
@@ -734,7 +771,7 @@ async def get_my_ladder(token: str, request: Request, db: AsyncSession = Depends
     (the ladder module calls it when it opens) because it asks Cricket Australia,
     which the rest of the page does not. 404 unless the club has the module on
     and Show squad on, since the ladder names the player's squad."""
-    club = await _club_for_token(db, token)
+    club = await _club_for_token(db, token, need_select=False)
     player = await _player_for_session(db, request, club)
     if "ladder" not in player_dashboard.served_modules(club):
         raise HTTPException(status_code=404, detail="Not available")
@@ -950,7 +987,7 @@ def _same_contact(a: Optional[str], b: Optional[str], digits: bool) -> bool:
 async def get_my_details(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     """The verified player's own contact details, for the Update details form. Their
     own record only. Refused with the PIN off, like fees."""
-    club = await _club_for_token(db, token)
+    club = await _club_for_token(db, token, need_select=False)
     player = await _player_for_session(db, request, club)
     if not club.availability_require_pin:
         raise HTTPException(status_code=403, detail=DETAILS_NEED_PIN)
@@ -959,7 +996,7 @@ async def get_my_details(token: str, request: Request, db: AsyncSession = Depend
 
 @router.patch("/{token}/me/details")
 async def update_my_details(token: str, body: DetailsBody, request: Request, db: AsyncSession = Depends(get_db)):
-    club = await _club_for_token(db, token)
+    club = await _club_for_token(db, token, need_select=False)
     player = await _player_for_session(db, request, club)
     if not club.availability_require_pin:
         raise HTTPException(status_code=403, detail=DETAILS_NEED_PIN)
