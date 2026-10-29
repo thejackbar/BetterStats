@@ -1328,3 +1328,12 @@ Proof. `verify_manual_game_roles.py` (49 checks, real Postgres, shipped route bo
 
 
 Follow-up (apply_game_roles, same day): the first Shoalwater dry run left 332 names unplaced, mostly one first name written two ways: the converter says "Staines, Ken", the roster has "Staines, Kenneth" (also Mick/Michael, Andy/Andrew, Rod/Rodney, Steve/Steven, Griffen/Griff, Dayman/Daymon, "Julian Andrew"/"Julian"). The script matched exact spellings only. `_resolve` now falls back, on that match's card only, to the same surname with a first name that agrees (`_first_names_agree`: equal, a prefix of at least three letters, a `NICKNAMES` entry, or the same initial within 0.8 similarity; the first given name only), taken only when exactly one person on the card fits. Every pairing is tallied and printed in the plan ("first names matched on a variant spelling"). Two who fit stay on the set-by-hand list. `verify_manual_game_roles.py` is 57 (control on the previous script fails the 5 new checks).
+
+
+## v9.135.2: Merge Duplicates cards count the scorebook
+
+- Report (Payneham, Neil): the pair "Zia, MYB" / "Zia, M" showed 0 seasons, 0 runs, 0 wickets and 0 innings on both cards, and he asked whether the zeros mattered. MYB Zia's profile holds 20 matches over 2019/20 and 2020/21. He also reported "Error: Player not found" opening M Zia's profile (see the data check below).
+- Cause: `admin._enrich_player` counted `player_season_stats` rows and synced `batting_innings` only. A scorebook-only player (CricketStatz import, typed cards) has neither, so every such player read 0. Not a rule about the merge; the zeros carried no meaning.
+- Fix: `services/merge_figures.py` reads the effective views for the whole candidate list in four queries and the card shows Seasons, Games, Runs, Wkts, Game Inn. and the span of years. Shared dicts are filled once per player.
+- Checks: `verify_merge_card_figures.py` 11 (control fails 8), `verify_merge_card_figures_browser.mjs` 14 at 1200px and 390px (control fails 10). Merge suites unchanged: same-day safeguard 11, hand-added 20, carry 31, pair script 16, profile carry 44, undo script 18. `verify_dangling_merge_redirect` fails one check on the previous commit as well; not caused by this change.
+- Not verified: the live cards on Payneham's list; query time on a club with thousands of candidate pairs (four grouped queries, bound array).
