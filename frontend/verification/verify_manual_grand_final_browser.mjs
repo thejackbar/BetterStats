@@ -46,6 +46,13 @@ const GAMES = {
     opposition: 'Snap', result: 'WIN', winning_team: 'Shoalwater Bay',
     is_final: false, is_grand_final: false, match_format: null, notes: null, batting_count: 1, is_photo_upload: true },
 }
+// Enough older matches to make the page long, so a click on the last row is far below the forms.
+for (let i = 1; i <= 26; i++) {
+  const id = `g-f${i}`
+  GAMES[id] = { id, season_id: SEASON.id, season_name: SEASON.name, grade_id: GRADE.id,
+    played_at: `1990-01-${String(i).padStart(2, '0')}`, opposition: `Filler ${i}`, result: 'WIN',
+    winning_team: 'Shoalwater Bay', is_final: false, is_grand_final: false, batting_count: 2, is_photo_upload: false }
+}
 const FULL = id => ({
   ...GAMES[id],
   batting_innings: [{ id: 1, player_id: 'p1', player_name: 'Alpha, Anne', innings_number: 1, runs: 12, fours: 1, sixes: 0 }],
@@ -143,6 +150,44 @@ const confirmModal = async page => {
   ck('every row has a Details button', (await page.locator('[data-testid=details-btn]').count()) === Object.keys(GAMES).length)
   ck('no page errors', errors.length === 0, errors.join(' | '))
   await page.screenshot({ path: `${SHOTS}/list.png`, fullPage: false })
+  await ctx.close()
+}
+
+// ── Edit and Details put their form in view at once, however far down the click was ──
+{
+  const where = (page, sel) => page.evaluate(s => {
+    const el = s === 'edit-heading'
+      ? [...document.querySelectorAll('h3')].find(e => /Edit manual game/.test(e.textContent))
+      : document.querySelector(s)
+    return el ? { top: Math.round(el.getBoundingClientRect().top), vh: window.innerHeight } : null
+  }, sel)
+  const { page, ctx, errors } = await open()
+  const last = () => page.locator('tr', { hasText: 'Filler 26' }).first()
+  await last().scrollIntoViewIfNeeded().catch(() => {})
+  const before = await page.evaluate(() => Math.round(document.querySelector('[data-testid=game-form-card]')?.getBoundingClientRect().top ?? 0))
+  ck('the form starts well above the viewport when the last row is in view', before < -300, `top ${before}`)
+
+  await last().getByRole('button', { name: 'Edit', exact: true }).click().catch(() => {})
+  await page.waitForTimeout(120)       // a smooth scroll over this distance is nowhere near done at 120 ms
+  const edit = await where(page, 'edit-heading')
+  ck('Edit puts the Edit manual game form at the top of the view at once, ready to change',
+     !!edit && edit.top >= 0 && edit.top < 200, JSON.stringify(edit))
+  const season = await page.locator('select').first().inputValue().catch(() => null)
+  ck('with the match loaded into it', season === SEASON.id, String(season))
+
+  // A second Edit from far down again, while the form is already showing.
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  await page.locator('tr', { hasText: 'Filler 25' }).first().getByRole('button', { name: 'Edit', exact: true }).click().catch(() => {})
+  await page.waitForTimeout(120)
+  const again = await where(page, 'edit-heading')
+  ck('and a second Edit from the bottom jumps again', !!again && again.top >= 0 && again.top < 200, JSON.stringify(again))
+
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  await page.locator('tr', { hasText: 'Filler 24' }).first().getByTestId('details-btn').click().catch(() => {})
+  await page.waitForTimeout(120)
+  const det = await where(page, '[data-testid=match-details]')
+  ck('Details from the bottom of the page is in view at once too', !!det && det.top >= 0 && det.top < 200, JSON.stringify(det))
+  ck('no page errors', errors.length === 0, errors.join(' | '))
   await ctx.close()
 }
 

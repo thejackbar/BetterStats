@@ -203,6 +203,7 @@ STATEMENTS: tuple[str, ...] = (
         JOIN games g ON g.id = ga.game_id
         JOIN grades gr ON gr.id = g.grade_id
         WHERE g.status IN ('ABANDONED', 'CANCELLED')
+          AND __OFF_g__
           AND NOT EXISTS (
               SELECT 1 FROM batting_innings bi
               WHERE bi.game_id = ga.game_id AND bi.player_id = ga.player_id
@@ -264,7 +265,7 @@ STATEMENTS: tuple[str, ...] = (
                     JOIN grades xgr ON xgr.id = xg.grade_id
                     JOIN seasons xs ON xs.id = xgr.season_id
                     WHERE xs.year = rs.year
-                      AND (x.has_row OR (COALESCE(xg.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+                      AND (x.has_row OR (NOT __OFF_xg__
                                           AND xg.ca_called_off IS NOT TRUE))
                     GROUP BY x.game_id
                ) z) AS held_games
@@ -276,7 +277,7 @@ STATEMENTS: tuple[str, ...] = (
             WHERE ga.player_id = pss.player_id
               AND (ga.is_reserve IS TRUE OR g.ca_called_off IS TRUE)
               AND gr.season_id = pss.season_id
-              AND COALESCE(g.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+              AND NOT __OFF_g__
               AND NOT EXISTS (
                   SELECT 1 FROM batting_innings bi
                   WHERE bi.game_id = ga.game_id AND bi.player_id = ga.player_id
@@ -751,7 +752,7 @@ STATEMENTS: tuple[str, ...] = (
             UNION
             SELECT ag.game_id, ag.season_id, ag.grade_id, ag.organisation_id, ga.player_id
             FROM auth_games ag JOIN game_appearances ga ON ga.game_id = ag.game_id
-            WHERE COALESCE(ag.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+            WHERE NOT __OFF_ag__
               AND ag.ca_called_off IS NOT TRUE
               AND ga.is_reserve IS NOT TRUE
         ),
@@ -1011,6 +1012,18 @@ PER_INNINGS_ORIGINALS: tuple[str, ...] = tuple(
     _per_innings(*spec, filtered=False) for spec in _PER_INNINGS_SPECS)
 
 STATEMENTS = STATEMENTS + PER_INNINGS_VIEWS
+
+# "CA's status says this fixture did not happen", written once in services/game_status.py
+# (an ABANDONED game with play in it still counts) and dropped into the views here. Only the
+# live definitions carry these placeholders; DOWNGRADE keeps the older text on purpose.
+from app.services.game_status import abandoned_without_play_sql as _awp  # noqa: E402
+
+STATEMENTS = tuple(
+    st.replace("__OFF_g__", _awp("g.status", "g.id"))
+      .replace("__OFF_xg__", _awp("xg.status", "xg.id"))
+      .replace("__OFF_ag__", _awp("ag.status", "ag.game_id"))
+    for st in STATEMENTS
+)
 
 # NOTHING MARKS A SEASON ANY MORE. The earlier rule set
 # `seasons.stats_source = 'cricketstatz'` for every season holding an imported

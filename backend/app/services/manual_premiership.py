@@ -80,14 +80,16 @@ async def squad(db, manual_game_ids: list, org_id) -> dict[str, list[dict]]:
 
     Everyone the card records for the club: a batter (a "did not bat" row is a named player), a
     bowler or a fielder. The card holds the club's own players only, since the opposition are not
-    player rows. A hand-entered card has no captain marker. A player who asked to be removed
-    (``privacy_hidden_at``) is left off, as on a synced game.
+    player rows. A player who asked to be removed (``privacy_hidden_at``) is left off, as on a
+    synced game. The captain is the player ``manual_game_roles`` names, so the honour carries the
+    "Captain" detail the way a synced one does.
     """
     if not manual_game_ids:
         return {}
     ids = [uuid.UUID(str(g)) for g in manual_game_ids]
     rows = (await db.execute(text("""
-        SELECT c.game_id, c.player_id, COALESCE(p.display_name_override, p.name) AS name
+        SELECT c.game_id, c.player_id, COALESCE(p.display_name_override, p.name) AS name,
+               COALESCE(r.is_captain, FALSE) AS is_captain
         FROM (
             SELECT manual_game_id AS game_id, player_id FROM manual_batting_innings WHERE manual_game_id = ANY(:ids)
             UNION
@@ -96,11 +98,12 @@ async def squad(db, manual_game_ids: list, org_id) -> dict[str, list[dict]]:
             SELECT manual_game_id, player_id FROM manual_fielding_stats WHERE manual_game_id = ANY(:ids)
         ) c
         JOIN players p ON p.id = c.player_id
+        LEFT JOIN manual_game_roles r ON r.manual_game_id = c.game_id AND r.player_id = c.player_id
         WHERE p.organisation_id = CAST(:org AS UUID) AND p.privacy_hidden_at IS NULL
         ORDER BY name
     """), {"ids": ids, "org": str(org_id)})).mappings().all()
     out: dict[str, list[dict]] = {}
     for r in rows:
         out.setdefault(str(r["game_id"]), []).append(
-            {"player_id": str(r["player_id"]), "name": r["name"], "is_captain": False})
+            {"player_id": str(r["player_id"]), "name": r["name"], "is_captain": bool(r["is_captain"])})
     return out

@@ -47,6 +47,7 @@ BLOCKING_REFS: list[tuple[str, str, str]] = [
     ("manual batting", "manual_batting_innings", "player_id"),
     ("manual bowling", "manual_bowling_spells", "player_id"),
     ("manual fielding", "manual_fielding_stats", "player_id"),
+    ("manual game roles", "manual_game_roles", "player_id"),
     ("manual bowler wickets", "manual_bowler_wickets", "bowler_id"),
     ("manual fall of wickets", "manual_fall_of_wickets", "player_id"),
     ("manual partnerships", "manual_partnerships", "batter1_id"),

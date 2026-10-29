@@ -38,6 +38,7 @@ from app.services import junior_hiding
 from app.services import merge_carry
 from app.services import merge_profile
 from app.services import merge_safety
+from app.services import merge_figures
 from app.services import grade_duplicates
 from app.services.import_reconcile import reconcile_imported_totals
 from app.auth.modules import require_module
@@ -96,7 +97,9 @@ async def get_player_info(player_id: str, org_id: str, db: AsyncSession = Depend
     p = await db.get(Player, uuid.UUID(player_id))
     if not p or str(p.organisation_id) != org_id:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await _enrich_player(db, p)
+    card = await _enrich_player(db, p)
+    await merge_figures.fill_figures(db, [card])
+    return card
 
 
 FUZZY_MERGE_THRESHOLD = 0.90
@@ -330,6 +333,9 @@ async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), 
             "player_b": b,
         })
 
+    # The cards count what the profile counts (scorebook games included), for the whole list in a few
+    # queries. A player in several pairs is one dict, so it is filled once.
+    await merge_figures.fill_figures(db, enriched_cache.values())
     return candidate_pairs
 
 

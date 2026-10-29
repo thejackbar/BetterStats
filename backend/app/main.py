@@ -4579,6 +4579,11 @@ async def lifespan(app: FastAPI):
         from app.services.manual_grand_final_ddl import STATEMENTS as _MANUAL_GF_DDL
         for _stmt in _MANUAL_GF_DDL:
             await conn.execute(text(_stmt))
+        # Migration 377: who captained and who kept wicket in a hand-entered game. Same one-copy rule:
+        # this list and alembic's 377 both run services/manual_game_roles_ddl.STATEMENTS.
+        from app.services.manual_game_roles_ddl import STATEMENTS as _MANUAL_ROLES_DDL
+        for _stmt in _MANUAL_ROLES_DDL:
+            await conn.execute(text(_stmt))
         # Migration 375: a player's action shot and which shot fills the hero position. Same one-copy
         # rule: this list and alembic's 375 both run services/player_action_photo_ddl.STATEMENTS.
         from app.services.player_action_photo_ddl import STATEMENTS as _PLAYER_ACTION_PHOTO_DDL

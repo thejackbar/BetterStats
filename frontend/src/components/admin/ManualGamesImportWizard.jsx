@@ -309,6 +309,12 @@ export default function ManualGamesImportWizard({ onDone }) {
               Where your side won, the players on the card now have the premiership.
             </p>
           )}
+          {(result.captains_named > 0 || result.keepers_named > 0) && (
+            <p className="text-sm text-pb-text mt-3" data-testid="roles-result">
+              A captain is named on {result.captains_named || 0} match{result.captains_named === 1 ? '' : 'es'} and a
+              wicketkeeper on {result.keepers_named || 0}.
+            </p>
+          )}
           {result.seasons_import_sourced > 0 && (
             <p className="text-xs text-pb-dim mt-3">
               {result.seasons_import_sourced} season{result.seasons_import_sourced === 1 ? '' : 's'} now count your
