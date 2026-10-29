@@ -5,7 +5,7 @@ A 25s landscape launch-style video for the new Player Cards in BetterCricket, us
 
 ## Output
 - Composition: `brag-output-2026-10-29-045309/composition/` (single root `index.html`, built by a script from the real card components)
-- Video: `brag-output-2026-10-29-045309/brag.mp4`, 1920x1080, 30fps, 50s (half speed)
+- Video: `brag-output-2026-10-29-045309/brag.mp4`, 1920x1080, 30fps, 90s (slow pacing, intro slide, card-type scenes)
 
 ## Source material
 - Card faces rebuilt from `frontend/src/components/cards/CardFaces.jsx`, `cardTheme.js`, `PackOpening.jsx`, `CardGallery.jsx`, `SwapsPanel.jsx`

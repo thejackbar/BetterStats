@@ -27,7 +27,7 @@ Get a pack (earned by runs, wickets, hat-trick) -> tap it open and turn the card
 - Interpretation: fast cuts and snappy card entrances, each key line holds long enough to read; the pack opening gets the biggest light and sound.
 
 ## Format: landscape - 1920x1080
-## Duration: 50 seconds (the first cut was 25s; all timing doubled to run at half speed)
+## Duration: 90 seconds (paced slowly on request)
 
 ## Visual identity (from the project)
 - Background: stage ground `#04070b` with a radial wash of `color-mix(#ff0000 30%, #0b1018)`, as the pack-opening overlay in `PackOpening.jsx`
@@ -98,3 +98,15 @@ Audio intent: resolve
 Audio-coupled idea: bell on the lockup
 Music mood for this video: upbeat
 Audio summary: steady 120 BPM bed, card-game SFX on every card move, a bell on the Legendary and on the end card.
+
+
+## Revision: slower cut (90s)
+1. Intro slide: "Introducing BetterCricket Player Cards" (0-7s)
+2. Every player gets a card (7-11.6s)
+3. Packs, then the club designs its own pack (11.6-23.1s)
+4. The pull: three cards only (Common, Rare, Legendary), slow flips, a gap between each (23.1-42.9s)
+5. Card types: four rarity tiers with their odds (42.9-51s)
+6. Card types: special cards, six kinds (51-61s)
+7. Card book, with the century card held up and turned over, long hold (61-71.9s)
+8. Swap (71.9-80s)
+9. Cards change to the club's colours, then the BetterCricket end card (80-90s)
