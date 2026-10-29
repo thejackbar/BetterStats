@@ -14,6 +14,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import './cards.css'
 import { CARD_W, CARD_H, hexWithAlpha, onColor, splitName, usePhotoMode } from '../PlayerTradingCard'
 import { TIERS, specialLook, specialHeadline, fmtDate } from './cardTheme'
+import { cardShotUrl } from '../../lib/playerShots'
 
 export { CARD_W, CARD_H }
 const FRAME = 7
@@ -82,17 +83,17 @@ function initialsOf(name) {
 
 // The player, or the club's badge when there is no photo, or their initials when there is no badge either.
 function Portrait({ card, club, accent, dim }) {
-  const photo = usePhotoMode(card.hero_photo_url, card.photo_url)
+  const photo = usePhotoMode(cardShotUrl(card), card.photo_url)
   const light = `color-mix(in srgb, ${accent} 55%, #fff)`
   if (photo.mode === 'hero') {
     // The photo starts HERO_TOP down the card so the top of the head clears the name (the photos are tight crops, with the head
     // touching their top edge), and fades in over HERO_FADE so it has no hard edge against the card. The bottom stays where it was,
     // under the band, so only that hidden part of the picture is lost.
-    return <img src={photo.src} alt="" data-card-hero onError={photo.fail} style={{ position: 'absolute', left: 0, top: HERO_TOP, width: PANEL_W, height: PANEL_H - 40 - HERO_TOP, objectFit: 'cover', objectPosition: '50% 0%', opacity: dim ? 0.92 : 1, WebkitMaskImage: `linear-gradient(to bottom, transparent 0, #000 ${HERO_FADE}px)`, maskImage: `linear-gradient(to bottom, transparent 0, #000 ${HERO_FADE}px)` }} />
+    return <img src={photo.src} alt="" data-card-hero={card.shot || 'legacy'} onError={photo.fail} style={{ position: 'absolute', left: 0, top: HERO_TOP, width: PANEL_W, height: PANEL_H - 40 - HERO_TOP, objectFit: 'cover', objectPosition: '50% 0%', opacity: dim ? 0.92 : 1, WebkitMaskImage: `linear-gradient(to bottom, transparent 0, #000 ${HERO_FADE}px)`, maskImage: `linear-gradient(to bottom, transparent 0, #000 ${HERO_FADE}px)` }} />
   }
   const C = 176
   if (photo.mode === 'head') {
-    return <img src={photo.src} alt="" onError={photo.fail} style={{ position: 'absolute', left: (PANEL_W - C) / 2, top: 96, width: C, height: C, borderRadius: '50%', objectFit: 'cover', objectPosition: '50% 22%', boxShadow: `0 0 0 5px ${light}, 0 14px 32px rgba(0,0,0,.55)` }} />
+    return <img src={photo.src} alt="" data-card-head onError={photo.fail} style={{ position: 'absolute', left: (PANEL_W - C) / 2, top: 96, width: C, height: C, borderRadius: '50%', objectFit: 'cover', objectPosition: '50% 22%', boxShadow: `0 0 0 5px ${light}, 0 14px 32px rgba(0,0,0,.55)` }} />
   }
   if (club?.logo_url) {
     return <img src={club.logo_url} alt="" style={{ position: 'absolute', left: (PANEL_W - 150) / 2, top: 104, width: 150, height: 150, objectFit: 'contain', filter: 'drop-shadow(0 6px 24px rgba(0,0,0,.5))' }} />
@@ -194,7 +195,7 @@ export function CardInfoBack({ card, club, accent, display = DEFAULT_DISPLAY }) 
 export function CardFront({ card, club, accent, display = DEFAULT_DISPLAY, sponsor, label = 'Career Statistics' }) {
   const { first, last } = splitName(card.name)
   const tier = TIERS[card.tier] || TIERS.common
-  const hero = !!card.hero_photo_url
+  const hero = !!cardShotUrl(card)
   const items = [
     { label: 'Matches', value: num(card.matches) },
     { label: 'Runs', value: num(card.runs) },
@@ -247,7 +248,7 @@ export function SpecialFront({ card, club, accent, display = DEFAULT_DISPLAY }) 
   const opp = d.opposition ? `v ${d.opposition}` : ''
   const when = fmtDate(card.occurred_on)
   const pill = [opp, when].filter(Boolean).join('  ·  ')
-  const hero = !!card.hero_photo_url
+  const hero = !!cardShotUrl(card)
   const BAND = 168
   const numeric = !head.small && String(head.big).length <= 6
   return (

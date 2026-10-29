@@ -2,7 +2,7 @@
 
 `admin._merge_players_core` moved a player's cricket and then deleted the row,
 and the row is where everything a club typed *about the person* lives: the
-headshot and action shot, email and phone, date of birth, shirt number, squad,
+headshot, hero photo and action shot, email and phone, date of birth, shirt number, squad,
 batting and bowling style. None of it was copied, so merging a freshly added
 roster record (which has the photo and the details) into the synced one (which
 has the games) kept the games and threw the rest away.
@@ -21,15 +21,16 @@ import uuid
 PHOTO_GROUPS: tuple[tuple[str, str, str], ...] = (
     ("photo_url", "photo_data", "photo_mime"),
     ("hero_photo_url", "hero_photo_data", "hero_photo_mime"),
+    ("action_photo_url", "action_photo_data", "action_photo_mime"),
 )
 
 # The route each photo URL column is served from (routers/images.py). The URL
 # names the player's own row, so it cannot be copied to another player: the
 # bytes would move and the address would still point at the row being deleted,
 # which serves a 404 and reads on screen as a wiped photo.
-PHOTO_ROUTES: dict[str, str] = {"photo_url": "photo", "hero_photo_url": "hero-photo"}
+PHOTO_ROUTES: dict[str, str] = {"photo_url": "photo", "hero_photo_url": "hero-photo", "action_photo_url": "action-photo"}
 
-_IMAGE_URL = re.compile(r"^/api/images/players/([0-9a-fA-F-]{36})/(photo|hero-photo)(\?|$)")
+_IMAGE_URL = re.compile(r"^/api/images/players/([0-9a-fA-F-]{36})/(photo|hero-photo|action-photo)(\?|$)")
 
 
 def player_image_url(player_id, url_col: str) -> str:
@@ -62,6 +63,7 @@ FIELDS: tuple[str, ...] = (
     "squad_team_id", "email", "phone", "date_of_birth", "shirt_number",
     "address_line1", "suburb", "state", "postcode", "emergency_contact_name", "emergency_contact_phone",
     "is_financial_override", "trained_override", "skill_positions", "dormancy_cleared_on",
+    "hero_source",
 )
 
 

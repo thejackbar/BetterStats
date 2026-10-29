@@ -1948,6 +1948,20 @@ export const api = {
       })
   },
   adminDeletePlayerHeroPhoto: (playerId) => request(`/club-admin/players/${playerId}/hero-photo`, { method: 'DELETE' }),
+  // The action shot (migration 375), a third photograph beside the headshot and the hero photo.
+  adminUploadPlayerActionPhoto: (playerId, file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/club-admin/players/${playerId}/action-photo`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  adminDeletePlayerActionPhoto: (playerId) => request(`/club-admin/players/${playerId}/action-photo`, { method: 'DELETE' }),
   adminListPartnershipRecords: () => request('/club-admin/partnership-records'),
   adminCreatePartnershipRecord: (data) =>
     request('/club-admin/partnership-records', { method: 'POST', body: JSON.stringify(data) }),
@@ -2011,8 +2025,6 @@ export const api = {
     request('/club-admin/hard-refresh', { method: 'POST' }),
   adminBackfillAggregates: () =>
     request('/club-admin/backfill-aggregates', { method: 'POST' }),
-  adminCleanupOppositionStats: () =>
-    request('/club-admin/cleanup-opposition-stats', { method: 'POST' }),
   adminListSyncRuns: (limit = 30) =>
     request(`/club-admin/sync-runs?limit=${limit}`),
   adminGetSyncRun: (runId) => request(`/club-admin/sync-runs/${runId}`),
@@ -3435,6 +3447,7 @@ export const api = {
   setPlayerCardHidden: (playerId, hidden) =>
     request(`/player-cards/players/${playerId}/hidden`, { method: 'POST', body: JSON.stringify({ hidden }) }),
   refreshPlayerCardSpecials: () => request('/player-cards/refresh-specials', { method: 'POST' }),
+  createPlayerCardGift: (data) => request('/player-cards/gifts', { method: 'POST', body: JSON.stringify(data) }),
   addPlayerCardEvent: (data) => request('/player-cards/events', { method: 'POST', body: JSON.stringify(data) }),
   deletePlayerCardEvent: (id) => request(`/player-cards/events/${id}`, { method: 'DELETE' }),
   savePlayerCardDesign: (target, data) =>

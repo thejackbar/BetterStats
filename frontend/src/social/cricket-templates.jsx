@@ -14,6 +14,7 @@ import brandWhite from '../assets/bettercricket-white.svg'
 import { IS_AFL, PLATFORM_NAME } from '../lib/sport'
 import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
 import { usePostLook } from './postLook'
+import { pickHero } from '../lib/playerShots'
 
 // The BetterCricket credit mark used in every template's footer — the real
 // brand logo (black on a light footer, white on a dark one), no wordmark text.
@@ -474,13 +475,17 @@ export function heroFocusStyle(focus) {
     : { objectPosition: pos }
 }
 
-// The photo for a player's BIG slot. A club can store two: a square headshot
-// that reads at 44px, and an action shot for exactly this. The action shot
-// wins here and nowhere else — a grid or a card front stays on the headshot,
-// which is the photo that works at that size.
+// The photo for a player's BIG slot. A club can store three: a square headshot
+// that reads at 44px, a tall hero photo and an action shot for exactly this.
+// The hero position takes the club's pick between the last two (`heroSource`,
+// from the player's saved choice or the editor's own), the hero photo first
+// when nothing is picked, and falls back to the headshot. A grid or a card
+// front stays on the headshot, which is the photo that works at that size.
+// `heroSource: 'photo'` is the editor asking for the headshot here as well.
 export function heroSrcOf(player) {
   if (!player) return null
-  return player.hero || player.headshot || null
+  if (player.heroSource === 'photo') return player.headshot || null
+  return pickHero({ hero: player.hero, action: player.action }, player.heroSource) || player.headshot || null
 }
 
 // Picks the player shown in the hero image slot. An explicit `featuredId`

@@ -53,6 +53,7 @@ class SettingsBody(BaseModel):
     feed_enabled: Optional[bool] = None
     event_packs_enabled: Optional[bool] = None
     starter_gifts: Optional[str] = None
+    big_photos: Optional[str] = None
 
 
 class EventBody(BaseModel):
@@ -60,6 +61,17 @@ class EventBody(BaseModel):
     starts_on: date
     ends_on: Optional[date] = None
     per_day: bool = True
+    quality: str = "special"
+
+
+class GiftBody(BaseModel):
+    """Packs an admin creates by hand. `request_id` is the screen's id for this click, so a double click grants once."""
+    title: str
+    quality: str = "special"
+    qty: int = 1
+    audience: str = "all"
+    player_ids: list[str] = []
+    request_id: Optional[str] = None
 
 
 class DesignBody(BaseModel):
@@ -119,10 +131,14 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
             **{k: settings.get(k, True) is not False for k in ("sets_enabled", "showcase_enabled", "board_enabled", "feed_enabled",
                                                          "event_packs_enabled")},
             "starter_gifts": settings.get("starter_gifts") or "minimal",
+            "big_photos": settings.get("big_photos") or "top",
             "effective_timezone": str(cards.club_zone(settings)),
         },
         "timezones": [{"id": i, "label": n} for i, n in TIMEZONES],
         "events": await cards.list_events(db, club.id),
+        "gifts": await cards.list_gifts(db, club.id),
+        "qualities": cards.quality_options(),
+        "max_gift_qty": cards.MAX_GIFT_QTY,
         "designs": await pack_designs.load_all(db, club.id),
         "design_targets": await pack_designs.targets(db, club.id),
         "max_weekly_packs": cards.MAX_WEEKLY_PACKS,
@@ -202,7 +218,7 @@ async def add_event(
     """Schedule a pack for a day or a run of days (a Test match, a club day). Players get it the day they open their page."""
     await cards.ensure_launched(db, club.id)
     try:
-        ev = await cards.add_event(db, club.id, body.title, body.starts_on, body.ends_on, body.per_day)
+        ev = await cards.add_event(db, club.id, body.title, body.starts_on, body.ends_on, body.per_day, body.quality)
     except ValueError as exc:
         await db.rollback()
         raise HTTPException(status_code=422, detail=str(exc))
@@ -210,6 +226,29 @@ async def add_event(
                                  target_type="card_event", target_id=ev["id"], details=ev)
     await db.commit()
     return await _payload(db, club)
+
+
+@router.post("/gifts")
+async def create_gift(
+    body: GiftBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Create packs now and put them in players' hands: everyone with a card, or the players chosen. Players open them from their page."""
+    snap = await cards.club_snapshot(db, club, fresh=True)
+    await cards.ensure_launched(db, club.id)
+    try:
+        out = await cards.create_gift(db, club, snap, title=body.title, quality=body.quality, qty=body.qty, audience=body.audience,
+                                      player_ids=body.player_ids, request_id=body.request_id, by=getattr(user, "email", None))
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not out["repeat"]:
+        await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_pack_gift", target_type="card_pack_gift",
+                                     target_id=out["id"], details={k: out[k] for k in ("title", "quality", "qty", "players", "packs")})
+    await db.commit()
+    return {"gift": out, **await _payload(db, club)}
 
 
 @router.delete("/events/{event_id}")

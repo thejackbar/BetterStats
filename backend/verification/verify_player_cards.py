@@ -82,6 +82,14 @@ if HAVE_SWAPS:
     except ImportError:   # the control run on the commit before pack designs
         DESIGNS_DDL = []
     try:
+        from app.services.player_card_gifts_ddl import STATEMENTS as GIFTS_DDL
+    except ImportError:   # the control run on the commit before admin-created packs
+        GIFTS_DDL = []
+    try:
+        from app.services.player_card_photos_ddl import STATEMENTS as PHOTOS_DDL
+    except ImportError:   # the control run on the commit before photos by card type
+        PHOTOS_DDL = []
+    try:
         from app.services.player_card_social_ddl import STATEMENTS as SOCIAL_DDL
     except ImportError:   # the control run on the commit before the social side
         SOCIAL_DDL = []
@@ -93,6 +101,8 @@ else:
     COMMUNITY_DDL = []
     PACKS_DDL = []
     DESIGNS_DDL = []
+    GIFTS_DDL = []
+    PHOTOS_DDL = []
     ITEM_DDL = []
 
 DB = os.environ["DATABASE_URL"]
@@ -170,7 +180,7 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
-        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL:
+        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL:
             await conn.execute(text(stmt))
 
 
@@ -390,6 +400,34 @@ async def main() -> None:
         check("tier follows the score", cards.tier_for(90) == "legendary" and cards.tier_for(75) == "epic"
               and cards.tier_for(55) == "rare" and cards.tier_for(54) == "common")
         check("the pool lists a player under their own tier", str(ALPHA) in snap["pool"][a["tier"]])
+
+    # ── The three photographs (migration 374) ────────────────────────────────
+    # A card carries the hero photo, the action shot and the club's pick between them; the frontend resolves it
+    # (lib/playerShots.js). Read through .get so the control run (the commit before 374) reports instead of crashing.
+    print("\nthe three photographs")
+    async with Session() as db:
+        try:
+            await db.execute(text("UPDATE players SET action_photo_url = '/api/images/players/x/action-photo?v=1', "
+                                  "hero_source = 'action' WHERE id = :i"), {"i": ALPHA})
+            await db.commit()
+        except Exception:
+            await db.rollback()  # the control run's schema has no such columns
+        club = await db.get(Organisation, ORG)
+        snap = await cards.club_snapshot(db, club, fresh=True)
+        a = cards.regular_card(snap, str(ALPHA))
+        d = cards.regular_card(snap, str(DELTA))
+        NO = object()
+        check("a regular card carries the action shot", a.get("action_photo_url", NO) == "/api/images/players/x/action-photo?v=1", str(a.get("action_photo_url", NO)))
+        check("and the club's pick between the hero photo and the action shot", a.get("hero_source", NO) == "action", str(a.get("hero_source", NO)))
+        check("a player with neither carries null for both, not a missing key", d.get("action_photo_url", NO) is None and d.get("hero_source", NO) is None)
+        own = cards._own_card_outside_pool(await db.get(Player, ALPHA), snap)
+        check("an own card outside the pool carries them too", own.get("action_photo_url", NO) == "/api/images/players/x/action-photo?v=1" and own.get("hero_source", NO) == "action")
+        try:
+            await db.execute(text("UPDATE players SET action_photo_url = NULL, hero_source = NULL WHERE id = :i"), {"i": ALPHA})
+            await db.commit()
+        except Exception:
+            await db.rollback()
+        cards.forget(ORG)
 
     # ── Week boundaries ──────────────────────────────────────────────────────
     print("\nthe weekly reset")
@@ -1610,11 +1648,31 @@ async def main() -> None:
                 check("...once", (await on(day, z2)).get("match_day") == 0)
                 await db.execute(text("DELETE FROM fixture_lineups WHERE fixture_id = :f"), {"f": fx_today})
                 await db.execute(text("INSERT INTO fixture_lineups (fixture_id, player_id, organisation_id) VALUES (:f, :p, :o)"), {"f": fx_multi, "p": Z2, "o": ORG}); await db.commit()
-                check("a two day match is Match Day on its second day too", (await on(day + timedelta(days=1), z2)).get("match_day") == 1)
+                check("a two day game is Match Day on its last day too", (await on(day + timedelta(days=1), z2)).get("match_day") == 1)
+                check("...and on its first day", (await on(day - timedelta(days=1), z2)).get("match_day") == 1)
+                weekly_two = uuid.uuid4()
+                await db.execute(text("INSERT INTO fixtures (id, organisation_id, source, played_on, end_on, status) VALUES (:i, :o, 'manual', :d, :e, 'IN_PROGRESS')"), {"i": weekly_two, "o": ORG, "d": D(2031, 8, 2), "e": D(2031, 8, 9)})
+                await db.execute(text("INSERT INTO fixture_lineups (fixture_id, player_id, organisation_id) VALUES (:f, :p, :o)"), {"f": weekly_two, "p": Z1, "o": ORG}); await db.commit()
+                mid = [(await on(D(2031, 8, d_), z1)).get("match_day") for d_ in range(3, 9)]
+                check("a game played on two Saturdays a week apart is NOT Match Day on the days between", all(m is None for m in mid), str(mid))
+                check("...but is on both Saturdays", (await on(D(2031, 8, 2), z1)).get("match_day") == 1 and (await on(D(2031, 8, 9), z1)).get("match_day") == 1)
                 check("a player not on any team sheet gets none", (await on(day, z1)).get("match_day") is None)
                 played = (await db.execute(text("SELECT g.played_at FROM game_appearances ga JOIN v_effective_games g ON g.id = ga.game_id WHERE ga.player_id = :p AND g.played_at IS NOT NULL LIMIT 1"), {"p": ALPHA})).scalar()
                 if played:
                     check("a scorecard dated today counts too", (await on(played, str(ALPHA))).get("match_day") == 1, str(played))
+
+                # taking back the packs that went out wrongly
+                for d_ in (D(2031, 8, 4), D(2031, 8, 5)):
+                    await db.execute(text("INSERT INTO player_card_packs (organisation_id, player_id, source, ref_key) VALUES (:o, :p, 'match_day', :r)"), {"o": ORG, "p": Z1, "r": f"match_day:{d_.isoformat()}"})
+                await db.execute(text("INSERT INTO player_card_packs (organisation_id, player_id, source, ref_key, opened_at) VALUES (:o, :p, 'match_day', 'match_day:2031-08-06', NOW())"), {"o": ORG, "p": Z1})
+                await db.commit()
+                dry = await cards.unwind_stray_match_day_packs(db, str(ORG))
+                check("a dry run counts the stray unopened Match Day packs and takes none back", dry["packs"] >= 2 and dry["players"] >= 1 and dry["applied"] is False and (await db.execute(text("SELECT count(*) FROM player_card_packs WHERE source = 'match_day' AND ref_key IN ('match_day:2031-08-04', 'match_day:2031-08-05')"))).scalar() == 2, str(dry))
+                done_ = await cards.unwind_stray_match_day_packs(db, str(ORG), apply=True)
+                await db.commit()
+                left = (await db.execute(text("SELECT ref_key FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND source = 'match_day' ORDER BY ref_key"), {"p": z1})).scalars().all()
+                check("applying takes back the two unopened strays, keeps the real days and the opened one", done_["applied"] is True and "match_day:2031-08-04" not in left and "match_day:2031-08-05" not in left and "match_day:2031-08-06" in left and "match_day:2031-08-02" in left and "match_day:2031-08-09" in left, str(left))
+                check("a second run finds nothing", (await cards.unwind_stray_match_day_packs(db, str(ORG)))["packs"] == 0)
 
                 # the club's switch
                 await cards.save_settings(db, ORG, {"event_packs_enabled": False}); await db.commit()
@@ -1918,6 +1976,214 @@ async def main() -> None:
     else:
         check("(the control run has no pack designs to test)", True)
 
+    # ── A new photo shows on the card at once ─────────────────────────────────────
+    print("\nplayer photos")
+    if HAVE and DESIGNS_DDL:
+        from io import BytesIO as _B
+        from starlette.datastructures import UploadFile as _Up
+        from PIL import Image as _Im
+        from app.routers import club_admin as ca
+        buf = _B(); _Im.new("RGB", (30, 40), (9, 9, 9)).save(buf, "PNG")
+        async with Session() as db:
+            club = await db.get(Organisation, ORG)
+            snap0 = await cards.club_snapshot(db, club, fresh=True)
+            before = snap0["people"][str(BRAVO)]["photo_url"]
+            again = await cards.club_snapshot(db, club)
+            check("the snapshot is cached between visits (so the next check means something)", again is snap0)
+            who = await db.get(Player, BRAVO)
+            out = await ca._store_player_photo(db, who, _Up(file=_B(buf.getvalue()), filename="new.png"), "photo")
+            snap1 = await cards.club_snapshot(db, club)
+            check("a new headshot is on the card straight away, without waiting for the snapshot to expire", snap1["people"][str(BRAVO)]["photo_url"] == out["photo_url"] != before, f"{before} -> {out}")
+            check("...and in the card the player is drawn from", cards.regular_card(snap1, str(BRAVO))["photo_url"] == out["photo_url"])
+            who = await db.get(Player, BRAVO)
+            hero = await ca._store_player_photo(db, who, _Up(file=_B(buf.getvalue()), filename="act.png"), "hero")
+            snap2 = await cards.club_snapshot(db, club)
+            check("a new action shot is on the card straight away too", snap2["people"][str(BRAVO)]["hero_photo_url"] == hero["hero_photo_url"])
+            who = await db.get(Player, BRAVO)
+            await ca._clear_player_photo(db, who, "hero")
+            snap3 = await cards.club_snapshot(db, club)
+            check("removing the action shot takes it off the card at once (back to the headshot circle)", snap3["people"][str(BRAVO)]["hero_photo_url"] is None and snap3["people"][str(BRAVO)]["photo_url"] == out["photo_url"])
+            await db.rollback()
+    else:
+        check("(the control run has no photo cache fix to test)", True)
+
+    # ── Packs an admin creates by hand, and the quality ladder ────────────────────
+    print("\npacks created by an admin")
+    if HAVE and GIFTS_DDL:
+        from app.routers import player_cards_admin as adm3
+        from app.services import player_card_pack_kinds as K3
+        pool3 = {"common": [f"c{i}" for i in range(80)], "rare": [f"r{i}" for i in range(40)], "epic": [f"e{i}" for i in range(20)], "legendary": [f"l{i}" for i in range(10)]}
+
+        def share(q, n=500):
+            good = tot = least = 0
+            least = 99
+            for _ in range(n):
+                got = cards.draw_cards(pool3, [], 5, K3.QUALITIES[q])
+                g = sum(1 for x in got if x["tier"] != "common")
+                good += g; tot += len(got); least = min(least, g)
+            return good / tot, least
+
+        ladder = [share(q) for q in K3.QUALITIES]
+        check("each quality step is richer in Rare and better than the one before it", [round(x[0], 3) for x in ladder] == sorted(round(x[0], 3) for x in ladder) and len({round(x[0], 2) for x in ladder}) == len(ladder), str([round(x[0], 2) for x in ladder]))
+        check("...and each guarantees its number of Rare or better cards (1, 2, 2, 3, 4, 4)", [x[1] for x in ladder] >= [K3.QUALITIES[q].rare_plus for q in K3.QUALITIES] and [K3.QUALITIES[q].rare_plus for q in K3.QUALITIES] == [1, 2, 2, 3, 4, 4], str([x[1] for x in ladder]))
+        check("a Legendary pack is nearly all Rare or better, a Standard one is not", ladder[-1][0] > 0.9 and ladder[0][0] < 0.5)
+        opts = cards.quality_options()
+        check("the screen is told each quality's guarantee and tier odds, adding to 100", [o["key"] for o in opts] == list(K3.QUALITIES) and all(abs(sum(o["odds"].values()) - 100) <= 2 and o["rare_plus"] >= 1 for o in opts), str(opts[0]))
+        check("a pack with no quality uses its own kind's odds, and one with a quality uses that", K3.quality_kind(None, "century") is K3.KINDS["century"] and K3.quality_kind("legendary", "weekly") is K3.QUALITIES["legendary"] and K3.quality_kind("nonsense", "weekly") is K3.KINDS["weekly"])
+
+        async with Session() as db:
+            club = await db.get(Organisation, ORG)
+            admin_user = User(id=uuid.uuid4(), email="admin@example.com")
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            people = sorted(snap["people"])
+            async def bad(**kw):
+                try:
+                    await cards.create_gift(db, club, snap, **kw)
+                    return None
+                except ValueError as exc:
+                    return str(exc)
+            check("a pack needs a name", await bad(title="  ", quality="elite") is not None)
+            check("...a quality that exists", await bad(title="X", quality="mythic") is not None)
+            check("...a quantity from 1 to 10", await bad(title="X", quality="elite", qty=0) is not None and await bad(title="X", quality="elite", qty=11) is not None and await bad(title="X", quality="elite", qty=True) is not None)
+            check("...someone to give it to", await bad(title="X", quality="elite", audience="players", player_ids=[]) is not None and await bad(title="X", quality="elite", audience="players", player_ids=[str(uuid.uuid4())]) is not None)
+            check("...and a known audience", await bad(title="X", quality="elite", audience="everyone") is not None)
+            await db.rollback()
+            club = await db.get(Organisation, ORG)
+
+            rid = str(uuid.uuid4())
+            out = await cards.create_gift(db, club, snap, title="  Cup   Day  ", quality="elite", qty=2, audience="all", request_id=rid, by="admin@example.com")
+            await db.commit()
+            n_all = len(people)
+            count = lambda **w: db.execute(text("SELECT count(*) FROM player_card_packs WHERE source = 'custom' AND organisation_id = :o AND ref_key LIKE :r"), {"o": ORG, "r": f"{rid}:%"})
+            check("giving to everyone makes qty packs for each player with a card", out["players"] == n_all and out["packs"] == n_all * 2 and (await count()).scalar() == n_all * 2 and out["repeat"] is False, str(out))
+            check("the name is tidied", out["title"] == "Cup Day")
+            again = await cards.create_gift(db, club, snap, title="Cup Day", quality="elite", qty=2, audience="all", request_id=rid)
+            await db.commit()
+            check("sending the same request again (a double click) grants nothing more", again["repeat"] is True and (await count()).scalar() == n_all * 2)
+            row = (await db.execute(text("SELECT label, quality, source, opened_at FROM player_card_packs WHERE ref_key = :r"), {"r": f"{rid}:1"})).first()
+            check("each pack carries the name and quality it was made with", row[0] == "Cup Day" and row[1] == "elite" and row[2] == "custom" and row[3] is None)
+
+            pick = [str(DELTA), str(CHARLIE)]
+            await cards.create_gift(db, club, snap, title="Thanks", quality="legendary", qty=1, audience="players", player_ids=[*pick, str(uuid.uuid4()), "not-a-uuid"])
+            await db.commit()
+            thanks = (await db.execute(text("SELECT player_id::text FROM player_card_packs WHERE label = 'Thanks' AND organisation_id = :o"), {"o": ORG})).scalars().all()
+            check("choosing players gives only to them (a made-up id is skipped, not an error)", sorted(thanks) == sorted(pick), str(thanks))
+            other = await bad(title="Theirs", quality="elite", request_id=rid) if False else None
+
+            # what the player sees and opens
+            who = await db.get(Player, uuid.UUID(pick[0]))
+            listed = [p for p in await cards.available_packs(db, pick[0], snap) if p["source"] == "custom"]
+            srcs3 = [p["source"] for p in await cards.available_packs(db, pick[0], snap)]
+            check("the player has the packs, named, with their quality, and ahead of the everyday packs", {p["label"] for p in listed} >= {"Cup Day", "Thanks"} and {p["quality"] for p in listed} >= {"elite", "legendary"} and not (set(srcs3[: srcs3.index("custom")]) & {"weekly", "runs", "wickets", "dismissals", "duck"}), str(srcs3))
+            seen = []
+            real_draw = cards.draw_cards
+            cards.draw_cards = lambda pool_, specials_, size=5, kind=None: (seen.append(kind.label if kind else None), real_draw(pool_, specials_, size, kind))[1]
+            try:
+                thanks_pack = next(p for p in listed if p["label"] == "Thanks")
+                got = await cards.open_pack(db, club, who, thanks_pack["id"], snap)
+                await db.commit()
+            finally:
+                cards.draw_cards = real_draw
+            check("opening it draws at the quality it was made at, whatever kind it came as", seen == ["Legendary"] and got, str(seen))
+            check("an opened pack is gone from the list", all(p["id"] != thanks_pack["id"] for p in await cards.available_packs(db, pick[0], snap)))
+            hist = await cards.list_gifts(db, ORG)
+            check("the club can see what it gave: name, quality, players, packs and how many are opened", {g["title"] for g in hist} >= {"Cup Day", "Thanks"} and next(g for g in hist if g["title"] == "Thanks")["opened"] == 1 and next(g for g in hist if g["title"] == "Cup Day")["packs"] == n_all * 2 and next(g for g in hist if g["title"] == "Cup Day")["opened"] == 0)
+
+            # a scheduled pack takes a quality too
+            ev = await cards.add_event(db, ORG, "Quality Test Match", date.today() + timedelta(days=90), None, True, "legendary")
+            await db.commit()
+            check("a scheduled pack remembers its quality, and it defaults to special", ev["quality"] == "legendary" and (await cards.add_event(db, ORG, "Club day", date.today() + timedelta(days=91), None))["quality"] == "special")
+            try:
+                await cards.add_event(db, ORG, "Bad", date.today(), None, True, "mythic"); bad_q = False
+            except ValueError:
+                bad_q = True
+            await db.rollback()
+            club = await db.get(Organisation, ORG)
+            check("a scheduled pack with an unknown quality is refused", bad_q)
+            club = await db.get(Organisation, ORG)
+            real_today2 = cards.club_today
+            cards.club_today = lambda s_, now=None: date.today() + timedelta(days=90)
+            try:
+                await cards.ensure_grants(db, club, pick[1], snap); await db.commit()
+            finally:
+                cards.club_today = real_today2
+            q = (await db.execute(text("SELECT quality FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND source = 'event' AND label = 'Quality Test Match'"), {"p": pick[1]})).scalar()
+            check("a pack granted from a scheduled event carries the event's quality", q == "legendary", str(q))
+
+            # the routes
+            club = await db.get(Organisation, ORG)
+            pay = await adm3.get_settings(db, club, admin_user)
+            check("the settings payload lists the qualities, the recent packs and the limit", [o["key"] for o in pay["qualities"]] == list(K3.QUALITIES) and any(g["title"] == "Cup Day" for g in pay["gifts"]) and pay["max_gift_qty"] == 10 and all("quality" in e for e in pay["events"]))
+            res = await adm3.create_gift(adm3.GiftBody(title="Route pack", quality="premium", qty=3, audience="players", player_ids=pick[:1]), db, club, admin_user)
+            check("the create route gives the packs and returns the gift with the refreshed payload", res["gift"]["packs"] == 3 and res["gift"]["players"] == 1 and any(g["title"] == "Route pack" for g in res["gifts"]))
+            check("...and it is on the audit trail", (await db.execute(text("SELECT count(*) FROM audit_logs WHERE action = 'player_card_pack_gift'"))).scalar() >= 1)
+            club = await db.get(Organisation, ORG)
+            codes = [await status_of(adm3.create_gift(adm3.GiftBody(title="", quality="premium"), db, club, admin_user))]
+            club = await db.get(Organisation, ORG)
+            codes.append(await status_of(adm3.create_gift(adm3.GiftBody(title="X", quality="nope"), db, club, admin_user)))
+            club = await db.get(Organisation, ORG)
+            codes.append(await status_of(adm3.create_gift(adm3.GiftBody(title="X", quality="premium", qty=99), db, club, admin_user)))
+            club = await db.get(Organisation, ORG)
+            check("a bad request through the route is a 422 each time", codes == [422, 422, 422], str(codes))
+            sched = await adm3.add_event(adm3.EventBody(title="Q day", starts_on=date.today() + timedelta(days=100), quality="elite"), db, club, admin_user)
+            check("the schedule route takes a quality too", any(e["title"] == "Q day" and e["quality"] == "elite" for e in sched["events"]))
+            await db.rollback()
+    else:
+        check("(the control run has no admin-created packs to test)", True)
+
+    # ── Which photo a card shows ──────────────────────────────────────────────────
+    print("\nphotos by card type")
+    if HAVE and PHOTOS_DDL:
+        P = {"photo_url": "/p.jpg", "hero_photo_url": "/h.jpg", "action_photo_url": "/a.jpg", "hero_source": None}
+        shot = cards.card_shot
+        check("a plain card (Common, Rare) shows the profile photo in the circle, even when the player has big photos", shot(P, "common", None, "top") == "profile" and shot(P, "rare", None, "top") == "profile")
+        check("an Epic card gets the hero photo and a Legendary card the action shot", shot(P, "epic", None, "top") == "hero" and shot(P, "legendary", None, "top") == "action")
+        check("a special card for a moment in play gets the action shot", all(shot(P, "special", k, "top") == "action" for k in ("century", "fifty", "five_for", "hat_trick")))
+        check("a special card for a person or a total gets the hero photo", all(shot(P, "special", k, "top") == "hero" for k in ("debut", "games", "runs_milestone", "wickets_milestone", "dismissals_milestone", "award")))
+        check("special cards get a big photo in every mode, plain cards only when the club says all", all(shot(P, "special", "century", m) == "action" for m in ("top", "specials", "all")) and shot(P, "epic", None, "specials") == "profile" and shot(P, "common", None, "all") == "hero" and shot(P, "legendary", None, "all") == "action")
+        check("a wanted shot the player does not have falls to the other big one", shot({**P, "action_photo_url": None}, "special", "century", "top") == "hero" and shot({**P, "hero_photo_url": None}, "special", "debut", "top") == "action")
+        check("a big card with no big shot shows the profile photo", shot({**P, "hero_photo_url": None, "action_photo_url": None}, "legendary", None, "top") == "profile" and shot({"photo_url": "/p.jpg"}, "special", "century", "top") == "profile")
+        check("a plain card with no profile photo uses a big shot rather than the logo", shot({**P, "photo_url": None}, "common", None, "top") == "hero" and shot({"photo_url": None}, "common", None, "top") == "profile")
+        check("a per-player pin beats the card's own choice, but never makes a plain card big", shot({**P, "hero_source": "hero"}, "legendary", None, "top") == "hero" and shot({**P, "hero_source": "action"}, "special", "debut", "top") == "action" and shot({**P, "hero_source": "action"}, "common", None, "top") == "profile")
+        check("a pin to a shot the player does not have falls to the other", shot({**P, "hero_source": "action", "action_photo_url": None}, "legendary", None, "top") == "hero")
+        async with Session() as db:
+            club = await db.get(Organisation, ORG)
+            await db.execute(text("UPDATE players SET photo_url = '/p.jpg', hero_photo_url = '/h.jpg', action_photo_url = '/a.jpg', hero_source = NULL WHERE id = :p"), {"p": ALPHA})
+            await db.commit()
+            cards.forget(ORG)
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            reg = cards.regular_card(snap, str(ALPHA))
+            check("a regular card carries its shot, from the player's tier and the club's setting", reg["shot"] == {"common": "profile", "rare": "profile", "epic": "hero", "legendary": "action"}[reg["tier"]], str((reg["tier"], reg["shot"])))
+            srow = (await db.execute(text("SELECT id::text AS id, player_id, kind, title, occurred_on, detail FROM player_special_cards WHERE player_id = :p AND kind = 'century' LIMIT 1"), {"p": ALPHA})).mappings().first()
+            check("a special card carries its shot too (a century: the action shot)", cards.special_card(snap, dict(srow))["shot"] == "action")
+            d0 = (await cards.load_settings(db, ORG))["big_photos"]
+            check("the club setting defaults to top", cards.default_settings()["big_photos"] == "top" and d0 == "top", str(d0))
+            await cards.save_settings(db, ORG, {"big_photos": "all"}); await db.commit()
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            check("changing it reaches the cards at once", cards.regular_card(snap, str(ALPHA))["shot"] in ("hero", "action"))
+            await cards.save_settings(db, ORG, {"big_photos": "specials"}); await db.commit()
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            check("...'specials' keeps every regular card on the circle, whatever its tier", cards.regular_card(snap, str(ALPHA))["shot"] == "profile")
+            try:
+                await cards.save_settings(db, ORG, {"big_photos": "everything"}); bad_p = False
+            except ValueError:
+                bad_p = True
+                await db.rollback()
+            check("an unknown choice is refused", bad_p)
+            club = await db.get(Organisation, ORG)
+            await cards.save_settings(db, ORG, {"big_photos": "top"}); await db.commit()
+            from app.routers import player_cards_admin as adm4
+            adm_user = User(id=uuid.uuid4(), email="admin@example.com")
+            got = await adm4.update_settings(adm4.SettingsBody(big_photos="all"), db, club, adm_user)
+            check("PATCH settings takes big_photos, and the payload reports it", got["settings"]["big_photos"] == "all")
+            club = await db.get(Organisation, ORG)
+            check("...an unknown one is a 422", await status_of(adm4.update_settings(adm4.SettingsBody(big_photos="some"), db, club, adm_user)) == 422)
+            club = await db.get(Organisation, ORG)
+            await adm4.update_settings(adm4.SettingsBody(big_photos="top"), db, club, adm_user)
+            await db.rollback()
+    else:
+        check("(the control run has no photo rule to test)", True)
+
     print("\nmigration")
     async with engine.begin() as conn:
         for stmt in CARD_DDL:
@@ -1932,6 +2198,12 @@ async def main() -> None:
         check("the items migration follows 365, runs its own shared list, and drops only its own table", "down_revision = \"365\"" in mig3 and "ITEM_STATEMENTS" in mig3 and "ITEM_DOWNGRADE" in mig3)
     main_src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
     check("the lifespan mirrors the same list", "from app.services.player_cards_ddl import STATEMENTS" in main_src)
+    if PHOTOS_DDL:
+        mig7 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "376_player_card_big_photos.py").read_text()
+        check("the photos migration follows 375, runs the shared list, and its lifespan mirror runs it too", 'down_revision = "375"' in mig7 and "STATEMENTS" in mig7 and "player_card_photos_ddl" in main_src)
+    if GIFTS_DDL:
+        mig6 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "374_player_card_pack_gifts.py").read_text()
+        check("the admin packs migration follows 373, runs the shared list, and its lifespan mirror runs it too", 'down_revision = "373"' in mig6 and "STATEMENTS" in mig6 and "player_card_gifts_ddl" in main_src)
     if DESIGNS_DDL:
         mig5 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "371_player_card_pack_designs.py").read_text()
         check("the designs migration follows 370, runs the shared list, and its lifespan mirror runs it too", 'down_revision = "370"' in mig5 and "STATEMENTS" in mig5 and "player_card_designs_ddl" in main_src)

@@ -165,6 +165,21 @@ async def get_player_hero_photo(player_id: str, db: AsyncSession = Depends(get_d
     )
 
 
+@router.get("/players/{player_id}/action-photo")
+async def get_player_action_photo(player_id: str, db: AsyncSession = Depends(get_db)):
+    """The player's action shot (migration 375), a third photograph beside the
+    headshot and the hero photo. Same no-auth posture as those: a low-sensitivity
+    image behind an unguessable id, and a privacy removal clears it."""
+    player = await db.get(Player, _parse_uuid(player_id))
+    if not player or not player.action_photo_data:
+        raise HTTPException(404, "No action photo")
+    return Response(
+        content=player.action_photo_data,
+        media_type=player.action_photo_mime or "image/png",
+        headers=_CACHE_HEADERS,
+    )
+
+
 @router.get("/scouted-players/{scouted_player_id}/photo")
 async def get_scouted_player_photo(scouted_player_id: str, db: AsyncSession = Depends(get_db)):
     """BetterScout's own scout-uploaded fallback photo — see

@@ -66,15 +66,17 @@ function PToggle({ on, onChange, label }) {
 }
 
 /* ── Photo management (admin only) ──────────────────────────────────────────
-   Two photographs, one row component. The HEADSHOT is the square mugshot that
-   reads at 44px on a roster row; the ACTION SHOT fills the hero slot on a
-   match-day post. Neither crops into the other's slot, which is why they are
-   stored separately (migration 274) rather than one being derived from the
-   other. `kind` picks which. ──────────────────────────────────────────────── */
+   Three photographs, one row component. The PROFILE PHOTO is the square
+   headshot that reads at 44px on a roster row; the HERO PHOTO fills the big
+   slot on a card, a share card and a match-day post; the ACTION SHOT (migration
+   375) is the player mid-shot, for that same big slot when the club picks it.
+   None crops into another's slot, which is why they are stored separately
+   (migration 274) rather than one being derived from another. `kind` picks
+   which. The hero photo was labelled "Action shot" before 375; same bytes. ── */
 const PHOTO_KINDS = {
   photo: {
-    label: 'Headshot',
-    hint: 'Square. Used on rosters, squad grids and beside a name.',
+    label: 'Profile photo',
+    hint: 'Square. Used on rosters, squad grids and beside a name, and sits in a circle on the player\u2019s Common and Rare cards, and on any card when there is no hero photo or action shot.',
     aspect: 1,
     thumb: 'w-11 h-11',
     addLabel: 'Upload photo',
@@ -85,19 +87,48 @@ const PHOTO_KINDS = {
     file: 'photo',
   },
   hero: {
-    label: 'Action shot',
-    hint: 'Tall. Fills the big photo on match-day posts. Free crop \u2014 the post\u2019s own Framing control does the final positioning.',
+    label: 'Hero photo',
+    hint: 'Tall. Fills the big photo on match-day posts and share cards, and the whole of the player\u2019s Epic card and of their special cards for a debut, a milestone or an award. Free crop \u2014 the post\u2019s own Framing control does the final positioning.',
     // Free crop on purpose: forcing a ratio here would crop twice and fight
     // the Framing control on the post itself.
     aspect: null,
     thumb: 'w-11 h-16',
-    addLabel: 'Upload action shot',
-    title: 'Edit Action Shot',
+    addLabel: 'Upload hero photo',
+    title: 'Edit Hero Photo',
     upload: (id, file) => api.adminUploadPlayerHeroPhoto(id, file),
     remove: (id) => api.adminDeletePlayerHeroPhoto(id),
     read: (r) => r.hero_photo_url,
     file: 'hero',
   },
+  action: {
+    label: 'Action shot',
+    hint: 'The player mid-shot. Fills the whole of their Legendary card and of their special cards for a century, fifty, five-for or hat-trick. It can also fill the hero position on posts and share cards: pick it below. Free crop.',
+    aspect: null,
+    thumb: 'w-11 h-16',
+    addLabel: 'Upload action shot',
+    title: 'Edit Action Shot',
+    upload: (id, file) => api.adminUploadPlayerActionPhoto(id, file),
+    remove: (id) => api.adminDeletePlayerActionPhoto(id),
+    read: (r) => r.action_photo_url,
+    file: 'action',
+  },
+}
+
+// Which of the hero photo and the action shot fills the big photo. '' is automatic: the hero photo, else the action shot.
+const HERO_SOURCE_OPTIONS = [
+  ['', 'Automatic (hero photo, else action shot)'],
+  ['hero', 'Hero photo'],
+  ['action', 'Action shot'],
+]
+
+// Says what the big photo will actually be, so a choice that falls back (nothing uploaded for it) is never a surprise.
+function heroSourceNote(source, heroUrl, actionUrl) {
+  if (!heroUrl && !actionUrl) return 'Nothing uploaded yet, so cards, share cards and posts use the profile photo.'
+  const want = source === 'action' ? 'action' : 'hero'
+  const have = { hero: !!heroUrl, action: !!actionUrl }
+  if (have[want]) return `${want === 'action' ? 'Action shot' : 'Hero photo'} fills the big photo.`
+  const other = want === 'action' ? 'hero' : 'action'
+  return `No ${want === 'action' ? 'action shot' : 'hero photo'} uploaded, so the ${other === 'action' ? 'action shot' : 'hero photo'} fills the big photo.`
 }
 
 function PhotoRow({ playerId, photoUrl, onPhotoChange, kind = 'photo', divider = true }) {
@@ -423,7 +454,7 @@ function AliasManager({ playerId }) {
   )
 }
 
-function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, onPhotoChange, heroPhotoUrl, onHeroPhotoChange, onPrivacyReleased }) {
+function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, onPhotoChange, heroPhotoUrl, onHeroPhotoChange, actionPhotoUrl, onActionPhotoChange, onPrivacyReleased }) {
   const bowlingLabelVal = bowlingLabel(draft.bowling_action, draft.bowling_type)
   const age = ageFromDob(draft.date_of_birth)
   // Where the two KIT SIZES live. They are not on this record and never will
@@ -619,8 +650,18 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
       {canEdit && playerId && (
         <>
           <PhotoRow playerId={playerId} photoUrl={photoUrl} onPhotoChange={onPhotoChange} />
-          <PhotoRow playerId={playerId} kind="hero" divider={false}
+          <PhotoRow playerId={playerId} kind="hero"
             photoUrl={heroPhotoUrl} onPhotoChange={onHeroPhotoChange} />
+          <PhotoRow playerId={playerId} kind="action"
+            photoUrl={actionPhotoUrl} onPhotoChange={onActionPhotoChange} />
+          <div className="mt-3 pt-3 border-t border-pb-hairline" data-hero-source>
+            <Field label="Big photo on cards and posts">
+              <PSelect value={draft.hero_source || ''} onChange={(v) => set('hero_source', v)} options={HERO_SOURCE_OPTIONS} />
+            </Field>
+            <p className="font-mono text-[9.5px] text-pb-faintest mt-1.5" data-hero-source-note>
+              {heroSourceNote(draft.hero_source, heroPhotoUrl, actionPhotoUrl)}
+            </p>
+          </div>
         </>
       )}
 
@@ -685,7 +726,7 @@ function NameMatchHold({ profileId, onReleased }) {
   )
 }
 
-export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit, onEditAvail, canEditAvail, onClose, onPhotoChange, onHeroPhotoChange, onPrivacyReleased, footer }) {
+export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit, onEditAvail, canEditAvail, onClose, onPhotoChange, onHeroPhotoChange, onActionPhotoChange, onPrivacyReleased, footer }) {
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }))
   const squad = profile.squad
   const handLabel = (BAT_HANDS.find((h) => h[0] === (draft.batting_hand || '')) || [])[1]
@@ -756,6 +797,7 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
           canEdit={canEdit} playerId={profile.id} playerName={profile.name}
           photoUrl={profile.photo_url} onPhotoChange={onPhotoChange}
           heroPhotoUrl={profile.hero_photo_url} onHeroPhotoChange={onHeroPhotoChange}
+          actionPhotoUrl={profile.action_photo_url} onActionPhotoChange={onActionPhotoChange}
           onPrivacyReleased={onPrivacyReleased} />
       </div>
       {footer}
@@ -817,6 +859,8 @@ export function draftFromProfile(p) {
     // always derived from this, never carried in the draft.
     date_of_birth: p.date_of_birth || '',
     shirt_number: p.shirt_number || '',
+    // '' is automatic. 'hero' or 'action' pins which photo fills the big slot.
+    hero_source: p.hero_source || '',
   }
 }
 
@@ -860,5 +904,7 @@ export function patchFromDraft(d) {
     date_of_birth: norm(d.date_of_birth),
     // Blank clears it, same rule as every other optional text field here.
     shirt_number: norm(d.shirt_number),
+    // Sent as an explicit null to go back to automatic, same reason as the overrides above.
+    hero_source: d.hero_source || null,
   }
 }

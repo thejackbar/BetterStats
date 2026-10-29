@@ -214,7 +214,7 @@ const run = async () => {
     })
     await p.goto(cardsUrl(BASE, 'tok123', '/packs'))
     await p.waitForSelector('[data-screen="packs"] [data-way]', { timeout: 20000 })
-    check('a club with no designs, and an older server that sends no pack_designs, keeps the built-in look and does not crash', (await p.locator('[data-pack-designed="yes"]').count()) === 0 && (await p.locator('[data-pack-design-bg]').count()) === 0 && (await p.locator('[data-way]').count()) === 22)
+    check('a club with no designs, and an older server that sends no pack_designs, keeps the built-in look and does not crash', (await p.locator('[data-pack-designed="yes"]').count()) === 0 && (await p.locator('[data-pack-design-bg]').count()) === 0 && (await p.locator('[data-way]').count()) === 23)
     await c.close()
   }
   check('no page errors', errors.length === 0, errors.join(' | '))

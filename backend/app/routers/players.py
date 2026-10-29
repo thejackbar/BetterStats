@@ -262,6 +262,8 @@ async def list_players(
             "claimed": p.claimed,
             "photo_url": p.photo_url,
             "hero_photo_url": p.hero_photo_url,
+            "action_photo_url": p.action_photo_url,
+            "hero_source": p.hero_source,
             "player_role": p.player_role,
         }
         for p in players
@@ -401,7 +403,7 @@ async def get_player_stats(
                 "match coverage failed for player %s", player_id)
 
     return {
-        "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url, "hero_photo_url": player.hero_photo_url, "is_overseas": player.is_overseas, "overseas_country": player.overseas_country, **(await _public_player_attrs(db, player))},
+        "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url, "hero_photo_url": player.hero_photo_url, "action_photo_url": player.action_photo_url, "hero_source": player.hero_source, "is_overseas": player.is_overseas, "overseas_country": player.overseas_country, **(await _public_player_attrs(db, player))},
         "career_batting": _str_keys(batting),
         "career_bowling": _str_keys(bowling),
         "career_fielding": _str_keys(fielding),
@@ -1093,6 +1095,10 @@ class PlayerProfileUpdate(BaseModel):
     # null clears it — the PATCH reads exclude_unset, so a present blank IS the
     # intent.
     shirt_number: Optional[str] = None
+    # Which of the hero photo and the action shot fills the hero position on a card, a share
+    # card and a post (migration 375). "hero" or "action" pins one; null (or "auto") is
+    # automatic. Read through exclude_unset like the rest, so an absent key leaves it alone.
+    hero_source: Optional[str] = None
     # Where they live and who to call (migration 356). Plain text, "" or null clears.
     address_line1: Optional[str] = None
     suburb: Optional[str] = None
@@ -1100,6 +1106,19 @@ class PlayerProfileUpdate(BaseModel):
     postcode: Optional[str] = None
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
+
+
+HERO_SOURCES = ("hero", "action")
+
+
+def _clean_hero_source(value) -> Optional[str]:
+    """`hero` or `action`, or None for automatic. Anything else is a 422, never stored."""
+    v = (value or "").strip().lower() if isinstance(value, str) else value
+    if v in (None, "", "auto"):
+        return None
+    if v not in HERO_SOURCES:
+        raise HTTPException(status_code=422, detail="hero_source must be 'hero', 'action' or empty for automatic")
+    return v
 
 
 def _profile_fields(player: Player) -> dict:
@@ -1135,6 +1154,8 @@ def _profile_fields(player: Player) -> dict:
         "emergency_contact_phone": player.emergency_contact_phone,
         "photo_url": player.photo_url,
         "hero_photo_url": player.hero_photo_url,
+        "action_photo_url": player.action_photo_url,
+        "hero_source": player.hero_source,
         "playhq_id": player.playhq_id,
         "squad_team_id": str(player.squad_team_id) if player.squad_team_id else None,
         "is_overseas": player.is_overseas,
@@ -1354,6 +1375,8 @@ async def update_player_profile(
     # bulk importer — see services/player_kit.py.
     if "shirt_number" in data:
         data["shirt_number"] = clean_shirt_number(data["shirt_number"])
+    if "hero_source" in data:
+        data["hero_source"] = _clean_hero_source(data["hero_source"])
     # Capture the effective display name before display_name_override changes,
     # so a rename via this route also gets remembered as an alias — same as
     # the club's rename path (club_admin PATCH /players/{id}).
@@ -1393,6 +1416,11 @@ async def update_player_profile(
     if old_display_name and old_display_name != player.display_name:
         await seed_alias_on_rename(db, player.organisation_id, player.id, old_display_name)
     await db.commit()
+    if "hero_source" in data:
+        # The collectable cards keep a snapshot of the club's players, the pick included, for a few
+        # minutes. A new pick has to show on the card now.
+        from app.services import player_cards
+        player_cards.forget(player.organisation_id)
     await db.refresh(player)
     return await _full_profile(db, player)
 

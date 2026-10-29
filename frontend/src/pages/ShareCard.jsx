@@ -8,6 +8,7 @@ import { fmtCount, formatSeason } from '../lib/cricketFormat'
 import { rememberClubSlug } from '../lib/clubSlug'
 import { useClubSponsors } from '../lib/useClubSponsors'
 import { exportNodePng } from '../lib/exportNodePng'
+import { heroShotUrl } from '../lib/playerShots'
 import FlipCard from '../components/FlipCard'
 import { CARD_W, CARD_H, PlayerCardFront, PlayerCardBack, cardSponsor, cardSponsorOptions, NO_SPONSOR, splitName } from '../components/PlayerTradingCard'
 
@@ -121,7 +122,7 @@ export default function ShareCard() {
 
   const accent = org?.theme_config?.accent || org?.accent_color || '#16c784'
   const display = clubDisplayFamily(org)
-  const faceProps = { player, org, accent, display, rankings, photoUrl: player.photo_url, heroUrl: player.hero_photo_url, seasonLabel, cb, cbw, cf }
+  const faceProps = { player, org, accent, display, rankings, photoUrl: player.photo_url, heroUrl: heroShotUrl(player), seasonLabel, cb, cbw, cf }
   const front = <PlayerCardFront {...faceProps} sponsor={sponsor} />
   const back = <PlayerCardBack {...faceProps} />
 
