@@ -9,15 +9,16 @@ import { CATEGORIES } from '../../components/cards/CardGallery'
 import { PACKS, TIERS } from '../../components/cards/cardTheme'
 import PackDesigns from './PackDesigns'
 import CreatePacks from './CreatePacks'
+import AdminChallenges from './AdminChallenges'
 
-// Player Cards, for the club's admin. Eight tabs: how the cards are being used (Overview), every player and what
+// Player Cards, for the club's admin. Nine tabs: how the cards are being used (Overview), every player and what
 // they hold (Players, then a click for their whole collection), what came in lately (Activity), every card that
 // exists and how many are out there (All cards), who has opened packs (Packs), an audit of swaps (Swaps), and the
 // club's switches (Settings). Everything but Settings only reads.
 
 const TABS = [
   ['overview', 'Overview'], ['players', 'Players'], ['activity', 'Activity'], ['cards', 'All cards'],
-  ['packs', 'Packs'], ['designs', 'Pack designs'], ['swaps', 'Swaps'], ['settings', 'Settings'],
+  ['packs', 'Packs'], ['designs', 'Pack designs'], ['challenges', 'Challenges'], ['swaps', 'Swaps'], ['settings', 'Settings'],
 ]
 const EXCLUDED = {
   private: 'Hidden from the public site (or removed at their request)',
@@ -366,6 +367,16 @@ function CatalogueTab({ club }) {
 }
 
 // ── Packs ───────────────────────────────────────────────────────────────────────────────────────────────────────
+// The challenges load when their tab first opens, then every save hands back the whole list.
+function ChallengesTab() {
+  const [payload, setPayload] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => { api.getPlayerCardChallenges().then(setPayload).catch((e) => setError(e?.message || 'Could not load challenges.')) }, [])
+  if (error) return <div role="alert" className="text-sm text-pb-red">{error}</div>
+  if (!payload) return <div className="text-sm text-pb-faint">Loading…</div>
+  return <AdminChallenges payload={payload} setPayload={setPayload} />
+}
+
 function PacksTab({ ov, open }) {
   const pool = ov.players.filter((p) => p.in_pool)
   const opened = pool.filter((p) => p.packs_opened > 0).sort((a, b) => (b.last_opened_at || '').localeCompare(a.last_opened_at || ''))
@@ -635,6 +646,7 @@ export default function AdminPlayerCards() {
     if (tab === 'settings') return <SettingsTab data={data} setData={setData} />
     if (tab === 'cards') return <CatalogueTab club={data.club} />
     if (tab === 'designs') return <PackDesigns data={data} setData={setData} />
+    if (tab === 'challenges') return <ChallengesTab />
     if (tab === 'swaps') return <SwapsTab />
     if (!ov) return <div className="text-sm text-pb-faint">Loading…</div>
     if (tab === 'activity') return <ActivityTab a={activity} open={open} />

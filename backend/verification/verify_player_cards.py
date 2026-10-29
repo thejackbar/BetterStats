@@ -95,6 +95,10 @@ if HAVE_SWAPS:
     except ImportError:   # the control run on the commit before packs could be designed and sized as they are made
         LOOKS_DDL = []
     try:
+        from app.services.player_card_challenges_ddl import STATEMENTS as CHALLENGES_DDL
+    except ImportError:   # the control run on the commit before challenges
+        CHALLENGES_DDL = []
+    try:
         from app.services.player_card_social_ddl import STATEMENTS as SOCIAL_DDL
     except ImportError:   # the control run on the commit before the social side
         SOCIAL_DDL = []
@@ -107,6 +111,7 @@ else:
     PACKS_DDL = []
     DESIGNS_DDL = []
     GIFTS_DDL = []
+    CHALLENGES_DDL = []
     LOOKS_DDL = []
     PHOTOS_DDL = []
     ITEM_DDL = []
@@ -186,7 +191,7 @@ async def build_schema() -> None:
             await conn.execute(text(sql.replace("OR REPLACE ", "")))
         for stmt in SUPERSEDED_DDL:
             await conn.execute(text(stmt))
-        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL + LOOKS_DDL:
+        for stmt in CARD_DDL + SWAP_DDL + SOCIAL_DDL + COMMUNITY_DDL + PACKS_DDL + DESIGNS_DDL + GIFTS_DDL + PHOTOS_DDL + LOOKS_DDL + CHALLENGES_DDL:
             await conn.execute(text(stmt))
 
 
@@ -2275,6 +2280,291 @@ async def main() -> None:
     else:
         check("(the control run has no photo rule to test)", True)
 
+    # ── Challenges: sets with a goal and a reward ─────────────────────────────────
+    print("\nchallenges")
+    if HAVE and CHALLENGES_DDL:
+        from app.services import player_card_challenges as CH
+        from app.routers import player_cards_admin as adm5, public_player_cards as pcr5
+        TIERS_ = ("common", "rare", "epic", "legendary")
+
+        def pc(tier, rarity, pid, **kw):
+            return {"kind": "player", "key": f"p:{pid}", "player_id": pid, "tier": tier, "rarity": rarity, **kw}
+
+        def sp(kind, pid, i=0):
+            return {"kind": "special", "key": f"s:{pid}{i}", "player_id": pid, "tier": "special", "special_kind": kind}
+
+        # the rules, as plain data
+        eleven = CH.clean_rules({"count": 11, "tiers_only": ["common"]})
+        check("a rule set is checked and filled in (cards of any kind by default, 11 cards)", eleven["count"] == 11 and eleven["kinds"] == "any" and eleven["tiers_only"] == ["common"], str(eleven))
+        for label, raw in (("an unknown rule", {"count": 3, "colour": "red"}), ("no cards", {"count": 0}), ("more than 30 cards", {"count": 31}), ("a tier that does not exist", {"count": 3, "tiers_only": ["mythic"]}),
+                           ("minimums that add up to more than the cards taken", {"count": 3, "min_tier": {"rare": 2, "epic": 2}}), ("a minimum in a tier the challenge rules out", {"count": 3, "tiers_only": ["common"], "min_tier": {"rare": 1}}),
+                           ("a squad rating over 99", {"count": 3, "min_rating": 120}), ("a list of players that is not ids", {"count": 3, "players": ["nope"]}), ("rules that are not an object", [1, 2])):
+            try:
+                CH.clean_rules(raw); got = None
+            except CH.ChallengeError as exc:
+                got = exc.status
+            check(f"{label} is refused", got == 422, str(got))
+        check("the rules read back as plain lines for the screen", CH.describe_rules(eleven) == ["11 cards", "All Common"] and "At least 3 Rare" in CH.describe_rules(CH.clean_rules({"count": 11, "min_tier": {"rare": 3}})) and "Squad rating 70 or more" in CH.describe_rules(CH.clean_rules({"count": 11, "min_rating": 70})) and "All different players" in CH.describe_rules(CH.clean_rules({"count": 11, "max_per_player": 1})))
+        # evaluate
+        ids = [str(uuid.uuid4()) for _ in range(12)]
+        elevenC = [pc("common", 20, ids[i]) for i in range(11)]
+        v = CH.evaluate(eleven, elevenC)
+        check("eleven Common cards meet 'eleven Common cards'", v["ok"] is True and all(c["ok"] for c in v["checks"]))
+        v = CH.evaluate(eleven, elevenC[:10])
+        check("ten do not, and the screen is told 10 of 11", v["ok"] is False and next(c for c in v["checks"] if c["id"] == "count")["have"] == 10)
+        v = CH.evaluate(eleven, elevenC[:10] + [pc("rare", 60, ids[11])])
+        check("a Rare in a Common-only challenge fails that line, and only that line", v["ok"] is False and [c["id"] for c in v["checks"] if not c["ok"]] == ["tiers_only"])
+        rare11 = CH.clean_rules({"count": 11, "tiers_only": ["rare"]})
+        check("'eleven Rare cards' takes eleven Rare and refuses Common", CH.evaluate(rare11, [pc("rare", 60, ids[i]) for i in range(11)])["ok"] and not CH.evaluate(rare11, elevenC)["ok"])
+        mix = CH.clean_rules({"count": 5, "min_tier": {"rare": 2, "epic": 1}})
+        check("minimums per tier: 2 Rare and an Epic among five", CH.evaluate(mix, [pc("rare", 60, ids[0]), pc("rare", 60, ids[1]), pc("epic", 80, ids[2]), pc("common", 10, ids[3]), pc("common", 10, ids[4])])["ok"] and not CH.evaluate(mix, [pc("rare", 60, ids[0]), pc("epic", 80, ids[2]), pc("common", 10, ids[3]), pc("common", 10, ids[4]), pc("common", 10, ids[5])])["ok"])
+        rating = CH.clean_rules({"count": 3, "min_rating": 70})
+        check("a squad rating is the average of the player cards' rarity", CH.evaluate(rating, [pc("epic", 80, ids[0]), pc("epic", 70, ids[1]), pc("rare", 60, ids[2])])["rating"] == 70.0 and CH.evaluate(rating, [pc("epic", 80, ids[0]), pc("epic", 70, ids[1]), pc("rare", 60, ids[2])])["ok"] and not CH.evaluate(rating, [pc("rare", 60, ids[0]), pc("rare", 60, ids[1]), pc("rare", 60, ids[2])])["ok"])
+        diff = CH.clean_rules({"count": 3, "max_per_player": 1})
+        check("'all different players' refuses two cards of one player (a special counts with their regular card)", CH.evaluate(diff, [pc("common", 5, ids[0]), pc("common", 5, ids[1]), pc("common", 5, ids[2])])["ok"] and not CH.evaluate(diff, [pc("common", 5, ids[0]), sp("century", ids[0]), pc("common", 5, ids[2])])["ok"])
+        only = CH.clean_rules({"count": 2, "players": ids[:3], "players_label": "2024 A Grade premiers"})
+        check("a challenge limited to named players refuses anyone else", CH.evaluate(only, [pc("common", 5, ids[0]), pc("common", 5, ids[1])])["ok"] and not CH.evaluate(only, [pc("common", 5, ids[0]), pc("common", 5, ids[7])])["ok"])
+        kindr = CH.clean_rules({"count": 2, "kinds": "specials", "special_kinds": ["century"]})
+        check("a challenge for specials of one kind takes those and no others", CH.evaluate(kindr, [sp("century", ids[0]), sp("century", ids[1])])["ok"] and not CH.evaluate(kindr, [sp("century", ids[0]), sp("fifty", ids[1])])["ok"] and not CH.evaluate(kindr, [sp("century", ids[0]), pc("common", 5, ids[1])])["ok"])
+        check("the reward is checked: a quality that exists, 1 to 5 packs, a size of 1 to 12", CH.clean_reward({"quality": "elite", "qty": 2, "size": 6}) == {"quality": "elite", "qty": 2, "size": 6})
+        for raw in ({"quality": "mythic"}, {"quality": "elite", "qty": 9}, {"quality": "elite", "size": 40}, "x"):
+            try:
+                CH.clean_reward(raw); bad_r = False
+            except CH.ChallengeError:
+                bad_r = True
+            check(f"a bad reward {str(raw)[:30]} is refused", bad_r)
+
+        async with Session() as db:
+            club = await db.get(Organisation, ORG)
+            admin_user = User(id=uuid.uuid4(), email="admin@example.com")
+            await db.execute(text("DELETE FROM club_card_challenges"))
+            await db.execute(text("UPDATE players SET photo_url = NULL, hero_photo_url = NULL, action_photo_url = NULL WHERE organisation_id = :o"), {"o": ORG})
+            await db.commit()
+            cards.forget(ORG)
+            snap = await cards.club_snapshot(db, club, fresh=True)
+            drawable = [pid for pid, f in snap["figs"].items() if f["matches"] > 0 and pid in snap["people"]]
+            tier_of = lambda pid: snap["rating"][pid]["tier"]
+            me = str(DELTA)
+            others = [pid for pid in drawable if pid != me]
+            await db.execute(text("DELETE FROM player_card_copies WHERE owner_player_id = :d"), {"d": DELTA})
+            async def give(subject, n=1, source="pack", special=None):
+                for _ in range(n):
+                    await db.execute(text("INSERT INTO player_card_copies (organisation_id, owner_player_id, subject_player_id, special_id, source) VALUES (:o, :d, :s, CAST(:sp AS UUID), :src)"),
+                                     {"o": ORG, "d": DELTA, "s": subject, "sp": special, "src": source})
+            held_n = lambda subject: db.execute(text("SELECT count(*) FROM player_card_copies WHERE owner_player_id = :d AND subject_player_id = :s AND special_id IS NULL"), {"d": DELTA, "s": subject})
+            target = others[0]
+            await give(target, 5)
+            await db.commit()
+
+            # an admin publishes an exchange: three cards of one tier, paying an Elite pack of six
+            tier_t = tier_of(target)
+            made = await adm5.create_challenge(adm5.ChallengeBody(kind="exchange", title="Three of a kind", blurb="Hand in three " + tier_t,
+                                                                 rules={"count": 3, "tiers_only": [tier_t]}, reward={"quality": "elite", "qty": 2, "size": 6}, max_completions=2), db, club, admin_user)
+            chid = next(c["id"] for c in made["challenges"] if c["title"] == "Three of a kind")
+            check("the admin publishes an exchange challenge, and the payload lists it with its requirements", any(c["id"] == chid and c["requirements"] == ["3 cards", f"All {CH.TIER_NAME[tier_t]}"] for c in made["challenges"]), str(made["challenges"]))
+            check("...with the premierships, players, tiers and kinds the admin can build from, and the limits", all(k in made for k in ("premierships", "players", "tiers", "special_kinds", "qualities", "limits")))
+            club = await db.get(Organisation, ORG)
+            codes = []
+            for body in (adm5.ChallengeBody(kind="exchange", title="", rules={"count": 3}), adm5.ChallengeBody(kind="exchange", title="Bad", rules={"count": 99}), adm5.ChallengeBody(kind="exchange", title="Bad", rules={"count": 3}, reward={"quality": "no"}),
+                         adm5.ChallengeBody(kind="nonsense", title="Bad"), adm5.ChallengeBody(kind="exchange", title="Bad", rules={"count": 3}, starts_on="2030-02-01", ends_on="2030-01-01")):
+                codes.append(await status_of(adm5.create_challenge(body, db, club, admin_user))); club = await db.get(Organisation, ORG)
+            check("a challenge with no name, too many cards, a bad reward, an unknown kind or dates the wrong way round is refused (422)", codes == [422] * 5, str(codes))
+
+            ov = await CH.overview(db, club, snap, me)
+            mine_c = next(c for c in ov["challenges"] if c["id"] == chid)
+            check("the player sees it with the reward, the rules, and nothing done yet", mine_c["status"] == "open" and mine_c["completions"] == 0 and mine_c["reward"]["quality"] == "elite" and mine_c["reward"]["size"] == 6 and mine_c["reward"]["qty"] == 2 and mine_c["requirements"][0] == "3 cards", str(mine_c))
+            det = await CH.detail(db, club, snap, me, chid)
+            keys = {c["key"]: c for c in det["cards"]}
+            check("the cards they can hand in are the ones they hold, with how many (their own card is not one of them)", keys.get(f"p:{target}", {}).get("spendable") == 5 and f"p:{me}" not in keys, str(list(keys)))
+
+            # a starting card is never spendable
+            gift_special = (await db.execute(text("SELECT id::text FROM player_special_cards WHERE player_id = :p LIMIT 1"), {"p": me})).scalar()
+            if gift_special:
+                await give(me, 1, source="gift", special=gift_special)
+                await db.commit()
+                det2 = await CH.detail(db, club, snap, me, chid)
+                check("a starting (gifted) card is not offered for hand-in", all(c["key"] != f"s:{gift_special}" for c in det2["cards"]))
+                try:
+                    await CH.check(db, club, snap, me, chid, [{"key": f"s:{gift_special}", "qty": 1}]); refused_gift = False
+                except CH.ChallengeError:
+                    refused_gift = True
+                check("...and handing one in is refused", refused_gift)
+                await db.rollback()
+                club = await db.get(Organisation, ORG)
+
+            async def refused_ch(coro):
+                try:
+                    await coro
+                    return None
+                except CH.ChallengeError as exc:
+                    return exc.status
+            check("a card the player does not hold, or more copies than they have, or their own card, is refused", await refused_ch(CH.check(db, club, snap, me, chid, [{"key": f"p:{others[1]}", "qty": 1}])) == 422 and await refused_ch(CH.check(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 6}])) == 422 and await refused_ch(CH.check(db, club, snap, me, chid, [{"key": f"p:{me}", "qty": 1}])) == 422)
+            two = await CH.check(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 2}])
+            three = await CH.check(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 3}])
+            check("checking says 2 of 3 is not enough and 3 is, and changes nothing", two["ok"] is False and three["ok"] is True and (await held_n(target)).scalar() == 5)
+            check("handing in too few is refused and spends nothing", await refused_ch(CH.submit(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 2}])) == 422 and (await held_n(target)).scalar() == 5)
+            await db.rollback()
+            club = await db.get(Organisation, ORG)
+            out = await CH.submit(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 3}])
+            await db.commit()
+            check("handing in three spends three, records the run and pays two Elite packs", out["ok"] and out["spent"] == 3 and out["packs"] == 2 and out["completions"] == 1 and (await held_n(target)).scalar() == 2, str(out))
+            rp = (await db.execute(text("SELECT label, quality, size, source FROM player_card_packs WHERE player_id = :d AND source = 'reward' AND ref_key LIKE :r ORDER BY ref_key"), {"d": DELTA, "r": f"{chid}:%"})).fetchall()
+            check("the packs are named for the challenge, Elite, six cards", len(rp) == 2 and all(r[0] == "Three of a kind" and r[1] == "elite" and r[2] == 6 and r[3] == "reward" for r in rp), str(rp))
+            run = (await db.execute(text("SELECT n, submitted FROM player_card_challenge_runs WHERE player_id = :d AND challenge_key = :k"), {"d": DELTA, "k": chid})).first()
+            check("the run keeps a record of what was spent", run[0] == 1 and run[1] == [{"key": f"p:{target}", "qty": 3}], str(run))
+            snap_open = await cards.club_snapshot(db, club, fresh=True)
+            pk = next(p for p in await cards.available_packs(db, me, snap_open) if p["source"] == "reward")
+            check("the reward pack shows in the player's list under its name and quality", pk["label"] == "Three of a kind" and pk["quality"] == "elite" and pk["size"] == 6)
+            club = await db.get(Organisation, ORG)
+            got6 = await cards.open_pack(db, club, await db.get(Player, DELTA), pk["id"], snap_open)
+            await db.commit()
+            check("opening it gives six cards", got6 is not None and len(got6) == 6, str(len(got6 or [])))
+            await give(target, 3)
+            await db.commit()
+            out2 = await CH.submit(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 3}])
+            await db.commit()
+            check("a second completion is allowed because the challenge allows two", out2["completions"] == 2 and out2["completions"] == out2["max_completions"])
+            await give(target, 3)
+            await db.commit()
+            before3 = (await held_n(target)).scalar()
+            third = await refused_ch(CH.submit(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 3}]))
+            check("a third is refused (409) and spends nothing", third == 409 and (await held_n(target)).scalar() == before3, f"{third} held={(await held_n(target)).scalar()} before={before3}")
+            await db.rollback()
+            club = await db.get(Organisation, ORG)
+
+            # open and close dates
+            soon = await adm5.create_challenge(adm5.ChallengeBody(kind="exchange", title="Next month", rules={"count": 1}, reward={"quality": "standard"}, starts_on="2099-01-01"), db, club, admin_user)
+            club = await db.get(Organisation, ORG)
+            old = await adm5.create_challenge(adm5.ChallengeBody(kind="exchange", title="Last month", rules={"count": 1}, reward={"quality": "standard"}, ends_on="2000-01-01"), db, club, admin_user)
+            soon_id = next(c["id"] for c in soon["challenges"] if c["title"] == "Next month"); old_id = next(c["id"] for c in old["challenges"] if c["title"] == "Last month")
+            club = await db.get(Organisation, ORG)
+            check("a challenge that has not started or has ended cannot be handed in to (409)", await refused_ch(CH.submit(db, club, snap, me, soon_id, [{"key": f"p:{target}", "qty": 1}])) == 409 and await refused_ch(CH.submit(db, club, snap, me, old_id, [{"key": f"p:{target}", "qty": 1}])) == 409)
+            await db.rollback()
+            club = await db.get(Organisation, ORG)
+            statuses = {c["title"]: c["status"] for c in (await CH.overview(db, club, snap, me))["challenges"]}
+            check("...and the list says so", statuses["Next month"] == "soon" and statuses["Last month"] == "ended")
+            await adm5.update_challenge(old_id, adm5.ChallengeBody(kind="exchange", title="Last month", rules={"count": 1}, reward={"quality": "standard"}, active=False), db, club, admin_user)
+            club = await db.get(Organisation, ORG)
+            check("an inactive challenge is hidden from players", all(c["title"] != "Last month" for c in (await CH.overview(db, club, snap, me))["challenges"]))
+            check("a challenge that does not exist (or is not this club's) is a 404", await refused_ch(CH.detail(db, club, snap, me, str(uuid.uuid4()))) == 404 and await refused_ch(CH.detail(db, club, snap, me, "nope")) == 404)
+
+            # collections: a premiership side
+            await db.execute(text("DELETE FROM player_achievements WHERE org_id = :o AND category = 'Premiership'"), {"o": ORG})
+            pair = others[:2]
+            for pid in pair:
+                await db.execute(text("INSERT INTO player_achievements (org_id, player_id, player_name, season, category, subcategory, achievement) VALUES (:o, :p, 'x', '2024', 'Premiership', 'A Grade', 'Premiership')"), {"o": ORG, "p": pid})
+            await db.commit()
+            club = await db.get(Organisation, ORG)
+            opts = await CH.premiership_options(db, club, snap)
+            check("the club's premierships are offered by season and grade, with the players who have a card", any(o["season"] == "2024" and o["grade"] == "A Grade" and o["players"] == 2 and "premiers" in o["label"] for o in opts), str(opts))
+            col = await adm5.create_challenge(adm5.ChallengeBody(kind="collection", title="2024 A Grade premiers", selector={"type": "premiership", "season": "2024", "grade": "A Grade"}, reward={"quality": "premium", "qty": 1, "size": 5}), db, club, admin_user)
+            colid = next(c["id"] for c in col["challenges"] if c["title"] == "2024 A Grade premiers")
+            club = await db.get(Organisation, ORG)
+            stored = next(c for c in col["challenges"] if c["id"] == colid)
+            check("a collection is the cards of that premiership side, worked out and fixed when it is made", sorted(stored["rules"]["card_keys"]) == sorted(f"p:{p}" for p in pair) and stored["rules"]["need"] == 2, str(stored["rules"]))
+            await db.execute(text("DELETE FROM player_card_copies WHERE owner_player_id = :d"), {"d": DELTA}); await give(pair[0]); await db.commit()
+            ov2 = await CH.overview(db, club, snap, me)
+            c2 = next(c for c in ov2["challenges"] if c["id"] == colid)
+            check("a collection lists its cards with which ones the player holds", [m["held"] for m in sorted(c2["members"], key=lambda m: m["key"])] == [k == f"p:{pair[0]}" for k in sorted(m["key"] for m in c2["members"])] and {m["key"] for m in c2["members"]} == {f"p:{x}" for x in pair} and all(m["name"] for m in c2["members"]), str(c2["members"]))
+            check("holding one of two shows 1 of 2 and is not complete", c2["owned"] == 1 and c2["total"] == 2 and c2["complete"] is False and c2["percent"] == 50, str(c2))
+            await give(pair[1]); await db.commit()
+            paid = await CH.claim_rewards(db, club, snap, me)
+            await db.commit()
+            check("holding both pays the reward, once, naming the challenge", any(p["title"] == "2024 A Grade premiers" for p in paid) and (await db.execute(text("SELECT count(*) FROM player_card_packs WHERE player_id = :d AND source = 'reward' AND ref_key LIKE :r"), {"d": DELTA, "r": f"{colid}:%"})).scalar() == 1, str(paid))
+            again = await CH.claim_rewards(db, club, snap, me)
+            await db.commit()
+            check("asking again pays nothing more", not any(p["title"] == "2024 A Grade premiers" for p in again))
+            await db.execute(text("DELETE FROM player_card_copies WHERE owner_player_id = :d AND subject_player_id = :s"), {"d": DELTA, "s": pair[1]}); await db.commit()
+            check("losing a card later does not take the reward back, and does not pay it twice when the card returns", (await db.execute(text("SELECT count(*) FROM player_card_packs WHERE player_id = :d AND source = 'reward' AND ref_key LIKE :r"), {"d": DELTA, "r": f"{colid}:%"})).scalar() == 1 and not any(p["title"] == "2024 A Grade premiers" for p in await CH.claim_rewards(db, club, snap, me)))
+            await db.rollback()
+            club = await db.get(Organisation, ORG)
+
+            # the code-defined sets pay too
+            await db.execute(text("DELETE FROM player_card_challenge_runs WHERE player_id = :d AND challenge_key LIKE 'set:%'"), {"d": DELTA})
+            defs = await sets_mod.definitions(db, club, snap) if "sets_mod" in dir() else None
+            from app.services import player_card_sets as sets_mod2
+            defs = await sets_mod2.definitions(db, club, snap)
+            if defs:
+                d0 = defs[0]
+                for pid in d0["players"]:
+                    await give(pid)
+                for sid in d0["specials"]:
+                    subject = (await db.execute(text("SELECT player_id::text FROM player_special_cards WHERE id = CAST(:i AS UUID)"), {"i": sid})).scalar()
+                    await give(subject, 1, special=sid)
+                await db.commit()
+                paid2 = await CH.claim_rewards(db, club, snap, me)
+                await db.commit()
+                total0 = len(sets_mod2.card_keys(d0))
+                check("finishing a set the code defines pays a pack, sized to the set, once", any(p["title"] == d0["title"] and p["quality"] == CH.set_reward(total0)["quality"] for p in paid2) and not any(p["title"] == d0["title"] for p in await CH.claim_rewards(db, club, snap, me)), str(paid2))
+            check("a small set pays less than a big one", CH.set_reward(3)["quality"] == "boosted" and CH.set_reward(8)["quality"] == "special" and CH.set_reward(20)["quality"] == "premium")
+            await db.rollback()
+            club = await db.get(Organisation, ORG)
+
+            # a player's own private sets
+            ms = await CH.create_my_set(db, club, snap, me, {"title": "  My   favourites ", "selector": {"type": "players", "player_ids": others[:3]}})
+            await db.commit()
+            ov3 = await CH.overview(db, club, snap, me)
+            mine_set = next(s for s in ov3["my_sets"] if s["id"] == ms["id"])
+            check("a player makes a set of players they want; it is named as they typed it and counts what they hold", mine_set["title"] == "My favourites" and mine_set["total"] == len(set(others[:3])) and mine_set["owned"] >= 0, str(mine_set))
+            other_me = str(ALPHA)
+            check("nobody else sees it", all(s["id"] != ms["id"] for s in (await CH.overview(db, club, snap, other_me))["my_sets"]))
+            check("nobody else can delete it", await CH.delete_my_set(db, other_me, ms["id"]) is False and await CH.delete_my_set(db, me, "nope") is False)
+            check("it pays nothing, however complete (no reward is ever recorded for a private set)", (await db.execute(text("SELECT count(*) FROM player_card_challenge_runs WHERE challenge_key = :k"), {"k": ms["id"]})).scalar() == 0)
+            check("a private set lists its cards with which ones the player holds", {m["key"] for m in mine_set["members"]} == {f"p:{x}" for x in set(others[:3])} and all("held" in m for m in mine_set["members"]))
+            only_prem = await adm5.create_challenge(adm5.ChallengeBody(kind="exchange", title="Premier squad", rules={"count": 2, "premiership": {"season": "2024", "grade": "A Grade"}}, reward={"quality": "boosted"}), db, club, admin_user)
+            club = await db.get(Organisation, ORG)
+            ps = next(c for c in only_prem["challenges"] if c["title"] == "Premier squad")
+            check("an exchange limited to a premiership side is turned into those players, with the side's name", sorted(ps["rules"]["players"]) == sorted(pair) and "premiers" in ps["rules"]["players_label"] and "premiership" not in ps["rules"], str(ps["rules"]))
+            tier_set = await CH.create_my_set(db, club, snap, me, {"selector": {"type": "tier", "tier": tier_of(target)}})
+            check("a set can be built from a tier, and takes its name from it when none is given", tier_set["title"].startswith("Every ") and tier_set["total"] >= 1, str(tier_set))
+            await db.commit()
+            club = await db.get(Organisation, ORG)
+            check("a set with nothing in it, or an unknown kind, is refused", await refused_ch(CH.create_my_set(db, club, snap, me, {"selector": {"type": "players", "player_ids": [str(uuid.uuid4())]}})) == 422 and await refused_ch(CH.create_my_set(db, club, snap, me, {"selector": {"type": "wishes"}})) == 422)
+            await db.rollback()
+            club = await db.get(Organisation, ORG)
+            for i in range(CH.MAX_MY_SETS):
+                try:
+                    await CH.create_my_set(db, club, snap, me, {"title": f"s{i}", "selector": {"type": "players", "player_ids": others[:1]}})
+                except CH.ChallengeError:
+                    break
+            check("a player can keep only so many sets", await refused_ch(CH.create_my_set(db, club, snap, me, {"title": "one too many", "selector": {"type": "players", "player_ids": others[:1]}})) == 422)
+            await db.rollback()
+            club = await db.get(Organisation, ORG)
+
+            # the routes
+            rq = request_for(DELTA, ORG)
+            await db.execute(text("DELETE FROM player_card_my_sets WHERE player_id = :d"), {"d": DELTA}); await db.commit()
+            listed = await pcr5.get_challenges(TOKEN, rq, db)
+            check("the player route lists the challenges, their own sets and anything just earned", "challenges" in listed and "my_sets" in listed and "earned" in listed)
+            opts2 = await pcr5.get_challenge_options(TOKEN, rq, db)
+            check("the options route lists premierships, players, tiers and kinds", all(k in opts2 for k in ("premierships", "players", "tiers", "special_kinds")) and any(p["id"] == target for p in opts2["players"]))
+            made_set = await pcr5.create_my_set(TOKEN, pcr5.MySetBody(title="Route set", selector={"type": "players", "player_ids": others[:2]}), rq, db)
+            check("the route makes a private set and deletes it", made_set["total"] == len(set(others[:2])) and (await pcr5.delete_my_set(TOKEN, made_set["id"], rq, db))["status"] == "deleted")
+            check("deleting one that is not theirs is a 404", await status_of(pcr5.delete_my_set(TOKEN, str(uuid.uuid4()), rq, db)) == 404)
+            sets_res = await pcr5.get_sets(TOKEN, rq, db)
+            check("the Sets route also pays what a finished set has earned and says so", "earned" in sets_res)
+            await db.rollback()
+            club = await db.get(Organisation, ORG)
+
+            # removing a challenge keeps what players did
+            await adm5.delete_challenge(chid, db, club, admin_user)
+            check("removing a challenge keeps what players did and the packs they earned", (await db.execute(text("SELECT count(*) FROM player_card_challenge_runs WHERE challenge_key = :k"), {"k": chid})).scalar() == 2 and (await db.execute(text("SELECT count(*) FROM player_card_packs WHERE source = 'reward' AND ref_key LIKE :r"), {"r": f"{chid}:%"})).scalar() >= 2)
+            club = await db.get(Organisation, ORG)
+            check("deleting one that is not there is a 404, and another club cannot", await status_of(adm5.delete_challenge(str(uuid.uuid4()), db, club, admin_user)) == 404)
+            await db.rollback()
+
+            # a merge carries what a player completed and their private sets
+            club = await db.get(Organisation, ORG)
+            keeper, dropped = INDIA, FOXTROT
+            await db.execute(text("INSERT INTO player_card_challenge_runs (organisation_id, challenge_key, player_id, title, n) VALUES (:o, 'merge-test', :d, 'Merge test', 1), (:o, 'merge-test', :k, 'Merge test', 1), (:o, 'only-dropped', :d, 'Only dropped', 1)"), {"o": ORG, "d": dropped, "k": keeper})
+            await db.execute(text("INSERT INTO player_card_my_sets (organisation_id, player_id, title) VALUES (:o, :d, 'Dropped set')"), {"o": ORG, "d": dropped})
+            await db.commit()
+            moved2 = await merge_carry.carry_rows(db, keeper, dropped, ORG)
+            await db.commit()
+            check("a player merge carries what was completed (once each) and their private sets", (await db.execute(text("SELECT count(*) FROM player_card_challenge_runs WHERE player_id = :d"), {"d": dropped})).scalar() == 0 and (await db.execute(text("SELECT count(*) FROM player_card_challenge_runs WHERE player_id = :k AND challenge_key IN ('merge-test', 'only-dropped')"), {"k": keeper})).scalar() == 2 and (await db.execute(text("SELECT count(*) FROM player_card_my_sets WHERE player_id = :k"), {"k": keeper})).scalar() == 1, str(moved2.keys()))
+    else:
+        check("(the control run has no challenges to test)", True)
+
     print("\nmigration")
     async with engine.begin() as conn:
         for stmt in CARD_DDL:
@@ -2289,6 +2579,9 @@ async def main() -> None:
         check("the items migration follows 365, runs its own shared list, and drops only its own table", "down_revision = \"365\"" in mig3 and "ITEM_STATEMENTS" in mig3 and "ITEM_DOWNGRADE" in mig3)
     main_src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
     check("the lifespan mirrors the same list", "from app.services.player_cards_ddl import STATEMENTS" in main_src)
+    if CHALLENGES_DDL:
+        mig9 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "380_player_card_challenges.py").read_text()
+        check("the challenges migration follows 379, runs the shared list, and its lifespan mirror runs it too", 'down_revision = "379"' in mig9 and "STATEMENTS" in mig9 and "player_card_challenges_ddl" in main_src)
     if PHOTOS_DDL:
         mig8 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "379_player_card_big_photos_default.py").read_text()
         check("the photos default migration (379) follows 378, puts 'all' back as the default and moves only rows still on the old one", 'down_revision = "378"' in mig8 and "SET DEFAULT 'all'" in mig8 and "WHERE big_photos = 'top'" in mig8)

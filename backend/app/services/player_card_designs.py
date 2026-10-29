@@ -119,7 +119,7 @@ async def targets(db: AsyncSession, org_id) -> list[dict]:
     groups = (("Everyday", ("starter", "weekly", "runs", "wickets", "dismissals", "duck")),
               ("For what you do", ("century", "five_for", "hat_trick", "fifty", "milestone")),
               ("On the day", tuple(kinds.DAY_SOURCES)),
-              ("From the club", ("custom",)))
+              ("From the club", ("custom", "reward")))
     for group, sources in groups:
         for s in sources:
             out.append({"key": s, "label": kinds.KINDS[s].label, "group": group})

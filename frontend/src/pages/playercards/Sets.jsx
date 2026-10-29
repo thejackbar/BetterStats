@@ -10,6 +10,19 @@ import { usePC } from './context'
 
 const MONO = "'JetBrains Mono', monospace"
 
+// What a player has just been paid for finishing something. Shown once: the next visit has nothing new to say.
+export function EarnedBanner({ earned }) {
+  const { accent } = usePC()
+  if (!earned || !earned.length) return null
+  return (
+    <div data-earned role="status" className="rounded-2xl border p-4 mb-5" style={{ borderColor: accent }}>
+      {earned.map((e) => (
+        <div key={e.title} className="text-sm"><strong>{e.title}</strong> is finished. You earned {e.qty === 1 ? 'a' : e.qty} {e.quality_label} reward {e.qty === 1 ? 'pack' : 'packs'}. Open {e.qty === 1 ? 'it' : 'them'} from Open packs.</div>
+      ))}
+    </div>
+  )
+}
+
 function Tabs({ tab }) {
   const { basePath, accent, features } = usePC()
   const tabs = [['sets', '', 'Sets'], ['board', '/board', 'Collectors'], ['week', '/week', 'This week']].filter(([k]) => (k === 'sets' ? features.sets : features[k === 'week' ? 'feed' : 'board']))
@@ -24,16 +37,18 @@ function Tabs({ tab }) {
 }
 
 export function SetsList() {
-  const { token, basePath, accent, display } = usePC()
+  const { token, basePath, accent, display, load } = usePC()
   const [data, setData] = useState(null)
   const [failed, setFailed] = useState(false)
-  useEffect(() => { api.availPublicSets(token).then(setData).catch(() => setFailed(true)) }, [token])
+  // A reward pack paid on this visit has to show in the pack count at once.
+  useEffect(() => { api.availPublicSets(token).then((d) => { setData(d); if (d.earned?.length) load() }).catch(() => setFailed(true)) }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
   if (failed) return <div className="text-sm text-pb-faint" data-sets-failed>Sets could not load. Reload to try again.</div>
   if (!data) return <div className="text-sm text-pb-faint" data-sets-loading>Loading sets…</div>
   const groups = [...new Set(data.sets.map((s) => s.group))]
   return (
     <div data-sets-list>
-      <p className="text-sm text-pb-dim mb-4 max-w-prose">Work towards completing a set by collecting every card in it. {data.complete > 0 ? `You have finished ${data.complete} ${data.complete === 1 ? 'set' : 'sets'}.` : 'There is no prize for finishing one beyond bragging rights.'}</p>
+      <EarnedBanner earned={data.earned} />
+      <p className="text-sm text-pb-dim mb-4 max-w-prose">Work towards completing a set by collecting every card in it, and finish it to earn a reward pack. {data.complete > 0 ? `You have finished ${data.complete} ${data.complete === 1 ? 'set' : 'sets'}.` : 'The bigger the set, the better the pack.'} Looking for something to hand cards in for? Try <Link to={`${basePath}/challenges`} className="underline">Challenges</Link>.</p>
       {data.sets.length === 0 && <div className="text-sm text-pb-dim" data-no-sets>The club does not have enough cards to make sets yet.</div>}
       {groups.map((g) => (
         <div key={g} className="mb-6">

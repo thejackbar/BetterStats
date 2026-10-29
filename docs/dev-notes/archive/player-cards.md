@@ -236,3 +236,14 @@ Reported: some players had lost the full photo on their card. Cause: v9.134.2 (r
 - Migration 379 sets the column default to `all` and moves rows still on `top` (nobody chose it; it was the default for three days). The default change is also in the lifespan list; the data step is alembic only.
 - Verified: `verify_player_cards.py` (558), browser `_hero_` and `_admin_` suites.
 
+
+## v9.136.0 (2026-10-30): challenges, and sets that pay a pack
+
+Asked for: players make their own sets, admins offer sets to everyone, sets work like SBCs in EAFC (hit criteria such as 11 Rares or 11 Commons, get a reward), and finishing a set earns a pack. Sets stay private to the player who made them.
+
+- Migration 380: `club_card_challenges`, `player_card_challenge_runs` (unique on player, challenge, n), `player_card_my_sets`. New pack kinds `custom` and `reward`, and `QUALITIES` is shared with the pack creator.
+- Exchange rules: count, kinds (any, players, specials), tiers allowed, minimum per tier, squad rating, most cards of one player (1 means all different), special kinds, and a premiership side (turned into a fixed player list when saved). Collection selectors: premiership side, chosen players, every card of a tier, every special card of a kind.
+- Decided: private sets pay nothing (a player could otherwise make a one-card set per pack); code-defined sets pay once; a collection keeps its cards; only an exchange spends them. Copies from starting gifts and a player's own card cannot be handed in, so a hand-in never costs a player their starting set.
+- Existing players with a finished set receive the reward pack the first time they open Sets or Challenges after release. This is deliberate and shown once as a banner.
+- Not done (proposed, not asked for yet): saved XIs built from held cards, and "nominate what you are collecting" as a goal on Home.
+- Verified: `verify_player_cards.py` (631), `verify_merge_carry.py`, `verify_player_page_dashboard.py`, `verify_player_dashboard_and_fines.py`, `verify_player_action_photo.py`, `verify_player_privacy.py`, `audit_route_access.py`; browser `_challenges_` (37, new), `_page_` (66), `_designs_` (35), `_admin_` (99), `_hero_` (11), community, social, v2, v3 and the base suite.

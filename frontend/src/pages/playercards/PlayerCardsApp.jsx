@@ -19,6 +19,8 @@ import Wishlist from './Wishlist'
 import Spares from './Spares'
 import CardPage from './CardPage'
 import Settings from './Settings'
+import Challenges from './Challenges'
+import ChallengePage from './ChallengePage'
 import Sets from './Sets'
 import SetPage from './SetPage'
 import Showcase from './Showcase'
@@ -61,6 +63,8 @@ function Shell() {
               <Route path="cards/spares" element={<Spares />} />
               <Route path="cards/card/:key" element={<CardPage />} />
               <Route path="cards/showcase" element={<Showcase />} />
+              <Route path="cards/challenges" element={<Challenges />} />
+              <Route path="cards/challenges/:id" element={<ChallengePage />} />
               <Route path="cards/sets" element={<Sets tab="sets" />} />
               <Route path="cards/sets/board" element={<Sets tab="board" />} />
               <Route path="cards/sets/week" element={<Sets tab="week" />} />

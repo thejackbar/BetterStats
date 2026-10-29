@@ -59,10 +59,19 @@ export default function HowItWorks() {
       </Section>
       <Section id="club" title="Sets, showcase and the collectors board">
         <ul>
-          <li>A set is a group of cards you can work towards completing, such as every century at the club or a season's awards. Finishing one earns a banner and bragging rights, nothing more.</li>
+          <li>A set is a group of cards you can work towards completing, such as every century at the club or a season's awards. Finishing one earns a banner and a reward pack from your club. The bigger the set, the better the pack, and each set pays once.</li>
           <li>Your showcase is up to six cards you hold, pinned for the club to see next to your name.</li>
           <li>The collectors board ranks everyone in the club, by how much of the club's set they hold. You can leave it in Settings. It counts different cards, never copies, so hoarding doubles does not help.</li>
           <li>This week lists what has happened in the club's cards lately. You can leave your name out of it in Settings.</li>
+        </ul>
+      </Section>
+      <Section id="challenges" title="Challenges and your own sets">
+        <ul>
+          <li>Your club can set challenges with a reward pack for finishing. A hand-in challenge asks for cards that meet some rules, such as 11 Rares or a squad rated 70 or more. The cards you hand in are spent, so it is a good home for doubles. Your own card and your starting cards cannot be handed in.</li>
+          <li>The rules are checked as you pick, so you can see what is still missing. You are asked once more before anything is handed in.</li>
+          <li>A collect challenge asks you to hold every card on a list, such as a premiership side. You keep the cards, and the reward arrives when the last one lands.</li>
+          <li>You can make sets of your own, such as the players from a premiership you want to collect. Only you can see them, and they pay nothing.</li>
+          <li>Reward packs turn up under Open packs, like any other.</li>
         </ul>
       </Section>
       <Section id="privacy" title="Who sees what">

@@ -183,6 +183,7 @@ export const PACKS = {
   australia_day: { label: 'Australia Day pack', line: 'Good on ya', a: '#fde68a', b: '#065f46', on: '#ffffff', stars: 2 },
   anzac_day: { label: 'Anzac Day pack', line: 'Lest we forget', a: '#e7e5e4', b: '#7f1d1d', on: '#ffffff', stars: 2 },
   event: { label: 'Event pack', line: 'Today only', a: '#7dd3fc', b: '#0c4a6e', on: '#ffffff', stars: 2 },
+  reward: { label: 'Reward pack', line: 'Earned in a challenge', a: '#fde68a', b: '#78350f', on: '#fffbeb', stars: 2 },
   custom: { label: 'Club pack', line: 'A gift from your club', a: '#fecdd3', b: '#9f1239', on: '#ffffff', stars: 2 },
   // For something the player did: the more stars, the better the cards.
   fifty: { label: 'Fifty pack', line: 'Fifty up', a: '#bfdbfe', b: '#1d4ed8', on: '#ffffff', stars: 3 },

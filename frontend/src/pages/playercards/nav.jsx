@@ -20,6 +20,7 @@ export const NAV = [
   { key: 'swaps', label: 'Swaps', icon: 'swaps', to: '/swaps', badge: 'swaps' },
   { key: 'spares', label: 'Spares', icon: 'spares', to: '/spares' },
   { group: 'Club', feature: ['sets', 'board', 'feed'] },
+  { key: 'challenges', label: 'Challenges', icon: 'target', to: '/challenges', feature: ['sets'] },
   { key: 'sets', label: 'Sets and board', icon: 'trophy', to: '/sets', feature: ['sets', 'board', 'feed'] },
   { group: 'Help' },
   { key: 'how', label: 'How it works', icon: 'help', to: '/how' },

@@ -1136,7 +1136,7 @@ async def ensure_grants(db: AsyncSession, club: Organisation, pid: str, snap: di
 
 # Where each kind of pack sits in the list: what is special or time-limited first, bulk packs last.
 _PACK_ORDER = {"starter": 0, **{k: 1 for k in ("century", "five_for", "hat_trick", "fifty", "milestone")},
-               **{k: 2 for k in kinds.DAY_SOURCES}, "custom": 2, "weekly": 3, "duck": 5}
+               **{k: 2 for k in kinds.DAY_SOURCES}, "custom": 2, "reward": 2, "weekly": 3, "duck": 5}
 
 
 async def available_packs(db: AsyncSession, pid: str, snap: dict) -> list[dict]:

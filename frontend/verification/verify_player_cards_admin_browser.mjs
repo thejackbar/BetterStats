@@ -154,7 +154,7 @@ const run = async () => {
   await page.waitForSelector('[data-stat]')
 
   console.log('\noverview')
-  check('eight tabs', (await page.locator('[data-pc-tab]').count()) === 8)
+  check('nine tabs', (await page.locator('[data-pc-tab]').count()) === 9)
   const stat = (n) => page.locator(`[data-stat="${n}"]`).innerText()
   check('players who have opened a pack, and who have not', /2/.test(await stat('Have opened a pack')) && /1 have not/.test(await stat('Have opened a pack')))
   check('packs opened and cards held', /14/.test(await stat('Packs opened')) && /40 cards held/.test(await stat('Packs opened')))

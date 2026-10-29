@@ -64,7 +64,7 @@ async def main():
         for _ in range(2):  # the lifespan re-runs the list on every boot
             for stmt in (ddl.STATEMENTS if ddl else []) + (cap_ddl.STATEMENTS if cap_ddl else []):
                 await conn.execute(text(stmt))
-        for mod in ("selection_lock_ddl", "team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl", "audit_ddl", "availability_maybe_ddl", "player_cards_ddl", "player_card_swaps_ddl", "player_card_social_ddl", "player_card_community_ddl", "player_card_packs_ddl", "player_card_designs_ddl", "player_card_gifts_ddl", "player_card_photos_ddl", "player_card_looks_ddl"):
+        for mod in ("selection_lock_ddl", "team_sides_ddl", "fixture_side_ddl", "fixture_pin_ddl", "audit_ddl", "availability_maybe_ddl", "player_cards_ddl", "player_card_swaps_ddl", "player_card_social_ddl", "player_card_community_ddl", "player_card_packs_ddl", "player_card_designs_ddl", "player_card_gifts_ddl", "player_card_photos_ddl", "player_card_looks_ddl", "player_card_challenges_ddl"):
             m = guarded(f"app.services.{mod}")
             for stmt in (m.STATEMENTS if m else []):
                 await conn.execute(text(stmt))

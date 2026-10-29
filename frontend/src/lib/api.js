@@ -3452,6 +3452,10 @@ export const api = {
   setPlayerCardHidden: (playerId, hidden) =>
     request(`/player-cards/players/${playerId}/hidden`, { method: 'POST', body: JSON.stringify({ hidden }) }),
   refreshPlayerCardSpecials: () => request('/player-cards/refresh-specials', { method: 'POST' }),
+  getPlayerCardChallenges: () => request('/player-cards/challenges'),
+  createPlayerCardChallenge: (data) => request('/player-cards/challenges', { method: 'POST', body: JSON.stringify(data) }),
+  updatePlayerCardChallenge: (id, data) => request(`/player-cards/challenges/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePlayerCardChallenge: (id) => request(`/player-cards/challenges/${id}`, { method: 'DELETE' }),
   createPlayerCardGiftDesigned: (form) => postForm('/player-cards/gifts/designed', form),
   createPlayerCardGift: (data) => request('/player-cards/gifts', { method: 'POST', body: JSON.stringify(data) }),
   addPlayerCardEvent: (data) => request('/player-cards/events', { method: 'POST', body: JSON.stringify(data) }),
@@ -3537,6 +3541,13 @@ export const api = {
   // Swapping doubles with another player: the board, one player's doubles, asking, and answering.
   availPublicSwaps: (token, { history = false } = {}) => request(`/public/availability/${token}/me/cards/swaps${history ? '?history=true' : ''}`),
   availPublicSwapPlayer: (token, playerId) => request(`/public/availability/${token}/me/cards/swaps/players/${playerId}`),
+  availPublicChallenges: (token) => request(`/public/availability/${token}/me/cards/challenges`),
+  availPublicChallengeOptions: (token) => request(`/public/availability/${token}/me/cards/challenge-options`),
+  availPublicChallenge: (token, id) => request(`/public/availability/${token}/me/cards/challenges/${id}`),
+  availPublicCheckChallenge: (token, id, cards) => request(`/public/availability/${token}/me/cards/challenges/${id}/check`, { method: 'POST', body: JSON.stringify({ cards }) }),
+  availPublicSubmitChallenge: (token, id, cards) => request(`/public/availability/${token}/me/cards/challenges/${id}/submit`, { method: 'POST', body: JSON.stringify({ cards }) }),
+  availPublicCreateMySet: (token, data) => request(`/public/availability/${token}/me/cards/my-sets`, { method: 'POST', body: JSON.stringify(data) }),
+  availPublicDeleteMySet: (token, id) => request(`/public/availability/${token}/me/cards/my-sets/${id}`, { method: 'DELETE' }),
   availPublicSets: (token) => request(`/public/availability/${token}/me/cards/sets`),
   // Named CardSet, not availPublicSet: that name is the availability answer write above, and a second key of the same name silently replaces it.
   availPublicCardSet: (token, key) => request(`/public/availability/${token}/me/cards/sets/${encodeURIComponent(key)}`),
