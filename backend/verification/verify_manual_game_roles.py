@@ -334,6 +334,34 @@ async def main() -> None:
 
         games = script.read_roles(tmp)
         check("the file is read: five matches and the names on each", len(games) == 5 and games["X1"]["captains"] == ["Anne Alpha"])
+        # Name matching on a card: exact first, then the same surname with a first name that agrees.
+        def card_of(*names):
+            return [dict(id=f"id-{i}", name=n, display_name_override=None) for i, n in enumerate(names)]
+        seen = script.Counter()
+        def resolve_full(nm, *card):
+            try:
+                return script._resolve(nm, card_of(*card), seen)
+            except TypeError:               # the control commit's _resolve takes no variants tally
+                return script._resolve(nm, card_of(*card))
+        res = lambda nm, *card: resolve_full(nm, *card)[0]
+        check("Ken is Kenneth, Rod is Rodney, Steve is Steven (a short form)",
+              res("Staines, Ken", "Staines, Kenneth", "Hind, Darren") == "id-0"
+              and res("Cribbs, Rod", "Cribbs, Michael", "Cribbs, Rodney") == "id-1"
+              and res("Salter, Steve", "Salter, Steven") == "id-0")
+        check("Mick is Michael and Andy is Andrew (listed nicknames)",
+              res("Winter, Mick", "Winter, Michael") == "id-0" and res("Lawler, Andy", "Lawler, Andrew") == "id-0")
+        check("a one-letter typo and a middle name left off agree",
+              res("Puntigam, Dayman", "Puntigam, Daymon") == "id-0" and res("Baldwin, Julian Andrew", "Baldwin, Julian") == "id-0"
+              and res("Trigg, Griffen", "Trigg, Griff") == "id-0")
+        check("an exact spelling wins over a variant", res("Staines, Josh", "Staines, Kenneth", "Staines, Josh") == "id-1")
+        check("the absent player is not replaced by a relative (Mick absent, Adam and Mark on the card)",
+              res("Winter, Mick", "Winter, Adam", "Winter, Mark") is None)
+        check("a different surname never matches", res("Staines, Ken", "Stains, Kenneth", "Hind, Ken") is None)
+        check("two people who both fit is listed, not guessed",
+              res("Cribbs, Rod", "Cribbs, Rodney", "Cribbs, Rodger") is None
+              and "more than one" in str(resolve_full("Cribbs, Rod", "Cribbs, Rodney", "Cribbs, Rodger")[1]))
+        check("every variant pairing is tallied for the plan to show",
+              ("Staines, Ken", "Staines, Kenneth") in seen and ("Winter, Mick", "Winter, Michael") in seen, str(dict(seen)))
         rows, left, unplaced = await script.plan(str(ORG), games)
         by_date = {r["date"]: r for r in rows}
         check("the plan changes three matches: X1, X2 (keeper only) and X4 (keeper only)",

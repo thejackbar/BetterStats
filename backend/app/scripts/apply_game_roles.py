@@ -13,6 +13,10 @@ This reads that file and adds the roles to the matches already in BetterCricket.
   * A player is found by name among the players on THAT match's card only (batting, bowling or fielding), never
     across the club, so a common name cannot reach the wrong person. A name that is not on the card, or fits two
     people on it, is listed and skipped.
+  * CSFW and the club's roster often spell a first name differently ("Staines, Ken" and "Staines, Kenneth",
+    "Winter, Mick" and "Winter, Michael"). When no one on the card matches exactly, the same surname with a
+    compatible first name (a short form, a common nickname, a one-letter typo, a middle name left off) is taken if it
+    is exactly one person on that card. Every such pairing is listed in the plan so it can be checked.
   * It only ADDS. A match that already has a captain (or a keeper), however it got there, keeps it: the role was
     set by somebody, and a file cannot overrule that. Both are listed.
   * Dry run by default: prints what it would write and writes nothing.
@@ -35,6 +39,7 @@ import json
 import re
 import uuid
 from collections import Counter, defaultdict
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from sqlalchemy import text
@@ -105,16 +110,83 @@ async def _card_players(session, game_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def _resolve(name: str, card: list[dict]) -> tuple[str | None, str | None]:
-    """(player id, None) when exactly one player on the card goes by this name, else (None, why)."""
+# First names a club writes two ways that are not one a prefix of the other. Only ever applied to people on the
+# same match's card with the same surname, so a wrong entry cannot reach beyond a dozen people.
+NICKNAMES = {
+    "mick": "michael", "mike": "michael", "mikey": "michael", "andy": "andrew", "drew": "andrew",
+    "bob": "robert", "bobby": "robert", "rob": "robert", "robbie": "robert", "bill": "william", "billy": "william",
+    "will": "william", "jim": "james", "jimmy": "james", "dave": "david", "davo": "david", "tom": "thomas",
+    "tommy": "thomas", "tony": "anthony", "chris": "christopher", "matt": "matthew", "nick": "nicholas",
+    "pete": "peter", "ben": "benjamin", "sam": "samuel", "dan": "daniel", "danny": "daniel", "joe": "joseph",
+    "ted": "edward", "ed": "edward", "ned": "edward", "jack": "john", "johnny": "john", "greg": "gregory",
+    "steve": "steven", "stephen": "steven", "phil": "philip", "rick": "richard", "rich": "richard",
+    "dick": "richard", "alex": "alexander", "tim": "timothy", "ken": "kenneth", "kenny": "kenneth",
+    "rod": "rodney", "ron": "ronald", "ronnie": "ronald", "don": "donald", "len": "leonard", "les": "leslie",
+    "doug": "douglas", "ray": "raymond", "russ": "russell", "barry": "barrie", "col": "colin", "gav": "gavin",
+}
+
+
+def _surname_of(name: str) -> str:
+    n = re.sub(r"\s+", " ", (name or "").strip().lower())
+    if "," in n:
+        return n.split(",", 1)[0].strip()
+    return n.split()[-1] if n else ""
+
+
+def _first_of(name: str) -> str:
+    """The first given name only: a middle name is not part of how someone is known on a card."""
+    n = re.sub(r"\s+", " ", (name or "").strip().lower())
+    if "," in n:
+        given = n.split(",", 1)[1].split()
+    else:
+        given = n.split()[:-1]
+    return given[0] if given else ""
+
+
+def _first_names_agree(a: str, b: str) -> bool:
+    """Two first names that read as one person's: equal, a short form (one a prefix of the other, at least three
+    letters), a listed nickname, or the same initial and one letter's typo apart."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    fa, fb = {a, NICKNAMES.get(a, a)}, {b, NICKNAMES.get(b, b)}
+    if fa & fb:
+        return True
+    for x in fa:
+        for y in fb:
+            short, long_ = (x, y) if len(x) < len(y) else (y, x)
+            if len(short) >= 3 and long_.startswith(short):
+                return True
+    return a[0] == b[0] and SequenceMatcher(None, a, b).ratio() >= 0.8
+
+
+def _resolve(name: str, card: list[dict], variants: Counter | None = None) -> tuple[str | None, str | None]:
+    """(player id, None) when exactly one player on the card goes by this name, else (None, why).
+
+    An exact spelling comes first. Failing that, the same surname with a first name that agrees (see
+    `_first_names_agree`) counts when it is exactly one person on the card, and the pairing is tallied in
+    `variants` so the plan can show it.
+    """
     want = _name_keys(name)
     hits = [p for p in card if want & _name_keys(p["name"], p["display_name_override"])]
     if len(hits) == 1:
         return hits[0]["id"], None
+    if not hits:
+        sur, first = _surname_of(name), _first_of(name)
+        loose = [p for p in card
+                 if any(_surname_of(n) == sur and _first_names_agree(first, _first_of(n))
+                        for n in (p["name"], p["display_name_override"]) if n)]
+        if len(loose) == 1:
+            if variants is not None:
+                variants[(name, loose[0]["display_name_override"] or loose[0]["name"])] += 1
+            return loose[0]["id"], None
+        hits = loose
     return None, ("not on that match's card" if not hits else "fits more than one player on that match's card")
 
 
-async def plan(org: str, games: dict[str, dict]) -> tuple[list[dict], Counter, list[dict]]:
+async def plan(org: str, games: dict[str, dict],
+               variants: Counter | None = None) -> tuple[list[dict], Counter, list[dict]]:
     """The matches to change: [{game_id, date, grade, opposition, add_captains, add_keepers}], why-not tallies,
     and the names that could not be placed."""
     from app.routers.manual_entries import _existing_game_index, _match_existing
@@ -147,7 +219,7 @@ async def plan(org: str, games: dict[str, dict]) -> tuple[list[dict], Counter, l
                     left[f"already has a {kind}: left as it is"] += 1
                     continue
                 for nm in names:
-                    pid, why = _resolve(nm, card)
+                    pid, why = _resolve(nm, card, variants)
                     if pid is None:
                         unplaced.append({"date": g["played_at"], "grade": g["grade"], "opposition": g["opposition"],
                                          "role": kind, "name": nm, "why": why})
@@ -160,11 +232,16 @@ async def plan(org: str, games: dict[str, dict]) -> tuple[list[dict], Counter, l
     return rows, left, unplaced
 
 
-def report(rows: list[dict], left: Counter, unplaced: list[dict], limit: int) -> None:
+def report(rows: list[dict], left: Counter, unplaced: list[dict], limit: int,
+           variants: Counter | None = None) -> None:
     say(f"\nwould add a captain to {sum(1 for r in rows if r['add_captains'])} matches "
         f"and a wicket keeper to {sum(1 for r in rows if r['add_keepers'])}, across {len(rows)} matches")
     for why, n in left.most_common():
         say(f"left as they are: {n}  ({why})")
+    if variants:
+        say(f"\nfirst names matched on a variant spelling ({sum(variants.values())} placements); check these are right:")
+        for (written, stored), n in sorted(variants.items()):
+            say(f"  {written!r} -> {stored!r}  x{n}")
     for r in rows[:limit]:
         say(f"  {r['date']}  {r['grade']:<10} v {r['opposition']:<22} "
             f"captain {len(r['add_captains'])}  keeper {len(r['add_keepers'])}  {r['game_id']}")
@@ -255,8 +332,9 @@ async def main(args) -> None:
     org = await _resolve_org(args.org)
     games = read_roles(Path(args.csv))
     say(f"{len(games)} matches in {args.csv}")
-    rows, left, unplaced = await plan(org, games)
-    report(rows, left, unplaced, args.list)
+    variants: Counter = Counter()
+    rows, left, unplaced = await plan(org, games, variants)
+    report(rows, left, unplaced, args.list, variants)
     if args.apply:
         await apply(org, rows, args.expect, args.by)
     else:
