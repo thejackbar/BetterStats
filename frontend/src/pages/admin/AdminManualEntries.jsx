@@ -737,12 +737,27 @@ function normalizeAggregatePayload(form) {
 
 // ─── Season adjustments tab ─────────────────────────────────────────────────
 
+// Edit puts the form in view the moment the row's details are loaded into it: the position is set outright,
+// with no glide up the page from wherever the list was scrolled to. `jump()` is called with the Edit; the
+// scroll itself runs from an effect, after the render that fills the form in. A counter, so a second Edit
+// while the form is already showing jumps again. `scroll-mt-20` on the card leaves room under the sticky
+// header. Shared by the three tabs that edit a row in a form above their list.
+function useJumpToForm() {
+  const ref = useRef(null)
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (tick) ref.current?.scrollIntoView({ block: 'start', behavior: 'instant' })
+  }, [tick])
+  return [ref, useCallback(() => setTick(n => n + 1), [])]
+}
+
 function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending, onSeasonCreated, onGradeCreated }) {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_SEASON_FORM)
   const [editingId, setEditingId] = useState(null)
   const [err, setErr] = useState(null)
+  const [formCardRef, jumpToForm] = useJumpToForm()
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -823,7 +838,7 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending,
       season_id: row.kind === 'career' ? '' : (row.season_id || ''),
       grade_id: row.grade_id || '',
     })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    jumpToForm()
   }
 
   const handleDelete = (row) => {
@@ -861,7 +876,7 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending,
         onGradeCreated={onGradeCreated}
       />
 
-      <div className="bg-pb-surface border pb-hairline rounded-lg p-4">
+      <div className="bg-pb-surface border pb-hairline rounded-lg p-4 scroll-mt-20" ref={formCardRef} data-testid="season-adj-form-card">
         <h3 className="text-base font-semibold text-pb-text mb-3">
           {editingId ? 'Edit season adjustment' : 'New season adjustment'}
         </h3>
@@ -962,6 +977,7 @@ function CareerAdjustmentsTab({ players, refreshAll, onPending }) {
   const [form, setForm] = useState(EMPTY_CAREER_FORM)
   const [editingId, setEditingId] = useState(null)
   const [err, setErr] = useState(null)
+  const [formCardRef, jumpToForm] = useJumpToForm()
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -992,7 +1008,7 @@ function CareerAdjustmentsTab({ players, refreshAll, onPending }) {
   const handleEdit = (row) => {
     setEditingId(row.id)
     setForm({ ...EMPTY_CAREER_FORM, ...row })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    jumpToForm()
   }
 
   const handleDelete = (row) => {
@@ -1010,7 +1026,7 @@ function CareerAdjustmentsTab({ players, refreshAll, onPending }) {
 
   return (
     <div className="space-y-6">
-      <div className="bg-pb-surface border pb-hairline rounded-lg p-4">
+      <div className="bg-pb-surface border pb-hairline rounded-lg p-4 scroll-mt-20" ref={formCardRef} data-testid="career-adj-form-card">
         <h3 className="text-base font-semibold text-pb-text mb-3">
           {editingId ? 'Edit career adjustment' : 'New career adjustment'}
         </h3>
@@ -1261,14 +1277,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
   const [formSection, setFormSection] = useState('match')
   // The match whose own details are open in the quick editor (the full match, as the server holds it).
   const [detailsGame, setDetailsGame] = useState(null)
-  // Edit puts the form in view the moment its details are loaded: the position is set outright, with no
-  // glide up the page, so the match is ready to change as soon as the click lands. A counter, so a second
-  // Edit while the form is already showing jumps again. Runs after the render that fills the form in.
-  const formCardRef = useRef(null)
-  const [jumpToForm, setJumpToForm] = useState(0)
-  useEffect(() => {
-    if (jumpToForm) formCardRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' })
-  }, [jumpToForm])
+  const [formCardRef, jumpToForm] = useJumpToForm()
 
   const seasonGrades = useMemo(
     () => (grades || []).filter(g => g.season_id === form.season_id),
@@ -1394,7 +1403,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
           return out
         }),
       })
-      setJumpToForm(n => n + 1)
+      jumpToForm()
     } catch (e) { setErr(e.message) }
   }
 
