@@ -2683,3 +2683,11 @@ Shoalwater Bay's 1995/96 C2 premiership team came from a bulk season import with
 
 The list comes from `org_award_definitions`, which a club seeds from a template and then edits. It is not built from the grades the club plays in. Fix: `addClubGrades` appends the club's grades from `api.getOrgGrades` for Premiership and Club Award (case-insensitive, never repeating a setup entry, before "Other..."), and `defaultTeamAwards` gives a club grade the setup does not mention the usual team awards (Premiership, Player of the Grand Final, Captain, 12th Man, 13th Man; the grade awards for Club Award). A grade the setup does define keeps the setup's own awards. Applied in `AchievementsAdmin` (Add, Bulk add, Edit) and the Add honour form on `PlayerProfile`. Nothing is written for the club: existing honours keep the subcategory they were saved with. `verify_award_club_grades_browser.mjs` (11 checks; control on the previous frontend fails the 4 grade checks and shows exactly the list the club saw).
 
+
+
+## v9.135.3: a failed player load no longer sticks to the next player
+
+- Report (Payneham, Neil): opening "M Zia" from the search box showed "Error: Player not found". The record exists (active, public, not privacy-hidden, no merge log) and on the live system both `/players/<id>` and `/players/<id>/stats` return 200 anonymously for M Zia and MYB Zia, with `hide_juniors` off. A local reproduction with the same shape of data also returned 200.
+- Found while tracing it: `usePlayerStats` never reset `error`, and `/players/:playerId` is one mounted route, so one failed load (any cause) drew its error over every player opened from the search box or a teammate link until a full reload. Also, a late reply from a player already left could overwrite the current one.
+- Fix: the effect clears `error` at the start of each load and ignores a reply once cleaned up.
+- Checks: `verify_player_profile_error_clears_browser.mjs` 5 (control on the previous hook fails 2: B not drawn, A's error still showing). Not verified: what failed the first load on Neil's browser. It is not data (the live reads are 200), so a one-off network or deploy-window failure that the old hook then kept on screen is the likely reading. If it recurs after this release, capture the failing request in the browser's network tab.
