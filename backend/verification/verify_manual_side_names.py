@@ -111,6 +111,8 @@ async def setup() -> None:
                 "WHERE table_schema = 'public' AND data_type = 'json'"))).all():
             await conn.execute(text(
                 f'ALTER TABLE "{tbl}" ALTER COLUMN "{col}" TYPE jsonb USING "{col}"::text::jsonb'))
+        # games.innings_totals is lifespan DDL (create_all omits it) and the views below read it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
         for name, sql in view_statements():
             await conn.execute(text(f"DROP VIEW IF EXISTS {name} CASCADE"))
             await conn.execute(text(sql.replace("OR REPLACE ", "")))

@@ -128,6 +128,58 @@ function PlayerPicker({ players, value, onChange, placeholder = 'Search player�
   )
 }
 
+// Who captained and who kept wicket, picked from the club's players. The match's own card names the quick
+// picks (a player can still be found by name when the card has not been filled in). Declared at module
+// level so typing in the search box keeps its caret. `captains` and `keepers` are lists of player ids:
+// a captain is one player, a keeper can be two when it changed mid-match.
+function MatchRoles({ players, cardIds, captains, keepers, onChange }) {
+  const nameOf = id => players.find(p => p.id === id)?.display_name || 'Unknown player'
+  const onCard = players.filter(p => cardIds.includes(p.id))
+  const lists = { captain_player_ids: captains, wicket_keeper_player_ids: keepers }
+  const set = (key, ids) => onChange({ ...lists, [key]: ids })
+  const roles = [
+    { key: 'captain_player_ids', label: 'Captain', testid: 'captain', single: true },
+    { key: 'wicket_keeper_player_ids', label: 'Wicketkeeper', testid: 'keeper', single: false },
+  ]
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:col-span-3" data-testid="match-roles">
+      {roles.map(({ key, label, testid, single }) => {
+        const ids = lists[key]
+        const pick = id => set(key, single && ids.length <= 1 ? [id] : [...ids, id].filter((v, i, a) => a.indexOf(v) === i))
+        return (
+          <div key={key} className="min-w-0">
+            <label className={LABEL_CLS}>{label}</label>
+            <div className="flex flex-wrap gap-1 mb-1">
+              {ids.length === 0 && <span className="text-xs text-pb-faint" data-testid={`${testid}-none`}>Not recorded</span>}
+              {ids.map(id => (
+                <span key={id} data-testid={`${testid}-chip`} className="inline-flex items-center gap-1 text-xs bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text">
+                  {nameOf(id)}
+                  <button type="button" aria-label={`Remove ${label.toLowerCase()} ${nameOf(id)}`} className="text-pb-faint hover:text-pb-text"
+                    onClick={() => set(key, ids.filter(x => x !== id))}>×</button>
+                </span>
+              ))}
+            </div>
+            <PlayerPicker players={players} value="" onChange={pick}
+              placeholder={single ? (ids.length ? 'Change captain…' : 'Search for the captain…') : 'Search for a wicketkeeper…'} />
+            {onCard.filter(p => !ids.includes(p.id)).length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {onCard.filter(p => !ids.includes(p.id)).map(p => (
+                  <button key={p.id} type="button" data-testid={`${testid}-quick`} onClick={() => pick(p.id)}
+                    className="text-[11px] border pb-hairline rounded px-1.5 py-0.5 text-pb-faint hover:text-pb-text hover:bg-pb-surface2">
+                    {p.display_name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const sameIds = (a, b) => (a || []).join('|') === (b || []).join('|')
+
 const EMPTY_AGG = {
   games_played: 0,
   batting_innings: 0, batting_runs: 0, batting_not_outs: 0, batting_balls: 0,
@@ -1112,6 +1164,7 @@ function emptyInningsRow(n = 1) {
 const EMPTY_GAME_FORM = {
   season_id: '', grade_id: '', played_at: '', home_team: '', away_team: '', opposition: '',
   venue: '', result: '', winning_team: '', is_final: false, is_grand_final: false, match_format: '', notes: '',
+  captain_player_ids: [], wicket_keeper_player_ids: [],
   batting_innings: [], bowling_spells: [], fielding_stats: [], innings: [],
 }
 
@@ -1137,10 +1190,19 @@ function detailsFormOf(game) {
     ...Object.fromEntries(DETAIL_TEXT_KEYS.map(k => [k, game[k] || ''])),
     is_final: !!game.is_final,
     is_grand_final: !!game.is_grand_final,
+    captain_player_ids: game.roles?.captain_player_ids || [],
+    wicket_keeper_player_ids: game.roles?.wicket_keeper_player_ids || [],
   }
 }
 
-function MatchDetailsEditor({ game, seasons, grades, knownValues, onPending, onNotice, onSeasonCreated, onGradeCreated, onClose, onSaved }) {
+// The players the card records for a match: its batters, bowlers and fielders.
+const cardPlayerIds = game => [...new Set(
+  ['batting_innings', 'bowling_spells', 'fielding_stats'].flatMap(k => (game?.[k] || []).map(r => r.player_id)).filter(Boolean)
+)]
+
+const ROLE_KEYS = ['captain_player_ids', 'wicket_keeper_player_ids']
+
+function MatchDetailsEditor({ game, players, seasons, grades, knownValues, onPending, onNotice, onSeasonCreated, onGradeCreated, onClose, onSaved }) {
   const initial = useMemo(() => detailsFormOf(game), [game])
   const [form, setForm] = useState(initial)
   const [err, setErr] = useState(null)
@@ -1153,7 +1215,7 @@ function MatchDetailsEditor({ game, seasons, grades, knownValues, onPending, onN
   const changes = () => {
     const out = {}
     for (const k of Object.keys(initial)) {
-      if (form[k] !== initial[k]) out[k] = form[k]
+      if (ROLE_KEYS.includes(k) ? !sameIds(form[k], initial[k]) : form[k] !== initial[k]) out[k] = form[k]
     }
     if ('played_at' in out && !out.played_at) out.played_at = null
     // A new season needs its grade said too (a grade belongs to one season); the quick editor clears it.
@@ -1259,6 +1321,13 @@ function MatchDetailsEditor({ game, seasons, grades, knownValues, onPending, onN
         {form.is_grand_final && (
           <p className="text-xs text-pb-faint md:col-span-3" data-testid="gf-help">{GRAND_FINAL_HELP}</p>
         )}
+        <MatchRoles
+          players={players || []}
+          cardIds={cardPlayerIds(game)}
+          captains={form.captain_player_ids}
+          keepers={form.wicket_keeper_player_ids}
+          onChange={r => setForm(f => ({ ...f, ...r }))}
+        />
       </div>
       <div className="flex gap-2 mt-4">
         <button className={BTN_PRIMARY} data-testid="details-save" onClick={save}>Save details</button>
@@ -1273,6 +1342,8 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(EMPTY_GAME_FORM)
   const [editingId, setEditingId] = useState(null)
+  // The roles the match held when it was opened, so an edit sends them only when they were changed.
+  const [loadedRoles, setLoadedRoles] = useState(null)
   const [err, setErr] = useState(null)
   const [formSection, setFormSection] = useState('match')
   // The match whose own details are open in the quick editor (the full match, as the server holds it).
@@ -1290,7 +1361,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
   }, [])
   useEffect(() => { refresh() }, [refresh])
 
-  const resetForm = () => { setForm(EMPTY_GAME_FORM); setEditingId(null); setErr(null) }
+  const resetForm = () => { setForm(EMPTY_GAME_FORM); setEditingId(null); setLoadedRoles(null); setErr(null) }
 
   const buildPayload = () => {
     const sanitize = (rows, mapFn) => rows
@@ -1300,7 +1371,15 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
         Object.keys(out).forEach(k => { if (out[k] === '') out[k] = null })
         return out
       })
+    // Captain and keeper go with the game when they were changed (or are named on a new game); a game saved
+    // with them untouched sends neither, so the server leaves them as they are.
+    const roleKeys = {}
+    for (const k of ROLE_KEYS) {
+      const was = loadedRoles ? loadedRoles[k] : []
+      if (!sameIds(form[k], was)) roleKeys[k] = form[k] || []
+    }
     return {
+      ...roleKeys,
       season_id: form.season_id,
       grade_id: form.grade_id || null,
       played_at: form.played_at || null,
@@ -1387,9 +1466,15 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
     try {
       const full = await api.adminGetManualGame(row.id)
       setEditingId(row.id)
+      const roles = {
+        captain_player_ids: full.roles?.captain_player_ids || [],
+        wicket_keeper_player_ids: full.roles?.wicket_keeper_player_ids || [],
+      }
+      setLoadedRoles(roles)
       setForm({
         ...EMPTY_GAME_FORM,
         ...full,
+        ...roles,
         grade_id: full.grade_id || '',
         played_at: full.played_at ? full.played_at.split('T')[0] : '',
         batting_innings: (full.batting_innings || []).map(r => ({ ...r, batting_position: r.batting_position || '' })),
@@ -1567,6 +1652,13 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
           {form.is_grand_final && (
             <p className="text-xs text-pb-faint md:col-span-3" data-testid="gf-help">{GRAND_FINAL_HELP}</p>
           )}
+          <MatchRoles
+            players={players}
+            cardIds={cardPlayerIds(form)}
+            captains={form.captain_player_ids || []}
+            keepers={form.wicket_keeper_player_ids || []}
+            onChange={r => setForm(f => ({ ...f, ...r }))}
+          />
         </div>
 
         <div className="mt-3">
@@ -1742,6 +1834,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
         <MatchDetailsEditor
           key={detailsGame.id}
           game={detailsGame}
+          players={players}
           seasons={seasons}
           grades={grades}
           knownValues={knownValues}

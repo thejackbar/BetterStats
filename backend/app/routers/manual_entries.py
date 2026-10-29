@@ -43,6 +43,7 @@ from app.models.db import (
     ManualFallOfWicket,
     ManualFieldingStat,
     ManualGame,
+    ManualGameRole,
     ManualInnings,
     ManualPartnership,
     ManualSeasonAdjustment,
@@ -239,6 +240,11 @@ class ManualGameIn(BaseModel):
     # Full both-team scorecard from the AI scorecard upload (renders the opposition half
     # of the match view; the opposition aren't stored as player rows).
     extracted_payload: Optional[dict] = None
+    # Who captained and who kept wicket (player ids). Only a key that is SENT is a decision: sent as a
+    # list it replaces that role's players with exactly those, sent as null or [] it clears the role,
+    # and left out it leaves the stored roles alone (an absent key is not a clear).
+    captain_player_ids: Optional[list[str]] = None
+    wicket_keeper_player_ids: Optional[list[str]] = None
     batting_innings: list[ManualBattingIn] = Field(default_factory=list)
     bowling_spells: list[ManualBowlingIn] = Field(default_factory=list)
     fielding_stats: list[ManualFieldingIn] = Field(default_factory=list)
@@ -270,6 +276,10 @@ class ManualGameDetailsIn(BaseModel):
     notes: Optional[str] = None
     season_id: Optional[str] = None
     grade_id: Optional[str] = None
+    # Who captained and who kept wicket, by player id. Sent as a list it replaces that role's players;
+    # sent as null or [] it clears the role; left out it is left alone.
+    captain_player_ids: Optional[list[str]] = None
+    wicket_keeper_player_ids: Optional[list[str]] = None
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -285,6 +295,50 @@ async def _premiership_follow_up(club_id: uuid.UUID, *, was: bool, now: bool) ->
     """
     if was or now:
         await premierships.maybe_reconcile(club_id)
+
+
+async def _game_roles(db: AsyncSession, gid: uuid.UUID) -> dict:
+    """Who captained and who kept wicket in a manual game, as player ids (stored order)."""
+    rows = (await db.execute(
+        select(ManualGameRole).where(ManualGameRole.manual_game_id == gid).order_by(ManualGameRole.id)
+    )).scalars().all()
+    return {
+        "captain_player_ids": [str(r.player_id) for r in rows if r.is_captain],
+        "wicket_keeper_player_ids": [str(r.player_id) for r in rows if r.is_wicket_keeper],
+    }
+
+
+def _role_ids(v) -> list[str]:
+    return list(dict.fromkeys(str(x) for x in (v or []) if x))
+
+
+async def _set_roles(db: AsyncSession, gid: uuid.UUID, org_id: uuid.UUID, *,
+                     captains: Optional[list] = None, keepers: Optional[list] = None) -> bool:
+    """Set the captain and/or wicket keeper of a manual game. ``None`` leaves that role as it is.
+
+    A list replaces the role's players with exactly those (an empty list clears it). Every player
+    must be one of the club's own. Returns whether anything stored changed. Does not commit.
+    """
+    cur = await _game_roles(db, gid)
+    cap = cur["captain_player_ids"] if captains is None else _role_ids(captains)
+    kee = cur["wicket_keeper_player_ids"] if keepers is None else _role_ids(keepers)
+    for pid in dict.fromkeys(cap + kee):
+        await _assert_player_in_org(db, _to_uuid(pid, "player"), org_id)
+    if cap == cur["captain_player_ids"] and kee == cur["wicket_keeper_player_ids"]:
+        return False
+    await db.execute(sa_delete(ManualGameRole).where(ManualGameRole.manual_game_id == gid))
+    for pid in dict.fromkeys(cap + kee):
+        db.add(ManualGameRole(manual_game_id=gid, player_id=uuid.UUID(pid),
+                              is_captain=pid in cap, is_wicket_keeper=pid in kee))
+    await db.flush()
+    return True
+
+
+def _roles_sent(data) -> tuple[Optional[list], Optional[list]]:
+    """(captains, keepers) from a request, each ``None`` unless the caller sent that key."""
+    sent = data.model_fields_set
+    return ((data.captain_player_ids or []) if "captain_player_ids" in sent else None,
+            (data.wicket_keeper_player_ids or []) if "wicket_keeper_player_ids" in sent else None)
 
 
 async def _grand_final_status(db: AsyncSession, club: Organisation, game: ManualGame) -> Optional[dict]:
@@ -1138,6 +1192,7 @@ async def games_template(
          # opened the bowling, Smith came on second.
          "bowling_order": 2,
          "fielding_catches": 1,
+         "is_captain": "true",
          # Our innings: its full total including sundries, and the sundries.
          "innings_total": 67, "innings_wickets": 1, "innings_overs": 40,
          "innings_byes": 4, "innings_leg_byes": 2, "innings_wides": 3,
@@ -1150,7 +1205,7 @@ async def games_template(
          "batting_sixes": 0, "batting_not_out": "true", "did_not_bat": "false",
          "bowling_overs": 10, "bowling_maidens": 0, "bowling_runs": 40,
          "bowling_wickets": 2, "bowling_wides": 2, "bowling_no_balls": 1,
-         "bowling_order": 1},
+         "bowling_order": 1, "is_wicketkeeper": "true"},
     ]
     for r in rows:
         w.writerow(r)
@@ -1204,6 +1259,7 @@ async def get_manual_game(
         "bowling_spells": [{**_row_to_dict(r), "player_name": _player_display_name(p)} for r, p in bowling],
         "fielding_stats": [{**_row_to_dict(r), "player_name": _player_display_name(p)} for r, p in fielding],
         "innings": [_row_to_dict(r) for r in innings],
+        "roles": await _game_roles(db, gid),
     }
 
 
@@ -1779,6 +1835,9 @@ async def create_manual_game(
     await _replace_game_children(db, game.id, data, club.id)
     await _replace_game_fow_partnerships(db, game.id, data.extracted_payload)
     await _replace_game_bowler_wickets(db, game.id, club.id, data.extracted_payload)
+    _cap, _kee = _roles_sent(data)
+    if _cap is not None or _kee is not None:
+        await _set_roles(db, game.id, club.id, captains=_cap, keepers=_kee)
     await db.flush()
     # A winner that contradicts both the result line and the scores is
     # corrected to what those two agree on (services/manual_result).
@@ -1884,6 +1943,9 @@ async def update_manual_game(
     if data.extracted_payload is not None:
         await _replace_game_fow_partnerships(db, gid, data.extracted_payload)
         await _replace_game_bowler_wickets(db, gid, club.id, data.extracted_payload)
+    _cap, _kee = _roles_sent(data)
+    if _cap is not None or _kee is not None:
+        await _set_roles(db, gid, club.id, captains=_cap, keepers=_kee)
     await db.flush()
     settled = await manual_result.settle_manual_game(db, game, club)
     if settled:
@@ -1983,9 +2045,20 @@ async def update_manual_game_details(
     def _plain(v):
         return str(v) if isinstance(v, uuid.UUID) else (v.isoformat() if hasattr(v, "isoformat") else v)
 
+    # Captain and wicket keeper: only a role that was sent. Logged as the lists they were and became.
+    roles_before = await _game_roles(db, gid)
+    _cap, _kee = _roles_sent(data)
+    role_changed = False
+    if _cap is not None or _kee is not None:
+        role_changed = await _set_roles(db, gid, club.id, captains=_cap, keepers=_kee)
+    roles_after = await _game_roles(db, gid) if role_changed else roles_before
+    role_keys = [k for k in ("captain_player_ids", "wicket_keeper_player_ids")
+                 if roles_after[k] != roles_before[k]]
+
     changed = [k for k in _DETAIL_FIELDS if getattr(game, k) != old[k]]
-    if not changed:
-        return {**_row_to_dict(game), "changed": [], "grand_final": await _grand_final_status(db, club, game)}
+    if not changed and not role_keys:
+        return {**_row_to_dict(game), "changed": [], "roles": roles_after,
+                "grand_final": await _grand_final_status(db, club, game)}
     game.updated_at = datetime.now(timezone.utc)
     await db.flush()
     await _log_edit(
@@ -1997,13 +2070,14 @@ async def update_manual_game_details(
         target_id=str(gid),
         summary=(f"Updated match details ({game.played_at or 'date unknown'}"
                  + (f" vs {game.opposition}" if game.opposition else "")
-                 + f"): {', '.join(changed)}"),
-        before={k: _plain(old[k]) for k in changed},
-        after={k: _plain(getattr(game, k)) for k in changed},
+                 + f"): {', '.join(changed + [k.replace('_player_ids', '') for k in role_keys])}"),
+        before={**{k: _plain(old[k]) for k in changed}, **{k: roles_before[k] for k in role_keys}},
+        after={**{k: _plain(getattr(game, k)) for k in changed}, **{k: roles_after[k] for k in role_keys}},
     )
     await db.commit()
     await db.refresh(game)
-    out = {**_row_to_dict(game), "changed": changed}
+    out = {**_row_to_dict(game), "changed": changed + [k.replace("_player_ids", "") for k in role_keys],
+           "roles": roles_after}
     if settled:
         out["winner_corrected"] = manual_result.describe(settled)
     # The honours follow the flag, and a change to who won or which grade it was also moves them.
@@ -2364,6 +2438,11 @@ async def undo_edit(
                 v = uuid.UUID(v) if isinstance(v, str) and v else None
             setattr(row, k, v)
         row.updated_at = datetime.now(timezone.utc)
+        bj = log.before_json
+        if "captain_player_ids" in bj or "wicket_keeper_player_ids" in bj:
+            await _set_roles(db, row.id, club.id,
+                             captains=bj.get("captain_player_ids") if "captain_player_ids" in bj else None,
+                             keepers=bj.get("wicket_keeper_player_ids") if "wicket_keeper_player_ids" in bj else None)
     elif action == "update":
         # Undo update → restore before snapshot
         if not log.before_json:
@@ -2737,6 +2816,9 @@ GAME_CSV_COLUMNS = [
     "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
     "bowling_wides", "bowling_no_balls", "bowling_order",
     "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
+    # Who captained and who kept wicket: yes on that player's row. Optional, and a sheet without
+    # them imports exactly as before. Blank means "the sheet did not say".
+    "is_captain", "is_wicketkeeper",
     # Everything below is optional, and a sheet without it imports exactly as
     # before. They carry what a club's own scorebook holds beyond its players'
     # figures: the opposition's innings, each innings' own total and extras,
@@ -2822,6 +2904,8 @@ _EXTRA_GAME_CHILDREN = (
     ("innings", ManualInnings, ()),
     ("fall_of_wickets", ManualFallOfWicket, ("player_id",)),
     ("partnerships", ManualPartnership, ("batter1_id", "batter2_id")),
+    # Captain and wicket keeper (migration 377): an undo, a delete and an overwrite import restore them.
+    ("roles", ManualGameRole, ("player_id",)),
 )
 
 
@@ -2949,6 +3033,7 @@ async def _write_games(
     ignored_synced = 0
     winners_corrected: list[dict] = []
     grand_finals = 0
+    captains_named = keepers_named = 0
 
     for game_key, group in by_game.items():
         dup = existing_by_game.get(game_key)
@@ -2971,6 +3056,9 @@ async def _write_games(
         first_row_num, first = group[0]
         settled = None
         game_player_ids: set = set()
+        # Who the sheet says captained and kept wicket in this match (a flag on any of a player's rows).
+        game_captains: set = set()
+        game_keepers: set = set()
         game_id = None
         snapshot = None
         try:
@@ -3171,6 +3259,10 @@ async def _write_games(
                         agg["run_outs"] += _parse_int(fro) or 0
                         agg["stumpings"] += _parse_int(fstump) or 0
                     game_player_ids.add(player.id)
+                    if _parse_bool(raw.get("is_captain")):
+                        game_captains.add(player.id)
+                    if _parse_bool(raw.get("is_wicketkeeper")):
+                        game_keepers.add(player.id)
 
                 # A sheet naming no bowling_order keeps its own row order;
                 # where some rows name one, they come first, in that order.
@@ -3181,6 +3273,21 @@ async def _write_games(
                     db.add(ManualFieldingStat(manual_game_id=game.id, player_id=pid, **agg))
                 _add_scorebook_innings(db, game.id, innings_meta,
                                        batters_by_innings, fow_by_innings)
+                # Captain and wicket keeper. A match this import replaces keeps the roles it had when
+                # the sheet names none (a blank is "not said", never "no captain"), for the players
+                # still on the card.
+                if not game_captains and not game_keepers and snapshot is not None:
+                    on_card = {str(pid) for pid in game_player_ids}
+                    for r in ((snapshot.get("children") or {}).get("roles") or []):
+                        if str(r.get("player_id")) in on_card:
+                            if r.get("is_captain"):
+                                game_captains.add(uuid.UUID(str(r["player_id"])))
+                            if r.get("is_wicket_keeper"):
+                                game_keepers.add(uuid.UUID(str(r["player_id"])))
+                for pid in dict.fromkeys(list(game_captains) + list(game_keepers)):
+                    db.add(ManualGameRole(manual_game_id=game.id, player_id=pid,
+                                          is_captain=pid in game_captains,
+                                          is_wicket_keeper=pid in game_keepers))
                 await db.flush()
                 # A sheet whose winner contradicts both its own result line and
                 # its own scores is corrected to what those two agree on, and
@@ -3196,6 +3303,8 @@ async def _write_games(
         affected_player_ids |= game_player_ids
         if grand_final or (snapshot or {}).get("is_grand_final"):
             grand_finals += 1
+        captains_named += 1 if game_captains else 0
+        keepers_named += 1 if game_keepers else 0
         if settled:
             winners_corrected.append(settled)
         if snapshot is not None:
@@ -3227,6 +3336,9 @@ async def _write_games(
         # Games written that are, or replaced, a marked grand final: the callers bring the club's
         # automatic premierships in line once they have committed.
         "grand_finals": grand_finals,
+        # Matches written with a captain and with a wicket keeper named.
+        "captains_named": captains_named,
+        "keepers_named": keepers_named,
     }
 
 
@@ -3418,6 +3530,12 @@ def _canon_header(h: str) -> str:
 _GAME_HEADER_BY_CANON = {_canon_header(c): c for c in GAME_CSV_COLUMNS}
 # A club writing "Grand Final" as the heading means the grand-final column.
 _GAME_HEADER_BY_CANON["grand_final"] = "is_grand_final"
+# And the headings a scorebook sheet is likely to carry for the two roles.
+_GAME_HEADER_BY_CANON.update({
+    "captain": "is_captain",
+    "wicketkeeper": "is_wicketkeeper", "wicket_keeper": "is_wicketkeeper", "keeper": "is_wicketkeeper",
+    "is_wicket_keeper": "is_wicketkeeper", "is_keeper": "is_wicketkeeper", "wk": "is_wicketkeeper",
+})
 _GAME_REQUIRED = ("game_key", "season_name", "player_name")
 
 
@@ -4311,6 +4429,8 @@ async def commit_manual_games(
         await premierships.maybe_reconcile(club.id)
     return {
         "grand_finals": written.get("grand_finals", 0),
+        "captains_named": written.get("captains_named", 0),
+        "keepers_named": written.get("keepers_named", 0),
         "games_created": games_new,
         "games_overwritten": len(overwritten),
         "games_superseded": len(superseded),

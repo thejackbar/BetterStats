@@ -40,6 +40,8 @@ CARRIED: tuple[tuple[str, str, str, Optional[tuple[str, ...]]], ...] = (
      ("manual_game_id", "innings_number")),
     ("manual_bowling_spells", "player_id", "int", None),
     ("manual_fielding_stats", "player_id", "int", ("manual_game_id",)),
+    # Captain and wicket keeper of a hand-entered game (migration 377): a record of what the player DID.
+    ("manual_game_roles", "player_id", "int", ("manual_game_id",)),
     ("manual_bowler_wickets", "bowler_id", "int", None),
     ("manual_bowler_wickets", "fielder_id", "int", None),
     ("manual_fall_of_wickets", "player_id", "int", None),

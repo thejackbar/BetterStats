@@ -2565,6 +2565,22 @@ class ManualFallOfWicket(Base):
     batter_name = Column(Text, nullable=True)
 
 
+class ManualGameRole(Base):
+    """Who captained and who kept wicket in a hand-entered game (migration 377).
+
+    A row only for a player who held a role. The synced twin is ``game_appearances.is_captain`` and
+    ``is_wicket_keeper``. Mapped here as well as in the DDL so a read through the ORM does not fail.
+    """
+    __tablename__ = "manual_game_roles"
+    __table_args__ = (UniqueConstraint("manual_game_id", "player_id", name="manual_game_roles_manual_game_id_player_id_key"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    manual_game_id = Column(UUID(as_uuid=True), ForeignKey("manual_games.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    is_captain = Column(Boolean, nullable=False, server_default="false", default=False)
+    is_wicket_keeper = Column(Boolean, nullable=False, server_default="false", default=False)
+
+
 class ManualBowlerWicket(Base):
     __tablename__ = "manual_bowler_wickets"
 
