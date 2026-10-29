@@ -110,8 +110,6 @@ STAT_MILESTONES = (
 
 # Which cards get a full-card photo (club setting `big_photos`), and which of the player's shots a card uses.
 PHOTO_MODES = ("top", "specials", "all")
-# Special cards made of a moment in play get the ACTION shot; the ones that mark a person or a total get the HERO photo.
-ACTION_SPECIALS = ("century", "fifty", "five_for", "hat_trick")
 BIG_PHOTO_TIERS = ("epic", "legendary")
 
 # What a player is given when a card is made about them: their debut and their latest landmark, or every one.
@@ -137,7 +135,7 @@ def default_settings() -> dict:
         "feed_enabled": True,
         "event_packs_enabled": True,
         "starter_gifts": "minimal",
-        "big_photos": "top",
+        "big_photos": "all",
     }
 
 
@@ -182,7 +180,7 @@ async def load_settings(db: AsyncSession, org_id) -> dict:
     if out.get("starter_gifts") not in GIFT_MODES:
         out["starter_gifts"] = "minimal"
     if out.get("big_photos") not in PHOTO_MODES:
-        out["big_photos"] = "top"
+        out["big_photos"] = "all"
     return out
 
 
@@ -514,11 +512,14 @@ async def _current_season(db: AsyncSession, org_id, pids: list[str]) -> tuple[li
 def card_shot(person: dict, tier: str, special_kind: Optional[str], mode: str) -> str:
     """Which of the player's photos a card shows: `hero`, `action` (both fill the card) or `profile` (the circle).
 
-    A card that is not special enough for the big photo shows the profile photo; a card that is shows the shot that suits it: a
-    moment in play (a century, a five-for, a Legendary card) the ACTION shot, a person or a total (a debut, a milestone, an award, an
-    Epic card) the HERO photo. A club's per-player pin (`hero_source`) beats that choice, because somebody decided it for this player.
-    Whatever is wanted but missing falls to the other big shot, and a card with no big shot (or no profile photo) uses what there is, so a
-    photo is never left unused."""
+    By default every card fills with the player's HERO photo when they have one, and every special card (a century, a five-for, a
+    debut, a milestone, an award) with their ACTION shot. A club can narrow that with `big_photos` (`top`: special, Epic and
+    Legendary cards; `specials`: special cards only), and the cards left out show the profile photo in a circle. A club's per-player pin
+    (`hero_source`) beats the card's own choice, because somebody decided it for this player.
+
+    Nothing is left blank: a special card without an action shot falls to the hero photo, then the profile photo; a regular card
+    without a hero photo keeps its circle (it does not borrow the action shot) unless the player has no profile photo, when the action
+    shot is used rather than the club logo."""
     shots = {"hero": person.get("hero_photo_url"), "action": person.get("action_photo_url")}
     special = special_kind is not None
     big = special or mode == "all" or (mode == "top" and tier in BIG_PHOTO_TIERS)
@@ -528,12 +529,15 @@ def card_shot(person: dict, tier: str, special_kind: Optional[str], mode: str) -
     if pin in shots:
         want = pin
     elif special:
-        want = "action" if special_kind in ACTION_SPECIALS else "hero"
+        want = "action"
     else:
-        want = "action" if tier == "legendary" else "hero"
+        want = "hero"
     for k in (want, "hero" if want == "action" else "action"):
-        if shots[k]:
-            return k
+        if not shots[k]:
+            continue
+        if k != want and not special and pin not in shots and person.get("photo_url"):
+            continue
+        return k
     return "profile"
 
 
@@ -560,7 +564,7 @@ def regular_card(snap: dict, pid: str) -> Optional[dict]:
         "dismissals": f.get("dismissals", 0),
         "rarity": r["score"],
         "tier": r["tier"],
-        "shot": card_shot(person, r["tier"], None, snap["settings"].get("big_photos") or "top"),
+        "shot": card_shot(person, r["tier"], None, snap["settings"].get("big_photos") or "all"),
     }
 
 
@@ -583,7 +587,7 @@ def special_card(snap: dict, row: dict) -> Optional[dict]:
         "occurred_on": row["occurred_on"].isoformat() if row["occurred_on"] else None,
         "detail": row["detail"] or {},
         "tier": "special",
-        "shot": card_shot(person, "special", row["kind"], snap["settings"].get("big_photos") or "top"),
+        "shot": card_shot(person, "special", row["kind"], snap["settings"].get("big_photos") or "all"),
     }
 
 
@@ -1419,7 +1423,7 @@ def _own_card_outside_pool(player: Player, snap: dict) -> dict:
         "rarity": 1, "tier": "common",
         "shot": card_shot({"photo_url": player.photo_url, "hero_photo_url": getattr(player, "hero_photo_url", None),
                            "action_photo_url": getattr(player, "action_photo_url", None), "hero_source": getattr(player, "hero_source", None)},
-                          "common", None, snap["settings"].get("big_photos") or "top"),
+                          "common", None, snap["settings"].get("big_photos") or "all"),
     }
 
 

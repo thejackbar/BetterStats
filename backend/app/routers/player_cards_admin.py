@@ -133,7 +133,7 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
             **{k: settings.get(k, True) is not False for k in ("sets_enabled", "showcase_enabled", "board_enabled", "feed_enabled",
                                                          "event_packs_enabled")},
             "starter_gifts": settings.get("starter_gifts") or "minimal",
-            "big_photos": settings.get("big_photos") or "top",
+            "big_photos": settings.get("big_photos") or "all",
             "effective_timezone": str(cards.club_zone(settings)),
         },
         "timezones": [{"id": i, "label": n} for i, n in TIMEZONES],

@@ -228,3 +228,11 @@ Asked for: design a custom pack on the spot, and set its name, the words under i
 - Not done: a size for a scheduled pack, and choosing a quality's guarantee. Both are small if wanted.
 - Verified: `verify_player_cards.py` (558), the other backend suites, route audit; browser `_admin_` (99), `_designs_` (35) and the rest of the Player Cards suites.
 
+## v9.135.5 (2026-10-29): the full photo is back on every card
+
+Reported: some players had lost the full photo on their card. Cause: v9.134.2 (rule: plain cards show the circle, only special, Epic and Legendary fill) was the default for every club, which took the photo off every Common and Rare card. Asked for: hero photo on all cards when one is available; action shot for the special cards.
+
+- `card_shot` now defaults to the hero photo for every card and the action shot for every special card (not only performance specials). `big_photos` defaults to `all`; `top` and `specials` remain as choices.
+- Migration 379 sets the column default to `all` and moves rows still on `top` (nobody chose it; it was the default for three days). The default change is also in the lifespan list; the data step is alembic only.
+- Verified: `verify_player_cards.py` (558), browser `_hero_` and `_admin_` suites.
+

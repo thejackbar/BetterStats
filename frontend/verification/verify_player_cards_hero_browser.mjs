@@ -60,7 +60,7 @@ const run = async () => {
     const p = await ctx.newPage()
     p.on('pageerror', (e) => errors.push(String(e)))
     const mk = (pid, name, shot, tier, x = {}) => ({ ...card(pid, name, { tier }), photo_url: '/api/images/head.jpg', hero_photo_url: '/api/images/hero.jpg', action_photo_url: '/api/images/action.jpg', shot, ...x })
-    const MIXED = [mk('p1', 'Barendse, Jack', 'profile', 'common', { mine: true }), mk('p2', 'Kumar, Sanjay', 'profile', 'rare'), mk('p3', 'Ryan, Andrew', 'hero', 'epic'), mk('p4', 'Lyall, Josh', 'action', 'legendary'), mk('p5', 'Old, Server', undefined, 'rare')]
+    const MIXED = [mk('p1', 'Barendse, Jack', 'hero', 'common', { mine: true }), mk('p2', 'Kumar, Sanjay', 'hero', 'rare'), mk('p3', 'Ryan, Andrew', 'hero', 'epic'), mk('p4', 'Lyall, Josh', 'action', 'special', { kind: 'special', special_kind: 'century', key: 's:x1', title: 'Century' }), mk('p5', 'Old, Server', undefined, 'rare'), mk('p6', 'Circle, Only', 'profile', 'common')]
     await p.route('**/api/**', async (r) => {
       const url = r.request().url()
       const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) })
@@ -79,10 +79,10 @@ const run = async () => {
       hero: [...document.querySelectorAll('[data-card-hero]')].map((i) => [i.getAttribute('data-card-hero'), i.getAttribute('src')]),
       head: [...document.querySelectorAll('[data-card-head]')].map((i) => i.getAttribute('src')),
     }))
-    check('plain cards show the profile photo in the circle, and nothing fills the card', seen.head.length === 2 && seen.head.every((u) => /head\.jpg/.test(u)), JSON.stringify(seen))
-    check('an Epic card fills with the hero photo', seen.hero.some(([k, u]) => k === 'hero' && /hero\.jpg/.test(u)), JSON.stringify(seen))
-    check('a Legendary card fills with the action shot', seen.hero.some(([k, u]) => k === 'action' && /action\.jpg/.test(u)), JSON.stringify(seen))
-    check('a card from a server that does not say (no shot) keeps the old behaviour: the hero position', seen.hero.some(([k]) => k === 'legacy') && seen.hero.length === 3, JSON.stringify(seen))
+    check('Common and Rare cards fill with the hero photo too, when the player has one', seen.hero.filter(([k, u]) => k === 'hero' && /hero\.jpg/.test(u)).length === 3, JSON.stringify(seen))
+    check('a special card fills with the action shot', seen.hero.some(([k, u]) => k === 'action' && /action\.jpg/.test(u)), JSON.stringify(seen))
+    check('a card the server says is a circle (a player with no hero photo) shows the profile photo, and nothing fills the card', seen.head.length === 1 && /head\.jpg/.test(seen.head[0]), JSON.stringify(seen))
+    check('a card from a server that does not say (no shot) keeps the old behaviour: the hero position', seen.hero.some(([k]) => k === 'legacy'), JSON.stringify(seen))
     if (SHOT) await p.screenshot({ path: `${SHOT}/hero-by-type.png` })
     await ctx.close()
   }
