@@ -1,11 +1,11 @@
-# Hyperframes Composition Brief: BetterCricket Player Cards (Applecross)
+# Hyperframes Composition Brief: BetterCricket Player Cards (Applecross as the example club)
 
 ## Objective
 A 25s landscape launch-style video for the new Player Cards in BetterCricket, using real Applecross Cricket Club data.
 
 ## Output
 - Composition: `brag-output-2026-10-29-045309/composition/` (single root `index.html`, built by a script from the real card components)
-- Video: `brag-output-2026-10-29-045309/brag.mp4`, 1920x1080, 30fps, 25s
+- Video: `brag-output-2026-10-29-045309/brag.mp4`, 1920x1080, 30fps, 50s (half speed)
 
 ## Source material
 - Card faces rebuilt from `frontend/src/components/cards/CardFaces.jsx`, `cardTheme.js`, `PackOpening.jsx`, `CardGallery.jsx`, `SwapsPanel.jsx`

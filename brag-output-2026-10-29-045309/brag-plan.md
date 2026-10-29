@@ -4,7 +4,7 @@
 BetterCricket gives every player at a club a collectable trading card built from their real career stats, with packs to open, a card book to fill and swaps with team-mates.
 
 ## The angle
-Applecross is the demo club, and every card in the video is a real Applecross player with their real career numbers (Ramon Fletcher's 711 wickets, Rob Wilton's 9,247 runs, Pratik Bhave's 153). The pitch is "this is your club's own footy-card moment": every player, every pack, nothing paid. The pack opening is the centrepiece. It is the one thing a viewer can't get from a stats page.
+This is a BetterCricket ad; Applecross is the demo club, and every card in the video is a real Applecross player with their real career numbers (Ramon Fletcher's 711 wickets, Rob Wilton's 9,247 runs, Pratik Bhave's 153). The pitch is "this is your club's own footy-card moment": every player, every pack, nothing paid. The pack opening is the centrepiece. It is the one thing a viewer can't get from a stats page.
 
 ## Hook (first 2-3 seconds)
 Wall of Applecross cards slams in, then "EVERY PLAYER GETS A CARD." in the club's red. Real faces, real figures, the card frame shining.
@@ -27,7 +27,7 @@ Get a pack (earned by runs, wickets, hat-trick) -> tap it open and turn the card
 - Interpretation: fast cuts and snappy card entrances, each key line holds long enough to read; the pack opening gets the biggest light and sound.
 
 ## Format: landscape - 1920x1080
-## Duration: 25 seconds
+## Duration: 50 seconds (the first cut was 25s; all timing doubled to run at half speed)
 
 ## Visual identity (from the project)
 - Background: stage ground `#04070b` with a radial wash of `color-mix(#ff0000 30%, #0b1018)`, as the pack-opening overlay in `PackOpening.jsx`
