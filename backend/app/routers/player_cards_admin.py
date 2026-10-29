@@ -9,12 +9,13 @@ key that is not sent leaves its setting alone and an explicit null clears the ti
 """
 from __future__ import annotations
 
+import json
 import secrets
 import uuid
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -247,6 +248,59 @@ async def create_gift(
     if not out["repeat"]:
         await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_pack_gift", target_type="card_pack_gift",
                                      target_id=out["id"], details={k: out[k] for k in ("title", "quality", "qty", "players", "packs")})
+    await db.commit()
+    return {"gift": out, **await _payload(db, club)}
+
+
+@router.post("/gifts/designed")
+async def create_designed_gift(
+    title: str = Form(...),
+    quality: str = Form("special"),
+    qty: int = Form(1),
+    audience: str = Form("all"),
+    player_ids: str = Form("[]"),
+    request_id: Optional[str] = Form(None),
+    style: str = Form("{}"),
+    bg: Optional[UploadFile] = File(None),
+    art: Optional[UploadFile] = File(None),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Create packs now AND give them a look of their own in the same step: a style (colours, darkness, layout) and a background and/or
+    centre picture. Everything is checked before anything is made, so a bad picture or colour makes no packs and no half design."""
+    try:
+        ids = json.loads(player_ids or "[]")
+        raw_style = json.loads(style or "{}")
+        if not isinstance(ids, list) or not isinstance(raw_style, dict):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status_code=422, detail="That request could not be read.")
+    try:
+        clean = pack_designs.clean_style({k: v for k, v in raw_style.items() if k != "title"})
+        images = {}
+        for kind, up in (("bg", bg), ("art", art)):
+            if up is not None and up.filename:
+                images[kind] = pack_designs.process_image(await up.read(pack_designs.MAX_UPLOAD_BYTES + 1), kind)
+    except pack_designs.DesignError as exc:
+        raise _design_error(exc)
+    snap = await cards.club_snapshot(db, club, fresh=True)
+    await cards.ensure_launched(db, club.id)
+    try:
+        out = await cards.create_gift(db, club, snap, title=title, quality=quality, qty=qty, audience=audience,
+                                      player_ids=[str(i) for i in ids], request_id=request_id, by=getattr(user, "email", None))
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not out["repeat"]:
+        target = pack_designs.gift_target(out["id"])
+        if clean:
+            await pack_designs.save_style(db, club.id, target, clean)
+        for kind, (data, mime) in images.items():
+            await pack_designs.put_image(db, club.id, target, kind, data, mime)
+        await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_pack_gift", target_type="card_pack_gift",
+                                     target_id=out["id"], details={**{k: out[k] for k in ("title", "quality", "qty", "players", "packs")},
+                                                                   "designed": bool(clean or images)})
     await db.commit()
     return {"gift": out, **await _payload(db, club)}
 

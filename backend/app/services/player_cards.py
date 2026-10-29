@@ -1146,7 +1146,7 @@ async def available_packs(db: AsyncSession, pid: str, snap: dict) -> list[dict]:
     out = []
     for r in packs:
         ev = pack_designs.event_id_of(r[1], r[2])
-        design = pack_designs.resolve(designs, r[1], ev)
+        design = pack_designs.resolve(designs, r[1], ev, pack_designs.gift_id_of(r[1], r[2]))
         # A pack with a name of its own (a scheduled event) keeps it; otherwise the club's name for that kind of pack, then ours.
         own = (design or {}).get("title") if design and design["target"] != pack_designs.DEFAULT_TARGET else None
         out.append({"id": r[0], "source": r[1], "label": r[4] or own or kinds.label_for(r[1]), "quality": r[5], "design": design})

@@ -30,6 +30,7 @@ find_spec, so the control reports the missing behaviour as failed checks instead
 from __future__ import annotations
 
 import asyncio
+import json
 import importlib.util
 import os
 import sys
@@ -2127,6 +2128,57 @@ async def main() -> None:
             check("a bad request through the route is a 422 each time", codes == [422, 422, 422], str(codes))
             sched = await adm3.add_event(adm3.EventBody(title="Q day", starts_on=date.today() + timedelta(days=100), quality="elite"), db, club, admin_user)
             check("the schedule route takes a quality too", any(e["title"] == "Q day" and e["quality"] == "elite" for e in sched["events"]))
+            # a pack designed on the spot, as it is made
+            if DESIGNS_DDL:
+                from io import BytesIO as _BI
+                from starlette.datastructures import UploadFile as _U2
+                from PIL import Image as _I2
+                from app.services import player_card_designs as D2
+
+                def _png(w, h):
+                    b = _BI(); _I2.new("RGB", (w, h), (20, 80, 200)).save(b, "PNG"); return b.getvalue()
+                club = await db.get(Organisation, ORG)
+                n_gifts = lambda: db.execute(text("SELECT count(*) FROM club_card_pack_gifts WHERE organisation_id = :o"), {"o": ORG})
+                before_n = (await n_gifts()).scalar()
+                rid2 = str(uuid.uuid4())
+                made = await adm3.create_designed_gift(title="Cup Day Special", quality="elite", qty=1, audience="players", player_ids=json.dumps(pick[:1]), request_id=rid2,
+                                                       style=json.dumps({"color_a": "#112233", "overlay": 0.5, "show_name": False, "art_position": "bottom"}),
+                                                       bg=_U2(file=_BI(_png(900, 1200)), filename="bg.png"), art=_U2(file=_BI(_png(300, 300)), filename="art.png"),
+                                                       db=db, club=club, user=admin_user)
+                gid = made["gift"]["id"]
+                gd = made["designs"].get(f"gift:{gid}")
+                check("a pack made with a design carries it: colours and layout as sent, and both pictures", gd and gd["a"] == "#112233" and gd["overlay"] == 0.5 and gd["show_name"] is False and gd["art_position"] == "bottom" and gd["background_url"] and gd["art_url"], str(gd))
+                check("...and the packs themselves were made as usual", made["gift"]["packs"] == 1 and made["gift"]["players"] == 1)
+                snap = await cards.club_snapshot(db, club, fresh=True)
+                mine_p = [p for p in await cards.available_packs(db, pick[0], snap) if p["label"] == "Cup Day Special"]
+                plain_p = [p for p in await cards.available_packs(db, pick[0], snap) if p["label"] == "Thanks"]
+                check("the player's pack has that design", mine_p and mine_p[0]["design"] and mine_p[0]["design"]["target"] == f"gift:{gid}" and mine_p[0]["design"]["a"] == "#112233", str(mine_p))
+                await D2.save_style(db, ORG, "custom", {"color_a": "#aa0000"}); await db.commit()
+                snap = await cards.club_snapshot(db, club, fresh=True)
+                plain_p = [p for p in await cards.available_packs(db, pick[0], snap) if p["label"] == "Thanks"]
+                mine_p = [p for p in await cards.available_packs(db, pick[0], snap) if p["label"] == "Cup Day Special"]
+                check("another club pack without its own design takes the club's 'club pack' design, and the designed one keeps its own", plain_p[0]["design"]["target"] == "custom" and mine_p[0]["design"]["target"] == f"gift:{gid}")
+                check("the gift's design can be changed later like any other (it is listed under From the club)", f"gift:{gid}" in {t["key"] for t in await D2.targets(db, ORG)} and (await D2.save_style(db, ORG, f"gift:{gid}", {"color_a": "#00ff00"}))["a"] == "#00ff00")
+                await db.commit()
+                check("a gift of this club can be designed, another club's cannot, and a made-up one is a 404", await D2.check_target(db, ORG, f"gift:{gid}") == f"gift:{gid}" and await raises(D2.check_target(db, ORG_SELECT, f"gift:{gid}")) == 404 and await raises(D2.check_target(db, ORG, f"gift:{uuid.uuid4()}")) == 404 and await raises(D2.check_target(db, ORG, "gift:nope")) == 404)
+                club = await db.get(Organisation, ORG)
+
+                after_n = (await n_gifts()).scalar()
+                async def refuse(**kw):
+                    base = dict(title="Bad design", quality="elite", qty=1, audience="all", player_ids="[]", request_id=None, style="{}", bg=None, art=None, db=db, club=club, user=admin_user)
+                    return await status_of(adm3.create_designed_gift(**{**base, **kw}))
+                codes2 = []
+                for kw in ({"style": json.dumps({"color_a": "red"})}, {"bg": _U2(file=_BI(svg), filename="x.svg")}, {"art": _U2(file=_BI(b"not a picture"), filename="x.png")},
+                           {"style": "{not json"}, {"player_ids": "5"}, {"quality": "nope"}):
+                    codes2.append(await refuse(**kw)); club = await db.get(Organisation, ORG)
+                check("a bad colour, picture, request or quality is refused (422) each time", codes2 == [422] * 6, str(codes2))
+                check("...and makes NO packs and no half design (nothing is made if anything is wrong)", (await n_gifts()).scalar() == after_n and (await db.execute(text("SELECT count(*) FROM club_card_pack_designs WHERE organisation_id = :o AND target LIKE 'gift:%'"), {"o": ORG})).scalar() == 1)
+                again2 = await adm3.create_designed_gift(title="Cup Day Special", quality="elite", qty=1, audience="players", player_ids=json.dumps(pick[:1]), request_id=rid2,
+                                                         style=json.dumps({"color_a": "#ff00ff"}), bg=None, art=None, db=db, club=club, user=admin_user)
+                check("sending the same request again changes neither the packs nor the design", again2["gift"]["repeat"] is True and again2["designs"][f"gift:{gid}"]["a"] == "#00ff00" and (await n_gifts()).scalar() == after_n)
+                plain = await adm3.create_designed_gift(title="No design here", quality="standard", qty=1, audience="players", player_ids=json.dumps(pick[:1]), request_id=None, style="{}", bg=None, art=None, db=db, club=club, user=admin_user)
+                check("a gift sent with no design makes no design row", f"gift:{plain['gift']['id']}" not in plain["designs"])
+                check("the designed gift is on the audit trail as designed", (await db.execute(text("SELECT count(*) FROM audit_logs WHERE action = 'player_card_pack_gift' AND details->>'designed' = 'true'"))).scalar() >= 1)
             await db.rollback()
     else:
         check("(the control run has no admin-created packs to test)", True)
