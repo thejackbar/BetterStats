@@ -1129,6 +1129,9 @@ function MatchDetailsEditor({ game, seasons, grades, knownValues, onPending, onN
   const [form, setForm] = useState(initial)
   const [err, setErr] = useState(null)
   const seasonGrades = useMemo(() => (grades || []).filter(g => g.season_id === form.season_id), [grades, form.season_id])
+  // Appears already in view, however far down the list the click was, with no glide.
+  const rootRef = useRef(null)
+  useEffect(() => { rootRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' }) }, [])
 
   // Only what the person actually changed.
   const changes = () => {
@@ -1163,7 +1166,7 @@ function MatchDetailsEditor({ game, seasons, grades, knownValues, onPending, onN
   }
 
   return (
-    <div className="bg-pb-surface border pb-hairline rounded-lg p-4" data-testid="match-details">
+    <div className="bg-pb-surface border pb-hairline rounded-lg p-4 scroll-mt-20" ref={rootRef} data-testid="match-details">
       <h3 className="text-base font-semibold text-pb-text mb-1">Edit match details</h3>
       <p className="text-xs text-pb-faint mb-3">
         {game.played_at ? String(game.played_at).split('T')[0] : 'No date'}{game.opposition ? ` v ${game.opposition}` : ''}.
@@ -1258,6 +1261,14 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
   const [formSection, setFormSection] = useState('match')
   // The match whose own details are open in the quick editor (the full match, as the server holds it).
   const [detailsGame, setDetailsGame] = useState(null)
+  // Edit puts the form in view the moment its details are loaded: the position is set outright, with no
+  // glide up the page, so the match is ready to change as soon as the click lands. A counter, so a second
+  // Edit while the form is already showing jumps again. Runs after the render that fills the form in.
+  const formCardRef = useRef(null)
+  const [jumpToForm, setJumpToForm] = useState(0)
+  useEffect(() => {
+    if (jumpToForm) formCardRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' })
+  }, [jumpToForm])
 
   const seasonGrades = useMemo(
     () => (grades || []).filter(g => g.season_id === form.season_id),
@@ -1383,16 +1394,15 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
           return out
         }),
       })
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      setJumpToForm(n => n + 1)
     } catch (e) { setErr(e.message) }
   }
 
   const handleDetails = async (row) => {
     try {
       setErr(null)
+      // The editor puts itself in view when it appears (see MatchDetailsEditor).
       setDetailsGame(await api.adminGetManualGame(row.id))
-      // The editor sits above the list; bring it into view so a click far down the page is not silent.
-      setTimeout(() => document.querySelector('[data-testid=match-details]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
     } catch (e) { setErr(e.message) }
   }
 
@@ -1440,7 +1450,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
         onImported={() => { refresh(); refreshAll() }}
       />
 
-      <div className="bg-pb-surface border pb-hairline rounded-lg p-4">
+      <div className="bg-pb-surface border pb-hairline rounded-lg p-4 scroll-mt-20" ref={formCardRef} data-testid="game-form-card">
         <h3 className="text-base font-semibold text-pb-text mb-3">
           {editingId ? 'Edit manual game' : 'New manual game'}
         </h3>
