@@ -1,8 +1,8 @@
 // Player Cards challenges, in Chromium on the production build with the API stubbed:
 //  * the player's Challenges screen: exchange and collection challenges with their rewards, a collection's cards, the earned banner, a player's
 //    own private sets (made and deleted, with the exact request on the wire), no horizontal scroll at 390;
-//  * the squad builder: tap cards to pick them, the checklist comes from the server (one check request per change), the hand-in asks first and
-//    sends exactly the cards picked, then says what was earned;
+//  * the squad builder: tap cards to pick them (each once, tap again to put it back), the checklist comes from the server, Finish sends exactly
+//    the cards picked and says what was earned and that every card is kept;
 //  * the admin Challenges tab: make an exchange (the body on the wire carries exactly the rules set), make a collection from a premiership,
 //    change one, remove one (asks first), and a refusal from the server is shown.
 //
@@ -22,7 +22,7 @@ const card = (pid, name, tier, rarity, x = {}) => ({
   kind: 'player', key: `p:${pid}`, player_id: pid, name, photo_url: null, hero_photo_url: null, matches: 100, runs: 1500, bat_avg: 24.5,
   wickets: 20, bowl_avg: 31.2, dismissals: 30, rarity, tier, copies: 1, obtained_at: '2026-10-20T01:00:00Z', mine: false, ...x,
 })
-const SPEND = [{ ...card('p2', 'Zed, Alan', 'common', 18), spendable: 2 }, { ...card('p3', 'Adams, Brian', 'epic', 81), spendable: 1 }, { ...card('p4', 'Hill, Tom', 'rare', 55), spendable: 1 }]
+const SPEND = [{ ...card('p2', 'Zed, Alan', 'common', 18), copies: 2 }, { ...card('p3', 'Adams, Brian', 'epic', 81), copies: 1 }, { ...card('p4', 'Hill, Tom', 'rare', 55), copies: 1 }]
 const reward = { quality: 'special', quality_label: 'Special', qty: 2, size: 5, title: 'Squad reward' }
 const EXCHANGE = { id: 'c1', kind: 'exchange', title: 'Rare squad', blurb: 'Two rares and a common.', reward, starts_on: null, ends_on: null, status: 'open', completions: 0, max_completions: 2, finished: false, requirements: ['3 cards', 'At least 1 Rare', 'At least 1 Common'], count: 3 }
 const COLLECTION = {
@@ -61,13 +61,13 @@ const run = async () => {
       if (path === '/my-sets' && method === 'POST') { state.mySets = [...state.mySets, { ...MY_SET, id: 's2', title: body.title || 'Zed fans' }]; return json({ ok: true }) }
       if (/^\/my-sets\//.test(path) && method === 'DELETE') { state.mySets = state.mySets.filter((s) => `/my-sets/${s.id}` !== path); return json({ ok: true }) }
       if (/^\/challenges\/c1\/check$/.test(path)) {
-        const n = body.cards.reduce((a, c) => a + c.qty, 0)
+        const n = body.cards.length
         return json({ ok: n === 3, checks: [{ id: 'count', label: '3 cards', ok: n === 3, have: n, need: 3 }, { id: 'rare', label: 'At least 1 Rare', ok: body.cards.some((c) => c.key === 'p:p4'), have: 0, need: 1 }], rating: 61 })
       }
       if (/^\/challenges\/c1\/submit$/.test(path)) {
-        if (state.failSubmit) return json({ detail: 'You can only hand in cards you hold.' }, 409)
+        if (state.failSubmit) return json({ detail: 'You can only use cards you hold.' }, 409)
         state.submitted = true
-        return json({ ok: true, spent: 3, packs: 2, reward })
+        return json({ ok: true, used: 3, packs: 2, reward })
       }
       if (/^\/challenges\/c1$/.test(path)) return json({ id: 'c1', title: EXCHANGE.title, blurb: EXCHANGE.blurb, rules: {}, requirements: EXCHANGE.requirements, reward, status: 'open', completions: state.submitted ? 1 : 0, max_completions: 2, cards: SPEND })
       if (/\/me\/cards$/.test(url)) return json({ club: CLUB, week_resets_at: '2026-10-26T16:00:00+00:00', packs: [], pack_size: 5, season: 'Summer', cards: [], totals: {} })
@@ -115,31 +115,27 @@ const run = async () => {
 
   {
     const { ctx, page } = await player(1280, '/challenges/c1', '[data-screen="challenge"]')
-    check('the builder lists the cards the player can hand in, with the rules unticked', (await page.locator('[data-challenge-card]').count()) === 3 && (await page.locator('[data-check-ok="no"]').count()) === 3)
-    check('Hand in is off with nothing picked', await page.locator('[data-handin]').isDisabled())
+    check('the builder lists the cards the player can pick, with the rules unticked', (await page.locator('[data-challenge-card]').count()) === 3 && (await page.locator('[data-check-ok="no"]').count()) === 3)
+    check('Finish is off with nothing picked', await page.locator('[data-handin]').isDisabled())
     const tap = (k) => page.locator(`[data-challenge-card="${k}"] button, [data-challenge-card="${k}"] [role=button]`).first().click()
     const before = calls.filter((c) => /check$/.test(c.path)).length
-    await tap('p:p2'); await tap('p:p2'); await tap('p:p3')
-    await page.waitForFunction(() => document.querySelector('[data-check="count"]')?.getAttribute('data-check-ok') === 'yes')
-    check('the checklist comes from the server and says what is still missing', (await page.locator('[data-check="rare"]').getAttribute('data-check-ok')) === 'no' && (await page.locator('[data-check="count"]').innerText()).includes('3/3'))
-    check('three quick taps are checked once or twice, not once each', calls.filter((c) => /check$/.test(c.path)).length - before <= 2)
-    await tap('p:p3')
-    check('a card held once cannot be picked twice', /1/.test(await page.locator('[data-picked-row="p:p3"] .font-mono').innerText()) && await page.locator('[aria-label^="More: Adams"]').isDisabled())
-    await page.locator('[aria-label^="Fewer: Zed"]').click()
-    await tap('p:p4')
+    await tap('p:p2'); await tap('p:p3'); await tap('p:p4')
     await page.waitForFunction(() => document.querySelector('[data-check="rare"]')?.getAttribute('data-check-ok') === 'yes')
-    check('with the rules met the checklist ticks and Hand in turns on', (await page.locator('[data-check-ok="yes"]').count()) === 2 && !(await page.locator('[data-handin]').isDisabled()) && /Squad rating 61/i.test(await page.locator('[data-rating]').innerText()))
+    check('the checklist comes from the server', (await page.locator('[data-check="count"]').getAttribute('data-check-ok')) === 'yes' && (await page.locator('[data-check="count"]').innerText()).includes('3/3'))
+    check('three quick taps are checked once or twice, not once each', calls.filter((c) => /check$/.test(c.path)).length - before <= 2)
+    await tap('p:p2')
+    check('tapping a picked card puts it back, and a card can only be picked once', (await page.locator('[data-picked-row]').count()) === 2 && (await page.locator('[data-picked-row="p:p2"]').count()) === 0)
+    await page.waitForFunction(() => document.querySelector('[data-check="count"]')?.getAttribute('data-check-ok') === 'no')
+    check('with a card missing the count line shows it and Finish is off', await page.locator('[data-handin]').isDisabled())
+    await tap('p:p2')
+    await page.waitForFunction(() => document.querySelector('[data-check="count"]')?.getAttribute('data-check-ok') === 'yes')
+    check('with the rules met the checklist ticks and Finish turns on', (await page.locator('[data-check-ok="yes"]').count()) === 2 && !(await page.locator('[data-handin]').isDisabled()) && /Squad rating 61/i.test(await page.locator('[data-rating]').innerText()))
+    check('the screen says every card is kept, and there is no confirmation about spending', /keep every card/i.test(await page.locator('[data-challenge-side]').innerText()) && (await page.locator('[data-handin-confirm]').count()) === 0)
     await page.click('[data-handin]')
-    check('the hand-in asks first and sends nothing yet', (await page.locator('[data-handin-confirm]').count()) === 1 && !calls.some((c) => /submit$/.test(c.path)))
-    await page.click('text=Not yet')
-    check('Not yet closes it and still sends nothing', (await page.locator('[data-handin-confirm]').count()) === 0 && !calls.some((c) => /submit$/.test(c.path)))
-    await page.click('[data-handin]')
-    await page.click('[data-handin-yes]')
     await page.waitForSelector('[data-challenge-done]')
     const sub = calls.find((c) => /submit$/.test(c.path))
-    const sent = Object.fromEntries((sub?.body?.cards || []).map((c) => [c.key, c.qty]))
-    check('the hand-in sends exactly the cards picked', JSON.stringify(sent) === JSON.stringify({ 'p:p2': 1, 'p:p3': 1, 'p:p4': 1 }), JSON.stringify(sub?.body))
-    check('it then says what was earned, with a link to the packs', /handed in 3 cards and earned 2 Special reward packs/.test(await page.locator('[data-challenge-done]').innerText()) && (await page.locator('[data-challenge-done] a[href$="/cards/packs"]').count()) === 1)
+    check('Finish sends exactly the cards picked, once each', JSON.stringify((sub?.body?.cards || []).map((c) => c.key).sort()) === JSON.stringify(['p:p2', 'p:p3', 'p:p4']) && (sub?.body?.cards || []).every((c) => c.qty === undefined), JSON.stringify(sub?.body))
+    check('it then says what was earned, with a link to the packs', /used 3 cards and earned 2 Special reward packs/.test(await page.locator('[data-challenge-done]').innerText()) && /still yours/.test(await page.locator('[data-challenge-done]').innerText()) && (await page.locator('[data-challenge-done] a[href$="/cards/packs"]').count()) === 1)
     await ctx.close()
   }
 
@@ -149,9 +145,9 @@ const run = async () => {
     const tap = (k) => page.locator(`[data-challenge-card="${k}"] button, [data-challenge-card="${k}"] [role=button]`).first().click()
     await tap('p:p2'); await tap('p:p3'); await tap('p:p4')
     await page.waitForFunction(() => document.querySelector('[data-check="count"]')?.getAttribute('data-check-ok') === 'yes')
-    await page.click('[data-handin]'); await page.click('[data-handin-yes]')
+    await page.click('[data-handin]')
     await page.waitForSelector('[role=alert]')
-    check('a refusal from the server is shown and the cards stay picked', /only hand in cards you hold/.test(await page.locator('[role=alert]').innerText()) && (await page.locator('[data-picked-row]').count()) === 3 && (await page.locator('[data-challenge-done]').count()) === 0)
+    check('a refusal from the server is shown and the cards stay picked', /only use cards you hold/.test(await page.locator('[role=alert]').innerText()) && (await page.locator('[data-picked-row]').count()) === 3 && (await page.locator('[data-challenge-done]').count()) === 0)
     state.failSubmit = false
     await ctx.close()
   }
@@ -221,7 +217,7 @@ const run = async () => {
   await page.waitForSelector('[data-challenge-form]')
   check('Publish stays off until it has a name', await page.locator('[data-challenge-save] button').isDisabled())
   await page.fill('[aria-label="Challenge name"]', 'Rare squad')
-  await page.fill('[aria-label="Cards to hand in"]', '11')
+  await page.fill('[aria-label="Cards in the squad"]', '11')
   await page.selectOption('[aria-label="Kind of card"]', 'players')
   await page.fill('[data-min-tier="rare"]', '3')
   await page.fill('[aria-label="Squad rating"]', '70')

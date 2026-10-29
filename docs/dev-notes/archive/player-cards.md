@@ -247,3 +247,12 @@ Asked for: players make their own sets, admins offer sets to everyone, sets work
 - Existing players with a finished set receive the reward pack the first time they open Sets or Challenges after release. This is deliberate and shown once as a banner.
 - Not done (proposed, not asked for yet): saved XIs built from held cards, and "nominate what you are collecting" as a goal on Home.
 - Verified: `verify_player_cards.py` (631), `verify_merge_carry.py`, `verify_player_page_dashboard.py`, `verify_player_dashboard_and_fines.py`, `verify_player_action_photo.py`, `verify_player_privacy.py`, `audit_route_access.py`; browser `_challenges_` (37, new), `_page_` (66), `_designs_` (35), `_admin_` (99), `_hero_` (11), community, social, v2, v3 and the base suite.
+
+## v9.136.1 (2026-10-30): challenges never take cards
+
+Asked for: players should not have to spend cards for challenges; they are always kept.
+
+- `submit` no longer deletes `player_card_copies`. The squad is any cards the player holds, including their own card and starting (gift) copies, each once. The run still records the cards used (same `submitted` shape, `qty` 1).
+- Chosen so a repeatable challenge cannot be farmed: with `max_completions` above 1, cards used in an earlier run of the same challenge are refused and not offered. Different challenges can reuse the same cards.
+- Wording: the admin kind is "Squad" (the stored kind stays `exchange`, so no migration). The submit response carries `used` instead of `spent`. The hand-in confirmation is gone, since nothing is lost.
+- Verified: `verify_player_cards.py` (634), browser `_challenges_` (37), `_page_` (66, with the eighth How it works section the earlier release added), `_admin_` (99).

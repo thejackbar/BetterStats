@@ -1,6 +1,6 @@
-// One exchange challenge: its rules, the reward, and a squad built from the cards the player can hand in. The rules are checked by the
-// server as the squad changes (so what this screen says is what the server will do), and the hand-in is a two step: the cards are
-// spent, so it asks first.
+// One squad challenge: its rules, the reward, and a squad built from the cards the player holds. Nothing is taken from the player: the
+// cards stay in their collection. The rules are checked by the server as the squad changes, so what this screen says is what the server
+// will do. Each card counts once, and cards used the last time the challenge was finished are not offered again.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
@@ -18,11 +18,10 @@ export default function ChallengePage() {
   const { token, basePath, club, accent, display, sponsor, load } = usePC()
   const [ch, setCh] = useState(null)
   const [err, setErr] = useState('')
-  const [picked, setPicked] = useState(() => new Map())      // key -> { card, qty }
+  const [picked, setPicked] = useState(() => new Map())      // key -> card
   const [verdict, setVerdict] = useState(null)
   const [tier, setTier] = useState('all')
   const [q, setQ] = useState('')
-  const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   const sent = useRef(0)
@@ -30,8 +29,8 @@ export default function ChallengePage() {
   const read = () => api.availPublicChallenge(token, id).then((c) => { setCh(c); setErr('') }).catch((e) => setErr(e?.message || 'That challenge could not be found.'))
   useEffect(() => { setCh(null); setPicked(new Map()); setVerdict(null); setResult(null); read() }, [token, id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selection = useMemo(() => [...picked.values()].map(({ card, qty }) => ({ key: card.key, qty })), [picked])
-  const total = selection.reduce((n, s) => n + s.qty, 0)
+  const selection = useMemo(() => [...picked.keys()].map((key) => ({ key })), [picked])
+  const total = selection.length
 
   // Ask the server which rules the squad meets, a moment after the last change.
   useEffect(() => {
@@ -44,16 +43,11 @@ export default function ChallengePage() {
     return () => clearTimeout(t)
   }, [selection, ch, token, id, result])
 
-  const add = (card) => setPicked((cur) => {
-    const next = new Map(cur); const have = next.get(card.key)
-    if ((have?.qty || 0) >= card.spendable) return cur
-    next.set(card.key, { card, qty: (have?.qty || 0) + 1 }); return next
-  })
-  const setQty = (card, qty) => setPicked((cur) => { const next = new Map(cur); if (qty <= 0) next.delete(card.key); else next.set(card.key, { card, qty: Math.min(qty, card.spendable) }); return next })
-  const reset = () => { setPicked(new Map()); setConfirming(false); setVerdict(null) }
+  const toggle = (card) => setPicked((cur) => { const next = new Map(cur); if (next.has(card.key)) next.delete(card.key); else next.set(card.key, card); return next })
+  const reset = () => { setPicked(new Map()); setVerdict(null) }
   const submit = async () => {
     setBusy(true); setErr('')
-    try { const out = await api.availPublicSubmitChallenge(token, id, selection); setResult(out); setPicked(new Map()); setConfirming(false); load(); read() } catch (e) { setErr(e?.message || 'That could not be handed in.'); setConfirming(false) } finally { setBusy(false) }
+    try { const out = await api.availPublicSubmitChallenge(token, id, selection); setResult(out); setPicked(new Map()); load(); read() } catch (e) { setErr(e?.message || 'That could not be finished.') } finally { setBusy(false) }
   }
 
   const shown = useMemo(() => {
@@ -69,11 +63,11 @@ export default function ChallengePage() {
   const ready = verdict?.ok && total > 0
   return (
     <div data-screen="challenge">
-      <PageHead title={ch.title} sub={ch.blurb || 'Hand in cards that meet the rules.'} actions={<Link to={`${basePath}/challenges`} className="px-4 py-2 rounded-lg border pb-hairline text-sm font-semibold">All challenges</Link>} />
+      <PageHead title={ch.title} sub={ch.blurb || 'Pick cards you hold that meet the rules. You keep every card.'} actions={<Link to={`${basePath}/challenges`} className="px-4 py-2 rounded-lg border pb-hairline text-sm font-semibold">All challenges</Link>} />
       {result && (
         <div data-challenge-done role="status" className="rounded-2xl border p-4 mb-5" style={{ borderColor: accent }}>
           <div className="font-bold">Challenge complete.</div>
-          <div className="text-sm mt-1">You handed in {result.spent} {result.spent === 1 ? 'card' : 'cards'} and earned {result.packs} {result.reward.quality_label} reward {result.packs === 1 ? 'pack' : 'packs'}. <Link to={`${basePath}/packs`} className="underline">Open {result.packs === 1 ? 'it' : 'them'}</Link>.</div>
+          <div className="text-sm mt-1">You used {result.used} {result.used === 1 ? 'card' : 'cards'} and earned {result.packs} {result.reward.quality_label} reward {result.packs === 1 ? 'pack' : 'packs'}. Every card is still yours. <Link to={`${basePath}/packs`} className="underline">Open {result.packs === 1 ? 'it' : 'them'}</Link>.</div>
         </div>
       )}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -85,15 +79,15 @@ export default function ChallengePage() {
             </div>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a card" aria-label="Find a card" className="rounded-lg border pb-hairline bg-transparent px-3 py-1.5 text-sm min-w-0 flex-1" />
           </div>
-          {ch.cards.length === 0 && <div className="text-sm text-pb-dim" data-no-spendable>You have no cards you can hand in yet. Your own card and your starting cards stay with you.</div>}
+          {ch.cards.length === 0 && <div className="text-sm text-pb-dim" data-no-spendable>You have no cards to pick from yet, or you used them all last time. Open some packs and come back.</div>}
           {ch.cards.length > 0 && shown.length === 0 && <div className="text-sm text-pb-dim" data-no-match>No cards match.</div>}
           <div className="flex flex-wrap gap-3" data-challenge-cards>
             {shown.map((c) => {
-              const n = picked.get(c.key)?.qty || 0
+              const on = picked.has(c.key)
               return (
                 <div key={c.key} className="flex flex-col items-center gap-1" data-challenge-card={c.key}>
-                  <Mini card={c} {...ui} width={92} count={c.spendable - n} selected={n > 0 ? true : undefined} onClick={() => add(c)} label={`${cardLine(c)}, ${c.spendable - n} left to hand in`} />
-                  {n > 0 && <span className="font-mono text-[10px] tracking-wide2 uppercase" data-card-picked>{n} picked</span>}
+                  <Mini card={c} {...ui} width={92} selected={on ? true : undefined} onClick={() => toggle(c)} label={`${cardLine(c)}${on ? ', picked' : ''}`} />
+                  {on && <span className="font-mono text-[10px] tracking-wide2 uppercase" data-card-picked>Picked</span>}
                 </div>
               )
             })}
@@ -117,31 +111,20 @@ export default function ChallengePage() {
             <div className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint mt-4 mb-1" data-picked-total>{total} {total === 1 ? 'card' : 'cards'} picked</div>
             {selection.length > 0 && (
               <ul className="flex flex-col gap-1 text-[13px] mb-3" data-picked-list>
-                {[...picked.values()].map(({ card, qty }) => (
+                {[...picked.values()].map((card) => (
                   <li key={card.key} data-picked-row={card.key} className="flex items-center gap-2">
                     <span className="flex-1 min-w-0 truncate">{cardLine(card)}</span>
-                    <button type="button" aria-label={`Fewer: ${cardLine(card)}`} onClick={() => setQty(card, qty - 1)} className="w-7 h-7 rounded border pb-hairline">−</button>
-                    <span className="font-mono text-[11px] w-6 text-center">{qty}</span>
-                    <button type="button" aria-label={`More: ${cardLine(card)}`} disabled={qty >= card.spendable} onClick={() => setQty(card, qty + 1)} className="w-7 h-7 rounded border pb-hairline" style={{ opacity: qty >= card.spendable ? 0.4 : 1 }}>+</button>
+                    <button type="button" aria-label={`Remove: ${cardLine(card)}`} onClick={() => toggle(card)} className="w-7 h-7 rounded border pb-hairline">−</button>
                   </li>
                 ))}
               </ul>
             )}
             {err && <div role="alert" className="text-sm mb-2" style={{ color: 'var(--pb-red, #f87171)' }}>{err}</div>}
-            {!confirming ? (
-              <div className="flex gap-2">
-                <button type="button" disabled={!ready || busy || finished || ch.status !== 'open'} onClick={() => setConfirming(true)} data-handin className="flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold" style={{ background: accent, color: onColor(accent), opacity: !ready || finished || ch.status !== 'open' ? 0.45 : 1 }}>Hand in {total || ''} {total === 1 ? 'card' : 'cards'}</button>
-                {selection.length > 0 && <button type="button" onClick={reset} className="px-3 py-2.5 rounded-lg text-sm border pb-hairline">Clear</button>}
-              </div>
-            ) : (
-              <div data-handin-confirm className="rounded-lg border p-3 text-sm" style={{ borderColor: accent }}>
-                These {total} {total === 1 ? 'card is' : 'cards are'} spent and cannot be got back.
-                <div className="flex gap-2 mt-2">
-                  <button type="button" disabled={busy} onClick={submit} data-handin-yes className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold" style={{ background: accent, color: onColor(accent) }}>{busy ? 'Handing in…' : 'Yes, hand them in'}</button>
-                  <button type="button" disabled={busy} onClick={() => setConfirming(false)} className="px-3 py-2 rounded-lg text-sm border pb-hairline">Not yet</button>
-                </div>
-              </div>
-            )}
+            <div className="text-[12px] text-pb-faint mb-2">You keep every card you pick.</div>
+            <div className="flex gap-2">
+              <button type="button" disabled={!ready || busy || finished || ch.status !== 'open'} onClick={submit} data-handin className="flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold" style={{ background: accent, color: onColor(accent), opacity: !ready || finished || ch.status !== 'open' ? 0.45 : 1 }}>{busy ? 'Finishing…' : 'Finish the challenge'}</button>
+              {selection.length > 0 && <button type="button" onClick={reset} className="px-3 py-2.5 rounded-lg text-sm border pb-hairline">Clear</button>}
+            </div>
             {ch.status !== 'open' && <div className="text-[12px] text-pb-faint mt-2">{ch.status === 'soon' ? 'This has not started yet.' : 'This has ended.'}</div>}
           </div>
         </aside>

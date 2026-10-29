@@ -2354,43 +2354,36 @@ async def main() -> None:
             held_n = lambda subject: db.execute(text("SELECT count(*) FROM player_card_copies WHERE owner_player_id = :d AND subject_player_id = :s AND special_id IS NULL"), {"d": DELTA, "s": subject})
             target = others[0]
             await give(target, 5)
+            await give(others[1]); await give(others[2])
             await db.commit()
 
-            # an admin publishes an exchange: three cards of one tier, paying an Elite pack of six
-            tier_t = tier_of(target)
-            made = await adm5.create_challenge(adm5.ChallengeBody(kind="exchange", title="Three of a kind", blurb="Hand in three " + tier_t,
-                                                                 rules={"count": 3, "tiers_only": [tier_t]}, reward={"quality": "elite", "qty": 2, "size": 6}, max_completions=2), db, club, admin_user)
-            chid = next(c["id"] for c in made["challenges"] if c["title"] == "Three of a kind")
-            check("the admin publishes an exchange challenge, and the payload lists it with its requirements", any(c["id"] == chid and c["requirements"] == ["3 cards", f"All {CH.TIER_NAME[tier_t]}"] for c in made["challenges"]), str(made["challenges"]))
+            # an admin publishes a squad challenge: two different cards, paying two Elite packs of six
+            made = await adm5.create_challenge(adm5.ChallengeBody(kind="exchange", title="Pair of cards", blurb="Pick two cards",
+                                                                 rules={"count": 2}, reward={"quality": "elite", "qty": 2, "size": 6}, max_completions=2), db, club, admin_user)
+            chid = next(c["id"] for c in made["challenges"] if c["title"] == "Pair of cards")
+            check("the admin publishes an exchange challenge, and the payload lists it with its requirements", any(c["id"] == chid and c["requirements"] == ["2 cards"] for c in made["challenges"]), str(made["challenges"]))
             check("...with the premierships, players, tiers and kinds the admin can build from, and the limits", all(k in made for k in ("premierships", "players", "tiers", "special_kinds", "qualities", "limits")))
             club = await db.get(Organisation, ORG)
             codes = []
-            for body in (adm5.ChallengeBody(kind="exchange", title="", rules={"count": 3}), adm5.ChallengeBody(kind="exchange", title="Bad", rules={"count": 99}), adm5.ChallengeBody(kind="exchange", title="Bad", rules={"count": 3}, reward={"quality": "no"}),
-                         adm5.ChallengeBody(kind="nonsense", title="Bad"), adm5.ChallengeBody(kind="exchange", title="Bad", rules={"count": 3}, starts_on="2030-02-01", ends_on="2030-01-01")):
+            for body in (adm5.ChallengeBody(kind="exchange", title="", rules={"count": 2}), adm5.ChallengeBody(kind="exchange", title="Bad", rules={"count": 99}), adm5.ChallengeBody(kind="exchange", title="Bad", rules={"count": 2}, reward={"quality": "no"}),
+                         adm5.ChallengeBody(kind="nonsense", title="Bad"), adm5.ChallengeBody(kind="exchange", title="Bad", rules={"count": 2}, starts_on="2030-02-01", ends_on="2030-01-01")):
                 codes.append(await status_of(adm5.create_challenge(body, db, club, admin_user))); club = await db.get(Organisation, ORG)
             check("a challenge with no name, too many cards, a bad reward, an unknown kind or dates the wrong way round is refused (422)", codes == [422] * 5, str(codes))
 
             ov = await CH.overview(db, club, snap, me)
             mine_c = next(c for c in ov["challenges"] if c["id"] == chid)
-            check("the player sees it with the reward, the rules, and nothing done yet", mine_c["status"] == "open" and mine_c["completions"] == 0 and mine_c["reward"]["quality"] == "elite" and mine_c["reward"]["size"] == 6 and mine_c["reward"]["qty"] == 2 and mine_c["requirements"][0] == "3 cards", str(mine_c))
+            check("the player sees it with the reward, the rules, and nothing done yet", mine_c["status"] == "open" and mine_c["completions"] == 0 and mine_c["reward"]["quality"] == "elite" and mine_c["reward"]["size"] == 6 and mine_c["reward"]["qty"] == 2 and mine_c["requirements"][0] == "2 cards", str(mine_c))
             det = await CH.detail(db, club, snap, me, chid)
             keys = {c["key"]: c for c in det["cards"]}
-            check("the cards they can hand in are the ones they hold, with how many (their own card is not one of them)", keys.get(f"p:{target}", {}).get("spendable") == 5 and f"p:{me}" not in keys, str(list(keys)))
+            check("the cards they can pick are the ones they hold, each once, with how many copies, and their own card is one of them", keys.get(f"p:{target}", {}).get("copies") == 5 and keys.get(f"p:{me}", {}).get("mine") is True and len(keys) == len({c["key"] for c in det["cards"]}), str(list(keys)))
 
-            # a starting card is never spendable
+            # a starting card counts, because nothing is taken from anyone
             gift_special = (await db.execute(text("SELECT id::text FROM player_special_cards WHERE player_id = :p LIMIT 1"), {"p": me})).scalar()
             if gift_special:
                 await give(me, 1, source="gift", special=gift_special)
                 await db.commit()
                 det2 = await CH.detail(db, club, snap, me, chid)
-                check("a starting (gifted) card is not offered for hand-in", all(c["key"] != f"s:{gift_special}" for c in det2["cards"]))
-                try:
-                    await CH.check(db, club, snap, me, chid, [{"key": f"s:{gift_special}", "qty": 1}]); refused_gift = False
-                except CH.ChallengeError:
-                    refused_gift = True
-                check("...and handing one in is refused", refused_gift)
-                await db.rollback()
-                club = await db.get(Organisation, ORG)
+                check("a starting (gifted) card can be picked too", any(c["key"] == f"s:{gift_special}" for c in det2["cards"]))
 
             async def refused_ch(coro):
                 try:
@@ -2398,37 +2391,40 @@ async def main() -> None:
                     return None
                 except CH.ChallengeError as exc:
                     return exc.status
-            check("a card the player does not hold, or more copies than they have, or their own card, is refused", await refused_ch(CH.check(db, club, snap, me, chid, [{"key": f"p:{others[1]}", "qty": 1}])) == 422 and await refused_ch(CH.check(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 6}])) == 422 and await refused_ch(CH.check(db, club, snap, me, chid, [{"key": f"p:{me}", "qty": 1}])) == 422)
-            two = await CH.check(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 2}])
-            three = await CH.check(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 3}])
-            check("checking says 2 of 3 is not enough and 3 is, and changes nothing", two["ok"] is False and three["ok"] is True and (await held_n(target)).scalar() == 5)
-            check("handing in too few is refused and spends nothing", await refused_ch(CH.submit(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 2}])) == 422 and (await held_n(target)).scalar() == 5)
+            check("a card the player does not hold is refused", await refused_ch(CH.check(db, club, snap, me, chid, [{"key": f"p:{others[3]}"}])) == 422)
+            check("the same card twice is refused (a card counts once)", await refused_ch(CH.check(db, club, snap, me, chid, [{"key": f"p:{target}"}, {"key": f"p:{target}"}])) == 422)
+            all_before = (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE owner_player_id = :d"), {"d": DELTA})).scalar()
+            one = await CH.check(db, club, snap, me, chid, [{"key": f"p:{target}"}])
+            two = await CH.check(db, club, snap, me, chid, [{"key": f"p:{target}"}, {"key": f"p:{others[1]}"}])
+            check("checking says 1 of 2 is not enough and 2 is, and changes nothing", one["ok"] is False and two["ok"] is True and (await held_n(target)).scalar() == 5)
+            check("finishing with too few is refused", await refused_ch(CH.submit(db, club, snap, me, chid, [{"key": f"p:{target}"}])) == 422)
             await db.rollback()
             club = await db.get(Organisation, ORG)
-            out = await CH.submit(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 3}])
+            out = await CH.submit(db, club, snap, me, chid, [{"key": f"p:{target}"}, {"key": f"p:{others[1]}"}])
             await db.commit()
-            check("handing in three spends three, records the run and pays two Elite packs", out["ok"] and out["spent"] == 3 and out["packs"] == 2 and out["completions"] == 1 and (await held_n(target)).scalar() == 2, str(out))
+            check("finishing records the run and pays two Elite packs", out["ok"] and out["used"] == 2 and out["packs"] == 2 and out["completions"] == 1, str(out))
+            check("...and every card is still held (nothing is spent)", (await held_n(target)).scalar() == 5 and (await held_n(others[1])).scalar() == 1 and (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE owner_player_id = :d"), {"d": DELTA})).scalar() == all_before)
             rp = (await db.execute(text("SELECT label, quality, size, source FROM player_card_packs WHERE player_id = :d AND source = 'reward' AND ref_key LIKE :r ORDER BY ref_key"), {"d": DELTA, "r": f"{chid}:%"})).fetchall()
-            check("the packs are named for the challenge, Elite, six cards", len(rp) == 2 and all(r[0] == "Three of a kind" and r[1] == "elite" and r[2] == 6 and r[3] == "reward" for r in rp), str(rp))
+            check("the packs are named for the challenge, Elite, six cards", len(rp) == 2 and all(r[0] == "Pair of cards" and r[1] == "elite" and r[2] == 6 and r[3] == "reward" for r in rp), str(rp))
             run = (await db.execute(text("SELECT n, submitted FROM player_card_challenge_runs WHERE player_id = :d AND challenge_key = :k"), {"d": DELTA, "k": chid})).first()
-            check("the run keeps a record of what was spent", run[0] == 1 and run[1] == [{"key": f"p:{target}", "qty": 3}], str(run))
+            check("the run keeps a record of the cards used", run[0] == 1 and sorted(i["key"] for i in run[1]) == sorted([f"p:{target}", f"p:{others[1]}"]), str(run))
+            det3 = await CH.detail(db, club, snap, me, chid)
+            check("the cards used are not offered again for the same challenge", not ({f"p:{target}", f"p:{others[1]}"} & {c["key"] for c in det3["cards"]}))
+            check("...and picking one of them again is refused", await refused_ch(CH.check(db, club, snap, me, chid, [{"key": f"p:{target}"}, {"key": f"p:{me}"}])) == 422)
             snap_open = await cards.club_snapshot(db, club, fresh=True)
             pk = next(p for p in await cards.available_packs(db, me, snap_open) if p["source"] == "reward")
-            check("the reward pack shows in the player's list under its name and quality", pk["label"] == "Three of a kind" and pk["quality"] == "elite" and pk["size"] == 6)
+            check("the reward pack shows in the player's list under its name and quality", pk["label"] == "Pair of cards" and pk["quality"] == "elite" and pk["size"] == 6)
             club = await db.get(Organisation, ORG)
             got6 = await cards.open_pack(db, club, await db.get(Player, DELTA), pk["id"], snap_open)
             await db.commit()
             check("opening it gives six cards", got6 is not None and len(got6) == 6, str(len(got6 or [])))
-            await give(target, 3)
+            await give(others[2])
             await db.commit()
-            out2 = await CH.submit(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 3}])
+            out2 = await CH.submit(db, club, snap, me, chid, [{"key": f"p:{me}"}, {"key": f"p:{others[2]}"}])
             await db.commit()
-            check("a second completion is allowed because the challenge allows two", out2["completions"] == 2 and out2["completions"] == out2["max_completions"])
-            await give(target, 3)
-            await db.commit()
-            before3 = (await held_n(target)).scalar()
-            third = await refused_ch(CH.submit(db, club, snap, me, chid, [{"key": f"p:{target}", "qty": 3}]))
-            check("a third is refused (409) and spends nothing", third == 409 and (await held_n(target)).scalar() == before3, f"{third} held={(await held_n(target)).scalar()} before={before3}")
+            check("a second completion is allowed with different cards (their own card counts), because the challenge allows two", out2["completions"] == 2 and out2["completions"] == out2["max_completions"])
+            third = await refused_ch(CH.submit(db, club, snap, me, chid, [{"key": f"p:{me}"}, {"key": f"p:{others[2]}"}]))
+            check("a third is refused (409)", third == 409, str(third))
             await db.rollback()
             club = await db.get(Organisation, ORG)
 
@@ -2438,7 +2434,7 @@ async def main() -> None:
             old = await adm5.create_challenge(adm5.ChallengeBody(kind="exchange", title="Last month", rules={"count": 1}, reward={"quality": "standard"}, ends_on="2000-01-01"), db, club, admin_user)
             soon_id = next(c["id"] for c in soon["challenges"] if c["title"] == "Next month"); old_id = next(c["id"] for c in old["challenges"] if c["title"] == "Last month")
             club = await db.get(Organisation, ORG)
-            check("a challenge that has not started or has ended cannot be handed in to (409)", await refused_ch(CH.submit(db, club, snap, me, soon_id, [{"key": f"p:{target}", "qty": 1}])) == 409 and await refused_ch(CH.submit(db, club, snap, me, old_id, [{"key": f"p:{target}", "qty": 1}])) == 409)
+            check("a challenge that has not started or has ended cannot be finished (409)", await refused_ch(CH.submit(db, club, snap, me, soon_id, [{"key": f"p:{target}"}])) == 409 and await refused_ch(CH.submit(db, club, snap, me, old_id, [{"key": f"p:{target}"}])) == 409)
             await db.rollback()
             club = await db.get(Organisation, ORG)
             statuses = {c["title"]: c["status"] for c in (await CH.overview(db, club, snap, me))["challenges"]}

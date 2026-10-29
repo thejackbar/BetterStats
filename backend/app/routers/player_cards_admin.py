@@ -307,7 +307,7 @@ async def create_challenge(
     club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SETTINGS)),
 ):
-    """Publish a challenge to every player: an exchange (hand in cards that meet the rules) or a collection (hold a list of cards)."""
+    """Publish a challenge to every player: a squad challenge (pick cards you hold that meet the rules) or a collection (hold a list of cards)."""
     snap = await cards.club_snapshot(db, club, fresh=True)
     try:
         made = await challenges.admin_save(db, club, snap, body.model_dump(), None, getattr(user, "email", None))

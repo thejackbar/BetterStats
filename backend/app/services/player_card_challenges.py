@@ -2,8 +2,8 @@
 
 Two kinds, both published by a club's admin to every player:
 
-* EXCHANGE: hand in cards that meet the rules and they are spent. "11 Common cards", "11 Rare cards", "a squad of 11 rated 70 or more",
-  "3 Epic cards and 8 Rare". The rules are a small fixed vocabulary (below), checked by one pure function (`evaluate`) that the screen
+* SQUAD (stored as kind `exchange`): pick cards you hold that meet the rules and nothing is taken from you. "11 Common cards", "11 Rare
+  cards", "a squad of 11 rated 70 or more", "3 Epic cards and 8 Rare". The rules are a small fixed vocabulary (below), checked by one pure function (`evaluate`) that the screen
   asks as the player builds their squad and that the submit asks again under lock, so what the screen says is what the server does.
 * COLLECTION: hold a list of cards and keep them ("the 2023 A Grade premiers", "every Legendary"). The list is worked out when the
   admin makes the challenge (from a premiership, a group of players, a tier or a kind of special card) and then fixed.
@@ -12,9 +12,9 @@ Completing either pays a reward pack (`reward`: a quality, a size, how many) onc
 pay one too, once per player per set. A player can also keep their own PRIVATE sets: a list of cards they have chosen to collect,
 which pay nothing (a player who could make their own rewards would make an easy one) and which nobody else can see.
 
-What is spent. A card handed into an exchange challenge is a `player_card_copies` row and the row is deleted; the run keeps a record
-of what was spent. A starting card (source `gift`) is never spent, for the same reason it is never taken back by a trim: it is
-re-gifted by the special-card refresh, which would make it free. A player's own card has no row and cannot be spent.
+Nothing is ever spent. A squad challenge looks at the cards a player holds (a starting card and their own card count too); each card
+counts once in a squad. A player can finish a challenge again only if its limit allows, and only with cards they did not use the
+last time, so one good squad cannot be paid for over and over. The run keeps a record of the cards used.
 """
 from __future__ import annotations
 
@@ -163,8 +163,7 @@ def clean_reward(raw: Any) -> dict:
 
 
 def evaluate(rules: dict, chosen: list[dict]) -> dict:
-    """Do these cards meet the rules? `chosen` is one card payload per card handed in (a card held twice and handed in twice is two
-    entries). Pure. Returns `{ok, checks: [{id, label, ok, have, need}], rating}`; every rule gets a line so the screen can show
+    """Do these cards meet the rules? `chosen` is one card payload per card picked (each card once). Pure. Returns `{ok, checks: [{id, label, ok, have, need}], rating}`; every rule gets a line so the screen can show
     what is still missing."""
     n = len(chosen)
     checks: list[dict] = []
@@ -399,15 +398,18 @@ async def admin_delete(db: AsyncSession, club: Organisation, challenge_id: str) 
 # ── What a player sees ────────────────────────────────────────────────────────────
 
 async def _held(db, club, me: str) -> tuple[dict, dict]:
-    """`(held, spendable)`: copies held per card, and the copies of each that could be spent (a starting card never can)."""
+    """`(held, usable)`: copies held per card, and the cards a squad can use (each once). The player's own card counts."""
     held = (await swaps._rows_by_card(db, club.id, me)).get(me, {})
-    rows = (await db.execute(text("""
-        SELECT subject_player_id::text, special_id::text, COUNT(*) FROM player_card_copies
-         WHERE organisation_id = CAST(:o AS UUID) AND owner_player_id = CAST(:me AS UUID) AND source <> 'gift'
-         GROUP BY 1, 2
-    """), {"o": str(club.id), "me": me})).fetchall()
-    spend = {(s, sp): int(n) for s, sp, n in rows}
-    return held, spend
+    usable = {c: 1 for c, n in held.items() if n > 0}
+    usable[(me, None)] = 1
+    return held, usable
+
+
+async def _used_before(db, me: str, challenge_id: str) -> set[str]:
+    """Card keys this player used in earlier runs of this challenge."""
+    rows = (await db.execute(text("SELECT submitted FROM player_card_challenge_runs WHERE player_id = CAST(:me AS UUID) AND challenge_key = :k"),
+                             {"me": me, "k": challenge_id})).fetchall()
+    return {str(i.get("key")) for (sub,) in rows for i in (sub or []) if isinstance(i, dict)}
 
 
 def _window(ch: dict, today: date) -> str:
@@ -499,7 +501,7 @@ async def _my_sets(db, club, snap, me: str, held: set[str]) -> list[dict]:
 
 async def overview(db: AsyncSession, club: Organisation, snap: dict, me: str) -> dict:
     """The challenges a player can see, how far they are, and their own private sets."""
-    held_cards, spend = await _held(db, club, me)
+    held_cards, _usable = await _held(db, club, me)
     held = {swaps.key_of(*c) for c, n in held_cards.items() if n > 0} | {f"p:{me}"}
     runs = await _runs(db, club, me)
     today = cards.club_today(snap["settings"])
@@ -538,17 +540,18 @@ async def _load(db, club, challenge_id: str) -> dict:
 
 
 async def detail(db: AsyncSession, club: Organisation, snap: dict, me: str, challenge_id: str) -> dict:
-    """One exchange challenge with the cards the player can spend on it."""
+    """One squad challenge with the cards the player can pick for it: everything they hold, less what an earlier run of it used."""
     ch = await _load(db, club, challenge_id)
     if ch["kind"] != "exchange":
-        raise ChallengeError("That challenge is not an exchange.", 409)
-    held, spend = await _held(db, club, me)
-    specials = await swaps._special_subjects(db, club.id, [c[1] for c in spend if c[1]])
+        raise ChallengeError("That challenge is not a squad challenge.", 409)
+    held, usable = await _held(db, club, me)
+    used = await _used_before(db, me, ch["id"])
+    specials = await swaps._special_subjects(db, club.id, [c[1] for c in usable if c[1]])
     pool = []
-    for card, n in spend.items():
+    for card, n in usable.items():
         payload = swaps._payload(snap, card, specials)
-        if payload and n > 0:
-            pool.append({**payload, "spendable": n})
+        if payload and swaps.key_of(*card) not in used:
+            pool.append({**payload, "key": swaps.key_of(*card), "copies": held.get(card, 1 if card[0] == me and not card[1] else 0), "mine": card[0] == me and not card[1]})
     order = {"special": 0, "legendary": 1, "epic": 2, "rare": 3, "common": 4}
     pool.sort(key=lambda c: (order.get(c["tier"], 5), -(c.get("rarity") or 0), c["name"]))
     runs = await _runs(db, club, me)
@@ -557,77 +560,64 @@ async def detail(db: AsyncSession, club: Organisation, snap: dict, me: str, chal
             "completions": runs.get(ch["id"], 0), "max_completions": ch["max_completions"], "cards": pool}
 
 
-async def _expand(db, club, snap, me: str, selection: Any, spend: dict) -> tuple[list[dict], dict[tuple, int]]:
-    """A selection `[{key, qty}]` as one payload per card, and the copies wanted of each. Refuses cards the player cannot spend."""
+async def _expand(db, club, snap, me: str, selection: Any, usable: dict, used: set[str]) -> list[dict]:
+    """A selection `[{key}]` as one payload per card. Each card counts once; a card the player does not hold, or used last time, is refused."""
     if not isinstance(selection, list) or len(selection) > 200:
         raise ChallengeError("The cards could not be read.")
-    want: dict[tuple, int] = {}
+    seen: set[tuple] = set()
+    chosen: list[dict] = []
     for item in selection:
         if not isinstance(item, dict):
             raise ChallengeError("The cards could not be read.")
         try:
-            card, _payload = await swaps._resolve(db, club.id, snap, str(item.get("key") or ""))
+            card, payload = await swaps._resolve(db, club.id, snap, str(item.get("key") or ""))
         except swaps.SwapError as exc:
             raise ChallengeError(exc.message, exc.status)
-        qty = _int(item.get("qty", 1), 1, 99, "How many of a card")
-        want[card] = want.get(card, 0) + qty
-    specials = await swaps._special_subjects(db, club.id, [c[1] for c in want if c[1]])
-    chosen: list[dict] = []
-    for card, qty in want.items():
-        if spend.get(card, 0) < qty:
-            raise ChallengeError("You can only hand in cards you hold, and not your own card or a starting card.")
-        payload = swaps._payload(snap, card, specials)
-        if payload is None:
-            raise ChallengeError("That card is not available.", 409)
-        chosen.extend([payload] * qty)
-    return chosen, want
+        if card in seen:
+            raise ChallengeError("A card counts once in a squad.")
+        if card not in usable:
+            raise ChallengeError("You can only use cards you hold.")
+        if swaps.key_of(*card) in used:
+            raise ChallengeError("You used that card the last time you did this challenge. Pick a different one.")
+        seen.add(card)
+        chosen.append(payload)
+    return chosen
 
 
 async def check(db: AsyncSession, club: Organisation, snap: dict, me: str, challenge_id: str, selection: Any) -> dict:
     ch = await _load(db, club, challenge_id)
     if ch["kind"] != "exchange":
-        raise ChallengeError("That challenge is not an exchange.", 409)
-    _held_cards, spend = await _held(db, club, me)
-    chosen, _want = await _expand(db, club, snap, me, selection, spend)
+        raise ChallengeError("That challenge is not a squad challenge.", 409)
+    _held_cards, usable = await _held(db, club, me)
+    chosen = await _expand(db, club, snap, me, selection, usable, await _used_before(db, me, ch["id"]))
     return evaluate(ch["rules"], chosen)
 
 
 async def submit(db: AsyncSession, club: Organisation, snap: dict, me: str, challenge_id: str, selection: Any) -> dict:
-    """Hand the cards in: check the rules, spend the cards, record the run, pay the reward. All or nothing; the caller commits."""
+    """Finish the challenge: check the rules, record the run (the cards stay with the player), pay the reward. The caller commits."""
     ch = await _load(db, club, challenge_id)
     if ch["kind"] != "exchange":
-        raise ChallengeError("That challenge is not an exchange.", 409)
+        raise ChallengeError("That challenge is not a squad challenge.", 409)
     status = _window(ch, cards.club_today(snap["settings"]))
     if status != "open":
         raise ChallengeError("That challenge is not open." if status == "ended" else "That challenge has not started.", 409)
     org = str(club.id)
-    # One submit at a time per player, so two taps cannot spend the same cards or pay twice.
+    # One submit at a time per player, so two taps cannot pay twice.
     await db.execute(text("SELECT id FROM players WHERE id = CAST(:me AS UUID) FOR UPDATE"), {"me": me})
     done = (await _runs(db, club, me)).get(ch["id"], 0)
     if done >= ch["max_completions"]:
         raise ChallengeError("You have already completed that challenge.", 409)
-    _held_cards, spend = await _held(db, club, me)
-    chosen, want = await _expand(db, club, snap, me, selection, spend)
+    _held_cards, usable = await _held(db, club, me)
+    chosen = await _expand(db, club, snap, me, selection, usable, await _used_before(db, me, ch["id"]))
     verdict = evaluate(ch["rules"], chosen)
     if not verdict["ok"]:
         raise ChallengeError("Those cards do not meet the challenge yet.", 422)
-    spent: list[dict] = []
-    for card, qty in want.items():
-        ids = [r[0] for r in (await db.execute(text("""
-            SELECT id::text FROM player_card_copies
-             WHERE organisation_id = CAST(:o AS UUID) AND owner_player_id = CAST(:me AS UUID) AND subject_player_id = CAST(:s AS UUID)
-               AND special_id IS NOT DISTINCT FROM CAST(:sp AS UUID) AND source <> 'gift'
-             ORDER BY obtained_at ASC, id FOR UPDATE
-        """), {"o": org, "me": me, "s": card[0], "sp": card[1]})).fetchall()][:qty]
-        if len(ids) < qty:
-            raise ChallengeError("You no longer hold all of those cards.", 409)
-        await db.execute(text("DELETE FROM player_card_copies WHERE id = ANY(CAST(:ids AS uuid[]))"), {"ids": ids})
-        spent.append({"key": swaps.key_of(*card), "qty": qty})
+    used = [{"key": c["key"], "qty": 1} for c in chosen]
     n = done + 1
-    if not await _record_run(db, org, me, ch["id"], ch["title"], n, spent):
+    if not await _record_run(db, org, me, ch["id"], ch["title"], n, used):
         raise ChallengeError("You have already completed that challenge.", 409)
     packs = await _grant(db, org, me, ch["id"], n, ch["title"], ch["reward"])
-    return {"ok": True, "spent": sum(s["qty"] for s in spent), "packs": packs, "reward": reward_view(ch["reward"], ch["title"]),
+    return {"ok": True, "used": len(used), "packs": packs, "reward": reward_view(ch["reward"], ch["title"]),
             "completions": n, "max_completions": ch["max_completions"]}
 
 

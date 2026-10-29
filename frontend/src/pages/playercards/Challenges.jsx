@@ -1,5 +1,5 @@
 // Challenges: sets with a goal and a reward. The club publishes two kinds. An EXCHANGE asks for cards that meet some rules (11 Common
-// cards, a squad rated 70 or more) and spends them; a COLLECTION asks you to hold a list of cards (the 2024 A Grade premiers) and
+// cards, a squad rated 70 or more) from cards you hold, and nothing is taken; a COLLECTION asks you to hold a list of cards (the 2024 A Grade premiers) and
 // keeps them. Finishing either pays a reward pack. Below them are a player's own PRIVATE sets: cards they have decided to collect,
 // which nobody else sees and which pay nothing.
 import { useEffect, useMemo, useState } from 'react'
@@ -183,17 +183,17 @@ export default function Challenges() {
   const collections = data.challenges.filter((c) => c.kind === 'collection')
   return (
     <div data-screen="challenges">
-      <PageHead title="Challenges" sub="Hand in cards that meet the rules, or collect a list of cards, and earn a reward pack." />
+      <PageHead title="Challenges" sub="Build a squad from cards you hold, or collect a list of cards, and earn a reward pack." />
       <EarnedBanner earned={data.earned} />
       <section className="mb-8" data-section="exchange">
-        <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mb-2">Hand in cards</h2>
-        <p className="text-sm text-pb-dim mb-3 max-w-prose">The cards you hand in are spent, so this is a good home for doubles. Your own card and your starting cards cannot be handed in.</p>
+        <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mb-2">Build a squad</h2>
+        <p className="text-sm text-pb-dim mb-3 max-w-prose">Pick cards you hold that meet the rules. You keep every card, and each card counts once.</p>
         {exchange.length === 0 && <div className="text-sm text-pb-dim" data-no-exchange>Your club has not set any of these yet.</div>}
         <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))' }}>{exchange.map((c) => <ChallengeCard key={c.id} c={c} />)}</div>
       </section>
       <section className="mb-8" data-section="collections">
         <h2 className="font-mono text-[11px] tracking-wide2 uppercase text-pb-faint mb-2">Collect</h2>
-        <p className="text-sm text-pb-dim mb-3 max-w-prose">Hold every card on the list and the reward is yours. You keep the cards.</p>
+        <p className="text-sm text-pb-dim mb-3 max-w-prose">Hold every card on the list and the reward is yours.</p>
         {collections.length === 0 && <div className="text-sm text-pb-dim" data-no-collections>Your club has not set any of these yet. The Sets screen has the club&rsquo;s own sets, which also pay a pack.</div>}
         <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))' }}>{collections.map((c) => <ChallengeCard key={c.id} c={c} />)}</div>
       </section>

@@ -149,7 +149,7 @@ const run = async () => {
     await goNav(page, 'packs')
     check('Packs lists every way a pack arrives, in three groups', (await page.locator('[data-way]').count()) === 24 && (await page.locator('[data-pack-group]').count()) === 3 && /2 packs to open/.test(await page.locator('[data-packs-ready]').textContent()))
     await goNav(page, 'how')
-    check('How it works has the odds for each tier and seven sections', (await page.locator('[data-odds]').count()) === 4 && (await page.locator('[data-how]').count()) === 7)
+    check('How it works has the odds for each tier and eight sections', (await page.locator('[data-odds]').count()) === 4 && (await page.locator('[data-how]').count()) === 8)
     check('...with the odds that the pack uses (60, 28, 10, 2)', /60 in 100/.test(await page.locator('[data-how="packs"]').textContent()) && /2 in 100/.test(await page.locator('[data-how="packs"]').textContent()))
     await ctx.close()
   }

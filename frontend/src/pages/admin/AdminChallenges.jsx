@@ -1,6 +1,6 @@
 // Player Cards, challenges: an admin sets a task for every player and says what finishing it pays. Two kinds.
-// An EXCHANGE is the squad-builder kind (11 Rares, a squad rated 70 or better, 11 different players): the player hands in cards that meet
-// the rules and they are spent. A COLLECTION is a list of cards to hold (everyone from a premiership side, every Century card): the
+// A SQUAD challenge (stored as `exchange`) is the squad-builder kind (11 Rares, a squad rated 70 or better, 11 different players): the player
+// picks cards they hold that meet the rules and keeps every one. A COLLECTION is a list of cards to hold (everyone from a premiership side, every Century card): the
 // cards stay with the player. Either way the reward is one or more packs from the club (services/player_card_challenges).
 import { useMemo, useState } from 'react'
 import { api } from '../../lib/api'
@@ -131,7 +131,7 @@ function ChallengeForm({ payload, initial, editingId, onSaved, onCancel }) {
       <div className="space-y-4" data-challenge-form>
         {!editingId && (
           <div role="radiogroup" aria-label="Kind of challenge" className="grid gap-2 sm:grid-cols-2">
-            {[['exchange', 'Exchange', 'Players hand in cards that meet your rules, like 11 Rares or a squad rated 70. The cards are spent.'],
+            {[['exchange', 'Squad', 'Players pick cards they hold that meet your rules, like 11 Rares or a squad rated 70. They keep every card.'],
               ['collection', 'Collection', 'Players hold a list of cards you pick, like a premiership side. They keep the cards.']].map(([k, l, d]) => (
               <button key={k} type="button" role="radio" aria-checked={f.kind === k} data-challenge-kind={k} onClick={() => set({ kind: k })}
                 className={`text-left rounded-lg border px-3 py-2 ${f.kind === k ? 'border-pb-accent bg-pb-surface2' : 'border-pb-hairline2 hover:bg-pb-surface2'}`}>
@@ -150,7 +150,7 @@ function ChallengeForm({ payload, initial, editingId, onSaved, onCancel }) {
           <div className="space-y-3" data-exchange-rules>
             <div className="font-mono text-[10.5px] tracking-wide2 uppercase text-pb-faint">What the cards must be</div>
             <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="Cards to hand in"><input type="number" min="1" max={lim.count || 30} value={f.count} onChange={(e) => set({ count: e.target.value })} aria-label="Cards to hand in" className={inputCls} /></Field>
+              <Field label="Cards in the squad"><input type="number" min="1" max={lim.count || 30} value={f.count} onChange={(e) => set({ count: e.target.value })} aria-label="Cards in the squad" className={inputCls} /></Field>
               <Field label="Kind of card">
                 <Select value={f.kinds} aria-label="Kind of card" onChange={(e) => set({ kinds: e.target.value })}>
                   <option value="any">Any card</option><option value="players">Player cards only</option><option value="specials">Special cards only</option>
@@ -184,7 +184,7 @@ function ChallengeForm({ payload, initial, editingId, onSaved, onCancel }) {
             {(payload.special_kinds || []).length > 0 && (
               <Field label="Special cards of these kinds only (none picked means any)"><Checks name="special-kinds" label="Special kinds" options={payload.special_kinds} value={f.specialKinds} onChange={(v) => set({ specialKinds: v })} /></Field>
             )}
-            <Field label="Times one player can complete it"><input type="number" min="1" max={lim.completions || 10} value={f.maxCompletions} onChange={(e) => set({ maxCompletions: e.target.value })} aria-label="Times it can be completed" className="w-24 bg-pb-surface2 border border-pb-hairline2 rounded px-2.5 py-1.5 text-sm" /></Field>
+            <Field label="Times one player can complete it (with different cards each time)"><input type="number" min="1" max={lim.completions || 10} value={f.maxCompletions} onChange={(e) => set({ maxCompletions: e.target.value })} aria-label="Times it can be completed" className="w-24 bg-pb-surface2 border border-pb-hairline2 rounded px-2.5 py-1.5 text-sm" /></Field>
           </div>
         ) : (
           <div className="space-y-3" data-collection-rules>
@@ -265,7 +265,7 @@ export default function AdminChallenges({ payload, setPayload }) {
   return (
     <div className="space-y-4" data-admin-challenges>
       <Card title="Challenges">
-        <p className="text-[12.5px] text-pb-faint max-w-prose">Set players a task and pay them a pack for finishing it. An <strong>exchange</strong> asks them to hand in cards that meet your rules (11 Rares, a squad rated 70, 11 different players) and the cards are spent. A <strong>collection</strong> asks them to hold a list of cards (everyone from a premiership side) and they keep them. Players also make private sets of their own; those pay nothing.</p>
+        <p className="text-[12.5px] text-pb-faint max-w-prose">Set players a task and pay them a pack for finishing it. A <strong>squad</strong> challenge asks them to pick cards they hold that meet your rules (11 Rares, a squad rated 70, 11 different players). A <strong>collection</strong> asks them to hold a list of cards (everyone from a premiership side). In both, players keep every card. If a squad challenge can be done more than once, the cards used last time can't be used again. Players also make private sets of their own; those pay nothing.</p>
         {!form && <div className="mt-3"><span data-challenge-new><Btn primary onClick={() => setForm({ initial: BLANK, id: null })}>New challenge</Btn></span></div>}
       </Card>
 

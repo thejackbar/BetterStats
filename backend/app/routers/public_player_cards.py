@@ -420,7 +420,7 @@ async def get_challenge_options(token: str, request: Request, db: AsyncSession =
 
 @router.get("/{token}/me/cards/challenges/{challenge_id}")
 async def get_challenge(token: str, challenge_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    """One exchange challenge: its rules and reward, and the cards the player could hand in."""
+    """One squad challenge: its rules and reward, and the cards the player could pick."""
     club, player, snap = await _ready(db, request, token)
     _need(snap, "sets")
     try:
@@ -442,7 +442,7 @@ async def check_challenge(token: str, challenge_id: str, body: CardsBody, reques
 
 @router.post("/{token}/me/cards/challenges/{challenge_id}/submit")
 async def submit_challenge(token: str, challenge_id: str, body: CardsBody, request: Request, db: AsyncSession = Depends(get_db)):
-    """Hand the cards in. They are spent and the reward pack is added, together or not at all."""
+    """Finish the challenge with these cards. They stay with the player and the reward pack is added, together or not at all."""
     club, player, snap = await _ready(db, request, token)
     _need(snap, "sets")
     try:
