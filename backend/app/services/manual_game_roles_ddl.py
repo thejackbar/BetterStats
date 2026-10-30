@@ -37,7 +37,7 @@ DOWNGRADE: list[str] = [
     "DROP TABLE IF EXISTS manual_game_roles",
 ]
 
-# Migration 378: ONE place that answers "who captained / kept wicket in this game", for a synced game
+# Migration 382: ONE place that answers "who captained / kept wicket in this game", for a synced game
 # (game_appearances) and a hand-entered one (manual_game_roles) alike. Every stats lens that filters on the
 # captain or the keeper (Records, the Leaderboard filter, a player's captain record, StatLab) joins this view
 # instead of game_appearances, which a hand-entered game never has a row in. Only the rows that carry a

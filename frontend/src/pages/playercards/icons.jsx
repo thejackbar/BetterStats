@@ -16,6 +16,7 @@ const PATHS = {
   chevron: 'M9 6l6 6-6 6',
   check: 'M5 12.5l4.5 4.5L19 7.5',
   bolt: 'M13 3 5 13.5h6L10 21l8-10.5h-6L13 3Z',
+  target: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Zm0 4.2a.3.3 0 1 0 0 .6.3.3 0 0 0 0-.6Z',
 }
 
 export default function Icon({ name, size = 20, className = '' }) {

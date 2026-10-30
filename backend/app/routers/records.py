@@ -516,7 +516,7 @@ async def get_records(
             ("_club_bs", "v_effective_bowling_spells"),
             ("_club_fs", "v_effective_fielding_stats"),
             ("_club_ga", "game_appearances"),
-            # Who captained / kept, synced and hand-entered games alike (migration 378).
+            # Who captained / kept, synced and hand-entered games alike (migration 382).
             ("_club_roles", "v_game_roles"),
         ):
             await db.execute(text(

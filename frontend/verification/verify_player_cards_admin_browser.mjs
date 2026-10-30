@@ -17,9 +17,11 @@ const check = (name, cond, detail = '') => {
   console.log(`${cond ? '  ok  ' : ' FAIL '} ${name}${!cond && detail ? '  -- ' + detail : ''}`)
 }
 
+// A real PNG, so the browser decodes what a test uploads.
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAMCAIAAADQ/GvKAAAAEklEQVR4nGOQizqBFTGMSqAjABWGeAGPl/lFAAAAAElFTkSuQmCC', 'base64')
 const CLUB = { name: 'Verify CC', short_name: 'Verify', slug: 'verify-cc', logo_url: null, accent_color: '#b91c1c', primary_color: '#b91c1c', font_config: {} }
 const state = {
-  settings: { enabled: true, include_juniors: false, weekly_packs: 1, timezone: null, effective_timezone: 'Australia/Perth', event_packs_enabled: true, starter_gifts: 'minimal', big_photos: 'top' },
+  settings: { enabled: true, include_juniors: false, weekly_packs: 1, timezone: null, effective_timezone: 'Australia/Perth', event_packs_enabled: true, starter_gifts: 'minimal', big_photos: 'all' },
   events: [],
   gifts: [],
   players: [
@@ -33,7 +35,7 @@ const state = {
 const QUALITIES = [['standard', 'Standard', 1, 5], ['boosted', 'Boosted', 2, 8], ['special', 'Special', 2, 10], ['premium', 'Premium', 3, 10], ['elite', 'Elite', 4, 15], ['legendary', 'Legendary', 4, 15]]
   .map(([key, label, rare_plus, special_pct]) => ({ key, label, line: `${label} line`, rare_plus, special_pct, odds: { common: 40, rare: 35, epic: 20, legendary: 5 } }))
 const settingsPayload = () => ({
-  club: CLUB, settings: state.settings, events: state.events, gifts: state.gifts, max_gift_qty: 10, qualities: QUALITIES,
+  club: CLUB, settings: state.settings, events: state.events, gifts: state.gifts, max_gift_qty: 10, pack_size: { default: 5, min: 1, max: 12 }, qualities: QUALITIES,
   timezones: [{ id: 'Australia/Perth', label: 'Western Australia' }, { id: 'Australia/Sydney', label: 'New South Wales, ACT' }],
   max_weekly_packs: 10, link: { path: '/playerdash/tok123' },
   pool: { size: state.players.filter((p) => p.in_pool).length, players: state.players.length }, players: state.players,
@@ -97,8 +99,10 @@ const run = async () => {
     if (!/\/player-cards\//.test(url)) return json({})
     const u = new URL(url)
     const path = u.pathname.replace(/^\/api/, '')
-    const body = req.postData() ? JSON.parse(req.postData()) : null
-    calls.push({ method, path, query: u.search.replace(/^\?/, ''), body })
+    const multipart = (req.headers()['content-type'] || '').includes('multipart')
+    const raw = multipart ? (req.postDataBuffer() || Buffer.from('')).toString('latin1') : null
+    const body = !multipart && req.postData() ? JSON.parse(req.postData()) : null
+    calls.push({ method, path, query: u.search.replace(/^\?/, ''), body, multipart, raw })
     if (path === '/player-cards/overview') return json(OV)
     if (path === '/player-cards/activity') return json(ACT)
     if (path === '/player-cards/wanted') return json({ total_wants: 7, cards: [{ key: 'p:a1', kind: 'player', player: 'Adams, Brian', tier: 'epic', title: 'Card', wanted_by: 4, could_swap: 2 }, { key: 's:x', kind: 'special', player: 'Baker, Chris', title: 'Century', tier: 'special', wanted_by: 3, could_swap: 0 }] })
@@ -118,9 +122,15 @@ const run = async () => {
       return json({ total: rows.length, counts: { accepted: 1, declined: 1, cancelled: 1, pending: 1, expired: 1 }, swaps: rows, offset: 0, limit: 50 })
     }
     if (path === '/player-cards/events' && method === 'POST') { state.events.push({ id: `e${state.events.length + 1}`, title: body.title, starts_on: body.starts_on, ends_on: body.ends_on || body.starts_on, per_day: body.per_day, quality: body.quality }); return json(settingsPayload()) }
+    if (path === '/player-cards/gifts/designed' && method === 'POST') {
+      const field = (name) => (raw.match(new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r]*)`)) || [])[1]
+      const gift = { id: `g${state.gifts.length + 1}`, title: field('title'), quality: field('quality'), qty: Number(field('qty')), size: Number(field('size')), audience: field('audience'), players: 3, packs: 3 * Number(field('qty')), opened: 0, created_at: '2026-10-28T01:00:00Z' }
+      state.gifts.unshift(gift)
+      return json({ gift, ...settingsPayload() })
+    }
     if (path === '/player-cards/gifts' && method === 'POST') {
       const n = body.audience === 'all' ? 3 : body.player_ids.length
-      const gift = { id: `g${state.gifts.length + 1}`, title: body.title, quality: body.quality, qty: body.qty, audience: body.audience, players: n, packs: n * body.qty, opened: 0, created_at: '2026-10-28T01:00:00Z' }
+      const gift = { id: `g${state.gifts.length + 1}`, title: body.title, quality: body.quality, qty: body.qty, size: body.size, audience: body.audience, players: n, packs: n * body.qty, opened: 0, created_at: '2026-10-28T01:00:00Z' }
       state.gifts.unshift(gift)
       return json({ gift, ...settingsPayload() })
     }
@@ -144,7 +154,7 @@ const run = async () => {
   await page.waitForSelector('[data-stat]')
 
   console.log('\noverview')
-  check('eight tabs', (await page.locator('[data-pc-tab]').count()) === 8)
+  check('nine tabs', (await page.locator('[data-pc-tab]').count()) === 9)
   const stat = (n) => page.locator(`[data-stat="${n}"]`).innerText()
   check('players who have opened a pack, and who have not', /2/.test(await stat('Have opened a pack')) && /1 have not/.test(await stat('Have opened a pack')))
   check('packs opened and cards held', /14/.test(await stat('Packs opened')) && /40 cards held/.test(await stat('Packs opened')))
@@ -268,12 +278,12 @@ const run = async () => {
   await page.waitForFunction(() => document.querySelector('[role="switch"][aria-label="Day packs are on"]').getAttribute('aria-checked') === 'false')
   check('turning them off sends event_packs_enabled false only', JSON.stringify(calls.filter((c) => c.method === 'PATCH').pop().body) === '{"event_packs_enabled":false}')
   await page.getByRole('switch', { name: 'Day packs are on' }).click()
-  check('photos on cards default to special, Epic and Legendary, and say what that means', (await page.getByLabel('Cards that fill with a photo').inputValue()) === 'top' && /Epic cards use the hero photo, Legendary cards the action shot/.test(await page.locator('[data-photo-note]').innerText()))
+  check('photos on cards default to every card with a photo, and say what that means', (await page.getByLabel('Cards that fill with a photo').inputValue()) === 'all' && /Every card fills with the player.s hero photo/.test(await page.locator('[data-photo-note]').innerText()))
   await page.getByLabel('Cards that fill with a photo').selectOption('specials')
   await page.waitForFunction(() => document.querySelector('select[aria-label="Cards that fill with a photo"]').value === 'specials')
   check('changing it sends big_photos only', JSON.stringify(calls.filter((c) => c.method === 'PATCH').pop().body) === '{"big_photos":"specials"}')
   check('the note follows the choice', /Every regular card shows the profile photo/.test(await page.locator('[data-photo-note]').innerText()))
-  await page.getByLabel('Cards that fill with a photo').selectOption('top')
+  await page.getByLabel('Cards that fill with a photo').selectOption('all')
   check('starting cards default to the minimal set', (await page.getByLabel('Starting cards').inputValue()) === 'minimal')
   await page.getByLabel('Starting cards').selectOption('all')
   await page.waitForFunction(() => document.querySelector('select[aria-label="Starting cards"]').value === 'all')
@@ -299,7 +309,7 @@ const run = async () => {
   await page.getByRole('button', { name: /^Give 6 packs now$/ }).click()
   await page.waitForSelector('[data-create-done]')
   const gift = calls.find((c) => c.path === '/player-cards/gifts')
-  check('giving sends the name, quality, quantity, audience and a request id, and nothing else', gift && JSON.stringify(Object.keys(gift.body)) === JSON.stringify(['title', 'quality', 'qty', 'audience', 'player_ids', 'request_id']) && gift.body.title === 'Grand Final winners' && gift.body.quality === 'legendary' && gift.body.qty === 2 && gift.body.audience === 'all' && gift.body.player_ids.length === 0 && /^[0-9a-f-]{36}$/.test(gift.body.request_id), JSON.stringify(gift?.body))
+  check('giving sends the name, quality, quantity, audience and a request id, and nothing else', gift && JSON.stringify(Object.keys(gift.body)) === JSON.stringify(['title', 'quality', 'qty', 'size', 'audience', 'player_ids', 'request_id']) && gift.body.title === 'Grand Final winners' && gift.body.quality === 'legendary' && gift.body.qty === 2 && gift.body.audience === 'all' && gift.body.player_ids.length === 0 && /^[0-9a-f-]{36}$/.test(gift.body.request_id), JSON.stringify(gift?.body))
   check('it says what happened, and the gift is listed with its quality', /Gave 6 packs to 3 players/.test(await page.locator('[data-create-done]').innerText()) && /Grand Final winners/.test(await page.locator('[data-gift="g1"]').innerText()) && /Legendary/.test(await page.locator('[data-gift="g1"]').innerText()))
   check('the name is cleared ready for the next', (await page.getByLabel('Name of the pack').inputValue()) === '')
   await page.getByLabel('Name of the pack').fill('Thanks')
@@ -315,6 +325,47 @@ const run = async () => {
   const g2 = calls.find((c) => c.path === '/player-cards/gifts')
   check('a gift to chosen players sends their ids, with a fresh request id', g2 && g2.body.audience === 'players' && JSON.stringify(g2.body.player_ids) === '["a1"]' && g2.body.request_id !== first, JSON.stringify(g2?.body))
   await page.getByLabel('Who gets them').selectOption('all')
+  // cards in the pack, the words under the name, and a design made on the spot
+  check('the number of cards starts at five, and the preview says so', (await page.getByLabel('Cards in the pack').inputValue()) === '5' && /5 cards/i.test(await page.locator('[data-create-preview]').innerText()))
+  await page.getByLabel('Cards in the pack').fill('0')
+  check('a pack of no cards is refused with a message and nothing to press', /holds from 1 to 12 cards/.test(await page.locator('[data-create-pack]').innerText()) && (await page.getByRole('button', { name: /^Give .* now$/ }).isDisabled()))
+  await page.getByLabel('Cards in the pack').fill('13')
+  check('...and so is one of thirteen', /holds from 1 to 12 cards/.test(await page.locator('[data-create-pack]').innerText()))
+  await page.getByLabel('Cards in the pack').fill('8')
+  check('the preview follows the number of cards', /8 cards/i.test(await page.locator('[data-create-preview]').innerText()))
+  await page.getByLabel('Name of the pack').fill('Ton Up Tuesday')
+  await page.getByLabel('Words under the name').fill('Dig deep, champions')
+  check('the words under the name show on the preview as they are typed', /dig deep, champions/i.test(await page.locator('[data-create-preview]').innerText()))
+  check('the design controls are tucked away until asked for', (await page.locator('[data-create-design]').count()) === 0)
+  await page.locator('[data-design-toggle]').click()
+  await page.locator('[data-create-design] [data-design-file="bg"]').setInputFiles({ name: 'pitch.png', mimeType: 'image/png', buffer: PNG })
+  await page.waitForSelector('[data-create-preview] [data-pack-design-bg]')
+  await page.locator('[data-create-design] [data-design-file="art"]').setInputFiles({ name: 'cup.png', mimeType: 'image/png', buffer: PNG })
+  await page.waitForSelector('[data-create-preview] [data-pack-design-art]')
+  check('a chosen picture shows on the preview at once, before anything is sent', !calls.some((c) => /designs/.test(c.path)))
+  await page.locator('[data-create-design] [data-design-colour="Foil colour"] input').evaluate((el) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(el, '#1d4ed8'); el.dispatchEvent(new Event('input', { bubbles: true })) })
+  await page.getByRole('switch', { name: "Show the club logo" }).click()
+  check('the button says it will go with the design', /with your design/.test(await page.locator('[data-create-pack]').innerText()))
+  if (SHOT) await page.screenshot({ path: `${SHOT}/10-make-a-designed-pack.png`, fullPage: true })
+  calls.length = 0
+  await page.getByRole('button', { name: /^Give 6 packs now$/ }).click()
+  await page.waitForFunction(() => document.querySelectorAll('[data-gift]').length === 3)
+  const dz = calls.find((c) => c.path === '/player-cards/gifts/designed')
+  check('a designed pack is sent as one multipart request to the designed route, with both pictures', dz && dz.multipart && /name="bg"; filename="pitch.png"/.test(dz.raw) && /name="art"; filename="cup.png"/.test(dz.raw), dz && dz.raw.slice(0, 300))
+  const styleField = ((dz?.raw || '').match(/name="style"\r\n\r\n([^\r]*)/) || [])[1]
+  check('...with the name, size and quality, and only the style that was changed', /name="size"\r\n\r\n8/.test(dz.raw) && /name="title"\r\n\r\nTon Up Tuesday/.test(dz.raw) && JSON.stringify(JSON.parse(styleField || '{}')) === '{"color_a":"#1d4ed8","show_logo":false,"line":"Dig deep, champions"}', styleField)
+  check('the gift is listed with its size', /8 cards/.test(await page.locator('[data-gift="g3"]').innerText()))
+  check('the design is cleared, ready for the next pack', (await page.locator('[data-create-design]').count()) === 0 && (await page.getByLabel('Words under the name').inputValue()) === '')
+  await page.getByLabel('Cards in the pack').fill('4')
+  await page.getByLabel('Name of the pack').fill('Plain four')
+  calls.length = 0
+  await page.getByRole('button', { name: /^Give 6 packs now$/ }).click()
+  await page.waitForFunction(() => document.querySelectorAll('[data-gift]').length === 4)
+  check('a pack with no design goes the quick way (JSON, with its size)', calls.some((c) => c.path === '/player-cards/gifts' && c.body.size === 4) && !calls.some((c) => c.path === '/player-cards/gifts/designed'))
+  await page.getByLabel('Cards in the pack').fill('5')
+  await page.locator('[data-when-later]').click()
+  check('scheduling hides the design and the words, and says why', (await page.locator('[data-design-toggle]').count()) === 0 && (await page.getByLabel('Words under the name').count()) === 0 && /Scheduled packs hold five cards/.test(await page.locator('[data-when-dates]').innerText()))
+  await page.locator('[data-when-now]').click()
   await page.locator('[data-when-later]').click()
   check('scheduling needs a name and a first day', await page.getByRole('button', { name: 'Schedule it' }).isDisabled())
   await page.getByLabel('Name of the pack').fill('Australia v South Africa, First Test')

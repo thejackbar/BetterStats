@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.routers.public_availability import _club_branding, _club_for_token, _client_ip, _player_for_session
-from app.services import player_card_alerts as alerts, player_card_catalogue as catalogue, player_card_community as community, player_card_designs as pack_designs, player_card_sets as card_sets, player_card_social as social, player_card_swaps as swaps, player_cards as cards, rate_limit
+from app.services import player_card_alerts as alerts, player_card_challenges as challenges, player_card_catalogue as catalogue, player_card_community as community, player_card_designs as pack_designs, player_card_sets as card_sets, player_card_social as social, player_card_swaps as swaps, player_cards as cards, rate_limit
 from app.services.session_safety import rollback_keeping
 
 router = APIRouter(prefix="/public/availability", tags=["public-player-cards"])
@@ -283,6 +283,15 @@ class PrefsBody(BaseModel):
     feed_hidden: Optional[bool] = None
 
 
+class CardsBody(BaseModel):
+    cards: list[dict] = []
+
+
+class MySetBody(BaseModel):
+    title: Optional[str] = None
+    selector: dict
+
+
 class ShowcaseBody(BaseModel):
     keys: list[str]
 
@@ -374,7 +383,99 @@ async def get_sets(token: str, request: Request, db: AsyncSession = Depends(get_
     """Every set the club has, with how far through each the player is."""
     club, player, snap = await _ready(db, request, token)
     _need(snap, "sets")
-    return await card_sets.overview(db, club, snap, str(player.id))
+    # A set that is complete pays its reward pack, once. Seeing the sets is when a player finds out.
+    earned = await challenges.claim_rewards(db, club, snap, str(player.id))
+    await db.commit()
+    return {**await card_sets.overview(db, club, snap, str(player.id)), "earned": earned}
+
+
+def _challenge_error(exc: "challenges.ChallengeError"):
+    return HTTPException(status_code=exc.status, detail=exc.message)
+
+
+@router.get("/{token}/me/cards/challenges")
+async def get_challenges(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The challenges the club has published, how far the player is, and their own private sets. Pays any reward just earned."""
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "sets")
+    me = str(player.id)
+    earned = await challenges.claim_rewards(db, club, snap, me)
+    await db.commit()
+    return {**await challenges.overview(db, club, snap, me), "earned": earned}
+
+
+@router.get("/{token}/me/cards/challenge-options")
+async def get_challenge_options(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """What a player can build a set from: the club's premierships, its players, the tiers and the kinds of special card."""
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "sets")
+    drawable = [pid for pid, f in snap["figs"].items() if f["matches"] > 0 and pid in snap["people"]]
+    return {
+        "premierships": await challenges.premiership_options(db, club, snap),
+        "players": sorted(({"id": pid, "name": snap["people"][pid]["display_name"]} for pid in drawable), key=lambda p: p["name"].lower()),
+        "tiers": [{"key": k, "label": challenges.TIER_NAME[k]} for k in ("legendary", "epic", "rare", "common")],
+        "special_kinds": [{"key": k, "label": v} for k, v in cards.SPECIAL_KINDS.items()],
+    }
+
+
+@router.get("/{token}/me/cards/challenges/{challenge_id}")
+async def get_challenge(token: str, challenge_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """One squad challenge: its rules and reward, and the cards the player could pick."""
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "sets")
+    try:
+        return await challenges.detail(db, club, snap, str(player.id), challenge_id)
+    except challenges.ChallengeError as exc:
+        raise _challenge_error(exc)
+
+
+@router.post("/{token}/me/cards/challenges/{challenge_id}/check")
+async def check_challenge(token: str, challenge_id: str, body: CardsBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Say which rules these cards meet. Changes nothing."""
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "sets")
+    try:
+        return await challenges.check(db, club, snap, str(player.id), challenge_id, body.cards)
+    except challenges.ChallengeError as exc:
+        raise _challenge_error(exc)
+
+
+@router.post("/{token}/me/cards/challenges/{challenge_id}/submit")
+async def submit_challenge(token: str, challenge_id: str, body: CardsBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """Finish the challenge with these cards. They stay with the player and the reward pack is added, together or not at all."""
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "sets")
+    try:
+        out = await challenges.submit(db, club, snap, str(player.id), challenge_id, body.cards)
+    except challenges.ChallengeError as exc:
+        await rollback_keeping(db, club, player)
+        raise _challenge_error(exc)
+    await db.commit()
+    return out
+
+
+@router.post("/{token}/me/cards/my-sets")
+async def create_my_set(token: str, body: MySetBody, request: Request, db: AsyncSession = Depends(get_db)):
+    """A set only this player can see: cards they have chosen to collect. It pays no reward."""
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "sets")
+    try:
+        out = await challenges.create_my_set(db, club, snap, str(player.id), body.model_dump())
+    except challenges.ChallengeError as exc:
+        await rollback_keeping(db, club, player)
+        raise _challenge_error(exc)
+    await db.commit()
+    return out
+
+
+@router.delete("/{token}/me/cards/my-sets/{set_id}")
+async def delete_my_set(token: str, set_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    club, player, snap = await _ready(db, request, token)
+    _need(snap, "sets")
+    if not await challenges.delete_my_set(db, str(player.id), set_id):
+        raise HTTPException(status_code=404, detail="That set could not be found.")
+    await db.commit()
+    return {"status": "deleted"}
 
 
 @router.get("/{token}/me/cards/sets/{set_key}")

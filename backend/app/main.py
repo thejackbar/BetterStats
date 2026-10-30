@@ -20,7 +20,7 @@ from app.routers import admin_broadcasts
 from app.routers import product_updates
 from app.routers import club_links as club_links_router
 from app.routers import privacy_requests as privacy_requests_router
-from app.routers import card_review, auth, organisations, players, games, game_fow, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_player_cards, player_cards_admin, player_dashboard_admin, public_net_checkin, net_manager, fines, website, comms, public_comms, public_ses, public_contact, public_teaser, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import card_review, auth, organisations, players, games, game_fow, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, cricketstatz, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_player_cards, player_cards_admin, player_dashboard_admin, public_net_checkin, net_manager, rotation, public_rotation, fines, website, comms, public_comms, public_ses, public_contact, public_teaser, public_webinar, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, public_billing, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace, sales_commissions, honours, role_programs
@@ -4382,6 +4382,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _SELECTION_DRAFT_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 381: Junior Rotation (groups, typed player names, rounds).
+        # Same one-copy rule: this list and alembic's 381 both run
+        # services/rotation_ddl.STATEMENTS.
+        from app.services.rotation_ddl import STATEMENTS as _ROTATION_DDL
+        for _stmt in _ROTATION_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 329: the record of a confirmed side being sent to the
         # captain and the players. Same one-copy rule: this list and alembic's
         # 329 both run services/selection_notice_ddl.STATEMENTS.
@@ -4562,6 +4569,14 @@ async def lifespan(app: FastAPI):
         from app.services.player_card_photos_ddl import STATEMENTS as _PLAYER_CARD_PHOTOS_DDL
         for _stmt in _PLAYER_CARD_PHOTOS_DDL:
             await conn.execute(text(_stmt))
+        # Migration 378: a pack made by hand can be designed and sized as it is made. Same one-copy rule.
+        from app.services.player_card_looks_ddl import STATEMENTS as _PLAYER_CARD_LOOKS_DDL
+        for _stmt in _PLAYER_CARD_LOOKS_DDL:
+            await conn.execute(text(_stmt))
+        # Migration 379: challenges, their completions and players' own sets. Same one-copy rule.
+        from app.services.player_card_challenges_ddl import STATEMENTS as _PLAYER_CARD_CHALLENGES_DDL
+        for _stmt in _PLAYER_CARD_CHALLENGES_DDL:
+            await conn.execute(text(_stmt))
         # Migration 365: automatic premierships (round name, honour-to-scorecard link, auto marker,
         # exclusions). Same one-copy rule: this list and alembic's 365 both run
         # services/premierships_ddl.STATEMENTS.
@@ -4584,7 +4599,7 @@ async def lifespan(app: FastAPI):
         from app.services.manual_game_roles_ddl import STATEMENTS as _MANUAL_ROLES_DDL
         for _stmt in _MANUAL_ROLES_DDL:
             await conn.execute(text(_stmt))
-        # Migration 378: v_game_roles, the one view the captain / keeper stats lenses join. Same one-copy rule.
+        # Migration 382: v_game_roles, the one view the captain / keeper stats lenses join. Same one-copy rule.
         from app.services.manual_game_roles_ddl import VIEW_STATEMENTS as _GAME_ROLES_VIEW_DDL
         for _stmt in _GAME_ROLES_VIEW_DDL:
             await conn.execute(text(_stmt))
@@ -6682,6 +6697,7 @@ app.include_router(selection.router, dependencies=[Depends(require_module("selec
 app.include_router(audit_router.router, dependencies=[Depends(require_module("select"))])  # BetterSelect: Audit History
 app.include_router(selection_rules.router, dependencies=[Depends(require_module("select"))])  # BetterSelect
 app.include_router(net_manager.router, dependencies=[Depends(require_module("select"))])  # BetterSelect (Net Manager)
+app.include_router(rotation.router, dependencies=[Depends(require_module("select"))])     # BetterSelect (Junior Rotation)
 app.include_router(fines.router, dependencies=[Depends(require_module("select"))])        # BetterSelect (Fines)
 app.include_router(votes.router, dependencies=[Depends(require_module("select"))])        # BetterSelect (vote collection)
 # Player-facing self-service availability (magic link + PIN). Unauthenticated by
@@ -6699,6 +6715,10 @@ app.include_router(public_votes.router)                                         
 # by necessity — resolves the club from its check-in token and checks entitlement
 # + the enabled flag itself, so it is NOT wrapped in require_module.
 app.include_router(public_net_checkin.router)                                             # BetterSelect (public net check-in)
+# Junior Rotation's parent link (token only, off by default). Unauthenticated by
+# design: it resolves the group from its own token and checks entitlement and the
+# enabled flag itself, so it is NOT wrapped in require_module.
+app.include_router(public_rotation.router)                                                # BetterSelect (public Junior Rotation)
 # Club Room Mode's public link (magic link + PIN). Unauthenticated by design —
 # resolves the club from its own link token and checks public_link_enabled
 # itself, so it is NOT wrapped in require_module (Club Room is Core anyway).

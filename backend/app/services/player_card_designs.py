@@ -34,11 +34,12 @@ ALLOWED_FORMATS = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp
 POSITIONS = ("top", "center", "bottom")
 SIZES = ("s", "m", "l")
 MAX_TITLE = 40
+MAX_LINE = 36
 MAX_PIXELS = 40_000_000                    # refuse a decompression bomb before decoding it
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
-_STYLE_KEYS = ("title", "color_a", "color_b", "color_on", "overlay", "show_name", "show_logo", "art_position", "art_size")
+_STYLE_KEYS = ("title", "line", "color_a", "color_b", "color_on", "overlay", "show_name", "show_logo", "art_position", "art_size")
 
-COLUMNS = ("id, target, title, color_a, color_b, color_on, overlay, show_name, show_logo, art_position, art_size, "
+COLUMNS = ("id, target, title, line, color_a, color_b, color_on, overlay, show_name, show_logo, art_position, art_size, "
            "bg_rev, art_rev, bg_mime IS NOT NULL AS has_bg, art_mime IS NOT NULL AS has_art")
 
 
@@ -52,6 +53,11 @@ def event_target(event_id) -> str:
     return f"event:{event_id}"
 
 
+def gift_target(gift_id) -> str:
+    """A pack an admin made by hand can have a look of its own, made while creating it."""
+    return f"gift:{gift_id}"
+
+
 def image_url(design_id, kind: str, rev) -> str:
     return f"/api/images/card-packs/{design_id}/{kind}?v={int(rev or 0)}"
 
@@ -59,7 +65,7 @@ def image_url(design_id, kind: str, rev) -> str:
 def row_dict(r) -> dict:
     """A design as the page uses it. Image URLs only when there is an image."""
     return {
-        "id": str(r["id"]), "target": r["target"], "title": r["title"],
+        "id": str(r["id"]), "target": r["target"], "title": r["title"], "line": r["line"],
         "a": r["color_a"], "b": r["color_b"], "on": r["color_on"],
         "overlay": float(r["overlay"] if r["overlay"] is not None else 0.25),
         "show_name": r["show_name"] is not False, "show_logo": r["show_logo"] is not False,
@@ -77,11 +83,23 @@ async def load_all(db: AsyncSession, org_id) -> dict[str, dict]:
     return {r["target"]: row_dict(r) for r in rows}
 
 
-def resolve(designs: dict[str, dict], source: str, event_id: Optional[str] = None) -> Optional[dict]:
-    """The design a pack uses: its event's, its source's, then the club's default."""
+def resolve(designs: dict[str, dict], source: str, event_id: Optional[str] = None, gift_id: Optional[str] = None) -> Optional[dict]:
+    """The design a pack uses: its own event's or gift's, then its source's, then the club's default."""
     if event_id and event_target(event_id) in designs:
         return designs[event_target(event_id)]
+    if gift_id and gift_target(gift_id) in designs:
+        return designs[gift_target(gift_id)]
     return designs.get(source) or designs.get(DEFAULT_TARGET)
+
+
+def gift_id_of(source: str, ref_key: str) -> Optional[str]:
+    """The id of the gift an admin-made pack came from (its ref is `<gift id>:<n>`)."""
+    if source != "custom" or not ref_key:
+        return None
+    try:
+        return str(uuid.UUID(str(ref_key).split(":", 1)[0]))
+    except ValueError:
+        return None
 
 
 def event_id_of(source: str, ref_key: str) -> Optional[str]:
@@ -101,7 +119,7 @@ async def targets(db: AsyncSession, org_id) -> list[dict]:
     groups = (("Everyday", ("starter", "weekly", "runs", "wickets", "dismissals", "duck")),
               ("For what you do", ("century", "five_for", "hat_trick", "fifty", "milestone")),
               ("On the day", tuple(kinds.DAY_SOURCES)),
-              ("From the club", ("custom",)))
+              ("From the club", ("custom", "reward")))
     for group, sources in groups:
         for s in sources:
             out.append({"key": s, "label": kinds.KINDS[s].label, "group": group})
@@ -109,6 +127,10 @@ async def targets(db: AsyncSession, org_id) -> list[dict]:
         "SELECT id::text, title FROM club_card_event_packs WHERE organisation_id = CAST(:o AS UUID) AND ends_on >= CURRENT_DATE - 30 "
         "ORDER BY starts_on, created_at"), {"o": str(org_id)})).fetchall()
     out += [{"key": event_target(i), "label": t, "group": "Scheduled"} for i, t in events]
+    gifts = (await db.execute(text(
+        "SELECT id::text, title FROM club_card_pack_gifts WHERE organisation_id = CAST(:o AS UUID) ORDER BY created_at DESC LIMIT 12"),
+        {"o": str(org_id)})).fetchall()
+    out += [{"key": gift_target(i), "label": t, "group": "From the club"} for i, t in gifts]
     return out
 
 
@@ -126,6 +148,16 @@ async def check_target(db: AsyncSession, org_id, target: str) -> str:
             {"i": ev, "o": str(org_id)})).first()
         if found:
             return event_target(ev)
+    if target.startswith("gift:"):
+        try:
+            gid = str(uuid.UUID(target.split(":", 1)[1]))
+        except ValueError:
+            raise DesignError("Not found", 404)
+        found = (await db.execute(text(
+            "SELECT 1 FROM club_card_pack_gifts WHERE id = CAST(:i AS UUID) AND organisation_id = CAST(:o AS UUID)"),
+            {"i": gid, "o": str(org_id)})).first()
+        if found:
+            return gift_target(gid)
     raise DesignError("Not found", 404)
 
 
@@ -142,6 +174,9 @@ def clean_style(patch: dict) -> dict:
             out[k] = v.lower() if v else None
         elif k == "title":
             t = " ".join(str(v or "").split())[:MAX_TITLE]
+            out[k] = t or None
+        elif k == "line":
+            t = " ".join(str(v or "").split())[:MAX_LINE]
             out[k] = t or None
         elif k == "overlay":
             try:
@@ -230,6 +265,11 @@ async def set_image(db: AsyncSession, org_id, target: str, kind: str, raw: bytes
         raise DesignError("Not found", 404)
     target = await check_target(db, org_id, target)
     data, mime = process_image(raw, kind)
+    return await put_image(db, org_id, target, kind, data, mime)
+
+
+async def put_image(db: AsyncSession, org_id, target: str, kind: str, data: bytes, mime: str) -> dict:
+    """Store a picture that `process_image` has already checked. The target has been checked by the caller."""
     await _ensure_row(db, org_id, target)
     await db.execute(text(
         f"UPDATE club_card_pack_designs SET {kind}_data = :d, {kind}_mime = :m, {kind}_rev = :v, updated_at = NOW() "

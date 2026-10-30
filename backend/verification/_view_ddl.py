@@ -102,7 +102,7 @@ def view_statements() -> list[tuple[str, str]]:
     for name, sql in out:
         latest[name] = sql
     views = [(n, latest[n]) for n in dict.fromkeys(n for n, _ in out)]
-    # `v_game_roles` (migration 378) is not a `v_effective_*` view, but the captain and keeper lenses join it, so a
+    # `v_game_roles` (migration 382) is not a `v_effective_*` view, but the captain and keeper lenses join it, so a
     # harness that builds the effective views needs it too. Read from the one list the migration and the lifespan
     # run. It needs `manual_game_roles`, which `Base.metadata.create_all` makes before any harness builds views.
     try:

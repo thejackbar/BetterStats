@@ -1,10 +1,10 @@
 export default {
   version: 'v9.135.2',
-  date: '2026-10-30',
+  date: '2026-10-29',
   // Above v9.135.1's sortKey. Check origin/main at merge time.
-  sortKey: '2026-11-12T18:00:00Z',
-  title: 'Captains and wicketkeepers on typed-in and imported matches now count in the stats',
+  sortKey: '2026-11-12T15:00:00Z',
+  title: 'Merge Duplicates: cards show a player\'s scorebook games',
   items: [
-    'Fixed: a captain or wicketkeeper set on a match you typed in or imported was on the match but missing from the stats. Records > Captains (all seasons and by grade), the captain filter on the Leaderboard, a player\'s captain record and the captain-only and keeper-only filters in StatLab now include those matches.',
+    'Fixed: on the Merge Duplicates cards a player who only exists in the club\'s scorebook (a CricketStatz import or a typed card) showed 0 seasons, 0 runs, 0 wickets and 0 innings, even where their profile holds 20 matches. The cards now count the same way the profile does, and add a Games figure and the years the player\'s games run across, for example "2019 to 2020". A record with no games at all still reads 0.',
   ],
 }

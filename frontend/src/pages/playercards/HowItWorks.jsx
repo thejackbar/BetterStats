@@ -21,7 +21,7 @@ export default function HowItWorks() {
       <PageHead title="How it works" sub="Cards of the players in your club, built from the real scorebook." />
       <Section id="cards" title="The cards">
         <p>Every player in the club has a card with their career figures: matches, runs, batting average, wickets, bowling average and dismissals, across every grade. The cards update as the stats do. The number in the corner is the card's rarity, from 1 to 99, worked out from how the player's figures compare with the rest of the club.</p>
-        <p>A Common or Rare card shows the player's profile photo in a circle. The better cards, Epic and Legendary, and every special card, fill with a full-card photo of the player when the club has one.</p>
+        <p>A card fills with a full-card photo of the player when the club has one, and special cards use the player's action shot. A player with only a profile photo shows it in a circle.</p>
         <p>You always have your own card. Everyone else's you collect from packs and swaps.</p>
       </Section>
       <Section id="packs" title="Packs and the odds">
@@ -39,7 +39,7 @@ export default function HowItWorks() {
         <p>Some packs are better. A Match Day pack, a holiday pack (Halloween, the Melbourne Cup, Christmas and more), a birthday pack, a surprise drop and any big day your club schedules, like a Test match, give two Rare or better cards at least and lean towards the better tiers. A pack for something you did is better again: a half century, a landmark, a five-for or hat-trick, and best of all a century, which is nearly all Rare or better. You get those for achievements from the day your club started using cards, and the Packs screen shows the full list. There are no paid packs.</p>
       </Section>
       <Section id="specials" title="Special cards">
-        <p>Special cards mark real moments: a century, a half century, a five wicket haul, a hat-trick, a debut, a games milestone (10, 50, 100 and on), a career milestone (every 1,000 runs, 200 wickets and 50 dismissals) and the club's awards. Each kind has its own colour, and a special card shows the player in a full-card photo: an action shot for a moment in play like a century or a five-for, a hero portrait for a debut, a milestone or an award. The player it is about starts with their debut card and their latest milestone card, and the rest turn up in packs.</p>
+        <p>Special cards mark real moments: a century, a half century, a five wicket haul, a hat-trick, a debut, a games milestone (10, 50, 100 and on), a career milestone (every 1,000 runs, 200 wickets and 50 dismissals) and the club's awards. Each kind has its own colour, and a special card shows the player's action shot filling the card. The player it is about starts with their debut card and their latest milestone card, and the rest turn up in packs.</p>
       </Section>
       <Section id="swaps" title="Swaps">
         <ul>
@@ -59,10 +59,19 @@ export default function HowItWorks() {
       </Section>
       <Section id="club" title="Sets, showcase and the collectors board">
         <ul>
-          <li>A set is a group of cards you can work towards completing, such as every century at the club or a season's awards. Finishing one earns a banner and bragging rights, nothing more.</li>
+          <li>A set is a group of cards you can work towards completing, such as every century at the club or a season's awards. Finishing one earns a banner and a reward pack from your club. The bigger the set, the better the pack, and each set pays once.</li>
           <li>Your showcase is up to six cards you hold, pinned for the club to see next to your name.</li>
           <li>The collectors board ranks everyone in the club, by how much of the club's set they hold. You can leave it in Settings. It counts different cards, never copies, so hoarding doubles does not help.</li>
           <li>This week lists what has happened in the club's cards lately. You can leave your name out of it in Settings.</li>
+        </ul>
+      </Section>
+      <Section id="challenges" title="Challenges and your own sets">
+        <ul>
+          <li>Your club can set challenges with a reward pack for finishing. A squad challenge asks you to pick cards you hold that meet some rules, such as 11 Rares or a squad rated 70 or more. You keep every card, your own card and your starting cards count, and each card counts once.</li>
+          <li>The rules are checked as you pick, so you can see what is still missing. If a challenge can be done more than once, the cards you used last time are not offered again.</li>
+          <li>A collect challenge asks you to hold every card on a list, such as a premiership side. You keep the cards, and the reward arrives when the last one lands.</li>
+          <li>You can make sets of your own, such as the players from a premiership you want to collect. Only you can see them, and they pay nothing.</li>
+          <li>Reward packs turn up under Open packs, like any other.</li>
         </ul>
       </Section>
       <Section id="privacy" title="Who sees what">

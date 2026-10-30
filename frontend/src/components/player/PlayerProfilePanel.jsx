@@ -76,7 +76,7 @@ function PToggle({ on, onChange, label }) {
 const PHOTO_KINDS = {
   photo: {
     label: 'Profile photo',
-    hint: 'Square. Used on rosters, squad grids and beside a name, and sits in a circle on the player\u2019s Common and Rare cards, and on any card when there is no hero photo or action shot.',
+    hint: 'Square. Used on rosters, squad grids and beside a name, and sits in a circle on the player\u2019s card when there is no hero photo (or when the club limits full photos to its better cards).',
     aspect: 1,
     thumb: 'w-11 h-11',
     addLabel: 'Upload photo',
@@ -88,7 +88,7 @@ const PHOTO_KINDS = {
   },
   hero: {
     label: 'Hero photo',
-    hint: 'Tall. Fills the big photo on match-day posts and share cards, and the whole of the player\u2019s Epic card and of their special cards for a debut, a milestone or an award. Free crop \u2014 the post\u2019s own Framing control does the final positioning.',
+    hint: 'Tall. Fills the big photo on match-day posts and share cards, and the whole of the player\u2019s card. Free crop \u2014 the post\u2019s own Framing control does the final positioning.',
     // Free crop on purpose: forcing a ratio here would crop twice and fight
     // the Framing control on the post itself.
     aspect: null,
@@ -102,7 +102,7 @@ const PHOTO_KINDS = {
   },
   action: {
     label: 'Action shot',
-    hint: 'The player mid-shot. Fills the whole of their Legendary card and of their special cards for a century, fifty, five-for or hat-trick. It can also fill the hero position on posts and share cards: pick it below. Free crop.',
+    hint: 'The player mid-shot. Fills the whole of their special cards (a century, a five-for, a debut, a milestone, an award). It can also fill the hero position on posts and share cards: pick it below. Free crop.',
     aspect: null,
     thumb: 'w-11 h-16',
     addLabel: 'Upload action shot',

@@ -5,7 +5,7 @@ matches show on the match, but Records > Captains > Batting (all seasons, and A 
 captain and keeper lens joined `game_appearances.is_captain`, a table only a synced game has rows in, so a
 hand-entered game could never have a captain as far as any stat was concerned.
 
-`v_game_roles` (migration 378) unions the synced flags with `manual_game_roles`; the Records captain boards,
+`v_game_roles` (migration 382) unions the synced flags with `manual_game_roles`; the Records captain boards,
 the Leaderboard captain filter, a player's captain record and StatLab's captain / keeper filters join it.
 
 Seeds a synced game and three hand-entered games and reads each lens through the shipped route bodies:

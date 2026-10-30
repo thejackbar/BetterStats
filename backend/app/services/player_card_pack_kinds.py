@@ -65,6 +65,8 @@ KINDS: dict[str, Kind] = {
 }
 # Packs a club creates by hand. Its name and quality are the club's; the source only names how it arrived.
 KINDS["custom"] = Kind("Club pack", "A gift from your club", EVENT, 2, 0.10)
+# What a player is paid for finishing a challenge or a set. The reward's own quality decides the odds; this is its name and look.
+KINDS["reward"] = Kind("Reward pack", "Earned in a challenge", EVENT, 2, 0.10)
 DEFAULT_KIND = KINDS["weekly"]
 
 # The quality ladder an admin picks from when they create a pack (and for a scheduled one). Each step is better than the last:

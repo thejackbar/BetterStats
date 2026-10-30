@@ -128,9 +128,10 @@ async def main() -> None:
                 id SERIAL PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT NOW(), org_id UUID NOT NULL, user_id UUID,
                 action TEXT NOT NULL, target_type TEXT, target_id TEXT, details JSONB DEFAULT '{}')"""))
         try:
+            from app.services import manual_game_roles_ddl as ROLES_MOD
             from app.services.manual_game_roles_ddl import STATEMENTS as ROLES_DDL
         except ImportError:      # the control commit has no such table
-            ROLES_DDL = []
+            ROLES_MOD, ROLES_DDL = None, []
         for stmt in ROLES_DDL:
             await conn.execute(text(stmt))
     P = {n: await pid(n) for n in PLAYERS}
@@ -413,10 +414,13 @@ async def main() -> None:
     if ROLES_DDL:
         keep = g1c.id if g1c else None
         async with h.engine.begin() as conn:
-            await conn.execute(text("DROP TABLE manual_game_roles"))
+            # v_game_roles (migration 382) reads this table, so it goes with it and is rebuilt from its own list.
+            await conn.execute(text("DROP TABLE manual_game_roles CASCADE"))
             for stmt in ROLES_DDL:
                 await conn.execute(text(stmt))
             for stmt in ROLES_DDL:           # the lifespan re-runs it every boot
+                await conn.execute(text(stmt))
+            for stmt in getattr(ROLES_MOD, "VIEW_STATEMENTS", []) if ROLES_MOD else []:
                 await conn.execute(text(stmt))
         async with Session() as s:
             await s.execute(text("INSERT INTO manual_game_roles (manual_game_id, player_id, is_captain) "

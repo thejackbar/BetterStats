@@ -144,10 +144,10 @@ const run = async () => {
   // ── What players see ────────────────────────────────────────────────────────
   console.log('\nwhat players see')
   const DESIGNS = {
-    default: design('default', { background_url: '/api/images/card-packs/d-default/bg?v=1', art_url: '/api/images/card-packs/d-default/art?v=1', a: '#1d4ed8', b: '#0b1a4a', on: '#ffffff', overlay: 0.3 }),
-    century: design('century', { title: 'Ton Up', background_url: '/api/images/card-packs/d-century/bg?v=1', show_name: false, show_logo: false }),
+    default: design('default', { line: 'Your club, your cards', background_url: '/api/images/card-packs/d-default/bg?v=1', art_url: '/api/images/card-packs/d-default/art?v=1', a: '#1d4ed8', b: '#0b1a4a', on: '#ffffff', overlay: 0.3 }),
+    century: design('century', { title: 'Ton Up', line: 'Dig deep, champions', background_url: '/api/images/card-packs/d-century/bg?v=1', show_name: false, show_logo: false }),
   }
-  const PACKS = [{ id: 'k1', source: 'weekly', label: 'Weekly pack', design: DESIGNS.default }, { id: 'k2', source: 'century', label: 'Ton Up', design: DESIGNS.century }, { id: 'k3', source: 'runs', label: 'Runs pack', design: null }]
+  const PACKS = [{ id: 'k1', source: 'weekly', label: 'Weekly pack', size: 3, design: DESIGNS.default }, { id: 'k2', source: 'century', label: 'Ton Up', size: 8, design: DESIGNS.century }, { id: 'k3', source: 'runs', label: 'Runs pack', design: null }]
   const card = (pid, name, tier, x = {}) => ({ kind: 'player', key: `p:${pid}`, player_id: pid, name, photo_url: null, hero_photo_url: null, matches: 100, runs: 1500, bat_avg: 24.5, wickets: 20, bowl_avg: 31.2, dismissals: 30, rarity: 60, tier, copies: 1, obtained_at: '2026-10-20T01:00:00Z', mine: false, ...x })
   const CARDS = [card('p1', 'Barendse, Jack', 'rare', { mine: true }), card('p2', 'Zed, Alan', 'common')]
   const open = async (width, route) => {
@@ -179,6 +179,7 @@ const run = async () => {
     check('a kind with no design of its own takes the club default (background and centre picture)', (await p.locator('[data-way="halloween"] [data-pack-design-bg]').count()) === 1 && (await p.locator('[data-way="halloween"] [data-pack-design-art]').count()) === 1)
     check('a design that hides the name and the logo hides them', (await p.locator('[data-way="century"] [data-pack-name]').count()) === 0 && (await p.locator('[data-way="century"] [data-pack-stars]').count()) === 0)
     check('the list uses the club\'s name for that kind of pack, and the default design\'s name never', /Ton Up/.test(await p.locator('[data-way="century"]').innerText()) && /Weekly pack/.test(await p.locator('[data-way="weekly"]').innerText()))
+    check('the words under the name are the club\'s own, on a pack that takes the club default', /your club, your cards/i.test(await p.locator('[data-way="halloween"] [data-pack-art]').innerText()))
     const bgStyle = await p.locator('[data-way="century"] [data-pack-design-bg]').evaluate((el) => getComputedStyle(el).backgroundImage)
     check('the background is the club\'s picture, covering the pack', /card-packs\/d-century\/bg/.test(bgStyle))
     const shape = await p.evaluate(() => [...document.querySelectorAll('[data-pack-art]')].map((a) => +(a.getBoundingClientRect().height / a.getBoundingClientRect().width).toFixed(2)))
@@ -194,6 +195,7 @@ const run = async () => {
   {
     const { c, p } = await open(390, '')
     check('Home shows the next pack with its design at 390px', (await p.locator('[data-open-pack] [data-pack-design-bg]').count()) === 1)
+    check('...and how many cards that pack holds (a pack can hold more or fewer than five)', /3 cards/i.test(await p.locator('[data-open-pack]').innerText()))
     check('no horizontal scroll on Home at 390px', (await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0)
     if (SHOT) await p.screenshot({ path: `${SHOT}/designs-player-home-390.png` })
     await c.close()
@@ -214,7 +216,7 @@ const run = async () => {
     })
     await p.goto(cardsUrl(BASE, 'tok123', '/packs'))
     await p.waitForSelector('[data-screen="packs"] [data-way]', { timeout: 20000 })
-    check('a club with no designs, and an older server that sends no pack_designs, keeps the built-in look and does not crash', (await p.locator('[data-pack-designed="yes"]').count()) === 0 && (await p.locator('[data-pack-design-bg]').count()) === 0 && (await p.locator('[data-way]').count()) === 23)
+    check('a club with no designs, and an older server that sends no pack_designs, keeps the built-in look and does not crash', (await p.locator('[data-pack-designed="yes"]').count()) === 0 && (await p.locator('[data-pack-design-bg]').count()) === 0 && (await p.locator('[data-way]').count()) === 24)
     await c.close()
   }
   check('no page errors', errors.length === 0, errors.join(' | '))

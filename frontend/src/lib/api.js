@@ -132,6 +132,11 @@ function mktQS(params) {
 async function uploadFile(path, file, field = 'file') {
   const form = new FormData()
   form.append(field, file)
+  return postForm(path, form)
+}
+
+// POST a FormData (a file or several, with fields) and read the JSON answer.
+async function postForm(path, form) {
   const res = await fetch(`${BASE}${path}`, { method: 'POST', body: form, credentials: 'include' })
   if (!res.ok) {
     const e = await res.json().catch(() => ({}))
@@ -3447,6 +3452,11 @@ export const api = {
   setPlayerCardHidden: (playerId, hidden) =>
     request(`/player-cards/players/${playerId}/hidden`, { method: 'POST', body: JSON.stringify({ hidden }) }),
   refreshPlayerCardSpecials: () => request('/player-cards/refresh-specials', { method: 'POST' }),
+  getPlayerCardChallenges: () => request('/player-cards/challenges'),
+  createPlayerCardChallenge: (data) => request('/player-cards/challenges', { method: 'POST', body: JSON.stringify(data) }),
+  updatePlayerCardChallenge: (id, data) => request(`/player-cards/challenges/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePlayerCardChallenge: (id) => request(`/player-cards/challenges/${id}`, { method: 'DELETE' }),
+  createPlayerCardGiftDesigned: (form) => postForm('/player-cards/gifts/designed', form),
   createPlayerCardGift: (data) => request('/player-cards/gifts', { method: 'POST', body: JSON.stringify(data) }),
   addPlayerCardEvent: (data) => request('/player-cards/events', { method: 'POST', body: JSON.stringify(data) }),
   deletePlayerCardEvent: (id) => request(`/player-cards/events/${id}`, { method: 'DELETE' }),
@@ -3531,6 +3541,13 @@ export const api = {
   // Swapping doubles with another player: the board, one player's doubles, asking, and answering.
   availPublicSwaps: (token, { history = false } = {}) => request(`/public/availability/${token}/me/cards/swaps${history ? '?history=true' : ''}`),
   availPublicSwapPlayer: (token, playerId) => request(`/public/availability/${token}/me/cards/swaps/players/${playerId}`),
+  availPublicChallenges: (token) => request(`/public/availability/${token}/me/cards/challenges`),
+  availPublicChallengeOptions: (token) => request(`/public/availability/${token}/me/cards/challenge-options`),
+  availPublicChallenge: (token, id) => request(`/public/availability/${token}/me/cards/challenges/${id}`),
+  availPublicCheckChallenge: (token, id, cards) => request(`/public/availability/${token}/me/cards/challenges/${id}/check`, { method: 'POST', body: JSON.stringify({ cards }) }),
+  availPublicSubmitChallenge: (token, id, cards) => request(`/public/availability/${token}/me/cards/challenges/${id}/submit`, { method: 'POST', body: JSON.stringify({ cards }) }),
+  availPublicCreateMySet: (token, data) => request(`/public/availability/${token}/me/cards/my-sets`, { method: 'POST', body: JSON.stringify(data) }),
+  availPublicDeleteMySet: (token, id) => request(`/public/availability/${token}/me/cards/my-sets/${id}`, { method: 'DELETE' }),
   availPublicSets: (token) => request(`/public/availability/${token}/me/cards/sets`),
   // Named CardSet, not availPublicSet: that name is the availability answer write above, and a second key of the same name silently replaces it.
   availPublicCardSet: (token, key) => request(`/public/availability/${token}/me/cards/sets/${encodeURIComponent(key)}`),
@@ -3817,6 +3834,28 @@ export const api = {
   nmGetSettings: () => request('/nets/settings'),
   nmSetSettings: (data) =>
     request('/nets/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  // Junior Rotation (BetterSelect): saved groups of typed names, a fair batting
+  // order and fielding rotation per game, the season tally, and the parent link.
+  rotPresets: () => request('/rotation/presets'),
+  rotListGroups: (archived = false) => request(`/rotation/groups?archived=${archived ? 'true' : 'false'}`),
+  rotCreateGroup: (data) => request('/rotation/groups', { method: 'POST', body: JSON.stringify(data) }),
+  rotGetGroup: (id) => request(`/rotation/groups/${id}`),
+  rotPatchGroup: (id, data) => request(`/rotation/groups/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rotRegenerateLink: (id) => request(`/rotation/groups/${id}/regenerate-link`, { method: 'POST' }),
+  rotArchiveGroup: (id, undo = false) => request(`/rotation/groups/${id}/archive?undo=${undo ? 'true' : 'false'}`, { method: 'POST' }),
+  rotAddPlayers: (id, names) => request(`/rotation/groups/${id}/players`, { method: 'POST', body: JSON.stringify({ names }) }),
+  rotPatchPlayer: (id, data) => request(`/rotation/players/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rotFixtures: () => request('/rotation/fixtures'),
+  rotRounds: (groupId) => request(`/rotation/groups/${groupId}/rounds`),
+  rotCreateRound: (groupId, data) => request(`/rotation/groups/${groupId}/rounds`, { method: 'POST', body: JSON.stringify(data) }),
+  rotGetRound: (id) => request(`/rotation/rounds/${id}`),
+  rotPutRound: (id, data) => request(`/rotation/rounds/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  rotGenerate: (id, data) => request(`/rotation/rounds/${id}/generate`, { method: 'POST', body: JSON.stringify(data || {}) }),
+  rotLock: (id) => request(`/rotation/rounds/${id}/lock`, { method: 'POST' }),
+  rotUnlock: (id) => request(`/rotation/rounds/${id}/unlock`, { method: 'POST' }),
+  rotDeleteRound: (id) => request(`/rotation/rounds/${id}`, { method: 'DELETE' }),
+  rotTally: (groupId) => request(`/rotation/groups/${groupId}/tally`),
+  rotPublic: (token) => request(`/public/rotation/${encodeURIComponent(token)}`),
   // Sessions (training days).
   nmListSessions: (limit = 40) => request(`/nets/sessions?limit=${limit}`),
   nmCreateSession: (data = {}) =>

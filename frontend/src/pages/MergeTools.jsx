@@ -72,12 +72,20 @@ function PlayerCard({ player, isSelected, onSelect, label }) {
           )}
         </div>
       </div>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-5 gap-2">
         <StatBadge label="Seasons" value={player.seasons_count} />
+        <StatBadge label="Games" value={player.games_held} />
         <StatBadge label="Runs" value={player.total_runs} />
         <StatBadge label="Wkts" value={player.total_wickets} />
         <StatBadge label="Game Inn." value={player.game_level_innings} />
       </div>
+      {player.first_game && (
+        <div className="mt-2 font-mono text-[10px] text-pb-faint text-center">
+          {player.first_game.slice(0, 4) === (player.last_game || '').slice(0, 4)
+            ? player.first_game.slice(0, 4)
+            : `${player.first_game.slice(0, 4)} to ${(player.last_game || '').slice(0, 4)}`}
+        </div>
+      )}
       {isSelected && (
         <div className="mt-3 font-mono text-[10px] tracking-wide2 text-center" style={{ color: 'var(--pb-accent)' }}>✓ Keep this player</div>
       )}

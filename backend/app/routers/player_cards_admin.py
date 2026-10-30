@@ -9,12 +9,13 @@ key that is not sent leaves its setting alone and an explicit null clears the ti
 """
 from __future__ import annotations
 
+import json
 import secrets
 import uuid
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +24,7 @@ from app.auth.capabilities import MANAGE_SETTINGS, require_cap
 from app.models.db import Organisation, Player, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.public_availability import _club_branding
-from app.services import audit_log, player_card_admin as insight, player_card_designs as pack_designs, player_cards as cards
+from app.services import audit_log, player_card_admin as insight, player_card_challenges as challenges, player_card_designs as pack_designs, player_cards as cards
 
 router = APIRouter(prefix="/player-cards", tags=["player-cards"])
 
@@ -72,6 +73,7 @@ class GiftBody(BaseModel):
     audience: str = "all"
     player_ids: list[str] = []
     request_id: Optional[str] = None
+    size: int = 5
 
 
 class DesignBody(BaseModel):
@@ -85,6 +87,22 @@ class DesignBody(BaseModel):
     show_logo: Optional[bool] = None
     art_position: Optional[str] = None
     art_size: Optional[str] = None
+
+
+class ChallengeBody(BaseModel):
+    """A challenge as the admin screen sends it. `rules` is for an exchange, `selector` and `need` for a collection."""
+    kind: str
+    title: str
+    blurb: Optional[str] = None
+    rules: dict = {}
+    selector: Optional[dict] = None
+    need: Optional[int] = None
+    reward: dict = {}
+    max_completions: int = 1
+    starts_on: Optional[str] = None
+    ends_on: Optional[str] = None
+    active: bool = True
+    sort_order: int = 0
 
 
 class TrimBody(BaseModel):
@@ -131,7 +149,7 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
             **{k: settings.get(k, True) is not False for k in ("sets_enabled", "showcase_enabled", "board_enabled", "feed_enabled",
                                                          "event_packs_enabled")},
             "starter_gifts": settings.get("starter_gifts") or "minimal",
-            "big_photos": settings.get("big_photos") or "top",
+            "big_photos": settings.get("big_photos") or "all",
             "effective_timezone": str(cards.club_zone(settings)),
         },
         "timezones": [{"id": i, "label": n} for i, n in TIMEZONES],
@@ -139,6 +157,7 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
         "gifts": await cards.list_gifts(db, club.id),
         "qualities": cards.quality_options(),
         "max_gift_qty": cards.MAX_GIFT_QTY,
+        "pack_size": {"default": cards.PACK_SIZE, "min": cards.MIN_PACK_SIZE, "max": cards.MAX_PACK_SIZE},
         "designs": await pack_designs.load_all(db, club.id),
         "design_targets": await pack_designs.targets(db, club.id),
         "max_weekly_packs": cards.MAX_WEEKLY_PACKS,
@@ -240,13 +259,160 @@ async def create_gift(
     await cards.ensure_launched(db, club.id)
     try:
         out = await cards.create_gift(db, club, snap, title=body.title, quality=body.quality, qty=body.qty, audience=body.audience,
-                                      player_ids=body.player_ids, request_id=body.request_id, by=getattr(user, "email", None))
+                                      player_ids=body.player_ids, request_id=body.request_id, by=getattr(user, "email", None), size=body.size)
     except ValueError as exc:
         await db.rollback()
         raise HTTPException(status_code=422, detail=str(exc))
     if not out["repeat"]:
         await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_pack_gift", target_type="card_pack_gift",
                                      target_id=out["id"], details={k: out[k] for k in ("title", "quality", "qty", "players", "packs")})
+    await db.commit()
+    return {"gift": out, **await _payload(db, club)}
+
+
+# ── Challenges: sets with a goal and a reward ─────────────────────────────────────────────────────────────────
+
+def _challenge_http(exc: "challenges.ChallengeError") -> HTTPException:
+    return HTTPException(status_code=exc.status, detail=exc.message)
+
+
+async def _challenge_payload(db: AsyncSession, club: Organisation) -> dict:
+    snap = await cards.club_snapshot(db, club)
+    drawable = [pid for pid, f in snap["figs"].items() if f["matches"] > 0 and pid in snap["people"]]
+    return {
+        "challenges": await challenges.admin_list(db, club),
+        "premierships": await challenges.premiership_options(db, club, snap),
+        "players": sorted(({"id": pid, "name": snap["people"][pid]["display_name"]} for pid in drawable), key=lambda p: p["name"].lower()),
+        "tiers": [{"key": k, "label": challenges.TIER_NAME[k]} for k in challenges.TIER_KEYS],
+        "special_kinds": [{"key": k, "label": v} for k, v in cards.SPECIAL_KINDS.items()],
+        "qualities": cards.quality_options(),
+        "limits": {"count": challenges.MAX_COUNT, "completions": challenges.MAX_COMPLETIONS, "reward_qty": challenges.MAX_REWARD_QTY,
+                   "pack_size": {"min": cards.MIN_PACK_SIZE, "max": cards.MAX_PACK_SIZE, "default": cards.PACK_SIZE}},
+    }
+
+
+@router.get("/challenges")
+async def list_challenges(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    return await _challenge_payload(db, club)
+
+
+@router.post("/challenges")
+async def create_challenge(
+    body: ChallengeBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Publish a challenge to every player: a squad challenge (pick cards you hold that meet the rules) or a collection (hold a list of cards)."""
+    snap = await cards.club_snapshot(db, club, fresh=True)
+    try:
+        made = await challenges.admin_save(db, club, snap, body.model_dump(), None, getattr(user, "email", None))
+    except challenges.ChallengeError as exc:
+        await db.rollback()
+        raise _challenge_http(exc)
+    await cards.ensure_launched(db, club.id)
+    await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_challenge_made", target_type="card_challenge",
+                                 target_id=made["id"], details={"title": made["title"], "kind": made["kind"]})
+    await db.commit()
+    return await _challenge_payload(db, club)
+
+
+@router.put("/challenges/{challenge_id}")
+async def update_challenge(
+    challenge_id: str,
+    body: ChallengeBody,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    snap = await cards.club_snapshot(db, club, fresh=True)
+    try:
+        uuid.UUID(challenge_id)
+        made = await challenges.admin_save(db, club, snap, body.model_dump(), challenge_id, getattr(user, "email", None))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Challenge not found.")
+    except challenges.ChallengeError as exc:
+        await db.rollback()
+        raise _challenge_http(exc)
+    await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_challenge_changed", target_type="card_challenge",
+                                 target_id=made["id"], details={"title": made["title"], "kind": made["kind"]})
+    await db.commit()
+    return await _challenge_payload(db, club)
+
+
+@router.delete("/challenges/{challenge_id}")
+async def delete_challenge(
+    challenge_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Remove a challenge. What players completed stays on record, and the packs they earned stay theirs."""
+    try:
+        uuid.UUID(challenge_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Challenge not found.")
+    if not await challenges.admin_delete(db, club, challenge_id):
+        raise HTTPException(status_code=404, detail="Challenge not found.")
+    await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_challenge_removed", target_type="card_challenge", target_id=challenge_id)
+    await db.commit()
+    return await _challenge_payload(db, club)
+
+
+@router.post("/gifts/designed")
+async def create_designed_gift(
+    title: str = Form(...),
+    quality: str = Form("special"),
+    qty: int = Form(1),
+    audience: str = Form("all"),
+    player_ids: str = Form("[]"),
+    request_id: Optional[str] = Form(None),
+    size: int = Form(5),
+    style: str = Form("{}"),
+    bg: Optional[UploadFile] = File(None),
+    art: Optional[UploadFile] = File(None),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SETTINGS)),
+):
+    """Create packs now AND give them a look of their own in the same step: a style (colours, darkness, layout) and a background and/or
+    centre picture. Everything is checked before anything is made, so a bad picture or colour makes no packs and no half design."""
+    try:
+        ids = json.loads(player_ids or "[]")
+        raw_style = json.loads(style or "{}")
+        if not isinstance(ids, list) or not isinstance(raw_style, dict):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status_code=422, detail="That request could not be read.")
+    try:
+        clean = pack_designs.clean_style({k: v for k, v in raw_style.items() if k != "title"})
+        images = {}
+        for kind, up in (("bg", bg), ("art", art)):
+            if up is not None and up.filename:
+                images[kind] = pack_designs.process_image(await up.read(pack_designs.MAX_UPLOAD_BYTES + 1), kind)
+    except pack_designs.DesignError as exc:
+        raise _design_error(exc)
+    snap = await cards.club_snapshot(db, club, fresh=True)
+    await cards.ensure_launched(db, club.id)
+    try:
+        out = await cards.create_gift(db, club, snap, title=title, quality=quality, qty=qty, audience=audience,
+                                      player_ids=[str(i) for i in ids], request_id=request_id, by=getattr(user, "email", None), size=size)
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not out["repeat"]:
+        target = pack_designs.gift_target(out["id"])
+        if clean:
+            await pack_designs.save_style(db, club.id, target, clean)
+        for kind, (data, mime) in images.items():
+            await pack_designs.put_image(db, club.id, target, kind, data, mime)
+        await audit_log.log_activity(db, org_id=club.id, user_id=user.id, action="player_card_pack_gift", target_type="card_pack_gift",
+                                     target_id=out["id"], details={**{k: out[k] for k in ("title", "quality", "qty", "players", "packs", "size")},
+                                                                   "designed": bool(clean or images)})
     await db.commit()
     return {"gift": out, **await _payload(db, club)}
 

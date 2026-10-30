@@ -9,15 +9,16 @@ import { CATEGORIES } from '../../components/cards/CardGallery'
 import { PACKS, TIERS } from '../../components/cards/cardTheme'
 import PackDesigns from './PackDesigns'
 import CreatePacks from './CreatePacks'
+import AdminChallenges from './AdminChallenges'
 
-// Player Cards, for the club's admin. Eight tabs: how the cards are being used (Overview), every player and what
+// Player Cards, for the club's admin. Nine tabs: how the cards are being used (Overview), every player and what
 // they hold (Players, then a click for their whole collection), what came in lately (Activity), every card that
 // exists and how many are out there (All cards), who has opened packs (Packs), an audit of swaps (Swaps), and the
 // club's switches (Settings). Everything but Settings only reads.
 
 const TABS = [
   ['overview', 'Overview'], ['players', 'Players'], ['activity', 'Activity'], ['cards', 'All cards'],
-  ['packs', 'Packs'], ['designs', 'Pack designs'], ['swaps', 'Swaps'], ['settings', 'Settings'],
+  ['packs', 'Packs'], ['designs', 'Pack designs'], ['challenges', 'Challenges'], ['swaps', 'Swaps'], ['settings', 'Settings'],
 ]
 const EXCLUDED = {
   private: 'Hidden from the public site (or removed at their request)',
@@ -366,6 +367,16 @@ function CatalogueTab({ club }) {
 }
 
 // ── Packs ───────────────────────────────────────────────────────────────────────────────────────────────────────
+// The challenges load when their tab first opens, then every save hands back the whole list.
+function ChallengesTab() {
+  const [payload, setPayload] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => { api.getPlayerCardChallenges().then(setPayload).catch((e) => setError(e?.message || 'Could not load challenges.')) }, [])
+  if (error) return <div role="alert" className="text-sm text-pb-red">{error}</div>
+  if (!payload) return <div className="text-sm text-pb-faint">Loading…</div>
+  return <AdminChallenges payload={payload} setPayload={setPayload} />
+}
+
 function PacksTab({ ov, open }) {
   const pool = ov.players.filter((p) => p.in_pool)
   const opened = pool.filter((p) => p.packs_opened > 0).sort((a, b) => (b.last_opened_at || '').localeCompare(a.last_opened_at || ''))
@@ -446,12 +457,12 @@ function SwapsTab() {
 // ── Settings ──────────────────────────────────────────────────────────────────────────────────────────────────────
 // Which cards get a full-card photo. The photo itself (hero or action shot) is chosen by the kind of card; this is how far it goes.
 const PHOTO_CHOICES = [
-  ['top', 'Special, Epic and Legendary cards (recommended)', 'Common and Rare cards show the profile photo in a circle. Epic cards use the hero photo, Legendary cards the action shot.'],
+  ['all', 'Every card that has one (recommended)', 'Every card fills with the player\u2019s hero photo when they have one. Cards of players with only a profile photo show it in a circle.'],
+  ['top', 'Special, Epic and Legendary cards only', 'Common and Rare cards show the profile photo in a circle. The rest fill with a photo.'],
   ['specials', 'Special cards only', 'Every regular card shows the profile photo in a circle. Special cards fill with a photo.'],
-  ['all', 'Every card that has one', 'How cards looked before. Any card whose player has a hero photo or action shot fills with it.'],
 ]
 function BigPhotos({ s, saving, save }) {
-  const now = s.big_photos || 'top'
+  const now = s.big_photos || 'all'
   return (
     <Card title="Photos on cards">
       <Field label="Cards that fill with a photo">
@@ -460,7 +471,7 @@ function BigPhotos({ s, saving, save }) {
         </Select>
       </Field>
       <p className="text-[12.5px] text-pb-faint mt-2" data-photo-note>{PHOTO_CHOICES.find(([k]) => k === now)?.[2]}</p>
-      <p className="text-[12.5px] text-pb-faint mt-2">A special card for a moment in play (a century, fifty, five-for or hat-trick) uses the action shot. One for a person or a total (a debut, a milestone, an award) uses the hero photo. Where a player lacks the shot a card wants, it uses the other, then the profile photo. A shot you pinned on a player's profile is used instead of all this.</p>
+      <p className="text-[12.5px] text-pb-faint mt-2">Every special card, such as a century, a five-for, a debut, a milestone or an award, uses the player\u2019s action shot. Where a player lacks the shot a card wants, it uses the other, then the profile photo. A shot you pinned on a player\u2019s profile is used instead of all this.</p>
     </Card>
   )
 }
@@ -635,6 +646,7 @@ export default function AdminPlayerCards() {
     if (tab === 'settings') return <SettingsTab data={data} setData={setData} />
     if (tab === 'cards') return <CatalogueTab club={data.club} />
     if (tab === 'designs') return <PackDesigns data={data} setData={setData} />
+    if (tab === 'challenges') return <ChallengesTab />
     if (tab === 'swaps') return <SwapsTab />
     if (!ov) return <div className="text-sm text-pb-faint">Loading…</div>
     if (tab === 'activity') return <ActivityTab a={activity} open={open} />

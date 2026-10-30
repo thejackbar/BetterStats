@@ -162,6 +162,7 @@ ITEMS: tuple[dict, ...] = (
     _item("select.selection", "select", "Selection", "Selection, Selection Whiteboard", (C.SELECT_SELECTION,),
           needs=(("select.availability", LEVEL_VIEW),)),
     _item("select.nets", "select", "Nets", "Nets", (C.SELECT_NETS,)),
+    _item("select.rotation", "select", "Junior Rotation", "Junior Rotation", (C.SELECT_ROTATION,)),
     _item("select.fines", "select", "Fines", "Fines", (C.SELECT_FINES,)),
     _item("select.rules", "select", "Settings and selection rules", "Settings, Selection rules", (C.SELECT_RULES,)),
     _item("select.audit", "select", "Audit history", "Audit History", (C.SELECT_AUDIT,)),
