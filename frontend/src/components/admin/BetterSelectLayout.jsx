@@ -73,9 +73,10 @@ const CRICKET_GROUPS = [
   {
     key: 'club',
     label: 'Club Life',
-    desc: 'Training, best-player voting, competition ladders and fines.',
+    desc: 'Training, junior rotation, best-player voting, competition ladders and fines.',
     items: [
       { to: '/admin/betterselect/nets', label: 'Nets', icon: 'nets', cap: null, anyCaps: selectCaps(CAP.SELECT_NETS), desc: 'Training and net sessions.' },
+      { to: '/admin/betterselect/rotation', label: 'Junior Rotation', icon: 'rotation', cap: null, anyCaps: selectCaps(CAP.SELECT_ROTATION), desc: 'Fair batting orders and fielding positions for junior sides.' },
       { to: '/admin/betterselect/votes', label: 'Votes', icon: 'votes', cap: null, anyCaps: [CAP.MANAGE_VOTES, CAP.VIEW_VOTE_RESULTS], desc: 'Best-player votes, Brownlow style.' },
       { to: '/admin/betterselect/ladders', label: 'Ladders', icon: 'ladders', cap: null, anyCaps: selectCaps(CAP.SELECT_SQUADS), desc: 'Competition ladders.' },
       { to: '/admin/betterselect/fines', label: 'Fines', icon: 'money', cap: null, anyCaps: selectCaps(CAP.SELECT_FINES), desc: 'The post-game fines session and the pot, per squad.' },

@@ -23,6 +23,7 @@ export const CAP = {
   SELECT_AVAILABILITY: 'select_availability',
   SELECT_SELECTION: 'select_selection',
   SELECT_NETS: 'select_nets',
+  SELECT_ROTATION: 'select_rotation',
   SELECT_FINES: 'select_fines',
   SELECT_RULES: 'select_rules',
   SELECT_AUDIT: 'select_audit',
@@ -46,7 +47,7 @@ export const CAP = {
 // satisfies any of them (full admins, a person locked to the whole module and the
 // legacy allowlists hold it), so a screen or menu item takes ANY of these.
 export const SELECT_ITEM_CAPS = [
-  CAP.SELECT_SQUADS, CAP.SELECT_AVAILABILITY, CAP.SELECT_SELECTION, CAP.SELECT_NETS,
+  CAP.SELECT_SQUADS, CAP.SELECT_AVAILABILITY, CAP.SELECT_SELECTION, CAP.SELECT_NETS, CAP.SELECT_ROTATION,
   CAP.SELECT_FINES, CAP.SELECT_RULES, CAP.SELECT_AUDIT,
 ]
 export const selectCaps = (item) => [item, CAP.MANAGE_SELECTIONS]
@@ -75,6 +76,7 @@ export const CAPABILITY_INFO = [
   { key: CAP.SELECT_AVAILABILITY, label: 'BetterSelect: availability', hint: 'Who can play each weekend' },
   { key: CAP.SELECT_SELECTION, label: 'BetterSelect: selection', hint: 'Name the side, and the selection whiteboard' },
   { key: CAP.SELECT_NETS, label: 'BetterSelect: nets', hint: 'Training and net sessions' },
+  { key: CAP.SELECT_ROTATION, label: 'BetterSelect: junior rotation', hint: 'Fair batting orders and fielding positions for junior sides' },
   { key: CAP.SELECT_FINES, label: 'BetterSelect: fines', hint: 'The post-game fines session and the pot' },
   { key: CAP.SELECT_RULES, label: 'BetterSelect: settings and rules', hint: 'Two-day game colours, junior grades and selection rules' },
   { key: CAP.SELECT_AUDIT, label: 'BetterSelect: audit history', hint: 'Who changed what in selection and availability' },
