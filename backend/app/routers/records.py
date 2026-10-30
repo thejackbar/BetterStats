@@ -43,7 +43,7 @@ _CLUB_PSS = "_club_pss"
 # same way (see `ensure_club_innings` in get_records): batting innings, bowling
 # spells, fielding rows, bare roster appearances, and the games those rows are
 # in. Anything named here is created on first use.
-_CLUB_INNINGS_TABLES = ("_club_bi", "_club_bs", "_club_fs", "_club_ga", "_club_games")
+_CLUB_INNINGS_TABLES = ("_club_bi", "_club_bs", "_club_fs", "_club_ga", "_club_roles", "_club_games")
 
 
 def _appearances_sql(match_grade_filter: str, season_clause: str, finals_clause: str) -> str:
@@ -516,6 +516,8 @@ async def get_records(
             ("_club_bs", "v_effective_bowling_spells"),
             ("_club_fs", "v_effective_fielding_stats"),
             ("_club_ga", "game_appearances"),
+            # Who captained / kept, synced and hand-entered games alike (migration 378).
+            ("_club_roles", "v_game_roles"),
         ):
             await db.execute(text(
                 f"CREATE TEMP TABLE {table} AS SELECT * FROM {source} x "
@@ -526,9 +528,10 @@ async def get_records(
             "CREATE TEMP TABLE _club_games AS SELECT * FROM v_effective_games g "
             "WHERE g.id = ANY(ARRAY("
             " SELECT game_id FROM _club_bi UNION SELECT game_id FROM _club_bs"
-            " UNION SELECT game_id FROM _club_fs UNION SELECT game_id FROM _club_ga))"))
+            " UNION SELECT game_id FROM _club_fs UNION SELECT game_id FROM _club_ga"
+            " UNION SELECT game_id FROM _club_roles))"))
         await db.execute(text(
-            "ANALYZE _club_bi, _club_bs, _club_fs, _club_ga, _club_games"))
+            "ANALYZE _club_bi, _club_bs, _club_fs, _club_ga, _club_roles, _club_games"))
 
     async def _create_club_pss() -> None:
         await db.execute(text(f"DROP TABLE IF EXISTS {_CLUB_PSS}"))
@@ -543,11 +546,11 @@ async def get_records(
     _gw_season = "AND s.id = ANY(:season_ids)" if season_ids else ""
     finals_clause = "AND g.is_final = TRUE" if finals_only else ""
     captain_bat_join = (
-        " JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE"
+        " JOIN v_game_roles gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE"
         if captain_only else ""
     )
     captain_bowl_join = (
-        " JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE"
+        " JOIN v_game_roles gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE"
         if captain_only else ""
     )
     _bat_join = (
@@ -1255,7 +1258,7 @@ async def get_records(
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(DISTINCT ga.game_id) AS matches,
                    COUNT(DISTINCT gr.season_id) AS seasons
-            FROM _club_ga ga
+            FROM _club_roles ga
             JOIN _club_games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -1381,7 +1384,7 @@ async def get_records(
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(DISTINCT gr.season_id) AS seasons,
                    COUNT(DISTINCT ga.game_id) AS matches
-            FROM _club_ga ga
+            FROM _club_roles ga
             JOIN _club_games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id

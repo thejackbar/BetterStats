@@ -1335,7 +1335,7 @@ def _player_agg_innings_cte(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {innings_extra} {player_extra}
             GROUP BY {group_cols}
         ),
@@ -1355,7 +1355,7 @@ def _player_agg_innings_cte(
             FROM game_universe gu
             JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
             JOIN players p ON p.id = bs.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
             GROUP BY {group_cols}
         ),
@@ -1370,7 +1370,7 @@ def _player_agg_innings_cte(
             FROM game_universe gu
             JOIN v_effective_fielding_stats fs ON fs.game_id = gu.game_id
             JOIN players p ON p.id = fs.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
             GROUP BY {group_cols}
         ),
@@ -1415,7 +1415,7 @@ def _player_agg_innings_cte(
             ) pg
             JOIN game_universe gu ON gu.game_id = pg.game_id
             JOIN players p ON p.id = pg.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
             GROUP BY {group_cols}
         )
@@ -2414,7 +2414,7 @@ async def query_innings_list(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -2483,7 +2483,7 @@ async def query_spell_list(
             FROM game_universe gu
             JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
             JOIN players p ON p.id = bs.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
         )
         SELECT * FROM rows
@@ -2843,7 +2843,7 @@ async def derived_consecutive_ducks(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -2900,7 +2900,7 @@ async def derived_consecutive_fifties(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -3026,7 +3026,7 @@ async def derived_carried_bat(
             JOIN players p ON p.id = bi.player_id
             JOIN innings_wickets iw ON iw.game_id = bi.game_id
                                    AND iw.innings_number = bi.innings_number
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id
                                           AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.not_out = TRUE
@@ -3142,7 +3142,7 @@ async def derived_milestone_runs(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id
                                           AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
@@ -3207,7 +3207,7 @@ async def derived_most_runs_in_match(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -3273,7 +3273,7 @@ async def _per_match_batting_metric(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               {player_extra}
@@ -3319,7 +3319,7 @@ async def derived_best_bowling_in_match(
             FROM game_universe gu
             JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
             JOIN players p ON p.id = bs.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
             GROUP BY bs.player_id, COALESCE(p.display_name_override, p.name),
                      gu.game_id, gu.played_at, gu.display_grade_name,
@@ -3369,7 +3369,7 @@ async def derived_most_balls_bowled_match(
             FROM game_universe gu
             JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
             JOIN players p ON p.id = bs.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
             GROUP BY bs.player_id, COALESCE(p.display_name_override, p.name),
                      gu.game_id, gu.played_at, gu.display_grade_name,
@@ -3411,7 +3411,7 @@ async def _per_match_fielding_metric(
             FROM game_universe gu
             JOIN v_effective_fielding_stats fs ON fs.game_id = gu.game_id
             JOIN players p ON p.id = fs.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND COALESCE(fs.{col}, 0) > 0
               {player_extra}
@@ -3455,7 +3455,7 @@ async def derived_golden_ducks(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.runs = 0
               AND bi.not_out = FALSE
@@ -3504,7 +3504,7 @@ async def derived_duck_pairs(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
             GROUP BY bi.player_id, COALESCE(p.display_name_override, p.name), gu.game_id
             HAVING COUNT(*) FILTER (
@@ -3564,7 +3564,7 @@ async def _longest_streak(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -3632,7 +3632,7 @@ async def _longest_bowling_streak(
             FROM game_universe gu
             JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
             JOIN players p ON p.id = bs.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
         ),
         grp AS (
@@ -3760,7 +3760,7 @@ async def derived_ducks_on_debut(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -3805,7 +3805,7 @@ async def derived_bowling_on_debut_innings(
             FROM game_universe gu
             JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
             JOIN players p ON p.id = bs.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
             ORDER BY bs.player_id, gu.played_at, bs.innings_number, bs.id
         )
@@ -3842,7 +3842,7 @@ async def _dismissal_count(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND ({pattern_clause})
@@ -3897,7 +3897,7 @@ async def derived_dismissal_caught_behind(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND bi.caught_behind IS TRUE
@@ -3961,7 +3961,7 @@ async def derived_unusual_dismissals(
         FROM game_universe gu
         JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
         JOIN players p ON p.id = bi.player_id
-        LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+        LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
         WHERE p.organisation_id = :org_id
           AND bi.did_not_bat IS NOT TRUE
           AND bi.dismissal_type IS NOT NULL
@@ -4024,7 +4024,7 @@ async def derived_century_and_duck_same_match(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               {player_extra}
@@ -4074,7 +4074,7 @@ async def derived_century_each_innings(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               {player_extra}
@@ -4112,7 +4112,7 @@ async def derived_innings_without_century(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -4148,7 +4148,7 @@ async def derived_lowest_century_conversion(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               {player_extra}
@@ -4186,7 +4186,7 @@ async def derived_innings_per_fifty(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -4373,7 +4373,7 @@ async def derived_top_scores_by_position(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND bi.batting_position BETWEEN 1 AND 11
@@ -4406,7 +4406,7 @@ async def derived_opening_bat_and_bowl(
             FROM game_universe gu
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.batting_position IN (1, 2)
               {player_extra}
@@ -4483,7 +4483,7 @@ async def derived_top_scores_pct_innings(
             JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
             JOIN players p ON p.id = bi.player_id
             JOIN innings_totals it ON it.game_id = bi.game_id AND it.innings_number = bi.innings_number
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bi.did_not_bat IS NOT TRUE
               AND it.team_innings_total >= 50
@@ -4522,7 +4522,7 @@ async def derived_catches_stumpings(
             FROM game_universe gu
             JOIN v_effective_fielding_stats fs ON fs.game_id = gu.game_id
             JOIN players p ON p.id = fs.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id {player_extra}
             GROUP BY fs.player_id, COALESCE(p.display_name_override, p.name)
         )
@@ -4685,7 +4685,7 @@ async def derived_top_opening_bowlers(
             FROM game_universe gu
             JOIN v_effective_bowling_spells bs ON bs.game_id = gu.game_id
             JOIN players p ON p.id = bs.player_id
-            LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+            LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND bs.innings_number IS NOT NULL
               {player_extra}
@@ -4782,7 +4782,7 @@ async def derived_caught_and_bowled(
            OR (bw.batter_position IS NULL
                AND LOWER(TRIM(COALESCE(p.display_name_override, p.name))) = LOWER(TRIM(bw.batter_name)))
          )
-        LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+        LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
         WHERE p.organisation_id = :org_id
           AND bi.did_not_bat IS NOT TRUE
           {player_extra}
@@ -4815,7 +4815,7 @@ async def derived_caught_and_bowled_bowler(
         FROM game_universe gu
         JOIN v_effective_bowler_wickets bw ON bw.game_id = gu.game_id
         JOIN players p ON p.id = bw.bowler_id
-        LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+        LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
         WHERE p.organisation_id = :org_id
           AND LOWER(bw.dismissal_type) IN ('caught and bowled', 'c&b', 'c & b')
           {player_extra}
@@ -4959,7 +4959,7 @@ async def _score_range_count(
         FROM game_universe gu
         JOIN v_effective_batting_innings bi ON bi.game_id = gu.game_id
         JOIN players p ON p.id = bi.player_id
-        LEFT JOIN game_appearances gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
+        LEFT JOIN v_game_roles gap ON gap.game_id = gu.game_id AND gap.player_id = p.id
         WHERE p.organisation_id = :org_id
           AND bi.did_not_bat IS NOT TRUE
           AND bi.runs >= :min_runs

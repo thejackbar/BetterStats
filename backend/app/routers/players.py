@@ -870,7 +870,7 @@ async def get_player_captain_stats(
             SUM(CASE WHEN g.result = 'WIN' THEN 1 ELSE 0 END) AS wins,
             SUM(CASE WHEN g.result = 'LOSS' THEN 1 ELSE 0 END) AS losses,
             SUM(CASE WHEN g.result IS NULL OR g.result NOT IN ('WIN', 'LOSS') THEN 1 ELSE 0 END) AS draws
-        FROM game_appearances ga
+        FROM v_game_roles ga
         JOIN v_effective_games g ON g.id = ga.game_id
         WHERE ga.player_id = :pid AND ga.is_captain = TRUE""" + club + """
     """), params)
@@ -886,7 +886,7 @@ async def get_player_captain_stats(
             SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds
         FROM v_effective_batting_innings bi
         JOIN v_effective_games g ON g.id = bi.game_id
-        JOIN game_appearances ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
+        JOIN v_game_roles ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
         WHERE bi.player_id = :pid""" + club + """
           AND NOT COALESCE(bi.did_not_bat, FALSE)
           AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -903,7 +903,7 @@ async def get_player_captain_stats(
             SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds
         FROM v_effective_batting_innings bi
         JOIN v_effective_games g ON g.id = bi.game_id
-        LEFT JOIN game_appearances ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
+        LEFT JOIN v_game_roles ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
         WHERE bi.player_id = :pid""" + club + """
           AND NOT COALESCE(bi.did_not_bat, FALSE)
           AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -928,7 +928,7 @@ async def get_player_captain_stats(
             COUNT(*) AS econ_of
         FROM v_effective_bowling_spells bs
         JOIN v_effective_games g ON g.id = bs.game_id
-        JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
+        JOIN v_game_roles ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
         WHERE bs.player_id = :pid""" + club + """
     """), params)
     bowl_cap = rc.with_coverage(dict(bowl_cap_res.mappings().first() or {}))
@@ -950,7 +950,7 @@ async def get_player_captain_stats(
             COUNT(*) AS econ_of
         FROM v_effective_bowling_spells bs
         JOIN v_effective_games g ON g.id = bs.game_id
-        LEFT JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
+        LEFT JOIN v_game_roles ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
         WHERE bs.player_id = :pid""" + club + """
           AND ga.game_id IS NULL
     """), params)
@@ -959,7 +959,7 @@ async def get_player_captain_stats(
     by_season_res = await db.execute(text("""
         WITH captain_games AS (
             SELECT ga.game_id, g.result, s.name AS season_name, s.year AS season_year
-            FROM game_appearances ga
+            FROM v_game_roles ga
             JOIN v_effective_games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id

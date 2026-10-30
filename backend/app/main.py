@@ -4584,6 +4584,10 @@ async def lifespan(app: FastAPI):
         from app.services.manual_game_roles_ddl import STATEMENTS as _MANUAL_ROLES_DDL
         for _stmt in _MANUAL_ROLES_DDL:
             await conn.execute(text(_stmt))
+        # Migration 378: v_game_roles, the one view the captain / keeper stats lenses join. Same one-copy rule.
+        from app.services.manual_game_roles_ddl import VIEW_STATEMENTS as _GAME_ROLES_VIEW_DDL
+        for _stmt in _GAME_ROLES_VIEW_DDL:
+            await conn.execute(text(_stmt))
         # Migration 375: a player's action shot and which shot fills the hero position. Same one-copy
         # rule: this list and alembic's 375 both run services/player_action_photo_ddl.STATEMENTS.
         from app.services.player_action_photo_ddl import STATEMENTS as _PLAYER_ACTION_PHOTO_DDL
