@@ -9,25 +9,24 @@ This is a BetterCricket advert about how the dashboard helps CLUBS: fewer messag
 ## Hook
 "Introducing the BetterCricket Player Dashboard. Everything about club life. One link."
 
-## Beats (narrated, 2 minutes)
-1. Intro: title, phone rises with the real dashboard
-2. No registration: pick your name, last 4 digits of mobile, you are in (players already in the club list, imported from PlayHQ or added by the club)
-3. See everything: availability (one tap), selection and fixtures, fees, best and fairest voting, season stats, then Fantasy and Player Cards
-4. One stop shop: bookmark in the browser, add to the phone's home screen
-5. Take the pressure off the club: no more availability messages, "what team am I in?", or fee chasing; selectors see answers arrive
-6. Players update their own details; share the link to reconnect with ex players and welcome new members
-7. Single source of truth: no separate fantasy app or availability trackers per team
-8. End card
+## Beats (on-screen text, 119.5s)
+1. Intro, 0-6s: "Introducing BetterCricket Player Dashboard", phone rises with the real dashboard
+2. No registration, 6-20s: already in your club list (imported from PlayHQ or added by the club), tap your name, last 4 digits of your mobile, "You're in."
+3. See everything, 20-64s, one scroll top to bottom: availability (one tap), fixtures (See more games, open a game), selection (side and training), fees, best and fairest voting, season stats, then Fantasy and Player Cards
+4. One stop shop, 64-75.5s: bookmark in the browser, add to the home screen (the new app lands in the empty slot), open it
+5. Take the pressure off the club, 75.5-92.5s: group chat noise gets struck off one by one (availability messages, "what team am I in?", fee chasing), then selectors see answers arrive
+6. Always up to date, 92.5-106.5s: players update their own details; share the link to reconnect with ex players and welcome new members
+7. Single source of truth, 106.5-114.5s: six separate apps collapse into one
+8. End card, 114.5-119.5s
 
 ## Tone
 - Preset: app-store (clean, benefit-led) with a confident launch feel
-- Interpretation: real UI in a phone, big type on the left, one benefit per beat, wipes between scenes
+- Interpretation: real UI in a phone, big type on the left, one benefit per beat, slow dissolves between scenes, BetterCricket green on dark
 
 ## Format: landscape 1920x1080, about 2 minutes
 ## Audio
-- Voiceover: VoiceStudio (debpalash/VoiceStudio), OmniVoice engine, designed voice "female, young adult, moderate pitch, australian accent", one voice reused for every line
-- Music: bundled happy-beats vol 1 under the voice, glow follows its energy
-- SFX: taps, card slides for wipes, soft impacts, bell on the end card
+- No voiceover. Music: bundled happy-beats vol 1, steady under, fade out over the last 3s
+- SFX: taps, soft card slides on scene changes, soft impacts when a message is struck off, bell on the end card
 
 ## Share copy
 The BetterCricket Player Dashboard: one link for every player. No registration, no extra apps. Availability, selection, fees, voting, stats, Fantasy and Player Cards, and a lot fewer messages for your club.

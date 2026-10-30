@@ -1,0 +1,1522 @@
+{
+  "ok": true,
+  "strict": false,
+  "browserSkipped": false,
+  "lint": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 13,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "duplicate_media_discovery_risk",
+        "severity": "warning",
+        "message": "Detected 5 matching img entries with the same source/start/duration.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Avoid duplicated media nodes that can be discovered twice during compilation."
+      },
+      {
+        "code": "duplicate_media_discovery_risk",
+        "severity": "warning",
+        "message": "Detected 3 matching img entries with the same source/start/duration.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Avoid duplicated media nodes that can be discovered twice during compilation."
+      },
+      {
+        "code": "composition_file_too_large",
+        "severity": "warning",
+        "message": "This HTML composition file has 369 lines. Smaller sub-compositions are easier to read, iterate on, and diff.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Split coherent scenes or layers into separate .html files under compositions/, then mount them from the parent with data-composition-src so each file stays small enough to inspect, revise, and validate independently."
+      },
+      {
+        "code": "timeline_track_too_dense",
+        "severity": "warning",
+        "message": "Track 1 has 8 timed elements in this HTML file. Smaller sub-compositions keep timelines easier to read, iterate on, and diff.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move coherent scene groups into separate .html files under compositions/ and mount them from the parent with data-composition-src so the timeline stays easier to inspect, revise, and validate."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s0\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s0",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s0\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s1\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s1",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s1\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s2\"> is a timeline element that contains nested <div id=\"ft1\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s2",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s2\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s3\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s3",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s3\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s4\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s4",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s4\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s5\"> is a timeline element that contains nested <div id=\"fd1\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s5",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s5\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s6\"> is a timeline element that contains nested <div id=\"apps\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s6",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s6\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s7\"> is a timeline element that contains nested <img id=\"end-logo\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s7",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s7\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"phone\"> is a timeline element that contains nested <div id=\"ph-body\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#phone",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"phone\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      }
+    ],
+    "filesScanned": 1
+  },
+  "runtime": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": []
+  },
+  "layout": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 14,
+    "findings": [
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 6.639,
+        "selector": "#long0",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 1272.08,
+          "top": 93.34,
+          "right": 1663.06,
+          "bottom": 3112.63,
+          "width": 390.97,
+          "height": 3019.29
+        },
+        "containerSelector": "#dash-scroll",
+        "text": "",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 1272.08,
+          "top": 93.34,
+          "right": 1663.06,
+          "bottom": 98.63,
+          "width": 390.97,
+          "height": 5.29
+        },
+        "dataAttributes": {
+          "data-hf-render-id": "long0",
+          "data-hf-authored-opacity": ""
+        },
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1272.08,
+          "y": 93.34,
+          "width": 390.97,
+          "height": 3019.29
+        },
+        "firstSeen": 6.639,
+        "lastSeen": 6.639,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          6.639
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "#ly-chat2 > div:nth-of-type(1) > div:nth-of-type(1)",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1271.41,
+          "top": 1310.85,
+          "right": 1296.94,
+          "bottom": 1333.49,
+          "width": 25.53,
+          "height": 22.64
+        },
+        "containerSelector": "#root",
+        "text": "AC",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 253.49
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1271.41,
+          "y": 1310.85,
+          "width": 25.53,
+          "height": 22.64
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "#ly-chat2 > div:nth-of-type(1) > div:nth-of-type(2) > b:nth-of-type(1)",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1321.93,
+          "top": 1308.21,
+          "right": 1546.37,
+          "bottom": 1356.59,
+          "width": 224.44,
+          "height": 48.38
+        },
+        "containerSelector": "#root",
+        "text": "Applecross ex players",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 276.59
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1321.93,
+          "y": 1308.21,
+          "width": 224.44,
+          "height": 48.38
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "#ly-chat2 > div:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1321.93,
+          "top": 1330.74,
+          "right": 1462.4,
+          "bottom": 1363.17,
+          "width": 140.47,
+          "height": 32.43
+        },
+        "containerSelector": "#root",
+        "text": "Old mates, new faces",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 283.17
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1321.93,
+          "y": 1330.74,
+          "width": 140.47,
+          "height": 32.43
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "#r1 > div:nth-of-type(1)",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1360.1,
+          "top": 1385.7,
+          "right": 1626.36,
+          "bottom": 1448.55,
+          "width": 266.26,
+          "height": 62.85
+        },
+        "containerSelector": "#root",
+        "text": "Update your details here, all it takes is your name:",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 368.55
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1360.1,
+          "y": 1385.7,
+          "width": 266.26,
+          "height": 62.85
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "div.lk > div:nth-of-type(1)",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1433.1,
+          "top": 1453,
+          "right": 1590.06,
+          "bottom": 1504.32,
+          "width": 156.96,
+          "height": 51.32
+        },
+        "containerSelector": "#root",
+        "text": "Applecross Player Dashboard",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 424.32
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1433.1,
+          "y": 1453,
+          "width": 156.96,
+          "height": 51.32
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "div.lk > div:nth-of-type(1) > span:nth-of-type(1)",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1433.1,
+          "top": 1492.8,
+          "right": 1535.78,
+          "bottom": 1522.82,
+          "width": 102.68,
+          "height": 30.02
+        },
+        "containerSelector": "#root",
+        "text": "betterat.cricket",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 442.82
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1433.1,
+          "y": 1492.8,
+          "width": 102.68,
+          "height": 30.02
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "#r2",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1266.53,
+          "top": 1532.79,
+          "right": 1531.85,
+          "bottom": 1593.86,
+          "width": 265.32,
+          "height": 61.07
+        },
+        "containerSelector": "#root",
+        "text": "Done, new mobile and email in",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 513.86
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1266.53,
+          "y": 1532.79,
+          "width": 265.32,
+          "height": 61.07
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "#r2 > b:nth-of-type(1)",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1266.53,
+          "top": 1516.27,
+          "right": 1294.55,
+          "bottom": 1535.16,
+          "width": 28.02,
+          "height": 18.89
+        },
+        "containerSelector": "#root",
+        "text": "Tom",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 455.16
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1266.53,
+          "y": 1516.27,
+          "width": 28.02,
+          "height": 18.89
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "#r3",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1266.53,
+          "top": 1595.76,
+          "right": 1498.99,
+          "bottom": 1653.77,
+          "width": 232.46,
+          "height": 58.01
+        },
+        "containerSelector": "#root",
+        "text": "Updated. Good to be back!",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 573.77
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1266.53,
+          "y": 1595.76,
+          "width": 232.46,
+          "height": 58.01
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "#r3 > b:nth-of-type(1)",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1266.53,
+          "top": 1579.24,
+          "right": 1294.99,
+          "bottom": 1598.45,
+          "width": 28.46,
+          "height": 19.21
+        },
+        "containerSelector": "#root",
+        "text": "Sam",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 518.45
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1266.53,
+          "y": 1579.24,
+          "width": 28.46,
+          "height": 19.21
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "#r4",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1266.53,
+          "top": 1658.73,
+          "right": 1565.93,
+          "bottom": 1730.56,
+          "width": 299.4,
+          "height": 71.83
+        },
+        "containerSelector": "#root",
+        "text": "Sent it to a mate who wants to join",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 650.56
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1266.53,
+          "y": 1658.73,
+          "width": 299.4,
+          "height": 71.83
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "#r4 > b:nth-of-type(1)",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1266.53,
+          "top": 1642.21,
+          "right": 1297.41,
+          "bottom": 1662.1,
+          "width": 30.88,
+          "height": 19.89
+        },
+        "containerSelector": "#root",
+        "text": "Liam",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 582.1
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1266.53,
+          "y": 1642.21,
+          "width": 30.88,
+          "height": 19.89
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 112.861,
+        "selector": "span.tm",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1275.34,
+          "top": 1256.84,
+          "right": 1313.39,
+          "bottom": 1279.78,
+          "width": 38.05,
+          "height": 22.94
+        },
+        "containerSelector": "#root",
+        "text": "6:42",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 199.78
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1275.34,
+          "y": 1256.84,
+          "width": 38.05,
+          "height": 22.94
+        },
+        "firstSeen": 112.861,
+        "lastSeen": 112.861,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          112.861
+        ]
+      }
+    ],
+    "duration": 119.5,
+    "samples": [
+      6.639,
+      19.917,
+      33.194,
+      46.472,
+      59.75,
+      73.028,
+      86.306,
+      99.583,
+      112.861
+    ],
+    "transitionSamples": [],
+    "transitionSamplesDropped": 0,
+    "tolerance": 2,
+    "totalIssueCount": 14,
+    "truncated": false
+  },
+  "motion": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": [],
+    "enabled": false,
+    "samples": 0
+  },
+  "contrast": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 1,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "contrast_aa_failure",
+        "severity": "warning",
+        "message": "Contrast is 3.91:1; WCAG AA requires 4.5:1.",
+        "text": "37",
+        "fg": "rgb(255,255,255)",
+        "bg": "rgb(229,72,77)",
+        "ratio": 3.91,
+        "requiredRatio": 4.5,
+        "suggestedColor": "rgb(24,24,24)",
+        "large": false,
+        "selector": "#ch1-un",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1614,
+          "y": 156,
+          "width": 44,
+          "height": 30
+        },
+        "time": 86.306,
+        "times": [
+          86.306
+        ]
+      }
+    ],
+    "enabled": true,
+    "samples": [
+      6.639,
+      33.194,
+      59.75,
+      86.306,
+      112.861
+    ],
+    "checked": 52,
+    "passed": 51
+  },
+  "craft": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 4,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "first_frame_empty",
+        "severity": "warning",
+        "message": "Frame 0 shows only the background, and the first frame is the thumbnail on social players: have the title or key image already on screen at 0 s instead of entering from nothing; see references/review.md.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0
+      },
+      {
+        "code": "text_below_floor",
+        "severity": "warning",
+        "message": "Type floor is 28 px (2.6% of the 1080 px short side, what a phone can read) and 62 text elements stay under it for 0.5 s or more, the smallest \"Tom\" at 12 px: set reading text to at least 28 px, or put data-layout-ignore on text that is texture rather than reading; see references/look.md.",
+        "text": "Tom",
+        "selector": "#m1 > b:nth-of-type(1)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1293.39,
+          "y": 239.49,
+          "width": 24.77,
+          "height": 14.63
+        },
+        "time": 76.807,
+        "times": [
+          0.598,
+          21.147,
+          21.147,
+          21.147,
+          21.147,
+          21.147,
+          21.147,
+          21.147,
+          21.147,
+          76.009,
+          76.009,
+          76.009,
+          76.807,
+          76.807,
+          77.406,
+          77.406,
+          78.004,
+          78.004,
+          78.204,
+          78.603,
+          78.603,
+          79.401,
+          79.999,
+          79.999,
+          81.994,
+          81.994,
+          82.593,
+          82.593,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          89.176,
+          99.75,
+          99.75,
+          99.75,
+          100.548,
+          100.548,
+          100.548,
+          101.944,
+          101.944,
+          103.141,
+          103.141,
+          104.338,
+          104.338,
+          110.523
+        ],
+        "fontPx": 11.7,
+        "floorPx": 28,
+        "seconds": 4.988,
+        "elements": [
+          {
+            "selector": "#m1 > b:nth-of-type(1)",
+            "text": "Tom",
+            "fontPx": 11.7,
+            "time": 76.807,
+            "seconds": 4.988
+          },
+          {
+            "selector": "#m2 > b:nth-of-type(1)",
+            "text": "Sam",
+            "fontPx": 11.7,
+            "time": 77.406,
+            "seconds": 4.589
+          },
+          {
+            "selector": "#m3 > b:nth-of-type(1)",
+            "text": "Liam",
+            "fontPx": 11.7,
+            "time": 78.004,
+            "seconds": 6.584
+          },
+          {
+            "selector": "#m4 > b:nth-of-type(1)",
+            "text": "Max",
+            "fontPx": 11.7,
+            "time": 78.603,
+            "seconds": 8.379
+          },
+          {
+            "selector": "div.lk > div:nth-of-type(1) > span:nth-of-type(1)",
+            "text": "betterat.cricket",
+            "fontPx": 11.79,
+            "time": 100.548,
+            "seconds": 5.786
+          },
+          {
+            "selector": "#r2 > b:nth-of-type(1)",
+            "text": "Tom",
+            "fontPx": 11.79,
+            "time": 101.944,
+            "seconds": 4.39
+          },
+          {
+            "selector": "#r3 > b:nth-of-type(1)",
+            "text": "Sam",
+            "fontPx": 11.79,
+            "time": 103.141,
+            "seconds": 3.193
+          },
+          {
+            "selector": "#m6 > b:nth-of-type(1)",
+            "text": "Tom",
+            "fontPx": 11.86,
+            "time": 79.999,
+            "seconds": 2.195
+          },
+          {
+            "selector": "#m7 > b:nth-of-type(1)",
+            "text": "Sam",
+            "fontPx": 11.86,
+            "time": 81.994,
+            "seconds": 2.594
+          },
+          {
+            "selector": "#ly-chat2 > div:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)",
+            "text": "Old mates, new faces",
+            "fontPx": 11.88,
+            "time": 99.75,
+            "seconds": 6.783
+          },
+          {
+            "selector": "#r4 > b:nth-of-type(1)",
+            "text": "Liam",
+            "fontPx": 11.94,
+            "time": 104.338,
+            "seconds": 1.996
+          },
+          {
+            "selector": "#m8 > b:nth-of-type(1)",
+            "text": "Liam",
+            "fontPx": 11.97,
+            "time": 82.593,
+            "seconds": 4.589
+          },
+          {
+            "selector": "#ly-chat1 > div:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1)",
+            "text": "Tom, Sam, Liam, Max, you",
+            "fontPx": 12,
+            "time": 76.009,
+            "seconds": 11.971
+          },
+          {
+            "selector": "#ch1-un",
+            "text": "37",
+            "fontPx": 13.08,
+            "time": 78.204,
+            "seconds": 8.579
+          },
+          {
+            "selector": "span.tm",
+            "text": "6:42",
+            "fontPx": 14.61,
+            "time": 0.598,
+            "seconds": 105.935
+          },
+          {
+            "selector": "div.lk > div:nth-of-type(1)",
+            "text": "Applecross Player Dashboard",
+            "fontPx": 14.74,
+            "time": 100.548,
+            "seconds": 5.786
+          },
+          {
+            "selector": "#m1",
+            "text": "Anyone free Saturday?",
+            "fontPx": 15.61,
+            "time": 76.807,
+            "seconds": 5.188
+          },
+          {
+            "selector": "#m2",
+            "text": "Am I playing this week??",
+            "fontPx": 15.61,
+            "time": 77.406,
+            "seconds": 4.788
+          },
+          {
+            "selector": "#m3",
+            "text": "What team am I in?",
+            "fontPx": 15.61,
+            "time": 78.004,
+            "seconds": 6.784
+          },
+          {
+            "selector": "#m4",
+            "text": "Can you resend the bank details?",
+            "fontPx": 15.61,
+            "time": 78.603,
+            "seconds": 8.579
+          },
+          {
+            "selector": "#m5",
+            "text": "Who hasn't paid fees yet?",
+            "fontPx": 15.61,
+            "time": 79.401,
+            "seconds": 7.98
+          },
+          {
+            "selector": "#r1 > div:nth-of-type(1)",
+            "text": "Update your details here, all it takes is your name:",
+            "fontPx": 15.72,
+            "time": 100.548,
+            "seconds": 5.985
+          },
+          {
+            "selector": "#r2",
+            "text": "Done, new mobile and email in",
+            "fontPx": 15.72,
+            "time": 101.944,
+            "seconds": 4.39
+          },
+          {
+            "selector": "#r3",
+            "text": "Updated. Good to be back!",
+            "fontPx": 15.72,
+            "time": 103.141,
+            "seconds": 3.193
+          },
+          {
+            "selector": "#m6",
+            "text": "Sorry, can't make it now",
+            "fontPx": 15.81,
+            "time": 79.999,
+            "seconds": 2.395
+          },
+          {
+            "selector": "#m7",
+            "text": "Are we home or away?",
+            "fontPx": 15.81,
+            "time": 81.994,
+            "seconds": 2.794
+          },
+          {
+            "selector": "#ly-chat2 > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "AC",
+            "fontPx": 15.85,
+            "time": 99.75,
+            "seconds": 6.783
+          },
+          {
+            "selector": "#r4",
+            "text": "Sent it to a mate who wants to join",
+            "fontPx": 15.92,
+            "time": 104.338,
+            "seconds": 1.996
+          },
+          {
+            "selector": "#m8",
+            "text": "Maybe? Can I let you know?",
+            "fontPx": 15.96,
+            "time": 82.593,
+            "seconds": 4.788
+          },
+          {
+            "selector": "#ly-chat1 > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "5X",
+            "fontPx": 16,
+            "time": 76.009,
+            "seconds": 11.971
+          },
+          {
+            "selector": "#ly-chat2 > div:nth-of-type(1) > div:nth-of-type(2) > b:nth-of-type(1)",
+            "text": "Applecross ex players",
+            "fontPx": 17.83,
+            "time": 99.75,
+            "seconds": 6.783
+          },
+          {
+            "selector": "#ly-chat1 > div:nth-of-type(1) > div:nth-of-type(2) > b:nth-of-type(1)",
+            "text": "Applecross 5th XI",
+            "fontPx": 18,
+            "time": 76.009,
+            "seconds": 11.971
+          },
+          {
+            "selector": "#ap2 > span:nth-of-type(1)",
+            "text": "5th XI availability",
+            "fontPx": 18.51,
+            "time": 110.523,
+            "seconds": 0.599
+          },
+          {
+            "selector": "div.mh",
+            "text": "What selectors see",
+            "fontPx": 24,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#tc1",
+            "text": "Availability",
+            "fontPx": 26,
+            "time": 21.147,
+            "seconds": 42.494
+          },
+          {
+            "selector": "#tc2b",
+            "text": "Fixtures",
+            "fontPx": 26,
+            "time": 21.147,
+            "seconds": 42.494
+          },
+          {
+            "selector": "#tc2",
+            "text": "Selection",
+            "fontPx": 26,
+            "time": 21.147,
+            "seconds": 42.494
+          },
+          {
+            "selector": "#tc3",
+            "text": "Fees",
+            "fontPx": 26,
+            "time": 21.147,
+            "seconds": 42.494
+          },
+          {
+            "selector": "#tc4",
+            "text": "Voting",
+            "fontPx": 26,
+            "time": 21.147,
+            "seconds": 42.494
+          },
+          {
+            "selector": "#tc5",
+            "text": "Stats",
+            "fontPx": 26,
+            "time": 21.147,
+            "seconds": 42.494
+          },
+          {
+            "selector": "#tc6",
+            "text": "Fantasy",
+            "fontPx": 26,
+            "time": 21.147,
+            "seconds": 42.494
+          },
+          {
+            "selector": "#tc6b",
+            "text": "Player Cards",
+            "fontPx": 26,
+            "time": 21.147,
+            "seconds": 42.494
+          },
+          {
+            "selector": "#mx > table:nth-of-type(1) > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(1)",
+            "text": "Tom B.",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x11",
+            "text": "Available",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x12",
+            "text": "Available",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x13",
+            "text": "Available",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#mx > table:nth-of-type(1) > tbody:nth-of-type(1) > tr:nth-of-type(2) > td:nth-of-type(1)",
+            "text": "Sam M.",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x21",
+            "text": "Available",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x22",
+            "text": "Unavailable",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x23",
+            "text": "Available",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#mx > table:nth-of-type(1) > tbody:nth-of-type(1) > tr:nth-of-type(3) > td:nth-of-type(1)",
+            "text": "Liam K.",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x31",
+            "text": "Maybe",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x32",
+            "text": "Available",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x33",
+            "text": "Available",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#mx > table:nth-of-type(1) > tbody:nth-of-type(1) > tr:nth-of-type(4) > td:nth-of-type(1)",
+            "text": "Max R.",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x41",
+            "text": "Available",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x42",
+            "text": "Maybe",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x43",
+            "text": "Unavailable",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#mx > table:nth-of-type(1) > tbody:nth-of-type(1) > tr:nth-of-type(5) > td:nth-of-type(1)",
+            "text": "Jack B.",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x51",
+            "text": "Available",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x52",
+            "text": "Available",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          },
+          {
+            "selector": "#x53",
+            "text": "Available",
+            "fontPx": 26,
+            "time": 89.176,
+            "seconds": 2.993
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"Applecross ex players\" (3 words) is on screen 0.04 s (±0.01 s), under its 1.05 s floor: hold it about 0.5 s + 0.3 s a word (1.40 s here) before it leaves or changes; see references/motion.md.",
+        "text": "Applecross ex players",
+        "selector": "#ly-chat2 > div:nth-of-type(1) > div:nth-of-type(2)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1326.1,
+          "y": 970.73,
+          "width": 217.38999999999987,
+          "height": 32.710000000000036
+        },
+        "time": 106.308,
+        "words": 3,
+        "seconds": 0.037,
+        "floorSeconds": 1.05
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "The film's last line \"betterat.cricket\" (2 words) is on screen 1.96 s (±0.01 s), under the 2.00 s a closing line needs: hold it about 0.5 s + 0.3 s a word and at least 2 s before the film ends; see references/motion.md.",
+        "text": "betterat.cricket",
+        "selector": "#end-u",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 110,
+          "y": 851.92,
+          "width": 384,
+          "height": 40
+        },
+        "time": 117.542,
+        "words": 2,
+        "seconds": 1.964,
+        "floorSeconds": 2
+      }
+    ],
+    "enabled": true,
+    "step": 0.19999999999998863,
+    "samples": 599
+  },
+  "audio": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": []
+  },
+  "hdr": {
+    "autoPromotion": null,
+    "inspection": "available"
+  },
+  "snapshots": {
+    "enabled": false,
+    "files": [],
+    "times": [],
+    "findingFiles": []
+  }
+}
