@@ -11,7 +11,7 @@ This is a BetterCricket advert about how the dashboard helps CLUBS: fewer messag
 
 ## Beats (on-screen text, 119.5s)
 1. Intro, 0-6s: "Introducing BetterCricket Player Dashboard", phone rises with the real dashboard
-2. No registration, 6-20s: already in your club list (imported from PlayHQ or added by the club), tap your name, last 4 digits of your mobile, "You're in."
+2. No registration, 6-20s: already in your club's records (the club has already added them), tap your name, last 4 digits of your mobile, "You're in."
 3. See everything, 20-64s, one scroll top to bottom: availability (one tap), fixtures (See more games, open a game), selection (side and training), fees, best and fairest voting, season stats, then Fantasy and Player Cards
 4. One stop shop, 64-75.5s: bookmark in the browser, add to the home screen (the new app lands in the empty slot), open it
 5. Take the pressure off the club, 75.5-92.5s: group chat noise gets struck off one by one (availability messages, "what team am I in?", fee chasing), then selectors see answers arrive

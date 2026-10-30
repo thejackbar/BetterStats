@@ -1,7 +1,7 @@
 {
   "version": 1,
   "historyId": "60e66965-1b39-4ba1-8a4a-0b0fd65f01bc",
-  "currentRevision": "81105812-1b6d-415f-b5cf-b0ffa4151962",
+  "currentRevision": "e9f096d8-20e3-4c86-8347-447ade217496",
   "pendingChanges": false,
   "files": {
     "assets/fonts/applecross-display.ttf": {
@@ -165,8 +165,8 @@
       "content": "/root/.cache/hyperframes/history/60e66965-1b39-4ba1-8a4a-0b0fd65f01bc/blobs/53/53dbce1e19aa713cbb12ee0bc4d206143b45ab15e6ffbfcaa8f69572d4d24d50"
     },
     "index.html": {
-      "hash": "7a3696b32e814daaee65ac62ab5f64d58358c8fc28aa570e7502348fdce973ca",
-      "content": "/root/.cache/hyperframes/history/60e66965-1b39-4ba1-8a4a-0b0fd65f01bc/blobs/7a/7a3696b32e814daaee65ac62ab5f64d58358c8fc28aa570e7502348fdce973ca"
+      "hash": "f38c03423d624718753913ec47d4cadb7b5194aff32f71f666f783df6afe221a",
+      "content": "/root/.cache/hyperframes/history/60e66965-1b39-4ba1-8a4a-0b0fd65f01bc/blobs/f3/f38c03423d624718753913ec47d4cadb7b5194aff32f71f666f783df6afe221a"
     },
     "meta.json": {
       "hash": "cf1d96336dc14fe45e4b3c5e2bb03e810849520be7d6665f0dd1cab9402e4c44",
@@ -200,14 +200,59 @@
           "after": "/root/.cache/hyperframes/history/60e66965-1b39-4ba1-8a4a-0b0fd65f01bc/blobs/7a/7a3696b32e814daaee65ac62ab5f64d58358c8fc28aa570e7502348fdce973ca"
         }
       }
+    },
+    "e9f096d8-20e3-4c86-8347-447ade217496": {
+      "actor": {
+        "kind": "outside",
+        "name": "Outside"
+      },
+      "label": "Changed outside the app",
+      "startedAt": 1793367254746,
+      "endedAt": 1793367254749,
+      "files": {
+        "index.html": {
+          "before": "/root/.cache/hyperframes/history/60e66965-1b39-4ba1-8a4a-0b0fd65f01bc/blobs/7a/7a3696b32e814daaee65ac62ab5f64d58358c8fc28aa570e7502348fdce973ca",
+          "after": "/root/.cache/hyperframes/history/60e66965-1b39-4ba1-8a4a-0b0fd65f01bc/blobs/f3/f38c03423d624718753913ec47d4cadb7b5194aff32f71f666f783df6afe221a"
+        }
+      }
     }
   },
   "checks": {
     "latest": {
-      "revision": null,
-      "id": "60d81ae4-b48a-4de8-901a-f9714cdeb87d"
+      "revision": "e9f096d8-20e3-4c86-8347-447ade217496",
+      "id": "327bec5e-e8c6-407a-8dac-5b58465cf1e0"
     },
-    "revisions": {},
+    "revisions": {
+      "e9f096d8-20e3-4c86-8347-447ade217496": [
+        {
+          "id": "327bec5e-e8c6-407a-8dac-5b58465cf1e0",
+          "scope": "project",
+          "report": "/home/user/BetterStats/brag-output-2026-10-30-113629/composition/.hyperframes/artifacts/checks/327bec5e-e8c6-407a-8dac-5b58465cf1e0.json",
+          "metadata": {
+            "ok": true,
+            "browserSkipped": false,
+            "options": {
+              "samples": 9,
+              "atTransitions": false,
+              "maxIssues": 80,
+              "collapseStatic": true,
+              "tolerance": 2,
+              "timeout": 10000,
+              "contrast": true,
+              "strict": false,
+              "snapshots": false,
+              "browserGpuMode": "auto"
+            }
+          },
+          "createdAt": 1793367285833,
+          "contentHash": "7804a400be50f9b63a8fc8f4d8c0c29b3a17457557911edb2e050c4cdc2f13e4",
+          "revision": "e9f096d8-20e3-4c86-8347-447ade217496",
+          "inputFingerprint": "10f52d4408fb5f6c6668044ee2a1f9a1da1c7f4b1c6faa14deef0d36fbb402c5",
+          "inputScope": "local-project-files",
+          "attribution": "recorded-revision"
+        }
+      ]
+    },
     "unversioned": [
       {
         "id": "60d81ae4-b48a-4de8-901a-f9714cdeb87d",
@@ -791,13 +836,14 @@
   },
   "renders": {
     "latest": {
-      "id": "1fc3dcba-0c70-400d-827c-52b70d02cf28",
-      "completedAt": 1793363392452,
+      "id": "a2a8bd16-9087-412e-9123-b410aa66de20",
+      "completedAt": 1793367593734,
       "output": "/home/user/BetterStats/brag-output-2026-10-30-113629/brag-raw.mp4",
       "status": "completed",
-      "revision": "81105812-1b6d-415f-b5cf-b0ffa4151962"
+      "revision": "e9f096d8-20e3-4c86-8347-447ade217496"
     },
     "retainedRevisions": [
+      "e9f096d8-20e3-4c86-8347-447ade217496",
       "81105812-1b6d-415f-b5cf-b0ffa4151962"
     ]
   },
