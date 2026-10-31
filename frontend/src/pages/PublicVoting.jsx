@@ -33,6 +33,7 @@ const NOT_OPEN = {
   awaiting_team: 'The team list for this game isn’t in yet — check back soon.',
   closed: 'Voting has closed for this game.',
   locked: 'Voting is closed for this game.',
+  cancelled: 'This game is no longer on the draw, so it can’t be voted on. Look for your team’s current game.',
 }
 const REASON = {
   captain_only: 'Only the captain submits votes for this club. Ask your skipper to cast them.',

@@ -1101,6 +1101,11 @@ async def bulk_state(
             await _set_override(db, club, s, fx, user.id, status="locked")
             updated += 1
             continue
+        if (fx.status or "").upper() in vote_svc.NOT_A_GAME_STATUSES:
+            # A bulk "open" must not quietly revive a game the draw no longer has.
+            # Reopening one on purpose is still possible from its own page.
+            skipped.append({"fixture_id": raw_id, "reason": "cancelled"})
+            continue
         ov = await vote_svc.get_override(db, s.id, fx.id)
         elig = await vote_svc.resolve_eligibility(db, club, fx, cfg, ov.eligibility_source if ov else None)
         if not elig["players"]:
@@ -1148,6 +1153,8 @@ async def nudge(
         except HTTPException:
             continue
         ov = await vote_svc.get_override(db, s.id, fx.id)
+        if vote_svc.fixture_vote_state(fx, cfg, ov.status if ov else None, True) == "cancelled":
+            continue  # never chase votes on a game the draw no longer has
         elig = await vote_svc.resolve_eligibility(db, club, fx, cfg, ov.eligibility_source if ov else None)
         ballots_by_fx = await vote_svc.load_ballots_by_fixture(db, club.id, [fx.id], s.id)
         voters = await vote_svc.voters_for_game(
