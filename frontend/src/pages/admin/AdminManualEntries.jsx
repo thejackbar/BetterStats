@@ -1434,6 +1434,22 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form])
 
+  // A game already in the data on that date. A hand-entered game counts on top of whatever the club
+  // already holds, so typing in a match PlayHQ also has (to correct it, say) counts it twice in every
+  // total. Warn only: two real games on one day is ordinary (several grades, a two-day match).
+  const [sameDay, setSameDay] = useState([])
+  useEffect(() => {
+    if (!form.played_at) { setSameDay([]); return undefined }
+    let cancelled = false
+    const t = setTimeout(async () => {
+      try {
+        const res = await api.adminCheckScorecardDuplicate(form.played_at, form.opposition || '', editingId || '')
+        if (!cancelled) setSameDay(res?.matches || [])
+      } catch { if (!cancelled) setSameDay([]) }
+    }, 400)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [form.played_at, form.opposition, editingId])
+
   const handleSubmit = () => {
     setErr(null)
     if (!form.season_id) return setErr('Choose a season')
@@ -1446,6 +1462,9 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
       body: 'A manual game appears in stats aggregations like any other match. Every change is logged and reversible from the Audit tab.'
         + (checks.length
           ? `\n\nThings that do not add up yet (you can still save):\n${checks.map(c => `• ${c.text}`).join('\n')}`
+          : '')
+        + (sameDay.length
+          ? `\n\nYour club already has ${sameDay.length === 1 ? 'a game' : `${sameDay.length} games`} on ${form.played_at}. If this is the same match, saving counts it twice. Only save if it is a different game.`
           : ''),
       confirmLabel: editingId ? 'Update' : 'Save',
       action: async () => {
@@ -1610,6 +1629,23 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
               placeholder="Start typing…"
             />
           </div>
+          {sameDay.length > 0 && (
+            <div data-testid="game-same-day" className="md:col-span-3 rounded-md border px-3 py-2.5 text-[12px]"
+              style={{ borderColor: 'rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)' }}>
+              <div className="font-semibold text-pb-text mb-1">
+                Your club already has {sameDay.length === 1 ? 'a game' : `${sameDay.length} games`} on {form.played_at}.
+                <span className="font-normal text-pb-dim"> A game you type in counts on top of these, so the same match entered twice is counted twice in every total.</span>
+              </div>
+              <ul className="list-disc pl-4 space-y-1 text-pb-dim">
+                {sameDay.map(d => (
+                  <li key={d.id}>
+                    {d.grade ? `${d.grade}: ` : ''}vs {d.opponent || 'unknown'} ({d.source === 'manual' ? 'hand entered' : 'from PlayHQ'}){d.likely ? ', same opposition' : ''}{' '}
+                    <Link to={`/games/${d.id}`} target="_blank" className="underline">view</Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div>
             <label className={LABEL_CLS}>Home team</label>
             <input type="text" value={form.home_team || ''} onChange={e => setForm({ ...form, home_team: e.target.value })} className={INPUT_CLS} />

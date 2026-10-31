@@ -743,10 +743,17 @@ async def get_career_bowling(
                 ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS average,
                 ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS economy,
                 MAX(pss.best_bowling_wickets) AS best_figures_wickets,
-                (ARRAY_AGG(pss.best_bowling_figures
+                -- The figures come from the row that holds the best wicket count, or
+                -- from none. Picking the best of the rows that merely HAVE figures
+                -- printed 5-20 beside a career best of 6 whenever the 6-wicket
+                -- season was a typed adjustment with no figures; with no figures
+                -- the page says "6 wickets", which is true.
+                (ARRAY_AGG(CASE WHEN pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'
+                                THEN pss.best_bowling_figures END
                     ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
-                             NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
-                 ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_bowling_figures,
+                             CASE WHEN pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'
+                                  THEN SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer END ASC NULLS LAST
+                 ) FILTER (WHERE pss.best_bowling_wickets IS NOT NULL))[1] AS best_bowling_figures,
                 COALESCE(SUM(pss.maidens), 0) AS total_maidens,
                 COALESCE(SUM(pss.overs), 0) AS total_overs,
                 COALESCE(SUM(pss.runs_conceded), 0) AS total_runs,

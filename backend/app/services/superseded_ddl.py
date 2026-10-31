@@ -559,6 +559,14 @@ STATEMENTS: tuple[str, ...] = (
                 COALESCE(SUM(mbs.runs), 0)::integer AS runs_conceded,
                 COALESCE(SUM(mbs.maidens), 0)::integer AS maidens,
                 MAX(mbs.wickets) AS best_bowling_wickets,
+                -- The figures of that best spell as `wickets-runs`, fewest runs
+                -- winning a tie on wickets. Without them every reader fell back
+                -- to printing the bare wicket count ("5 wickets") for a club
+                -- whose bowling is all hand-entered. Nothing for a spell with no
+                -- wicket in it: a best of 0-20 is not a figure.
+                (ARRAY_AGG(mbs.wickets::text || '-' || mbs.runs::text
+                           ORDER BY mbs.wickets DESC, mbs.runs ASC)
+                 FILTER (WHERE mbs.wickets > 0))[1] AS best_bowling_figures,
                 COUNT(*) FILTER (WHERE mbs.wickets >= 5)::integer AS five_wicket_innings,
                 COALESCE(SUM(mbs.wides), 0)::integer AS wides,
                 COALESCE(SUM(mbs.no_balls), 0)::integer AS no_balls
@@ -598,7 +606,7 @@ STATEMENTS: tuple[str, ...] = (
             COALESCE(w.runs_conceded, 0) AS runs_conceded,
             COALESCE(w.maidens, 0) AS maidens,
             w.best_bowling_wickets,
-            NULL::text AS best_bowling_figures,
+            w.best_bowling_figures,
             COALESCE(w.five_wicket_innings, 0) AS five_wicket_innings,
             COALESCE(w.wides, 0) AS wides,
             COALESCE(w.no_balls, 0) AS no_balls,
@@ -670,7 +678,7 @@ STATEMENTS: tuple[str, ...] = (
         NULL::numeric AS bowling_average,
         NULL::numeric AS bowling_strike_rate,
         ca_agg.best_bowling_wickets,
-        NULL::text AS best_bowling_figures,
+        ca_agg.best_bowling_figures,
         ca_agg.five_wicket_innings,
         ca_agg.wides,
         ca_agg.no_balls,
@@ -810,6 +818,14 @@ STATEMENTS: tuple[str, ...] = (
                 COALESCE(SUM(bs.runs), 0)::integer AS runs_conceded,
                 COALESCE(SUM(bs.maidens), 0)::integer AS maidens,
                 MAX(bs.wickets) AS best_bowling_wickets,
+                -- The figures of that best spell as `wickets-runs`, fewest runs
+                -- winning a tie on wickets. Without them every reader fell back
+                -- to printing the bare wicket count ("5 wickets") for a club
+                -- whose bowling is all hand-entered. Nothing for a spell with no
+                -- wicket in it: a best of 0-20 is not a figure.
+                (ARRAY_AGG(bs.wickets::text || '-' || bs.runs::text
+                           ORDER BY bs.wickets DESC, bs.runs ASC)
+                 FILTER (WHERE bs.wickets > 0))[1] AS best_bowling_figures,
                 COUNT(*) FILTER (WHERE bs.wickets >= 5)::integer AS five_wicket_innings,
                 COALESCE(SUM(bs.wides), 0)::integer AS wides,
                 COALESCE(SUM(bs.no_balls), 0)::integer AS no_balls
@@ -847,6 +863,7 @@ STATEMENTS: tuple[str, ...] = (
             COALESCE(w.runs_conceded, 0) AS runs_conceded,
             COALESCE(w.maidens, 0) AS maidens,
             w.best_bowling_wickets,
+            w.best_bowling_figures,
             COALESCE(w.five_wicket_innings, 0) AS five_wicket_innings,
             COALESCE(w.wides, 0) AS wides,
             COALESCE(w.no_balls, 0) AS no_balls,
