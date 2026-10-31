@@ -1348,3 +1348,27 @@ Follow-up (apply_game_roles, same day): the first Shoalwater dry run left 332 na
 - Run for the club next: Card review > Possible doubles and `inspect_player_matches <org> "<player>" <date>` for the six sample players; the duplicates are in that list when PlayHQ holds the same day.
 - Checks: `frontend/verification/verify_manual_same_day_browser.mjs` (24; the exact request on the wire, the Edit flow excluding its own game, singular and plural, an empty day, a failed check, 390px with no sideways scroll). Control with the form change stashed fails 16 and does not crash.
 - Not verified: Hamilton's live data. Whether their duplicates are typed-in copies of PlayHQ games, or CA season rows counting games with no scorecard, can only be told from the six-player extract.
+
+### v9.137.2 follow-up: Hamilton's six-player extract read (31 Oct 2026)
+
+The club sent its Excel against BetterStats for six players (Baker, Barker, Forsyth, Healy, Milich, Robinson, Spencer, Tonkin: 8 in the sheet), season by season, 2010/11 to 2026/27. Read by classifying each player-season, club figure against BetterStats:
+
+- 26 player-seasons read EXACTLY double (games, innings, runs, overs, wickets) and three more read double with one figure off. All fall in 2015/16 to 2022/23. Not one season from 2023/24 on is doubled, and every 2024/25 and 2025/26 season agrees to the run. The club typed everything it held for those eight seasons, including the matches PlayHQ already had, and stopped typing when PlayHQ's own data became complete.
+- 15 player-seasons read extra games with innings, runs, overs and wickets right (the club's "additional game recorded but no details"). They sit in 2010/11 to 2012/13 and 2015/16, 2017/18: seasons where PlayHQ holds the team sheet but not the card. The extra count is about the number of games typed (Tonkin 2012/13: 11 recorded, 21 shown).
+- The 2013/14 Border Cup games came from a newspaper (individual scores only). Barker reads 0 games against 2, Forsyth 1 innings against 4, Milich 1 against 2: the games were loaded, the individual scores were not.
+- Best bowling reads "1 wicket", "4wickets" and so on in 2010/11 to 2017/18 and nowhere else: exactly the seasons whose bowling is typed only. Confirms the v9.137.2 cause.
+- Not a bug, a PlayHQ fact: Baker's 2025/26 bowling carries David Spencer's 6-1-1-11 (Geelong Blue, 14 Dec), and Ballarat 28 Jan 2024 has no Hamilton batting or bowling in PlayHQ at all.
+- The competition lens also shows games with no detail under names the club never used ("Over 60s Mixed", "Over 60  Mixed", "WilloFest" beside "Willowfest"): near-duplicate grade names, a Merge Grades job.
+
+Mechanism, proved on a real Postgres with the club's shape (3 PlayHQ games plus 3 typed copies, one player): a season row is the sum of every source row of `v_effective_player_season_stats`. CA's season total (`api`) has no per-match granularity, so an unpaired typed game cannot step it aside.
+
+| State | Games | Runs |
+|---|---|---|
+| typed copies unpaired, season not re-sourced (Hamilton today) | 6 | 145 (85 + 60) |
+| paired, club card preferred, season not re-sourced | 3 | 85 (PlayHQ's) |
+| paired, club card preferred, season re-sourced | 3 | 60 (the club's) |
+| paired, PlayHQ card preferred, season re-sourced | 3 | 85 (from the scorecard) |
+
+Two gaps follow. (1) Pairing alone fixes the count but the club's corrections never reach the totals: only a re-sourced season (`import_authoritative`) lets the club's card carry them, and nothing a club can click sets it (only an overwrite CSV import does). (2) `repair_overwrite_pairs` deliberately skips hand-typed games, and Card review's link does not flip the season, so there is no operator or club path for Hamilton's case yet. Not built: it changes stored totals for a club and needs a decision on which card wins per match.
+
+`ops/diagnostics/season_sources_by_player.sql` (read only) shows, per season, the source rows behind a player's totals, flags `DOUBLE`, and lists the typed games that share a date with an unpaired synced game. Run it for the six players before changing anything.
