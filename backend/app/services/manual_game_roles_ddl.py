@@ -36,3 +36,26 @@ STATEMENTS: list[str] = [
 DOWNGRADE: list[str] = [
     "DROP TABLE IF EXISTS manual_game_roles",
 ]
+
+# Migration 382: ONE place that answers "who captained / kept wicket in this game", for a synced game
+# (game_appearances) and a hand-entered one (manual_game_roles) alike. Every stats lens that filters on the
+# captain or the keeper (Records, the Leaderboard filter, a player's captain record, StatLab) joins this view
+# instead of game_appearances, which a hand-entered game never has a row in. Only the rows that carry a
+# flag are in it, so a join to it is small; a game id here is the id the effective views give the game (a
+# synced game's own id, a manual game's own id), so `bi.game_id = r.game_id` works for both.
+VIEW_STATEMENTS: list[str] = [
+    """
+    CREATE OR REPLACE VIEW v_game_roles AS
+        SELECT ga.game_id, ga.player_id, ga.is_captain, ga.is_wicket_keeper
+        FROM game_appearances ga
+        WHERE ga.is_captain OR ga.is_wicket_keeper
+        UNION ALL
+        SELECT r.manual_game_id AS game_id, r.player_id, r.is_captain, r.is_wicket_keeper
+        FROM manual_game_roles r
+        WHERE r.is_captain OR r.is_wicket_keeper
+    """,
+]
+
+VIEW_DOWNGRADE: list[str] = [
+    "DROP VIEW IF EXISTS v_game_roles",
+]

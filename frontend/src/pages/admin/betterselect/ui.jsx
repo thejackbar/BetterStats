@@ -41,6 +41,7 @@ const ICON_PATHS = {
   money: <><rect x="2.5" y="6" width="19" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M6 9.5v5M18 9.5v5" /></>,
   list: <><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" /></>,
   nets: <><path d="M4 4v16M20 4v16M4 4h16M4 9h16M4 14h16M4 19h16M9 4v16M14 4v16" /></>,
+  rotation: <><path d="M4 11a8 8 0 0 1 13.7-5.2L20 8.5" /><path d="M20 4v4.5h-4.5" /><path d="M20 13a8 8 0 0 1-13.7 5.2L4 15.5" /><path d="M4 20v-4.5h4.5" /></>,
   timer: <><circle cx="12" cy="13" r="8" /><path d="M12 13V9M9 2h6M12 5V2" /></>,
   play: <><path d="M7 5l12 7-12 7z" fill="currentColor" stroke="none" /></>,
   pause: <><rect x="7" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none" /><rect x="13.5" y="5" width="3.5" height="14" rx="1" fill="currentColor" stroke="none" /></>,

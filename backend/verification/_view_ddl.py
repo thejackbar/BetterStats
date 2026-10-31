@@ -101,4 +101,16 @@ def view_statements() -> list[tuple[str, str]]:
     latest: dict[str, str] = {}
     for name, sql in out:
         latest[name] = sql
-    return [(n, latest[n]) for n in dict.fromkeys(n for n, _ in out)]
+    views = [(n, latest[n]) for n in dict.fromkeys(n for n, _ in out)]
+    # `v_game_roles` (migration 382) is not a `v_effective_*` view, but the captain and keeper lenses join it, so a
+    # harness that builds the effective views needs it too. Read from the one list the migration and the lifespan
+    # run. It needs `manual_game_roles`, which `Base.metadata.create_all` makes before any harness builds views.
+    try:
+        from app.services.manual_game_roles_ddl import VIEW_STATEMENTS
+    except ImportError:          # a control run on a commit before the view existed
+        VIEW_STATEMENTS = []
+    for stmt in VIEW_STATEMENTS:
+        m = re.search(r"CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+(\w+)\s+AS", stmt, re.I)
+        if m:
+            views.append((m.group(1), stmt))
+    return views

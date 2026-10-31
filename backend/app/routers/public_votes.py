@@ -612,6 +612,7 @@ async def submit_ballot(token: str, fixture_id: str, body: BallotBody, request: 
         detail = {
             "awaiting_team": "Voting opens once the team list for this game is in.",
             "upcoming": "This game hasn't been played yet.",
+            "cancelled": "This game is no longer on the draw, so it can't be voted on. Look for your team's current game.",
         }.get(state, "Voting has closed for this game.")
         raise HTTPException(status_code=409, detail=detail)
 

@@ -3834,6 +3834,28 @@ export const api = {
   nmGetSettings: () => request('/nets/settings'),
   nmSetSettings: (data) =>
     request('/nets/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  // Junior Rotation (BetterSelect): saved groups of typed names, a fair batting
+  // order and fielding rotation per game, the season tally, and the parent link.
+  rotPresets: () => request('/rotation/presets'),
+  rotListGroups: (archived = false) => request(`/rotation/groups?archived=${archived ? 'true' : 'false'}`),
+  rotCreateGroup: (data) => request('/rotation/groups', { method: 'POST', body: JSON.stringify(data) }),
+  rotGetGroup: (id) => request(`/rotation/groups/${id}`),
+  rotPatchGroup: (id, data) => request(`/rotation/groups/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rotRegenerateLink: (id) => request(`/rotation/groups/${id}/regenerate-link`, { method: 'POST' }),
+  rotArchiveGroup: (id, undo = false) => request(`/rotation/groups/${id}/archive?undo=${undo ? 'true' : 'false'}`, { method: 'POST' }),
+  rotAddPlayers: (id, names) => request(`/rotation/groups/${id}/players`, { method: 'POST', body: JSON.stringify({ names }) }),
+  rotPatchPlayer: (id, data) => request(`/rotation/players/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rotFixtures: () => request('/rotation/fixtures'),
+  rotRounds: (groupId) => request(`/rotation/groups/${groupId}/rounds`),
+  rotCreateRound: (groupId, data) => request(`/rotation/groups/${groupId}/rounds`, { method: 'POST', body: JSON.stringify(data) }),
+  rotGetRound: (id) => request(`/rotation/rounds/${id}`),
+  rotPutRound: (id, data) => request(`/rotation/rounds/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  rotGenerate: (id, data) => request(`/rotation/rounds/${id}/generate`, { method: 'POST', body: JSON.stringify(data || {}) }),
+  rotLock: (id) => request(`/rotation/rounds/${id}/lock`, { method: 'POST' }),
+  rotUnlock: (id) => request(`/rotation/rounds/${id}/unlock`, { method: 'POST' }),
+  rotDeleteRound: (id) => request(`/rotation/rounds/${id}`, { method: 'DELETE' }),
+  rotTally: (groupId) => request(`/rotation/groups/${groupId}/tally`),
+  rotPublic: (token) => request(`/public/rotation/${encodeURIComponent(token)}`),
   // Sessions (training days).
   nmListSessions: (limit = 40) => request(`/nets/sessions?limit=${limit}`),
   nmCreateSession: (data = {}) =>

@@ -41,6 +41,8 @@ VOTER_MODES = {"players", "captain"}
 # A team can also be on "chosen": only the people the club listed for that team
 # vote (``vote_medals.grade_vote_counters``). Not a medal-wide default, since the
 # list is per team, and not a football mode, so ``VOTER_MODES`` stays as it was.
+# Fixture statuses that are not a game: never votable (see ``fixture_vote_state``).
+NOT_A_GAME_STATUSES = ("BYE", "CANCELLED")
 TEAM_VOTER_MODES = VOTER_MODES | {"chosen"}
 MAX_CHOSEN_VOTERS = 12
 # A team's voting settings are keyed by its grade NAME. Two of a club's teams can
@@ -396,6 +398,16 @@ def team_vote_setting(cfg: dict, shared: dict, grade_name: Optional[str], team_i
     and the next save split it per team, see ``split_legacy_team_settings``)."""
     modes = cfg.get("grade_voter_modes") or {}
     key = team_setting_key(shared, grade_name, team_id)
+    if key not in modes and team_id:
+        # A team that changed grade keeps its own setting. It was stored under
+        # "<old grade>::<team id>" while two teams shared that grade, and the new
+        # grade is keyed by its bare name, so the team's own entry is found by
+        # its id. Without this the people chosen for a moved team lose the right
+        # to vote for it.
+        suffix = f"{TEAM_KEY_SEP}{team_id}"
+        own = next((k for k in modes if k.endswith(suffix)), None)
+        if own is not None:
+            key = own
     if key not in modes and grade_name in modes:
         key = grade_name
     mode = modes.get(key)
@@ -511,7 +523,6 @@ def clean_grade_weighting(raw) -> dict:
     return {"mode": mode, "manual": manual}
 
 
-_NOT_A_GAME_STATUSES = ("BYE", "CANCELLED")
 
 
 async def count_games_by_grade_name(
@@ -539,7 +550,7 @@ async def count_games_by_grade_name(
             order[name] = min(disp, order.get(name, disp))
     games: dict[str, int] = {}
     for f in fixtures:
-        if (f.status or "").upper() in _NOT_A_GAME_STATUSES or (f.home_away or "").upper() == "BYE":
+        if (f.status or "").upper() in NOT_A_GAME_STATUSES or (f.home_away or "").upper() == "BYE":
             continue
         gid = grade_by_fixture.get(str(f.id))
         name = name_of.get(str(gid)) if gid else None
@@ -1058,9 +1069,19 @@ def fixture_vote_state(fixture: Fixture, cfg: dict, override: Optional[str], rea
     """One of: 'upcoming' (not played yet), 'awaiting_team' (played, but no
     votable list from the club's chosen source yet — an unsynced scorecard, an
     unsaved XI, an unpublished team list), 'open', 'closed' (auto-close passed),
-    'locked' (admin lock). A manual lock/reopen always wins over the auto
-    window."""
+    'locked' (admin lock), 'cancelled' (Cricket Australia no longer has the
+    game: a team moved grade, a washout, a bye). A manual lock/reopen always wins
+    over the auto window, and a deliberate reopen is the one thing that brings a
+    cancelled game back.
+
+    A cancelled row is kept, not deleted, when the club had picked an XI or
+    collected votes on it (``fixtures_reconcile``), and the saved XI alone made
+    it look ready. Without this state it stayed open under its OLD grade and
+    opponent, and a player on the moved team was offered it instead of their
+    real game."""
     today = today or date.today()
+    if (fixture.status or "").upper() in NOT_A_GAME_STATUSES and override != "reopened":
+        return "cancelled"
     start = fixture.played_on
     if start and start > today:
         return "upcoming"
