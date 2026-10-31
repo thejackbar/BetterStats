@@ -62,6 +62,8 @@ KINDS: dict[str, Kind] = {
     "hat_trick": Kind("Hat-trick pack", "Three in three", FIVE_FOR, 4, 0.15),
     "fifty": Kind("Fifty pack", "Fifty up", FIFTY, 3, 0.10),
     "milestone": Kind("Milestone pack", "A landmark reached", MILESTONE, 3, 0.12),
+    # Every player who played in a win, the day after it. Granted as a Premium pack (the odds are FIFTY's), see WINNER_PACK.
+    "winner_winner": Kind("Winner Winner", "Chicken dinner", FIFTY, 3, 0.10),
 }
 # Packs a club creates by hand. Its name and quality are the club's; the source only names how it arrived.
 KINDS["custom"] = Kind("Club pack", "A gift from your club", EVENT, 2, 0.10)
@@ -81,6 +83,9 @@ QUALITIES: dict[str, Kind] = {
     "legendary": Kind("Legendary", "Nearly all Rare or better", CENTURY, 4, 0.15),
 }
 DEFAULT_QUALITY = "special"
+
+# Winner Winner: a Premium pack of five, named for the win. One per player per game, ref `winner:<game id>`.
+WINNER_PACK = {"source": "winner_winner", "quality": "premium", "label": "Winner Winner"}
 
 
 def quality_kind(quality: Optional[str], source: Optional[str] = None) -> Kind:

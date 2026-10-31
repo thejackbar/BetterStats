@@ -25,6 +25,7 @@ const GROUPS = [
       ['hat_trick', 'Three wickets in three balls.'],
       ['fifty', 'A half century.'],
       ['milestone', 'A landmark card: a games, runs, wickets or dismissals milestone.'],
+      ['winner_winner', 'Your side won and you played. It arrives the day after, five cards, at least three of them Rare or better.'],
       ['reward', 'Finish a challenge, or a set, and your club pays you one.'],
     ],
     note: 'These come for achievements from the day your club started using cards. Nothing is handed out for old history.',

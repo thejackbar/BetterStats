@@ -117,7 +117,7 @@ async def targets(db: AsyncSession, org_id) -> list[dict]:
     """What a club can design: all packs, each kind of pack, and each scheduled event."""
     out = [{"key": DEFAULT_TARGET, "label": "Every pack", "group": "All"}]
     groups = (("Everyday", ("starter", "weekly", "runs", "wickets", "dismissals", "duck")),
-              ("For what you do", ("century", "five_for", "hat_trick", "fifty", "milestone")),
+              ("For what you do", ("century", "five_for", "hat_trick", "fifty", "milestone", "winner_winner")),
               ("On the day", tuple(kinds.DAY_SOURCES)),
               ("From the club", ("custom", "reward")))
     for group, sources in groups:

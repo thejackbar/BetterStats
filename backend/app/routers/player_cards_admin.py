@@ -53,6 +53,7 @@ class SettingsBody(BaseModel):
     board_enabled: Optional[bool] = None
     feed_enabled: Optional[bool] = None
     event_packs_enabled: Optional[bool] = None
+    winner_packs: Optional[bool] = None
     starter_gifts: Optional[str] = None
     big_photos: Optional[str] = None
 
@@ -147,7 +148,7 @@ async def _payload(db: AsyncSession, club: Organisation) -> dict:
             "timezone": settings["timezone"],
             "alerts_enabled": settings.get("alerts_enabled", True) is not False,
             **{k: settings.get(k, True) is not False for k in ("sets_enabled", "showcase_enabled", "board_enabled", "feed_enabled",
-                                                         "event_packs_enabled")},
+                                                         "event_packs_enabled", "winner_packs")},
             "starter_gifts": settings.get("starter_gifts") or "minimal",
             "big_photos": settings.get("big_photos") or "all",
             "effective_timezone": str(cards.club_zone(settings)),

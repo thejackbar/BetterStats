@@ -186,6 +186,7 @@ export const PACKS = {
   reward: { label: 'Reward pack', line: 'Earned in a challenge', a: '#fde68a', b: '#78350f', on: '#fffbeb', stars: 2 },
   custom: { label: 'Club pack', line: 'A gift from your club', a: '#fecdd3', b: '#9f1239', on: '#ffffff', stars: 2 },
   // For something the player did: the more stars, the better the cards.
+  winner_winner: { label: 'Winner Winner', line: 'Chicken dinner', a: '#22c55e', b: '#14532d', on: '#ffffff', stars: 3 },
   fifty: { label: 'Fifty pack', line: 'Fifty up', a: '#bfdbfe', b: '#1d4ed8', on: '#ffffff', stars: 3 },
   milestone: { label: 'Milestone pack', line: 'A landmark reached', a: '#a7f3d0', b: '#047857', on: '#022c22', stars: 3 },
   five_for: { label: 'Five-for pack', line: 'Five wickets or more', a: '#5eead4', b: '#134e4a', on: '#ffffff', stars: 4 },

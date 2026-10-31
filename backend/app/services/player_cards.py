@@ -134,6 +134,8 @@ def default_settings() -> dict:
         "board_enabled": True,
         "feed_enabled": True,
         "event_packs_enabled": True,
+        "winner_packs": True,
+        "winner_packs_from": None,
         "starter_gifts": "minimal",
         "big_photos": "all",
     }
@@ -170,7 +172,7 @@ def week_ends_at(settings: dict, now: Optional[datetime] = None) -> datetime:
 async def load_settings(db: AsyncSession, org_id) -> dict:
     row = (await db.execute(text(
         "SELECT enabled, include_juniors, weekly_packs, timezone, launched_at, alerts_enabled, "
-        "sets_enabled, showcase_enabled, board_enabled, feed_enabled, event_packs_enabled, starter_gifts, big_photos "
+        "sets_enabled, showcase_enabled, board_enabled, feed_enabled, event_packs_enabled, winner_packs, winner_packs_from, starter_gifts, big_photos "
         "FROM club_card_settings WHERE organisation_id = CAST(:o AS UUID)"
     ), {"o": str(org_id)})).mappings().first()
     if not row:
@@ -209,7 +211,7 @@ async def save_settings(db: AsyncSession, org_id, patch: dict) -> dict:
         sets.append("weekly_packs = :weekly_packs")
         params["weekly_packs"] = max(0, min(int(patch["weekly_packs"]), MAX_WEEKLY_PACKS))
     for flag in ("alerts_enabled", "sets_enabled", "showcase_enabled", "board_enabled", "feed_enabled",
-                 "event_packs_enabled"):
+                 "event_packs_enabled", "winner_packs"):
         if flag in patch and patch[flag] is not None:
             sets.append(f"{flag} = :{flag}")
             params[flag] = bool(patch[flag])
@@ -1097,6 +1099,59 @@ async def _grant_day_packs(db, club: Organisation, pid: str, settings: dict) -> 
     return added
 
 
+# A win is paid the day after it, and for a week after that, so a player who does not open their page the next day still gets it.
+WINNER_LOOKBACK_DAYS = 7
+
+# The games this player's side won, by the day each finished. A game is read as OUR win in this order, because a fixture between two
+# synced clubs is one row whose `result` is relative to whichever club synced it first (see `services/club_grades`):
+#   1. when exactly one of home_org_id / away_org_id is this club, the club's side against `winning_team` (neutral);
+#   2. otherwise the team the player's appearance names, against `winning_team`;
+#   3. otherwise, with no winner recorded, `result` = WIN only where it is relative to this club (a game this club owns).
+# A 12th man who did not play (`is_reserve`) did not win anything. A fixture's own last day (`end_on`) is the day it finished.
+_WINS_SQL = """
+    SELECT g.id::text AS game_id
+      FROM game_appearances ga
+      JOIN players p ON p.id = ga.player_id AND p.organisation_id = CAST(:org AS UUID)
+      JOIN v_effective_games g ON g.id = ga.game_id
+      LEFT JOIN fixtures f ON f.id = g.id
+     WHERE ga.player_id = CAST(:pid AS UUID) AND COALESCE(ga.is_reserve, FALSE) = FALSE
+       AND COALESCE(f.end_on, g.played_at) >= :floor AND COALESCE(f.end_on, g.played_at) < :today
+       AND (
+            (g.winning_team IS NOT NULL
+             AND (COALESCE(g.home_org_id = CAST(:org AS UUID), FALSE) <> COALESCE(g.away_org_id = CAST(:org AS UUID), FALSE))
+             AND ((g.home_org_id = CAST(:org AS UUID) AND g.winning_team = g.home_team)
+                  OR (g.away_org_id = CAST(:org AS UUID) AND g.winning_team = g.away_team)))
+         OR (g.winning_team IS NOT NULL
+             AND NOT (COALESCE(g.home_org_id = CAST(:org AS UUID), FALSE) <> COALESCE(g.away_org_id = CAST(:org AS UUID), FALSE))
+             AND ga.team_name IS NOT NULL AND ga.team_name = g.winning_team)
+         OR (NOT (g.winning_team IS NOT NULL
+                  AND ((COALESCE(g.home_org_id = CAST(:org AS UUID), FALSE) <> COALESCE(g.away_org_id = CAST(:org AS UUID), FALSE))
+                       OR ga.team_name IS NOT NULL))
+             AND g.organisation_id = CAST(:org AS UUID) AND UPPER(COALESCE(g.result, '')) IN ('WIN', 'W', 'WON'))
+       )
+"""
+
+
+async def _grant_winner_packs(db, org: str, pid: str, settings: dict) -> dict[str, int]:
+    """Winner Winner: a Premium pack of five for each win the player played in, from the day after it. Add-only and once per game
+    (ref `winner:<game id>`), so a result corrected later never takes one back or pays twice. Nothing before the club's start day
+    (`winner_packs_from`, the day the feature arrived for a club already using cards) and never more than a week back."""
+    if settings.get("winner_packs") is False:
+        return {}
+    today = club_today(settings)
+    floor = today - timedelta(days=WINNER_LOOKBACK_DAYS)
+    start = settings.get("winner_packs_from")
+    if start is None:
+        return {}   # a club with no settings row has not launched cards
+    floor = max(floor, start if isinstance(start, date) else date.fromisoformat(str(start)))
+    rows = (await db.execute(text(_WINS_SQL), {"org": org, "pid": pid, "floor": floor, "today": today})).fetchall()
+    w = kinds.WINNER_PACK
+    n = 0
+    for (game_id,) in rows:
+        n += await _insert_labelled(db, org, pid, w["source"], f"winner:{game_id}", w["label"], w["quality"])
+    return {w["source"]: n}
+
+
 async def _grant_achievement_packs(db, org: str, pid: str, launched: Optional[datetime]) -> dict[str, int]:
     """One pack for each century, five-for, hat-trick, fifty and landmark the player has had since the club began using
     cards. Never from before: a club's whole history does not turn into a flood of high packs on launch."""
@@ -1130,12 +1185,13 @@ async def ensure_grants(db: AsyncSession, club: Organisation, pid: str, snap: di
     launched = settings.get("launched_at")
     added["duck"] = await _insert_packs(db, org, pid, "duck", await _duck_refs(db, pid, launched.date() if launched else None))
     added.update(await _grant_achievement_packs(db, org, pid, launched))
+    added.update(await _grant_winner_packs(db, org, pid, settings))
     added.update(await _grant_day_packs(db, club, pid, settings))
     return added
 
 
 # Where each kind of pack sits in the list: what is special or time-limited first, bulk packs last.
-_PACK_ORDER = {"starter": 0, **{k: 1 for k in ("century", "five_for", "hat_trick", "fifty", "milestone")},
+_PACK_ORDER = {"starter": 0, **{k: 1 for k in ("century", "five_for", "hat_trick", "fifty", "milestone", "winner_winner")},
                **{k: 2 for k in kinds.DAY_SOURCES}, "custom": 2, "reward": 2, "weekly": 3, "duck": 5}
 
 
