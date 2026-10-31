@@ -1351,7 +1351,7 @@ Follow-up (apply_game_roles, same day): the first Shoalwater dry run left 332 na
 
 ### v9.137.2 follow-up: Hamilton's six-player extract read (31 Oct 2026)
 
-The club sent its Excel against BetterStats for six players (Baker, Barker, Forsyth, Healy, Milich, Robinson, Spencer, Tonkin: 8 in the sheet), season by season, 2010/11 to 2026/27. Read by classifying each player-season, club figure against BetterStats:
+The club described a six-player sample but the sheet holds eight (Baker, Barker, Forsyth, Healy, Milich, Robinson, Spencer, Tonkin). It sets the club's Excel beside BetterStats, season by season, 2010/11 to 2026/27. Read by classifying each player-season, club figure against BetterStats:
 
 - 26 player-seasons read EXACTLY double (games, innings, runs, overs, wickets) and three more read double with one figure off. All fall in 2015/16 to 2022/23. Not one season from 2023/24 on is doubled, and every 2024/25 and 2025/26 season agrees to the run. The club typed everything it held for those eight seasons, including the matches PlayHQ already had, and stopped typing when PlayHQ's own data became complete.
 - 15 player-seasons read extra games with innings, runs, overs and wickets right (the club's "additional game recorded but no details"). They sit in 2010/11 to 2012/13 and 2015/16, 2017/18: seasons where PlayHQ holds the team sheet but not the card. The extra count is about the number of games typed (Tonkin 2012/13: 11 recorded, 21 shown).
