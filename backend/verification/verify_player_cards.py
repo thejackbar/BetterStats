@@ -2644,8 +2644,8 @@ async def main() -> None:
     main_src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
     check("the lifespan mirrors the same list", "from app.services.player_cards_ddl import STATEMENTS" in main_src)
     if WINNER_DDL:
-        mig10 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "381_player_card_winner_packs.py").read_text()
-        check("the Winner Winner migration follows 380, runs the shared list, and its lifespan mirror runs it too", 'down_revision = "380"' in mig10 and "STATEMENTS" in mig10 and "player_card_winner_ddl" in main_src)
+        mig10 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "383_player_card_winner_packs.py").read_text()
+        check("the Winner Winner migration follows 382, runs the shared list, and its lifespan mirror runs it too", 'down_revision = "382"' in mig10 and "STATEMENTS" in mig10 and "player_card_winner_ddl" in main_src)
         check("its downgrade drops only the two columns it added", "\n".join(__import__("app.services.player_card_winner_ddl", fromlist=["DOWNGRADE"]).DOWNGRADE).count("DROP COLUMN") == 2)
     if CHALLENGES_DDL:
         mig9 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "380_player_card_challenges.py").read_text()

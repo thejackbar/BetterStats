@@ -1,10 +1,10 @@
-"""Player Cards, Winner Winner packs (migration 381): the club's switch, and the day they start.
+"""Player Cards, Winner Winner packs (migration 383): the club's switch, and the day they start.
 
 * `club_card_settings.winner_packs`: the club's switch for the pack every player who played in a win gets the day after it.
 * `club_card_settings.winner_packs_from`: the first day a win can earn one. A club that already uses cards gets the day this
   migration ran, so its history is not paid out at once; a club that starts using cards later gets that day.
 
-ONE copy of the DDL: alembic's 381 and main.py's lifespan mirror both run STATEMENTS. Every statement is idempotent.
+ONE copy of the DDL: alembic's 383 and main.py's lifespan mirror both run STATEMENTS. Every statement is idempotent.
 """
 
 STATEMENTS = [

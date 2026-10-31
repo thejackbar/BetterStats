@@ -257,11 +257,11 @@ Asked for: players should not have to spend cards for challenges; they are alway
 - Wording: the admin kind is "Squad" (the stored kind stays `exchange`, so no migration). The submit response carries `used` instead of `spent`. The hand-in confirmation is gone, since nothing is lost.
 - Verified: `verify_player_cards.py` (634), browser `_challenges_` (37), `_page_` (66, with the eighth How it works section the earlier release added), `_admin_` (99).
 
-## v9.136.2 (2026-10-31): Winner Winner packs
+## v9.137.2 (2026-10-31): Winner Winner packs
 
 Asked for: after a win, the players in that team who won get a Premium pack of five the day after. Called Winner Winner, green, and sent automatically.
 
-- Migration 381: `club_card_settings.winner_packs` (default on) and `winner_packs_from` (default the day it arrived). The start day stops a club's last week of wins turning into packs the minute this deploys; a week is the most it ever looks back.
+- Migration 383: `club_card_settings.winner_packs` (default on) and `winner_packs_from` (default the day it arrived). The start day stops a club's last week of wins turning into packs the minute this deploys; a week is the most it ever looks back.
 - Paid when a player next opens their page, from the day after the game ends, not only ON that day (unlike Match Day, which needs you there). A pack is one per player per game, so opening the page twice or a corrected scorecard never doubles it.
 - Which wins count is the hard part: `games.result` is relative to the club that synced the game first. The SQL prefers the neutral `winning_team` against the club's side, then the player's team name, and trusts `result` only for a game this club owns. Tested with a shared fixture where the other club's result says WIN and ours was a loss.
 - Green is `cardTheme.PACKS.winner_winner` (a '#22c55e', b '#14532d', three stars to match Premium). The pack is a design target under "For what you do".

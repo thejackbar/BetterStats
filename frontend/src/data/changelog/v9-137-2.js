@@ -1,8 +1,8 @@
 export default {
-  version: 'v9.136.2',
+  version: 'v9.137.2',
   date: '2026-10-31',
-  // Above v9.136.1's sortKey. Check origin/main at merge time.
-  sortKey: '2026-11-13T14:00:00Z',
+  // Above v9.137.1.1's sortKey. Check origin/main at merge time.
+  sortKey: '2026-11-14T20:00:00Z',
   title: 'Player Cards: Winner Winner packs',
   items: [
     'New: Winner Winner. Every player who played in a win gets a green Premium pack of five cards the day after it. A loss, a draw, an abandoned game and a game as 12th man earn nothing.',
