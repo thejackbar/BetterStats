@@ -14,6 +14,7 @@ All endpoints are scoped to the caller's club via get_current_club.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 import re
 from datetime import date, datetime, timezone
@@ -31,9 +32,12 @@ from app.services.side_size import effective_min
 from app.services.club_match import fixture_is_in_house, fixture_side
 from app.services.fixtures_reconcile import reconcile
 from app.services.fixtures_source import org_grassroots_fixtures_checked
-from app.services import squad_sides
+from app.services import grade_move, squad_sides
+from app.services.session_safety import rollback_keeping
 from app.services.grade_labels import grade_is_women, org_grade_category_sets
 from app.services.junior_fixtures import junior_fixture_ids
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/fixtures", tags=["fixtures"])
 
@@ -526,7 +530,19 @@ async def sync_fixtures(
 
     await db.commit()
 
-    if not synced and not rec.changed:
+    # A side the pairing above could not follow (its old row kept as CANCELLED, the
+    # new grade's game beside it) still has to count towards its vote medals.
+    club_id = club.id
+    try:
+        for name in await grade_move.extend_medals_for_dropped_games(db, club_id):
+            if name not in rec.medals_extended:
+                rec.medals_extended.append(name)
+        await db.commit()
+    except Exception:
+        logger.warning("fixtures sync: widening vote medals for a moved team failed", exc_info=True)
+        await rollback_keeping(db, club)
+
+    if not synced and not rec.changed and not rec.medals_extended:
         return {
             "synced": 0, "teams_assigned": 0, "rekeyed": 0, "removed": 0, "cancelled": 0,
             "moved": 0, "medals_extended": [],

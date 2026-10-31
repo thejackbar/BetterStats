@@ -3,14 +3,17 @@
 An association moves a side up or down mid-season (Applecross 8th XI, One Day
 Grade 6 to Grade 5). Everything the club did for that side hangs off a fixture row
 (the picked XI, the unconfirmed draft, votes, notes) or off a vote medal that
-counts a list of grades by name. Two things lost it:
+counts a list of grades by name. Three things lost it:
 
   * the fixtures sync could only re-key a game inside ONE grade, so the
     Grade 6 row CA dropped was cancelled or removed and the Grade 5 one was
     created empty beside it (``fixtures_reconcile.find_moved``);
   * a medal ticked for Grade 6 never counted a vote cast in Grade 5, so a
     season of votes for the side stopped adding up the day it moved
-    (``extend_medals``).
+    (``extend_medals``);
+  * a side the sync could not pair row to row (the old row kept as CANCELLED,
+    the new grade's game beside it) never widened the medal at all
+    (``extend_medals_for_dropped_games``).
 
 Nothing here moves a played game: its stats belong to the grade it was played in
 and stay there (derive on read).
@@ -77,6 +80,50 @@ async def extend_medals(db: AsyncSession, org_id, old_grade_id, new_grade_id) ->
             changed.append(m.name)
     if changed:
         await db.flush()
+    return changed
+
+
+async def extend_medals_for_dropped_games(db: AsyncSession, org_id) -> list[str]:
+    """Widen vote medals for a move the sync could not pair row to row.
+
+    ``fixtures_reconcile`` follows a moved side only when exactly one stale row and
+    one new game share the day and the team name. Otherwise the old row is kept as
+    CANCELLED (the club had picked an XI on it) and the new grade's game sits beside
+    it as its own row, and ``extend_medals`` never runs: a medal ticked for the old
+    grade then drops the team's real games, and its voters are offered nothing.
+
+    The signal is the same one a person would use. A team has a CANCELLED synced
+    game in grade A and, on the same day, a live synced game in grade B, and it has
+    no live game left in A on a later day (a squad that still plays A and had one
+    game washed out is not a move). Every grade-limited medal that counts A by name
+    then counts B too, through ``extend_medals``: ticks are only ever added, an
+    all-grades medal is untouched, and running it again changes nothing. Any date,
+    because the sync's own move logic ignores a day once it has passed. Does not
+    commit. Returns the names of the medals changed.
+    """
+    rows = (await db.execute(
+        text(
+            "SELECT DISTINCT c.grade_id, l.grade_id "
+            "FROM fixtures c "
+            "JOIN fixtures l ON l.organisation_id = c.organisation_id AND l.team_id = c.team_id "
+            "  AND l.played_on = c.played_on AND l.id <> c.id AND l.grade_id <> c.grade_id "
+            "WHERE c.organisation_id = :org AND c.source = 'grassroots' "
+            "  AND UPPER(COALESCE(c.status, '')) = 'CANCELLED' "
+            "  AND c.team_id IS NOT NULL AND c.grade_id IS NOT NULL "
+            "  AND l.source = 'grassroots' AND l.grade_id IS NOT NULL "
+            "  AND UPPER(COALESCE(l.status, '')) NOT IN ('CANCELLED', 'BYE') "
+            "  AND NOT EXISTS ("
+            "    SELECT 1 FROM fixtures x WHERE x.organisation_id = c.organisation_id "
+            "      AND x.team_id = c.team_id AND x.grade_id = c.grade_id AND x.source = 'grassroots' "
+            "      AND x.played_on > c.played_on AND UPPER(COALESCE(x.status, '')) NOT IN ('CANCELLED', 'BYE'))"
+        ),
+        {"org": org_id},
+    )).fetchall()
+    changed: list[str] = []
+    for old_grade, new_grade in rows:
+        for name in await extend_medals(db, org_id, old_grade, new_grade):
+            if name not in changed:
+                changed.append(name)
     return changed
 
 
