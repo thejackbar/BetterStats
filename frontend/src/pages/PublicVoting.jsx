@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
+import { SignedInAs, SignInHint } from '../components/player/SignedInAs'
 
 const initialsOf = (n = '') => n.split(/[ ,]+/).filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase()
 
@@ -250,6 +251,12 @@ export default function PublicVoting() {
     setStep('games')
   }, [searchParams, setSearchParams])
 
+  // Forget who is signed in (best effort on the cookie) and go back to "find your name".
+  const switchPlayer = useCallback(async () => {
+    try { await api.votePublicSwitch(token) } catch { /* cookie clear is best-effort */ }
+    setMe(null); setChosen(null); setFixture(null); setError(''); setLandingKey((k) => k + 1); setStep('pick')
+  }, [token])
+
   const doVerify = async (player, pinValue) => {
     setBusy(true); setError('')
     try {
@@ -320,6 +327,10 @@ export default function PublicVoting() {
           </div>
         )}
 
+        {me && step !== 'loading' && step !== 'dead' && (
+          <SignedInAs name={me.display_name} onSwitch={switchPlayer} />
+        )}
+
         {step !== 'loading' && step !== 'dead' && (
           <div className="flex items-center gap-3 mb-6">
             {club?.logo_url
@@ -335,24 +346,16 @@ export default function PublicVoting() {
                 {(landing?.medal?.name || 'Best-player votes').toUpperCase()}
               </div>
             </div>
-            {me && (
-              <div className="ml-auto flex items-center gap-3 shrink-0">
-                {me.my_page && (
-                  <a href={me.my_page} data-my-page-link
-                    className="text-xs font-semibold underline" style={{ color: 'var(--pb-accent)' }}>My page</a>
-                )}
-                <button onClick={async () => {
-                  try { await api.votePublicSwitch(token) } catch { /* cookie clear is best-effort */ }
-                  setMe(null); setChosen(null); setFixture(null); setLandingKey((k) => k + 1); setStep('pick')
-                }} className="text-xs text-pb-faint hover:text-pb-text underline">Not you?</button>
-              </div>
+            {me?.my_page && (
+              <a href={me.my_page} data-my-page-link
+                className="ml-auto shrink-0 text-xs font-semibold underline" style={{ color: 'var(--pb-accent)' }}>My page</a>
             )}
           </div>
         )}
 
         {step === 'games' && landing && (
           <div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={me?.display_name} onSwitch={switchPlayer} /></> : null}</Banner>
             {((landing.grades?.length || 0) > 1 || (landing.rounds?.length || 0) > 1) && (
               <div className="flex gap-2 mb-3.5">
                 {(landing.grades?.length || 0) > 1 && (
@@ -415,7 +418,7 @@ export default function PublicVoting() {
         {step === 'pick' && landing && (
           <div>
             <div className="text-center mb-4 text-sm text-pb-faint">Find your name to vote</div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={me?.display_name} onSwitch={switchPlayer} /></> : null}</Banner>
             <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search your name…"
               className="w-full bg-pb-surface2 border pb-hairline rounded-xl px-4 py-3 text-base focus:outline-none focus:border-pb-accent mb-3" />
             <div className="rounded-xl border pb-hairline overflow-hidden divide-y divide-pb-hairline max-h-[45vh] overflow-y-auto">
@@ -445,7 +448,7 @@ export default function PublicVoting() {
               <div className="text-sm text-pb-faint">Hi</div>
               <div className="font-display font-bold text-2xl">{chosen.display_name}</div>
             </div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={me?.display_name} onSwitch={switchPlayer} /></> : null}</Banner>
             {!chosen.has_phone ? (
               <div className="text-center text-pb-faint text-sm py-4">
                 There’s no mobile number on file for you yet. Ask your club admin to add it, or to record your votes for you.
@@ -482,7 +485,7 @@ export default function PublicVoting() {
                 This club lets non-players vote. Enter your name so the club knows whose ballot this is.
               </p>
             </div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={me?.display_name} onSwitch={switchPlayer} /></> : null}</Banner>
             <input autoFocus value={supporterName} onChange={(e) => setSupporterName(e.target.value)}
               placeholder="Your name (e.g. Coach Dave)"
               className="w-full bg-pb-surface2 border pb-hairline rounded-xl px-4 py-3 text-base focus:outline-none focus:border-pb-accent" />
@@ -501,7 +504,7 @@ export default function PublicVoting() {
               </div>
               <div className="text-xs text-pb-faint mt-0.5">{fmtDay(fixture.fixture.date)}</div>
             </div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={me?.display_name} onSwitch={switchPlayer} /></> : null}</Banner>
 
             {fixture.fixture.state !== 'open' ? (
               <div className="rounded-xl border pb-hairline px-4 py-8 text-center text-pb-faint text-sm">
@@ -511,6 +514,7 @@ export default function PublicVoting() {
             ) : fixture.role === 'none' ? (
               <div className="rounded-xl border pb-hairline px-4 py-8 text-center text-pb-faint text-sm">
                 {REASON[fixture.reason] || 'You can’t vote on this game.'}
+                {fixture.reason !== 'no_voters_chosen' && <SignInHint name={me?.display_name} onSwitch={switchPlayer} />}
                 <div className="mt-4"><button onClick={backToGames} className="text-pb-accent underline">← Back to games</button></div>
               </div>
             ) : (

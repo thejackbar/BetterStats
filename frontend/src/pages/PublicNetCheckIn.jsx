@@ -18,6 +18,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../lib/api'
+import { SignInHint } from '../components/player/SignedInAs'
 
 function ClubHeader({ club }) {
   const initials = (club?.name || 'Club').split(' ').map((w) => w[0]).join('').slice(0, 3).toUpperCase()
@@ -251,7 +252,7 @@ export default function PublicNetCheckIn() {
                 {squadNames.length > 0 && <span data-squad-note> · {squadNames.join(', ')} squad{squadNames.length === 1 ? '' : 's'}</span>}
               </p>
             )}
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={chosen?.display_name} onSwitch={switchPlayer} /></> : null}</Banner>
             <input
               autoFocus
               value={search}
@@ -300,7 +301,7 @@ export default function PublicNetCheckIn() {
               <div className="text-sm text-pb-faint">Hi</div>
               <div className="font-display font-bold text-2xl">{chosen.display_name}</div>
             </div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={chosen?.display_name} onSwitch={switchPlayer} /></> : null}</Banner>
 
             {chosen.verified ? (
               // Verified on a previous visit — the cookie is the proof, so this
@@ -370,7 +371,7 @@ export default function PublicNetCheckIn() {
                 Leave your details and you’re in for tonight. Someone at the club will pick this up and add you properly.
               </p>
             </div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={chosen?.display_name} onSwitch={switchPlayer} /></> : null}</Banner>
             <div className="space-y-3">
               <div>
                 <label className="block font-mono text-[11px] tracking-wide2 text-pb-faint uppercase mb-1.5">Full name</label>
