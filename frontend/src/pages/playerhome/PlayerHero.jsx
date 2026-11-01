@@ -3,6 +3,7 @@
 // only; nothing here names another player.
 import { useState } from 'react'
 import { fmtShort, fmtTime } from './ui'
+import { formatPlayerName } from '../../lib/nameFormat'
 
 function initialsOf(name) {
   const parts = (name || '').trim().split(/\s+/).filter(Boolean)
@@ -13,7 +14,7 @@ function initialsOf(name) {
 
 // The photo, or their initials in the club colour when there is none (or it will
 // not load, which a stale link to a deleted photo does).
-function Avatar({ player }) {
+function Avatar({ player, name }) {
   const [failed, setFailed] = useState(false)
   const size = 'w-[76px] h-[76px] sm:w-[92px] sm:h-[92px]'
   if (player?.photo_url && !failed) {
@@ -26,13 +27,15 @@ function Avatar({ player }) {
     <span data-hero-initials aria-hidden="true"
       className={`${size} rounded-2xl shrink-0 flex items-center justify-center font-display font-bold text-2xl`}
       style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>
-      {initialsOf(player?.display_name)}
+      {initialsOf(name)}
     </span>
   )
 }
 
 export default function PlayerHero({ club, player, squads, selected = [], onSwitch, onUpdateDetails }) {
   const short = club?.short_name || club?.name
+  // Printed the way the club chose in Settings (First Last, Last, First and so on).
+  const name = formatPlayerName(player?.display_name, club?.player_name_format)
   return (
     <section data-hero className="rounded-2xl border pb-hairline p-4 mb-3"
       style={{ background: 'color-mix(in srgb, var(--pb-accent) 6%, transparent)' }}>
@@ -41,11 +44,11 @@ export default function PlayerHero({ club, player, squads, selected = [], onSwit
           {club?.logo_url && <img src={club.logo_url} alt="" className="w-6 h-6 rounded object-contain shrink-0" />}
           <span className="font-mono text-[10.5px] uppercase tracking-wide2 text-pb-faint truncate">{short}</span>
         </div>
-        <button onClick={onSwitch} className="text-pb-faint text-xs hover:text-pb-text underline shrink-0">Signed in as {player?.display_name}. Not you?</button>
+        <button onClick={onSwitch} className="text-pb-faint text-xs hover:text-pb-text underline shrink-0">Signed in as {name}. Not you?</button>
       </div>
       <div className="flex items-center gap-4">
         <div className="relative shrink-0">
-          <Avatar player={player} />
+          <Avatar player={player} name={name} />
           {player?.shirt_number ? (
             <span data-shirt className="absolute -bottom-1.5 -right-1.5 min-w-[26px] text-center rounded-full px-1.5 py-0.5 font-display font-bold text-[12px] border"
               style={{ background: 'var(--pb-bg)', borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' }}>
@@ -54,7 +57,7 @@ export default function PlayerHero({ club, player, squads, selected = [], onSwit
           ) : null}
         </div>
         <div className="min-w-0">
-          <div className="font-display font-bold text-[22px] sm:text-[26px] leading-tight break-words" data-hero-name>{player?.display_name}</div>
+          <div className="font-display font-bold text-[22px] sm:text-[26px] leading-tight break-words" data-hero-name>{name}</div>
           {(squads || []).length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5" data-my-squads>
               {squads.map((n) => (

@@ -230,6 +230,8 @@ def _club_branding(club: Organisation) -> dict:
         "logo_url": club.logo_url,
         "primary_color": club.primary_color,
         "accent_color": club.accent_color,
+        # So the page prints player names the way the club chose in Settings.
+        "player_name_format": club.player_name_format or "last_first",
     }
 
 

@@ -141,6 +141,8 @@ def _club_branding(club: Organisation) -> dict:
         "logo_url": club.logo_url,
         "primary_color": club.primary_color,
         "accent_color": club.accent_color,
+        # So the page prints player names the way the club chose in Settings.
+        "player_name_format": club.player_name_format or "last_first",
     }
 
 
@@ -554,6 +556,11 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         )).fetchall()
         photos = {str(i): u for i, u in rows}
 
+    # What each player did in this game, one small line each, to help a voter choose.
+    # Only a game that has synced has a scorecard; a lineup-sourced game before then has none.
+    stats = {} if role == "none" else await vote_svc.match_stat_lines(
+        db, club.id, vote_svc.match_ref_id(fx), ids)
+
     return {
         "club": _club_branding(club),
         "fixture": {
@@ -577,7 +584,8 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
         # Someone who cannot vote on this game (did not play it, or the club needs a
         # name first) is not handed its team list.
         "players": [] if role == "none" else [
-            {"id": p["id"], "name": p["name"], "photo_url": photos.get(str(p["id"]))} for p in eligible
+            {"id": p["id"], "name": p["name"], "photo_url": photos.get(str(p["id"])),
+             "stats": stats.get(str(p["id"]))} for p in eligible
         ],
         "my_ballot": my_ballot,
     }

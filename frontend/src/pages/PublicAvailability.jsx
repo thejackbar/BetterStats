@@ -13,6 +13,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
+import { formatPlayerName, nameMatchesSearch } from '../lib/nameFormat'
 import { AvailabilityEditor, ALL_CHOICES, unansweredNextWeek } from './playerhome/AvailabilityEditor'
 import Group, { useOpenSections } from './playerhome/Group'
 import DetailsModal from './playerhome/DetailsModal'
@@ -43,8 +44,9 @@ function ClubHeader({ club, hasAvailability = true }) {
 // their own mobile and were refused had very often tapped somebody else's name
 // (or arrived on a link that had someone else picked), so the name is the
 // biggest thing on the screen and the label names whose mobile is wanted.
-function SigningInAs({ player, onSwitch }) {
-  const initials = (player?.display_name || '?').trim().split(/\s+/).filter(Boolean)
+function SigningInAs({ player, club, onSwitch }) {
+  const shownName = formatPlayerName(player?.display_name, club?.player_name_format)
+  const initials = (shownName || '?').trim().split(/\s+/).filter(Boolean)
     .map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
   return (
     <div data-signing-in-as className="rounded-2xl border-2 p-4 mb-4 text-center"
@@ -52,7 +54,7 @@ function SigningInAs({ player, onSwitch }) {
       <div className="font-mono text-[11px] tracking-wide2 text-pb-faint uppercase mb-3">You are logging in as</div>
       <span aria-hidden="true" className="mx-auto mb-2 w-14 h-14 rounded-2xl flex items-center justify-center font-display font-bold text-xl"
         style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{initials}</span>
-      <div data-signing-in-name className="font-display font-bold text-3xl leading-tight break-words">{player?.display_name}</div>
+      <div data-signing-in-name className="font-display font-bold text-3xl leading-tight break-words">{shownName}</div>
       <button type="button" onClick={onSwitch} data-not-you
         className="mt-4 w-full py-2.5 rounded-xl border pb-hairline bg-pb-surface2 text-sm font-semibold hover:text-pb-accent transition-colors">
         This isn’t me. Pick a different name
@@ -79,7 +81,8 @@ function Banner({ tone = 'error', children }) {
 // they have already cast with who they gave 3, 2 and 1 to. Each to-cast game links
 // to its ballot on the vote page (which asks for their PIN once); a cast vote on a
 // game still open links to the same ballot to change it.
-function VotesModule({ data }) {
+function VotesModule({ data, club }) {
+  const fmt = (n) => formatPlayerName(n, club?.player_name_format)
   const due = data.votes || []
   const cast = data.votes_cast || []
   return (
@@ -114,7 +117,10 @@ function VotesModule({ data }) {
                     {c.picks.map((pk, i) => (
                       <div key={i} className="flex items-baseline gap-2 text-[13px]" data-pick>
                         <span className="font-mono font-bold w-5 text-right shrink-0" style={{ color: 'var(--pb-accent)' }}>{pk.points ?? ''}</span>
-                        <span className="min-w-0 truncate">{pk.name}</span>
+                        <div className="min-w-0">
+                          <div className="truncate">{fmt(pk.name)}</div>
+                          {pk.stats && <div className="text-[11px] leading-snug text-pb-faint" data-pick-stats>{pk.stats}</div>}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -484,7 +490,7 @@ function MyPage({ token, me, club, availability, onSwitch }) {
   const render = (key) => {
     switch (key) {
       case 'cards': return <CardsSummary key={key} token={token} club={club} swapsWaiting={data?.cards?.swaps_waiting || 0} onReady={setCardsReady} />
-      case 'votes': return <VotesModule key={key} data={data} />
+      case 'votes': return <VotesModule key={key} data={data} club={club} />
       case 'ladder': return <LadderModule key={key} state={ladder} />
       case 'season': return <SeasonDashboard key={key} data={data} ranks={ranks} />
       case 'fantasy': return <FantasyCard key={key} data={data} />
@@ -639,10 +645,11 @@ export default function PublicAvailability() {
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [step, token])
 
+  const fmtName = (n) => formatPlayerName(n, club?.player_name_format)
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return players
-    return players.filter((p) => p.display_name.toLowerCase().includes(q))
+    return players.filter((p) => nameMatchesSearch(p.display_name, q))
   }, [players, search])
 
   const pickPlayer = async (p) => {
@@ -782,7 +789,7 @@ export default function PublicAvailability() {
                   onClick={() => pickPlayer(p)}
                   className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-pb-surface2 transition-colors"
                 >
-                  <span className="text-[15px] font-medium">{p.display_name}</span>
+                  <span className="text-[15px] font-medium">{fmtName(p.display_name)}</span>
                   {requirePin && !p.has_phone
                     ? <span className="font-mono text-[10px] text-pb-faintest uppercase shrink-0">no mobile</span>
                     : <span className="text-pb-faintest shrink-0">→</span>}
@@ -798,23 +805,23 @@ export default function PublicAvailability() {
         {/* Step 2 — prove it's you */}
         {step === 'pin' && chosen && (
           <form onSubmit={submitPin}>
-            <SigningInAs player={chosen} onSwitch={switchPlayer} />
+            <SigningInAs player={chosen} club={club} onSwitch={switchPlayer} />
             {error && (
               <Banner>
                 <div>{error}</div>
                 <div className="mt-1.5 font-semibold">
-                  You are logging in as {chosen.display_name}. If that is not you, pick your own name.
+                  You are logging in as {fmtName(chosen.display_name)}. If that is not you, pick your own name.
                 </div>
               </Banner>
             )}
             {!chosen.has_phone ? (
               <div className="text-center text-pb-faint text-sm py-4">
-                There’s no mobile number on file for {chosen.display_name} yet. Ask your club admin to add it, or to set your availability for you.
+                There’s no mobile number on file for {fmtName(chosen.display_name)} yet. Ask your club admin to add it, or to set your availability for you.
               </div>
             ) : (
               <>
                 <label className="block text-center text-sm font-semibold mb-2">
-                  Enter the last 4 digits of <span style={{ color: 'var(--pb-accent)' }}>{chosen.display_name}’s</span> mobile
+                  Enter the last 4 digits of <span style={{ color: 'var(--pb-accent)' }}>{fmtName(chosen.display_name)}’s</span> mobile
                 </label>
                 <input
                   ref={pinRef}
@@ -831,7 +838,7 @@ export default function PublicAvailability() {
                   className="w-full mt-4 py-3.5 rounded-xl font-semibold text-pb-bg transition disabled:opacity-50"
                   style={{ background: 'var(--pb-accent)' }}
                 >
-                  {verifying ? 'Checking…' : `Log in as ${chosen.display_name}`}
+                  {verifying ? 'Checking…' : `Log in as ${fmtName(chosen.display_name)}`}
                 </button>
               </>
             )}

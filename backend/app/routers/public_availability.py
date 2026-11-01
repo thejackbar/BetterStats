@@ -187,6 +187,8 @@ def _club_branding(club: Organisation) -> dict:
         "logo_url": club.logo_url,
         "primary_color": club.primary_color,
         "accent_color": club.accent_color,
+        # So the page prints player names the way the club chose in Settings.
+        "player_name_format": club.player_name_format or "last_first",
     }
 
 
@@ -441,6 +443,9 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
     )).scalars().all()
     due: list[dict] = []
     cast: list[dict] = []
+    # Each cast ballot's game and the players it names, so the lines of match stats
+    # are read only for the few ballots that are shown.
+    cast_games: dict[int, tuple] = {}
     live_left = VOTES_LIVE_EXAMINED
     for medal in medals:
         cfg = vote_svc.effective_config(medal)
@@ -469,7 +474,7 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
                 f = fx_by[b.fixture_id]
                 is_open = state_by[b.fixture_id] == "open"
                 closes = vote_svc.fixture_close_date(f, cfg)
-                cast.append({
+                row = {
                     "medal": medal.name,
                     "fixture_id": str(f.id),
                     "opponent": f.opponent_name or f.label,
@@ -484,7 +489,10 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
                         for pk in sorted(b.picks, key=lambda x: x.position)
                     ],
                     "link": f"/vote/{medal.link_token}?fixture={f.id}&player={player.id}" if is_open else None,
-                })
+                }
+                cast.append(row)
+                cast_games[id(row)] = (
+                    vote_svc.match_ref_id(f), [pk.player_id for pk in sorted(b.picks, key=lambda x: x.position)])
 
         todo = [f for f in open_fx if f.id not in voted]
         if not todo:
@@ -521,7 +529,14 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
             })
     due.sort(key=lambda d: (d["closes_on"] or "9999", d["date"] or ""))
     cast.sort(key=lambda c: c["date"] or "", reverse=True)
-    return due, cast[:VOTES_CAST_SHOWN]
+    cast = cast[:VOTES_CAST_SHOWN]
+    for row in cast:
+        game_ref, pick_ids = cast_games[id(row)]
+        stats = await vote_svc.match_stat_lines(db, club.id, game_ref, pick_ids)
+        # What each player they picked did in that game, small, under their name.
+        for pk, pid in zip(row["picks"], pick_ids):
+            pk["stats"] = stats.get(str(pid))
+    return due, cast
 
 
 FANTASY_DEADLINES_SHOWN = 3
