@@ -66,13 +66,13 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 TODAY = date.today()
 NOW = datetime.now(timezone.utc)
 ORG = uuid.uuid4()
-CAP, VICE, P1, P2, X, Y, Z = (uuid.uuid4() for _ in range(7))
+CAP, VICE, P1, P2, X, Y, Z, W, V = (uuid.uuid4() for _ in range(9))
 KEEPER = uuid.uuid4()
-PRICE = {CAP: 5.0, VICE: 5.0, P1: 10.0, P2: 14.0, X: 12.0, Y: 9.0, Z: 13.0}
-NAMES = {CAP: "Cap", VICE: "Vice", P1: "Pat One", P2: "Pat Two", X: "Xan", Y: "Yul", Z: "Zed Z"}
+PRICE = {CAP: 5.0, VICE: 5.0, P1: 10.0, P2: 14.0, X: 12.0, Y: 9.0, Z: 13.0, W: 4.0, V: 4.5}
+NAMES = {CAP: "Cap", VICE: "Vice", P1: "Pat One", P2: "Pat Two", X: "Xan", Y: "Yul", Z: "Zed Z", W: "Wes Cheap", V: "Val Cheap"}
 FS_ID, R1, R2 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-# M: bank 1.1, one free transfer.  N: bank 0, none.  L, H: queued behind a lock.
-SQUADS = {k: (uuid.uuid4(), uuid.uuid4(), b, f) for k, b, f in (("M", 1.1, 1), ("N", 0.0, 0), ("L", 1.1, 1), ("H", 0.0, 1))}
+# M: bank 1.1, one free transfer.  N: bank 0, none.  L, H: queued behind a lock.  C: sells the captain and vice.
+SQUADS = {k: (uuid.uuid4(), uuid.uuid4(), b, f) for k, b, f in (("M", 1.1, 1), ("N", 0.0, 0), ("L", 1.1, 1), ("H", 0.0, 1), ("C", 5.0, 1))}
 MGR = {v[0]: v[1] for v in SQUADS.values()}
 
 
@@ -225,8 +225,41 @@ async def main_checks() -> None:
     check("nothing tallied", await tally("N", R1) is None)
 
     print("4. The other rules still hold in a batch")
-    code, r = await refused(batch("N", [(CAP, X)]))
-    check("the captain cannot be sold", code == 400, repr((code, r)))
+    # The captain and vice CAN be sold: the player who comes in takes the armband. (This used to be
+    # refused with "Change your captain or vice first", which left a manager unable to confirm.)
+    async def armbands(key):
+        async with Session() as s:
+            return {(r[0]): (bool(r[1]), bool(r[2])) for r in (await s.execute(text(
+                "SELECT player_id, is_captain, is_vice_captain FROM fantasy_squad_players WHERE squad_id = :s"),
+                {"s": SQUADS[key][0]})).all()}
+    code, r = await refused(single("C", CAP, W))
+    check("the captain can be sold for a cheaper player (single route)", code is None, repr((code, r)))
+    ab = await armbands("C")
+    check("the player who came in is now captain", ab.get(W) == (True, False), repr(ab))
+    check("and the captain is gone, so there is still exactly one", CAP not in ab and sum(1 for c, _ in ab.values() if c) == 1, repr(ab))
+    code, r = await refused(batch("C", [(VICE, V)]))
+    check("the vice can be sold too (batch route)", code is None, repr((code, r)))
+    ab = await armbands("C")
+    check("the incoming player is now vice, the captain is untouched",
+          ab.get(V) == (False, True) and ab.get(W) == (True, False) and VICE not in ab, repr(ab))
+    check("one captain and one vice remain", sum(1 for c, _ in ab.values() if c) == 1 and sum(1 for _, v in ab.values() if v) == 1, repr(ab))
+    check("bank follows both sales (5.0 + 5.0 - 4.0 + 5.0 - 4.5)", await squad_row("C") == (6.5, 0), repr(await squad_row("C")))
+
+    # Every refusal names the player and the figures, so the manager can see what to change.
+    code, r = await refused(batch("N", [(P1, X), (P2, Z)]))
+    check("over budget says by how much and why",
+          code == 400 and all(t in str(r) for t in ("$1.0 over budget", "$0.0 in the bank", "$24.0", "$25.0")), repr((code, r)))
+    code, r = await refused(batch("N", [(Y, X)]))
+    check("a player who is not in the squad is named", code == 400 and "Yul" in str(r) and "isn't in your squad" in str(r), repr((code, r)))
+    code, r = await refused(batch("N", [(P1, KEEPER)]))
+    check("a role mismatch names both players and both roles",
+          code == 400 and all(t in str(r) for t in ("Kay Keeper", "wicketkeeper", "Pat One", "batter")), repr((code, r)))
+    code, r = await refused(batch("N", [(P1, P2)]))
+    check("a player already held is named", code == 400 and "Pat Two" in str(r) and "already in your squad" in str(r), repr((code, r)))
+    code, r = await refused(batch("N", [(P1, X), (P1, Y)]))
+    check("a repeated player is named", code == 400 and "Pat One" in str(r) and "more than one transfer" in str(r), repr((code, r)))
+    code, r = await refused(batch("N", [("not-a-player-id", X)]))
+    check("a malformed player id is a readable 400, not a 500", code == 400 and "isn't in your squad" in str(r), repr((code, r)))
     code, r = await refused(batch("N", [(P1, X), (P1, Y)]))
     check("the same player cannot go out twice", code == 400, repr((code, r)))
     code, r = await refused(batch("N", [(P1, Y), (P2, Y)]))
@@ -256,6 +289,11 @@ async def main_checks() -> None:
     code, r = await refused(single("H", P1, X))
     code2, r2 = await refused(single("H", P2, Z))
     check("H queues a pair the budget cannot cover (12.0 + 13.0 against 24.0)", code is None and code2 is None, repr((code, r, code2, r2)))
+    check("and warns in dollars how far over it is", isinstance(r2, dict) and "$" in str(r2.get("warning")) and "over budget" in str(r2.get("warning")), repr(r2))
+    code, r = await refused(single("L", P1, Z))
+    check("queuing a player twice names the player", code == 400 and "Pat One" in str(r) and "already queued" in str(r), repr((code, r)))
+    code, r = await refused(single("L", Y, Z))
+    check("a queued swap for someone not in the squad names them", code == 400 and "Yul" in str(r), repr((code, r)))
 
     print("6. Settlement carries out a queued swap that a later sale pays for")
     async with Session() as s:
