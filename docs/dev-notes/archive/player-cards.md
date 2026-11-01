@@ -268,3 +268,12 @@ Asked for: after a win, the players in that team who won get a Premium pack of f
 - Also fixed in passing: the Sets switch said finishing a set awards nothing, which stopped being true in v9.136.0. And `verify_player_cards.py` failed on 31 October because two Halloween checks counted all Halloween packs; they now compare against a baseline.
 - Not done: a team-sheet or "played but result not yet in" case: a win only counts once the scorecard (or a hand-entered result) is in.
 - Verified: `verify_player_cards.py` (651; a mutation that ignores the winning side fails five of the new checks), the other backend suites and route audit, browser `_page_` (67), `_admin_` (101), `_designs_` (35), `_challenges_` (37), `_hero_`, community and social.
+
+## v9.137.2.1 (2026-11-01): Winner Winner and Match Day catch up
+
+Reported the day after Winner Winner shipped: players who won on Saturday had no pack, and a player in a T20 Division Two team playing today had no Match Day pack.
+
+- Not verified against live data: the sandbox has no production access. What the code explains: the Winner Winner start day (`winner_packs_from`) is the day migration 383 ran, so wins finished before that day are never paid, and a deploy the day after the games does exactly that. Match Day only reads a CONFIRMED team sheet, so a side not yet confirmed in Selection earns nothing until it is.
+- Changed: the win rule's last fallback now also applies when a winner is recorded but the player's team name matches neither side (it reads the club's own stored result); a failure in the wins query is isolated in a savepoint so it cannot stop the Match Day pack or the page; `ensure_grants` passes the club id as a string.
+- Added: `catch_up_card_packs` (dry run, `--apply --by`, audited per club as `player_card_packs_caught_up`) and `diagnose_card_packs` (read-only, prints the query's own error if it raises).
+- Verified: `verify_player_cards.py` (660: catch-up dry run writes nothing, apply pays, a second run pays nothing, a later start day is ignored, a broken wins query leaves the other packs granted), the other backend suites.

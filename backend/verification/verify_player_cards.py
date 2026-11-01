@@ -1699,15 +1699,16 @@ async def main() -> None:
                     await win_game("draw", 5, winner=None, result="DRAW")
                     await win_game("result_only_win", 6, home_org=None, away_org=None, winner=None, result="WIN")
                     await win_game("their_win_our_result_word", 2, home_org=ORG_SELECT, away_org=ORG, home_team="Them", away_team="Us", winner="Them", result="WIN")
+                    await win_game("name_mismatch_win", 3, home_org=None, away_org=None, winner="Us", result="WIN", team="Applecross A")
                     await win_game("too_old", 9)
                     await win_game("two_day_win", 0, two_day=True)
                     await db.commit()
                     refs = lambda pid: db.execute(text("SELECT ref_key, quality, label, size, source FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND source = 'winner_winner'"), {"p": pid})
                     early = await on(E - timedelta(days=1), z1)   # the day home_win is played
-                    check("nothing on the day a win is played, but earlier wins are paid", f"winner:{gids['home_win']}" not in {r[0] for r in (await refs(z1)).fetchall()} and early.get("winner_winner") == 2, str(early))
+                    check("nothing on the day a win is played, but earlier wins are paid", f"winner:{gids['home_win']}" not in {r[0] for r in (await refs(z1)).fetchall()} and early.get("winner_winner") == 3, str(early))
                     got = await on(E, z1)
                     have = {r[0] for r in (await refs(z1)).fetchall()}
-                    check("the day after, each win the player played in pays a pack", have == {f"winner:{gids[k]}" for k in ("home_win", "away_win", "result_only_win")} and got.get("winner_winner") == 1, str(got) + str(have))
+                    check("the day after, each win the player played in pays a pack", have == {f"winner:{gids[k]}" for k in ("home_win", "away_win", "result_only_win", "name_mismatch_win")} and got.get("winner_winner") == 1, str(got) + str(have))
                     check("...not a loss, a draw, a game as 12th man, or a game that is a win only for the other club", all(f"winner:{gids[k]}" not in have for k in ("home_loss", "draw", "reserve_win", "their_win_our_result_word")))
                     check("...nor a win older than a week", f"winner:{gids['too_old']}" not in have)
                     check("a two day game pays the day after its LAST day, not on it", f"winner:{gids['two_day_win']}" not in have)
@@ -1716,7 +1717,7 @@ async def main() -> None:
                     one = (await refs(z1)).fetchall()[0]
                     check("a Winner Winner pack is Premium, named for the win, five cards", one[1] == "premium" and one[2] == "Winner Winner" and one[3] in (None, 5) and one[4] == "winner_winner", str(one))
                     # the player who was 12th man in the reserve game still got the others, and the reserve game is a pack for nobody who did not play
-                    check("a player on the winning side who did play in the reserve game gets that pack", (await on(E + timedelta(days=1), z2)).get("winner_winner") == 5, str((await refs(z2)).fetchall()))
+                    check("a player on the winning side who did play in the reserve game gets that pack", (await on(E + timedelta(days=1), z2)).get("winner_winner") == 6, str((await refs(z2)).fetchall()))
                     snap_w = await cards.club_snapshot(db, club, fresh=True)
                     ww = next(p for p in await cards.available_packs(db, z1, snap_w) if p["source"] == "winner_winner")
                     check("it shows in the list under its name, Premium, five cards", ww["label"] == "Winner Winner" and ww["quality"] == "premium" and ww["size"] == 5)
@@ -1731,6 +1732,7 @@ async def main() -> None:
                     snap = await cards.club_snapshot(db, club, fresh=True)
                     await on(E + timedelta(days=1), z2)
                     check("...and wins before the club's start day are never paid", {r[0] for r in (await refs(z2)).fetchall()} == {f"winner:{gids['home_win']}", f"winner:{gids['two_day_win']}"}, str((await refs(z2)).fetchall()))
+                    check("a win is still paid when the player's team name matches neither side's name, if the result is ours", f"winner:{gids['name_mismatch_win']}" in have)
                     await db.execute(text("UPDATE club_card_settings SET winner_packs_from = CURRENT_DATE WHERE organisation_id = :o"), {"o": ORG}); await db.commit()
                     snap = await cards.club_snapshot(db, club, fresh=True)
                     opened = await cards.open_pack(db, club, await db.get(Player, Z1), ww["id"], snap_w)
@@ -1739,6 +1741,55 @@ async def main() -> None:
                     k_ww = K.kind_for("winner_winner")
                     check("its odds are a Premium pack's", k_ww.rare_plus == K.QUALITIES["premium"].rare_plus and k_ww.weights == K.QUALITIES["premium"].weights)
                     await db.execute(text("DELETE FROM player_card_packs WHERE source = 'winner_winner'")); await db.commit()
+
+                    # a failure in the Winner Winner query must not stop the other packs
+                    real_sql = cards._WINS_SQL
+                    cards._WINS_SQL = "SELECT nonsense FROM nowhere"
+                    try:
+                        broke = await on(E + timedelta(days=1), z2)
+                        survived = "starter" in broke or "weekly" in broke
+                    except Exception as exc:
+                        survived = False
+                    finally:
+                        cards._WINS_SQL = real_sql
+                    check("if the wins query fails, the player's other packs are still granted and nothing raises", survived and broke.get("winner_winner") in (None, 0) if survived else False)
+                    await db.rollback()
+                    club = await db.get(Organisation, ORG)
+                    snap = await cards.club_snapshot(db, club, fresh=True)
+
+                    # catching up: the same grants for everyone at once, from a start day that fell after the wins
+                    ww_fx = uuid.uuid4()
+                    await db.execute(text("INSERT INTO fixtures (id, organisation_id, source, played_on, status) VALUES (:i, :o, 'manual', :d, 'UPCOMING')"), {"i": ww_fx, "o": ORG, "d": E + timedelta(days=1)})
+                    await db.execute(text("INSERT INTO fixture_lineups (fixture_id, player_id, organisation_id) VALUES (:f, :p, :o)"), {"f": ww_fx, "p": Z1, "o": ORG})
+                    await db.execute(text("UPDATE club_card_settings SET winner_packs_from = :d WHERE organisation_id = :o"), {"d": E, "o": ORG}); await db.commit()
+                    cards.club_today = lambda st, now=None: E + timedelta(days=1)
+                    try:
+                        md_before = (await n_packs(z1, "match_day")).scalar()
+                        dry = await cards.catch_up_packs(db, club, apply=False, winner_from=E - timedelta(days=3))
+                        await db.rollback()
+                        club = await db.get(Organisation, ORG)
+                        names = {r["player"] for r in dry["winner"]}
+                        z1_wins = [r for r in dry["winner"] if r["player"].startswith("Zulu")]
+                        check("a dry run says who would get what, and writes nothing", len(z1_wins) == 4 and any(r["player"].startswith("Zulu") for r in dry["match_day"]) and not dry["errors"]
+                              and (await n_packs(z1, "winner_winner")).scalar() == 0 and (await n_packs(z1, "match_day")).scalar() == md_before, str(dry)[:400])
+                        check("...and does not move the start day", (await db.execute(text("SELECT winner_packs_from FROM club_card_settings WHERE organisation_id = :o"), {"o": ORG})).scalar() == E)
+                        before_md = (await n_packs(z1, "match_day")).scalar()
+                        done = await cards.catch_up_packs(db, club, apply=True, winner_from=E - timedelta(days=3))
+                        await db.commit()
+                        check("applying pays the wins finished since the start day it was given, and today's Match Day", (await n_packs(z1, "winner_winner")).scalar() == 4 and (await n_packs(z1, "match_day")).scalar() == before_md + 1 and not done["errors"], str(done)[:400])
+                        check("...lowers the club's start day", (await db.execute(text("SELECT winner_packs_from FROM club_card_settings WHERE organisation_id = :o"), {"o": ORG})).scalar() == E - timedelta(days=3))
+                        again = await cards.catch_up_packs(db, club, apply=True, winner_from=E - timedelta(days=3))
+                        await db.commit()
+                        check("running it again pays nothing more", not again["winner"] and not again["match_day"] and (await n_packs(z1, "winner_winner")).scalar() == 4)
+                        later = await cards.catch_up_packs(db, club, apply=True, winner_from=E + timedelta(days=5))
+                        await db.commit()
+                        check("a later start day is never applied (it only lowers)", later["winner_from"] == (E - timedelta(days=3)).isoformat() and (await db.execute(text("SELECT winner_packs_from FROM club_card_settings WHERE organisation_id = :o"), {"o": ORG})).scalar() == E - timedelta(days=3))
+                        check("a player not on a sheet today gets no Match Day pack from it", (await n_packs(z2, "match_day")).scalar() == (await db.execute(text("SELECT count(*) FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND source = 'match_day'"), {"p": z2})).scalar() and not any(r["player"].startswith("Yankee") for r in done["match_day"]))
+                    finally:
+                        cards.club_today = real_today
+                    await db.execute(text("DELETE FROM player_card_packs WHERE source = 'winner_winner'")); await db.commit()
+                    await db.execute(text("UPDATE club_card_settings SET winner_packs_from = CURRENT_DATE WHERE organisation_id = :o"), {"o": ORG}); await db.commit()
+                    snap = await cards.club_snapshot(db, club, fresh=True)
 
                 # taking back the packs that went out wrongly
                 for d_ in (D(2031, 8, 4), D(2031, 8, 5)):

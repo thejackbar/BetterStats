@@ -1015,6 +1015,60 @@ async def unwind_stray_match_day_packs(db, org: str, *, apply: bool = False) -> 
     return out
 
 
+async def catch_up_packs(db, club: Organisation, *, apply: bool = False, winner_from: Optional[date] = None) -> dict:
+    """Pay now what the players of a club have earned and not yet been granted, for the two packs that depend on a day: Winner
+    Winner (wins finished before today, within a week) and Match Day (today's own fixtures). It applies the same rules, the same refs
+    and the same add-only inserts as a player opening their page, so it can never pay twice or pay what that would not. Dry run
+    unless `apply`.
+
+    `winner_from` lowers the club's Winner Winner start day (never raises it), for a club whose start day fell after wins it meant
+    to pay (the feature arrived the day after the games). Every player in the card pool is looked at, each in a savepoint, so one
+    failing player is listed in `errors` and the rest still go. Returns counts, who, and the start day used."""
+    org = str(club.id)
+    settings = await load_settings(db, org)
+    out: dict = {"winner": [], "match_day": [], "errors": [], "applied": bool(apply), "winner_from": None, "today": None}
+    if not settings.get("enabled", True) or settings.get("launched_at") is None:
+        out["note"] = "Player Cards are off, or not launched, for this club."
+        return out
+    today = club_today(settings)
+    out["today"] = today.isoformat()
+    current = settings.get("winner_packs_from")
+    start = current
+    if winner_from is not None and (current is None or winner_from < current):
+        start = winner_from
+    out["winner_from"] = start.isoformat() if start else None
+    window = _winner_window(settings, start)
+    if apply and start is not None and start != current:
+        await db.execute(text("UPDATE club_card_settings SET winner_packs_from = :d WHERE organisation_id = CAST(:o AS UUID)"), {"d": start, "o": org})
+    snap = await club_snapshot(db, club, fresh=True)
+    have: dict[str, set] = {}
+    for pid_, ref in (await db.execute(text(
+            "SELECT player_id::text, ref_key FROM player_card_packs WHERE organisation_id = CAST(:o AS UUID) AND source IN ('winner_winner', 'match_day')"),
+            {"o": org})).fetchall():
+        have.setdefault(pid_, set()).add(ref)
+    w = kinds.WINNER_PACK
+    day_ref = f"match_day:{today.isoformat()}"
+    for pid, person in snap["people"].items():
+        name = person.get("display_name") or pid
+        try:
+            async with db.begin_nested():
+                if window is not None:
+                    for game_id in await _winning_games(db, org, pid, *window):
+                        if f"winner:{game_id}" in have.get(pid, set()):
+                            continue
+                        out["winner"].append({"player": name, "game": game_id})
+                        if apply:
+                            await _insert_labelled(db, org, pid, w["source"], f"winner:{game_id}", w["label"], w["quality"])
+                if settings.get("event_packs_enabled") is not False and day_ref not in have.get(pid, set()) and await _playing_today(db, org, pid, today):
+                    out["match_day"].append({"player": name})
+                    if apply:
+                        await _insert_packs(db, org, pid, "match_day", [day_ref])
+        except Exception as exc:
+            logger.exception("player cards: catch up failed for player %s", pid)
+            out["errors"].append({"player": name, "error": f"{type(exc).__name__}: {exc}"[:300]})
+    return out
+
+
 async def _insert_labelled(db, org: str, pid: str, source: str, ref: str, label: Optional[str], quality: Optional[str] = None) -> int:
     res = await db.execute(text("""
         INSERT INTO player_card_packs (organisation_id, player_id, source, ref_key, label, quality)
@@ -1078,10 +1132,10 @@ async def delete_event(db, org_id, event_id: str) -> bool:
     return bool(res.rowcount)
 
 
-async def _grant_day_packs(db, club: Organisation, pid: str, settings: dict) -> dict[str, int]:
+async def _grant_day_packs(db, club: Organisation, pid: str, settings: dict, org: Optional[str] = None) -> dict[str, int]:
     """Packs for today: holidays, a birthday, a surprise drop, Match Day and any day the club scheduled. A day pack can
     only be earned on its day (the page has to be opened), then it banks until opened."""
-    org, today = str(club.id), club_today(settings)
+    org, today = org or str(club.id), club_today(settings)
     added: dict[str, int] = {}
     if settings.get("event_packs_enabled") is not False:
         for source, ref in kinds.annual_events(today):
@@ -1105,8 +1159,8 @@ WINNER_LOOKBACK_DAYS = 7
 # The games this player's side won, by the day each finished. A game is read as OUR win in this order, because a fixture between two
 # synced clubs is one row whose `result` is relative to whichever club synced it first (see `services/club_grades`):
 #   1. when exactly one of home_org_id / away_org_id is this club, the club's side against `winning_team` (neutral);
-#   2. otherwise the team the player's appearance names, against `winning_team`;
-#   3. otherwise, with no winner recorded, `result` = WIN only where it is relative to this club (a game this club owns).
+#   2. otherwise, when the player's appearance names one of the two teams, that team against `winning_team`;
+#   3. otherwise `result` = WIN, but only where it is relative to this club (a game this club owns), whether or not a winner is recorded.
 # A 12th man who did not play (`is_reserve`) did not win anything. A fixture's own last day (`end_on`) is the day it finished.
 _WINS_SQL = """
     SELECT g.id::text AS game_id
@@ -1116,40 +1170,55 @@ _WINS_SQL = """
       LEFT JOIN fixtures f ON f.id = g.id
      WHERE ga.player_id = CAST(:pid AS UUID) AND COALESCE(ga.is_reserve, FALSE) = FALSE
        AND COALESCE(f.end_on, g.played_at) >= :floor AND COALESCE(f.end_on, g.played_at) < :today
-       AND (
-            (g.winning_team IS NOT NULL
-             AND (COALESCE(g.home_org_id = CAST(:org AS UUID), FALSE) <> COALESCE(g.away_org_id = CAST(:org AS UUID), FALSE))
-             AND ((g.home_org_id = CAST(:org AS UUID) AND g.winning_team = g.home_team)
-                  OR (g.away_org_id = CAST(:org AS UUID) AND g.winning_team = g.away_team)))
-         OR (g.winning_team IS NOT NULL
-             AND NOT (COALESCE(g.home_org_id = CAST(:org AS UUID), FALSE) <> COALESCE(g.away_org_id = CAST(:org AS UUID), FALSE))
-             AND ga.team_name IS NOT NULL AND ga.team_name = g.winning_team)
-         OR (NOT (g.winning_team IS NOT NULL
-                  AND ((COALESCE(g.home_org_id = CAST(:org AS UUID), FALSE) <> COALESCE(g.away_org_id = CAST(:org AS UUID), FALSE))
-                       OR ga.team_name IS NOT NULL))
-             AND g.organisation_id = CAST(:org AS UUID) AND UPPER(COALESCE(g.result, '')) IN ('WIN', 'W', 'WON'))
-       )
+       AND CASE
+            WHEN g.winning_team IS NOT NULL
+                 AND (COALESCE(g.home_org_id = CAST(:org AS UUID), FALSE) <> COALESCE(g.away_org_id = CAST(:org AS UUID), FALSE))
+              THEN (g.home_org_id = CAST(:org AS UUID) AND g.winning_team = g.home_team)
+                OR (g.away_org_id = CAST(:org AS UUID) AND g.winning_team = g.away_team)
+            WHEN g.winning_team IS NOT NULL AND ga.team_name IS NOT NULL AND ga.team_name IN (g.home_team, g.away_team)
+              THEN ga.team_name = g.winning_team
+            ELSE g.organisation_id = CAST(:org AS UUID) AND UPPER(COALESCE(g.result, '')) IN ('WIN', 'W', 'WON')
+           END
 """
+
+
+def _winner_window(settings: dict, start_override: Optional[date] = None) -> Optional[tuple[date, date]]:
+    """`(floor, today)` for Winner Winner, or None when it is off or the club has not launched cards."""
+    if settings.get("winner_packs") is False:
+        return None
+    start = start_override or settings.get("winner_packs_from")
+    if start is None:
+        return None
+    today = club_today(settings)
+    start = start if isinstance(start, date) else date.fromisoformat(str(start))
+    return max(today - timedelta(days=WINNER_LOOKBACK_DAYS), start), today
+
+
+async def _winning_games(db, org: str, pid: str, floor: date, today: date) -> list[str]:
+    rows = (await db.execute(text(_WINS_SQL), {"org": org, "pid": pid, "floor": floor, "today": today})).fetchall()
+    return [r[0] for r in rows]
 
 
 async def _grant_winner_packs(db, org: str, pid: str, settings: dict) -> dict[str, int]:
     """Winner Winner: a Premium pack of five for each win the player played in, from the day after it. Add-only and once per game
     (ref `winner:<game id>`), so a result corrected later never takes one back or pays twice. Nothing before the club's start day
-    (`winner_packs_from`, the day the feature arrived for a club already using cards) and never more than a week back."""
-    if settings.get("winner_packs") is False:
+    (`winner_packs_from`, the day the feature arrived for a club already using cards) and never more than a week back.
+
+    It runs in its own savepoint and never raises: a pack that cannot be worked out is logged and the player's other packs (and the
+    Match Day pack that follows) are still granted."""
+    window = _winner_window(settings)
+    if window is None:
         return {}
-    today = club_today(settings)
-    floor = today - timedelta(days=WINNER_LOOKBACK_DAYS)
-    start = settings.get("winner_packs_from")
-    if start is None:
-        return {}   # a club with no settings row has not launched cards
-    floor = max(floor, start if isinstance(start, date) else date.fromisoformat(str(start)))
-    rows = (await db.execute(text(_WINS_SQL), {"org": org, "pid": pid, "floor": floor, "today": today})).fetchall()
     w = kinds.WINNER_PACK
-    n = 0
-    for (game_id,) in rows:
-        n += await _insert_labelled(db, org, pid, w["source"], f"winner:{game_id}", w["label"], w["quality"])
-    return {w["source"]: n}
+    try:
+        async with db.begin_nested():
+            n = 0
+            for game_id in await _winning_games(db, org, pid, *window):
+                n += await _insert_labelled(db, org, pid, w["source"], f"winner:{game_id}", w["label"], w["quality"])
+        return {w["source"]: n}
+    except Exception:
+        logger.exception("player cards: winner packs failed for player %s", pid)
+        return {}
 
 
 async def _grant_achievement_packs(db, org: str, pid: str, launched: Optional[datetime]) -> dict[str, int]:
@@ -1186,7 +1255,7 @@ async def ensure_grants(db: AsyncSession, club: Organisation, pid: str, snap: di
     added["duck"] = await _insert_packs(db, org, pid, "duck", await _duck_refs(db, pid, launched.date() if launched else None))
     added.update(await _grant_achievement_packs(db, org, pid, launched))
     added.update(await _grant_winner_packs(db, org, pid, settings))
-    added.update(await _grant_day_packs(db, club, pid, settings))
+    added.update(await _grant_day_packs(db, club, pid, settings, org))
     return added
 
 
