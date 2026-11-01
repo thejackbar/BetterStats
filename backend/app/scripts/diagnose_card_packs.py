@@ -5,7 +5,9 @@ whether the player is on their confirmed team sheet, the scorecards dated that d
 finished in the last week that count as a win for them and why each does or does not, and the packs they already hold. Anything
 that raises is printed rather than hidden.
 
-    python -m app.scripts.diagnose_card_packs <club slug> "<part of the player's name>" [--date YYYY-MM-DD]
+    python -m app.scripts.diagnose_card_packs <club slug> "<part of the player's name>" [--date YYYY-MM-DD] [--days N]
+
+`--days N` (default 8) is how far back the list of wins goes; use `--days 40` to see every win since the start of October and which count.
 
 Run inside the betterstats-backend container (`docker compose exec`, from /srv/docker, with COMPOSE_PROJECT_NAME set).
 """
@@ -24,6 +26,7 @@ async def main() -> None:
     ap.add_argument("club")
     ap.add_argument("name")
     ap.add_argument("--date", default="")
+    ap.add_argument("--days", type=int, default=8)
     args = ap.parse_args()
     async with async_session_maker() as db:
         club = (await db.execute(select(Organisation).where(Organisation.slug == args.club.lower()))).scalars().first()
@@ -67,21 +70,21 @@ async def main() -> None:
             """), {"o": org, "p": pid, "d": today, "n": f"%{args.name}%"})).fetchall()
             for o in others:
                 print(f"  NOTE: another record with a similar name IS on a sheet today: {o[1]} ({o[0][:8]}). A duplicate player record?")
-            print("  wins in the last week:")
+            print(f"  games in the last {args.days} days (COUNTS = would be paid; today's win is paid tomorrow):")
             try:
-                counted = set(await pc._winning_games(db, org, pid, today - timedelta(days=8), today + timedelta(days=1)))
+                counted = set(await pc._winning_games(db, org, pid, today - timedelta(days=args.days), today + timedelta(days=1)))
                 games = (await db.execute(text("""
                     SELECT g.id::text, g.played_at, g.home_team, g.away_team, g.winning_team, g.result, g.status, g.organisation_id::text, g.home_org_id::text, g.away_org_id::text,
                            ga.team_name, ga.is_reserve, (SELECT end_on FROM fixtures f WHERE f.id = g.id)
                       FROM game_appearances ga JOIN v_effective_games g ON g.id = ga.game_id
                      WHERE ga.player_id = CAST(:p AS UUID) AND g.played_at >= :since ORDER BY g.played_at
-                """), {"p": pid, "since": today - timedelta(days=9)})).fetchall()
+                """), {"p": pid, "since": today - timedelta(days=args.days + 1)})).fetchall()
                 for g in games:
                     mark = "COUNTS" if g[0] in counted else "does not count"
                     print(f"    {g[1]} {g[2]} v {g[3]} winner={g[4]!r} result={g[5]!r} status={g[6]} owner={'us' if g[7] == org else g[7]} home_org={'us' if g[8] == org else g[8]} "
                           f"away_org={'us' if g[9] == org else g[9]} team_name={g[10]!r} reserve={g[11]} end_on={g[12]}  -> {mark}")
                 if not games:
-                    print("    no scorecards for this player in the last 9 days (the sync may not have read the games yet)")
+                    print("    no scorecards for this player in that window (the sync may not have read the games yet)")
             except Exception as exc:
                 print(f"    THE WINS QUERY RAISED: {type(exc).__name__}: {exc}")
                 await db.rollback()

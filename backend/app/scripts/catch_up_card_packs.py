@@ -3,7 +3,8 @@
 Packs are granted when a player opens their page. This does the same for everyone in the card pool at once, by the same rules and
 the same refs, so it can never pay twice and never pays what opening the page would not:
 
-  * Winner Winner: a win finished before today and within the last 7 days, from the club's start day (`winner_packs_from`).
+  * Winner Winner: every win finished before today, from the club's start day (`winner_packs_from`) or from `--winner-from` if that is
+    earlier. A player opening their page only looks back 7 days; this does not, so it is how a backfill is done.
   * Match Day: a fixture whose own day is today (a first or last day), with the player on its confirmed team sheet, or a scorecard
     dated today.
 
@@ -12,7 +13,7 @@ it meant to pay. The default is yesterday in the club's own timezone. Pass `--wi
 
     python -m app.scripts.catch_up_card_packs <club slug | all>                       # dry run: who would get what
     python -m app.scripts.catch_up_card_packs <club slug | all> --apply --by "name"    # does it, and writes an audit entry per club
-    python -m app.scripts.catch_up_card_packs <club slug> --winner-from 2026-10-31
+    python -m app.scripts.catch_up_card_packs <club slug> --winner-from 2026-10-01      # backfill from 1 October
 
 Run inside the betterstats-backend container (`docker compose exec`, from /srv/docker, with COMPOSE_PROJECT_NAME set).
 """

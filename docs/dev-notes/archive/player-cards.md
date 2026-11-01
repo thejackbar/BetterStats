@@ -277,3 +277,12 @@ Reported the day after Winner Winner shipped: players who won on Saturday had no
 - Changed: the win rule's last fallback now also applies when a winner is recorded but the player's team name matches neither side (it reads the club's own stored result); a failure in the wins query is isolated in a savepoint so it cannot stop the Match Day pack or the page; `ensure_grants` passes the club id as a string.
 - Added: `catch_up_card_packs` (dry run, `--apply --by`, audited per club as `player_card_packs_caught_up`) and `diagnose_card_packs` (read-only, prints the query's own error if it raises).
 - Verified: `verify_player_cards.py` (660: catch-up dry run writes nothing, apply pays, a second run pays nothing, a later start day is ignored, a broken wins query leaves the other packs granted), the other backend suites.
+
+## v9.137.2.2 (2026-11-01): Winner Winner backfill
+
+Asked for: backfill Winner Winner packs from 1 October 2026 (Jack Barendse should end up with 4).
+
+- A start day alone could not do it: a page only looks back `WINNER_LOOKBACK_DAYS` (7). The catch-up now reads from the start day it is given with no cap, so `catch_up_card_packs <club> --winner-from 2026-10-01` pays every win from 1 October, one pack per player per win, and sets the club's start day to 1 October. Wins from before the club launched cards are included on purpose.
+- Today's win is paid tomorrow (a pack is for the day after), so a count that includes a win played today is one short until then.
+- `diagnose_card_packs --days N` lists every game back that far with whether it counts and why.
+- Verified: `verify_player_cards.py` (661, including a backfill past the week).

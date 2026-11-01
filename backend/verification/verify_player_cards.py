@@ -1784,6 +1784,9 @@ async def main() -> None:
                         later = await cards.catch_up_packs(db, club, apply=True, winner_from=E + timedelta(days=5))
                         await db.commit()
                         check("a later start day is never applied (it only lowers)", later["winner_from"] == (E - timedelta(days=3)).isoformat() and (await db.execute(text("SELECT winner_packs_from FROM club_card_settings WHERE organisation_id = :o"), {"o": ORG})).scalar() == E - timedelta(days=3))
+                        back = await cards.catch_up_packs(db, club, apply=False, winner_from=E - timedelta(days=12))
+                        await db.rollback(); club = await db.get(Organisation, ORG)
+                        check("a backfill reaches past the week a page looks back, to the date given", any(r["game"] == str(gids["too_old"]) for r in back["winner"] if r["player"].startswith("Zulu")) and not any(r["game"] == str(gids["too_old"]) for r in dry["winner"]), str(back)[:300])
                         check("a player not on a sheet today gets no Match Day pack from it", (await n_packs(z2, "match_day")).scalar() == (await db.execute(text("SELECT count(*) FROM player_card_packs WHERE player_id = CAST(:p AS UUID) AND source = 'match_day'"), {"p": z2})).scalar() and not any(r["player"].startswith("Yankee") for r in done["match_day"]))
                     finally:
                         cards.club_today = real_today

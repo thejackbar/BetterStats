@@ -1022,7 +1022,8 @@ async def catch_up_packs(db, club: Organisation, *, apply: bool = False, winner_
     unless `apply`.
 
     `winner_from` lowers the club's Winner Winner start day (never raises it), for a club whose start day fell after wins it meant
-    to pay (the feature arrived the day after the games). Every player in the card pool is looked at, each in a savepoint, so one
+    to pay (the feature arrived the day after the games). The catch-up pays every win from the start day, however far back, which is
+    how a deliberate backfill is done; opening a page still only looks back a week. Every player in the card pool is looked at, each in a savepoint, so one
     failing player is listed in `errors` and the rest still go. Returns counts, who, and the start day used."""
     org = str(club.id)
     settings = await load_settings(db, org)
@@ -1037,7 +1038,7 @@ async def catch_up_packs(db, club: Organisation, *, apply: bool = False, winner_
     if winner_from is not None and (current is None or winner_from < current):
         start = winner_from
     out["winner_from"] = start.isoformat() if start else None
-    window = _winner_window(settings, start)
+    window = _winner_window(settings, start, capped=False)
     if apply and start is not None and start != current:
         await db.execute(text("UPDATE club_card_settings SET winner_packs_from = :d WHERE organisation_id = CAST(:o AS UUID)"), {"d": start, "o": org})
     snap = await club_snapshot(db, club, fresh=True)
@@ -1182,8 +1183,10 @@ _WINS_SQL = """
 """
 
 
-def _winner_window(settings: dict, start_override: Optional[date] = None) -> Optional[tuple[date, date]]:
-    """`(floor, today)` for Winner Winner, or None when it is off or the club has not launched cards."""
+def _winner_window(settings: dict, start_override: Optional[date] = None, *, capped: bool = True) -> Optional[tuple[date, date]]:
+    """`(floor, today)` for Winner Winner, or None when it is off or the club has not launched cards. A player opening their page
+    never looks back more than `WINNER_LOOKBACK_DAYS`; the catch-up (`capped=False`) looks back to the start day, so an admin can
+    backfill further on purpose."""
     if settings.get("winner_packs") is False:
         return None
     start = start_override or settings.get("winner_packs_from")
@@ -1191,7 +1194,7 @@ def _winner_window(settings: dict, start_override: Optional[date] = None) -> Opt
         return None
     today = club_today(settings)
     start = start if isinstance(start, date) else date.fromisoformat(str(start))
-    return max(today - timedelta(days=WINNER_LOOKBACK_DAYS), start), today
+    return (max(today - timedelta(days=WINNER_LOOKBACK_DAYS), start) if capped else start), today
 
 
 async def _winning_games(db, org: str, pid: str, floor: date, today: date) -> list[str]:
