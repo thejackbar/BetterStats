@@ -48,6 +48,7 @@ count and a better special chance; all of that lives in `player_card_pack_kinds`
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import time
@@ -367,8 +368,10 @@ _FIGURES_SQL = """
 """
 
 _SNAP_TTL = 300.0
+_SNAP_STALE_MAX = 3600.0   # a snapshot up to an hour old is still served while a new one is built
 _SNAP_MAX = 60
 _SNAP: dict[str, tuple[float, dict]] = {}
+_SNAP_BUILDING: dict[str, "asyncio.Future"] = {}
 _SPECIAL_REFRESH: dict[str, float] = {}
 SPECIAL_REFRESH_TTL = 600.0
 
@@ -404,22 +407,11 @@ async def _junior_only(db: AsyncSession, org_id) -> set[str]:
         return set()
 
 
-async def club_snapshot(db: AsyncSession, club: Organisation, *, fresh: bool = False) -> dict:
-    """The club's card pool, cached for a few minutes.
-
-    ``{"settings", "people": {pid: person}, "figs": {pid: figures}, "rating": {pid: rarity},
-    "pool": {tier: [pid]}, "current_season_ids": [...], "season_label"}``. `people` holds every
-    eligible player (their own card always works); `pool` holds only those with a match played."""
-    key = str(club.id)
-    hit = _SNAP.get(key)
-    now = time.monotonic()
-    if hit and not fresh and now - hit[0] < _SNAP_TTL:
-        return hit[1]
-
-    settings = await load_settings(db, club.id)
-    players = await _club_players(db, club.id)
-    hidden = await hidden_ids(db, club.id)
-    juniors = set() if settings["include_juniors"] else await _junior_only(db, club.id)
+async def _build_snapshot(db: AsyncSession, org_id) -> dict:
+    settings = await load_settings(db, org_id)
+    players = await _club_players(db, org_id)
+    hidden = await hidden_ids(db, org_id)
+    juniors = set() if settings["include_juniors"] else await _junior_only(db, org_id)
 
     people: dict[str, dict] = {}
     for p in players:
@@ -461,15 +453,102 @@ async def club_snapshot(db: AsyncSession, club: Organisation, *, fresh: bool = F
         if f["matches"] > 0:
             pool[rating[pid]["tier"]].append(pid)
 
-    season_ids, season_label = await _current_season(db, club.id, list(people))
+    season_ids, season_label = await _current_season(db, org_id, list(people))
     snap = {
-        "org_id": key, "settings": settings, "people": people, "figs": figs, "rating": rating, "pool": pool,
+        "org_id": str(org_id), "settings": settings, "people": people, "figs": figs, "rating": rating, "pool": pool,
         "current_season_ids": season_ids, "season_label": season_label,
     }
-    if len(_SNAP) >= _SNAP_MAX:
-        _SNAP.clear()
-    _SNAP[key] = (now, snap)
     return snap
+
+
+
+
+def _store_snapshot(key: str, snap: dict) -> None:
+    if len(_SNAP) >= _SNAP_MAX and key not in _SNAP:
+        _SNAP.clear()
+    _SNAP[key] = (time.monotonic(), snap)
+
+
+_BACKGROUND: set = set()
+
+
+def _spawn(coro) -> None:
+    """Run a coroutine on its own, holding a reference so it is not collected, and never raising into the caller."""
+    task = asyncio.get_running_loop().create_task(coro)
+    _BACKGROUND.add(task)
+    task.add_done_callback(_BACKGROUND.discard)
+
+
+async def _revalidate_snapshot(key: str) -> None:
+    """Rebuild a club's snapshot on a session of its own, once at a time, while requests keep being served the old one."""
+    if key in _SNAP_BUILDING:
+        return
+    fut = asyncio.get_running_loop().create_future()
+    fut.add_done_callback(lambda f: f.cancelled() or f.exception())
+    _SNAP_BUILDING[key] = fut
+    try:
+        from app.models.db import async_session_maker
+        async with async_session_maker() as session:
+            snap = await _build_snapshot(session, uuid.UUID(key))
+        _store_snapshot(key, snap)
+        fut.set_result(snap)
+    except BaseException as exc:  # noqa: BLE001 - the stale snapshot keeps serving; the next request tries again
+        logger.exception("player cards: snapshot refresh failed for %s", key)
+        if not fut.done():
+            fut.set_exception(exc if isinstance(exc, Exception) else RuntimeError("cancelled"))
+    finally:
+        if _SNAP_BUILDING.get(key) is fut:
+            _SNAP_BUILDING.pop(key, None)
+
+
+async def club_snapshot(db: AsyncSession, club: Organisation, *, fresh: bool = False) -> dict:
+    """The club's card pool, cached.
+
+    ``{"settings", "people": {pid: person}, "figs": {pid: figures}, "rating": {pid: rarity},
+    "pool": {tier: [pid]}, "current_season_ids": [...], "season_label"}``. `people` holds every
+    eligible player (their own card always works); `pool` holds only those with a match played.
+
+    Building it takes seconds on a club with years of history, so no request waits for it twice: a snapshot younger than
+    `_SNAP_TTL` is served as it is; one older (up to `_SNAP_STALE_MAX`) is served as it is WHILE one rebuild runs in the
+    background; with nothing cached, or `fresh`, the caller builds it and anyone else who arrives meanwhile waits for that
+    build instead of starting their own (a page opens several requests at once)."""
+    key = str(club.id)
+    hit = _SNAP.get(key)
+    if hit and not fresh:
+        age = time.monotonic() - hit[0]
+        if age < _SNAP_TTL:
+            return hit[1]
+        if age < _SNAP_STALE_MAX:
+            if key not in _SNAP_BUILDING:
+                _spawn(_revalidate_snapshot(key))
+            return hit[1]
+    pending = _SNAP_BUILDING.get(key)
+    if pending is not None and not fresh:
+        try:
+            return await asyncio.shield(pending)
+        except asyncio.CancelledError:
+            if not pending.cancelled() and pending.done() is False:
+                raise   # this request was cancelled, not the build
+        except Exception:  # noqa: BLE001 - the build failed for the other request; build it here and let this one report its own error
+            pass
+    fut = asyncio.get_running_loop().create_future()
+    fut.add_done_callback(lambda f: f.cancelled() or f.exception())
+    _SNAP_BUILDING[key] = fut
+    try:
+        snap = await _build_snapshot(db, club.id)
+        _store_snapshot(key, snap)
+        fut.set_result(snap)
+        return snap
+    except BaseException as exc:
+        if not fut.done():
+            if isinstance(exc, Exception):
+                fut.set_exception(exc)
+            else:
+                fut.cancel()
+        raise
+    finally:
+        if _SNAP_BUILDING.get(key) is fut:
+            _SNAP_BUILDING.pop(key, None)
 
 
 async def _current_season(db: AsyncSession, org_id, pids: list[str]) -> tuple[list[str], Optional[str]]:
@@ -903,6 +982,34 @@ async def refresh_specials(db: AsyncSession, club: Organisation, *, force: bool 
         made["gifted"] = await _gift_new_specials(db, org, snap["settings"].get("starter_gifts") or "minimal")
     _SPECIAL_REFRESH[key] = now
     return made
+
+
+_SPECIALS_RUNNING: set = set()
+
+
+async def refresh_specials_soon(org_id) -> None:
+    """Bring a club's special cards up to date AFTER the response, on a session of its own, once at a time and no more than
+    `SPECIAL_REFRESH_TTL` apart. A refresh scans the club's whole history (seconds on a club with years of games), so no page
+    waits for it: a card made by it shows on the player's next load. Never raises."""
+    key = str(org_id)
+    if key in _SPECIALS_RUNNING or time.monotonic() - _SPECIAL_REFRESH.get(key, -1e9) < SPECIAL_REFRESH_TTL:
+        return
+    _SPECIALS_RUNNING.add(key)
+
+    async def run() -> None:
+        try:
+            from app.models.db import async_session_maker
+            async with async_session_maker() as session:
+                club = await session.get(Organisation, org_id)
+                if club is not None:
+                    await refresh_specials(session, club)
+                    await session.commit()
+        except Exception:  # noqa: BLE001
+            logger.exception("player cards: special card refresh failed for %s", key)
+        finally:
+            _SPECIALS_RUNNING.discard(key)
+
+    _spawn(run())
 
 
 # ── The dashboard's one-line view ─────────────────────────────────────────────

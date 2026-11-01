@@ -286,3 +286,13 @@ Asked for: backfill Winner Winner packs from 1 October 2026 (Jack Barendse shoul
 - Today's win is paid tomorrow (a pack is for the day after), so a count that includes a win played today is one short until then.
 - `diagnose_card_packs --days N` lists every game back that far with whether it counts and why.
 - Verified: `verify_player_cards.py` (661, including a backfill past the week).
+
+## v9.137.3 (2026-11-02): Player Cards load much faster
+
+Reported: trading cards were loading really slowly.
+
+- Measured, not guessed. A scaled copy of the schema (310 players, 4,000 games, 56,000 appearances) with every statement timed: a cold snapshot took 4.2 s (2.5 s the junior lookup, 1.5 s the stats view), `refresh_specials` 2.9 to 3.6 s every ten minutes, and everything else under 0.4 s. In production the page also draws a photo per card, and photos are stored exactly as uploaded (up to 8 MB, never resized), which no server timing shows.
+- Photos: `?w=` and `services/image_sizes.py` (next size up of 240, 480, 800, 1200; JPEG, or PNG when there is transparency; EXIF rotation applied first; originals and GIFs untouched; an unreadable file is served as uploaded). The three photo routes read one column instead of the whole player. Chosen over resizing on upload because that needs a backfill of every stored photo and a migration; a copy made on demand is kept per `v`, so a re-upload gets a new one.
+- Snapshot: concurrent cold requests built it once each before (eight at once took 6.4 s, now 3.1 s). An expired one cost the next visitor about 2.9 s; it is now 0.000 s and the rebuild runs in the background. Staleness is bounded to an hour and `forget()` still clears it.
+- Special cards: refreshed after the response. Not done: making the refresh itself cheaper (it re-scans all history; an incremental window of recent games plus a daily full scan would cut it about tenfold), and `sets_mod.definitions` / `claim_rewards` (about 0.3 s each on the Sets and Challenges screens).
+- Verified: `verify_player_cards.py` (673, with the concurrency, stale, hour-old, failed-build and background-refresh cases), `verify_player_action_photo.py` (42, including the size copies, EXIF rotation, transparency and the single-column read), `verify_photo_sizes.mjs`, and the Player Cards browser suites.

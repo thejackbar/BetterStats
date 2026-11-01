@@ -36,3 +36,14 @@ export function heroShotKind(p) {
   if (!url) return null
   return url === p.action_photo_url && url !== p.hero_photo_url ? 'action' : 'hero'
 }
+
+// A card draws a photo at a few hundred pixels, but the file is stored as uploaded (up to 8 MB). `?w=` on a player photo URL asks the server
+// for a copy no wider than that (it rounds up to one of a few sizes and keeps them), so a card downloads tens of kilobytes, not megabytes.
+// Any other URL (a logo, a pack picture, a photo from somewhere else) is returned as it is.
+export const CARD_HERO_W = 800   // the hero position is 340 px wide: twice that for a sharp screen
+export const CARD_HEAD_W = 480   // the headshot circle is 150 to 170 px
+const PLAYER_PHOTO = /^\/api\/images\/players\/[^/?#]+\/(photo|hero-photo|action-photo)(\?|$)/
+export function sizedPhoto(url, w) {
+  if (!url || !w || !PLAYER_PHOTO.test(url) || /[?&]w=/.test(url)) return url
+  return `${url}${url.includes('?') ? '&' : '?'}w=${w}`
+}

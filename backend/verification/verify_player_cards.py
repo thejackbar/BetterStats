@@ -2695,6 +2695,95 @@ async def main() -> None:
         check("the swaps migration follows 363 and runs its own shared list", "down_revision = \"363\"" in mig2 and "player_card_swaps_ddl import BASE_STATEMENTS" in mig2 and "player_card_swaps_ddl import STATEMENTS" in main_src_swaps())
         mig3 = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "366_player_card_swap_items.py").read_text()
         check("the items migration follows 365, runs its own shared list, and drops only its own table", "down_revision = \"365\"" in mig3 and "ITEM_STATEMENTS" in mig3 and "ITEM_DOWNGRADE" in mig3)
+    # Speed: nobody waits for the snapshot twice, and no page waits for the special card refresh
+    if hasattr(cards, "_build_snapshot"):
+        import time as _time
+        real_build, builds = cards._build_snapshot, {"n": 0}
+
+        async def slow_build(db_, org_id):
+            builds["n"] += 1
+            await asyncio.sleep(0.3)
+            return await real_build(db_, org_id)
+
+        async def one_snapshot():
+            async with Session() as s_:
+                c_ = await s_.get(Organisation, ORG)
+                return await cards.club_snapshot(s_, c_)
+
+        cards._build_snapshot = slow_build
+        try:
+            cards.forget()
+            got8 = await asyncio.gather(*[one_snapshot() for _ in range(8)])
+            check("eight requests arriving with nothing cached build the snapshot once, and all get it", builds["n"] == 1 and all(g is got8[0] for g in got8), str(builds))
+            key_ = str(ORG)
+            old_snap = cards._SNAP[key_][1]
+            cards._SNAP[key_] = (_time.monotonic() - 400, old_snap)       # past the 5 minutes, inside the hour
+            t0 = _time.monotonic()
+            served = await one_snapshot()
+            fast = _time.monotonic() - t0
+            check("an expired snapshot is served at once, while one rebuild starts", served is old_snap and fast < 0.2 and builds["n"] == 2, f"{fast:.2f}s {builds}")
+            await one_snapshot(); await one_snapshot()
+            check("...and more requests while it rebuilds do not start another", builds["n"] == 2, str(builds))
+            await asyncio.sleep(0.7)
+            check("...then the rebuilt snapshot replaces it", cards._SNAP[key_][1] is not old_snap and builds["n"] == 2 and not cards._SNAP_BUILDING)
+            cards._SNAP[key_] = (_time.monotonic() - 4000, old_snap)      # older than an hour: not served stale
+            t0 = _time.monotonic()
+            rebuilt = await one_snapshot()
+            check("a snapshot older than an hour is built in the request, not served", rebuilt is not old_snap and _time.monotonic() - t0 >= 0.3 and builds["n"] == 3)
+            cards.forget()
+            async with Session() as s_:
+                c_ = await s_.get(Organisation, ORG)
+                forced = await cards.club_snapshot(s_, c_, fresh=True)
+            check("fresh still builds its own, whatever is cached", forced is not rebuilt and builds["n"] == 4)
+
+            # a build that fails reaches its own caller, and the next request tries again
+            async def failing_build(db_, org_id):
+                builds["n"] += 1
+                await asyncio.sleep(0.1)
+                raise RuntimeError("the database went away")
+            cards._build_snapshot = failing_build
+            cards.forget()
+            outs = await asyncio.gather(*[one_snapshot() for _ in range(3)], return_exceptions=True)
+            check("a build that fails is reported to the request that ran it, and nothing is cached", any(isinstance(o, RuntimeError) for o in outs) and key_ not in cards._SNAP and not cards._SNAP_BUILDING, str(outs))
+            cards._build_snapshot = slow_build
+            check("...and the next request builds it again", (await one_snapshot()) is not None and key_ in cards._SNAP)
+        finally:
+            cards._build_snapshot = real_build
+            cards.forget()
+
+    if hasattr(cards, "refresh_specials_soon"):
+        import time as _time
+        real_refresh, ran = cards.refresh_specials, {"n": 0}
+
+        async def slow_refresh(db_, club_, force=False):
+            ran["n"] += 1
+            await asyncio.sleep(0.3)
+            return {}
+
+        cards.refresh_specials = slow_refresh
+        try:
+            cards._SPECIAL_REFRESH.clear()
+            t0 = _time.monotonic()
+            await cards.refresh_specials_soon(ORG)
+            await cards.refresh_specials_soon(ORG)
+            check("the special card refresh is started in the background and the caller does not wait", _time.monotonic() - t0 < 0.1)
+            await asyncio.sleep(0.6)
+            check("...once, however many ask while it runs", ran["n"] == 1, str(ran))
+            cards._SPECIAL_REFRESH[str(ORG)] = _time.monotonic()
+            await cards.refresh_specials_soon(ORG)
+            await asyncio.sleep(0.5)
+            check("...and not again inside the throttle window", ran["n"] == 1, str(ran))
+            cards._SPECIAL_REFRESH.clear()
+            async with Session() as s_:
+                t0 = _time.monotonic()
+                resp = await pc_routes.get_my_cards(TOKEN, request_for(DELTA, ORG), s_)
+                took = _time.monotonic() - t0
+            check("opening the cards page does not wait for the refresh, and still answers with the cards", took < 0.25 and bool(resp["cards"]), f"{took:.2f}s")
+            await asyncio.sleep(0.6)
+        finally:
+            cards.refresh_specials = real_refresh
+            cards._SPECIAL_REFRESH.clear()
+
     main_src = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
     check("the lifespan mirrors the same list", "from app.services.player_cards_ddl import STATEMENTS" in main_src)
     if WINNER_DDL:
