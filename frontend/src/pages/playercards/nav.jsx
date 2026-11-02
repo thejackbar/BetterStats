@@ -109,9 +109,13 @@ export function Rail() {
   )
 }
 
+// The entries the phone's bottom bar carries itself (Cards covers both My cards and Club cards' switch, but Club cards is still listed in More).
+const BAR_KEYS = ['home', 'book', 'packs', 'swaps']
+
 export function BottomBar() {
-  const { basePath, base, accent, me, onSwitch, features } = usePC()
+  const { basePath, base, accent, me, onSwitch } = usePC()
   const counts = useCounts()
+  const nav = useNav()
   const { pathname } = useLocation()
   const [more, setMore] = useState(false)
   const rel = pathname.slice(basePath.length) || '/'
@@ -122,6 +126,9 @@ export function BottomBar() {
     { key: 'swaps', label: 'Swaps', icon: 'swaps', to: '/swaps', on: rel.startsWith('/swaps'), badge: counts.swaps },
   ]
   const moreOn = !items.some((i) => i.on)
+  // The More sheet is the sidebar's list (NAV, through useNav) minus what the bar already holds, so a new screen or a feature
+  // switch shows up on a phone the same as on a laptop. A group heading is dropped when nothing under it is left.
+  const moreItems = nav.filter((n) => n.group || !BAR_KEYS.includes(n.key)).filter((n, i, all) => !n.group || (all[i + 1] && !all[i + 1].group))
   const cell = 'relative flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-mono uppercase tracking-wide'
   return (
     <>
@@ -140,9 +147,16 @@ export function BottomBar() {
         <div role="dialog" aria-modal="true" aria-label="More" data-more-sheet className="md:hidden fixed inset-0 z-40" onClick={() => setMore(false)} style={{ background: 'rgba(3,6,10,.7)' }}>
           <div onClick={(e) => e.stopPropagation()} className="absolute bottom-0 inset-x-0 rounded-t-2xl bg-pb-surface border-t pb-hairline p-4" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}>
             <div className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint mb-2">More</div>
-            {[{ to: `${basePath}/club`, label: 'Club cards', icon: 'club' }, { to: `${basePath}/wishlist`, label: 'Wish list', icon: 'heart' }, ...(features.showcase ? [{ to: `${basePath}/showcase`, label: 'Showcase', icon: 'star' }] : []), { to: `${basePath}/spares`, label: 'Spares', icon: 'spares' }, ...((features.sets || features.board || features.feed) ? [{ to: `${basePath}/sets`, label: 'Sets and board', icon: 'trophy' }] : []), { to: `${basePath}/how`, label: 'How it works', icon: 'help' }, { to: `${basePath}/settings`, label: 'Settings', icon: 'bolt' }, { to: base, label: 'Back to my page', icon: 'back' }].map((l) => (
-              <Link key={l.label} to={l.to} onClick={() => setMore(false)} data-more-link className="flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-pb-surface2"><Icon name={l.icon} />{l.label}</Link>
+            <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 190px)' }}>
+            {moreItems.map((n, i) => n.group ? (
+              <div key={`g${i}`} className="font-mono text-[10px] tracking-wide2 uppercase text-pb-faintest px-2 pt-3 pb-1">{n.group}</div>
+            ) : (
+              <Link key={n.key} to={`${basePath}${n.to}`} onClick={() => setMore(false)} data-more-link data-more-key={n.key} className="flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-pb-surface2">
+                <Icon name={n.icon} /><span className="flex-1">{n.label}</span><Badge n={counts[n.badge]} accent={accent} />
+              </Link>
             ))}
+            <Link to={base} onClick={() => setMore(false)} data-more-link className="flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-pb-surface2"><Icon name="back" />Back to my page</Link>
+            </div>
             <div className="flex items-center justify-between px-2 pt-3 text-sm text-pb-faint border-t pb-hairline mt-2">
               <span>{me?.player?.display_name}</span>
               <button type="button" onClick={onSwitch} className="underline">Not you?</button>

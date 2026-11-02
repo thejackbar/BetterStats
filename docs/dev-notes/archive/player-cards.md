@@ -296,3 +296,9 @@ Reported: trading cards were loading really slowly.
 - Snapshot: concurrent cold requests built it once each before (eight at once took 6.4 s, now 3.1 s). An expired one cost the next visitor about 2.9 s; it is now 0.000 s and the rebuild runs in the background. Staleness is bounded to an hour and `forget()` still clears it.
 - Special cards: refreshed after the response. Not done: making the refresh itself cheaper (it re-scans all history; an incremental window of recent games plus a daily full scan would cut it about tenfold), and `sets_mod.definitions` / `claim_rewards` (about 0.3 s each on the Sets and Challenges screens).
 - Verified: `verify_player_cards.py` (673, with the concurrency, stale, hour-old, failed-build and background-refresh cases), `verify_player_action_photo.py` (42, including the size copies, EXIF rotation, transparency and the single-column read), `verify_photo_sizes.mjs`, and the Player Cards browser suites.
+
+## v9.139.1.1: the phone More menu is the sidebar list
+
+- Bug: `BottomBar`'s More sheet in `pages/playercards/nav.jsx` had its own hard-coded links, so Challenges (added after it) never appeared on a phone. The sheet is now `useNav()` minus `BAR_KEYS` (home, book, packs, swaps, which the bar holds itself), with the sidebar's group headings (a heading is dropped when nothing under it is left) and badges.
+- Kept: Club cards stays in More (the bar's Cards slot covers My cards, with the My cards / Club cards switch on top). The sheet list scrolls inside a max height so a long list cannot run off a short phone.
+- Verified: `verify_player_cards_page_browser.mjs` (70, new: More plus the bar equals the sidebar, headings, the sheet inside the screen). Control on the previous `nav.jsx` fails the Challenges, parity and heading checks and nothing else.
