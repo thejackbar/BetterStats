@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 import re
 import uuid
 from types import SimpleNamespace
@@ -65,6 +66,8 @@ from app.services.season_resolve import (
     season_year_for_date as _season_year_for_date,
 )
 from app.services.sync import _compute_milestones
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/club-admin/manual-entries", tags=["manual-entries"])
 
@@ -436,6 +439,27 @@ async def _recompute_milestones(db: AsyncSession, org_id: uuid.UUID, player_ids)
     ids = sorted({pid for pid in player_ids if pid}, key=str)
     if ids:
         await _compute_milestones(db, ids, org_id, reconcile=True)
+    await _refresh_import_deltas(db, org_id)
+
+
+async def _refresh_import_deltas(db: AsyncSession, org_id: uuid.UUID) -> None:
+    """Rebuild a club's season-totals import after its games changed.
+
+    The import's remainder is what is left once the club's own games are taken
+    off (`import_reconcile.with_typed`), so typing, editing or deleting a game
+    moves it. Without this the totals were only right after the next sync. Never
+    raises (a failed refresh must not undo a saved game) and does nothing for a
+    club with no import.
+    """
+    try:
+        has = (await db.execute(_t(
+            "SELECT EXISTS (SELECT 1 FROM imported_stats WHERE organisation_id = :o)"),
+            {"o": org_id})).scalar()
+        if has:
+            from app.services.import_reconcile import reconcile_imported_totals
+            await reconcile_imported_totals(str(org_id))
+    except Exception:
+        log.exception("manual entries: import refresh failed org=%s", org_id)
 
 
 def _extract_player_ids(rows) -> list:

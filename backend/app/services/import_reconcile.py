@@ -499,6 +499,71 @@ def covered_by_year(gr_season_ids, year_by_season: dict) -> set:
     return ids | {s for s, y in year_by_season.items() if y in years}
 
 
+_TYPED_COLUMNS = COUNT_METRICS + ("high_score", "is_hs_not_out", "best_bowling_wickets", "best_bowling_figures")
+
+
+async def fetch_typed_by_player(session, org_uuid, pids) -> dict:
+    """{pid: {season_id: metrics}} the club's own typed or imported GAMES roll up to.
+
+    A season-totals sheet and the same matches typed in as games are one body of
+    figures counted twice, and the reconciler used to subtract only Cricket
+    Australia's record, never the club's own games. Hamilton Veterans (Oct 2026):
+    a season-by-season sheet committed in August, every game typed in from the
+    same records in September and October, and 2016/17 to 2022/23 read exactly
+    double for 26 player-seasons. Reads ``source = 'manual_game'`` of the
+    effective view only, so the import's own deltas are never read back (no
+    circle) and a game paired to a synced twin, which already counts from that
+    twin, is not counted twice here.
+    """
+    from sqlalchemy import text
+
+    if not pids:
+        return {}
+    cols = ", ".join(f"v.{c}" for c in _TYPED_COLUMNS)
+    rows = (await session.execute(
+        text(f"""
+            SELECT v.player_id, v.season_id, {cols}
+              FROM v_effective_player_season_stats v
+              JOIN seasons s ON s.id = v.season_id
+             WHERE v.source = 'manual_game'
+               AND s.organisation_id = CAST(:org AS UUID)
+               AND v.player_id = ANY(CAST(:pids AS uuid[]))
+        """),
+        {"org": str(org_uuid), "pids": [str(p) for p in pids]},
+    )).mappings().all()
+    out: dict = {}
+    for r in rows:
+        by_season = out.setdefault(r["player_id"], {})
+        by_season[r["season_id"]] = accumulate(by_season.get(r["season_id"]), dict(r))
+    return out
+
+
+def with_typed(gr_totals: dict, covered, import_seasons, typed_by_season: Optional[dict],
+               year_by_season: dict) -> tuple:
+    """Fold the club's typed games into what is already held: (totals, covered).
+
+    Only seasons the sheet itself claims count (same year included, as for
+    Cricket Australia's rows): typed games from seasons the sheet never covered
+    belong to nobody's reconciliation and must not eat into the residual. A
+    season the typed games hold is covered, so the sheet's row for it is
+    dropped and the games stand; any shortfall of the sheet over them stays in
+    the career residual (``club - held - emitted``), exactly as for a season
+    Cricket Australia holds. A season no game was typed for is untouched, so a
+    games-only row for a player the club never typed is kept.
+    """
+    if not typed_by_season:
+        return gr_totals, covered
+    sheet_ids = {sid for sid, _m in import_seasons if sid is not None}
+    in_scope = covered_by_year(sheet_ids, year_by_season)
+    typed_ids = {sid for sid in typed_by_season if sid in in_scope}
+    if not typed_ids:
+        return gr_totals, covered
+    totals = accumulate(None, gr_totals)
+    for sid in typed_ids:
+        totals = accumulate(totals, typed_by_season[sid])
+    return totals, set(covered) | covered_by_year(typed_ids, year_by_season)
+
+
 def season_rows_by_grade(items, season_ids) -> list:
     """(season_id, grade_label, metrics) for the given seasons, one per grade,
     so a season delta written for a team-labelled sheet keeps the grade its
@@ -696,6 +761,9 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
         # Ungraded GR fetch (existing all-grades comparison), only for players
         # who actually have an ungraded group.
         gr_by_player = await fetch_gr_by_player(session, org_uuid, ungraded_pids)
+        # The club's own typed games, for the same players (whole-book comparisons only: a
+        # sheet scoped to one grade cannot be compared to a season's games across grades).
+        typed_by_player = await fetch_typed_by_player(session, org_uuid, ungraded_pids)
         # One fetch per distinct cut-off, covering the players whose book stops there.
         gr_by_cut: dict = {}
         for cut in sorted({c for _pid, _g, c in by_group.keys() if c is not None}):
@@ -726,6 +794,9 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
             gr = gr_pool.get(pid, {"season_ids": set(), "totals": None})
             gr_totals = gr["totals"] if gr["totals"] is not None else _blank()
             covered = gr["season_ids"] if grade is not None else covered_by_year(gr["season_ids"], year_by_season)
+            if grade is None:
+                gr_totals, covered = with_typed(
+                    gr_totals, covered, import_seasons, typed_by_player.get(pid), year_by_season)
 
             season_deltas, career = reconcile_player(
                 club, gr_totals, import_seasons, covered
