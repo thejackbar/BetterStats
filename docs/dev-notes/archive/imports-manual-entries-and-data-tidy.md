@@ -1372,3 +1372,13 @@ Mechanism, proved on a real Postgres with the club's shape (3 PlayHQ games plus 
 Two gaps follow. (1) Pairing alone fixes the count but the club's corrections never reach the totals: only a re-sourced season (`import_authoritative`) lets the club's card carry them, and nothing a club can click sets it (only an overwrite CSV import does). (2) `repair_overwrite_pairs` deliberately skips hand-typed games, and Card review's link does not flip the season, so there is no operator or club path for Hamilton's case yet. Not built: it changes stored totals for a club and needs a decision on which card wins per match.
 
 `ops/diagnostics/season_sources_by_player.sql` (read only) shows, per season, the source rows behind a player's totals, flags `DOUBLE`, and lists the typed games that share a date with an unpaired synced game. Run it for the six players before changing anything.
+
+### CORRECTION (2 Nov 2026, from the live read of Baker): the doubled seasons are `import` plus `manual_game`, not PlayHQ plus typed
+
+Running `season_sources_by_player.sql` on the box for Ken Baker showed the 2018/19 to 2022/23 seasons are `import` rows (the `import_effective_deltas` branch, fed by `imported_stats`, the BetterImport season/grade totals) beside `manual_game` rows holding the SAME figures, grade by grade (2022/23: 3 games 78 runs and 4 games 96 runs, in both). There is no `api` row for those seasons and section 3 found no unpaired PlayHQ twin for any typed game. The PlayHQ-twin explanation above holds only for 2023/24 onward, where `api` plus a few typed games is correct (Baker 2024/25: PlayHQ 8 games plus 2 typed = the club's 10 and 234 runs) and the script's `DOUBLE` flag is a false positive.
+
+The older extra games with no detail are `import` rows carrying games only (2012/13: 3 games, 0 innings; 2013/14: 1 game, 0 innings) beside the typed games.
+
+Cause in code: `import_reconcile` derives the import's remainder by subtracting only Cricket Australia's figures (`fetch_gr_by_player`, `fetch_gr_by_player_for_grade`: `player_season_stats` and `player_season_grade_stats`). A club's typed games are never treated as already provided, so a season-totals sheet and typed games of the same player-seasons add. Rule 21's "disjoint" assumption (the import's rollup counts the file's matches, the views count the rest) does not hold when the club types the same matches. Section 4 of the script showed 20 games-CSV imports, 34 typed and 51 edits, so the typed games are not the doubled copy; the second copy is a stats import. The audit entries do not name which stats batches exist: read `import_batches`.
+
+The best-bowling fix and the same-date warning in v9.137.2 stand; neither addresses this.
