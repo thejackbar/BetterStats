@@ -94,6 +94,8 @@ async def build_schema() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
+        # Lifespan DDL (services/superseded_ddl): the played-game test reads it.
+        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS ca_called_off BOOLEAN"))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS grade_merge_logs (
                 id SERIAL PRIMARY KEY, merged_at TIMESTAMPTZ DEFAULT NOW(),

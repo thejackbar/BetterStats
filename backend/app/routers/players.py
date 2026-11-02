@@ -812,10 +812,18 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     # Team tab does so canonical/merged grade names line up.
     breakdown = await get_player_team_breakdown(
         db, player_id, str(player.organisation_id), scope=await _hidden_only_scope(db, player))
+    # A grade he has gone quiet in, or one his club has no side in this season,
+    # has nothing to count down to (services/milestone_activity).
+    from app.services import milestone_activity
+    activity = await milestone_activity.load_grade_activity(db, player.organisation_id)
+    season_rows = breakdown.get("season_rows") or []
     for row in breakdown.get("rows", []):
         matches_in_grade = int(row.get("matches") or 0)
         grade_name = row.get("grade_name")
         if not grade_name or matches_in_grade <= 0:
+            continue
+        if player.organisation_id and not milestone_activity.profile_grade_ok(
+                activity, season_rows, grade_name):
             continue
         grade_scheme = book.for_grade(grade_name)
         target = next_threshold("grade_matches", matches_in_grade, grade_scheme)

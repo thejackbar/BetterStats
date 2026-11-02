@@ -6486,9 +6486,11 @@ async def list_milestones_report(
     from app.services.milestone_rules import (
         next_threshold, reach_window, crossed_thresholds, is_displayable,
     )
-    from app.services import grade_milestone_schemes, milestone_scan
+    from app.services import grade_milestone_schemes, milestone_activity, milestone_scan
 
     org_id = str(club.id)
+    # Which grades the club has a side in this season, for the upcoming list.
+    activity = await milestone_activity.load_grade_activity(db, org_id)
     # The club's scheme for career milestones; a grade-level one (grade_matches
     # below) reads that grade's own increments where the club set them.
     book = await grade_milestone_schemes.load_book(db, org_id)
@@ -6630,7 +6632,8 @@ async def list_milestones_report(
                 COALESCE(p.display_name_override, p.name) AS player_name,
                 p.gender AS gender,
                 COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
-                COUNT(DISTINCT ga.game_id) AS matches
+                COUNT(DISTINCT ga.game_id) AS matches,
+                MAX(g.played_at) AS last_played
             FROM game_appearances ga
             JOIN players p ON p.id = ga.player_id
             JOIN active_ids ai ON ai.player_id = p.id
@@ -6661,6 +6664,10 @@ async def list_milestones_report(
         grade_name = r["grade_name"]
         if not grade_name:
             continue
+        # Not a grade he still plays, or one the club has no side in this
+        # season: nothing to count down to (services/milestone_activity).
+        if not milestone_activity.upcoming_grade_ok(activity, grade_name, r["last_played"]):
+            continue
         grade_scheme = book.for_grade(grade_name)
         target = next_threshold("grade_matches", n, grade_scheme)
         if target is None:
@@ -6682,9 +6689,15 @@ async def list_milestones_report(
 
     upcoming.sort(key=lambda m: m["needed"])
 
+    # What the filter bar reads: the season each player last played and the
+    # kind of cricket they play. Derived on read, never stored.
+    lens = await milestone_activity.annotate_players(
+        db, org_id, [*upcoming, *achieved], activity)
+
     return {
         "upcoming": upcoming,
         "achieved": achieved,
+        "lens": lens,
         "scheme": _scheme_payload(scheme),
         "scheme_options": {f"{stat}_steps": list(MILESTONE_PRESETS[stat]) for stat in MILESTONE_STATS},
         "step_limits": {

@@ -5,6 +5,8 @@ import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { useClub } from '../../hooks/useClub'
 import { normalizeGender } from '../../lib/playerAttributes'
 import MilestoneSplitNote from '../../components/MilestoneSplitNote'
+import MilestoneLensFilters from '../../components/MilestoneLensFilters'
+import { lensMatch } from '../../lib/milestoneLens'
 import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 
@@ -290,6 +292,8 @@ export default function AdminMilestones() {
   const [status, setStatus] = useState('upcoming')
   const [category, setCategory] = useState('all')
   const [gender, setGender] = useState('all')
+  const [ageGroup, setAgeGroup] = useState('all')
+  const [since, setSince] = useState('any')
   const [search, setSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -351,6 +355,10 @@ export default function AdminMilestones() {
     const catMatch = item => category === 'all' || item.category === category
     const nameMatch = item => !q || item.player_name.toLowerCase().includes(q)
     const genderMatch = item => gender === 'all' || normalizeGender(item.gender) === gender
+    // Age group and "last played" read per-player facts the server derives.
+    const lens = { ageGroup, since }
+    const currentSeason = data.lens?.current_season
+    const lensOk = item => lensMatch(item, lens, currentSeason)
     // Date filter only applies to achieved milestones (by the date achieved).
     // Items with no achieved_at fall out once a range is set.
     const dateMatch = item => {
@@ -362,10 +370,10 @@ export default function AdminMilestones() {
       return true
     }
     return {
-      upcomingFiltered: data.upcoming.filter(i => catMatch(i) && nameMatch(i) && genderMatch(i)),
-      achievedFiltered: data.achieved.filter(i => catMatch(i) && nameMatch(i) && genderMatch(i) && dateMatch(i)),
+      upcomingFiltered: data.upcoming.filter(i => catMatch(i) && nameMatch(i) && genderMatch(i) && lensOk(i)),
+      achievedFiltered: data.achieved.filter(i => catMatch(i) && nameMatch(i) && genderMatch(i) && lensOk(i) && dateMatch(i)),
     }
-  }, [data, category, search, gender, dateFrom, dateTo])
+  }, [data, category, search, gender, ageGroup, since, dateFrom, dateTo])
 
   const showUpcoming = status === 'upcoming' || status === 'all'
   const showAchieved = status === 'achieved' || status === 'all'
@@ -433,6 +441,15 @@ export default function AdminMilestones() {
               </button>
             ))}
           </div>
+
+          {/* Age group (Seniors, Juniors...) and how recently they last played */}
+          <MilestoneLensFilters
+            lens={data?.lens}
+            ageGroup={ageGroup}
+            onAgeGroup={setAgeGroup}
+            since={since}
+            onSince={setSince}
+          />
 
           {/* Player search */}
           <input

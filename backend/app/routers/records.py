@@ -1935,9 +1935,10 @@ async def get_records_milestones(
         next_threshold, reach_window, crossed_thresholds, is_displayable,
     )
     from app.services.grade_milestone_schemes import load_book
-    from app.services import milestone_scan
+    from app.services import milestone_activity, milestone_scan
 
     book = await load_book(db, org_id)
+    activity = await milestone_activity.load_grade_activity(db, org_id)
     # Career figures follow the club's scheme; a grade's own follow that
     # grade's, where the club set one.
     scheme = book.for_grade(grade_name) if grade_name else book.club
@@ -2026,7 +2027,8 @@ async def get_records_milestones(
                 SELECT p.id::text AS player_id,
                        COALESCE(p.display_name_override, p.name) AS player_name,
                        p.gender AS gender,
-                       COALESCE(SUM(bi.runs), 0) AS total
+                       COALESCE(SUM(bi.runs), 0) AS total,
+                       MAX(g.played_at) AS last_played
                 FROM players p
                 JOIN v_effective_batting_innings bi ON bi.player_id = p.id
                 JOIN v_effective_games g ON g.id = bi.game_id
@@ -2042,7 +2044,8 @@ async def get_records_milestones(
                 SELECT p.id::text AS player_id,
                        COALESCE(p.display_name_override, p.name) AS player_name,
                        p.gender AS gender,
-                       COALESCE(SUM(bs.wickets), 0) AS total
+                       COALESCE(SUM(bs.wickets), 0) AS total,
+                       MAX(g.played_at) AS last_played
                 FROM players p
                 JOIN v_effective_bowling_spells bs ON bs.player_id = p.id
                 JOIN v_effective_games g ON g.id = bs.game_id
@@ -2056,7 +2059,8 @@ async def get_records_milestones(
                 SELECT p.id::text AS player_id,
                        COALESCE(p.display_name_override, p.name) AS player_name,
                        p.gender AS gender,
-                       COALESCE(SUM(fs.catches), 0) AS total
+                       COALESCE(SUM(fs.catches), 0) AS total,
+                       MAX(g.played_at) AS last_played
                 FROM players p
                 JOIN v_effective_fielding_stats fs ON fs.player_id = p.id
                 JOIN v_effective_games g ON g.id = fs.game_id
@@ -2070,7 +2074,8 @@ async def get_records_milestones(
                 SELECT p.id::text AS player_id,
                        COALESCE(p.display_name_override, p.name) AS player_name,
                        p.gender AS gender,
-                       COUNT(DISTINCT ga.game_id) AS total
+                       COUNT(DISTINCT ga.game_id) AS total,
+                       MAX(g.played_at) AS last_played
                 FROM players p
                 JOIN game_appearances ga ON ga.player_id = p.id
                 JOIN v_effective_games g ON g.id = ga.game_id
@@ -2099,6 +2104,10 @@ async def get_records_milestones(
                     })
                 if r["player_id"] not in active_ids:
                     continue
+                # A grade he has gone quiet in, or one the club has no side in
+                # this season, has nothing to count down to.
+                if not milestone_activity.upcoming_grade_ok(activity, grade_name, r["last_played"]):
+                    continue
                 target = next_threshold(mt, n, scheme)
                 if target is None:
                     continue
@@ -2122,9 +2131,15 @@ async def get_records_milestones(
         set() if await user_can_view_org_private(db, viewer, org_id)
         else await player_visibility.hidden_player_ids(db, org_id)
     )
+    upcoming = player_visibility.drop_hidden(upcoming, hidden)
+    achieved = player_visibility.drop_hidden(achieved, hidden)
+    # What the filter bar reads, on the players left after hiding.
+    lens = await milestone_activity.annotate_players(
+        db, org_id, [*upcoming, *achieved], activity)
     return {
-        "upcoming": player_visibility.drop_hidden(upcoming, hidden),
-        "achieved": player_visibility.drop_hidden(achieved, hidden),
+        "upcoming": upcoming,
+        "achieved": achieved,
+        "lens": lens,
         "scope": "grade" if grade_name else "career",
     }
 
