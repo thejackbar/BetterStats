@@ -103,8 +103,11 @@ async function open({ matches = MATCHES, fails = false, width = 1440 } = {}) {
   ck('it names the PlayHQ one as PlayHQ', /from PlayHQ/.test(text), text)
   ck('and the other as hand entered', /hand entered/.test(text), text)
   ck('it flags the same opposition', /same opposition/.test(text), text)
-  ck('and links to each game', (await box.locator('a').count()) === 2, String(await box.locator('a').count()))
+  ck('and links to each game', (await box.locator('a[href^="/games/"]').count()) === 2, String(await box.locator('a[href^="/games/"]').count()))
   ck('it says the same match twice is counted twice', /counted twice in every total/.test(text), text)
+  const hint = page.getByTestId('game-same-day-hint')
+  ck('a PlayHQ game on the day points to Card review to link the two', (await hint.count()) === 1 && /Card review/.test(await hint.innerText()))
+  ck('the link goes to the possible doubles', (await hint.locator('a').getAttribute('href').catch(() => '')) === '/admin/card-review/doubles')
 
   // Editing a saved game: it must not flag itself, and saving still goes.
   await page.getByRole('button', { name: 'Edit', exact: true }).first().click({ timeout: 15000 }).catch(() => {})
@@ -130,6 +133,16 @@ async function open({ matches = MATCHES, fails = false, width = 1440 } = {}) {
   await page.waitForTimeout(900)
   const text = await page.getByTestId('game-same-day').innerText().catch(() => '')
   ck('one game reads "a game", not "1 games"', /already has a game on 2025-02-20/.test(text), text.slice(0, 120))
+  await ctx.close()
+}
+
+// ── only a hand-entered game that day: no pointer to link it to PlayHQ ──────
+{
+  const { page, ctx } = await open({ matches: [MATCHES[1]] })
+  await dateBox(page).fill('2025-02-20')
+  await page.waitForTimeout(900)
+  ck('a hand-entered game alone still warns', (await page.getByTestId('game-same-day').count()) === 1)
+  ck('but offers no Card review pointer (there is no PlayHQ game to link)', (await page.getByTestId('game-same-day-hint').count()) === 0)
   await ctx.close()
 }
 

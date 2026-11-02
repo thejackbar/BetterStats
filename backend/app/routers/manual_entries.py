@@ -115,6 +115,16 @@ class _AggregateFields(BaseModel):
         except ValueError as e:
             raise ValueError(str(e))
 
+    @model_validator(mode="after")
+    def _best_wickets_follow_figures(self):
+        # ONE ENTRY: figures "4-13" carry the wickets, so the two can never disagree and a profile
+        # never has to fall back to printing a bare "4 wickets". Figures win over a stale wickets box.
+        # Wickets given alone are still accepted (older rows, API callers): they read as "N wickets".
+        w = _wickets_of_figures(self.bowling_best_figures)
+        if w is not None:
+            self.bowling_best_wickets = w
+        return self
+
 
 class SeasonAdjustmentIn(_AggregateFields):
     player_id: str
@@ -2628,6 +2638,12 @@ _BOWLING_FIGURES_RE = re.compile(r"^\s*(\d+)\s*[-/]\s*(\d+)\s*$")
 _EXCEL_DATE_RE = re.compile(r"^\s*(\d+)[-/](Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b", re.IGNORECASE)
 
 
+def _wickets_of_figures(figures) -> Optional[int]:
+    """The wickets in canonical figures ("4-13" gives 4), or None when there are none."""
+    m = re.match(r"^(\d+)-\d+$", figures or "")
+    return int(m.group(1)) if m else None
+
+
 def _parse_bowling_figures(v) -> Optional[str]:
     """Normalize 'best bowling figures' input.
 
@@ -2774,6 +2790,12 @@ async def import_season_adjustments(
                     fields[col] = _parse_bowling_figures(val)
                 else:  # text fields: notes
                     fields[col] = (val or "").strip() or None
+
+            # Figures carry the wickets (see _AggregateFields), so a sheet that gives only "4-13"
+            # does not leave the profile printing "N wickets".
+            _w = _wickets_of_figures(fields.get("bowling_best_figures"))
+            if _w is not None:
+                fields["bowling_best_wickets"] = _w
 
             # Upsert on the UNIQUE (player_id, season_id, grade_id) constraint
             existing_q = await db.execute(

@@ -109,9 +109,10 @@ const routes = (page, calls, o = {}) => page.route('**/api/**', async (route) =>
   if (/card-review\/matches\/[^/]+\/candidates/.test(url)) return json({ candidates: [{ game_id: G2, date: '2026-03-14', opposition: 'Northfield', grade: '1st XI', shared: 11, ca_batters: 11, club_batters: 11, taken_by: null }] })
   if (/card-review\/matches\/[^/]+\/choice/.test(url) && req.method() === 'POST') {
     const b = JSON.parse(body); state.current = b.choice
-    return json({ match_id: M1, from: 'club', to: b.choice, left_out: b.choice === 'hybrid' ? ['x'] : [], brought: [], match: detail(b.choice) })
+    return json({ match_id: M1, from: 'club', to: b.choice, left_out: b.choice === 'hybrid' ? ['x'] : [], brought: [], match: detail(b.choice),
+      season_basis: { season: 'Summer 2025/26', by_match: b.choice !== 'ca' } })
   }
-  if (/card-review\/matches\/[^/]+\/undo/.test(url) && req.method() === 'POST') { state.current = 'club'; return json({ to: 'club', match: detail('club') }) }
+  if (/card-review\/matches\/[^/]+\/undo/.test(url) && req.method() === 'POST') { state.current = 'club'; return json({ to: 'club', match: detail('club'), season_basis: { season: 'Summer 2025/26', by_match: true } }) }
   if (/card-review\/matches\/[^/]+\/(pair-ok|relink|unlink)/.test(url) && req.method() === 'POST') return json({ ok: true })
   if (/card-review\/matches\/[^/]+$/.test(url)) return json(detail(state.current))
   if (/card-review\/game\//.test(url)) {
@@ -310,6 +311,10 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || 
   await page.waitForTimeout(400)
   const ch = posts(calls, /choice/)
   check('choosing it is one POST with the combined choice', ch.length === 1 && JSON.parse(ch[0].body).choice === 'hybrid')
+  const afterChoice = await page.locator('body').innerText()
+  check('the page says the season now counts match by match', /Summer 2025\/26 totals now count each match from its own scorecard/.test(afterChoice),
+    afterChoice.slice(0, 200))
+  check('and the choice cards say profiles, the leaderboard and records follow it', /Profiles, the leaderboard and records follow/.test(afterChoice))
   await page.click('[data-testid="undo"]')
   await page.waitForTimeout(400)
   check('Undo is one POST to /undo', posts(calls, /undo/).length === 1)

@@ -126,6 +126,9 @@
 
 54a. Best bowling is `best_bowling_figures` (`wickets-runs`) with the bare "N wickets" only as the fallback. Every branch of `v_effective_player_season_stats` that rolls up spells (`manual_game`, `api_scorecard`) must emit the figures string, never `NULL::text`, or a club with typed-in bowling never shows one. `get_career_bowling` takes the figures from the row that holds the best wicket count, never from "the rows that have figures". Archive: grep `reads wickets and runs`.
 
+54b. A season counts match by match (CA's season total stepped aside) when it is in `v_club_sourced_seasons`: `import_authoritative`, OR it holds a paired match a person chose the club's card for in Card review (`review_choice` set and `pair_prefers_import`). DERIVED, never stored: undoing the last choice returns the season to CA's total. Nothing reads `seasons.import_authoritative` directly any more; a new season-total reader goes through `v_effective_player_season_stats`, and anything that keys on `pair_prefers_import` alone must also ask whether a person decided. An automatic pair (`review_choice` NULL) is untouched on purpose. Archive: grep `chosen club card moves every total`.
+54c. Best bowling is entered once as wickets/runs; the wickets are read off valid figures in `manual_aggregate`, `manual_career` and `_AggregateFields`, figures winning over a stale wickets box. A bare wicket count is legacy and reads "N wickets".
+
 ## Traps and failure signatures
 
 - Strike rate 320 or 333.33 beside blank balls: rules 1, 6. Overs summing to 20.4: rule 7. Header average differs from StatLab: rule 12. 13 matches where the club counts 10: rules 13, 14.

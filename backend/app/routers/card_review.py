@@ -309,7 +309,7 @@ async def card_review_choose(match_id: str, data: ChoiceIn,
     res = await _do(club, act.set_choice(db, club.id, match_id, data.choice, user.id, note=data.note))
     res.pop("players", None)
     d = await cr.match_detail(db, club.id, match_id)
-    return {**res, "match": d}
+    return {**res, "match": d, "season_basis": await act.season_basis(db, club.id, match_id)}
 
 
 @router.post("/matches/{match_id}/undo")
@@ -318,7 +318,8 @@ async def card_review_undo(match_id: str, user: User = Depends(require_cap(MANAG
                            db: AsyncSession = Depends(get_db)):
     match_id = _id(match_id)
     res = await _do(club, act.undo_last(db, club.id, match_id, user.id))
-    return {**res, "match": await cr.match_detail(db, club.id, match_id)}
+    return {**res, "match": await cr.match_detail(db, club.id, match_id),
+            "season_basis": await act.season_basis(db, club.id, match_id)}
 
 
 @router.post("/matches/{match_id}/refresh")

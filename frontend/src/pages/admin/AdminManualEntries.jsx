@@ -367,10 +367,25 @@ function AggregateFieldGrid({ form, setForm, includeWidesNoBalls = false }) {
           <NumberField label="Runs conceded" value={form.bowling_runs} onChange={set('bowling_runs')} />
           <NumberField label="Wickets" value={form.bowling_wickets} onChange={set('bowling_wickets')} />
           <NumberField label="5-wicket innings" value={form.bowling_five_wicket_innings} onChange={set('bowling_five_wicket_innings')} />
-          <NumberField label="Best — wickets" value={form.bowling_best_wickets} onChange={set('bowling_best_wickets')} />
-          <div>
-            <label className={LABEL_CLS}>Best figures (e.g. 4-13)</label>
-            <input type="text" value={form.bowling_best_figures || ''} onChange={e => setForm({ ...form, bowling_best_figures: e.target.value })} className={INPUT_CLS} />
+          <div className="col-span-2">
+            <label className={LABEL_CLS} htmlFor="best-bowling">Best bowling (wickets/runs, e.g. 4/13)</label>
+            <input id="best-bowling" data-testid="best-bowling" type="text" inputMode="text" autoComplete="off" placeholder="4/13"
+              value={form.bowling_best_figures || ''}
+              onChange={e => {
+                const v = e.target.value
+                const m = /^\s*(\d+)\s*[-/]\s*(\d+)\s*$/.exec(v)
+                // One entry: the wickets are read off the figures, so the profile never has to fall back to "N wickets".
+                setForm({ ...form, bowling_best_figures: v, ...(m ? { bowling_best_wickets: Number(m[1]) } : {}) })
+              }}
+              className={INPUT_CLS} />
+            {form.bowling_best_wickets !== '' && form.bowling_best_wickets != null && !(form.bowling_best_figures || '').trim() && (
+              <p className="mt-1 text-[11px] text-amber-300" data-testid="best-bowling-legacy">
+                This was saved as {form.bowling_best_wickets} {Number(form.bowling_best_wickets) === 1 ? 'wicket' : 'wickets'} with no runs, so the profile can only say that.
+                Enter it as wickets/runs (for example {form.bowling_best_wickets}/13) to show the full figures,{' '}
+                <button type="button" className="underline" data-testid="best-bowling-clear"
+                  onClick={() => setForm({ ...form, bowling_best_wickets: '' })}>or remove it</button>.
+              </p>
+            )}
           </div>
           {includeWidesNoBalls && <>
             <NumberField label="Wides" value={form.bowling_wides} onChange={set('bowling_wides')} />
@@ -1644,6 +1659,13 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
                   </li>
                 ))}
               </ul>
+              {sameDay.some(d => d.source !== 'manual') && (
+                <p className="mt-2 text-pb-dim" data-testid="game-same-day-hint">
+                  If this is the same match as the PlayHQ one, save it and then link the two in{' '}
+                  <Link to="/admin/card-review/doubles" className="underline">Card review</Link>
+                  . You choose which card the site shows, and every total follows that choice.
+                </p>
+              )}
             </div>
           )}
           <div>
