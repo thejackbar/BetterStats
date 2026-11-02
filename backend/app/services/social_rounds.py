@@ -586,10 +586,17 @@ _NOT_FOUND_MESSAGE = (
 )
 
 
-def _match_day_time(m: dict) -> tuple[str, str]:
-    """('YYYY-MM-DD', 'HH:MM') from a raw grade-match item's schedule."""
-    sched = m.get("matchSchedule") or [{}]
-    dt = (sched[0].get("startDateTime") if sched else "") or ""
+def _match_day_time(m: dict, last: bool = False) -> tuple[str, str]:
+    """('YYYY-MM-DD', 'HH:MM') from a raw grade-match item's schedule.
+
+    A two-day game has one entry per day, a week apart, in no reliable order, so
+    this never reads ``matchSchedule[0]``. Fixtures want the first day (default);
+    results want ``last=True``, the weekend the game finished, the same day
+    ``get_grade_results`` files it under."""
+    days = gr.schedule_days(m)
+    if not days:
+        return "", ""
+    dt = days[-1][1] if last else days[0][1]
     return dt[:10], (dt[11:16] if len(dt) >= 16 else "")
 
 
@@ -657,7 +664,7 @@ async def _grade_rows_for_season(db: AsyncSession, org_id, season_id) -> list[tu
     return [(r.guid, r.grade_id, r.grade_name, r.season_name) for r in res]
 
 
-async def _reference_round(db: AsyncSession, org, raw: str):
+async def _reference_round(db: AsyncSession, org, raw: str, last: bool = False):
     """Resolve a pasted match reference into the anchor match plus every club
     match in the same round.
 
@@ -673,6 +680,10 @@ async def _reference_round(db: AsyncSession, org, raw: str):
     payload is the invalid/playhq/not_found dict to return as-is), or
     ``(None, ctx)`` where ctx carries the anchor, the round's club matches
     (each ``(grade_guid, raw_match)``), the grade-name map and the season.
+
+    ``last`` places every match on the LAST day it is played (results, which are
+    filed under the weekend a two-day game finished); the default is the first
+    day (fixtures). Anchor and candidates must use the same one.
     """
     ref = parse_reference(raw)
     if not ref:
@@ -719,7 +730,7 @@ async def _reference_round(db: AsyncSession, org, raw: str):
         for m in lst:
             all_matches.append((guid, m))
 
-    anchor_day, _ = _match_day_time(anchor)
+    anchor_day, _ = _match_day_time(anchor, last)
     try:
         anchor_date = date.fromisoformat(anchor_day)
     except (ValueError, TypeError):
@@ -733,7 +744,7 @@ async def _reference_round(db: AsyncSession, org, raw: str):
         _h_oid, _, _a_oid, _ = _match_logos(m)
         if fixture_side(org, home, away, _h_oid, _a_oid) is None:
             continue
-        day, _tm = _match_day_time(m)
+        day, _tm = _match_day_time(m, last)
         in_window = False
         if anchor_date and day:
             try:
@@ -825,7 +836,7 @@ async def social_results_for_reference(db: AsyncSession, org, raw: str, include_
     only completed matches (statusId 3) in the round window are fetched, plus
     those still in play (statusId 2) when ``include_live``. The anchor itself
     doesn't have to be completed — whatever the window holds is returned."""
-    err, ctx = await _reference_round(db, org, raw)
+    err, ctx = await _reference_round(db, org, raw, last=True)
     if err is not None:
         return err
     statuses = {"3", "2"} if include_live else {"3"}
@@ -1384,7 +1395,7 @@ async def social_totw(
         label = _range_label(*date_range)
         pairs = [(m.get("id"), grade_name_by_guid.get(m.get("grade_id")) or "", bool(m.get("live"))) for m in kept]
     elif q.strip():
-        err, ctx = await _reference_round(db, org, q)
+        err, ctx = await _reference_round(db, org, q, last=True)
         if err is not None:
             return err
         statuses = {"3", "2"} if live_ok else {"3"}

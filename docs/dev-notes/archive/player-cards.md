@@ -287,7 +287,7 @@ Asked for: backfill Winner Winner packs from 1 October 2026 (Jack Barendse shoul
 - `diagnose_card_packs --days N` lists every game back that far with whether it counts and why.
 - Verified: `verify_player_cards.py` (661, including a backfill past the week).
 
-## v9.137.3 (2026-11-02): Player Cards load much faster
+## v9.137.4 (2026-11-02): Player Cards load much faster
 
 Reported: trading cards were loading really slowly.
 

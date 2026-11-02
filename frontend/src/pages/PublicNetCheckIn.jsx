@@ -19,6 +19,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { SignInHint } from '../components/player/SignedInAs'
+import { formatPlayerName, nameMatchesSearch } from '../lib/nameFormat'
 
 function ClubHeader({ club }) {
   const initials = (club?.name || 'Club').split(' ').map((w) => w[0]).join('').slice(0, 3).toUpperCase()
@@ -122,10 +123,12 @@ export default function PublicNetCheckIn() {
     if (step === 'pin' && requirePin && chosen && !chosen.verified) pinRef.current?.focus()
   }, [step, requirePin, chosen])
 
+  // Names print the way the club chose in Settings.
+  const fmtName = (n) => formatPlayerName(n, club?.player_name_format)
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return players
-    return players.filter((p) => (p.display_name || '').toLowerCase().includes(q))
+    return players.filter((p) => nameMatchesSearch(p.display_name, q))
   }, [players, search])
 
   async function doCheckIn() {
@@ -252,7 +255,7 @@ export default function PublicNetCheckIn() {
                 {squadNames.length > 0 && <span data-squad-note> · {squadNames.join(', ')} squad{squadNames.length === 1 ? '' : 's'}</span>}
               </p>
             )}
-            <Banner>{error ? <>{error}<SignInHint name={chosen?.display_name} onSwitch={switchPlayer} /></> : null}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={chosen ? fmtName(chosen.display_name) : undefined} onSwitch={switchPlayer} /></> : null}</Banner>
             <input
               autoFocus
               value={search}
@@ -271,7 +274,7 @@ export default function PublicNetCheckIn() {
                   disabled={busy}
                   className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-pb-surface2 transition-colors disabled:opacity-50"
                 >
-                  <span className="text-[15px] font-medium">{p.display_name}</span>
+                  <span className="text-[15px] font-medium">{fmtName(p.display_name)}</span>
                   {requirePin && !p.has_phone
                     ? <span className="font-mono text-[10px] text-pb-faintest uppercase shrink-0">no mobile</span>
                     : <span className="text-pb-faintest shrink-0">→</span>}
@@ -299,9 +302,9 @@ export default function PublicNetCheckIn() {
           <form onSubmit={submitPin}>
             <div className="text-center mb-5">
               <div className="text-sm text-pb-faint">Hi</div>
-              <div className="font-display font-bold text-2xl">{chosen.display_name}</div>
+              <div className="font-display font-bold text-2xl">{fmtName(chosen.display_name)}</div>
             </div>
-            <Banner>{error ? <>{error}<SignInHint name={chosen?.display_name} onSwitch={switchPlayer} /></> : null}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={chosen ? fmtName(chosen.display_name) : undefined} onSwitch={switchPlayer} /></> : null}</Banner>
 
             {chosen.verified ? (
               // Verified on a previous visit — the cookie is the proof, so this
@@ -371,7 +374,7 @@ export default function PublicNetCheckIn() {
                 Leave your details and you’re in for tonight. Someone at the club will pick this up and add you properly.
               </p>
             </div>
-            <Banner>{error ? <>{error}<SignInHint name={chosen?.display_name} onSwitch={switchPlayer} /></> : null}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={chosen ? fmtName(chosen.display_name) : undefined} onSwitch={switchPlayer} /></> : null}</Banner>
             <div className="space-y-3">
               <div>
                 <label className="block font-mono text-[11px] tracking-wide2 text-pb-faint uppercase mb-1.5">Full name</label>
@@ -423,7 +426,7 @@ export default function PublicNetCheckIn() {
             <div className="font-display font-bold text-2xl">
               {done.already_in ? 'You’re already checked in' : 'You’re checked in'}
             </div>
-            {done.name && <div className="text-pb-faint mt-1.5">{done.name}</div>}
+            {done.name && <div className="text-pb-faint mt-1.5">{fmtName(done.name)}</div>}
             {(done.sessions || []).length > 0 && (
               <div className="mt-5 rounded-xl border pb-hairline divide-y divide-pb-hairline overflow-hidden text-left">
                 {done.sessions.map((s) => (

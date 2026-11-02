@@ -1,13 +1,13 @@
 export default {
   version: 'v9.137.3',
-  date: '2026-11-02',
+  date: '2026-11-01',
   // Above v9.137.2.4's sortKey. Check origin/main at merge time.
-  sortKey: '2026-11-15T09:00:00Z',
-  title: 'Player Cards: much faster to load',
+  sortKey: '2026-11-15T00:00:00Z',
+  title: 'Player page names, and match stats on the ballot',
   items: [
-    'Fixed: cards were slow because every card downloaded the player\'s photo at the size it was uploaded, often several megabytes. A card now asks for a copy about as wide as it is drawn, usually under 150 KB, and the server keeps those copies.',
-    'Fixed: the server read all three of a player\'s photos from the database to send one. It now reads only the one asked for.',
-    'Fixed: when the club\'s card figures were due for a refresh, the next player to open a page waited several seconds for it, and so did anyone who arrived at the same time. The old figures are now served straight away while one refresh runs in the background, and a page that opens several requests at once shares a single refresh.',
-    'Fixed: special cards are brought up to date after the page has loaded rather than before it. A new special card shows on the next visit.',
+    'Fixed: a player\'s own page, the vote pages and net check-in printed names as "Barendse, Jack" whatever the club had picked under Settings. They now follow the club\'s player name format, so a club on First Name Last Name sees "Jack Barendse" in the header, the signed in line, the name pickers and the ballot.',
+    'Fixed: the vote page thanked a player by their surname ("Thanks, Barendse"). It now says "Thanks, Jack".',
+    'New: each player on the voting ballot has a small line under their name with what they did in that game, for example "45* (32) · 2/18 (4 ov) · 2 ct" for runs (a star if not out) and balls, wickets and runs against with overs, and catches, stumpings and run outs. A player who took the field but did not bat or bowl reads "Did not bat or bowl". Games that are not scored yet show no lines, and a player who is hidden from the public pages shows no line.',
+    'New: the same line sits under each name in the votes a player has already cast on their own page.',
   ],
 }
