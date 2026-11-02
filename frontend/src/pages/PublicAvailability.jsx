@@ -29,6 +29,11 @@ function ClubHeader({ club, hasAvailability = true }) {
   const initials = (club?.name || 'Club').split(' ').map((w) => w[0]).join('').slice(0, 3).toUpperCase()
   return (
     <div className="flex flex-col items-center text-center gap-3 mb-6">
+      {club?.slug && (
+        <a href={`/${club.slug}`} data-back-to-site className="self-start text-[13px] font-semibold text-pb-dim hover:text-pb-text">
+          <span aria-hidden="true">←</span> Back to BetterCricket
+        </a>
+      )}
       {club?.logo_url
         ? <img src={club.logo_url} alt="" className="w-16 h-16 rounded-xl object-contain bg-pb-surface2 p-1" />
         : <span className="w-16 h-16 rounded-xl flex items-center justify-center font-display font-bold text-xl" style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{initials}</span>}
@@ -444,7 +449,7 @@ function summaryFor(id, { me, data, ladder, cardsReady }) {
 // the same PIN cookie as the availability answers. The answers live in the page's own
 // state (`availability` is the editor, built by the parent so a tap saves from here);
 // the rest arrives in one call. A phone gets one column, a wide screen two.
-function MyPage({ token, me, club, availability, onSwitch }) {
+function MyPage({ token, me, club, availability, onSwitch, prefetch }) {
   const [data, setData] = useState(null)
   const [failed, setFailed] = useState(false)
   const [ladder, setLadder] = useState({ status: 'loading', ladders: [] })
@@ -455,7 +460,14 @@ function MyPage({ token, me, club, availability, onSwitch }) {
   const [cardsReady, setCardsReady] = useState(null) // packs to open, kept current as the player opens them
   useEffect(() => {
     let alive = true
-    const load = () => api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
+    // The first read is the one the page started with its other two; later reads are fresh.
+    let early = prefetch?.current || null
+    if (prefetch) prefetch.current = null
+    const load = () => {
+      const first = early; early = null
+      const read = first ? first.then((d) => d || api.availPublicProfile(token)) : api.availPublicProfile(token)
+      return read.then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
+    }
     load()
     // Coming back with the browser's Back button restores this page as it was, so a vote
     // cast in between would still read as due. Read it again when that happens.
@@ -510,6 +522,12 @@ function MyPage({ token, me, club, availability, onSwitch }) {
 
   return (
     <div data-my-page>
+      {club?.slug && (
+        <a href={`/${club.slug}`} data-back-to-site
+          className="inline-flex items-center gap-1.5 mb-3 text-[13px] font-semibold text-pb-dim hover:text-pb-text">
+          <span aria-hidden="true">←</span> Back to BetterCricket
+        </a>
+      )}
       <PlayerHero club={club} player={data?.player || me.player} squads={squads} selected={data?.selected || []} onSwitch={onSwitch}
         onUpdateDetails={data?.can_update_details ? () => { setNotice(null); setShowDetails(true) } : null} />
       {notice && (
@@ -570,6 +588,7 @@ export default function PublicAvailability() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const autoPicked = useRef(false)
+  const profileRef = useRef(null) // the profile read started with the page, for MyPage to use once
   const [step, setStep] = useState('loading') // loading | pick | pin | weekend | dead
   const [club, setClub] = useState(null)
   const [requirePin, setRequirePin] = useState(true)
@@ -607,22 +626,23 @@ export default function PublicAvailability() {
   // Load branding + roster, and resume an existing verified session if present.
   useEffect(() => {
     let alive = true
-    api.availPublicLanding(token)
+    // The three reads do not depend on each other, so they go out together instead of one
+    // after another (the page used to wait for the club list, then for who is signed in,
+    // then for the profile). A device that is not signed in simply gets a 401 on the last
+    // two. The profile is handed to MyPage through a ref, which uses it once.
+    const landingP = api.availPublicLanding(token)
+    const meP = api.availPublicMe(token).then((d) => ({ ok: true, d }), () => ({ ok: false }))
+    profileRef.current = api.availPublicProfile(token).catch(() => null)
+    landingP
       .then(async (d) => {
+        const mine = await meP
         if (!alive) return
         setClub(d.club)
         setRequirePin(d.require_pin)
         setHasAvailability(d.has_availability !== false)
         setPlayers(d.players || [])
         // Already verified on this device? Jump straight to the weekend.
-        try {
-          const mine = await api.availPublicMe(token)
-          if (!alive) return
-          setMe(mine)
-          setStep('weekend')
-        } catch {
-          if (alive) setStep('pick')
-        }
+        if (mine.ok) { setMe(mine.d); setStep('weekend') } else { profileRef.current = null; setStep('pick') }
       })
       .catch(() => { if (alive) setStep('dead') })
     return () => { alive = false }
@@ -850,6 +870,7 @@ export default function PublicAvailability() {
           <div>
             <Banner>{error}</Banner>
             <MyPage
+              prefetch={profileRef}
               token={token}
               me={me}
               club={club}

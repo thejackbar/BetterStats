@@ -121,5 +121,47 @@ for (const [fmt, shown, initials, pick] of [['first_last', 'Jack Barendse', 'JB'
   await browser.close()
 }
 
+// ── 4. The dashboard loads its three reads together, and links back to the club site ──
+{
+  const { browser, page, errors } = await launch()
+  const club = { ...brand(null), slug: 'applecross' }
+  const player = { id: 'jack', display_name: 'Barendse, Jack', photo_url: null, shirt_number: null, profile_path: '/players/jack' }
+  const started = {}   // when each read reached the network
+  const t0 = Date.now()
+  await page.route(/\/api\/public\/availability\/AV/, async (r) => {
+    const path = new URL(r.request().url()).pathname.replace(/^.*\/public\/availability\/AV/, '') || '/'
+    started[path] = Date.now() - t0
+    await new Promise((res) => setTimeout(res, 400))   // each read takes 400ms
+    if (path === '/me/profile') return json(r, { player, squads: [], selected: [], modules: [], can_update_details: true, votes: [], votes_cast: [] })
+    if (path.startsWith('/me')) return json(r, { club, player, dates: [], squads: [], has_availability: false, has_squad: false })
+    return json(r, { club, require_pin: false, has_availability: false, allow_maybe: false, week_names: [], players: [] })
+  })
+  await page.goto(`${BASE}/playerdash/AV`)
+  await page.waitForSelector('[data-update-details]', { timeout: 10000 })   // arrives with the profile read
+  const loaded = Date.now() - t0
+  const starts = Object.values(started)
+  check('landing, who-is-signed-in and profile all start together', ['/', '/me', '/me/profile'].every((k) => k in started) && Math.max(...starts) - Math.min(...starts) < 300, JSON.stringify(started))
+  // Wall-clock time is logged, not asserted (render time varies by machine). Measured with 400ms reads:
+  // the previous build took ~1.6s from the first read to the whole page, this one ~1.1s.
+  console.log(`  ${loaded - Math.min(...starts)}ms from the first read to the whole page`)
+  const back = page.locator('[data-back-to-site]')
+  check('a Back to BetterCricket link is on the page', (await back.count()) === 1 && /Back to BetterCricket/.test(await back.textContent()))
+  check('...and it goes to the club\'s own site', (await back.getAttribute('href')) === '/applecross')
+  check('no sideways overflow at 390px', (await overflow(page, PHONE.width)).over <= 0)
+  await page.screenshot({ path: `${SHOT}/dashboard-back-link.png` })
+  // Not signed in: the roster step still shows the link, and the unused profile read is dropped quietly.
+  await page.unroute(/\/api\/public\/availability\/AV/)
+  await page.route(/\/api\/public\/availability\/AV/, async (r) => {
+    const path = new URL(r.request().url()).pathname.replace(/^.*\/public\/availability\/AV/, '') || '/'
+    if (path.startsWith('/me')) return json(r, { detail: 'Not verified' }, 401)
+    return json(r, { club, require_pin: true, has_availability: false, allow_maybe: false, week_names: [], players: [{ id: 'jack', display_name: 'Barendse, Jack', has_phone: true }] })
+  })
+  await page.goto(`${BASE}/playerdash/AV`)
+  await page.waitForSelector('text=Barendse, Jack', { timeout: 10000 })
+  check('not signed in: the name list appears and still links back to the site', (await page.locator('[data-back-to-site]').getAttribute('href')) === '/applecross')
+  check('no page errors', errors.length === 0, errors.join(' | '))
+  await browser.close()
+}
+
 console.log(failed ? `\n${failed} FAILED` : '\nall passed')
 process.exit(failed ? 1 : 0)

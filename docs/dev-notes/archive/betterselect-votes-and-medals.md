@@ -607,3 +607,11 @@ Reported after v9.123.3: a single nominated counter was too narrow. Some clubs h
 - Decisions: a player hidden from the public pages gets no line (the photo test from rule 35b); a game with no batting or bowling rows gets no lines; the ballot shows the line on the ballot page itself as well as the player's cast picks, because the cast list alone cannot help someone choosing.
 - Checked with `backend/scripts/verify_vote_match_stats.py` (14 checks against Postgres 16 through the shipped helper, `fixture_state` and `_votes_for_player`; the previous commit fails 7) and `frontend/verification/drive_name_format_and_vote_stats.mjs` (25 checks in Chromium at 390px, API stubbed, with a default-format control). `drive_signed_in_as.mjs` still passes. Not done: the football vote page.
 
+### Player page speed and the way back to the club site (v9.137.4.1, Nov 2026)
+- Report: after v9.137.3 the player page was very slow to load and had no easy way back to the main site.
+- Found: the page chained three reads (landing with the whole roster, `/me`, `/me/profile`), so a load paid three round trips before anything drew. `_votes_for_player` was also heavy: 217 queries on a seeded club with 8 medals and 48 games (34 votes due), mostly one `resolve_eligibility` per due game, and `_open_fixtures` re-reads the club's fixtures once per medal. Not fixed here; production timings were not available.
+- Fix: the three reads now start together (`profileRef` hands the profile to `MyPage`), and `get_my_profile` logs one `player page timings` line per load so the slow module is read from the log. With 400ms stubbed reads the previous build took about 1.6s from first read to a full page and this one about 1.1s.
+- New: `Back to BetterCricket` (`data-back-to-site`) links to `/<club slug>` at the top of the player page and above the name picker.
+- Not done: batching the per-game eligibility in `_votes_for_player`; it must keep `resolve_eligibility` and `_voter_role` as the single source (rule 35c), so it needs its own change and a control run. Parallel server-side modules need separate sessions and were left alone.
+- Checked with `frontend/verification/drive_name_format_and_vote_stats.mjs` (now covers the parallel start, which the previous build fails, and the link) and the earlier suites.
+
