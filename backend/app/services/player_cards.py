@@ -48,6 +48,7 @@ count and a better special chance; all of that lives in `player_card_pack_kinds`
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import time
@@ -134,6 +135,8 @@ def default_settings() -> dict:
         "board_enabled": True,
         "feed_enabled": True,
         "event_packs_enabled": True,
+        "winner_packs": True,
+        "winner_packs_from": None,
         "starter_gifts": "minimal",
         "big_photos": "all",
     }
@@ -170,7 +173,7 @@ def week_ends_at(settings: dict, now: Optional[datetime] = None) -> datetime:
 async def load_settings(db: AsyncSession, org_id) -> dict:
     row = (await db.execute(text(
         "SELECT enabled, include_juniors, weekly_packs, timezone, launched_at, alerts_enabled, "
-        "sets_enabled, showcase_enabled, board_enabled, feed_enabled, event_packs_enabled, starter_gifts, big_photos "
+        "sets_enabled, showcase_enabled, board_enabled, feed_enabled, event_packs_enabled, winner_packs, winner_packs_from, starter_gifts, big_photos "
         "FROM club_card_settings WHERE organisation_id = CAST(:o AS UUID)"
     ), {"o": str(org_id)})).mappings().first()
     if not row:
@@ -209,7 +212,7 @@ async def save_settings(db: AsyncSession, org_id, patch: dict) -> dict:
         sets.append("weekly_packs = :weekly_packs")
         params["weekly_packs"] = max(0, min(int(patch["weekly_packs"]), MAX_WEEKLY_PACKS))
     for flag in ("alerts_enabled", "sets_enabled", "showcase_enabled", "board_enabled", "feed_enabled",
-                 "event_packs_enabled"):
+                 "event_packs_enabled", "winner_packs"):
         if flag in patch and patch[flag] is not None:
             sets.append(f"{flag} = :{flag}")
             params[flag] = bool(patch[flag])
@@ -365,8 +368,10 @@ _FIGURES_SQL = """
 """
 
 _SNAP_TTL = 300.0
+_SNAP_STALE_MAX = 3600.0   # a snapshot up to an hour old is still served while a new one is built
 _SNAP_MAX = 60
 _SNAP: dict[str, tuple[float, dict]] = {}
+_SNAP_BUILDING: dict[str, "asyncio.Future"] = {}
 _SPECIAL_REFRESH: dict[str, float] = {}
 SPECIAL_REFRESH_TTL = 600.0
 
@@ -402,22 +407,11 @@ async def _junior_only(db: AsyncSession, org_id) -> set[str]:
         return set()
 
 
-async def club_snapshot(db: AsyncSession, club: Organisation, *, fresh: bool = False) -> dict:
-    """The club's card pool, cached for a few minutes.
-
-    ``{"settings", "people": {pid: person}, "figs": {pid: figures}, "rating": {pid: rarity},
-    "pool": {tier: [pid]}, "current_season_ids": [...], "season_label"}``. `people` holds every
-    eligible player (their own card always works); `pool` holds only those with a match played."""
-    key = str(club.id)
-    hit = _SNAP.get(key)
-    now = time.monotonic()
-    if hit and not fresh and now - hit[0] < _SNAP_TTL:
-        return hit[1]
-
-    settings = await load_settings(db, club.id)
-    players = await _club_players(db, club.id)
-    hidden = await hidden_ids(db, club.id)
-    juniors = set() if settings["include_juniors"] else await _junior_only(db, club.id)
+async def _build_snapshot(db: AsyncSession, org_id) -> dict:
+    settings = await load_settings(db, org_id)
+    players = await _club_players(db, org_id)
+    hidden = await hidden_ids(db, org_id)
+    juniors = set() if settings["include_juniors"] else await _junior_only(db, org_id)
 
     people: dict[str, dict] = {}
     for p in players:
@@ -459,15 +453,102 @@ async def club_snapshot(db: AsyncSession, club: Organisation, *, fresh: bool = F
         if f["matches"] > 0:
             pool[rating[pid]["tier"]].append(pid)
 
-    season_ids, season_label = await _current_season(db, club.id, list(people))
+    season_ids, season_label = await _current_season(db, org_id, list(people))
     snap = {
-        "org_id": key, "settings": settings, "people": people, "figs": figs, "rating": rating, "pool": pool,
+        "org_id": str(org_id), "settings": settings, "people": people, "figs": figs, "rating": rating, "pool": pool,
         "current_season_ids": season_ids, "season_label": season_label,
     }
-    if len(_SNAP) >= _SNAP_MAX:
-        _SNAP.clear()
-    _SNAP[key] = (now, snap)
     return snap
+
+
+
+
+def _store_snapshot(key: str, snap: dict) -> None:
+    if len(_SNAP) >= _SNAP_MAX and key not in _SNAP:
+        _SNAP.clear()
+    _SNAP[key] = (time.monotonic(), snap)
+
+
+_BACKGROUND: set = set()
+
+
+def _spawn(coro) -> None:
+    """Run a coroutine on its own, holding a reference so it is not collected, and never raising into the caller."""
+    task = asyncio.get_running_loop().create_task(coro)
+    _BACKGROUND.add(task)
+    task.add_done_callback(_BACKGROUND.discard)
+
+
+async def _revalidate_snapshot(key: str) -> None:
+    """Rebuild a club's snapshot on a session of its own, once at a time, while requests keep being served the old one."""
+    if key in _SNAP_BUILDING:
+        return
+    fut = asyncio.get_running_loop().create_future()
+    fut.add_done_callback(lambda f: f.cancelled() or f.exception())
+    _SNAP_BUILDING[key] = fut
+    try:
+        from app.models.db import async_session_maker
+        async with async_session_maker() as session:
+            snap = await _build_snapshot(session, uuid.UUID(key))
+        _store_snapshot(key, snap)
+        fut.set_result(snap)
+    except BaseException as exc:  # noqa: BLE001 - the stale snapshot keeps serving; the next request tries again
+        logger.exception("player cards: snapshot refresh failed for %s", key)
+        if not fut.done():
+            fut.set_exception(exc if isinstance(exc, Exception) else RuntimeError("cancelled"))
+    finally:
+        if _SNAP_BUILDING.get(key) is fut:
+            _SNAP_BUILDING.pop(key, None)
+
+
+async def club_snapshot(db: AsyncSession, club: Organisation, *, fresh: bool = False) -> dict:
+    """The club's card pool, cached.
+
+    ``{"settings", "people": {pid: person}, "figs": {pid: figures}, "rating": {pid: rarity},
+    "pool": {tier: [pid]}, "current_season_ids": [...], "season_label"}``. `people` holds every
+    eligible player (their own card always works); `pool` holds only those with a match played.
+
+    Building it takes seconds on a club with years of history, so no request waits for it twice: a snapshot younger than
+    `_SNAP_TTL` is served as it is; one older (up to `_SNAP_STALE_MAX`) is served as it is WHILE one rebuild runs in the
+    background; with nothing cached, or `fresh`, the caller builds it and anyone else who arrives meanwhile waits for that
+    build instead of starting their own (a page opens several requests at once)."""
+    key = str(club.id)
+    hit = _SNAP.get(key)
+    if hit and not fresh:
+        age = time.monotonic() - hit[0]
+        if age < _SNAP_TTL:
+            return hit[1]
+        if age < _SNAP_STALE_MAX:
+            if key not in _SNAP_BUILDING:
+                _spawn(_revalidate_snapshot(key))
+            return hit[1]
+    pending = _SNAP_BUILDING.get(key)
+    if pending is not None and not fresh:
+        try:
+            return await asyncio.shield(pending)
+        except asyncio.CancelledError:
+            if not pending.cancelled() and pending.done() is False:
+                raise   # this request was cancelled, not the build
+        except Exception:  # noqa: BLE001 - the build failed for the other request; build it here and let this one report its own error
+            pass
+    fut = asyncio.get_running_loop().create_future()
+    fut.add_done_callback(lambda f: f.cancelled() or f.exception())
+    _SNAP_BUILDING[key] = fut
+    try:
+        snap = await _build_snapshot(db, club.id)
+        _store_snapshot(key, snap)
+        fut.set_result(snap)
+        return snap
+    except BaseException as exc:
+        if not fut.done():
+            if isinstance(exc, Exception):
+                fut.set_exception(exc)
+            else:
+                fut.cancel()
+        raise
+    finally:
+        if _SNAP_BUILDING.get(key) is fut:
+            _SNAP_BUILDING.pop(key, None)
 
 
 async def _current_season(db: AsyncSession, org_id, pids: list[str]) -> tuple[list[str], Optional[str]]:
@@ -903,6 +984,34 @@ async def refresh_specials(db: AsyncSession, club: Organisation, *, force: bool 
     return made
 
 
+_SPECIALS_RUNNING: set = set()
+
+
+async def refresh_specials_soon(org_id) -> None:
+    """Bring a club's special cards up to date AFTER the response, on a session of its own, once at a time and no more than
+    `SPECIAL_REFRESH_TTL` apart. A refresh scans the club's whole history (seconds on a club with years of games), so no page
+    waits for it: a card made by it shows on the player's next load. Never raises."""
+    key = str(org_id)
+    if key in _SPECIALS_RUNNING or time.monotonic() - _SPECIAL_REFRESH.get(key, -1e9) < SPECIAL_REFRESH_TTL:
+        return
+    _SPECIALS_RUNNING.add(key)
+
+    async def run() -> None:
+        try:
+            from app.models.db import async_session_maker
+            async with async_session_maker() as session:
+                club = await session.get(Organisation, org_id)
+                if club is not None:
+                    await refresh_specials(session, club)
+                    await session.commit()
+        except Exception:  # noqa: BLE001
+            logger.exception("player cards: special card refresh failed for %s", key)
+        finally:
+            _SPECIALS_RUNNING.discard(key)
+
+    _spawn(run())
+
+
 # ── The dashboard's one-line view ─────────────────────────────────────────────
 
 async def dashboard_summary(db: AsyncSession, club: Organisation, player: Player) -> Optional[dict]:
@@ -1013,6 +1122,61 @@ async def unwind_stray_match_day_packs(db, org: str, *, apply: bool = False) -> 
     return out
 
 
+async def catch_up_packs(db, club: Organisation, *, apply: bool = False, winner_from: Optional[date] = None) -> dict:
+    """Pay now what the players of a club have earned and not yet been granted, for the two packs that depend on a day: Winner
+    Winner (wins finished before today, within a week) and Match Day (today's own fixtures). It applies the same rules, the same refs
+    and the same add-only inserts as a player opening their page, so it can never pay twice or pay what that would not. Dry run
+    unless `apply`.
+
+    `winner_from` lowers the club's Winner Winner start day (never raises it), for a club whose start day fell after wins it meant
+    to pay (the feature arrived the day after the games). The catch-up pays every win from the start day, however far back, which is
+    how a deliberate backfill is done; opening a page still only looks back a week. Every player in the card pool is looked at, each in a savepoint, so one
+    failing player is listed in `errors` and the rest still go. Returns counts, who, and the start day used."""
+    org = str(club.id)
+    settings = await load_settings(db, org)
+    out: dict = {"winner": [], "match_day": [], "errors": [], "applied": bool(apply), "winner_from": None, "today": None}
+    if not settings.get("enabled", True) or settings.get("launched_at") is None:
+        out["note"] = "Player Cards are off, or not launched, for this club."
+        return out
+    today = club_today(settings)
+    out["today"] = today.isoformat()
+    current = settings.get("winner_packs_from")
+    start = current
+    if winner_from is not None and (current is None or winner_from < current):
+        start = winner_from
+    out["winner_from"] = start.isoformat() if start else None
+    window = _winner_window(settings, start, capped=False)
+    if apply and start is not None and start != current:
+        await db.execute(text("UPDATE club_card_settings SET winner_packs_from = :d WHERE organisation_id = CAST(:o AS UUID)"), {"d": start, "o": org})
+    snap = await club_snapshot(db, club, fresh=True)
+    have: dict[str, set] = {}
+    for pid_, ref in (await db.execute(text(
+            "SELECT player_id::text, ref_key FROM player_card_packs WHERE organisation_id = CAST(:o AS UUID) AND source IN ('winner_winner', 'match_day')"),
+            {"o": org})).fetchall():
+        have.setdefault(pid_, set()).add(ref)
+    w = kinds.WINNER_PACK
+    day_ref = f"match_day:{today.isoformat()}"
+    for pid, person in snap["people"].items():
+        name = person.get("display_name") or pid
+        try:
+            async with db.begin_nested():
+                if window is not None:
+                    for game_id in await _winning_games(db, org, pid, *window):
+                        if f"winner:{game_id}" in have.get(pid, set()):
+                            continue
+                        out["winner"].append({"player": name, "game": game_id})
+                        if apply:
+                            await _insert_labelled(db, org, pid, w["source"], f"winner:{game_id}", w["label"], w["quality"])
+                if settings.get("event_packs_enabled") is not False and day_ref not in have.get(pid, set()) and await _playing_today(db, org, pid, today):
+                    out["match_day"].append({"player": name})
+                    if apply:
+                        await _insert_packs(db, org, pid, "match_day", [day_ref])
+        except Exception as exc:
+            logger.exception("player cards: catch up failed for player %s", pid)
+            out["errors"].append({"player": name, "error": f"{type(exc).__name__}: {exc}"[:300]})
+    return out
+
+
 async def _insert_labelled(db, org: str, pid: str, source: str, ref: str, label: Optional[str], quality: Optional[str] = None) -> int:
     res = await db.execute(text("""
         INSERT INTO player_card_packs (organisation_id, player_id, source, ref_key, label, quality)
@@ -1076,10 +1240,10 @@ async def delete_event(db, org_id, event_id: str) -> bool:
     return bool(res.rowcount)
 
 
-async def _grant_day_packs(db, club: Organisation, pid: str, settings: dict) -> dict[str, int]:
+async def _grant_day_packs(db, club: Organisation, pid: str, settings: dict, org: Optional[str] = None) -> dict[str, int]:
     """Packs for today: holidays, a birthday, a surprise drop, Match Day and any day the club scheduled. A day pack can
     only be earned on its day (the page has to be opened), then it banks until opened."""
-    org, today = str(club.id), club_today(settings)
+    org, today = org or str(club.id), club_today(settings)
     added: dict[str, int] = {}
     if settings.get("event_packs_enabled") is not False:
         for source, ref in kinds.annual_events(today):
@@ -1095,6 +1259,76 @@ async def _grant_day_packs(db, club: Organisation, pid: str, settings: dict) -> 
         ref = f"{ev['id']}:{today.isoformat()}" if ev["per_day"] else ev["id"]
         added["event"] = added.get("event", 0) + await _insert_labelled(db, org, pid, "event", ref, ev["title"], ev["quality"])
     return added
+
+
+# A win is paid the day after it, and for a week after that, so a player who does not open their page the next day still gets it.
+WINNER_LOOKBACK_DAYS = 7
+
+# The games this player's side won, by the day each finished. A game is read as OUR win in this order, because a fixture between two
+# synced clubs is one row whose `result` is relative to whichever club synced it first (see `services/club_grades`):
+#   1. when exactly one of home_org_id / away_org_id is this club, the club's side against `winning_team` (neutral);
+#   2. otherwise, when the player's appearance names one of the two teams, that team against `winning_team`;
+#   3. otherwise `result` = WIN, but only where it is relative to this club (a game this club owns), whether or not a winner is recorded.
+# A 12th man who did not play (`is_reserve`) did not win anything. A fixture's own last day (`end_on`) is the day it finished.
+_WINS_SQL = """
+    SELECT g.id::text AS game_id
+      FROM game_appearances ga
+      JOIN players p ON p.id = ga.player_id AND p.organisation_id = CAST(:org AS UUID)
+      JOIN v_effective_games g ON g.id = ga.game_id
+      LEFT JOIN fixtures f ON f.id = g.id
+     WHERE ga.player_id = CAST(:pid AS UUID) AND COALESCE(ga.is_reserve, FALSE) = FALSE
+       AND COALESCE(f.end_on, g.played_at) >= :floor AND COALESCE(f.end_on, g.played_at) < :today
+       AND CASE
+            WHEN g.winning_team IS NOT NULL
+                 AND (COALESCE(g.home_org_id = CAST(:org AS UUID), FALSE) <> COALESCE(g.away_org_id = CAST(:org AS UUID), FALSE))
+              THEN (g.home_org_id = CAST(:org AS UUID) AND g.winning_team = g.home_team)
+                OR (g.away_org_id = CAST(:org AS UUID) AND g.winning_team = g.away_team)
+            WHEN g.winning_team IS NOT NULL AND ga.team_name IS NOT NULL AND ga.team_name IN (g.home_team, g.away_team)
+              THEN ga.team_name = g.winning_team
+            ELSE g.organisation_id = CAST(:org AS UUID) AND UPPER(COALESCE(g.result, '')) IN ('WIN', 'W', 'WON')
+           END
+"""
+
+
+def _winner_window(settings: dict, start_override: Optional[date] = None, *, capped: bool = True) -> Optional[tuple[date, date]]:
+    """`(floor, today)` for Winner Winner, or None when it is off or the club has not launched cards. A player opening their page
+    never looks back more than `WINNER_LOOKBACK_DAYS`; the catch-up (`capped=False`) looks back to the start day, so an admin can
+    backfill further on purpose."""
+    if settings.get("winner_packs") is False:
+        return None
+    start = start_override or settings.get("winner_packs_from")
+    if start is None:
+        return None
+    today = club_today(settings)
+    start = start if isinstance(start, date) else date.fromisoformat(str(start))
+    return (max(today - timedelta(days=WINNER_LOOKBACK_DAYS), start) if capped else start), today
+
+
+async def _winning_games(db, org: str, pid: str, floor: date, today: date) -> list[str]:
+    rows = (await db.execute(text(_WINS_SQL), {"org": org, "pid": pid, "floor": floor, "today": today})).fetchall()
+    return [r[0] for r in rows]
+
+
+async def _grant_winner_packs(db, org: str, pid: str, settings: dict) -> dict[str, int]:
+    """Winner Winner: a Premium pack of five for each win the player played in, from the day after it. Add-only and once per game
+    (ref `winner:<game id>`), so a result corrected later never takes one back or pays twice. Nothing before the club's start day
+    (`winner_packs_from`, the day the feature arrived for a club already using cards) and never more than a week back.
+
+    It runs in its own savepoint and never raises: a pack that cannot be worked out is logged and the player's other packs (and the
+    Match Day pack that follows) are still granted."""
+    window = _winner_window(settings)
+    if window is None:
+        return {}
+    w = kinds.WINNER_PACK
+    try:
+        async with db.begin_nested():
+            n = 0
+            for game_id in await _winning_games(db, org, pid, *window):
+                n += await _insert_labelled(db, org, pid, w["source"], f"winner:{game_id}", w["label"], w["quality"])
+        return {w["source"]: n}
+    except Exception:
+        logger.exception("player cards: winner packs failed for player %s", pid)
+        return {}
 
 
 async def _grant_achievement_packs(db, org: str, pid: str, launched: Optional[datetime]) -> dict[str, int]:
@@ -1130,12 +1364,13 @@ async def ensure_grants(db: AsyncSession, club: Organisation, pid: str, snap: di
     launched = settings.get("launched_at")
     added["duck"] = await _insert_packs(db, org, pid, "duck", await _duck_refs(db, pid, launched.date() if launched else None))
     added.update(await _grant_achievement_packs(db, org, pid, launched))
-    added.update(await _grant_day_packs(db, club, pid, settings))
+    added.update(await _grant_winner_packs(db, org, pid, settings))
+    added.update(await _grant_day_packs(db, club, pid, settings, org))
     return added
 
 
 # Where each kind of pack sits in the list: what is special or time-limited first, bulk packs last.
-_PACK_ORDER = {"starter": 0, **{k: 1 for k in ("century", "five_for", "hat_trick", "fifty", "milestone")},
+_PACK_ORDER = {"starter": 0, **{k: 1 for k in ("century", "five_for", "hat_trick", "fifty", "milestone", "winner_winner")},
                **{k: 2 for k in kinds.DAY_SOURCES}, "custom": 2, "reward": 2, "weekly": 3, "duck": 5}
 
 

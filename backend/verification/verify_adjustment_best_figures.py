@@ -1,7 +1,7 @@
 """The season adjustment's best bowling is one entry, and the profile shows wickets and runs.
 
 Reported by Hamilton Veterans (Oct 2026): best bowling read "1 wicket", "4wickets" and the like.
-Typed games were one cause (fixed: v9.137.2). The adjustment form was the other: it asked for
+Typed games were one cause (fixed: v9.138.0). The adjustment form was the other: it asked for
 "Best, wickets" and "Best figures" in two boxes, and a person who filled only the first left the
 profile with nothing but a wicket count to print.
 

@@ -8,6 +8,7 @@ import { fmt2, fmtCount } from '../lib/cricketFormat'
 import { styleChips } from '../lib/playerAttributes'
 import { splitDisplayName } from '../lib/nameFormat'
 import betterStatsLogo from '../assets/bettercricket-white.svg'
+import { sizedPhoto, CARD_HERO_W, CARD_HEAD_W } from '../lib/playerShots'
 
 export const CARD_W = 360
 export const CARD_H = 492
@@ -68,6 +69,8 @@ export function cardSponsor(data, surface, choice) {
 
 // Hero photo first, then the headshot, then nothing (the club logo stands in). A photo that fails to load drops a step.
 export function usePhotoMode(heroUrl, photoUrl) {
+  heroUrl = sizedPhoto(heroUrl, CARD_HERO_W)
+  photoUrl = sizedPhoto(photoUrl, CARD_HEAD_W)
   const [heroOk, setHeroOk] = useState(!!heroUrl)
   const [photoOk, setPhotoOk] = useState(!!photoUrl)
   useEffect(() => { setHeroOk(!!heroUrl) }, [heroUrl])

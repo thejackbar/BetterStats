@@ -56,7 +56,7 @@
 33. The notes pass runs last on its own session and a failure is noted, not raised. `POST /notes` (`run_notes_pass`) reruns it alone on the latest non-undone import, reusing its batch id so undo removes the honours. Re-import re-stamps only rows a CricketStatz import wrote (`ci.organisation_id`), never a hand-typed honour. Award definitions survive undo.
 34. Every progress write is a heartbeat (`cricketstatz_imports.updated_at`, migration 286); `/status` returns seconds since; "still going" under 90 s. The bar tracks seasons, not matches (total grows). Move `phase` column and blob together. A run silent past `STALL_AFTER_SECONDS` (300) is closed as errored so a dead process cannot 409 the club. Stop button at `/imports/{id}/stop`.
 
-- v9.138.0: the season-level rule "CA's totals PLUS the imported matches CA does not have" still holds for an AUTOMATIC pair. It changes only in a season where a person chose the club's card for a paired match in Card review (`review_choice` set): that season is then counted match by match (`v_club_sourced_seasons`, stats guide 54b), so a pair a person decided no longer leaves CA's season total beside the card the club chose.
+- v9.139.0: the season-level rule "CA's totals PLUS the imported matches CA does not have" still holds for an AUTOMATIC pair. It changes only in a season where a person chose the club's card for a paired match in Card review (`review_choice` set): that season is then counted match by match (`v_club_sourced_seasons`, stats guide 54b), so a pair a person decided no longer leaves CA's season total beside the card the club chose.
 
 ## Traps and failure signatures
 

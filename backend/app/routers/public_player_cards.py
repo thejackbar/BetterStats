@@ -46,14 +46,9 @@ async def get_my_cards(token: str, request: Request, db: AsyncSession = Depends(
     """The player's collection and the packs they can open now."""
     club, player, snap = await _ready(db, request, token)
     pid = str(player.id)
-    # Special cards for events in the club's history, made once and kept up to date. A failure
-    # here must not stop the player opening what they have.
-    try:
-        await cards.refresh_specials(db, club)
-        await db.commit()
-    except Exception:
-        logger.exception("player cards: special card refresh failed for %s", club.id)
-        await rollback_keeping(db, club, player)
+    # Special cards for events in the club's history are made once and kept up to date, but AFTER this response: the refresh scans
+    # the club's whole history, so a page never waits for it. A card it makes shows on the next load.
+    await cards.refresh_specials_soon(club.id)
     await cards.ensure_grants(db, club, pid, snap)
     await db.commit()
     packs = await cards.available_packs(db, pid, snap)

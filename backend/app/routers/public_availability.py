@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -187,6 +188,8 @@ def _club_branding(club: Organisation) -> dict:
         "logo_url": club.logo_url,
         "primary_color": club.primary_color,
         "accent_color": club.accent_color,
+        # So the page prints player names the way the club chose in Settings.
+        "player_name_format": club.player_name_format or "last_first",
     }
 
 
@@ -441,6 +444,9 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
     )).scalars().all()
     due: list[dict] = []
     cast: list[dict] = []
+    # Each cast ballot's game and the players it names, so the lines of match stats
+    # are read only for the few ballots that are shown.
+    cast_games: dict[int, tuple] = {}
     live_left = VOTES_LIVE_EXAMINED
     for medal in medals:
         cfg = vote_svc.effective_config(medal)
@@ -469,7 +475,7 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
                 f = fx_by[b.fixture_id]
                 is_open = state_by[b.fixture_id] == "open"
                 closes = vote_svc.fixture_close_date(f, cfg)
-                cast.append({
+                row = {
                     "medal": medal.name,
                     "fixture_id": str(f.id),
                     "opponent": f.opponent_name or f.label,
@@ -484,7 +490,10 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
                         for pk in sorted(b.picks, key=lambda x: x.position)
                     ],
                     "link": f"/vote/{medal.link_token}?fixture={f.id}&player={player.id}" if is_open else None,
-                })
+                }
+                cast.append(row)
+                cast_games[id(row)] = (
+                    vote_svc.match_ref_id(f), [pk.player_id for pk in sorted(b.picks, key=lambda x: x.position)])
 
         todo = [f for f in open_fx if f.id not in voted]
         if not todo:
@@ -521,7 +530,14 @@ async def _votes_for_player(db: AsyncSession, club: Organisation, player: Player
             })
     due.sort(key=lambda d: (d["closes_on"] or "9999", d["date"] or ""))
     cast.sort(key=lambda c: c["date"] or "", reverse=True)
-    return due, cast[:VOTES_CAST_SHOWN]
+    cast = cast[:VOTES_CAST_SHOWN]
+    for row in cast:
+        game_ref, pick_ids = cast_games[id(row)]
+        stats = await vote_svc.match_stat_lines(db, club.id, game_ref, pick_ids)
+        # What each player they picked did in that game, small, under their name.
+        for pk, pid in zip(row["picks"], pick_ids):
+            pk["stats"] = stats.get(str(pid))
+    return due, cast
 
 
 FANTASY_DEADLINES_SHOWN = 3
@@ -646,8 +662,19 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
     A side shows only once it is LOCKED (confirmed). A draft or an unlocked side
     can still change, and telling a player they are in before the selector has
     finished is worse than telling them nothing."""
+    t0 = last = time.perf_counter()
+    laps: dict[str, int] = {}
+
+    def lap(name: str) -> None:
+        """Milliseconds since the last lap, for the one log line that says which module is slow."""
+        nonlocal last
+        now_t = time.perf_counter()
+        laps[name] = round((now_t - last) * 1000)
+        last = now_t
+
     club = await _club_for_token(db, token, need_select=False)
     player = await _player_for_session(db, request, club)
+    lap("session")
     now = local_now(tz)
     today = now.date() if now else date.today()
 
@@ -662,6 +689,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         await _training(db, club, player, today) if "training" in modules
         else {"upcoming": [], "attended_8_weeks": 0, "last_attended": None}
     )
+    lap("squad_selected_training")
 
     # The newer modules fail on their own: one that cannot be built is dropped
     # from this response and the rest of the page still loads.
@@ -677,6 +705,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
             await rollback_keeping(db, club, player)
         if cards is None:
             modules = [m for m in modules if m != "cards"]
+        lap("cards")
     if "votes" in modules:
         try:
             votes, votes_cast = await _votes_for_player(db, club, player)
@@ -685,6 +714,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
             await rollback_keeping(db, club, player)
         if not votes and not votes_cast:
             modules = [m for m in modules if m != "votes"]
+        lap("votes")
     if "season" in modules:
         try:
             season = await player_dashboard.season_overview(db, club, player)
@@ -700,6 +730,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
                 logger.exception("player page: recent form failed for %s", player.id)
                 await rollback_keeping(db, club, player)
                 season["form"] = {"batting": [], "bowling": []}
+        lap("season")
     if "fantasy" in modules:
         try:
             fantasy = await _fantasy_for_player(db, club, player)
@@ -708,6 +739,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
             await rollback_keeping(db, club, player)
         if fantasy is None:
             modules = [m for m in modules if m != "fantasy"]
+        lap("fantasy")
     if "fees" in modules:
         try:
             fees = await player_dashboard.fees_owing(db, club, player)
@@ -715,6 +747,7 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
             logger.exception("player page: fees failed for %s", player.id)
             await rollback_keeping(db, club, player)
             modules = [m for m in modules if m != "fees"]
+        lap("fees")
     if "fines" in modules:
         try:
             fines = await fines_svc.player_fines(db, club.id, player.id)
@@ -724,6 +757,13 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
             fines = []
         if not fines:
             modules = [m for m in modules if m != "fines"]
+        lap("fines")
+
+    total = round((time.perf_counter() - t0) * 1000)
+    # One line per page load, so "the dashboard is slow" can be answered from the log:
+    # which module took the time. Warning level once the page takes over 1.5 seconds.
+    (logger.warning if total > 1500 else logger.info)(
+        "player page timings total=%dms %s", total, " ".join(f"{k}={v}ms" for k, v in laps.items()))
 
     return {
         "club": _club_branding(club),

@@ -1,6 +1,6 @@
--- Which clubs and seasons change when v9.138.0 ships. READ ONLY, every club.
+-- Which clubs and seasons change when v9.139.0 ships. READ ONLY, every club.
 --
--- From v9.138.0 a season counts match by match (Cricket Australia's season total stepped aside) as
+-- From v9.139.0 a season counts match by match (Cricket Australia's season total stepped aside) as
 -- soon as a person chose the club's card for any paired match in it. Clubs that already used Card
 -- review, including its bulk switches, have such choices now, so their season totals move the
 -- moment the new views are applied. That is the intent, but nobody should be surprised by it.

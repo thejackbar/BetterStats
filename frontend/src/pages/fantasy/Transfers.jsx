@@ -2,7 +2,9 @@
 // to pick the replacement, then confirm. Several players can go out at once: the bank
 // shows what the set returns less what the picks cost, and the server checks the budget
 // over the whole set. The first transfer of the round is free; further ones cost the
-// points hit.
+// points hit. A pick may take the bank below zero while the manager is still working out
+// the set (sell more, or pick cheaper); only Confirm is held back until it fits. The
+// captain's or vice's armband passes to whoever comes in for them (the server does the same).
 import { useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import { StatTile, DISP, tintBg, mix, money, pts, Btn, Avatar, Field, ROLE_LABEL, ROLE_SHORT, ROLE_ORDER, GREEN, RED, AMBER, PriceTag, PriceArrow, MoverChips, byMover, moverEmpty } from './ui'
@@ -53,6 +55,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
   const [sort, setSort] = useState(null)                 // { key, dir } once a column is picked
   const [step, setStep] = useState('sell')               // phone: sell | buy
   const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')                    // why the last Confirm was refused, shown beside the button
 
   const poolById = useMemo(() => Object.fromEntries((pool || []).map(p => [p.player_id, p])), [pool])
   const free = squad?.free_transfers ?? 0
@@ -109,16 +112,16 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
     if (queuedOut.has(p.player_id)) return
     const was = outs.some(o => o.player_id === p.player_id)
     const next = was ? outs.filter(o => o.player_id !== p.player_id) : [...outs, p]
+    setErr('')
     setOuts(next)
     setIns(prune(next, ins))
     // Keep the pool on a role the manager is replacing.
     if (!was && roleFilter !== 'all' && !next.some(o => o.role === roleFilter)) setRoleFilter(p.role)
   }
-  const clearAll = () => { setOuts([]); setIns([]); setStep('sell') }
-  const canPick = (p) => !outs.length ? false
-    : inIds.has(p.player_id) || (openRoles.has(p.role) && projected - Number(p.price) >= -1e-6)
+  const clearAll = () => { setOuts([]); setIns([]); setErr(''); setStep('sell') }
+  const canPick = (p) => !outs.length ? false : inIds.has(p.player_id) || openRoles.has(p.role)
   const toggleIn = (p) => {
-    if (inIds.has(p.player_id)) { setIns(ins.filter(x => x.player_id !== p.player_id)); return }
+    if (inIds.has(p.player_id)) { setErr(''); setIns(ins.filter(x => x.player_id !== p.player_id)); return }
     if (!outs.length) { flash('Tap a player to sell first.'); return }
     if (!openRoles.has(p.role)) {
       flash(outs.some(o => o.role === p.role)
@@ -126,16 +129,17 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
         : 'Transfers are like-for-like by role.')
       return
     }
-    if (projected - Number(p.price) < -1e-6) return
+    setErr('')
     setIns(prune(outs, [...ins, p]))
   }
+  const removeIn = (p) => { setErr(''); setIns(ins.filter(x => x.player_id !== p.player_id)) }
   const effSort = sort || (move === 'all' ? { key: desktop ? 'total' : 'price', dir: 'desc' } : null)
   const toggleSort = (key) => setSort(effSort?.key === key
     ? { key, dir: effSort.dir === 'desc' ? 'asc' : 'desc' }
     : { key, dir: key === 'name' ? 'asc' : 'desc' })
 
   const confirm = async () => {
-    setBusy(true)
+    setBusy(true); setErr('')
     try {
       const n = pairs.length
       const r = await api.fanTransfers(token, pairs.map(x => ({ out_player_id: x.out.player_id, in_player_id: x.tin.player_id })))
@@ -144,9 +148,20 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
         : `${n > 1 ? `${n} transfers done` : 'Transfer done'}.${r.hit ? ` ${r.hit} pt hit.` : ''}`)
       setOuts([]); setIns([]); setSearch(''); setStep('sell')
       await onChange()
-    } catch (e) { fail(e) } finally { setBusy(false) }
+    } catch (e) {
+      // The banner at the top of the page is off screen on a phone and clears itself after
+      // a few seconds, so say what went wrong right beside the button as well, until the
+      // manager changes the set. After a refusal the squad may have moved: reload it.
+      setErr(e?.message || 'The transfer did not go through. Check your connection and try again.')
+      fail(e)
+      onChange().catch(() => {})
+    } finally { setBusy(false) }
   }
 
+  const overBy = !locked && projected < -1e-6 ? Math.abs(projected) : 0
+  const overMsg = overBy > 0
+    ? `${money(overBy)} over budget. You can't confirm yet: sell another player or pick ${pairs.filter(x => x.tin).length > 1 ? 'cheaper replacements' : 'a cheaper replacement'}.`
+    : null
   const bankColor = projected < -1e-6 ? RED : GREEN
   const confirmLabel = locked
     ? (pairs.length > 1 ? `Queue ${pairs.length} transfers` : 'Queue transfer')
@@ -228,8 +243,9 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
               <div style={{ marginLeft: 8 }}><MoverChips value={move} onChange={setMove} /></div>
               <div style={{ marginLeft: 'auto', width: 180 }}><Field placeholder="⌕ Search" value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '7px 12px', fontSize: 11.5 }} /></div>
             </div>
-            <SwapSummary pairs={pairs} onRemoveIn={(p) => setIns(ins.filter(x => x.player_id !== p.player_id))} />
-            {outs.length > 0 && !locked && projected < -1e-6 && <div style={{ font: `600 11px 'Hanken Grotesk'`, color: RED, marginBottom: 8 }}>{money(Math.abs(projected))} over budget. Sell another player or pick cheaper replacements.</div>}
+            <SwapSummary pairs={pairs} onRemoveIn={removeIn} />
+            {overMsg && <div data-testid="over-budget" style={{ font: `600 11px 'Hanken Grotesk'`, color: RED, marginBottom: 8 }}>{overMsg}</div>}
+            <ErrorNote text={err} />
             {move !== 'all' && !table.length && <p style={{ font: `500 12.5px 'Hanken Grotesk'`, color: 'var(--faint)', padding: '6px 2px' }}>{moverEmpty(move)}</p>}
             <div style={{ display: 'grid', gridTemplateColumns: COLS, padding: '0 6px 9px' }}>
               {sortHead('name', 0)}
@@ -306,7 +322,7 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
         </>
       ) : (
         <>
-          <div style={{ paddingTop: 14 }}><SwapSummary pairs={pairs} onRemoveIn={(p) => setIns(ins.filter(x => x.player_id !== p.player_id))} /></div>
+          <div style={{ paddingTop: 14 }}><SwapSummary pairs={pairs} onRemoveIn={removeIn} /></div>
           <SectionLabel right={<button onClick={() => setStep('sell')} style={{ background: 'none', border: 'none', color: 'var(--accent-strong)', font: `600 11px 'Hanken Grotesk'`, cursor: 'pointer' }}>Change</button>}>
             Replace with · {shortRoles.map(r => ROLE_LABEL[r].toLowerCase()).join(', ')}
           </SectionLabel>
@@ -343,6 +359,8 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
             })}
           </div>
           <div style={{ paddingTop: 16 }}>
+            {overMsg && <div data-testid="over-budget" style={{ font: `600 11.5px 'Hanken Grotesk'`, color: RED, marginBottom: 8 }}>{overMsg}</div>}
+            <ErrorNote text={err} />
             <Btn full disabled={!canConfirm || busy} onClick={confirm}>
               {busy ? 'Confirming…' : canConfirm ? `${locked ? (pairs.length > 1 ? `Queue ${pairs.length} transfers for next round` : 'Queue transfer for next round') : confirmLabel} · ${cost}` : projected < -1e-6 ? `${money(Math.abs(projected))} over budget` : 'Pick a replacement for each player'}
             </Btn>
@@ -354,7 +372,8 @@ export default function Transfers({ token, squad, pool, rules, round, onChange, 
 }
 
 // Each player going out beside the player coming in for him (or the role still to fill).
-// Tap a pick to take him out of the set.
+// Tap a pick to take them out of the set. When the player going out is captain or vice, the
+// player coming in takes the armband, and the row says so.
 function SwapSummary({ pairs, onRemoveIn }) {
   if (!pairs.length) return null
   return (
@@ -366,6 +385,11 @@ function SwapSummary({ pairs, onRemoveIn }) {
           {tin
             ? <button onClick={() => onRemoveIn(tin)} title="Remove this pick" style={{ minWidth: 0, flex: 1, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text)', font: 'inherit', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tin.name} <span style={{ color: 'var(--faint)' }}>{money(tin.price)} ✕</span></button>
             : <span style={{ color: 'var(--accent-strong)' }}>pick a {ROLE_LABEL[out.role].toLowerCase()}</span>}
+          {tin && (out.is_captain || out.is_vice_captain) && (
+            <span data-testid="armband" style={{ flex: '0 0 auto', font: `700 9px 'Hanken Grotesk'`, letterSpacing: '.06em', textTransform: 'uppercase', color: AMBER, border: `1px solid ${mix(AMBER, 34)}`, padding: '2px 6px', borderRadius: 6 }}>
+              {out.is_captain ? 'Captain' : 'Vice'}
+            </span>
+          )}
         </div>
       ))}
     </div>
@@ -395,6 +419,16 @@ function QueuedList({ items, cancelled, onCancel, busy }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// Why the last Confirm was refused, in the server's own words, kept beside the button.
+function ErrorNote({ text }) {
+  if (!text) return null
+  return (
+    <div role="alert" data-testid="transfer-error" style={{ margin: '0 0 8px', borderRadius: 10, padding: '9px 12px', font: `600 11.5px 'Hanken Grotesk'`, color: RED, background: mix(RED, 10), border: `1px solid ${mix(RED, 28)}` }}>
+      {text}
     </div>
   )
 }

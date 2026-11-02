@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { aflApi, mediaUrl } from '../aflApi'
+import { SignedInAs, SignInHint } from '../../components/player/SignedInAs'
 
 const NOT_OPEN = {
   awaiting_team: "Voting opens once the team list for this game is in.",
@@ -78,6 +79,13 @@ export default function AflPublicVoting() {
     setStep('games')
   }
 
+  // Forget who is signed in (best effort on the cookie) and go back to the games list,
+  // where a player not yet identified is asked for their name.
+  async function switchPlayer() {
+    try { await aflApi.votePublicSwitch(token) } catch { /* best effort */ }
+    setMe(null); backToGames()
+  }
+
   async function verify(playerId, code) {
     setBusy(true); setError(null)
     try {
@@ -137,15 +145,13 @@ export default function AflPublicVoting() {
             {(landing.medal?.name || 'Best & fairest votes').toUpperCase()}
           </div>
         </div>
-        {me && (
-          <button onClick={async () => {
-            try { await aflApi.votePublicSwitch(token) } catch { /* best effort */ }
-            setMe(null); backToGames()
-          }} className="ml-auto text-xs text-pb-faint underline shrink-0">Not you?</button>
-        )}
       </header>
 
-      {error && <div className="mb-4 text-sm text-pb-red">{error}</div>}
+      <SignedInAs name={me?.display_name} onSwitch={switchPlayer} />
+
+      {error && (
+        <div className="mb-4 text-sm text-pb-red">{error}<SignInHint name={me?.display_name} onSwitch={switchPlayer} /></div>
+      )}
 
       {step === 'games' && (
         <div>
@@ -203,7 +209,10 @@ export default function AflPublicVoting() {
             <p className="text-sm text-pb-faint">{NOT_OPEN[game.game.state] || 'Voting has closed.'}</p>
           ) : game.role === 'none' ? (
             <div>
-              <p className="text-sm text-pb-faint mb-4">{REASON[game.reason] || "You can't vote on this game."}</p>
+              <p className="text-sm text-pb-faint mb-4">
+                {REASON[game.reason] || "You can't vote on this game."}
+                <SignInHint name={me?.display_name} onSwitch={switchPlayer} />
+              </p>
               {game.reason === 'verify_required' && (
                 <div className="space-y-1.5">
                   {landing.players.map((p) => (

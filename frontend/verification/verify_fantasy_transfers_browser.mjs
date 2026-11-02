@@ -7,8 +7,11 @@
 // Checks: picking a player to sell moves the Bank straight to bank + his sale price; a second sale adds to it;
 // a pick the first sale alone could not pay for becomes available once the second sale is in; the bank follows
 // each pick and Confirm sends ONE request to /transfers carrying every swap, paired by role; the pool sorts by
-// Player, Price, Sel and Total, both ways; an over-budget set cannot be confirmed; the phone flow (sell, next,
-// replace, confirm) sends the same request; no sideways scroll at 390px; no page errors.
+// Player, Price, Sel and Total, both ways; a pick beyond the bank CAN be made (a draft of the new team) but the set
+// cannot be confirmed and the screen says by how much; selling the captain or vice shows the armband passing to
+// the incoming player and Confirm still goes through; a refusal from the server is shown in full beside the
+// button and stays until the set changes; the phone flow (sell, next, replace, confirm) sends the same request;
+// no sideways scroll at 390px; no page errors.
 import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 
@@ -38,12 +41,14 @@ const POOL = [
   { ...S('ohara', "O'Hara, DJ", 'batter', 9.8), selected_pct: 42.3, total_points: 227 },
   { ...S('rook', 'Rookie, Ray', 'batter', 4.0), selected_pct: 1.2, total_points: 12 },
   { ...S('dock', 'Dockery, James', 'bowler', 12.5), selected_pct: 65.4, total_points: 275.5 },
+  { ...S('ar1', 'Flint, Andrew', 'allrounder', 9.0), selected_pct: 10, total_points: 50 },
+  { ...S('ar2', 'Gale, Mia', 'allrounder', 8.5), selected_pct: 9, total_points: 48 },
 ]
 const names = (rows) => rows.map(r => r.replace(/\s+/g, ' ').trim())
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function open({ width = 1600, locked = false, free = 0 } = {}) {
+async function open({ width = 1600, locked = false, free = 0, squad = SQUAD, refuse = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1000 } })
   const page = await ctx.newPage()
   const errors = [], posts = []
@@ -55,12 +60,12 @@ async function open({ width = 1600, locked = false, free = 0 } = {}) {
     if (path === '/public/fantasy/tok') return json(route, { club: { name: 'Applecross CC', accent_color: '#d40000' }, season: { name: 'Fantasy', status: 'active', rules: { transfer_hit: 4 } }, me: { id: 'm1', display_name: 'Boom Boom' } })
     if (path === '/public/fantasy/tok/me') return json(route, {
       manager: { id: 'm1', display_name: 'Boom Boom' },
-      squad: { id: 's1', team_name: 'Boom XI', players: SQUAD, chips: [], total_points: 646.5, value: 119.9, budget_remaining: 1.1, free_transfers: free, overall_rank: 11, can_rebuild: false, queued_transfers: [] },
+      squad: { id: 's1', team_name: 'Boom XI', players: squad, chips: [], total_points: 646.5, value: 119.9, budget_remaining: 1.1, free_transfers: free, overall_rank: 11, can_rebuild: false, queued_transfers: [] },
       round: { number: 3, status: 'upcoming', locked, lock_at: null, next_number: 4 },
     })
     if (path === '/public/fantasy/tok/pool') return json(route, { players: POOL, rules: { transfer_hit: 4 } })
     if (path === '/public/fantasy/tok/notifications') return json(route, { notifications: [] })
-    if (path === '/public/fantasy/tok/transfers') { posts.push({ method: req.method(), body: JSON.parse(req.postData() || '{}') }); return json(route, locked ? { ok: true, queued: true, count: 2, after_round: 3, warning: null } : { ok: true, hit: 4, count: 2 }) }
+    if (path === '/public/fantasy/tok/transfers') { posts.push({ method: req.method(), body: JSON.parse(req.postData() || '{}') }); if (refuse) return json(route, { detail: refuse }, 400); return json(route, locked ? { ok: true, queued: true, count: 2, after_round: 3, warning: null } : { ok: true, hit: 4, count: 2 }) }
     return json(route, {})
   })
   await page.goto(`${BASE}/fantasy/tok`, { waitUntil: 'domcontentloaded' })
@@ -73,8 +78,8 @@ async function open({ width = 1600, locked = false, free = 0 } = {}) {
 const bankChip = async (page) => (await page.locator('div', { hasText: /^Bank \$/ }).last().innerText()).replace(/\s+/g, ' ').trim()
 // The header row shares the grid style, so keep only player rows (they carry a % in the Sel column).
 const rows = async (page) => names(await page.locator('div[style*="grid-template-columns: 2fr"]').allInnerTexts()).filter(r => /%/.test(r))
-const sell = (page, name) => page.getByRole('button', { name: new RegExp(name) }).first().click()
-const plus = (page, name) => page.locator('div[style*="grid-template-columns: 2fr"]', { hasText: name }).getByRole('button').click()
+const sell = (page, name) => page.getByRole('button', { name: new RegExp(name) }).first().click({ timeout: 3000 })
+const plus = (page, name) => page.locator('div[style*="grid-template-columns: 2fr"]', { hasText: name }).getByRole('button').click({ timeout: 3000 })
 
 // ── 1. Desktop ───────────────────────────────────────────────────────────────
 {
@@ -87,16 +92,16 @@ const plus = (page, name) => page.locator('div[style*="grid-template-columns: 2f
   ck('selling Monument moves Bank to $11.1 straight away', /\$11\.1/.test(bank), bank)
   ck('and says what it was before', /now \$1\.1/.test(bank), bank)
 
-  // Zimmer $22.0 is beyond 11.1, so it is unavailable with one sale
+  // Zimmer $22.0 is beyond 11.1, but a draft of the new team may go over: only Confirm is held back.
   const bigBtn = page.locator('div[style*="grid-template-columns: 2fr"]', { hasText: 'Zimmer, Big' }).getByRole('button')
-  ck('a $22.0 pick is not available on one sale', await bigBtn.isDisabled())
+  ck('a $22.0 pick is still selectable on one sale (draft)', !(await bigBtn.isDisabled()))
 
   await sell(page, 'Prakashkar, Manan')
   bank = await bankChip(page)
   ck('a second sale adds to the bank (1.1 + 10.0 + 15.2)', /\$26\.3/.test(bank), bank)
   ck('both players are marked Out', (await page.getByText('Out', { exact: true }).count()) === 2)
   ck('the pairs show two batters still to pick', (await page.getByTestId('swap-summary').innerText()).match(/pick a batter/g)?.length === 2, await page.getByTestId('swap-summary').innerText())
-  ck('now the $22.0 pick is available', !(await bigBtn.isDisabled()))
+  ck('and still selectable with two sales', !(await bigBtn.isDisabled()))
 
   await plus(page, 'Zimmer, Big')
   bank = await bankChip(page)
@@ -104,7 +109,7 @@ const plus = (page, name) => page.locator('div[style*="grid-template-columns: 2f
   const summary = await page.getByTestId('swap-summary').innerText()
   ck('the first batter out is paired with him', /Monument, Darren\s*→\s*Zimmer, Big/.test(summary.replace(/\n/g, ' ')), summary)
   const midBtn = page.locator('div[style*="grid-template-columns: 2fr"]', { hasText: 'Middleton, James' }).getByRole('button')
-  ck('a $11.8 pick is now out of reach', await midBtn.isDisabled())
+  ck('a $11.8 pick can still be added to the draft', !(await midBtn.isDisabled()))
   const confirm = page.getByRole('button', { name: /Confirm 2 transfers/ })
   ck('Confirm is off while one replacement is missing', await confirm.isDisabled())
   ck('and Cost counts both swaps (no free transfer: 8 pts)', /8 pts/.test(await page.locator('body').innerText()))
@@ -205,6 +210,81 @@ const plus = (page, name) => page.locator('div[style*="grid-template-columns: 2f
   ck('no page errors', t.errors.length === 0, t.errors.join(' | '))
   await t.ctx.close()
 }
+
+// ── 5. Draft: over budget can be picked, cannot be confirmed, and says by how much ──
+try {
+  const t = await open()
+  const { page } = t
+  await sell(page, 'Monument, Darren')                 // bank 1.1 + 10.0 = 11.1
+  await plus(page, 'Zimmer, Big')                       // 22.0 => -10.9
+  let bank = await bankChip(page)
+  ck('the over-budget pick was taken into the draft', /\$-?10\.9|-\$10\.9/.test(bank), bank)
+  const swap = await page.getByTestId('swap-summary').innerText()
+  ck('the swap shows Monument out for Zimmer', /Monument, Darren\s*→\s*Zimmer, Big/.test(swap.replace(/\n/g, ' ')), swap)
+  const over = await page.getByTestId('over-budget').innerText()
+  ck('the screen says it is $10.9 over budget and what to do', /\$10\.9 over budget/.test(over) && /sell another player or pick a cheaper replacement/.test(over), over)
+  ck('Confirm is held back', await page.getByRole('button', { name: /Confirm transfer/ }).isDisabled())
+  await page.getByRole('button', { name: /Zimmer, Big \$22/ }).click()   // take the pick out of the draft
+  await plus(page, 'Rookie, Ray')
+  ck('a pick that fits clears the warning', (await page.getByTestId('over-budget').count()) === 0)
+  ck('and Confirm is on', !(await page.getByRole('button', { name: /Confirm transfer/ }).isDisabled()))
+  ck('no page errors', t.errors.length === 0, t.errors.join(' | '))
+  await t.ctx.close()
+} catch (e) { ck('section 5 ran to the end', false, String(e.message).split('\n')[0]) }
+
+// ── 6. Selling the captain or vice: the armband passes, Confirm goes through ──
+try {
+  const t = await open()
+  const { page } = t
+  await sell(page, 'Barendse, Jack')                    // the captain
+  await sell(page, 'Wijesinghe, Isuri')                 // the vice
+  await plus(page, 'Flint, Andrew')
+  await plus(page, 'Gale, Mia')
+  const armbands = await page.getByTestId('armband').allInnerTexts()
+  ck('the summary shows the captain and the vice handing over', JSON.stringify(armbands.map(a => a.trim().toLowerCase())) === JSON.stringify(['captain', 'vice']), JSON.stringify(armbands))
+  const confirm = page.getByRole('button', { name: /Confirm 2 transfers/ })
+  ck('Confirm is on (a captain no longer blocks it)', !(await confirm.isDisabled()))
+  await confirm.click()
+  await page.waitForTimeout(400)
+  ck('and the request carries both swaps', JSON.stringify(t.posts[0]?.body) === JSON.stringify({ swaps: [{ out_player_id: 'b', in_player_id: 'ar1' }, { out_player_id: 'w', in_player_id: 'ar2' }] }), JSON.stringify(t.posts))
+  ck('no page errors', t.errors.length === 0, t.errors.join(' | '))
+  await t.ctx.close()
+} catch (e) { ck('section 6 ran to the end', false, String(e.message).split('\n')[0]) }
+
+// ── 7. A refusal from the server is shown in full beside the button and stays ──
+try {
+  const REASON = 'Flint, Andrew is already in your squad.'
+  const t = await open({ refuse: REASON })
+  const { page } = t
+  await sell(page, 'Monument, Darren')
+  await plus(page, 'Rookie, Ray')
+  await page.getByRole('button', { name: /Confirm transfer/ }).click()
+  await page.waitForTimeout(500)
+  const note = page.getByTestId('transfer-error')
+  ck('the refusal is shown beside the button, word for word', (await note.count()) === 1 && (await note.innerText()).trim() === REASON, await note.count() ? await note.innerText() : 'none')
+  await page.waitForTimeout(5600)                       // the page banner clears itself after 5s
+  ck('it is still there after the page banner has gone', (await page.getByTestId('transfer-error').count()) === 1)
+  await sell(page, 'Prakashkar, Manan')
+  ck('and clears once the set changes', (await page.getByTestId('transfer-error').count()) === 0)
+  ck('no page errors', t.errors.length === 0, t.errors.join(' | '))
+  await t.ctx.close()
+} catch (e) { ck('section 7 ran to the end', false, String(e.message).split('\n')[0]) }
+
+// ── 8. Phone: the refusal sits above the button, and over budget can be drafted ──
+try {
+  const t = await open({ width: 390, refuse: 'You are $10.9 over budget.' })
+  const { page } = t
+  await page.getByText('Monument, Darren').click()
+  await page.getByRole('button', { name: /Next: pick a replacement/ }).click()
+  await page.waitForSelector('text=Replace with')
+  await page.getByText('Zimmer, Big').click({ timeout: 3000 })
+  const body = await page.locator('body').innerText()
+  ck('phone: the $22.0 pick is taken even though the bank cannot cover it', /Zimmer, Big/.test(await page.getByTestId('swap-summary').innerText()))
+  ck('phone: the button says how far over', /\$10\.9 over budget/.test(await page.getByRole('button', { name: /over budget/ }).innerText()), body.slice(-300))
+  ck('phone: and that button is disabled', await page.getByRole('button', { name: /over budget/ }).isDisabled())
+  ck('phone: no sideways scroll', (await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) <= 1)
+  await t.ctx.close()
+} catch (e) { ck('section 8 ran to the end', false, String(e.message).split('\n')[0]) }
 
 await browser.close()
 console.log(`\n${pass} passed, ${fail} failed`)

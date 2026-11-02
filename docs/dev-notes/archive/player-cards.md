@@ -256,3 +256,43 @@ Asked for: players should not have to spend cards for challenges; they are alway
 - Chosen so a repeatable challenge cannot be farmed: with `max_completions` above 1, cards used in an earlier run of the same challenge are refused and not offered. Different challenges can reuse the same cards.
 - Wording: the admin kind is "Squad" (the stored kind stays `exchange`, so no migration). The submit response carries `used` instead of `spent`. The hand-in confirmation is gone, since nothing is lost.
 - Verified: `verify_player_cards.py` (634), browser `_challenges_` (37), `_page_` (66, with the eighth How it works section the earlier release added), `_admin_` (99).
+
+## v9.137.2 (2026-10-31): Winner Winner packs
+
+Asked for: after a win, the players in that team who won get a Premium pack of five the day after. Called Winner Winner, green, and sent automatically.
+
+- Migration 383: `club_card_settings.winner_packs` (default on) and `winner_packs_from` (default the day it arrived). The start day stops a club's last week of wins turning into packs the minute this deploys; a week is the most it ever looks back.
+- Paid when a player next opens their page, from the day after the game ends, not only ON that day (unlike Match Day, which needs you there). A pack is one per player per game, so opening the page twice or a corrected scorecard never doubles it.
+- Which wins count is the hard part: `games.result` is relative to the club that synced the game first. The SQL prefers the neutral `winning_team` against the club's side, then the player's team name, and trusts `result` only for a game this club owns. Tested with a shared fixture where the other club's result says WIN and ours was a loss.
+- Green is `cardTheme.PACKS.winner_winner` (a '#22c55e', b '#14532d', three stars to match Premium). The pack is a design target under "For what you do".
+- Also fixed in passing: the Sets switch said finishing a set awards nothing, which stopped being true in v9.136.0. And `verify_player_cards.py` failed on 31 October because two Halloween checks counted all Halloween packs; they now compare against a baseline.
+- Not done: a team-sheet or "played but result not yet in" case: a win only counts once the scorecard (or a hand-entered result) is in.
+- Verified: `verify_player_cards.py` (651; a mutation that ignores the winning side fails five of the new checks), the other backend suites and route audit, browser `_page_` (67), `_admin_` (101), `_designs_` (35), `_challenges_` (37), `_hero_`, community and social.
+
+## v9.137.2.1 (2026-11-01): Winner Winner and Match Day catch up
+
+Reported the day after Winner Winner shipped: players who won on Saturday had no pack, and a player in a T20 Division Two team playing today had no Match Day pack.
+
+- Not verified against live data: the sandbox has no production access. What the code explains: the Winner Winner start day (`winner_packs_from`) is the day migration 383 ran, so wins finished before that day are never paid, and a deploy the day after the games does exactly that. Match Day only reads a CONFIRMED team sheet, so a side not yet confirmed in Selection earns nothing until it is.
+- Changed: the win rule's last fallback now also applies when a winner is recorded but the player's team name matches neither side (it reads the club's own stored result); a failure in the wins query is isolated in a savepoint so it cannot stop the Match Day pack or the page; `ensure_grants` passes the club id as a string.
+- Added: `catch_up_card_packs` (dry run, `--apply --by`, audited per club as `player_card_packs_caught_up`) and `diagnose_card_packs` (read-only, prints the query's own error if it raises).
+- Verified: `verify_player_cards.py` (660: catch-up dry run writes nothing, apply pays, a second run pays nothing, a later start day is ignored, a broken wins query leaves the other packs granted), the other backend suites.
+
+## v9.137.2.2 (2026-11-01): Winner Winner backfill
+
+Asked for: backfill Winner Winner packs from 1 October 2026 (Jack Barendse should end up with 4).
+
+- A start day alone could not do it: a page only looks back `WINNER_LOOKBACK_DAYS` (7). The catch-up now reads from the start day it is given with no cap, so `catch_up_card_packs <club> --winner-from 2026-10-01` pays every win from 1 October, one pack per player per win, and sets the club's start day to 1 October. Wins from before the club launched cards are included on purpose.
+- Today's win is paid tomorrow (a pack is for the day after), so a count that includes a win played today is one short until then.
+- `diagnose_card_packs --days N` lists every game back that far with whether it counts and why.
+- Verified: `verify_player_cards.py` (661, including a backfill past the week).
+
+## v9.137.4 (2026-11-02): Player Cards load much faster
+
+Reported: trading cards were loading really slowly.
+
+- Measured, not guessed. A scaled copy of the schema (310 players, 4,000 games, 56,000 appearances) with every statement timed: a cold snapshot took 4.2 s (2.5 s the junior lookup, 1.5 s the stats view), `refresh_specials` 2.9 to 3.6 s every ten minutes, and everything else under 0.4 s. In production the page also draws a photo per card, and photos are stored exactly as uploaded (up to 8 MB, never resized), which no server timing shows.
+- Photos: `?w=` and `services/image_sizes.py` (next size up of 240, 480, 800, 1200; JPEG, or PNG when there is transparency; EXIF rotation applied first; originals and GIFs untouched; an unreadable file is served as uploaded). The three photo routes read one column instead of the whole player. Chosen over resizing on upload because that needs a backfill of every stored photo and a migration; a copy made on demand is kept per `v`, so a re-upload gets a new one.
+- Snapshot: concurrent cold requests built it once each before (eight at once took 6.4 s, now 3.1 s). An expired one cost the next visitor about 2.9 s; it is now 0.000 s and the rebuild runs in the background. Staleness is bounded to an hour and `forget()` still clears it.
+- Special cards: refreshed after the response. Not done: making the refresh itself cheaper (it re-scans all history; an incremental window of recent games plus a daily full scan would cut it about tenfold), and `sets_mod.definitions` / `claim_rewards` (about 0.3 s each on the Sets and Challenges screens).
+- Verified: `verify_player_cards.py` (673, with the concurrency, stale, hour-old, failed-build and background-refresh cases), `verify_player_action_photo.py` (42, including the size copies, EXIF rotation, transparency and the single-column read), `verify_photo_sizes.mjs`, and the Player Cards browser suites.

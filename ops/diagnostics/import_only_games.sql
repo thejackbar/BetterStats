@@ -2,7 +2,7 @@
 -- decide which to keep. READ ONLY, one club.
 --
 -- Hamilton Veterans (Nov 2026): the sheet `hamilton_import_pre_online.csv` and the games the club
--- typed in overlap almost entirely (v9.137.3 stops them counting twice). What is left is a few
+-- typed in overlap almost entirely (v9.138.1 stops them counting twice). What is left is a few
 -- dozen games the sheet alone holds, in 2011/12, 2013/14 and 2017/18. The club called some of
 -- them wrong ("additional game recorded but no details") and the rest may be the only record there
 -- is of a match. They stay in the totals until the club says otherwise.

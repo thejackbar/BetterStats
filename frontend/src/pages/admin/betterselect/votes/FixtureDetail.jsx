@@ -202,7 +202,7 @@ export default function FixtureDetail({ fixtureId, medalId, onBack }) {
         <div className="ml-auto flex gap-2">
           {fx.state === 'open'
             ? <Btn sm variant="ghost" onClick={() => setLock(true)}>Lock voting</Btn>
-            : (fx.state === 'locked' || fx.state === 'closed') &&
+            : (fx.state === 'locked' || fx.state === 'closed' || fx.state === 'cancelled') &&
               <Btn sm variant="ghost" onClick={() => setLock(false)}>Reopen voting</Btn>}
         </div>
       </div>
@@ -213,6 +213,14 @@ export default function FixtureDetail({ fixtureId, medalId, onBack }) {
           Save an XI on the <Link to="/admin/betterselect/selection" className="underline">Selection</Link> page,
           publish the side on Play.Cricket, or run <Link to="/admin/sync" className="underline">Sync Now</Link> once
           the weekend's results are in.
+        </div>
+      )}
+
+      {fx.state === 'cancelled' && (
+        <div className="rounded-lg px-4 py-3 text-sm bg-pb-amber/10 border border-pb-amber/30 text-pb-amber">
+          This game is cancelled, or Cricket Australia moved the team to another grade, so players are not offered it
+          and nobody is reminded to vote on it. Ballots already cast still count. Find the team's current game in the
+          list; if it is missing, run Sync fixtures on the Fixtures page.
         </div>
       )}
 

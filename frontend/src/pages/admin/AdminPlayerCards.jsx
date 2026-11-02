@@ -558,8 +558,10 @@ function SettingsTab({ data, setData }) {
             hint="Emails to players when a swap is asked of them and when a card on their wish list is available. Every player starts with both off and chooses to switch them on. Players with no email on file, and under 18s, are never emailed." />
           <Toggle on={s.event_packs_enabled !== false} disabled={saving} onChange={(v) => save({ event_packs_enabled: v })} label="Day packs are on"
             hint="Match Day, holiday (Halloween, the Melbourne Cup, Christmas and more), birthday and surprise packs. Players collect one by opening their page that day. Packs you schedule below are not affected by this switch." />
+          <Toggle on={s.winner_packs !== false} disabled={saving} onChange={(v) => save({ winner_packs: v })} label="Winner Winner packs are on"
+            hint="Every player who played in a win gets a Premium pack of five the day after it. Reserves who did not play, losses, draws and abandoned games earn nothing. Only wins from the day this was switched on count, and a pack is never taken back if a result is corrected." />
           <Toggle on={s.sets_enabled !== false} disabled={saving} onChange={(v) => save({ sets_enabled: v })} label="Sets are on"
-            hint="Groups of cards players work towards completing, such as every century at the club. Nothing is awarded for finishing one." />
+            hint="Groups of cards players work towards completing, such as every century at the club. Finishing one pays the player a reward pack." />
           <Toggle on={s.showcase_enabled !== false} disabled={saving} onChange={(v) => save({ showcase_enabled: v })} label="Showcases are on"
             hint="Players can pin up to six cards they hold, shown next to their name on the collectors board." />
           <Toggle on={s.board_enabled !== false} disabled={saving} onChange={(v) => save({ board_enabled: v })} label="The collectors board is on"

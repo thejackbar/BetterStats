@@ -41,6 +41,8 @@ VOTER_MODES = {"players", "captain"}
 # A team can also be on "chosen": only the people the club listed for that team
 # vote (``vote_medals.grade_vote_counters``). Not a medal-wide default, since the
 # list is per team, and not a football mode, so ``VOTER_MODES`` stays as it was.
+# Fixture statuses that are not a game: never votable (see ``fixture_vote_state``).
+NOT_A_GAME_STATUSES = ("BYE", "CANCELLED")
 TEAM_VOTER_MODES = VOTER_MODES | {"chosen"}
 MAX_CHOSEN_VOTERS = 12
 # A team's voting settings are keyed by its grade NAME. Two of a club's teams can
@@ -396,6 +398,16 @@ def team_vote_setting(cfg: dict, shared: dict, grade_name: Optional[str], team_i
     and the next save split it per team, see ``split_legacy_team_settings``)."""
     modes = cfg.get("grade_voter_modes") or {}
     key = team_setting_key(shared, grade_name, team_id)
+    if key not in modes and team_id:
+        # A team that changed grade keeps its own setting. It was stored under
+        # "<old grade>::<team id>" while two teams shared that grade, and the new
+        # grade is keyed by its bare name, so the team's own entry is found by
+        # its id. Without this the people chosen for a moved team lose the right
+        # to vote for it.
+        suffix = f"{TEAM_KEY_SEP}{team_id}"
+        own = next((k for k in modes if k.endswith(suffix)), None)
+        if own is not None:
+            key = own
     if key not in modes and grade_name in modes:
         key = grade_name
     mode = modes.get(key)
@@ -511,7 +523,6 @@ def clean_grade_weighting(raw) -> dict:
     return {"mode": mode, "manual": manual}
 
 
-_NOT_A_GAME_STATUSES = ("BYE", "CANCELLED")
 
 
 async def count_games_by_grade_name(
@@ -539,7 +550,7 @@ async def count_games_by_grade_name(
             order[name] = min(disp, order.get(name, disp))
     games: dict[str, int] = {}
     for f in fixtures:
-        if (f.status or "").upper() in _NOT_A_GAME_STATUSES or (f.home_away or "").upper() == "BYE":
+        if (f.status or "").upper() in NOT_A_GAME_STATUSES or (f.home_away or "").upper() == "BYE":
             continue
         gid = grade_by_fixture.get(str(f.id))
         name = name_of.get(str(gid)) if gid else None
@@ -746,6 +757,86 @@ async def eligible_players(db: AsyncSession, org_id, game_id) -> list[dict]:
             if p["id"] in captain_ids:
                 p["is_captain"] = True
     return players
+
+
+def _fmt_overs(v) -> str:
+    """4.0 -> "4", 3.4 -> "3.4": a whole number of overs reads without the ".0"."""
+    if v is None:
+        return ""
+    f = float(v)
+    return str(int(f)) if f == int(f) else f"{f:.1f}"
+
+
+async def match_stat_lines(db: AsyncSession, org_id, game_id, player_ids: list) -> dict[str, str]:
+    """One short line per player of what they did in this game, to help a voter
+    choose: "45* (32) · 2/18 (4 ov) · 2 ct". Batting is runs (not out starred) and
+    balls, bowling is wickets/runs and overs, fielding is catches, stumpings and
+    run outs. A two innings game lists each innings in order.
+
+    Read from the synced scorecard tables the votable list itself comes from, so
+    a manual game (never votable) has nothing here. Scoped through
+    ``players.organisation_id`` (a shared game holds the opposition's rows too),
+    and a player hidden from the public pages gets no line, the same test the
+    ballot applies to a photo. A player who is on the game's list but has no
+    batting, bowling or fielding row reads "Did not bat or bowl" so a missing
+    line is never mistaken for a missing figure. A game with no batting or bowling
+    rows is unscored and gets no lines. Keyed by player id string; an id with no
+    entry means no line to show."""
+    if not player_ids or not isinstance(game_id, uuid.UUID):
+        return {}
+    ids = [uuid.UUID(str(i)) for i in player_ids]
+    args = {"gid": game_id, "org": org_id, "ids": ids}
+    # A game with no batting or bowling rows at all is not scored yet (or never will be):
+    # no line, rather than "Did not bat or bowl" against everyone.
+    if (await db.execute(text(
+        "SELECT 1 FROM batting_innings WHERE game_id = :gid UNION ALL "
+        "SELECT 1 FROM bowling_spells WHERE game_id = :gid LIMIT 1"), {"gid": game_id})).first() is None:
+        return {}
+    visible = (
+        "JOIN players p ON p.id = t.player_id AND p.organisation_id = :org "
+        "AND COALESCE(p.is_public, true) AND p.privacy_hidden_at IS NULL"
+    )
+    bat = (await db.execute(text(
+        "SELECT t.player_id, t.runs, t.balls, t.not_out FROM batting_innings t " + visible +
+        " WHERE t.game_id = :gid AND t.player_id = ANY(CAST(:ids AS uuid[]))"
+        " AND COALESCE(t.did_not_bat, false) = false AND t.runs IS NOT NULL"
+        " ORDER BY t.innings_number, t.id"), args)).fetchall()
+    bowl = (await db.execute(text(
+        "SELECT t.player_id, t.wickets, t.runs, t.overs FROM bowling_spells t " + visible +
+        " WHERE t.game_id = :gid AND t.player_id = ANY(CAST(:ids AS uuid[]))"
+        " AND t.overs IS NOT NULL ORDER BY t.innings_number, t.id"), args)).fetchall()
+    field = (await db.execute(text(
+        "SELECT t.player_id, SUM(COALESCE(t.catches, 0) + COALESCE(t.catches_wk, 0)), "
+        "SUM(COALESCE(t.stumpings, 0)), SUM(COALESCE(t.run_outs, 0)) FROM fielding_stats t " + visible +
+        " WHERE t.game_id = :gid AND t.player_id = ANY(CAST(:ids AS uuid[])) GROUP BY t.player_id"), args)).fetchall()
+    shown = {r[0] for r in (await db.execute(text(
+        "SELECT p.id FROM players p WHERE p.organisation_id = :org AND p.id = ANY(CAST(:ids AS uuid[])) "
+        "AND COALESCE(p.is_public, true) AND p.privacy_hidden_at IS NULL"), args)).fetchall()}
+
+    batting: dict = {}
+    for pid, runs, balls, not_out in bat:
+        batting.setdefault(pid, []).append(
+            f"{runs}{'*' if not_out else ''}" + (f" ({balls})" if balls is not None else ""))
+    bowling: dict = {}
+    for pid, wkts, runs, overs in bowl:
+        bowling.setdefault(pid, []).append(f"{wkts or 0}/{runs or 0} ({_fmt_overs(overs)} ov)")
+    fielding: dict = {}
+    for pid, ct, st, ro in field:
+        bits = [f"{n} {lab}" for n, lab in ((ct, "ct"), (st, "st"), (ro, "ro")) if n]
+        if bits:
+            fielding[pid] = ", ".join(bits)
+
+    out: dict[str, str] = {}
+    for pid in shown:
+        parts = []
+        if pid in batting:
+            parts.append(", ".join(batting[pid]))
+        if pid in bowling:
+            parts.append(", ".join(bowling[pid]))
+        if pid in fielding:
+            parts.append(fielding[pid])
+        out[str(pid)] = " · ".join(parts) if parts else "Did not bat or bowl"
+    return out
 
 
 async def lineup_players(db: AsyncSession, org_id, fixture_id) -> list[dict]:
@@ -1058,9 +1149,19 @@ def fixture_vote_state(fixture: Fixture, cfg: dict, override: Optional[str], rea
     """One of: 'upcoming' (not played yet), 'awaiting_team' (played, but no
     votable list from the club's chosen source yet — an unsynced scorecard, an
     unsaved XI, an unpublished team list), 'open', 'closed' (auto-close passed),
-    'locked' (admin lock). A manual lock/reopen always wins over the auto
-    window."""
+    'locked' (admin lock), 'cancelled' (Cricket Australia no longer has the
+    game: a team moved grade, a washout, a bye). A manual lock/reopen always wins
+    over the auto window, and a deliberate reopen is the one thing that brings a
+    cancelled game back.
+
+    A cancelled row is kept, not deleted, when the club had picked an XI or
+    collected votes on it (``fixtures_reconcile``), and the saved XI alone made
+    it look ready. Without this state it stayed open under its OLD grade and
+    opponent, and a player on the moved team was offered it instead of their
+    real game."""
     today = today or date.today()
+    if (fixture.status or "").upper() in NOT_A_GAME_STATUSES and override != "reopened":
+        return "cancelled"
     start = fixture.played_on
     if start and start > today:
         return "upcoming"

@@ -217,6 +217,76 @@ async def main() -> None:
               merge_profile.image_url_owner(getattr(keep, "action_photo_url", None)) == str(P_NONE))
         await db.rollback()
 
+    print("smaller copies of a photo (?w=)")
+    from PIL import Image
+    from app.services import image_sizes
+
+    def jpeg(size, orientation=None):
+        im = Image.new("RGB", size, (200, 30, 30))
+        im.paste((30, 30, 200), (0, 0, size[0] // 2, size[1] // 2))
+        buf = io.BytesIO()
+        exif = Image.Exif()
+        if orientation:
+            exif[274] = orientation
+        im.save(buf, format="JPEG", quality=95, exif=exif.tobytes() if orientation else b"")
+        return buf.getvalue()
+
+    def png_alpha(size):
+        im = Image.new("RGBA", size, (0, 0, 0, 0))
+        im.paste((255, 0, 0, 255), (0, 0, size[0] // 2, size[1]))
+        buf = io.BytesIO(); im.save(buf, format="PNG"); return buf.getvalue()
+
+    P_BIG, P_ROT, P_ALPHA, P_SMALL, P_TWO = (uuid.uuid4() for _ in range(5))
+    big, rot, alpha, small = jpeg((3200, 2400)), jpeg((2400, 1600), orientation=6), png_alpha((2000, 3000)), jpeg((300, 200))
+    async with Session() as db:
+        for pid, data, mime in ((P_BIG, big, "image/jpeg"), (P_ROT, rot, "image/jpeg"), (P_ALPHA, alpha, "image/png"), (P_SMALL, small, "image/jpeg")):
+            db.add(Player(id=pid, name=f"Size {str(pid)[:4]}", organisation_id=OURS, hero_photo_data=data, hero_photo_mime=mime, photo_data=small, photo_mime="image/jpeg"))
+        await db.commit()
+    image_sizes.clear()
+
+    async def fetch(pid, kind="hero", **kw):
+        fn = {"hero": images_router.get_player_hero_photo, "photo": images_router.get_player_photo, "action": images_router.get_player_action_photo}[kind]
+        async with Session() as db:
+            return await attempt(fn(str(pid), db, **kw))
+
+    def dims(resp):
+        with Image.open(io.BytesIO(bytes(resp.body))) as im:
+            return im.size, im.format
+    r, e = await fetch(P_BIG)
+    check("with no size the original bytes are served, as before", r is not None and bytes(r.body) == big, str(e))
+    r, e = await fetch(P_BIG, w=700, v="a1")
+    check("a 700 wide request is served at the next size up (800 wide), as a JPEG", r is not None and dims(r) == ((800, 600), "JPEG") and r.media_type == "image/jpeg", str(e))
+    check("...and is far smaller than the upload", r is not None and len(r.body) < len(big) / 5, f"{len(r.body) if r else 0} vs {len(big)}")
+    r2, _ = await fetch(P_BIG, w=790, v="a1")
+    check("two widths in the same size share one copy", r2 is not None and bytes(r2.body) == bytes(r.body) and len(image_sizes._cache) == 1, str(len(image_sizes._cache)))
+    r3, _ = await fetch(P_BIG, w=100000, v="a1")
+    check("a huge width is held to the largest size (1200), and the cache stays small", r3 is not None and dims(r3)[0][0] == 1200 and len(image_sizes._cache) == 2)
+    r, e = await fetch(P_ROT, w=800, v="b1")
+    check("a phone photo with EXIF rotation is turned upright in its copy", r is not None and dims(r)[0] == (800, 1200), str(dims(r) if r else e))
+    r, e = await fetch(P_ALPHA, w=480, v="c1")
+    check("a photo with transparency stays a PNG, with its transparency", r is not None and dims(r) == ((480, 720), "PNG") and Image.open(io.BytesIO(bytes(r.body))).convert("RGBA").getpixel((400, 10))[3] == 0, str(e))
+    r, e = await fetch(P_SMALL, w=800, v="d1")
+    check("a photo already smaller than the size is served untouched", r is not None and bytes(r.body) == small, str(e))
+    r, e = await fetch(P_HERO, w=800, v="e1")
+    check("bytes that are not an image are served as uploaded, not a 500", r is not None and bytes(r.body) == HERO, str(e))
+    r, e = await fetch(P_NONE, w=800)
+    check("a player with no hero photo is still a 404", r is None and isinstance(e, HTTPException) and e.status_code == 404)
+    r, e = await fetch(P_BIG, kind="photo", w=240, v="f1")
+    check("the headshot route takes a size too", r is not None and dims(r)[0] == (240, 160), str(e))
+    check("the cache headers are unchanged", r is not None and "max-age=604800" in r.headers.get("cache-control", ""))
+    async with Session() as db:
+        await db.execute(text("UPDATE players SET hero_photo_data = :d WHERE id = :i"), {"d": jpeg((3200, 2400)), "i": P_BIG}); await db.commit()
+    r4, _ = await fetch(P_BIG, w=700, v="a1")
+    check("a photo that changes under the same version is not served from a stale copy", r4 is not None and bytes(r4.body) != bytes(r.body))
+    from sqlalchemy import event
+    statements = []
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def _log(conn, cursor, stmt, params, ctx, many): statements.append(stmt)
+    await fetch(P_BIG, w=800, v="a1")
+    event.remove(engine.sync_engine, "before_cursor_execute", _log)
+    photo_reads = [x for x in statements if "players" in x.lower()]
+    check("an image request reads only the column it serves", photo_reads and all("hero_photo_data" in x and "action_photo_data" not in x and " photo_data" not in x.replace("hero_photo_data", "") for x in photo_reads), str(photo_reads)[:300])
+
     print("the control: it can be absent")
     async with Session() as db:
         n = (await db.execute(text("SELECT count(*) FROM players WHERE action_photo_data IS NULL"))).scalar()

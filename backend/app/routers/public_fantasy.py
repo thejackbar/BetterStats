@@ -40,6 +40,7 @@ from app.models.db import (
     FantasyDraft, FantasyDraftPick, FantasyDraftWishlist, FantasyWaiverClaim, FantasyTrade,
 )
 from app.services import rate_limit, fantasy_draft, fantasy_engine, fantasy_squad, fantasy_queue, fantasy_round_rank, fantasy_round_insights, section_names
+from app.services.fantasy_queue import money_str, name_of, role_word
 from app.services.fantasy_squad import validate_squad, score_squad_round
 from app.services.fantasy_scoring import DEFAULT_RULES, DEFAULT_SCORING
 
@@ -1125,13 +1126,18 @@ async def _make_transfers(db: AsyncSession, season: FantasySeason, squad: Fantas
     uses a free transfer while there is one, then costs the points hit. Nothing is
     written unless every swap passes. After the round has locked the swaps are queued."""
     if not swaps:
-        raise HTTPException(status_code=400, detail="Pick a player out and a player in.")
+        raise HTTPException(status_code=400, detail="No transfer was sent. Pick a player to sell and a replacement to buy.")
     if len(swaps) > MAX_SWAPS_PER_REQUEST:
-        raise HTTPException(status_code=400, detail=f"At most {MAX_SWAPS_PER_REQUEST} transfers at a time.")
+        raise HTTPException(status_code=400, detail=f"You picked {len(swaps)} transfers. You can make at most "
+                                                    f"{MAX_SWAPS_PER_REQUEST} at a time, so do the rest in a second go.")
     outs = [s.out_player_id for s in swaps]
     ins = [s.in_player_id for s in swaps]
-    if len(set(outs)) != len(outs) or len(set(ins)) != len(ins):
-        raise HTTPException(status_code=400, detail="Each player can only be in one transfer.")
+    names = await fantasy_queue.player_names(db, outs + ins)
+    for ids, what in ((outs, "sold"), (ins, "bought")):
+        dupes = sorted({name_of(names, i) for i in ids if ids.count(i) > 1})
+        if dupes:
+            raise HTTPException(status_code=400, detail=f"{', '.join(dupes)} appears in more than one transfer. "
+                                                        f"A player can only be {what} once in the same go.")
 
     # Once the round has locked the XI is frozen until it is scored, so a transfer
     # made now is queued: it happens when the round is scored, at the prices then,
@@ -1155,26 +1161,30 @@ async def _make_transfers(db: AsyncSession, season: FantasySeason, squad: Fantas
         select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
     )).scalars().all()
     have = {str(s.player_id) for s in sps}
-    budget = float(squad.budget_remaining or 0)
+    budget = start_bank = float(squad.budget_remaining or 0)
+    sells_total = buys_total = 0.0
     plan = []
     for s in swaps:
+        out_name, in_name = name_of(names, s.out_player_id), name_of(names, s.in_player_id)
         out_sp = next((x for x in sps if str(x.player_id) == s.out_player_id), None)
         if out_sp is None:
-            raise HTTPException(status_code=400, detail="That player isn't in your squad.")
-        if out_sp.is_captain or out_sp.is_vice_captain:
-            raise HTTPException(status_code=400, detail="Change your captain or vice before transferring them out.")
+            raise HTTPException(status_code=400, detail=f"{out_name} isn't in your squad, so can't be transferred out. "
+                                                        "Reload the page: your squad may have changed.")
         if s.in_player_id in have:
-            raise HTTPException(status_code=400, detail="You already have that player.")
+            raise HTTPException(status_code=400, detail=f"{in_name} is already in your squad.")
         in_pool = (await db.execute(
             select(FantasyPoolPlayer).where(
                 FantasyPoolPlayer.fantasy_season_id == season.id,
                 FantasyPoolPlayer.player_id == s.in_player_id,
             )
         )).scalar_one_or_none()
-        if in_pool is None or not in_pool.is_available:
-            raise HTTPException(status_code=400, detail="That player isn't available.")
+        if in_pool is None:
+            raise HTTPException(status_code=400, detail=f"{in_name} isn't in this season's player pool.")
+        if not in_pool.is_available:
+            raise HTTPException(status_code=400, detail=f"{in_name} has been marked unavailable by your club, so can't be picked.")
         if in_pool.role != out_sp.role:
-            raise HTTPException(status_code=400, detail=f"Transfers must be like-for-like by role ({out_sp.role}).")
+            raise HTTPException(status_code=400, detail=f"{in_name} is a {role_word(in_pool.role)} but {out_name} is a "
+                                                        f"{role_word(out_sp.role)}. Transfers must be like-for-like by role.")
         out_pool = (await db.execute(
             select(FantasyPoolPlayer).where(
                 FantasyPoolPlayer.fantasy_season_id == season.id,
@@ -1183,10 +1193,15 @@ async def _make_transfers(db: AsyncSession, season: FantasySeason, squad: Fantas
         )).scalar_one_or_none()
         sell = _sell_value(out_sp.purchase_price, out_pool.current_price if out_pool else (out_sp.purchase_price or 0))
         budget += sell - float(in_pool.current_price)
+        sells_total += sell
+        buys_total += float(in_pool.current_price)
         plan.append((out_sp, in_pool, sell))
     if budget < -1e-6:
-        raise HTTPException(status_code=400, detail="Not enough budget for that transfer." if len(swaps) == 1
-                            else "Not enough budget for those transfers.")
+        raise HTTPException(status_code=400, detail=(
+            f"You are {money_str(abs(budget))} over budget. You have {money_str(start_bank)} in the bank, selling "
+            f"returns {money_str(sells_total)} and the replacement{'s' if len(swaps) > 1 else ''} cost"
+            f"{'' if len(swaps) > 1 else 's'} {money_str(buys_total)}. "
+            f"Sell another player or pick {'cheaper replacements' if len(swaps) > 1 else 'a cheaper replacement'}."))
 
     rnd = locked_round
     hit_points = int((season.rules or DEFAULT_RULES).get("transfer_hit", DEFAULT_RULES["transfer_hit"]))
@@ -1200,8 +1215,11 @@ async def _make_transfers(db: AsyncSession, season: FantasySeason, squad: Fantas
         total_hit += hit
         out_id = str(out_sp.player_id)
         await db.delete(out_sp)
+        # The armband passes with the player, as it does for a queued transfer
+        # (fantasy_queue.apply_pending): the one coming in is captain or vice in his place.
         db.add(FantasySquadPlayer(
             squad_id=squad.id, player_id=str(in_pool.player_id), role=in_pool.role,
+            is_captain=bool(out_sp.is_captain), is_vice_captain=bool(out_sp.is_vice_captain),
             purchase_price=in_pool.current_price, added_round=rnd.round_number if rnd else None,
         ))
         db.add(FantasyTransaction(squad_id=squad.id, league_id=squad.league_id, round_id=rnd.id if rnd else None,
