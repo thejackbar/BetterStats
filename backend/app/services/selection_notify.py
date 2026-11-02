@@ -50,7 +50,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
-from app.services import email_service, email_suppression, player_age
+from app.services import email_service, email_suppression, name_format, player_age
 from app.services.comms_policy import OPERATIONAL
 
 logger = logging.getLogger(__name__)
@@ -141,6 +141,10 @@ async def load_sheet(db: AsyncSession, club, fixture_id) -> Optional[dict]:
         {"fid": fixture_id, "org": club.id},
     )).mappings().all()
     players = [dict(r) for r in rows]
+    # ``name`` stays as stored (a greeting needs its comma to find the given name);
+    # ``shown`` is what the email prints, in the club's chosen name format.
+    for pl in players:
+        pl["shown"] = name_format.format_player_name(pl["name"], getattr(club, "player_name_format", None))
     return {"fixture": dict(fx), "players": players}
 
 
@@ -194,6 +198,18 @@ def _match_lines(fx: dict) -> list[tuple[str, str]]:
     return lines
 
 
+def _shown(p: dict) -> str:
+    """The name to print for a player of the sheet (a sample sheet has no ``shown``)."""
+    return p.get("shown") or p["name"]
+
+
+def _greeting_name(p: Optional[dict]) -> str:
+    """The first name to greet a recipient with, "there" when there is none. Always
+    from the stored name: a club stores players "Last, First", so splitting on the
+    first space gave the surname ("You've been selected, Oliphant,")."""
+    return name_format.first_name((p or {}).get("name")) or "there"
+
+
 def _tag(p: dict) -> str:
     tags = [t for t, on in (("C", p["is_captain"]), ("WK", p["is_wicket_keeper"])) if on]
     return f" ({', '.join(tags)})" if tags else ""
@@ -209,10 +225,10 @@ def _sheet_rows(players: list[dict]) -> tuple[list[str], list[str]]:
                    if phone else '<span style="color:#888">no number on file</span>')
         h_rows.append(
             f'<tr><td style="padding:4px 10px 4px 0">{i}</td>'
-            f'<td style="padding:4px 10px 4px 0"><strong>{html.escape(p["name"])}</strong>{html.escape(tag)}</td>'
+            f'<td style="padding:4px 10px 4px 0"><strong>{html.escape(_shown(p))}</strong>{html.escape(tag)}</td>'
             f'<td style="padding:4px 0">{h_phone}</td></tr>'
         )
-        t_rows.append(f"{i}. {p['name']}{tag}  {phone or '(no number on file)'}")
+        t_rows.append(f"{i}. {_shown(p)}{tag}  {phone or '(no number on file)'}")
     return h_rows, t_rows
 
 
@@ -220,8 +236,8 @@ def captain_email(club, sheet: dict, captain: dict) -> tuple[str, str, str]:
     """(subject, html, text) of the captain's team sheet."""
     fx, players = sheet["fixture"], sheet["players"]
     title = _title(fx)
-    first = (captain["name"] or "").split(" ")[0] or "there"
-    missing = [p["name"] for p in players if not _clean_phone(p.get("phone"))]
+    first = _greeting_name(captain)
+    missing = [_shown(p) for p in players if not _clean_phone(p.get("phone"))]
 
     h_rows, t_rows = _sheet_rows(players)
 
@@ -257,7 +273,7 @@ def player_email(club, sheet: dict, player: dict, captain_name: Optional[str],
     """(subject, html, text) telling one player they are in."""
     fx = sheet["fixture"]
     title = _title(fx)
-    first = (player["name"] or "").split(" ")[0] or "there"
+    first = _greeting_name(player)
     extra = (message or "").strip()
     h_match = "".join(
         f'<tr><td style="padding:2px 10px 2px 0;color:#666">{html.escape(k)}</td>'
@@ -289,7 +305,7 @@ def _variable_values(club, sheet: dict, *, to: str, recipient: Optional[dict],
     fx, players = sheet["fixture"], sheet["players"]
     d = fx.get("played_on")
     vals = {
-        "first_name": ((recipient or {}).get("name") or "").split(" ")[0] or "there",
+        "first_name": _greeting_name(recipient),
         "club": club.name or "",
         "team": fx.get("team_name") or "",
         "opponent": fx.get("opponent_name") or fx.get("label") or "",
@@ -301,7 +317,7 @@ def _variable_values(club, sheet: dict, *, to: str, recipient: Optional[dict],
         "round": fx.get("round") or "",
         "home_away": fx["home_away"].title() if fx.get("home_away") in ("HOME", "AWAY") else "",
         "captain": captain_name or "",
-        "side": ", ".join(f"{p['name']}{_tag(p)}" for p in players),
+        "side": ", ".join(f"{_shown(p)}{_tag(p)}" for p in players),
     }
     if to == "captain":
         vals["team_sheet"] = "\n".join(_sheet_rows(players)[1])
@@ -316,7 +332,7 @@ def _html_values(vals: dict[str, str], sheet: dict, to: str) -> dict[str, str]:
     out = {k: html.escape(v) for k, v in vals.items()}
     players = sheet["players"]
     out["side"] = ("<ol style=\"margin:0 0 12px;padding-left:20px\">"
-                   + "".join(f"<li>{html.escape(p['name'])}{html.escape(_tag(p))}</li>" for p in players)
+                   + "".join(f"<li>{html.escape(_shown(p))}{html.escape(_tag(p))}</li>" for p in players)
                    + "</ol>")
     if to == "captain":
         out["team_sheet"] = ('<table style="border-collapse:collapse">'
@@ -513,7 +529,7 @@ async def send_to_captain(db: AsyncSession, club, fixture_id, *, user_id=None,
         try:
             subject, body_h, body_t = render_template(
                 club, tpl, sheet, to="captain", recipient=captain,
-                captain_name=captain["name"], default_subject=subject)
+                captain_name=_shown(captain), default_subject=subject)
         except Exception:
             logger.exception("selection captain template %s failed", tpl.get("id"))
             note_code = "template_failed"
@@ -558,12 +574,12 @@ async def send_to_players(db: AsyncSession, club, fixture_id, *, user_id=None,
             reason = "junior"
         if reason is None:
             subject, body_h, body_t = player_email(
-                club, sheet, p, captain["name"] if captain else None, message)
+                club, sheet, p, _shown(captain) if captain else None, message)
             if tpl is not None:
                 try:
                     subject, body_h, body_t = render_template(
                         club, tpl, sheet, to="players", recipient=p,
-                        captain_name=captain["name"] if captain else None,
+                        captain_name=_shown(captain) if captain else None,
                         message=message, default_subject=subject)
                 except Exception:
                     logger.exception("selection player template %s failed", tpl.get("id"))

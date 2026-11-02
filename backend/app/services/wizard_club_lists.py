@@ -47,6 +47,7 @@ from typing import Optional
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import name_format
 from app.models.db import (
     CommsContact, CommsList, CommsSegment, CommsSegmentMember, MarketingClub, MarketingClubContact,
     WizardClubList,
@@ -77,7 +78,7 @@ def norm_email(raw: Optional[str]) -> Optional[str]:
 
 
 def _first_name(full: Optional[str]) -> str:
-    return (full or "").strip().split()[0] if (full or "").strip() else ""
+    return name_format.first_name(full)
 
 
 def _iso(v):

@@ -48,6 +48,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.services import name_format
 from app.auth.modules import (
     BILLABLE_MODULES, PAID_STATUSES, STATUS_ACTIVE, STATUS_PAUSED, STATUS_TRIAL,
     account_plan_status, expand_billing_module,
@@ -661,7 +662,7 @@ def _email_body(org, row: BillingInvoice, admin: User) -> tuple[str, str, str]:
     period is ending and what happens if it isn't paid; a first invoice says
     what paying it switches on."""
     name = html.escape(org.name or "your club")
-    first = (admin.display_name or admin.username or "").split(" ")[0]
+    first = name_format.first_name(admin.display_name or admin.username)
     greeting = f"Hi {html.escape(first)}," if first else "Hi,"
     number = row.invoice_number or "(draft)"
     due_date = perth_date(row.due_at) if row.due_at else None

@@ -77,6 +77,11 @@
 39. Grade milestones (`milestone_scan.grade_milestones`): name folded through active `grade_merge_logs`, active players only, ids bound as `uuid[]` (never a subquery). One-grade players skipped, judged across ALL stats.
 40. `POST .../settings/test-email`: self-only `[Test]` digest, touches no delivery, 5 per 10 minutes.
 
+**Naming people in emails (v9.137.4.2)**
+- A club stores players "Last, First", so `name.split(" ")[0]` is the SURNAME. Every greeting derives the given name through `services/name_format.first_name` (it takes the part after the comma, else the first word) and falls back to "there". Never split a name on a space to greet someone; `{{first_name}}` in BetterComms and in selection templates both go through it. Check: `backend/scripts/verify_name_greetings.py`.
+- A name PRINTED in an email (captain, side, team sheet) goes through `name_format.format_player_name(name, club.player_name_format)`, mirroring the frontend `formatPlayerName`. Keep the stored name for greeting (`first_name("I. Oliphant")` has no given name) and use a separate `shown` value for display, as `selection_notify.load_sheet` does.
+- A name in running prose (`{{name}}`, "X has asked to swap") uses `name_format.natural_name`: "Iain Oliphant" for a stored "Oliphant, Iain", and a typed name is left alone.
+
 **Old bell (v7.7.3)**
 
 41. `users.last_notification_seen_at`, `last_seen_app_version` (migration 029); `GET /club-admin/notifications/count` (60s poll), `/summary`, `POST /seen`; window 14 days.

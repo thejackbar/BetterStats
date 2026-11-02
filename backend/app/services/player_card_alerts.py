@@ -19,6 +19,7 @@ from typing import Optional
 
 from sqlalchemy import text
 
+from app.services import name_format
 from app.config.settings import settings
 from app.services import email_service, player_age, player_card_catalogue as catalogue, player_card_swaps as swaps, player_cards as cards
 from app.services.player_card_social import load_prefs
@@ -47,10 +48,7 @@ def _page_link(club, path: str = "") -> Optional[str]:
 
 
 def _first(name: str) -> str:
-    n = (name or "").strip()
-    if "," in n:
-        n = n.split(",", 1)[1].strip() or n
-    return n.split(" ")[0] if n else "there"
+    return name_format.first_name(name) or "there"
 
 
 def _wrap(club, paragraphs: list[str], link: Optional[str], link_label: str, settings_link: Optional[str]) -> tuple[str, str]:
@@ -146,7 +144,7 @@ async def swap_asked(club_id, swap_id: str) -> None:
                 {"ids": [row["f"], row["t"]]})).fetchall()}
             sides = (await swaps._items_of(db, [swap_id]))[swap_id]
             n_give = sum(q for _c, q in sides["give"]); n_want = sum(q for _c, q in sides["want"])
-            who = names.get(row["f"], "A player")
+            who = name_format.natural_name(names.get(row["f"])) or "A player"
             link = _page_link(club, "/swaps")
 
             def build(rec):
@@ -203,7 +201,7 @@ async def scan_wants(club_id, keys: Optional[list[str]] = None) -> None:
                         continue
                     n = swaps.tradeable(owner, card, held.get(card, 0))
                     if n > 0:
-                        holders.append(snap["people"][owner]["display_name"])
+                        holders.append(name_format.natural_name(snap["people"][owner]["display_name"]))
                 if not holders:
                     await db.execute(text(
                         "UPDATE player_card_alerts SET cleared_at = NOW() WHERE player_id = CAST(:p AS UUID) AND kind = :k AND ref_key = :r AND cleared_at IS NULL"),

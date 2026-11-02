@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from app.services import name_format
 from datetime import date, timedelta
 from typing import Optional
 
@@ -1049,7 +1050,7 @@ async def send_nudge(db: AsyncSession, club, medal: VoteMedal, fixture: Fixture,
     # twice with nothing to tell them apart reads as a duplicate email.
     award = medal.name if medal and medal.name else DEFAULT_MEDAL_NAME
     subject = f"{round_label_for(fixture)} v {opponent} — {award} votes"
-    first = (player.get("name") or "").split(" ")[0] or "there"
+    first = name_format.first_name(player.get("name")) or "there"
     body_html = (
         f"<p>Hi {first},</p>"
         f"<p><strong>{award}</strong> votes are still open for "

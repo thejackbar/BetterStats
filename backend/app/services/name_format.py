@@ -34,6 +34,42 @@ def first_name(name: str | None) -> str:
     return words[0] if words else ""
 
 
+def format_player_name(name: str | None, fmt: str | None) -> str:
+    """A stored name printed the way the club chose under Settings (Player name
+    format). Mirrors the frontend ``formatPlayerName`` so an email and the site
+    show the same name. ``fmt`` is one of ``last_first`` (the default),
+    ``first_last``, ``first_initial_last``, ``last_first_initial``; anything else
+    leaves the canonical "Last, First". A name with no comma we cannot split
+    (a nickname, three words) is returned as it is stored.
+
+    Use it to PRINT a name. To greet someone use ``first_name`` on the stored
+    name, not on this: "I. Oliphant" has no given name left to find.
+    """
+    canon = canonical_player_name(name)
+    if not fmt or fmt == "last_first" or "," not in canon:
+        return canon
+    last, _, first = canon.partition(",")
+    last, first = last.strip(), first.strip()
+    if not first:
+        return canon
+    if fmt == "first_last":
+        return f"{first} {last}"
+    if fmt == "first_initial_last":
+        return f"{first[0]}. {last}"
+    if fmt == "last_first_initial":
+        return f"{last}, {first[0]}."
+    return canon
+
+
+def natural_name(name: str | None) -> str:
+    """A name for running prose ("Hi {{name}}", "thanks to ..."): "Iain Oliphant"
+    for a stored "Oliphant, Iain". A name with no comma is already in the order
+    somebody typed it and is returned as it is, so a contact typed "Sam Taylor"
+    is never turned round."""
+    n = (name or "").strip()
+    return format_player_name(n, "first_last") if "," in n else n
+
+
 def name_sort_key(name: str | None) -> tuple[str, str]:
     """Return a ``(surname, given)`` sort key for a player name.
 

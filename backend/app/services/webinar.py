@@ -30,6 +30,7 @@ from typing import Any, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import name_format
 from app.config.settings import settings
 from app.services import email_service
 
@@ -391,7 +392,7 @@ async def mark_email_sent(db: AsyncSession, registration_id: str, *, error: Opti
 
 
 def _confirmation_html(*, name: str, event: WebinarEvent, watch_url: str, calendar_url: str) -> str:
-    greeting = f"Hi {name.split()[0]}," if name.strip() else "Hi,"
+    greeting = f"Hi {name_format.first_name(name)}," if name_format.first_name(name) else "Hi,"
     return f"""
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#1a1a1a">
       <p style="font-size:14px;color:#555;margin:0 0 8px">BetterCricket</p>
@@ -435,7 +436,7 @@ def _confirmation_html(*, name: str, event: WebinarEvent, watch_url: str, calend
 
 
 def _confirmation_text(*, name: str, event: WebinarEvent, watch_url: str) -> str:
-    greeting = f"Hi {name.split()[0]}," if name.strip() else "Hi,"
+    greeting = f"Hi {name_format.first_name(name)}," if name_format.first_name(name) else "Hi,"
     return (
         f"{greeting}\n\n"
         "Thanks for registering for the BetterCricket live demo and Q&A.\n\n"
@@ -614,7 +615,7 @@ async def _send_reminder_email(
 
 
 def _reminder_html(*, name: str, event: WebinarEvent, watch_url: str) -> str:
-    greeting = f"Hi {name.split()[0]}," if name.strip() else "Hi,"
+    greeting = f"Hi {name_format.first_name(name)}," if name_format.first_name(name) else "Hi,"
     return f"""
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#1a1a1a">
       <p style="font-size:14px;color:#555;margin:0 0 8px">BetterCricket</p>
@@ -644,7 +645,7 @@ def _reminder_html(*, name: str, event: WebinarEvent, watch_url: str) -> str:
 
 
 def _reminder_text(*, name: str, event: WebinarEvent, watch_url: str) -> str:
-    greeting = f"Hi {name.split()[0]}," if name.strip() else "Hi,"
+    greeting = f"Hi {name_format.first_name(name)}," if name_format.first_name(name) else "Hi,"
     return (
         f"{greeting}\n\n"
         "A quick reminder that the BetterCricket live demo and Q&A starts in a "

@@ -39,6 +39,7 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import name_format
 from app.auth.modules import org_entitled_modules
 from app.config.settings import settings as app_settings
 from app.models.db import Organisation, async_session_maker
@@ -705,8 +706,7 @@ async def dispatch_emails(session: AsyncSession, org: Organisation) -> dict:
         address = (items[0]["email"] or "").strip()
         if not address:
             continue
-        greeting = ((items[0]["first_name"] or items[0]["display_name"] or "there")
-                    .strip().split(" ")[0] or "there")
+        greeting = name_format.first_name(items[0]["first_name"] or items[0]["display_name"]) or "there"
 
         # Grouped under the event's own label so a digest reads as sections
         # rather than a flat list of unrelated sentences.
@@ -811,8 +811,8 @@ async def send_test_email(session: AsyncSession, org: Organisation, user) -> dic
         }]}]
     result["items"] = sum(len(g["items"]) for g in groups)
 
-    greeting = ((getattr(user, "first_name", None) or getattr(user, "display_name", None)
-                 or "there").strip().split(" ")[0] or "there")
+    greeting = name_format.first_name(
+        getattr(user, "first_name", None) or getattr(user, "display_name", None)) or "there"
     base = app_settings.public_base_url.rstrip("/")
     html, text_body = _digest_html(org.name or "Your club", greeting, groups,
                                    f"{base}/admin", f"{base}/admin/notifications", test=True)

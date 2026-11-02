@@ -36,6 +36,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import name_format
 from app.auth.modules import BILLABLE_MODULE_NAMES, billing_key_for
 from app.config.settings import settings
 from app.services import email_service
@@ -86,7 +87,7 @@ async def _primary_admin(session: AsyncSession, org_id) -> dict | None:
 
 
 def _greeting(admin: dict) -> str:
-    return (admin.get("first_name") or admin.get("display_name") or "there").split(" ")[0]
+    return name_format.first_name(admin.get("first_name") or admin.get("display_name")) or "there"
 
 
 async def _already_sent(session: AsyncSession, dedupe_key: str) -> bool:

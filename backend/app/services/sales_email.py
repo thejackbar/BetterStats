@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from app.services import name_format
 from app.config.settings import settings
 from app.services import email_service
 
@@ -87,8 +88,7 @@ BUILT_IN_TEMPLATES = (
 
 
 def _greeting(name: Optional[str]) -> str:
-    parts = (name or "").strip().split()
-    first = parts[0] if parts else ""
+    first = name_format.first_name(name)
     return f"Hi {first}," if first else "Hi there,"
 
 
@@ -743,7 +743,7 @@ async def render_template(
         # first_name/name/club keep the SAME meaning comms.py's own merge
         # variables have (bare values, not a pre-built greeting phrase) —
         # the seeded body spells out "Hi {{first_name}}," itself.
-        "first_name": name_parts[0] if name_parts else "there",
+        "first_name": name_format.first_name(contact_name) or "there",
         "name": (contact_name or "").strip() or "there",
         "club": club_name,
         "rep_name": rep_name,

@@ -7,6 +7,7 @@ All three mirror self_serve_verification.py's email-construction pattern.
 """
 from __future__ import annotations
 
+from app.services import name_format
 from app.config.settings import settings
 from app.services import email_service
 
@@ -36,8 +37,7 @@ def _greeting(display_name: str) -> str:
     # Last" display name, e.g. the Invite admin form only collects one
     # combined field) — the greeting itself should only ever use the first
     # word of it.
-    parts = (display_name or "").split()
-    first = parts[0] if parts else ""
+    first = name_format.first_name(display_name)
     return f"Hi {first}," if first else "Hi there,"
 
 

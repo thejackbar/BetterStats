@@ -21,6 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 
+from app.services import name_format
 from app.config.settings import settings
 from app.models.db import async_session_maker, Organisation, FeeMember, DiaryTaskDefinition, DiaryTaskOccurrence
 from app.services import email_service
@@ -64,7 +65,7 @@ async def _send_reminders_for_org(session, org: Organisation, today: date) -> in
 
         overdue = occ.due_date < today
         status_word = "is overdue" if overdue else f"is due on {occ.due_date.isoformat()}"
-        first_name = (member.full_name or "").split(" ")[0] or "there"
+        first_name = name_format.first_name(member.full_name) or "there"
         html = (
             f"<p>Hi {first_name},</p>"
             f"<p><strong>{defn.title}</strong> {status_word} — you're the person responsible for it "

@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 import secrets
 import uuid
+from app.services import name_format
 from datetime import date, timedelta
 from typing import Optional
 
@@ -495,7 +496,7 @@ async def send_nudge(db: AsyncSession, club, medal: AflVoteMedal, game: dict, pl
             if link_token else None)
     opponent = game_label(game)
     award = medal.name or DEFAULT_MEDAL_NAME
-    first = (player.get("name") or "").split(" ")[0] or "there"
+    first = name_format.first_name(player.get("name")) or "there"
     subject = f"{round_label_for(game)} v {opponent} — {award} votes"
     body_html = (
         f"<p>Hi {first},</p>"

@@ -24,6 +24,7 @@ from typing import Optional
 from fastapi import Request, Response
 from jose import JWTError, jwt
 
+from app.services import name_format
 from app.config.settings import settings
 from app.services import email_service
 
@@ -98,7 +99,7 @@ async def send_magic_link_email(*, to_email: str, member_name: str, club_name: s
     always returns a generic success message regardless, to avoid leaking
     whether an email is registered."""
     link = f"{settings.public_base_url}/portal/{club_slug}?token={token}"
-    first_name = (member_name or "").split(" ")[0] or "there"
+    first_name = name_format.first_name(member_name) or "there"
     html = (
         f"<p>Hi {first_name},</p>"
         f"<p>Here's your sign-in link for the {club_name} member portal:</p>"

@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 
+from app.services import name_format
 from app.config.settings import settings
 from app.models.db import (
     async_session_maker, Organisation, FeeMember, FeeMemberSeason,
@@ -65,11 +66,11 @@ async def _remind_qualifications(session, org: Organisation) -> int:
         status_word = "has expired" if q.expires_at < date.today() else f"expires on {q.expires_at.isoformat()}"
         link = f"{settings.public_base_url}/portal/{org.slug}"
         html = (
-            f"<p>Hi {member.full_name.split(' ')[0]},</p>"
+            f"<p>Hi {name_format.first_name(member.full_name) or 'there'},</p>"
             f"<p>Your <strong>{qtype.name}</strong> {status_word}.</p>"
             f'<p>Visit the <a href="{link}">{org.name} member portal</a> to check your details.</p>'
         )
-        text = f"Hi {member.full_name},\n\nYour {qtype.name} {status_word}.\n\n{link}"
+        text = f"Hi {name_format.first_name(member.full_name) or 'there'},\n\nYour {qtype.name} {status_word}.\n\n{link}"
         result = await _send(member.email, member.full_name, org.name,
                              f"{qtype.name} — {status_word}", html, text)
         if result.ok:
@@ -97,11 +98,11 @@ async def _remind_fees(session, org: Organisation) -> int:
         owing = snapshot["financials"]["total_outstanding"]
         link = f"{settings.public_base_url}/portal/{org.slug}"
         html = (
-            f"<p>Hi {member.full_name.split(' ')[0]},</p>"
+            f"<p>Hi {name_format.first_name(member.full_name) or 'there'},</p>"
             f"<p>You have <strong>${owing:.2f}</strong> outstanding in club fees.</p>"
             f'<p>Visit the <a href="{link}">{org.name} member portal</a> to view and pay online.</p>'
         )
-        text = f"Hi {member.full_name},\n\nYou have ${owing:.2f} outstanding in club fees.\n\n{link}"
+        text = f"Hi {name_format.first_name(member.full_name) or 'there'},\n\nYou have ${owing:.2f} outstanding in club fees.\n\n{link}"
         result = await _send(member.email, member.full_name, org.name,
                              f"{org.name} — ${owing:.2f} outstanding", html, text)
         if result.ok:

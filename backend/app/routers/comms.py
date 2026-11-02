@@ -638,7 +638,7 @@ def _resolved_vars(c: CommsContact, mc: Optional[MarketingClub], org: Organisati
     fn_email = None if org_is_outreach(org) else c.email
     return {
         "first_name": pick("first_name", _first_name(c.name, fn_email)),
-        "name": name or _first_name(c.name, fn_email),
+        "name": name_format.natural_name(name) or _first_name(c.name, fn_email),
         "email": c.email,
         "club": pick("club", mv.get("club") or (org.name or "")),
         "association": pick("association", mv.get("association", "")),
@@ -663,7 +663,7 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
     fn_email = None if org_is_outreach(org) else email
     ctx = {
         "first_name": _first_name(name, fn_email),
-        "name": (name or "").strip() or _first_name(name, fn_email),
+        "name": name_format.natural_name(name) or _first_name(name, fn_email),
         "email": email,
         # {{club}} is the single club variable: the recipient's club. Defaults to
         # the sending org's name (a club emailing its own members), and is
