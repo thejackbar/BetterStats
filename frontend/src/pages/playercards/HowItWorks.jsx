@@ -20,7 +20,7 @@ export default function HowItWorks() {
     <div data-screen="how">
       <PageHead title="How it works" sub="Cards of the players in your club, built from the real scorebook." />
       <Section id="cards" title="The cards">
-        <p>Every player in the club has a card with their career figures: matches, runs, batting average, wickets, bowling average and dismissals, across every grade. The cards update as the stats do. The number in the corner is the card's rarity, from 1 to 99, worked out from how the player's figures compare with the rest of the club.</p>
+        <p>Every player in the club has a card with their career figures: matches, runs, batting average, wickets, bowling average and dismissals, across every grade. The cards update as the stats do. The number in the corner is the card's rarity, from 1 to 99, worked out from how the player's figures compare with the rest of the club. A player also earns a point for each big career landmark: 200 games, 300 wickets, 5,000 runs or 100 dismissals, and a second point at 400 games, 500 wickets, 10,000 runs or 200 dismissals. That adds up to three points at most.</p>
         <p>A card fills with a full-card photo of the player when the club has one, and special cards use the player's action shot. A player with only a profile photo shows it in a circle.</p>
         <p>You always have your own card. Everyone else's you collect from packs and swaps.</p>
       </Section>

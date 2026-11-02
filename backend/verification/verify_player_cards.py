@@ -417,6 +417,38 @@ async def main() -> None:
               and cards.tier_for(55) == "rare" and cards.tier_for(54) == "common")
         check("the pool lists a player under their own tier", str(ALPHA) in snap["pool"][a["tier"]])
 
+    # ── Career landmarks lift the rating (v9.139.2) ──────────────────────────
+    # `rate_pool` is pure, so it is driven directly with hand-built figures. The lift is read through getattr so the
+    # control run (the commit before it) reports the missing behaviour as failed checks instead of crashing.
+    print("\ncareer landmarks lift the rating")
+    lift = getattr(cards, "milestone_lift", None)
+    check("a landmark lift exists", lift is not None)
+    if lift is not None:
+        check("nothing under the first marks", lift({"matches": 199, "wickets": 299, "runs": 4999, "dismissals": 99}) == 0)
+        check("each first mark is worth one point",
+              [lift({k: v}) for k, v in (("matches", 200), ("wickets", 300), ("runs", 5000), ("dismissals", 100))] == [1, 1, 1, 1])
+        check("the second mark is worth a second point", lift({"matches": 400}) == 2 and lift({"wickets": 500}) == 2)
+        check("the lift is capped at 3", lift({"matches": 400, "wickets": 500, "runs": 10000, "dismissals": 200}) == 3)
+        check("a missing or null figure counts as nothing", lift({}) == 0 and lift({"matches": None, "wickets": None}) == 0)
+
+    def pool_with(target_wickets: int, target_matches: int = 120) -> dict:
+        figs = {}
+        for i in range(20):
+            figs[f"p{i}"] = {"pid": f"p{i}", "matches": 20 + i, "runs": 100 * i, "innings": 15 + i, "not_outs": 1,
+                             "bat_avg": 8.0 + i, "wickets": 10 + 20 * i, "bowl_avg": 30.0 - i, "dismissals": i}
+        figs["star"] = {"pid": "star", "matches": target_matches, "runs": 1500, "innings": 60, "not_outs": 5,
+                        "bat_avg": 20.0, "wickets": target_wickets, "bowl_avg": 22.0, "dismissals": 6}
+        return figs
+    under, over = cards.rate_pool(pool_with(299))["star"]["score"], cards.rate_pool(pool_with(300))["star"]["score"]
+    below = cards.rate_pool(pool_with(295))["star"]["score"]
+    check("a figure just under a mark gets no lift (same score as a lower one)", under == below, f"{under} {below}")
+    check("reaching 300 wickets adds one point to the rating", over == under + 1, f"{under} -> {over}")
+    check("the rating still stops at 99",
+          cards.rate_pool(pool_with(500, 400))["star"]["score"] <= 99)
+    check("a player with no matches is still 1 with big figures elsewhere",
+          cards.rate_pool({"z": {"pid": "z", "matches": 0, "runs": 0, "innings": 0, "not_outs": 0, "bat_avg": None,
+                                 "wickets": 0, "bowl_avg": None, "dismissals": 0}})["z"] == {"score": 1, "tier": "common"})
+
     # ── The three photographs (migration 374) ────────────────────────────────
     # A card carries the hero photo, the action shot and the club's pick between them; the frontend resolves it
     # (lib/playerShots.js). Read through .get so the control run (the commit before 374) reports instead of crashing.

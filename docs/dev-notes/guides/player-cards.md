@@ -51,6 +51,8 @@
 
 32. **One nav list** (v9.139.1.1): the sidebar, the rail and the phone's More sheet all read `nav.NAV` through `useNav()`; the sheet shows every entry the bottom bar does not hold (`BAR_KEYS`). Never hand-list links in a nav component, or a new screen is missing on one size (Challenges was missing on phones).
 
+33. **Career landmarks lift the rating** (v9.139.2): `rate_pool` adds `milestone_lift` (`RATING_LANDMARKS`, cap 3) on top of the percentile blend and the board bonus, from absolute career marks (200 / 400 games, 300 / 500 wickets, 5,000 / 10,000 runs, 100 / 200 dismissals). Change the marks in that one tuple, and change the `HowItWorks.jsx` sentence with it. A change to the rating moves tiers (pack odds, tier sets, challenge rules), so run `app.scripts.preview_card_milestone_lift <club|all>` first.
+
 ## Verify
 
 - `backend/verification/verify_player_cards.py` on its own database (673 checks); control: run it on the previous commit.

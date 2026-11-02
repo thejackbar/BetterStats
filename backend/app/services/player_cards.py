@@ -109,6 +109,18 @@ STAT_MILESTONES = (
     ("dismissals_milestone", "dismissals", 50, 20),
 )
 
+# A lift to the rarity rating for the big career landmarks (v9.139.2). One point for each figure that has
+# reached its first mark and a second once it has reached the next, so a figure is worth at most two and
+# the lift is capped at MILESTONE_LIFT_CAP. These are fixed numbers, not club percentiles: 200 games is a
+# big career at any club. The keys are the same ones `rate_pool` reads from `figs`.
+RATING_LANDMARKS = (
+    ("matches", (200, 400)),
+    ("wickets", (300, 500)),
+    ("runs", (5000, 10000)),
+    ("dismissals", (100, 200)),
+)
+MILESTONE_LIFT_CAP = 3
+
 # Which cards get a full-card photo (club setting `big_photos`), and which of the player's shots a card uses.
 PHOTO_MODES = ("top", "specials", "all")
 BIG_PHOTO_TIERS = ("epic", "legendary")
@@ -306,12 +318,25 @@ def _rank_bonus(rank: Optional[int]) -> int:
     return 0
 
 
+def milestone_lift(f: dict) -> int:
+    """Points for the big career landmarks a player has reached (`RATING_LANDMARKS`), at most MILESTONE_LIFT_CAP.
+
+    Absolute, not relative to the club, and it only ever adds. Read from the same career figures as the
+    rest of the rating, so a figure that is corrected downwards takes its point away again."""
+    total = 0
+    for key, marks in RATING_LANDMARKS:
+        value = f.get(key) or 0
+        total += sum(1 for mark in marks if value >= mark)
+    return min(total, MILESTONE_LIFT_CAP)
+
+
 def rate_pool(figs: dict[str, dict]) -> dict[str, dict]:
     """`{pid: {"score": 1..99, "tier": ...}}` for every player in `figs`.
 
     The score blends where a player sits in the club (percentiles, so a small club's best is still
     its best), weighted to the stronger of batting and bowling, then adds a bonus for standing on the
-    club's all-time boards (runs, wickets, dismissals, matches). Players with no matches get 1."""
+    club's all-time boards (runs, wickets, dismissals, matches) and a small lift for the big career
+    landmarks (`milestone_lift`). Players with no matches get 1."""
     played = {p: f for p, f in figs.items() if f["matches"] > 0}
     out = {p: {"score": 1, "tier": "common"} for p in figs}
     if not played:
@@ -344,7 +369,7 @@ def rate_pool(figs: dict[str, dict]) -> dict[str, dict]:
         base = 0.40 * max(bat, bowl) + 0.15 * min(bat, bowl) + 0.15 * field + 0.30 * longevity
         bonuses = sorted((_rank_bonus(r) for r in ranks.get(pid, {}).values()), reverse=True)
         bonus = min(sum(bonuses[:2]), 10)
-        score = max(1, min(99, int(round(base + bonus))))
+        score = max(1, min(99, int(round(base + bonus + milestone_lift(f)))))
         out[pid] = {"score": score, "tier": tier_for(score)}
     return out
 
