@@ -2338,7 +2338,14 @@ function entityHeader(target, activeDerived) {
   }
 }
 
+// The tables whose every row IS a match (or one side's innings in it): a row opens that
+// match's scorecard. A click that lands on a link inside the row still goes to the link, and
+// Enter opens it from the keyboard. Same behaviour as a partnership row on Records.
+const SCORECARD_TARGETS = new Set(['team_innings_list', 'match_list'])
+
 function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort, sortBy, clubSlug, rowOffset = 0 }) {
+  const navigate = useNavigate()
+  const opensScorecard = !activeDerived && SCORECARD_TARGETS.has(target)
   const dimCols = activeDerived
     ? (DUO_DERIVED.has(activeDerived)
         ? [{ key: 'player_a_name', label: 'BOWLER' }, { key: 'player_b_name', label: 'FIELDER' }]
@@ -2366,8 +2373,18 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+          {rows.map((row, i) => {
+            const gameId = opensScorecard ? row.game_id : null
+            const open = () => navigate(`/games/${gameId}`)
+            return (
+            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2${gameId ? ' cursor-pointer' : ''}`}
+              {...(gameId ? {
+                tabIndex: 0,
+                title: 'Open the scorecard',
+                'data-game-id': gameId,
+                onClick: e => { if (!e.target.closest('a')) open() },
+                onKeyDown: e => { if (e.key === 'Enter' && e.target === e.currentTarget) open() },
+              } : {})}>
               <td className="py-2.5 pl-5 font-mono text-pb-faintest">{rowOffset + i + 1}</td>
               {dimCols.map(dc => (
                 <td key={dc.key} className="py-2.5 pr-3 font-medium text-pb-text">
@@ -2383,7 +2400,8 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
                 </td>
               ))}
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
     </div>

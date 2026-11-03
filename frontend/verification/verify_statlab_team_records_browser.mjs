@@ -139,6 +139,29 @@ c = lastCall()
 ck('match runs: sorted by match_runs', c.target === 'match_list' && c.sort_by === 'match_runs', JSON.stringify(c))
 ck('match runs: the column is shown', /MATCH/i.test(await textOf(page.locator('main'))) && (await textOf(page.locator('main'))).includes('501'))
 
+// ── a row opens the scorecard of its match ────────────────────────────────
+const mrow = page.locator('tr[data-game-id="g-2"]')
+ck('a Match list row is a click-through to its match', await mrow.count() === 1)
+if (await mrow.count()) await mrow.first().click()
+await page.waitForTimeout(400)
+ck('clicking a Match list row opens /games/<its game id>', new URL(page.url()).pathname === '/games/g-2', page.url())
+
+await page.goto(`${BASE}/our-club/statlab`)
+await page.getByText('TEAM INNINGS', { exact: true }).first().click()
+await page.waitForTimeout(400)
+await page.getByTestId('statlab-target-guide').getByText('Biggest successful chases', { exact: true }).first().click()
+await page.waitForTimeout(500)
+const trow = page.locator('tr[data-game-id="g-1"]')
+ck('a Team innings row is a click-through to its match', await trow.count() === 1)
+ck('the row says so on hover', (await trow.first().getAttribute('title')) === 'Open the scorecard')
+if (await trow.count()) { await trow.first().focus(); await page.keyboard.press('Enter') }
+await page.waitForTimeout(400)
+ck('Enter on a Team innings row opens /games/<its game id>', new URL(page.url()).pathname === '/games/g-1', page.url())
+
+await page.goto(`${BASE}/our-club/statlab`)
+await page.getByText('PLAYER CAREER', { exact: true }).first().waitFor()
+ck('a player table row is not made a click-through', await page.locator('tr[data-game-id]').count() === 0)
+
 await page.setViewportSize({ width: 390, height: 900 })
 await page.waitForTimeout(300)
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
