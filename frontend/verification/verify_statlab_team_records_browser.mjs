@@ -113,6 +113,10 @@ for (const [label, expect] of [
   ['Lowest totals defended against us', { sort_by: 'runs', sort_dir: 'asc', field: 'is_defended', result: null }],
   ['Highest totals in a loss', { sort_by: 'runs', sort_dir: 'desc', field: 'is_ours', result: 'lost' }],
   ['Lowest totals in a win', { sort_by: 'runs', sort_dir: 'asc', field: 'is_ours', result: 'won' }],
+  ['Biggest wins (Runs)', { sort_by: 'won_by_runs', sort_dir: 'desc', field: 'won_by_runs', result: null, ours: '1' }],
+  ['Biggest wins (Wickets)', { sort_by: 'won_by_wickets', sort_dir: 'desc', field: 'won_by_wickets', result: null, ours: '1' }],
+  ['Biggest defeats (Runs)', { sort_by: 'won_by_runs', sort_dir: 'desc', field: 'won_by_runs', result: null, ours: '0' }],
+  ['Biggest defeats (Wickets)', { sort_by: 'won_by_wickets', sort_dir: 'desc', field: 'won_by_wickets', result: null, ours: '0' }],
   ['Closest wins (Runs)', { sort_by: 'won_by_runs', sort_dir: 'asc', field: 'won_by_runs', result: null }],
   ['Closest wins (Wickets)', { sort_by: 'won_by_wickets', sort_dir: 'asc', field: 'won_by_wickets', result: null }],
 ]) {
@@ -124,6 +128,10 @@ for (const [label, expect] of [
   ck(`${label}: sorted ${expect.sort_by} ${expect.sort_dir} and filtered on ${expect.field}`,
     k.target === 'team_innings_list' && k.sort_by === expect.sort_by && k.sort_dir === expect.sort_dir
     && treeOf(k).includes(expect.field), `${k.sort_by} ${k.sort_dir} ${treeOf(k)}`)
+  if (expect.ours) {
+    ck(`${label}: is_ours is ${expect.ours} on the wire`,
+      treeOf(k).includes(`"field":"is_ours","op":"eq","value":"${expect.ours}"`), treeOf(k))
+  }
   if (expect.result) {
     ck(`${label}: our result (${expect.result}) goes on the wire`,
       k.result === expect.result || (k.results || '').includes(expect.result), JSON.stringify(k))
@@ -134,6 +142,8 @@ for (const [label, expect] of [
 {
   const labels = await page.locator('button').allInnerTexts()
   ck('no preset is still called just "Closest wins"', !labels.some(t => /^\s*·?\s*Closest wins\s*$/.test(t)))
+  ck('nor "Biggest winning margins" or plain "Biggest defeats"',
+    !labels.some(t => /^\s*·?\s*(Biggest winning margins|Biggest defeats)\s*$/.test(t)))
 }
 
 await page.getByText('MATCH LIST', { exact: true }).first().click()

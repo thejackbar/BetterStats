@@ -212,6 +212,26 @@ async def main() -> None:
               [(str(r.get("game_id")), r.get("won_by_wickets")) for r in theirs_won
                if str(r.get("game_id")) == str(games["G2"])] == [(str(games["G2"]), 5)])
 
+        print("\n-- biggest wins and defeats, in the same two units --")
+        big_runs = await safe(session, "team_innings_list", "won_by_runs", ["is_ours:eq:1", "won_by_runs:gt:0"])
+        got = [(str(r.get("game_id")), r.get("won_by_runs")) for r in big_runs]
+        check("biggest wins by runs: G3 by 30, G10 by 10, G9 by 2",
+              got == [(str(games["G3"]), 30), (str(games["G10"]), 10), (str(games["G9"]), 2)], str(got))
+        big_wkts = await safe(session, "team_innings_list", "won_by_wickets", ["is_ours:eq:1", "won_by_wickets:gt:0"])
+        got = [(str(r.get("game_id")), r.get("won_by_wickets")) for r in big_wkts]
+        check("biggest wins by wickets: G1 by 6, G8 by 3, G7 by 1",
+              got == [(str(games["G1"]), 6), (str(games["G8"]), 3), (str(games["G7"]), 1)], str(got))
+        lost_runs = await safe(session, "team_innings_list", "won_by_runs", ["is_ours:eq:0", "won_by_runs:gt:0"])
+        got = [(str(r.get("game_id")), r.get("won_by_runs"), r.get("against")) for r in lost_runs]
+        check("biggest defeats by runs: only G5, which they won batting first by 20",
+              got == [(str(games["G5"]), 20, "Us")], str(got))
+        lost_wkts = await safe(session, "team_innings_list", "won_by_wickets", ["is_ours:eq:0", "won_by_wickets:gt:0"])
+        got = [(str(r.get("game_id")), r.get("won_by_wickets")) for r in lost_wkts]
+        check("biggest defeats by wickets: G4 by 8 (their two-day fourth-innings chase at 102/2), then G2 by 5",
+              got == [(str(games["G4"]), 8), (str(games["G2"]), 5)], str(got))
+        check("a chase is no run margin: the old match-list difference would have ranked G1 (251 v 250) as a win by 1 run",
+              str(games["G1"]) not in {g for g, _ in [(str(r.get("game_id")), 0) for r in big_runs]})
+
         print("\n-- both sides' runs in one match --")
         m = await safe(session, "match_list", "match_runs", [], sort_dir="desc")
         top = {str(r.get("game_id")): r.get("match_runs") for r in m}
