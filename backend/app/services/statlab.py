@@ -204,6 +204,12 @@ TEAM_INNINGS_METRICS: dict[str, str] = {
     "is_chase": "is_chase",
     "is_defended": "is_defended",
     "won": "won",
+    # How a win is measured depends on who batted last. A side that batted first and won
+    # wins BY RUNS (its runs less the other side's, over the whole match); a side that
+    # chased wins BY WICKETS (ten less the wickets it lost in that last innings). Each is
+    # NULL on every other row, so a filter on one lists only wins of that kind.
+    "won_by_runs": "won_by_runs",
+    "won_by_wickets": "won_by_wickets",
 }
 
 PARTNERSHIP_METRICS: dict[str, str] = {
@@ -2823,7 +2829,23 @@ async def query_team_innings_list(
                    CASE WHEN f.batting_side_won
                          AND f.innings_number = 1
                          AND f.match_last_innings = 2
-                        THEN 1 ELSE 0 END                                       AS is_defended
+                        THEN 1 ELSE 0 END                                       AS is_defended,
+                   -- One row per match carries the margin: the winning side's LAST innings, and
+                   -- only when the other side batted after it (so it did not chase).
+                   CASE WHEN f.batting_side_won
+                         AND f.innings_number = f.side_last_innings
+                         AND f.side_last_innings < f.match_last_innings
+                         AND f.side_total - (f.match_total - f.side_total) > 0
+                        THEN f.side_total - (f.match_total - f.side_total)
+                   END                                                          AS won_by_runs,
+                   CASE WHEN f.batting_side_won
+                         AND f.innings_number = f.side_last_innings
+                         AND f.innings_number = f.match_last_innings
+                         AND f.innings_number >= 2
+                         AND f.runs >= (f.match_total - f.side_total) - f.side_runs_before + 1
+                         AND f.wickets IS NOT NULL AND f.wickets < 10
+                        THEN 10 - f.wickets
+                   END                                                          AS won_by_wickets
             FROM framed f
         )
         SELECT * FROM rows

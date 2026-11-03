@@ -113,6 +113,8 @@ for (const [label, expect] of [
   ['Lowest totals defended against us', { sort_by: 'runs', sort_dir: 'asc', field: 'is_defended', result: null }],
   ['Highest totals in a loss', { sort_by: 'runs', sort_dir: 'desc', field: 'is_ours', result: 'lost' }],
   ['Lowest totals in a win', { sort_by: 'runs', sort_dir: 'asc', field: 'is_ours', result: 'won' }],
+  ['Closest wins (Runs)', { sort_by: 'won_by_runs', sort_dir: 'asc', field: 'won_by_runs', result: null }],
+  ['Closest wins (Wickets)', { sort_by: 'won_by_wickets', sort_dir: 'asc', field: 'won_by_wickets', result: null }],
 ]) {
   const link = page.locator('button', { hasText: label }).first()
   ck(`REPORTS lists "${label}"`, await link.count() > 0)
@@ -126,6 +128,12 @@ for (const [label, expect] of [
     ck(`${label}: our result (${expect.result}) goes on the wire`,
       k.result === expect.result || (k.results || '').includes(expect.result), JSON.stringify(k))
   }
+}
+
+// The old single "Closest wins" (whole-match run difference, which counts a chase as a run margin) is gone.
+{
+  const labels = await page.locator('button').allInnerTexts()
+  ck('no preset is still called just "Closest wins"', !labels.some(t => /^\s*·?\s*Closest wins\s*$/.test(t)))
 }
 
 await page.getByText('MATCH LIST', { exact: true }).first().click()

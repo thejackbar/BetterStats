@@ -148,6 +148,8 @@ const METRIC_LABELS = {
   is_chase: { label: 'Successful Chase (1 = yes)', short: 'Chase', decimal: false },
   is_defended: { label: 'Total Defended (1 = yes)', short: 'Defended', decimal: false },
   won: { label: 'Batting Side Won (1 = yes)', short: 'Won', decimal: false },
+  won_by_runs: { label: 'Won By (Runs, batting first)', short: 'By runs', decimal: false },
+  won_by_wickets: { label: 'Won By (Wickets, chasing)', short: 'By wkts', decimal: false },
 }
 
 const OPERATORS = [
@@ -376,7 +378,8 @@ const PRESET_GROUPS = [
       { type: 'preset', label: 'Highest-scoring matches (both sides)', target: 'match_list', sortBy: 'match_runs', sortDir: 'desc', filters: [], context: {} },
       { type: 'preset', label: 'Lowest-scoring matches (both sides)',  target: 'match_list', sortBy: 'match_runs', sortDir: 'asc',  filters: [{ field: 'team_runs', op: 'gt', value: '0' }, { field: 'opp_runs', op: 'gt', value: '0' }], context: {} },
       { type: 'preset', label: 'Biggest winning margins',  target: 'match_list', sortBy: 'margin_runs',  sortDir: 'desc', filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
-      { type: 'preset', label: 'Closest wins',             target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
+      { type: 'preset', label: 'Closest wins (Runs)',     target: 'team_innings_list', sortBy: 'won_by_runs',    sortDir: 'asc', filters: [{ field: 'is_ours', op: 'eq', value: '1' }, { field: 'won_by_runs', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Closest wins (Wickets)',  target: 'team_innings_list', sortBy: 'won_by_wickets', sortDir: 'asc', filters: [{ field: 'is_ours', op: 'eq', value: '1' }, { field: 'won_by_wickets', op: 'gt', value: '0' }], context: {} },
       { type: 'preset', label: 'Biggest defeats',          target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'lt', value: '0' }], context: { result: 'lost' } },
       { type: 'preset', label: 'Finals',                   target: 'match_list', sortBy: 'played_at',   sortDir: 'desc', filters: [], context: { finals_only: true } },
     ],
@@ -414,7 +417,7 @@ const COLUMN_SETS = {
   innings_list:     ['runs','balls','fours','sixes','strike_rate','batting_position'],
   spell_list:       ['overs','maidens','runs','wickets','economy'],
   match_list:       ['team_runs','team_wickets','opp_runs','opp_wickets','margin_runs','match_runs'],
-  team_innings_list:['runs','wickets','target','extras','innings_number'],
+  team_innings_list:['runs','wickets','target','won_by_runs','won_by_wickets','extras','innings_number'],
   partnership_list: ['runs','balls','wicket_number','batter1_runs','batter2_runs'],
 }
 
@@ -496,7 +499,7 @@ const FILTER_CATEGORIES = [
   { key: 'fielding', label: 'Fielding',
     fields: ['catches','catches_wk','catches_non_wk','run_outs','stumpings'] },
   { key: 'match', label: 'Match',
-    fields: ['team_runs','team_wickets','opp_runs','opp_wickets','margin_runs','match_runs','innings_number','target','is_chase','is_defended','won'] },
+    fields: ['team_runs','team_wickets','opp_runs','opp_wickets','margin_runs','match_runs','innings_number','target','is_chase','is_defended','won','won_by_runs','won_by_wickets'] },
   { key: 'partnership', label: 'Partnership',
     fields: ['wicket_number','batter1_runs','batter2_runs'] },
 ]

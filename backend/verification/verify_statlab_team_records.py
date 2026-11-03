@@ -12,6 +12,15 @@ runs, less the chasing side's own earlier runs, plus one.
                                                 -> THEIR chase, target 101 (350 - 250 + 1)
   G5  one-day, we fall short:                   Them 220, Us 200          -> no chase either side, their 220 defended
   G6  two-day draw:                             four innings, nobody wins -> no chase, nothing defended
+  G7  one-day, we chase and win by ONE wicket:  Them 200, Us 201/9       -> won by 1 wicket
+  G8  one-day, we chase and win by 3 wickets:   Them 190, Us 191/7
+  G9  one-day, we defend by 2 runs:             Us 151, Them 149         -> won by 2 runs
+  G10 two-day, we bat first and win:            Us 250, Them 200, Us 100, Them 140
+                                                -> won by 10 runs (350 - 340), no chase
+
+"Closest wins" used to be the match list's whole-match run difference, which for a chase is
+not a margin at all (a one-wicket win reads as however many runs the chaser made). Runs now
+counts only wins from batting first, wickets only chases, each in its own unit.
 
 Control: on the previous commit `target` is not a metric, so every read below
 reports a failure instead of crashing (answers are read through `.get`).
@@ -90,6 +99,11 @@ async def seed(session) -> dict:
     await game("G5", 5, "Them", "One Day", [(1, "them", 220, 6, 4), (2, "us", 200, 10, 3)])
     await game("G6", 6, None, "Two Day",
                [(1, "us", 220, 10, 4), (2, "them", 180, 10, 4), (3, "us", 90, 3, 2), (4, "them", 60, 2, 1)])
+    await game("G7", 7, "Us", "One Day", [(1, "them", 200, 10, 4), (2, "us", 201, 9, 3)])
+    await game("G8", 8, "Us", "One Day", [(1, "them", 190, 8, 4), (2, "us", 191, 7, 3)])
+    await game("G9", 9, "Us", "One Day", [(1, "us", 151, 9, 4), (2, "them", 149, 10, 2)])
+    await game("G10", 10, "Us", "Two Day",
+               [(1, "us", 250, 10, 4), (2, "them", 200, 10, 3), (3, "us", 100, 10, 2), (4, "them", 140, 10, 2)])
     await session.commit()
     await session.execute(text("ANALYZE"))
     await session.commit()
@@ -131,12 +145,13 @@ async def main() -> None:
 
         print("\n-- our successful chases --")
         ours = await safe(session, "team_innings_list", "target", ["is_ours:eq:1", "is_chase:eq:1"])
-        check("exactly one chase of ours: G1", [str(r.get("game_id")) for r in ours] == [str(games["G1"])],
+        check("our chases are G1, G7 and G8, biggest target first (251, 201, 191)",
+              [str(r.get("game_id")) for r in ours] == [str(games["G1"]), str(games["G7"]), str(games["G8"])],
               str([(r.get("runs"), r.get("target")) for r in ours]))
-        check("G1's target is the other side's 250 plus one", [r.get("target") for r in ours] == [251])
-        check("and it was 251 for 4", [(r.get("runs"), r.get("wickets")) for r in ours] == [(251, 4)])
+        check("G1's target is the other side's 250 plus one", [r.get("target") for r in ours][:1] == [251])
+        check("and it was 251 for 4", [(r.get("runs"), r.get("wickets")) for r in ours][:1] == [(251, 4)])
         check("the row names who batted and who they played",
-              [(r.get("batting_team"), r.get("against")) for r in ours] == [("Us", "Them")],
+              {(r.get("batting_team"), r.get("against")) for r in ours} == {("Us", "Them")},
               str([(r.get("batting_team"), r.get("against")) for r in ours]))
 
         print("\n-- chases against us --")
@@ -152,7 +167,7 @@ async def main() -> None:
 
         print("\n-- a chase that fell short, a draw, and the first innings are not chases --")
         every = await safe(session, "team_innings_list", "runs", ["is_chase:eq:1"])
-        check("only three chases in the whole book", len(every) == 3, str(len(every)))
+        check("five chases in the whole book (three ours, two against us)", len(every) == 5, str(len(every)))
         g5 = innings_of(allrows, games["G5"])
         check("G5: we fell 20 short, the target is still worked out (221) but it is no chase",
               (2, 200, 221) in g5 and all(r.get("is_chase") == 0 for r in by["G5"]), str(g5))
@@ -162,14 +177,40 @@ async def main() -> None:
 
         print("\n-- defended totals --")
         dfn = await safe(session, "team_innings_list", "runs", ["is_ours:eq:1", "is_defended:eq:1"], sort_dir="asc")
-        check("we defended 150 in G3 and nothing else", [(str(r.get("game_id")), r.get("runs")) for r in dfn]
-              == [(str(games["G3"]), 150)], str([(r.get("runs")) for r in dfn]))
+        check("we defended 150 in G3 and 151 in G9, smallest first",
+              [(str(r.get("game_id")), r.get("runs")) for r in dfn]
+              == [(str(games["G3"]), 150), (str(games["G9"]), 151)], str([(r.get("runs")) for r in dfn]))
         dfn_against = await safe(session, "team_innings_list", "runs", ["is_ours:eq:0", "is_defended:eq:1"],
                                  sort_dir="asc")
         check("they defended 220 against us in G5", [(str(r.get("game_id")), r.get("runs")) for r in dfn_against]
               == [(str(games["G5"]), 220)], str([(r.get("runs")) for r in dfn_against]))
         check("a two-day first innings is never 'defended'",
               all(r.get("is_defended") == 0 for r in by["G4"] + by["G6"]))
+
+        print("\n-- closest wins: runs only when batting first, wickets only when chasing --")
+        by_runs = await safe(session, "team_innings_list", "won_by_runs",
+                             ["is_ours:eq:1", "won_by_runs:gt:0"], sort_dir="asc")
+        got = [(str(r.get("game_id")), r.get("won_by_runs")) for r in by_runs]
+        check("won by runs lists only wins from batting first: G9 by 2, G10 by 10, G3 by 30, closest first",
+              got == [(str(games["G9"]), 2), (str(games["G10"]), 10), (str(games["G3"]), 30)], str(got))
+        check("a chase is never a win by runs (G1, G7, G8 are absent)",
+              not {str(games[k]) for k in ("G1", "G7", "G8")} & {g for g, _ in got})
+        check("one row per match: G10's two Us innings give a single margin",
+              sum(1 for g, _ in got if g == str(games["G10"])) == 1)
+        by_wkts = await safe(session, "team_innings_list", "won_by_wickets",
+                             ["is_ours:eq:1", "won_by_wickets:gt:0"], sort_dir="asc")
+        gotw = [(str(r.get("game_id")), r.get("won_by_wickets")) for r in by_wkts]
+        check("won by wickets lists only chases, fewest wickets in hand first: G7 by 1, G8 by 3, G1 by 6",
+              gotw == [(str(games["G7"]), 1), (str(games["G8"]), 3), (str(games["G1"]), 6)], str(gotw))
+        check("a defended total is never a win by wickets (G3, G9, G10 are absent)",
+              not {str(games[k]) for k in ("G3", "G9", "G10")} & {g for g, _ in gotw})
+        check("a loss or a draw carries no margin for us (G2, G5 lost; G6 drawn, both sides)",
+              all(r.get("won_by_runs") is None and r.get("won_by_wickets") is None
+                  for r in [x for x in by["G2"] + by["G5"] if x.get("is_ours") == 1] + by["G6"]))
+        theirs_won = await safe(session, "team_innings_list", "won_by_wickets", ["is_ours:eq:0", "won_by_wickets:gt:0"])
+        check("the other side's win carries ITS margin: their G2 chase was by 5 wickets",
+              [(str(r.get("game_id")), r.get("won_by_wickets")) for r in theirs_won
+               if str(r.get("game_id")) == str(games["G2"])] == [(str(games["G2"]), 5)])
 
         print("\n-- both sides' runs in one match --")
         m = await safe(session, "match_list", "match_runs", [], sort_dir="desc")
