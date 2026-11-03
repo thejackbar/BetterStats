@@ -12,8 +12,8 @@ Runs the SHIPPED `reconcile_imported_totals` over the app's own view DDL
 (`superseded_ddl.STATEMENTS`), the shipped `_refresh_import_deltas` the games routes call,
 and the pure helpers the preview shares with the commit.
 
-THE CONTROL RUN is this file against the previous commit. `with_typed`,
-`fetch_typed_by_player` and `_refresh_import_deltas` do not exist there, so they are read
+THE CONTROL RUN is this file against the previous commit. `settle_typed`,
+`summarize_typed` and `_refresh_import_deltas` may not exist there, so they are read
 through `getattr` and report instead of crashing: the totals checks fail on exactly the
 doubling (14 games and 348 runs where there are 7 and 174).
 
@@ -61,8 +61,8 @@ ORG = uuid.UUID("c1000000-0000-0000-0000-000000000001")
 S18, S11, S13, S23 = (uuid.UUID(f"c2000000-0000-0000-0000-00000000000{n}") for n in (1, 2, 3, 4))
 G_MIXED, G_BORDER, G_MIXED11, G_BORDER13, G_MIXED23 = (
     uuid.UUID(f"c3000000-0000-0000-0000-00000000000{n}") for n in (1, 2, 3, 4, 5))
-P_FULL, P_SHORT, P_ONLY, P_OUT, P_LATE = (
-    uuid.UUID(f"c4000000-0000-0000-0000-00000000000{n}") for n in (1, 2, 3, 4, 5))
+P_FULL, P_SHORT, P_ONLY, P_OUT, P_LATE, P_POOL, P_HQ = (
+    uuid.UUID(f"c4000000-0000-0000-0000-00000000000{n}") for n in (1, 2, 3, 4, 5, 6, 7))
 
 
 async def ex(session, sql, **kw):
@@ -120,7 +120,8 @@ async def main() -> None:
             await ex(s, "INSERT INTO grades (id, season_id, name, grassroots_id, category, categories) "
                         "VALUES (:i, :s, :n, :g, 'senior', ARRAY['senior'])", i=gid, s=sid, n=nm, g=str(gid))
         for pid, nm in ((P_FULL, "Full, Fred"), (P_SHORT, "Short, Sam"), (P_ONLY, "Only, Olly"),
-                        (P_OUT, "Out, Ozzy"), (P_LATE, "Late, Larry")):
+                        (P_OUT, "Out, Ozzy"), (P_LATE, "Late, Larry"),
+                        (P_POOL, "Pool, Paul"), (P_HQ, "Hq, Harry")):
             await ex(s, "INSERT INTO players (id, organisation_id, name, grassroots_id, status) "
                         "VALUES (:i, :o, :n, :g, 'active')", i=pid, o=ORG, n=nm, g=str(pid))
         batch = uuid.uuid4()
@@ -141,6 +142,18 @@ async def main() -> None:
         await type_games(s, P_OUT, S23, G_MIXED23, 5, 10, start=date(2024, 1, 6))
         # LATE: the sheet first; the games are typed afterwards (the refresh case).
         s.add(import_row(batch, P_LATE, S18, "2018/19 mixed", 2, 40, 2))
+        # POOL: more games typed than the sheet has in 2018/19 (5 against 4), fewer in 2011/12 (1 against 3).
+        # The two used to be pooled across the career, so the surplus hid the shortfall.
+        s.add(import_row(batch, P_POOL, S18, "2018/19 mixed", 4, 80, 4))
+        s.add(import_row(batch, P_POOL, S11, "2011/12", 3, 30, 3))
+        await type_games(s, P_POOL, S18, G_MIXED, 5, 20, start=date(2019, 6, 1))
+        await type_games(s, P_POOL, S11, G_MIXED11, 1, 10, start=date(2012, 2, 4))
+        # HQ: a shortfall (sheet 3 games and 60 runs, typed 2 and 50) for a player with a big Cricket Australia
+        # record in another season, which used to absorb it whole.
+        s.add(import_row(batch, P_HQ, S18, "2018/19 mixed", 3, 60, 3))
+        await type_games(s, P_HQ, S18, G_MIXED, 2, 25, start=date(2019, 7, 1))
+        await ex(s, "INSERT INTO player_season_stats (player_id, season_id, matches, batting_innings, runs, not_outs, source) "
+                    "VALUES (:p, :s, 10, 10, 200, 0, 'api')", p=P_HQ, s=S23)
         await s.commit()
 
     await recon.reconcile_imported_totals(str(ORG))
@@ -178,27 +191,55 @@ async def main() -> None:
           f"{late_after} (refresh {'present' if refresh else 'ABSENT'})")
     check("LATE: and to the typed 40 runs", late_after[2] == 40, f"{late_after}")
 
+    print("\n-- a season is settled on its own, not pooled across the career --")
+    pool = await totals(P_POOL)
+    check("POOL: 8 games (5 in 2018/19, 3 in 2011/12), not the 7 the pooled rule left", pool[0] == 8, f"{pool}")
+    async with base.Session() as s:
+        rows = {r[0]: int(r[1]) for r in (await s.execute(text(
+            "SELECT se.name, SUM(v.matches) FROM v_effective_player_season_stats v JOIN seasons se ON se.id = v.season_id "
+            "WHERE v.player_id = :p GROUP BY se.name"), {"p": P_POOL})).all()}
+    check("POOL: the short season keeps its own 3 games", rows.get("Summer 2011/12") == 3, f"{rows}")
+    check("POOL: the season with more games typed than the sheet stays at the typed 5", rows.get("Summer 2018/19") == 5, f"{rows}")
+    check("POOL: runs follow the same way (100 + 30)", pool[2] == 130, f"{pool}")
+    hq = await totals(P_HQ)
+    check("HQ: the shortfall is kept for a player with a big Cricket Australia record (13 games, not 12)", hq[0] == 13, f"{hq}")
+    check("HQ: and its 10 runs (260, not 250)", hq[2] == 260, f"{hq}")
+    async with base.Session() as s:
+        carried = (await s.execute(text(
+            "SELECT COUNT(*) FROM import_effective_deltas WHERE player_id = :p AND scope = 'career'"), {"p": P_HQ})).scalar()
+    check("neither leaves a catch-all career row: the leftover sits on its season", carried == 0, f"{carried} career rows")
+
     print("\n-- the pure helpers the preview shares --")
-    with_typed = getattr(recon, "with_typed", None)
+    settle = getattr(recon, "settle_typed", None)
+    summarize_typed = getattr(recon, "summarize_typed", None)
     a, b = uuid.uuid4(), uuid.uuid4()
-    gr = recon._blank()
+    club = {**recon._blank(), "matches": 7, "runs": 87}
     typed = {a: recon.accumulate(None, {"matches": 5, "runs": 50})}
-    if with_typed:
-        t, cov = with_typed(gr, set(), [(a, {"matches": 5})], typed, {a: 2018})
-        check("a typed season in the sheet is held and covered", t["matches"] == 5 and a in cov, f"{t['matches']} {cov}")
-        t2, cov2 = with_typed(gr, set(), [(b, {"matches": 5})], typed, {a: 2018, b: 2019})
-        check("a typed season the sheet never names is not held", t2["matches"] == 0 and a not in cov2,
-              f"{t2['matches']} {cov2}")
-        t3, _ = with_typed(gr, set(), [(a, {"matches": 5})], typed, {a: 2018})
-        check("the caller's own totals are not mutated", gr["matches"] == 0 and t3 is not gr, f"{gr['matches']}")
-        club = {**recon._blank(), "matches": 7, "runs": 87}
-        held, cov3 = with_typed(gr, set(), [(a, {"matches": 7})], {a: recon.accumulate(None, {"matches": 7, "runs": 87})}, {a: 2018})
-        summary = recon.summarize(club, held, [(a, {"matches": 7, "runs": 87})], cov3)
-        check("summarize (the preview) reads the sheet as already held: final 7, not 14",
-              summary["final"]["matches"] == 7 and summary["season_delta_count"] == 0,
+    if settle and summarize_typed:
+        st = settle(club, [(a, {"matches": 7, "runs": 87})], typed, {a: 2018})
+        check("a typed season in the sheet is settled: the sheet's row is replaced by what it holds beyond the games",
+              st.import_seasons == [] and len(st.deltas) == 1 and st.deltas[0][1]["matches"] == 2
+              and st.deltas[0][1]["runs"] == 37, f"{st.import_seasons} {st.deltas}")
+        check("and the club total no longer counts that season twice", st.club["matches"] == 0 and st.club["runs"] == 0,
+              f"{st.club['matches']} {st.club['runs']}")
+        st2 = settle(club, [(b, {"matches": 7})], typed, {a: 2018, b: 2019})
+        check("a typed season the sheet never names is left alone", len(st2.import_seasons) == 1 and not st2.deltas
+              and st2.club["matches"] == 7, f"{st2.import_seasons} {st2.deltas}")
+        same = {**recon._blank(), "matches": 5, "runs": 50}
+        st3 = settle(same, [(a, {"matches": 5, "runs": 50})], typed, {a: 2018})
+        check("a season the games hold in full leaves nothing over", not st3.deltas and st3.import_seasons == [], f"{st3.deltas}")
+        two_rows = settle({**recon._blank(), "matches": 6}, [(a, {"matches": 3}), (b, {"matches": 3})], typed, {a: 2018, b: 2018})
+        check("a year held under two season rows is one season: 6 on the sheet against 5 typed leaves 1",
+              len(two_rows.deltas) == 1 and two_rows.deltas[0][1]["matches"] == 1, f"{two_rows.deltas}")
+        ballsy = settle(club, [(a, {"matches": 5, "runs": 50, "balls_faced": 400, "fours": 30})], typed, {a: 2018})
+        check("figures a typed game leaves unrecorded (balls faced, fours) never make a leftover on their own",
+              not ballsy.deltas, f"{ballsy.deltas}")
+        summary = summarize_typed(club, recon._blank(), [(a, {"matches": 7, "runs": 87})], set(), typed, {a: 2018})
+        check("summarize_typed (the preview): final is the 5 typed games plus the 2 left over, not 12",
+              summary["final"]["matches"] == 7 and summary["season_delta_count"] == 1,
               f"{summary['final']['matches']} / {summary['season_delta_count']}")
     else:
-        check("with_typed exists", False, "ABSENT")
+        check("settle_typed and summarize_typed exist", False, "ABSENT")
 
     print(f"\n{PASS} passed, {FAIL} failed")
     if FAIL:

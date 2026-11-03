@@ -456,7 +456,7 @@ async def _refresh_import_deltas(db: AsyncSession, org_id: uuid.UUID) -> None:
     """Rebuild a club's season-totals import after its games changed.
 
     The import's remainder is what is left once the club's own games are taken
-    off (`import_reconcile.with_typed`), so typing, editing or deleting a game
+    off (`import_reconcile.settle_typed`, season by season), so typing, editing or deleting a game
     moves it. Without this the totals were only right after the next sync. Never
     raises (a failed refresh must not undo a saved game) and does nothing for a
     club with no import.
