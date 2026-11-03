@@ -1,8 +1,12 @@
 """Remove season-totals import rows a club has decided it does not want. Dry run unless --apply.
 
-Written for Hamilton Veterans (Nov 2026). Their sheet holds a few dozen games nothing else does
-(`ops/diagnostics/import_only_games.sql` lists them as a CSV with a "Keep? (Y/N)" column). The club
-marks each row, and this removes the sheet rows marked N. A row marked Y, or left blank, is kept.
+Written for Hamilton Veterans (Nov 2026). It reads the club's answers from either of two CSVs:
+
+  * `ops/diagnostics/import_only_games.sql`, games only the sheet holds, with a "Keep? (Y/N)" column.
+    Rows marked N are removed; Y or blank is kept.
+  * `ops/diagnostics/sheet_vs_cards_decide.sql`, where the sheet and the typed scorecards disagree, with a
+    "Which is right? (Cards or Sheet)" column. Rows marked Cards have the sheet's rows removed, so the season
+    shows the cards alone. Sheet or blank removes nothing (a wrong scorecard is the club's to correct).
 
   * It removes only `imported_stats` rows, by id, and only rows that belong to the club and sit in a
     batch that has not been undone. An id that is not the club's, or is already gone, is listed and
@@ -35,23 +39,35 @@ from app.scripts.audit_twelfth_man import _resolve_org, say
 ACTION = "drop_import_rows"
 RESTORE_ACTION = "drop_import_rows_restore"
 KEEP_COLUMN = "Keep? (Y/N)"
+DECIDE_COLUMN = "Which is right? (Cards or Sheet)"
 IDS_COLUMN = "Sheet row ids (leave)"
 
 
 def ids_from_csv(path: str) -> list[int]:
-    """The sheet row ids of every row the club marked N. A mark that is not Y, N or blank is refused."""
+    """The sheet row ids of every row the club decided should go. A mark that is not one of the words
+    the column asks for is refused, naming the line, so a typo is never read as "keep"."""
     out: list[int] = []
     with open(path, newline="", encoding="utf-8-sig") as fh:
         reader = csv.DictReader(fh)
-        for col in (KEEP_COLUMN, IDS_COLUMN):
-            if col not in (reader.fieldnames or []):
-                raise SystemExit(f"The file has no '{col}' column. It must be the list from import_only_games.sql.")
+        fields = reader.fieldnames or []
+        if IDS_COLUMN not in fields:
+            raise SystemExit(f"The file has no '{IDS_COLUMN}' column. It must be a list from import_only_games.sql "
+                             f"or sheet_vs_cards_decide.sql.")
+        if DECIDE_COLUMN in fields:
+            column, remove, keep = DECIDE_COLUMN, ("cards", "card", "typed", "cards are right"), \
+                ("", "sheet", "sheet is right")
+            words = "Cards or Sheet"
+        elif KEEP_COLUMN in fields:
+            column, remove, keep = KEEP_COLUMN, ("n", "no", "drop", "remove"), ("", "y", "yes", "keep")
+            words = "Y or N"
+        else:
+            raise SystemExit(f"The file has neither a '{KEEP_COLUMN}' nor a '{DECIDE_COLUMN}' column.")
         for n, row in enumerate(reader, start=2):
-            mark = (row.get(KEEP_COLUMN) or "").strip().lower()
-            if mark in ("", "y", "yes", "keep"):
+            mark = (row.get(column) or "").strip().lower()
+            if mark in keep:
                 continue
-            if mark not in ("n", "no", "drop", "remove"):
-                raise SystemExit(f"Line {n}: '{row.get(KEEP_COLUMN)}' is not Y or N. Fix it and run again.")
+            if mark not in remove:
+                raise SystemExit(f"Line {n}: '{row.get(column)}' is not {words}. Fix it and run again.")
             try:
                 out += [int(x) for x in (row.get(IDS_COLUMN) or "").split()]
             except ValueError:
@@ -141,7 +157,7 @@ async def restore(audit_id: int, by: str | None) -> int:
 async def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("org", help="club id or slug")
-    ap.add_argument("--csv", help="the list from import_only_games.sql, with the club's Y/N marks")
+    ap.add_argument("--csv", help="a list from import_only_games.sql (Y/N) or sheet_vs_cards_decide.sql (Cards/Sheet), with the club's marks")
     ap.add_argument("--ids", help="sheet row ids, space separated, instead of a CSV")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--expect", type=int)
@@ -156,7 +172,7 @@ async def main() -> None:
         raise SystemExit("Give exactly one of --csv or --ids.")
     ids = ids_from_csv(a.csv) if a.csv else [int(x) for x in a.ids.split()]
     if not ids:
-        raise SystemExit("Nothing is marked N: nothing to remove.")
+        raise SystemExit("Nothing is marked for removal (N, or Cards): nothing to remove.")
     rows, missing = await plan(org, ids)
     show(rows, missing)
     if not a.apply:

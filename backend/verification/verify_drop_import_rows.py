@@ -1,4 +1,4 @@
-"""The club decides which sheet-only games to keep, and the decision moves the totals and can be undone.
+"""The club decides which sheet-only games to keep, and which of the sheet or the typed cards is right, and each decision moves the totals and can be undone.
 
 Hamilton Veterans (Nov 2026): a few dozen games only the season-totals sheet holds. The club is sent
 a CSV (`ops/diagnostics/import_only_games.sql`), marks each row Y or N, and
@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -52,6 +53,8 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 ORG = "c1000000-0000-0000-0000-000000000001"
 P_SHORT, P_ONLY, P_OUT = (f"c4000000-0000-0000-0000-00000000000{n}" for n in (2, 3, 4))
+P_BOWL = "c4000000-0000-0000-0000-000000000008"
+S18, G_MIXED = "c2000000-0000-0000-0000-000000000001", "c3000000-0000-0000-0000-000000000001"
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -86,6 +89,35 @@ def marked_csv(rows: list[dict], marks: dict) -> str:
             r[dr.KEEP_COLUMN] = marks.get(r["Player"], "")
             w.writerow(r)
     return path
+
+
+def sql_decide_list() -> list[dict]:
+    """The second list, sheet against cards, produced by the shipped SQL file."""
+    url = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
+    out = subprocess.run(["psql", "-q", url, "-v", "club='%Hamilton Veterans%'", "-f", str(REPO / "ops/diagnostics/sheet_vs_cards_decide.sql")],
+                         capture_output=True, text=True)
+    return list(csv.DictReader(out.stdout.splitlines())) if out.returncode == 0 else []
+
+
+def decided_csv(rows: list[dict], marks: dict) -> str:
+    path = tempfile.mktemp(suffix=".csv")
+    with open(path, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        for r in rows:
+            r = dict(r)
+            r[getattr(dr, 'DECIDE_COLUMN', 'Which is right? (Cards or Sheet)')] = marks.get(r["Player"], "")
+            w.writerow(r)
+    return path
+
+
+async def season_figures(pid: str, season_like: str) -> tuple:
+    async with async_session_maker() as s:
+        r = (await s.execute(text(
+            "SELECT COALESCE(SUM(v.overs), 0), COALESCE(SUM(v.wickets), 0) FROM v_effective_player_season_stats v "
+            "JOIN seasons se ON se.id = v.season_id WHERE v.player_id = CAST(:p AS UUID) AND se.name ILIKE :s"),
+            {"p": pid, "s": season_like})).one()
+    return float(r[0]), int(r[1])
 
 
 async def main() -> None:
@@ -165,6 +197,76 @@ async def main() -> None:
         check("an entry restores once", False, "restored twice")
     except SystemExit as e:
         check("an entry restores once", "already restored" in str(e), str(e))
+
+    print("\n-- the second list: where the sheet and the typed cards disagree --")
+    async with async_session_maker() as s:
+        await s.execute(text("INSERT INTO players (id, organisation_id, name, grassroots_id, status) "
+                             "VALUES (CAST(:p AS UUID), CAST(:o AS UUID), 'Bowl, Bob', :p, 'active')"), {"p": P_BOWL, "o": ORG})
+        batch = (await s.execute(text("SELECT id FROM import_batches WHERE organisation_id = CAST(:o AS UUID) LIMIT 1"), {"o": ORG})).scalar()
+        await s.execute(text(
+            "INSERT INTO imported_stats (organisation_id, import_batch_id, player_id, scope, season_id, season_label, grade_label, "
+            " games_played, batting_innings, batting_runs, bowling_overs, bowling_balls, bowling_wickets, is_prior_bucket) "
+            "VALUES (CAST(:o AS UUID), :b, CAST(:p AS UUID), 'season', CAST(:s AS UUID), '2018/19', 'Over 60 Mixed', 3, 3, 60, 10, 60, 5, false)"),
+            {"o": ORG, "b": batch, "p": P_BOWL, "s": S18})
+        for i, (ov, wk) in enumerate(((3, 1), (3, 1), (2, 1))):
+            mg = uuid.uuid4()
+            await s.execute(text(
+                "INSERT INTO manual_games (id, organisation_id, season_id, grade_id, played_at, match_format) "
+                "VALUES (:i, CAST(:o AS UUID), CAST(:s AS UUID), CAST(:g AS UUID), :d, 'One Day')"),
+                {"i": mg, "o": ORG, "s": S18, "g": G_MIXED, "d": date(2019, 8, 10 + i)})
+            await s.execute(text(
+                "INSERT INTO manual_batting_innings (manual_game_id, player_id, innings_number, batting_position, runs, balls, not_out, did_not_bat) "
+                "VALUES (:g, CAST(:p AS UUID), 1, 3, 20, 25, false, false)"), {"g": mg, "p": P_BOWL})
+            await s.execute(text(
+                "INSERT INTO manual_bowling_spells (manual_game_id, player_id, innings_number, overs, maidens, runs, wickets) "
+                "VALUES (:g, CAST(:p AS UUID), 2, :o, 0, 10, :w)"), {"g": mg, "p": P_BOWL, "o": ov, "w": wk})
+        await s.commit()
+    from app.services.import_reconcile import reconcile_imported_totals
+    await reconcile_imported_totals(ORG)
+
+    lst2 = sql_decide_list()
+    who = {r["Player"] for r in lst2}
+    check("the second list is produced", len(lst2) > 0, "no rows")
+    check("it holds the player whose sheet and cards differ only on overs and wickets", "Bowl, Bob" in who, f"{sorted(who)}")
+    bowl = next((r for r in lst2 if r["Player"] == "Bowl, Bob"), {})
+    check("and says which figures differ: overs, wickets", bowl.get("Figures that differ") == "overs, wickets", f"{bowl.get('Figures that differ')!r}")
+    check("with both sides shown (10 against 8 overs, 5 against 3 wickets)",
+          bowl.get("Overs (sheet)") == "10.0" and bowl.get("Overs (cards)") == "8.0"
+          and bowl.get("Wickets (sheet)") == "5" and bowl.get("Wickets (cards)") == "3", f"{bowl}")
+    check("a player whose cards hold MORE games than the sheet is on it too (Pool, Paul)", "Pool, Paul" in who, f"{sorted(who)}")
+    check("a season that agrees is left off (Full, Fred)", "Full, Fred" not in who)
+    check("and so is a season the sheet has MORE GAMES for: that is the first list's question",
+          not ({"Short, Sam", "Only, Olly", "Out, Ozzy", "Hq, Harry"} & who), f"{sorted(who)}")
+
+    before = await season_figures(P_BOWL, "%2018/19%")
+    check("until the club answers, the season shows the sheet's larger figures (10 overs, 5 wickets)",
+          before == (10.0, 5), f"{before}")
+    answered = decided_csv(lst2, {"Bowl, Bob": "Cards", "Pool, Paul": "Sheet"})
+    try:
+        ids2 = dr.ids_from_csv(answered)
+    except SystemExit as e:
+        ids2 = []
+        print(f"       (the script cannot read the file: {e})")
+    check("only the rows marked Cards are taken: Bowl's sheet row, never Pool's (marked Sheet)",
+          ids2 == [int(x) for x in bowl["Sheet row ids (leave)"].split()], f"{ids2}")
+    check("Sheet and blank remove nothing", len(ids2) == 1, f"{ids2}")
+    for word in ("both", "maybe", "y"):
+        try:
+            dr.ids_from_csv(decided_csv(lst2, {"Bowl, Bob": word}))
+            check(f"'{word}' is refused, not read as keep", False, "accepted")
+        except SystemExit as e:
+            check(f"'{word}' is refused, naming the line", "Cards or Sheet" in str(e), str(e))
+    rows2, missing2 = await dr.plan(ORG, ids2)
+    try:
+        audit2 = await dr.apply(ORG, rows2, expect=1, by="test")
+    except SystemExit:
+        audit2 = None
+    after = await season_figures(P_BOWL, "%2018/19%")
+    check("once the club says Cards, the season shows the cards alone (8 overs, 3 wickets)", after == (8.0, 3), f"{after}")
+    check("and the player drops off the list", "Bowl, Bob" not in {r["Player"] for r in sql_decide_list()})
+    if audit2:
+        await dr.restore(audit2, by="test")
+    check("a restore puts the sheet back exactly (10 overs, 5 wickets)", await season_figures(P_BOWL, "%2018/19%") == (10.0, 5))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     if FAIL:
