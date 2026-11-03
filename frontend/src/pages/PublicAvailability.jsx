@@ -376,17 +376,30 @@ function FinesModule({ data }) {
   )
 }
 
-// The sections of the page, in the order a player reads them. Each holds the club's
-// modules that belong to it, in the club's own order; a section with none drops out.
-// Availability always shows for a club with BetterSelect, because the answer buttons are in it.
-const GROUPS = [
-  { id: 'availability', title: 'Availability', keys: [] },
-  { id: 'cards', title: 'Player Cards', keys: ['cards'], hideTitle: true, wide: true },
-  { id: 'selection', title: 'Selection', keys: ['squad', 'selected', 'training', 'ladder'] },
-  { id: 'admin', title: 'Club admin', keys: ['fees', 'fines'] },
-  { id: 'voting', title: 'Voting', keys: ['votes'], hideTitle: true },
-  { id: 'stats', title: 'Stats', keys: ['season'] },
-  { id: 'fantasy', title: 'Fantasy', keys: ['fantasy'], hideTitle: true },
+// The sections of the page. Each holds the club's modules that belong to it, in the
+// club's own order; a section with none drops out. Availability always shows for a club
+// with BetterSelect, because the answer buttons are in it.
+const GROUPS = {
+  availability: { title: 'Availability', keys: [] },
+  selection: { title: 'Selection', keys: ['squad', 'selected', 'training', 'ladder'] },
+  cards: { title: 'Player Cards', keys: ['cards'], hideTitle: true },
+  fantasy: { title: 'Fantasy', keys: ['fantasy'], hideTitle: true },
+  stats: { title: 'Stats', keys: ['season'] },
+  voting: { title: 'Voting', keys: ['votes'], hideTitle: true },
+  admin: { title: 'Club admin', keys: ['fees', 'fines'] },
+}
+
+// The page reads as rows of related sections. A phone stacks them in this order; a wide
+// screen puts each row side by side, every section the same width. The pairs follow the
+// week: answer Availability, then see the Selection it feeds; the two games on top of the
+// club (Player Cards and Fantasy); how you went (Stats) and what you thought (Voting);
+// then the housekeeping. A section a club does not have drops out and its partner keeps
+// its own row, so a pair never changes partners.
+const ROWS = [
+  ['availability', 'selection'],
+  ['cards', 'fantasy'],
+  ['stats', 'voting'],
+  ['admin'],
 ]
 
 // The Selection modules drawn together as one block of short rows.
@@ -515,9 +528,12 @@ function MyPage({ token, me, club, availability, onSwitch, prefetch }) {
   // The profile call names the squads the club lets players see; until it lands the
   // availability call already carries them, so the hero does not wait.
   const squads = data ? (data.squads || []) : (me.squads || [])
-  const shown = GROUPS
-    .map((g) => ({ ...g, mods: modules.filter((m) => g.keys.includes(m)) }))
-    .filter((g) => (g.id === 'availability' ? me.has_availability !== false : g.mods.length > 0))
+  const rows = ROWS
+    .map((ids) => ids
+      .map((id) => ({ id, ...GROUPS[id], mods: modules.filter((m) => GROUPS[id].keys.includes(m)) }))
+      .filter((g) => (g.id === 'availability' ? me.has_availability !== false : g.mods.length > 0)))
+    .filter((row) => row.length > 0)
+  const shown = rows.flat()
   const allOpen = shown.every((g) => sections.isOpen(g.id))
 
   return (
@@ -552,19 +568,24 @@ function MyPage({ token, me, club, availability, onSwitch, prefetch }) {
         <button type="button" data-toggle-all onClick={() => sections.setAll(shown.map((g) => g.id), !allOpen)}
           className="text-[12px] text-pb-faint underline">{allOpen ? 'Collapse all' : 'Expand all'}</button>
       </div>
-      <div className="md:columns-2 md:gap-3" data-groups>
-        {shown.map((g) => {
-          const { text, tone } = summaryFor(g.id, { me, data, ladder, cardsReady })
-          return (
-            <Group key={g.id} id={g.id} hideTitle={g.hideTitle} wide={g.wide}
-              title={g.id === 'fantasy' && data?.fantasy?.name ? data.fantasy.name : g.title}
-              summary={text} tone={tone} open={sections.isOpen(g.id)} onToggle={sections.toggle}>
-              {g.id === 'availability' && availability({ selected: data?.selected || [] })}
-              {g.id === 'selection' && data && g.mods.some((m) => GLANCE.includes(m)) && <SelectionGlance data={data} modules={modules} />}
-              {g.mods.filter((m) => !GLANCE.includes(m)).map(render)}
-            </Group>
-          )
-        })}
+      <div className="space-y-3" data-groups>
+        {rows.map((row) => (
+          // items-start: opening one section never stretches the closed one beside it.
+          <div key={row[0].id} data-group-row className="grid gap-3 md:grid-cols-2 items-start">
+            {row.map((g) => {
+              const { text, tone } = summaryFor(g.id, { me, data, ladder, cardsReady })
+              return (
+                <Group key={g.id} id={g.id} hideTitle={g.hideTitle}
+                  title={g.id === 'fantasy' && data?.fantasy?.name ? data.fantasy.name : g.title}
+                  summary={text} tone={tone} open={sections.isOpen(g.id)} onToggle={sections.toggle}>
+                  {g.id === 'availability' && availability({ selected: data?.selected || [] })}
+                  {g.id === 'selection' && data && g.mods.some((m) => GLANCE.includes(m)) && <SelectionGlance data={data} modules={modules} />}
+                  {g.mods.filter((m) => !GLANCE.includes(m)).map(render)}
+                </Group>
+              )
+            })}
+          </div>
+        ))}
       </div>
     </div>
   )
