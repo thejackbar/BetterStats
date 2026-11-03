@@ -1558,6 +1558,26 @@ def draw_cards(pool: dict[str, list[str]], specials: list[str], size: int = PACK
     return picks
 
 
+async def wanted_keys_of(db, pid: str) -> set[tuple]:
+    """The cards on a player's wish list, as `(subject, special id)`."""
+    rows = (await db.execute(text(
+        "SELECT subject_player_id::text, special_id::text FROM player_card_wants WHERE player_id = CAST(:pid AS UUID)"), {"pid": pid})).fetchall()
+    return {(r[0], r[1]) for r in rows}
+
+
+async def drop_fulfilled_wants(db, pid: str) -> int:
+    """A card on a wish list is taken off it the moment the player holds a copy, however it came (a pack, a swap, a gift). It is the
+    list that changes: the card and its copy are untouched. Returns how many were taken off."""
+    res = await db.execute(text("""
+        DELETE FROM player_card_wants w
+         WHERE w.player_id = CAST(:pid AS UUID)
+           AND EXISTS (SELECT 1 FROM player_card_copies c
+                        WHERE c.owner_player_id = w.player_id AND c.subject_player_id = w.subject_player_id
+                          AND c.special_id IS NOT DISTINCT FROM w.special_id)
+    """), {"pid": pid})
+    return res.rowcount or 0
+
+
 async def open_pack(db: AsyncSession, club: Organisation, player: Player, pack_id: str, snap: dict) -> Optional[list[dict]]:
     """Open one pack: lock it, draw, record the copies. Returns the cards, or None when the pack is not
     this player's, is already open, or was a weekly pack that has expired. The caller commits."""
@@ -1571,6 +1591,7 @@ async def open_pack(db: AsyncSession, club: Organisation, player: Player, pack_i
     if row[1] == "weekly" and not str(row[2]).startswith(week_key(snap["settings"]) + ":"):
         return None
     specials = [sid for sid, owner in await _all_special_ids(db, club.id) if owner in snap["people"]]
+    wanted = await wanted_keys_of(db, str(player.id))
     picks = draw_cards(snap["pool"], specials, size=max(MIN_PACK_SIZE, min(int(row[4] or PACK_SIZE), MAX_PACK_SIZE)), kind=kinds.quality_kind(row[3], row[1]))
     await db.execute(text("UPDATE player_card_packs SET opened_at = NOW() WHERE id = CAST(:id AS UUID)"), {"id": pack_id})
     special_rows = await _specials_by_id(db, club.id, [p["id"] for p in picks if p["kind"] == "special"])
@@ -1589,7 +1610,10 @@ async def open_pack(db: AsyncSession, club: Organisation, player: Player, pack_i
             INSERT INTO player_card_copies (organisation_id, owner_player_id, subject_player_id, special_id, pack_id, source)
             VALUES (CAST(:org AS UUID), CAST(:owner AS UUID), CAST(:subject AS UUID), CAST(:sid AS UUID), CAST(:pack AS UUID), 'pack')
         """), {"org": str(club.id), "owner": str(player.id), "subject": subject, "sid": special_id, "pack": pack_id})
+        # Tell the opening screen which pulls were on the player's wish list (they come off it just below).
+        card["from_wishlist"] = (subject, special_id) in wanted
         cards.append(card)
+    await drop_fulfilled_wants(db, str(player.id))
     return cards
 
 

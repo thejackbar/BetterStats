@@ -14,6 +14,7 @@ export function PlayerCardsProvider({ token, club, me, onSwitch, children }) {
   const [data, setData] = useState(null)
   const [failed, setFailed] = useState(false)
   const [swapsWaiting, setSwapsWaiting] = useState(0)
+  const [suggested, setSuggested] = useState(0)
   const [wants, setWants] = useState({ keys: new Set(), ready: 0, count: 0 })
   const [pack, setPack] = useState(null)
   const [owned, setOwned] = useState(() => new Set())
@@ -26,7 +27,7 @@ export function PlayerCardsProvider({ token, club, me, onSwitch, children }) {
   const basePath = `${base}/cards`
 
   const load = useCallback(() => api.availPublicCards(token).then((d) => { setData(d); setFailed(false); return d }).catch(() => setFailed(true)), [token])
-  const loadSwaps = useCallback(() => api.availPublicSwaps(token).then((b) => setSwapsWaiting(b.incoming.length)).catch(() => {}), [token])
+  const loadSwaps = useCallback(() => api.availPublicSwaps(token).then((b) => { setSwapsWaiting(b.incoming.length); setSuggested((b.suggested || []).length) }).catch(() => {}), [token])
   // The wish list: which cards are on it (for the add and remove buttons) and how many someone could swap now (for the badge).
   const loadWants = useCallback(() => api.availPublicWants(token)
     .then((w) => setWants({ keys: new Set(w.wants.map((x) => x.key)), ready: w.ready, count: w.wants.length })).catch(() => {}), [token])
@@ -45,14 +46,16 @@ export function PlayerCardsProvider({ token, club, me, onSwitch, children }) {
     setOwned(new Set((data?.cards || []).map((c) => c.key)))
     setPack(p)
   }, [data])
-  const closePack = useCallback(() => { setPack(null); load() }, [load])
+  // A card pulled comes off the wish list on the server, so the list (and its badge) is read again whenever packs are opened.
+  const closePack = useCallback(() => { setPack(null); load(); loadWants() }, [load, loadWants])
   const nextPack = useCallback(async () => {
     // The pack that was just opened is gone; read the list again and go straight on to the next.
     const d = await api.availPublicCards(token)
     setData(d)
     setOwned(new Set(d.cards.map((c) => c.key)))
     setPack(d.packs[0] || null)
-  }, [token])
+    loadWants()
+  }, [token, loadWants])
   const openAll = useCallback(async () => {
     setBusyAll(true); setPackErr('')
     try {
@@ -61,13 +64,13 @@ export function PlayerCardsProvider({ token, club, me, onSwitch, children }) {
       setPackErr(e?.message || 'Could not open the packs. Try again.')
     } finally {
       setBusyAll(false)
-      load()
+      load(); loadWants()
     }
-  }, [token, load])
+  }, [token, load, loadWants])
 
   const value = {
     token, club, me, onSwitch, accent, display, sponsor, base, basePath,
-    data, failed, load, mine, features, swapsWaiting, loadSwaps, wants, loadWants, toggleWant,
+    data, failed, load, mine, features, swapsWaiting, suggested, loadSwaps, wants, loadWants, toggleWant,
     pack, owned, startPack, closePack, nextPack, allResult, setAllResult, busyAll, openAll, packErr,
     packsCount: data?.packs?.length || 0,
   }

@@ -304,6 +304,7 @@ export default function PackOpening({ pack, packsLeft, club, accent, display = D
                   <>
                     <div style={{ font: `800 italic 22px ${display}`, letterSpacing: 1, textTransform: 'uppercase', color: (TIERS[current.tier] || TIERS.common).ink }}>
                       {current.kind === 'special' ? `Special: ${current.title}` : (TIERS[current.tier] || TIERS.common).label}
+                      {current.from_wishlist && <span data-wishlist-badge style={{ marginLeft: 8, padding: '2px 7px', borderRadius: 6, background: '#facc15', color: '#422006', font: `700 10px ${MONO}`, letterSpacing: 1, verticalAlign: 'middle' }}>WISH LIST</span>}
                       {!owned.has(current.key) && <span data-new-badge style={{ marginLeft: 8, padding: '2px 7px', borderRadius: 6, background: '#22c55e', color: '#052e16', font: `700 10px ${MONO}`, letterSpacing: 1, verticalAlign: 'middle' }}>NEW</span>}
                     </div>
                     <div style={{ font: `600 11px ${MONO}`, letterSpacing: 1.5, textTransform: 'uppercase', opacity: 0.75, marginTop: 4 }}>{idx < cards.length - 1 ? 'Tap for the next card' : 'Tap to see the lot'}</div>

@@ -101,7 +101,7 @@ function Tile({ to, title, children, accent, tag }) {
 }
 
 export default function Home() {
-  const { token, data, failed, mine, features, club, accent, display, sponsor, basePath, swapsWaiting, wants } = usePC()
+  const { token, data, failed, mine, features, club, accent, display, sponsor, basePath, swapsWaiting, suggested, wants } = usePC()
   const [share, setShare] = useState(null)
   const [pinned, setPinned] = useState([])
   useEffect(() => { if (features.showcase) api.availPublicShowcase(token).then((r) => setPinned(r.cards || [])).catch(() => {}) }, [token, features.showcase])
@@ -126,6 +126,7 @@ export default function Home() {
         <Tile to={`${basePath}/swaps`} title="Swaps" tag="swaps">
           <div style={{ font: `800 22px/1.1 ${display}`, textTransform: 'uppercase' }}>{swapsWaiting ? `${swapsWaiting} asking you` : 'Nothing waiting'}</div>
           <div className="text-sm text-pb-dim mt-1">{swapsWaiting ? 'Open them to accept or decline.' : 'Swap any cards you hold with another player.'}</div>
+          {suggested > 0 && <div data-suggested-tag className="mt-2 inline-block px-2.5 py-1 rounded-full text-[12px] font-semibold" style={{ background: accent, color: onColor(accent) }}>{suggested === 1 ? '1 suggested swap' : `${suggested} suggested swaps`}</div>}
         </Tile>
         <Tile to={`${basePath}/book`} title="Your collection" tag="collection">
           <div className="flex gap-6">

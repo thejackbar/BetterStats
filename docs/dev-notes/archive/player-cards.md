@@ -302,3 +302,13 @@ Reported: trading cards were loading really slowly.
 - Bug: `BottomBar`'s More sheet in `pages/playercards/nav.jsx` had its own hard-coded links, so Challenges (added after it) never appeared on a phone. The sheet is now `useNav()` minus `BAR_KEYS` (home, book, packs, swaps, which the bar holds itself), with the sidebar's group headings (a heading is dropped when nothing under it is left) and badges.
 - Kept: Club cards stays in More (the bar's Cards slot covers My cards, with the My cards / Club cards switch on top). The sheet list scrolls inside a max height so a long list cannot run off a short phone.
 - Verified: `verify_player_cards_page_browser.mjs` (70, new: More plus the bar equals the sidebar, headings, the sheet inside the screen). Control on the previous `nav.jsx` fails the Challenges, parity and heading checks and nothing else.
+
+## v9.139.3 (2026-11-03): wish list clears itself, and suggested swaps
+
+Asked for: a pulled player comes off your wish list; when another player holds a card you want and wants one you hold, prompt a suggested swap for those two.
+
+- Removal is one SQL (`drop_fulfilled_wants`) rather than a call at each place a copy is added; it is also run on every read of the list, so gifts, challenge rewards and any future source are covered. Chosen over hiding held cards at read time, which would bring a card back to the list if the player later traded it away.
+- Suggestions: one per player, not one per matching pair, so a busy club does not bury a player in prompts; `options` says how many pairs there were. Pair choice favours giving a spare, then similar rarity, then the more valuable card received. Computed from the same data on both sides so each player is prompted. It goes out with the swaps board, so Home's count costs no extra request.
+- Privacy trade-off, deliberate: a suggestion tells each player that the other wants one specific card of theirs, and which of the other's cards they want. Nothing else on either list is shown. The privacy line in How it works says so.
+- Not done: an email or alert for a new suggestion (the alert settings exist for wants becoming available and for swap requests); suggesting multi-card swaps.
+- Verified: `verify_player_cards.py` (686: pairing, spare first, the four-pair case, the live request, accept clearing both lists, a gift clearing on read, a pack pulling wished cards with the `from_wishlist` flag) and browser `_suggested_` (11) plus the other Player Cards suites.

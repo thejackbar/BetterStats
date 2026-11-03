@@ -152,6 +152,7 @@ async def get_my_swaps(token: str, request: Request, db: AsyncSession = Depends(
     me = str(player.id)
     return {
         **await swaps.list_swaps(db, club, snap, me, history=history),
+        "suggested": await social.suggested_swaps(db, club, snap, me),
         "mine": await swaps.tradeable_cards(db, club, snap, me),
         "people": await swaps.swap_people(db, club, snap, me),
         "expires_days": swaps.SWAP_DAYS,
@@ -295,7 +296,9 @@ class ShowcaseBody(BaseModel):
 async def get_wants(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     """The player's wish list, each card with who could swap one now."""
     club, player, snap = await _ready(db, request, token)
-    return await social.list_wants(db, club, snap, str(player.id))
+    out = await social.list_wants(db, club, snap, str(player.id))
+    await db.commit()   # list_wants takes off the cards the player now holds
+    return out
 
 
 @router.post("/{token}/me/cards/wants")

@@ -1794,6 +1794,76 @@ async def main() -> None:
                     await db.execute(text("UPDATE club_card_settings SET winner_packs_from = CURRENT_DATE WHERE organisation_id = :o"), {"o": ORG}); await db.commit()
                     snap = await cards.club_snapshot(db, club, fresh=True)
 
+                # Wish list: a card comes off it once held, and two players who hold what the other is after are shown a suggested swap
+                if hasattr(cards, "drop_fulfilled_wants") and hasattr(social, "suggested_swaps"):
+                    async def wl_reset():
+                        await db.execute(text("DELETE FROM player_card_wants WHERE player_id = ANY(CAST(:p AS uuid[]))"), {"p": [z1, z2]})
+                        await db.execute(text("DELETE FROM player_card_swaps WHERE from_player_id = ANY(CAST(:p AS uuid[])) OR to_player_id = ANY(CAST(:p AS uuid[]))"), {"p": [z1, z2]})
+                        await db.execute(text("DELETE FROM player_card_copies WHERE owner_player_id = ANY(CAST(:p AS uuid[]))"), {"p": [z1, z2]})
+                        await db.commit()
+
+                    async def wl_give(owner, subject, n=1):
+                        for _ in range(n):
+                            await db.execute(text("INSERT INTO player_card_copies (organisation_id, owner_player_id, subject_player_id, source) VALUES (:o, :p, :s, 'pack')"), {"o": ORG, "p": owner, "s": subject})
+                        await db.commit()
+
+                    await wl_reset()
+                    await wl_give(Z1, ALPHA, 2); await wl_give(Z1, BRAVO); await wl_give(Z2, CHARLIE); await wl_give(Z2, DELTA)
+                    wl_snap = await cards.club_snapshot(db, club, fresh=True)
+                    await social.add_want(db, club, wl_snap, z1, f"p:{CHARLIE}")
+                    await db.commit()
+                    check("one-sided: I want a card they hold, they want nothing of mine, so no suggestion", await social.suggested_swaps(db, club, wl_snap, z1) == [] and await social.suggested_swaps(db, club, wl_snap, z2) == [])
+                    await social.add_want(db, club, wl_snap, z2, f"p:{ALPHA}")
+                    await db.commit()
+                    sg1, sg2 = await social.suggested_swaps(db, club, wl_snap, z1), await social.suggested_swaps(db, club, wl_snap, z2)
+                    check("both want what the other holds: each is shown one suggested swap, with the other player", len(sg1) == 1 and len(sg2) == 1 and sg1[0]["player"]["player_id"] == z2 and sg2[0]["player"]["player_id"] == z1, str((sg1, sg2))[:300])
+                    check("...my card for theirs: Z1 gives ALPHA (a spare) for CHARLIE; Z2 gives CHARLIE for ALPHA", sg1[0]["give"]["key"] == f"p:{ALPHA}" and sg1[0]["give"]["spare"] is True and sg1[0]["want"]["key"] == f"p:{CHARLIE}" and sg2[0]["give"]["key"] == f"p:{CHARLIE}" and sg2[0]["want"]["key"] == f"p:{ALPHA}" and sg2[0]["give"]["spare"] is False)
+                    check("a suggestion carries both cards in full (so the screen can draw them)", all(k in sg1[0]["give"] and k in sg1[0]["want"] for k in ("name", "tier", "key")))
+                    # several matches: one suggestion per player, the best pair, and how many pairs there were
+                    await social.add_want(db, club, wl_snap, z1, f"p:{DELTA}")
+                    await social.add_want(db, club, wl_snap, z2, f"p:{BRAVO}")
+                    await db.commit()
+                    sg1 = await social.suggested_swaps(db, club, wl_snap, z1)
+                    check("with two cards each way there is still one suggestion per player, the best pair first, and it says there are 4 ways", len(sg1) == 1 and sg1[0]["options"] == 4 and sg1[0]["give"]["spare"] is True, str(sg1)[:300])
+                    # the request over them
+                    await swaps.create_swap(db, club, wl_snap, z1, z2, [{"key": f"p:{ALPHA}", "qty": 1}], [{"key": f"p:{CHARLIE}", "qty": 1}])
+                    await db.commit()
+                    sg1 = await social.suggested_swaps(db, club, wl_snap, z1)
+                    check("a live request over a card takes it out of the suggestions, and the other pair is still offered", len(sg1) == 1 and sg1[0]["give"]["key"] == f"p:{BRAVO}" and sg1[0]["want"]["key"] == f"p:{DELTA}", str(sg1)[:300])
+                    # accepting it takes both cards off both lists
+                    sw_id = (await db.execute(text("SELECT id::text FROM player_card_swaps WHERE from_player_id = :p AND status = 'pending'"), {"p": Z1})).scalar()
+                    await swaps.respond(db, club, wl_snap, z2, sw_id, "accept")
+                    await db.commit()
+                    w1, w2 = {w["key"] for w in (await social.list_wants(db, club, wl_snap, z1))["wants"]}, {w["key"] for w in (await social.list_wants(db, club, wl_snap, z2))["wants"]}
+                    await db.commit()
+                    check("a swap that hands over a wished-for card takes it off the list, for both of them", f"p:{CHARLIE}" not in w1 and f"p:{ALPHA}" not in w2, str((w1, w2)))
+                    check("...and keeps the wishes that are still open", f"p:{DELTA}" in w1 and f"p:{BRAVO}" in w2, str((w1, w2)))
+                    check("...and nothing was taken from anyone's cards", (await db.execute(text("SELECT count(*) FROM player_card_copies WHERE owner_player_id = ANY(CAST(:p AS uuid[]))"), {"p": [z1, z2]})).scalar() == 5)
+                    # a card that arrives some other way (a gift) comes off when the list is read
+                    await wl_give(Z1, DELTA)
+                    check("a card that arrived another way comes off the list when it is read", f"p:{DELTA}" not in {w["key"] for w in (await social.list_wants(db, club, wl_snap, z1))["wants"]})
+                    await db.commit()
+
+                    # opening a pack: what is pulled comes off the list, and the opening screen is told which pulls were wished for
+                    await wl_reset()
+                    await wl_give(Z1, ALPHA)
+                    wl_snap = await cards.club_snapshot(db, club, fresh=True)
+                    pool_keys = [pid for pid, f in wl_snap["figs"].items() if f["matches"] > 0 and pid in wl_snap["people"] and pid not in (z1, str(ALPHA))]
+                    for pid in pool_keys[:100]:
+                        await social.add_want(db, club, wl_snap, z1, f"p:{pid}")
+                    await db.commit()
+                    wished_before = {w["key"] for w in (await social.list_wants(db, club, wl_snap, z1))["wants"]}
+                    await db.execute(text("INSERT INTO player_card_packs (organisation_id, player_id, source, ref_key, size) VALUES (:o, :p, 'custom', 'wl-test', 5) RETURNING id"), {"o": ORG, "p": Z1})
+                    pack_id = (await db.execute(text("SELECT id::text FROM player_card_packs WHERE player_id = :p AND ref_key = 'wl-test'"), {"p": Z1})).scalar()
+                    opened = await cards.open_pack(db, club, await db.get(Player, Z1), pack_id, wl_snap)
+                    await db.commit()
+                    pulled = [c["key"] for c in opened]
+                    left = {r[0] for r in (await db.execute(text("SELECT 'p:' || subject_player_id::text FROM player_card_wants WHERE player_id = :p AND special_id IS NULL"), {"p": Z1})).fetchall()}
+                    check("every card pulled that was on the wish list is off it, and the ones not pulled are still on it", wished_before and all(k not in left for k in pulled) and all(k in left for k in wished_before if k not in pulled), f"pulled={pulled} left={len(left)}")
+                    check("each pulled card says whether it was on the list", all(c["from_wishlist"] is (c["key"] in wished_before) for c in opened), str([(c["key"][:8], c["from_wishlist"]) for c in opened]))
+                    check("a pack that pulls a wished-for card is the case under test (the list had it)", any(c["from_wishlist"] for c in opened))
+                    await wl_reset()
+
                 # taking back the packs that went out wrongly
                 for d_ in (D(2031, 8, 4), D(2031, 8, 5)):
                     await db.execute(text("INSERT INTO player_card_packs (organisation_id, player_id, source, ref_key) VALUES (:o, :p, 'match_day', :r)"), {"o": ORG, "p": Z1, "r": f"match_day:{d_.isoformat()}"})

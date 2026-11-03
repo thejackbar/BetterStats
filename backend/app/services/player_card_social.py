@@ -2,7 +2,10 @@
 alert settings.
 
 * A wish list is private to its owner. A card on it is listed with who could swap one right now, which is the same thing
-  anyone can already see in Club cards. Nobody else is ever told what is on someone's list.
+  anyone can already see in Club cards. Nobody else is ever told what is on someone's list, with ONE exception: a suggested swap
+  (below) shows each of two players a card of theirs the other is after, and a card of the other's they are after, because the
+  match is the point. Nothing else on either list is shown.
+* A card comes off the wish list the moment the player holds a copy, however it came (`player_cards.drop_fulfilled_wants`).
 * A holder who marks a spare "open to offers" is told how many players want it, as a number, never as names.
 * A spare is a copy beyond the one a player keeps: two copies of a card is one spare. A player's own card is theirs without a
   row, so every pulled copy of it is a spare.
@@ -15,7 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation
-from app.services import player_card_catalogue as catalogue, player_card_swaps as swaps
+from app.services import player_card_catalogue as catalogue, player_card_swaps as swaps, player_cards as cards
 from app.services.player_card_swaps import Card, SwapError
 
 MAX_WANTS = 100
@@ -41,6 +44,7 @@ async def wanted_cards(db: AsyncSession, club: Organisation, me: str) -> list[tu
 
 async def list_wants(db: AsyncSession, club: Organisation, snap: dict, me: str) -> dict:
     """The player's wish list, each card with who could swap one now. `ready` counts cards someone has."""
+    await cards.drop_fulfilled_wants(db, me)   # a card obtained some way that did not clean up after itself (a gift, a challenge)
     wanted = await wanted_cards(db, club, me)
     specials = await _specials(db, club, [c for c, _ in wanted])
     holders = await catalogue._holder_map(db, club, snap, me)
@@ -88,6 +92,77 @@ async def remove_want(db: AsyncSession, club: Organisation, me: str, key: str) -
 
 async def wanted_keys(db: AsyncSession, club: Organisation, me: str) -> set[str]:
     return {swaps.key_of(*c) for c, _ in await wanted_cards(db, club, me)}
+
+
+# ── Suggested swaps ───────────────────────────────────────────────────────────────────────────────────────────
+
+MAX_SUGGESTIONS = 12
+
+
+async def suggested_swaps(db: AsyncSession, club: Organisation, snap: dict, me: str) -> list[dict]:
+    """Players who hold a card on MY wish list and want a card I hold, one suggestion per player: my card for theirs. It reads the same
+    from either side, so both players are prompted. A player who already has a live request with me over either card is left out
+    (it is being dealt with). Where a player offers several, the pair is the best match: a spare of mine before a card I only have
+    one of, then the two cards closest in rarity, then the rarer card I am after."""
+    mine_wants = {c for c, _ in await wanted_cards(db, club, me)}
+    if not mine_wants:
+        return []
+    org = str(club.id)
+    their_wants: dict[str, set[Card]] = {}
+    for owner, subject, special_id in (await db.execute(text(
+            "SELECT player_id::text, subject_player_id::text, special_id::text FROM player_card_wants "
+            "WHERE organisation_id = CAST(:o AS UUID) AND player_id <> CAST(:me AS UUID)"), {"o": org, "me": me})).fetchall():
+        their_wants.setdefault(owner, set()).add((subject, special_id))
+    if not their_wants:
+        return []
+    everyone = await swaps._rows_by_card(db, club.id)
+    held_me = everyone.get(me, {})
+    # Cards already in a live request between me and each other player.
+    busy: dict[str, set[Card]] = {}
+    live = (await db.execute(text(
+        "SELECT s.id::text, s.from_player_id::text, s.to_player_id::text FROM player_card_swaps s "
+        "WHERE s.organisation_id = CAST(:o AS UUID) AND (s.from_player_id = CAST(:me AS UUID) OR s.to_player_id = CAST(:me AS UUID)) AND " + swaps._live_sql()),
+        {"o": org, "me": me})).fetchall()
+    if live:
+        sides = await swaps._items_of(db, [r[0] for r in live])
+        for sid, frm, to in live:
+            other = to if frm == me else frm
+            busy.setdefault(other, set()).update(c for side in sides[sid].values() for c, _ in side)
+
+    def spare(card: Card) -> bool:
+        n = held_me.get(card, 0)
+        return (n >= 1) if card == (me, None) else n >= 2
+
+    picks: list[tuple[tuple, str, Card, Card, dict, dict, int]] = []
+    for other, wants in their_wants.items():
+        if other not in snap["people"]:
+            continue
+        theirs = everyone.get(other, {})
+        can_get = [c for c in mine_wants & set(theirs) if swaps.tradeable(other, c, theirs[c]) > 0 and c not in busy.get(other, set())]
+        can_give = [c for c in wants & set(held_me) if swaps.tradeable(me, c, held_me[c]) > 0 and c not in busy.get(other, set())]
+        if not can_get or not can_give:
+            continue
+        specials = await _specials(db, club, can_get + can_give)
+        got = {c: swaps._payload(snap, c, specials) for c in can_get}
+        gave = {c: swaps._payload(snap, c, specials) for c in can_give}
+        can_get, can_give = [c for c in can_get if got[c]], [c for c in can_give if gave[c]]
+        if not can_get or not can_give:
+            continue
+
+        def rank(gw: tuple[Card, Card]) -> tuple:
+            g_, w_ = gw
+            return (not spare(g_), abs((gave[g_].get("rarity") or 0) - (got[w_].get("rarity") or 0)), -(got[w_].get("rarity") or 0),
+                    swaps.key_of(*g_), swaps.key_of(*w_))
+
+        g, w = min(((g_, w_) for g_ in can_give for w_ in can_get), key=rank)
+        picks.append(((not spare(g), abs((gave[g].get("rarity") or 0) - (got[w].get("rarity") or 0)), snap["people"][other]["display_name"].lower()),
+                      other, g, w, gave[g], got[w], len(can_give) * len(can_get)))
+    picks.sort(key=lambda p: p[0])
+    out = []
+    for _rank, other, g, w, gp, wp, combos in picks[:MAX_SUGGESTIONS]:
+        out.append({"player": {"player_id": other, "name": snap["people"][other]["display_name"]},
+                    "give": {**gp, "key": swaps.key_of(*g), "spare": spare(g)}, "want": {**wp, "key": swaps.key_of(*w)}, "options": combos})
+    return out
 
 
 # ── Spares and "open to offers" ───────────────────────────────────────────────────────────────────────────────

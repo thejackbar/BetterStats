@@ -432,6 +432,9 @@ async def respond(db: AsyncSession, club: Organisation, snap: dict, me: str, swa
                     "WHERE id = ANY(CAST(:ids AS uuid[]))"
                 ), {"new": new_owner, "ids": found[(owner, card)][:qty]})
         new = "accepted"
+        # Whatever either of them was after and has now been handed, comes off their wish list.
+        for who in (s["from_id"], s["to_id"]):
+            await cards.drop_fulfilled_wants(db, who)
     await db.execute(text(
         "UPDATE player_card_swaps SET status = :st, resolved_at = NOW() WHERE id = CAST(:id AS UUID)"
     ), {"st": new, "id": swap_id})
