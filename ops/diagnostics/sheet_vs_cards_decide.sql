@@ -6,8 +6,12 @@
 -- to, or the cards can hold more than the sheet. Only the club knows which is right.
 --
 -- One row per player and season where the sheet and the cards differ on games, innings, runs, overs or
--- wickets. A season where the sheet has MORE GAMES than the cards is left out: it is on the sheet-only
--- games list (import_only_games.sql), so the club never answers the same thing twice.
+-- wickets. Two things are left out, so the club is only asked what it can answer:
+--   * a figure the sheet never held. An older season's sheet line is often GAMES ONLY (no innings, runs,
+--     overs or wickets), and the cards holding those figures is not a disagreement. Batting figures are
+--     compared only when the sheet has batting for the season, bowling figures only when it has bowling.
+--   * a season where the sheet has MORE GAMES than the cards. It is on the sheet-only games list
+--     (import_only_games.sql), so the club never answers the same thing twice.
 --
 -- The club writes "Cards" or "Sheet" in the last-but-one column:
 --   Cards  the typed scorecards are right and the sheet is not. `app.scripts.drop_import_rows` removes the
@@ -45,32 +49,39 @@ typed AS (
            SUM(overs) AS overs, SUM(wickets) AS wkts
       FROM v_effective_player_season_stats
      WHERE source = 'manual_game'
-     GROUP BY player_id, season_id)
+     GROUP BY player_id, season_id),
+diff AS (
+    SELECT sh.*, t.g AS cg, t.inns AS cinns, t.runs AS cruns, t.overs AS covers, t.wkts AS cwkts,
+           (sh.g IS DISTINCT FROM t.g) AS d_games,
+           ((sh.inns > 0 OR sh.runs > 0) AND sh.inns IS DISTINCT FROM t.inns) AS d_inns,
+           ((sh.inns > 0 OR sh.runs > 0) AND sh.runs IS DISTINCT FROM t.runs) AS d_runs,
+           ((sh.overs > 0 OR sh.wkts > 0) AND sh.overs IS DISTINCT FROM t.overs) AS d_overs,
+           ((sh.overs > 0 OR sh.wkts > 0) AND sh.wkts IS DISTINCT FROM t.wkts) AS d_wkts
+      FROM sheet sh
+      JOIN typed t ON t.player_id = sh.player_id AND t.season_id = sh.season_id
+     WHERE sh.g <= t.g)
 SELECT COALESCE(p.display_name_override, p.name)               AS "Player",
        s.name                                                  AS "Season",
-       sh.g                                                    AS "Games (sheet)",
-       t.g                                                     AS "Games (cards)",
-       sh.inns                                                 AS "Innings (sheet)",
-       t.inns                                                  AS "Innings (cards)",
-       sh.runs                                                 AS "Runs (sheet)",
-       t.runs                                                  AS "Runs (cards)",
-       sh.overs                                                AS "Overs (sheet)",
-       t.overs                                                 AS "Overs (cards)",
-       sh.wkts                                                 AS "Wickets (sheet)",
-       t.wkts                                                  AS "Wickets (cards)",
+       d.g                                                     AS "Games (sheet)",
+       d.cg                                                    AS "Games (cards)",
+       d.inns                                                  AS "Innings (sheet)",
+       d.cinns                                                 AS "Innings (cards)",
+       d.runs                                                  AS "Runs (sheet)",
+       d.cruns                                                 AS "Runs (cards)",
+       d.overs                                                 AS "Overs (sheet)",
+       d.covers                                                AS "Overs (cards)",
+       d.wkts                                                  AS "Wickets (sheet)",
+       d.cwkts                                                 AS "Wickets (cards)",
        concat_ws(', ',
-           CASE WHEN sh.g    IS DISTINCT FROM t.g    THEN 'games'    END,
-           CASE WHEN sh.inns IS DISTINCT FROM t.inns THEN 'innings'  END,
-           CASE WHEN sh.runs IS DISTINCT FROM t.runs THEN 'runs'     END,
-           CASE WHEN sh.overs IS DISTINCT FROM t.overs THEN 'overs'  END,
-           CASE WHEN sh.wkts IS DISTINCT FROM t.wkts THEN 'wickets'  END) AS "Figures that differ",
+           CASE WHEN d.d_games THEN 'games'   END,
+           CASE WHEN d.d_inns  THEN 'innings' END,
+           CASE WHEN d.d_runs  THEN 'runs'    END,
+           CASE WHEN d.d_overs THEN 'overs'   END,
+           CASE WHEN d.d_wkts  THEN 'wickets' END)             AS "Figures that differ",
        ''                                                      AS "Which is right? (Cards or Sheet)",
-       array_to_string(sh.row_ids, ' ')                        AS "Sheet row ids (leave)"
-  FROM sheet sh
-  JOIN typed t ON t.player_id = sh.player_id AND t.season_id = sh.season_id
-  JOIN players p ON p.id = sh.player_id
-  JOIN seasons s ON s.id = sh.season_id
- WHERE (sh.g IS DISTINCT FROM t.g OR sh.inns IS DISTINCT FROM t.inns OR sh.runs IS DISTINCT FROM t.runs
-        OR sh.overs IS DISTINCT FROM t.overs OR sh.wkts IS DISTINCT FROM t.wkts)
-   AND sh.g <= t.g
+       array_to_string(d.row_ids, ' ')                         AS "Sheet row ids (leave)"
+  FROM diff d
+  JOIN players p ON p.id = d.player_id
+  JOIN seasons s ON s.id = d.season_id
+ WHERE d.d_games OR d.d_inns OR d.d_runs OR d.d_overs OR d.d_wkts
  ORDER BY "Player", s.year;

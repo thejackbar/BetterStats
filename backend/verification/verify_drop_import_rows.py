@@ -221,6 +221,29 @@ async def main() -> None:
                 "INSERT INTO manual_bowling_spells (manual_game_id, player_id, innings_number, overs, maidens, runs, wickets) "
                 "VALUES (:g, CAST(:p AS UUID), 2, :o, 0, 10, :w)"), {"g": mg, "p": P_BOWL, "o": ov, "w": wk})
         await s.commit()
+    # Two older-season shapes: a sheet line that is GAMES ONLY (no innings, runs, overs or wickets) against cards that
+    # hold figures (not a disagreement, so not asked), and a games-only line with fewer games than the cards (a games
+    # disagreement, so asked).
+    P_GUS, P_GIL = "c4000000-0000-0000-0000-000000000009", "c4000000-0000-0000-0000-00000000000a"
+    async with async_session_maker() as s:
+        batch = (await s.execute(text("SELECT id FROM import_batches WHERE organisation_id = CAST(:o AS UUID) LIMIT 1"), {"o": ORG})).scalar()
+        for pid, nm, sheet_games, cards in ((P_GUS, "Gamesonly, Gus", 2, 2), (P_GIL, "Gamesfew, Gil", 1, 2)):
+            await s.execute(text("INSERT INTO players (id, organisation_id, name, grassroots_id, status) "
+                                 "VALUES (CAST(:p AS UUID), CAST(:o AS UUID), :n, :p, 'active')"), {"p": pid, "o": ORG, "n": nm})
+            await s.execute(text(
+                "INSERT INTO imported_stats (organisation_id, import_batch_id, player_id, scope, season_id, season_label, grade_label, "
+                " games_played, is_prior_bucket) VALUES (CAST(:o AS UUID), :b, CAST(:p AS UUID), 'season', CAST(:s AS UUID), '2018/19', 'Over 60 Mixed', :g, false)"),
+                {"o": ORG, "b": batch, "p": pid, "s": S18, "g": sheet_games})
+            for i in range(cards):
+                mg = uuid.uuid4()
+                await s.execute(text(
+                    "INSERT INTO manual_games (id, organisation_id, season_id, grade_id, played_at, match_format) "
+                    "VALUES (:i, CAST(:o AS UUID), CAST(:s AS UUID), CAST(:g AS UUID), :d, 'One Day')"),
+                    {"i": mg, "o": ORG, "s": S18, "g": G_MIXED, "d": date(2019, 9, 1 + i)})
+                await s.execute(text(
+                    "INSERT INTO manual_batting_innings (manual_game_id, player_id, innings_number, batting_position, runs, balls, not_out, did_not_bat) "
+                    "VALUES (:g, CAST(:p AS UUID), 1, 3, 10, 12, false, false)"), {"g": mg, "p": pid})
+        await s.commit()
     from app.services.import_reconcile import reconcile_imported_totals
     await reconcile_imported_totals(ORG)
 
@@ -235,6 +258,10 @@ async def main() -> None:
           and bowl.get("Wickets (sheet)") == "5" and bowl.get("Wickets (cards)") == "3", f"{bowl}")
     check("a player whose cards hold MORE games than the sheet is on it too (Pool, Paul)", "Pool, Paul" in who, f"{sorted(who)}")
     check("a season that agrees is left off (Full, Fred)", "Full, Fred" not in who)
+    check("a games-only sheet line is not asked about figures it never held (Gamesonly, Gus)", "Gamesonly, Gus" not in who, f"{sorted(who)}")
+    gil = next((r for r in lst2 if r["Player"] == "Gamesfew, Gil"), {})
+    check("but a games-only line with FEWER games than the cards is asked, about games only",
+          gil.get("Figures that differ") == "games", f"{gil.get('Figures that differ')!r}")
     check("and so is a season the sheet has MORE GAMES for: that is the first list's question",
           not ({"Short, Sam", "Only, Olly", "Out, Ozzy", "Hq, Harry"} & who), f"{sorted(who)}")
 
