@@ -12,6 +12,8 @@ cents only right before handing an amount to Stripe (which is cents-native).
 """
 from __future__ import annotations
 
+from datetime import date
+
 CORE = {"key": "core", "name": "BetterStats", "price": 399}
 
 # The four bolt-on modules and their annual price — mirrors PRICED_MODULES in
@@ -174,3 +176,30 @@ def apply_coupon_to_quote(quote: dict, coupon) -> dict:
         "stackable_with_bundle": coupon.stackable_with_bundle,
     }
     return quote
+
+
+def add_years(d: date, years: int) -> date:
+    """Same calendar date ``years`` on. 29 February lands on the 28th in a
+    non-leap year rather than raising or rolling into March."""
+    try:
+        return d.replace(year=d.year + years)
+    except ValueError:
+        return d.replace(year=d.year + years, day=28)
+
+
+def prorate_to_renewal(full_price_dollars: float, today: date, renewal: date | None) -> dict | None:
+    """What part of a module's annual price covers ``today`` up to the club's
+    renewal date: price x days left / days in the year that ends on that date.
+
+    The ONE rule behind every "line this module up with BetterStats" price: the
+    card Checkout preview, an invoice for a module added part way through, and
+    the amount a Super Admin is told to collect when they set a module Active
+    by hand. ``None`` when there is nothing sensible to prorate to (no renewal
+    date, one that is today or already past, or one more than a year out) so
+    the caller can say so and fall back rather than guess."""
+    if renewal is None or renewal <= today or renewal > add_years(today, 1):
+        return None
+    of_days = (renewal - add_years(renewal, -1)).days
+    days = min((renewal - today).days, of_days)
+    return {"days": days, "of_days": of_days,
+            "amount_cents": round(full_price_dollars * 100 * days / of_days)}

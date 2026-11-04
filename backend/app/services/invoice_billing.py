@@ -50,7 +50,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.modules import (
     BILLABLE_MODULES, PAID_STATUSES, STATUS_ACTIVE, STATUS_PAUSED, STATUS_TRIAL,
-    account_plan_status, core_already_paid, expand_billing_module,
+    account_plan_status, core_already_paid, core_renewal_date, expand_billing_module,
 )
 from app.config.settings import settings
 from app.models.db import (
@@ -132,13 +132,7 @@ def due_by(d: date) -> datetime:
     return start_of_day(d) - timedelta(seconds=1)
 
 
-def add_years(d: date, years: int) -> date:
-    """Same calendar date ``years`` on. 29 February lands on the 28th in a
-    non-leap year rather than raising or rolling into March."""
-    try:
-        return d.replace(year=d.year + years)
-    except ValueError:
-        return d.replace(year=d.year + years, day=28)
+add_years = billing_pricing.add_years  # one copy, shared with the card path
 
 
 def fmt_date(d: date | None) -> str:
@@ -275,6 +269,15 @@ async def plan_invoice(db: AsyncSession, org, module_keys: list[str], coupon_cod
     already = [k for k in keys if not plan_by_key.get(k, {}).get("can_subscribe", True)]
     renewal, held = invoice_period(org)
     in_period = bool(held) and renewal is not None and renewal > today
+    if not in_period and core_already_paid(org):
+        # No invoice period, but BetterStats was paid another way (set Active by
+        # hand after a bank transfer) and has a renewal date ahead of it: modules
+        # added now are an add-on prorated to that date, so the whole club
+        # renews together. Without a usable date they fall through below as a
+        # full year from payment.
+        core_renewal = core_renewal_date(org)
+        if billing_pricing.prorate_to_renewal(1, today, core_renewal):
+            renewal, in_period = core_renewal, True
 
     if in_period:
         keys = [k for k in keys if k != "core" and k not in held]

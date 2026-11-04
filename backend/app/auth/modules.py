@@ -403,6 +403,17 @@ def core_already_paid(org) -> bool:
     return bool(row and row["status"] == STATUS_SUBSCRIBED)
 
 
+def core_renewal_date(org):
+    """The date the club's BetterStats (Core) renews, or None when it is not a
+    paid subscription or carries no renewal date. Every other module is lined
+    up with this date, so it is the one date a club renews on."""
+    row = next((r for r in account_plan_status(org) if r["module"] == MODULE_CORE), None)
+    if not row or row["status"] != STATUS_SUBSCRIBED or not row["renewal_date"]:
+        return None
+    from datetime import date as _date
+    return _date.fromisoformat(row["renewal_date"])
+
+
 def entitlement_summary(org, role: str | None = None) -> dict:
     """The entitlement shape surfaced to the frontend (via ``/auth/me``).
 
