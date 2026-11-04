@@ -150,7 +150,8 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
                                    extra_coupon_id: str | None = None, extra_stackable: bool = False,
                                    extra_coupon_code: str | None = None,
                                    extra_coupon_off_dollars: float | None = None,
-                                   coupon_redemption_id: str | None = None):
+                                   coupon_redemption_id: str | None = None,
+                                   include_core: bool = True):
     """A Stripe Checkout Session in subscription mode, priced from
     billing_pricing.price_for (dynamic price_data line items, so no Stripe
     Price objects need pre-creating in the dashboard for every module
@@ -204,7 +205,9 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
     event fired, never a second lookup against our own DB to know what was
     bought."""
     _require_configured()
-    quote = billing_pricing.price_for(billing_keys, schedule=discount_schedule)
+    # include_core=False: BetterStats is already paid (hand-set Active after a
+    # bank transfer), so this subscription carries only the modules chosen.
+    quote = billing_pricing.price_for(billing_keys, schedule=discount_schedule, include_core=include_core)
 
     line_items = [
         {

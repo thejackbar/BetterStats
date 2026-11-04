@@ -68,14 +68,24 @@ def bundle_discount(module_count: int, schedule: dict | None = None) -> int:
     return table[max(table)] if module_count > max(table) else 0
 
 
-def price_for(selected_keys, schedule: dict | None = None) -> dict:
+def price_for(selected_keys, schedule: dict | None = None, *, include_core: bool = True) -> dict:
     """Price a selection of billable module keys (besides Core, which is always
     included). Returns whole-AUD subtotal/discount/total plus a per-line-item
     breakdown, in the same shape the frontend's priceFor() returns — Fantasy, if
     selected, is priced as its own line item outside the bundle discount.
     `schedule` overrides the seed-default BUNDLE_DISCOUNT table (pass the live,
-    super-admin-configured one — see platform_settings.get_bundle_discount_schedule)."""
+    super-admin-configured one — see platform_settings.get_bundle_discount_schedule).
+
+    ``include_core=False`` is for a club whose BetterStats is already paid for
+    some other way (a Super Admin set it Active after a bank transfer, so there
+    is no Stripe subscription carrying it). Core is then not a line and not
+    charged again, and there is no bundle discount: the bundle rewards
+    subscribing to everything at once, and the club has already subscribed."""
     keys = set(selected_keys or [])
+    if not include_core:
+        quote = price_for_addon(keys)
+        quote["module_count"] = len([m for m in PRICED_MODULES if m["key"] in keys])
+        return quote
     bundle_mods = [m for m in PRICED_MODULES if m["key"] in keys]
     line_items = [dict(CORE)] + [dict(m) for m in bundle_mods]
     if FANTASY["key"] in keys:

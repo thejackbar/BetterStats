@@ -668,3 +668,19 @@ judged valid.
   it via the Redemptions modal as the recovery path today).
 
 <!-- END original CLAUDE.md L15164-15248 -->
+
+## v9.139.4.1: a hand-set Active BetterStats is not charged again
+
+Reported on Kalamunda Cricket Club. It paid for BetterStats by bank transfer, a Super Admin set the module to Active in All Clubs (writes the `org_module_subscriptions` core row via `set_status_billing`, `billing_source` stays NULL, no Stripe subscription), and the Account page showed "Subscribed, renews 10 July 2027". Ticking BetterSocials then quoted BetterStats $399 + BetterSocials $149 = $548 (with a $48 bundle discount once two modules were ticked) and `/checkout-session` would have opened a second Stripe subscription with a Core line.
+
+Cause: `price_for` always force-adds Core, and `/quote` and `/checkout-session` only treated a club as "already subscribed" when `stripe_subscription_id` was set. A bank-transfer club never has one. The Super Admin setter was fine; the buyer paths ignored what it wrote. The invoice path had a comment saying a held Core was deliberately re-priced "so the card checkout and the invoice agree", so it had the same fault.
+
+Fix:
+- `auth.modules.core_already_paid(org)`: Core's `account_plan_status` row is `subscribed` (Stripe, invoice or hand-set alike). A trial or expired trial is not paid.
+- `billing_pricing.price_for(..., include_core=False)` delegates to `price_for_addon`: no Core line, no bundle discount. `/quote` returns `core_included: false`, `/checkout-session` passes `include_core` to `stripe_client.create_checkout_session`, and `invoice_billing.plan_invoice` drops Core from `billing_keys` for an initial invoice.
+- The new Stripe subscription then carries only the modules bought (`billing_keys` has no `core`), so renewals, `invoice.paid` and `customer.subscription.deleted` never touch Core's renewal date or row.
+- The later add-on path (`existing_keys` handed to `add_modules_to_subscription`) now lists only modules whose rows are `billing_source = 'stripe'`. Before, a hand-set Core joined `billing_keys` on the second purchase, so a Stripe renewal would have rolled Core's date forward unpaid and cancelling the subscription would have removed Core.
+
+Not done on purpose: the new subscription starts a fresh twelve months from payment at full price, it is not prorated to Core's renewal date (Stripe Checkout cannot prorate inline `price_data` without a `billing_cycle_anchor`, which was not tested against live Stripe). The club's renewals therefore sit on two dates until a Super Admin lines them up.
+
+Proved by `backend/verification/verify_manual_core_checkout.py` (real Postgres, shipped route bodies, Stripe edge stubbed). Control run against the previous commit reports 9 failures: the quote, the Checkout line items, the add-on `existing_keys` and the invoice plan all still carry Core. `verify_invoice_billing.py` still passes (103).

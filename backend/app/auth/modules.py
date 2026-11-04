@@ -393,6 +393,16 @@ def account_plan_status(org, now: datetime | None = None) -> list[dict]:
     return out
 
 
+def core_already_paid(org) -> bool:
+    """True when the club's BetterStats (Core) is a real paid subscription,
+    however it got there: a Stripe checkout, a BetterCricket invoice, or a
+    Super Admin setting it Active after a bank transfer (no payment record on
+    our side at all). A buyer of another module is then NOT charged for Core
+    again. A trial or an expired trial is not paid, so it still is."""
+    row = next((r for r in account_plan_status(org) if r["module"] == MODULE_CORE), None)
+    return bool(row and row["status"] == STATUS_SUBSCRIBED)
+
+
 def entitlement_summary(org, role: str | None = None) -> dict:
     """The entitlement shape surfaced to the frontend (via ``/auth/me``).
 

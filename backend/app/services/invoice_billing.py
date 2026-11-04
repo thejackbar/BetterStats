@@ -50,7 +50,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.modules import (
     BILLABLE_MODULES, PAID_STATUSES, STATUS_ACTIVE, STATUS_PAUSED, STATUS_TRIAL,
-    account_plan_status, expand_billing_module,
+    account_plan_status, core_already_paid, expand_billing_module,
 )
 from app.config.settings import settings
 from app.models.db import (
@@ -317,16 +317,23 @@ async def plan_invoice(db: AsyncSession, org, module_keys: list[str], coupon_cod
             "due_at": _due_for_new(trial_end, now),
         }
 
+    # A Core a Super Admin set Active by hand (a bank transfer, no invoice period
+    # behind it) is already paid, so it is not priced in again — the card
+    # checkout leaves it out in exactly the same way, and the two must not
+    # disagree. Core is only priced into a first subscription when it is not
+    # yet paid (a trial, an expired trial or nothing).
+    core_paid = core_already_paid(org)
+    if core_paid:
+        keys = [k for k in keys if k != "core"]
+        if not keys:
+            raise InvoiceBillingError("Select at least one module")
     if already:
-        # Core is always priced into a first subscription, so a Core already
-        # held (hand-granted) is not refused here — the card checkout charges
-        # it in exactly the same way, and the two must not disagree.
         blocking = [k for k in already if k != "core"]
         if blocking:
             raise InvoiceBillingError(f"Already subscribed: {', '.join(blocking)}", 409)
-    priced = keys if "core" in keys else [*keys, "core"]
+    priced = keys if (core_paid or "core" in keys) else [*keys, "core"]
     schedule = await platform_settings.get_bundle_discount_schedule(db)
-    quote = billing_pricing.price_for(priced, schedule=schedule)
+    quote = billing_pricing.price_for(priced, schedule=schedule, include_core=not core_paid)
     coupon = None
     if coupon_code:
         try:
