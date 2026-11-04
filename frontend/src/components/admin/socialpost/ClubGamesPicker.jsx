@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../../lib/api'
+import { naturalCompare } from '../../../lib/naturalSort'
 
 // The club's own list of played games: the same rows the public Games page
 // (/{club}/games) draws, from the same endpoint. A post is built from one of
@@ -63,7 +64,7 @@ export default function ClubGamesPicker({ orgId, onPick, busy = false }) {
     [games],
   )
   const grades = useMemo(
-    () => [...new Set(played.map((g) => g.grade_name).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    () => [...new Set(played.map((g) => g.grade_name).filter(Boolean))].sort(naturalCompare),
     [played],
   )
   const shown = useMemo(

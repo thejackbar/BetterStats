@@ -41,6 +41,7 @@ import { sortTeams, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from
 import { useFitHeight, useBoxHeight, rowDensity, ROW_MIN } from './useFitHeight'
 import { sideFit, sideLabel } from '../../../lib/sideSize'
 import usePersistedState from '../../../lib/usePersistedState'
+import { naturalCompare } from '../../../lib/naturalSort'
 
 const DRAFT_DELAY_MS = 600
 const DRAFT_RETRY_MS = 5000
@@ -826,7 +827,7 @@ export default function AdminSelectionDraftTable() {
   const squadOptions = useMemo(() => {
     const names = new Set()
     Object.values(merged).forEach((p) => (p.squads || []).forEach((s) => names.add(s)))
-    return [...names].sort((a, b) => squadShort(a).localeCompare(squadShort(b)))
+    return [...names].sort((a, b) => naturalCompare(squadShort(a), squadShort(b)))
   }, [merged, squadShort])
 
   // ── The pool: everyone not named in a team ────────────────────────────────

@@ -18,6 +18,7 @@ from datetime import date, timedelta
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.natural_order import natural_key
 from app.models.db import FixtureLineup, Grade, Player, Season, Team
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 from app.auth.modules import org_has_module
@@ -283,7 +284,7 @@ def _squad_order(teams: dict[str, tuple[str, int]]) -> dict[str, int]:
         tid, (name, seq) = item
         return (
             not (seq or 0) > 0, seq or 0,
-            [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", (name or "").lower())],
+            natural_key(name),
             tid,
         )
     return {tid: i + 1 for i, (tid, _) in enumerate(sorted(teams.items(), key=key))}
@@ -317,7 +318,7 @@ def _ordered_squads(names, active_teams: dict) -> list[str]:
         r = (0 if (seq or 0) > 0 else 1, seq or 0)
         if key not in rank or r < rank[key]:
             rank[key] = r
-    return sorted(names, key=lambda n: (rank.get(n.lower(), (2, 0)), n.lower()))
+    return sorted(names, key=lambda n: (rank.get(n.lower(), (2, 0)), natural_key(n)))
 
 
 def _drop_in_from(

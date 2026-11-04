@@ -42,6 +42,7 @@ import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRul
 import { teamSeq, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
 import { confirmSig, restoreDraft } from './selectionDraft'
 import { sideFit, sideLabel, sideProblem } from '../../../lib/sideSize'
+import { naturalCompare } from '../../../lib/naturalSort'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
 // displayed positional *hints* are gone, but the eligibility model is useful).
@@ -70,7 +71,7 @@ function TeamSwitcher({ fixtureId, fx, fixtures, navigate, shortTeam }) {
       g = [{ id: fixtureId, team_name: fx.team_name, grade_name: fx.grade_name, team_sequence: fx.team_sequence,
              opponent_name: fx.opponent_name, label: fx.label, home_away: fx.home_away, played_on: fx.played_on }, ...g]
     }
-    return g.slice().sort((a, b) => teamSeq(a) - teamSeq(b) || teamNameOf(a).localeCompare(teamNameOf(b)))
+    return g.slice().sort((a, b) => teamSeq(a) - teamSeq(b) || naturalCompare(teamNameOf(a), teamNameOf(b)))
   }, [fixtures, dayKey, fixtureId, fx])
 
   const idx = group.findIndex((f) => f.id === fixtureId)

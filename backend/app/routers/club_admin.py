@@ -13,6 +13,7 @@ import csv
 import re
 from pathlib import Path
 
+from app.services.natural_order import natural_key
 from app.auth.capabilities import (
     MANAGE_AWARDS, MANAGE_MERGES, MANAGE_PLAYERS, RUN_SYNC, require_any_cap, require_cap, require_full_admin,
 )  # route gates added by the access audit
@@ -5661,10 +5662,10 @@ async def _post_default_options(db: AsyncSession, club: Organisation) -> dict:
     """The teams and grades a sponsor can be pinned to: the club's BetterSelect
     teams if it has any, and every grade name its stats land in."""
     from app.services.club_grades import club_grade_rows
-    teams = (await db.execute(
-        select(Team.name).where(Team.organisation_id == club.id, Team.is_active.is_(True))
-        .order_by(Team.sequence, Team.name)
-    )).scalars().all()
+    team_rows = (await db.execute(
+        select(Team.name, Team.sequence).where(Team.organisation_id == club.id, Team.is_active.is_(True))
+    )).all()
+    teams = [n for n, _ in sorted(team_rows, key=lambda r: (r[1] is None, r[1] or 0, natural_key(r[0])))]
     grade_rows = await club_grade_rows(db, club.id)
     grades: list[str] = []
     seen: set[str] = set()

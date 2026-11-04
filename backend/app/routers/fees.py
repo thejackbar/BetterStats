@@ -23,6 +23,7 @@ from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
+from app.services.natural_order import natural_key
 from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Season, Grade, Game, Player,
@@ -279,9 +280,10 @@ async def list_grades(
     db: AsyncSession = Depends(get_db),
 ):
     season = await _season_or_404(db, club, season_id)
-    grades = (await db.execute(
-        select(Grade).where(Grade.season_id == season.id).order_by(Grade.name)
-    )).scalars().all()
+    grades = sorted(
+        (await db.execute(select(Grade).where(Grade.season_id == season.id))).scalars().all(),
+        key=lambda g: natural_key(g.name),
+    )
     # Per-grade format breakdown so the admin can see what each grade is before
     # tagging it (e.g. spotting which "One Day" grades are actually women's).
     breakdown = (await db.execute(

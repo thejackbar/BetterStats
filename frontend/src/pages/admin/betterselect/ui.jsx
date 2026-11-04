@@ -370,9 +370,9 @@ export function Search({ value, onChange, placeholder = 'Search…', className =
 }
 
 /* ── Toggle chip (filter pills) ──────────────────────────────────────────── */
-export function Chip({ label, active = false, onClick, dot, className = '' }) {
+export function Chip({ label, active = false, onClick, dot, title, className = '' }) {
   return (
-    <button type="button" onClick={onClick}
+    <button type="button" onClick={onClick} title={title}
       className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium transition whitespace-nowrap border ${
         active ? 'bg-pb-accent/12 text-pb-accent border-pb-accent/40' : 'bg-transparent text-pb-dim border-pb-hairline2 hover:text-pb-text'
       } ${className}`}>

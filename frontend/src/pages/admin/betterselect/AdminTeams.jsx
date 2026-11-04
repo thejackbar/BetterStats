@@ -44,6 +44,7 @@ import {
 import { useFilters, FilterBar } from './filters'
 import usePersistedState from '../../../lib/usePersistedState'
 import { orderPlayers, downloadSquadCsv, downloadSquadPdf } from '../../../lib/squadExport'
+import { naturalCompare } from '../../../lib/naturalSort'
 
 function matchesName(p, q) {
   const needle = q.trim().toLowerCase()
@@ -957,7 +958,7 @@ function ManageSquadsModal({ teams, players, onDeleted, onClose }) {
   }, [players])
 
   const sorted = useMemo(
-    () => [...(teams || [])].sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || a.name.localeCompare(b.name)),
+    () => [...(teams || [])].sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || naturalCompare(a.name, b.name)),
     [teams],
   )
 

@@ -4,6 +4,8 @@
 // Seniority rank for ordering a matchday's teams (1 = top team). Prefer the
 // explicit Team.sequence; fall back to the first number in the team/grade name
 // (mirrors the backend's _guess_sequence); unranked teams sink to the bottom.
+import { naturalCompare } from '../../../lib/naturalSort'
+
 export function teamSeq(f) {
   if (f?.team_sequence && f.team_sequence > 0) return f.team_sequence
   const m = (f?.team_name || f?.grade_name || '').match(/(\d+)/)
@@ -31,5 +33,5 @@ export const stripPrefix = (prefix, name) => (prefix && name?.startsWith(prefix)
 
 // A matchday's teams, top side first.
 export function sortTeams(fixtures) {
-  return fixtures.slice().sort((a, b) => teamSeq(a) - teamSeq(b) || teamNameOf(a).localeCompare(teamNameOf(b)))
+  return fixtures.slice().sort((a, b) => teamSeq(a) - teamSeq(b) || naturalCompare(teamNameOf(a), teamNameOf(b)))
 }

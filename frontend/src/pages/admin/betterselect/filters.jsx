@@ -20,7 +20,7 @@
 // Facet types:
 //   multi  → value is string[]  (checkbox list; one chip per selection)
 //   single → value is '' | str  (chip row, single choice; '' = any)
-//   bool   → value is boolean   (a flag; grouped under "Show only")
+//   bool   → value is boolean   (a flag; grouped under "Options")
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Chip, Search, Icon, FilterButton } from './ui'
@@ -124,10 +124,23 @@ function labelOf(facet, val) {
   return o ? o.label : val
 }
 
+// The leading words every label shares ("Applecross " in "Applecross 1st XI",
+// "Applecross A", ...), so a long list reads "1st XI", "A" and so on. Needs two
+// or more labels, and never strips a label down to nothing.
+function commonWordPrefix(labels) {
+  // The bare club name ("Applecross") is a label of its own, so it is left out of
+  // the comparison and keeps its full name when the others are shortened.
+  const words = labels.map((l) => l.split(' ')).filter((w) => w.length > 1)
+  if (words.length < 2) return ''
+  let n = 0
+  while (words.every((w) => w.length > n + 1 && w[n] === words[0][n])) n += 1
+  return n ? words[0].slice(0, n).join(' ') + ' ' : ''
+}
+
 /* Titled column inside the panel. */
-function Group({ title, children }) {
+function Group({ title, children, wide = false }) {
   return (
-    <div className="min-w-[140px]">
+    <div className={wide ? 'min-w-[140px] basis-full' : 'min-w-[140px]'}>
       <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faintest mb-1.5 pb-1 border-b border-pb-hairline">{title}</div>
       <div className="flex flex-col gap-1">{children}</div>
     </div>
@@ -160,7 +173,9 @@ export function FilterBar({ filters, facets, searchPlaceholder = 'Search…', co
   const { values, search, setSearch, setValue, toggle, clearAll, activeCount } = filters
 
   const bools = facets.filter((f) => f.type === 'bool')
-  const groups = facets.filter((f) => f.type !== 'bool')
+  // `hidden` facets still filter and still show as a chip, but have no list in the
+  // panel (their one control lives on the screen, e.g. the Leave out row).
+  const groups = facets.filter((f) => f.type !== 'bool' && !f.hidden)
 
   const chips = []
   for (const f of facets) {
@@ -193,8 +208,21 @@ export function FilterBar({ filters, facets, searchPlaceholder = 'Search…', co
       {open && facets.length > 0 && (
         <div className="flex flex-wrap gap-x-6 gap-y-4 rounded-lg border border-pb-hairline2 bg-pb-surface2/40 px-4 py-3">
           {groups.map((f) => (
-            <Group key={f.key} title={f.label}>
-              {f.type === 'multi'
+            <Group key={f.key} title={f.label} wide={f.type === 'multi' && f.display === 'chips'}>
+              {f.type === 'multi' && f.display === 'chips'
+                ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {(() => {
+                      const cut = commonWordPrefix(f.options.map((o) => o.label))
+                      return f.options.map((o) => (
+                        <Chip key={o.value} label={cut && o.label.startsWith(cut) ? o.label.slice(cut.length) : o.label} dot={o.dot} title={o.label}
+                          active={(values[f.key] || []).includes(o.value)}
+                          onClick={() => toggle(f.key, o.value)} />
+                      ))
+                    })()}
+                  </div>
+                )
+                : f.type === 'multi'
                 ? f.options.map((o) => (
                     <Check key={o.value} label={o.label} dot={o.dot}
                       checked={(values[f.key] || []).includes(o.value)}
@@ -212,7 +240,7 @@ export function FilterBar({ filters, facets, searchPlaceholder = 'Search…', co
             </Group>
           ))}
           {bools.length > 0 && (
-            <Group title="Show only">
+            <Group title="Options">
               {bools.map((f) => (
                 <Check key={f.key} label={f.label}
                   checked={!!values[f.key]}

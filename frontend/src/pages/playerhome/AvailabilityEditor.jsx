@@ -5,6 +5,7 @@
 import { Fragment, useMemo, useState } from 'react'
 import { AVAILABILITY, weekPatterns, weekPatternOf, DEFAULT_WEEK_NAMES } from '../../lib/availability'
 import { Tag, fmtDay, fmtShort, fmtTime, weekLabel } from './ui'
+import { naturalCompare } from '../../lib/naturalSort'
 
 // The three answers a player can give (NO_RESPONSE is the absence of one).
 export const ALL_CHOICES = ['AVAILABLE', 'MAYBE', 'UNAVAILABLE']
@@ -67,7 +68,7 @@ function orderFixtures(fxs, selectedIds) {
     sel(b) - sel(a)
     || (b.mine ? 1 : 0) - (a.mine ? 1 : 0)
     || (a.start_time || '99:99').localeCompare(b.start_time || '99:99')
-    || (a.team_name || '').localeCompare(b.team_name || ''))
+    || naturalCompare(a.team_name, b.team_name))
 }
 
 // One game: when, which of our teams, home or away, against whom, where.

@@ -32,6 +32,7 @@ import {
 } from 'recharts'
 import MilestoneSplitNote from '../components/MilestoneSplitNote'
 import { capBadgeText } from '../lib/capAward'
+import { naturalCompare } from '../lib/naturalSort'
 
 const MAIN_TABS = [
   { key: 'batting',       label: 'BATTING' },
@@ -1653,7 +1654,7 @@ function MatchesBySeasonGrade({ rows = [], seasonRows = [] }) {
       .sort((a, b) => (
         (a.display_order == null) - (b.display_order == null)
         || (a.display_order ?? 0) - (b.display_order ?? 0)
-        || String(a.grade_name).localeCompare(String(b.grade_name))
+        || naturalCompare(a.grade_name, b.grade_name)
       ))
   ), [rows])
 
