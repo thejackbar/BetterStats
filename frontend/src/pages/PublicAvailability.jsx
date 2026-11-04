@@ -389,18 +389,12 @@ const GROUPS = {
   admin: { title: 'Club admin', keys: ['fees', 'fines'] },
 }
 
-// The page reads as rows of related sections. A phone stacks them in this order; a wide
-// screen puts each row side by side, every section the same width. The pairs follow the
-// week: answer Availability, then see the Selection it feeds; the two games on top of the
-// club (Player Cards and Fantasy); how you went (Stats) and what you thought (Voting);
-// then the housekeeping. A section a club does not have drops out and its partner keeps
-// its own row, so a pair never changes partners.
-const ROWS = [
-  ['availability', 'selection'],
-  ['cards', 'fantasy'],
-  ['stats', 'voting'],
-  ['admin'],
-]
+// The order the sections are read in, one grid of equal cells: two across on a wide screen,
+// one on a phone. It follows the week: answer Availability, then see the Selection it feeds;
+// the two games on top of the club (Player Cards, Fantasy); how you went (Stats) and what you
+// thought (Voting); then the housekeeping. A club without a section just has fewer cells, and
+// the rest fill in behind it, so four sections make a 2x2 and seven make three rows and one.
+const ORDER = ['availability', 'selection', 'cards', 'fantasy', 'stats', 'voting', 'admin']
 
 // The Selection modules drawn together as one block of short rows.
 const GLANCE = ['squad', 'selected', 'training']
@@ -528,12 +522,9 @@ function MyPage({ token, me, club, availability, onSwitch, prefetch }) {
   // The profile call names the squads the club lets players see; until it lands the
   // availability call already carries them, so the hero does not wait.
   const squads = data ? (data.squads || []) : (me.squads || [])
-  const rows = ROWS
-    .map((ids) => ids
-      .map((id) => ({ id, ...GROUPS[id], mods: modules.filter((m) => GROUPS[id].keys.includes(m)) }))
-      .filter((g) => (g.id === 'availability' ? me.has_availability !== false : g.mods.length > 0)))
-    .filter((row) => row.length > 0)
-  const shown = rows.flat()
+  const shown = ORDER
+    .map((id) => ({ id, ...GROUPS[id], mods: modules.filter((m) => GROUPS[id].keys.includes(m)) }))
+    .filter((g) => (g.id === 'availability' ? me.has_availability !== false : g.mods.length > 0))
   const allOpen = shown.every((g) => sections.isOpen(g.id))
 
   return (
@@ -568,24 +559,20 @@ function MyPage({ token, me, club, availability, onSwitch, prefetch }) {
         <button type="button" data-toggle-all onClick={() => sections.setAll(shown.map((g) => g.id), !allOpen)}
           className="text-[12px] text-pb-faint underline">{allOpen ? 'Collapse all' : 'Expand all'}</button>
       </div>
-      <div className="space-y-3" data-groups>
-        {rows.map((row) => (
-          // items-start: opening one section never stretches the closed one beside it.
-          <div key={row[0].id} data-group-row className="grid gap-3 md:grid-cols-2 items-start">
-            {row.map((g) => {
-              const { text, tone } = summaryFor(g.id, { me, data, ladder, cardsReady })
-              return (
-                <Group key={g.id} id={g.id} hideTitle={g.hideTitle}
-                  title={g.id === 'fantasy' && data?.fantasy?.name ? data.fantasy.name : g.title}
-                  summary={text} tone={tone} open={sections.isOpen(g.id)} onToggle={sections.toggle}>
-                  {g.id === 'availability' && availability({ selected: data?.selected || [] })}
-                  {g.id === 'selection' && data && g.mods.some((m) => GLANCE.includes(m)) && <SelectionGlance data={data} modules={modules} />}
-                  {g.mods.filter((m) => !GLANCE.includes(m)).map(render)}
-                </Group>
-              )
-            })}
-          </div>
-        ))}
+      {/* items-start: opening one section never stretches the closed one beside it. */}
+      <div className="grid gap-3 md:grid-cols-2 items-start" data-groups>
+        {shown.map((g) => {
+          const { text, tone } = summaryFor(g.id, { me, data, ladder, cardsReady })
+          return (
+            <Group key={g.id} id={g.id} hideTitle={g.hideTitle}
+              title={g.id === 'fantasy' && data?.fantasy?.name ? data.fantasy.name : g.title}
+              summary={text} tone={tone} open={sections.isOpen(g.id)} onToggle={sections.toggle}>
+              {g.id === 'availability' && availability({ selected: data?.selected || [] })}
+              {g.id === 'selection' && data && g.mods.some((m) => GLANCE.includes(m)) && <SelectionGlance data={data} modules={modules} />}
+              {g.mods.filter((m) => !GLANCE.includes(m)).map(render)}
+            </Group>
+          )
+        })}
       </div>
     </div>
   )

@@ -49,7 +49,7 @@ const me = () => ({
 })
 const profile = () => ({
   club: {}, player: player(), can_update_details: state.canUpdate, squads: ['1sts'], squads_visible: true,
-  modules: [...(state.cards ? ['cards'] : []), ...(state.fantasy ? ['fantasy'] : []), 'season', 'squad', 'selected', 'training', 'fees', 'votes'],
+  modules: [...(state.cards ? ['cards'] : []), ...(state.fantasy ? ['fantasy'] : []), 'season', 'squad', 'selected', 'training', ...(state.slim ? [] : ['fees', 'votes'])],
   selected: state.noSelected ? [] : [{ fixture_id: 'f1', date: iso(5), start_time: '13:00', venue: 'Main Oval', opponent_name: 'Rovers', home_away: 'HOME', label: null, round: '4', team_name: '1sts', is_captain: true, is_wicket_keeper: false }],
   fees: { on_record: true, season: 'Summer 26/27', total_outstanding: 60, membership_outstanding: 60, match_fee_outstanding: 0, total_paid: 40, credit: 0, payments: PAYMENTS },
   votes: [{ medal: 'Dunslow Medal', fixture_id: 'f1', opponent: 'Rovers', round: 'Round 1', date: iso(-2), closes_on: iso(5), link: '/vote/vtok?fixture=f1&player=p1' }],
@@ -110,7 +110,7 @@ const run = async () => {
     await page.goto(`${BASE}/avail/tok`)
     await page.locator('[data-hero]').waitFor({ timeout: 20000 })
     await page.locator('[data-groups]').waitFor()
-    await page.locator('[data-vote-due]').waitFor({ state: 'attached' })
+    if (!state.slim) await page.locator('[data-vote-due]').waitFor({ state: 'attached' })
     return { ctx, page }
   }
   const overflow = (page) => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
@@ -460,8 +460,8 @@ const run = async () => {
     const had = state.cards; state.cards = true
     const wide = await open(1280, false, true)
     await wide.page.locator('[data-group="cards"]').waitFor()
-    const ids = await wide.page.evaluate(() => [...document.querySelectorAll('[data-group-row]')].map((r) => [...r.querySelectorAll('[data-group]')].map((e) => e.getAttribute('data-group'))))
-    check('rows are Availability+Selection, Player Cards+Fantasy, Stats+Voting, Club admin', JSON.stringify(ids) === JSON.stringify([['availability', 'selection'], ['cards', 'fantasy'], ['stats', 'voting'], ['admin']]), JSON.stringify(ids))
+    const ids = await wide.page.evaluate(() => [...document.querySelectorAll('[data-groups] > [data-group]')].map((e) => e.getAttribute('data-group')))
+    check('in reading order: Availability, Selection, Player Cards, Fantasy, Stats, Voting, Club admin', JSON.stringify(ids) === JSON.stringify(['availability', 'selection', 'cards', 'fantasy', 'stats', 'voting', 'admin']), JSON.stringify(ids))
     const boxes = await wide.page.evaluate(() => [...document.querySelectorAll('[data-group]')].map((e) => { const b = e.getBoundingClientRect(); return { id: e.getAttribute('data-group'), x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) } }))
     check('closed: every section is exactly the same size', boxes.every((b) => b.w === boxes[0].w && b.h === boxes[0].h), JSON.stringify(boxes))
     const at = (id) => boxes.find((b) => b.id === id)
@@ -481,15 +481,31 @@ const run = async () => {
     state.cards = had
   })
 
+  await safe('four sections make a 2x2', async () => {
+    console.log('\n── Four sections reflow into a 2x2 ──')
+    const had = { ...state }; state.cards = true; state.fantasy = false; state.slim = true
+    const wide = await open(870, false, true)
+    await wide.page.locator('[data-group="cards"]').waitFor()
+    // No fees or votes for this club: Availability, Selection, Player Cards, Stats.
+    check('the club has exactly those four sections', (await wide.page.locator('[data-groups] > [data-group]').count()) === 4)
+    const b = await wide.page.evaluate(() => [...document.querySelectorAll('[data-group]')].map((e) => { const r = e.getBoundingClientRect(); return { id: e.getAttribute('data-group'), x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width) } }))
+    const at = (id) => b.find((v) => v.id === id)
+    check('Availability | Selection on the top row, Player Cards | Stats under them', at('availability').y === at('selection').y && at('cards').y === at('stats').y && at('cards').y > at('availability').y && at('cards').x === at('availability').x && at('stats').x === at('selection').x, JSON.stringify(b))
+    check('all four are the same width', b.every((v) => v.w === b[0].w), JSON.stringify(b))
+    await wide.page.screenshot({ path: `${SHOT}/player-page-2x2-870.png` })
+    await wide.ctx.close()
+    Object.assign(state, had); state.slim = false
+  })
+
   await safe('layout', async () => {
     console.log('\n── Layout ──')
     const wide = await open(1280)
     const box = (id) => wide.page.locator(`[data-group="${id}"]`).boundingBox()
     const [av, sel, fan, stats, vote, adm] = await Promise.all(['availability', 'selection', 'fantasy', 'stats', 'voting', 'admin'].map(box))
     check('wide: Availability and Selection are side by side on one row', Math.abs(av.y - sel.y) < 1 && av.x + av.width <= sel.x + 1, JSON.stringify([av, sel]))
-    check('wide: Stats and Voting are side by side on one row, below Fantasy', Math.abs(stats.y - vote.y) < 1 && stats.y > fan.y, JSON.stringify([stats, vote, fan]))
+    check('wide: six sections fill two across, in order: Fantasy | Stats on row two', Math.abs(fan.y - stats.y) < 1 && fan.x < stats.x && fan.y > av.y, JSON.stringify([fan, stats, av]))
     check('wide: every section is the same width', [sel, fan, stats, vote, adm].every((b) => Math.abs(b.width - av.width) < 1), JSON.stringify([av, sel, fan, stats, vote, adm].map((b) => Math.round(b.width))))
-    check('wide: Club admin is the last row, on the left', adm.x <= av.x + 1 && adm.y > stats.y, JSON.stringify([adm, stats]))
+    check('wide: Voting | Club admin on the last row', Math.abs(vote.y - adm.y) < 1 && vote.x < adm.x && vote.y > fan.y, JSON.stringify([vote, adm, fan]))
     check('1280px: no sideways overflow', (await overflow(wide.page)) <= 0, String(await overflow(wide.page)))
     await wide.page.screenshot({ path: `${SHOT}/player-page-1280.png`, fullPage: true })
     await wide.ctx.close()
