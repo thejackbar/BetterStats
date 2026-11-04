@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -11,7 +11,6 @@ import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useAllowMaybe, useSelectConfig, useWeekNames } from '../../../lib/useAvailabilityConfig'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
-import { useFitHeight } from './useFitHeight'
 import {
   Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
   playedWithinYears, RuleTags, Chip, RecencySelect, RECENCY_OPTIONS, RECENCY_OVER, recencyOf, monthsAgoISO,
@@ -204,6 +203,10 @@ export default function AdminAvailability() {
     { key: 'selected', label: 'Selected', type: 'single', options: [
       { value: 'selected', label: 'Selected this round' }, { value: 'unselected', label: 'Not selected' },
     ] },
+    // Current squad hides inactive and dormant players. These add one group back
+    // without switching the whole roster to All (which brings both).
+    { key: 'showinactive', label: 'Include inactive players', type: 'bool' },
+    { key: 'showdormant', label: 'Include dormant players', type: 'bool' },
   ], [squadOptions, competitions, showGender])
   const filters = useFilters(facets, { persist: 'availability' })
   const { values, search } = filters
@@ -262,7 +265,9 @@ export default function AdminAvailability() {
   const players = useMemo(() => {
     return (data?.players || []).filter((p) => {
       // Roster visibility — 'current' hides dormant (and never-played inactive).
-      if (roster === 'current' && !p.is_current) return false
+      if (roster === 'current' && !p.is_current
+        && !(values.showinactive && p.is_inactive)
+        && !(values.showdormant && p.is_dormant)) return false
       if (values.squad?.length && !values.squad.some((s) => (p.squads || []).includes(s))) return false
       if (values.role?.length && !values.role.includes(p.player_role)) return false
       if (values.gender && genderKey(p.gender) !== values.gender) return false
@@ -375,11 +380,36 @@ export default function AdminAvailability() {
     }
   }
 
-  // The matrix card scrolls inside itself, so the date row (sticky top-0) stays
-  // put while the players scroll. It needs a height to scroll against: measured
-  // from where the card starts to the bottom of the window, like the whiteboard.
-  // Only measured once the card exists (not on the spinner or empty screens).
-  const [matrixRef, matrixH] = useFitHeight({ enabled: !isPhone && data !== null && dates.length > 0, bottom: 20 })
+  // The matrix flows down the page like any other list: the page scrolls, never
+  // the card. The date row is a separate strip pinned under the layout's own
+  // sticky header (so it stays in view while the players scroll past), and it
+  // follows the body's sideways scroll. A sticky row inside an overflow box needs
+  // a height on that box, which is what left only a few rows visible when the
+  // filters above were tall. Both tables share one colgroup so columns line up.
+  const headScrollRef = useRef(null)
+  const bodyScrollRef = useRef(null)
+  const [stickyTop, setStickyTop] = useState(0)
+  const matrixOn = data !== null && dates.length > 0
+  useLayoutEffect(() => {
+    if (!matrixOn) return undefined
+    const read = () => {
+      const h = document.querySelector('header.sticky')
+      const next = h ? Math.round(h.getBoundingClientRect().height) : 0
+      setStickyTop((t) => (t === next ? t : next))
+    }
+    read()
+    window.addEventListener('resize', read)
+    const hdr = document.querySelector('header.sticky')
+    const ro = hdr && typeof ResizeObserver === 'function' ? new ResizeObserver(read) : null
+    if (ro) ro.observe(hdr)
+    return () => { window.removeEventListener('resize', read); if (ro) ro.disconnect() }
+  }, [matrixOn])
+  // Either strip scrolled sideways drags the other. Setting an equal value fires
+  // no event, so the two cannot ping-pong.
+  const syncScroll = (from, to) => {
+    const a = from.current, b = to.current
+    if (a && b && b.scrollLeft !== a.scrollLeft) b.scrollLeft = a.scrollLeft
+  }
 
   if (data === null) {
     return <BetterSelectLayout title="Availability"><PbSpinner message="Loading availability…" /></BetterSelectLayout>
@@ -395,6 +425,15 @@ export default function AdminAvailability() {
       </BetterSelectLayout>
     )
   }
+
+  // One column plan for the date strip and the player rows, so they line up.
+  const matrixMinW = Math.max(760, 170 + 120 * dates.length)
+  const colgroup = (
+    <colgroup>
+      <col style={{ width: 170 }} />
+      {dates.map((d) => <col key={d.date} />)}
+    </colgroup>
+  )
 
   return (
     <BetterSelectLayout
@@ -522,12 +561,15 @@ export default function AdminAvailability() {
       )}
 
       {/* Matrix */}
-      <div ref={matrixRef} data-avail-matrix data-fit={matrixH != null ? 'on' : 'off'} className="pb-card overflow-auto"
-        style={matrixH != null ? { height: matrixH } : undefined}>
-        <table className="border-separate w-full" style={{ borderSpacing: 0, minWidth: 760 }}>
+      <div data-avail-matrix className="pb-card">
+        <div ref={headScrollRef} data-avail-head onScroll={() => syncScroll(headScrollRef, bodyScrollRef)}
+          className="sticky z-20 overflow-x-auto bg-pb-surface2 rounded-t-[9px] border-b pb-hairline"
+          style={{ top: stickyTop, scrollbarWidth: 'none' }}>
+          <table className="border-separate w-full" style={{ borderSpacing: 0, tableLayout: 'fixed', minWidth: matrixMinW }}>
+            {colgroup}
           <thead>
             <tr>
-              <th className="sticky left-0 top-0 z-30 bg-pb-surface2 text-left px-4 py-3 border-b pb-hairline" style={{ minWidth: 170 }}>
+              <th className="sticky left-0 z-10 bg-pb-surface2 text-left px-4 py-3 border-b pb-hairline" style={{ minWidth: 170 }}>
                 <div className="flex items-center gap-2.5">
                   {canEdit && (
                     <input type="checkbox" checked={allSelected} onChange={toggleSelAll}
@@ -542,7 +584,7 @@ export default function AdminAvailability() {
                 const sub = fixtureSub(d, weekNames)
                 return (
                   <th key={d.date} onClick={() => { setSelDate(d.date); setFilterCols([]) }}
-                    className="sticky top-0 z-20 px-3 py-2.5 border-b border-l pb-hairline text-center cursor-pointer"
+                    className="px-3 py-2.5 border-b border-l pb-hairline text-center cursor-pointer"
                     style={{
                       minWidth: 120,
                       background: sel ? 'color-mix(in srgb, var(--pb-accent) 7%, var(--pb-surface2))' : 'var(--pb-surface2)',
@@ -572,6 +614,12 @@ export default function AdminAvailability() {
               })}
             </tr>
           </thead>
+          </table>
+        </div>
+        <div ref={bodyScrollRef} data-avail-body onScroll={() => syncScroll(bodyScrollRef, headScrollRef)} className="overflow-x-auto">
+          <table className="border-separate w-full" style={{ borderSpacing: 0, tableLayout: 'fixed', minWidth: matrixMinW }}>
+            {colgroup}
+
           <tbody>
             {players.length === 0 && (
               <tr>
@@ -665,6 +713,7 @@ export default function AdminAvailability() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Quick-update modal — set one player's availability on one date */}
