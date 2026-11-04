@@ -1931,3 +1931,7 @@ Checks: `backend/verification/verify_junior_rotation.py` (103, real Postgres, sh
 
 Not built: a drag handle on the batting order (arrows only), a field diagram, per-kid batting restrictions (always last, never first), bowling overs, importing names from the club roster, and a stand-alone sign-in for the product outside BetterSelect.
 
+
+## v9.139.3.2: player page sections in matching pairs
+
+The page used `md:columns-2` with Player Cards spanning all columns. Columns balance before a spanning child, so Availability sat alone above the cards bar at half width and the others flowed around it, in a different order from how a player uses them. Replaced with `ROWS` (Availability+Selection, Player Cards+Fantasy, Stats+Voting, Club admin), one `grid md:grid-cols-2 items-start` per row, so every section is the same width and an open section does not stretch its neighbour. `Group` lost its `wide` prop and its `mb-3`/`break-inside-avoid` (the grid owns spacing). Verified with `verify_player_page_dashboard_browser.mjs`, now 131 pass; two hero checks ("the name and squad are shown", "the side is on the header card") fail identically on the previous commit and are untouched. The 1280px and 390px layout checks, with Player Cards stubbed in, are new.

@@ -49,7 +49,7 @@ const me = () => ({
 })
 const profile = () => ({
   club: {}, player: player(), can_update_details: state.canUpdate, squads: ['1sts'], squads_visible: true,
-  modules: state.fantasy ? ['fantasy', 'season', 'squad', 'selected', 'training', 'fees', 'votes'] : ['season', 'squad', 'selected', 'training', 'fees', 'votes'],
+  modules: [...(state.cards ? ['cards'] : []), ...(state.fantasy ? ['fantasy'] : []), 'season', 'squad', 'selected', 'training', 'fees', 'votes'],
   selected: state.noSelected ? [] : [{ fixture_id: 'f1', date: iso(5), start_time: '13:00', venue: 'Main Oval', opponent_name: 'Rovers', home_away: 'HOME', label: null, round: '4', team_name: '1sts', is_captain: true, is_wicket_keeper: false }],
   fees: { on_record: true, season: 'Summer 26/27', total_outstanding: 60, membership_outstanding: 60, match_fee_outstanding: 0, total_paid: 40, credit: 0, payments: PAYMENTS },
   votes: [{ medal: 'Dunslow Medal', fixture_id: 'f1', opponent: 'Rovers', round: 'Round 1', date: iso(-2), closes_on: iso(5), link: '/vote/vtok?fixture=f1&player=p1' }],
@@ -99,6 +99,7 @@ const run = async () => {
       }
       return state.detailsStatus === 200 ? json(r, { details: DETAILS, pin_required: true }) : json(r, { detail: 'Updating your details needs the PIN switched on for this link. Ask your club.' }, state.detailsStatus)
     })
+    await page.route(/\/api\/public\/availability\/tok\/me\/cards$/, (r) => json(r, { cards: [], packs: [] }))
     await page.route(/\/api\/public\/availability\/tok\/me\/ranks$/, (r) => { hits.ranks++; return json(r, { ranks: RANKS }) })
     await page.route(/\/api\/public\/availability\/tok\/me\/profile(\?.*)?$/, (r) => json(r, profile()))
     await page.route(/\/api\/public\/availability\/tok\/me(\?.*)?$/, (r) => {
@@ -400,8 +401,8 @@ const run = async () => {
   await safe('sections', async () => {
     console.log('\n── Sections ──')
     const { ctx, page } = await open(390)
-    const ids = await page.evaluate(() => [...document.querySelectorAll('[data-groups] > [data-group]')].map((e) => e.getAttribute('data-group')))
-    check('Availability, Selection, Club admin, Voting, Stats, Fantasy, in that order', JSON.stringify(ids) === JSON.stringify(['availability', 'selection', 'admin', 'voting', 'stats', 'fantasy']), JSON.stringify(ids))
+    const ids = await page.evaluate(() => [...document.querySelectorAll('[data-groups] [data-group]')].map((e) => e.getAttribute('data-group')))
+    check('Availability, Selection, Fantasy, Stats, Voting, Club admin, in that order (this club has no Player Cards)', JSON.stringify(ids) === JSON.stringify(['availability', 'selection', 'fantasy', 'stats', 'voting', 'admin']), JSON.stringify(ids))
     check('each module is in its own section', (await page.locator('[data-group="availability"] [data-availability]').count()) === 1
       && (await page.locator('[data-group="admin"] [data-fee-payments]').count()) === 1
       && (await page.locator('[data-group="voting"] [data-vote-due]').count()) === 1
@@ -454,12 +455,41 @@ const run = async () => {
     await ctx.close()
   })
 
+  await safe('layout with Player Cards', async () => {
+    console.log('\n── Layout with every section ──')
+    const had = state.cards; state.cards = true
+    const wide = await open(1280, false, true)
+    await wide.page.locator('[data-group="cards"]').waitFor()
+    const ids = await wide.page.evaluate(() => [...document.querySelectorAll('[data-group-row]')].map((r) => [...r.querySelectorAll('[data-group]')].map((e) => e.getAttribute('data-group'))))
+    check('rows are Availability+Selection, Player Cards+Fantasy, Stats+Voting, Club admin', JSON.stringify(ids) === JSON.stringify([['availability', 'selection'], ['cards', 'fantasy'], ['stats', 'voting'], ['admin']]), JSON.stringify(ids))
+    const boxes = await wide.page.evaluate(() => [...document.querySelectorAll('[data-group]')].map((e) => { const b = e.getBoundingClientRect(); return { id: e.getAttribute('data-group'), x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) } }))
+    check('closed: every section is exactly the same size', boxes.every((b) => b.w === boxes[0].w && b.h === boxes[0].h), JSON.stringify(boxes))
+    const at = (id) => boxes.find((b) => b.id === id)
+    check('Player Cards sits beside Fantasy, not full width', at('cards').y === at('fantasy').y && at('cards').x < at('fantasy').x)
+    await wide.page.screenshot({ path: `${SHOT}/player-page-all-1280.png`, fullPage: true })
+    await wide.page.locator('[data-group-toggle="cards"]').click()
+    const open1 = await wide.page.evaluate(() => { const c = document.querySelector('[data-group="cards"]').getBoundingClientRect(); const f = document.querySelector('[data-group="fantasy"]').getBoundingClientRect(); return { ch: c.height, fh: f.height } })
+    check('opening Player Cards does not stretch Fantasy beside it', open1.ch > open1.fh && open1.fh < 80, JSON.stringify(open1))
+    await wide.ctx.close()
+    const phone = await open(390, false, true)
+    await phone.page.locator('[data-group="cards"]').waitFor()
+    const tops = await phone.page.evaluate(() => ['availability', 'selection', 'cards', 'fantasy', 'stats', 'voting', 'admin'].map((i) => document.querySelector(`[data-group="${i}"]`).getBoundingClientRect().top))
+    check('390px: one column, in the same order', tops.every((t, i) => i === 0 || t > tops[i - 1]), JSON.stringify(tops))
+    check('390px: no sideways overflow', (await overflow(phone.page)) <= 0)
+    await phone.page.screenshot({ path: `${SHOT}/player-page-all-390.png`, fullPage: true })
+    await phone.ctx.close()
+    state.cards = had
+  })
+
   await safe('layout', async () => {
     console.log('\n── Layout ──')
     const wide = await open(1280)
-    const sel = await wide.page.locator('[data-group="availability"]').boundingBox()
-    const stats = await wide.page.locator('[data-group="stats"]').boundingBox()
-    check('wide: Availability is the left column, the rest sit to its right', sel.x + sel.width <= stats.x + 1, JSON.stringify([sel, stats]))
+    const box = (id) => wide.page.locator(`[data-group="${id}"]`).boundingBox()
+    const [av, sel, fan, stats, vote, adm] = await Promise.all(['availability', 'selection', 'fantasy', 'stats', 'voting', 'admin'].map(box))
+    check('wide: Availability and Selection are side by side on one row', Math.abs(av.y - sel.y) < 1 && av.x + av.width <= sel.x + 1, JSON.stringify([av, sel]))
+    check('wide: Stats and Voting are side by side on one row, below Fantasy', Math.abs(stats.y - vote.y) < 1 && stats.y > fan.y, JSON.stringify([stats, vote, fan]))
+    check('wide: every section is the same width', [sel, fan, stats, vote, adm].every((b) => Math.abs(b.width - av.width) < 1), JSON.stringify([av, sel, fan, stats, vote, adm].map((b) => Math.round(b.width))))
+    check('wide: Club admin is the last row, on the left', adm.x <= av.x + 1 && adm.y > stats.y, JSON.stringify([adm, stats]))
     check('1280px: no sideways overflow', (await overflow(wide.page)) <= 0, String(await overflow(wide.page)))
     await wide.page.screenshot({ path: `${SHOT}/player-page-1280.png`, fullPage: true })
     await wide.ctx.close()
