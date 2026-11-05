@@ -328,3 +328,12 @@ What changed: `data/modules-marketing.js` (Core, BetterSelect, BetterSocials, Be
 Facts were taken from the changelog entries, not from memory. New feature cards have no screenshots yet: the module pages' `showcase` and `gallery` images still show the August screens. Left alone on purpose: the FAQ answer "How do we pay?" (says bank transfer or PayID, card payments on the roadmap) because whether checkout is live is a runtime flag (`billing_checkout_enabled`) that the repo cannot show, and the BetterFootball pages, which the marketing site does not cover at all.
 
 Checked: production build, then every edited page driven in Chromium at 390px and 1280px with `/api` stubbed (new text present, no horizontal overflow, the longest FAQ answer not clipped). Not run: a control run against the previous commit, since the check is for text that did not exist before.
+
+## v9.139.6.1 (2026-11-05): screenshots for the new public pages
+
+Cowork captured the shots from the brief and uploaded them through GitHub's web uploader, some into the repo root. They were cropped, framed and wired in here: 26 JPGs in `frontend/public/marketing/` (BetterStats images) and `frontend/public/marketing/modules/`. The raw PNGs, three test files and an 8 MB stray capture were removed from the repo; the originals stay in the uploader's Downloads folder.
+
+Framing is `tools/frame_marketing_shot.py` (1920x1080, app window on a gradient in the module accent, under 700 KB). Admin captures include the club-site header, which draws the app version number for a signed-in admin (`Navbar.jsx`, `showVersion`); those were cropped with `--crop 0,130,...` so the number stays off public pages. Check any new admin capture for it before publishing. The lineup grid and the three-size image are composites built from the exported posts.
+
+Still missing from the brief (never captured): the pack opening (4), Fines (18), Junior Rotation (19), the Glass Card layout (25), the BetterIQ named side (28) and the Fantasy live ladder (30). Those features are described in text only.
+

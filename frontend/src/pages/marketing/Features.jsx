@@ -203,22 +203,27 @@ const SHORT_SECTIONS = [
   {
     title: 'Player Dashboard',
     desc: 'Every player gets their own page from one club link and the last four digits of their mobile. Their photo, season dashboard, last five innings and spells, and their cards, plus availability, Fantasy and fees paid if your club runs them. Switch it on from BetterStats. It works without BetterSelect.',
+    src: SCREENSHOT_PATHS.shortPlayerDash,
   },
   {
     title: 'Player Cards',
     desc: 'A collectable card for every player, rated 1 to 99 from their career figures. Weekly packs, packs for runs and wickets, a Winner Winner pack after a win, special cards for centuries and five-fors, swaps, sets and challenges. No paid packs, and nothing is ever taken from a collection.',
+    src: SCREENSHOT_PATHS.shortPlayerCards,
   },
   {
     title: 'Stats by Competition',
     desc: 'Read the club, a team or a player one competition at a time, then narrow by grade type and match type. A club in several associations in one season no longer has them added together, and you can order your competitions the way you want them read.',
+    src: SCREENSHOT_PATHS.shortCompetition,
   },
   {
     title: 'Club Room Mode',
     desc: 'A TV slideshow for the clubhouse: sponsors, fixtures and lineups, leaderboards, club records, honour boards and premiership squads, saved posts and your own images. It runs full-screen from a public link, so it keeps playing when nobody is logged in.',
+    src: SCREENSHOT_PATHS.shortClubRoom,
   },
   {
     title: 'Import Your History',
     desc: 'Load a whole club history from one spreadsheet, bring your records across from CricketStatz, or type in games from the scorebook. Choose whether a match you already hold is left alone or overwritten, and a hand-entered game is never overwritten by a sync.',
+    src: SCREENSHOT_PATHS.shortImport,
   },
 ]
 

@@ -371,6 +371,11 @@ export const SCREENSHOT_PATHS = {
   shortAdmin:             '/marketing/short-admin.jpg',
   shortOpposition:        '/marketing/feature-opposition.jpg',
   shortGames:             '/marketing/feature-games.jpg',
+  shortPlayerDash:        '/marketing/player-dashboard.jpg',
+  shortPlayerCards:       '/marketing/player-cards-book.jpg',
+  shortCompetition:       '/marketing/stats-by-competition.jpg',
+  shortClubRoom:          '/marketing/club-room-stage.jpg',
+  shortImport:            '/marketing/card-review.jpg',
   // Club branding & back office (sponsors/milestones used directly in the Core gallery)
   featuresWhitelabel:     '/marketing/feature-whitelabel.jpg',
   // About page

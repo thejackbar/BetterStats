@@ -67,6 +67,28 @@ export const CORE_MARKETING = {
   // stays in `gallery` below.
   showcase: [
     {
+      src: '/marketing/player-dashboard.jpg',
+      headline: 'A page for every player, from one link.',
+      body: 'Each player opens their own page with the last four digits of their mobile. It has their photo and squads, a season dashboard with batting, bowling and fielding panels and their last five innings and spells, and the club’s cards. Where your club runs the modules, they also answer games, see when the next Fantasy round locks and check fees paid, all from the same page.',
+      points: [
+        'One club link and a four-digit PIN',
+        'Batting, bowling and fielding panels with club rank',
+        'Last five innings and last five spells',
+        'Switched on from BetterStats, and it works without BetterSelect',
+      ],
+    },
+    {
+      src: '/marketing/player-cards-book.jpg',
+      headline: 'Every player is a card. Collect the club.',
+      body: 'Each player has a card rated 1 to 99 from their career figures. Packs of five arrive every week and for runs, wickets and wins, and a century, five-for, debut or club award earns a special card. Players swap with each other, work towards sets and take on challenges, and the club decides what is switched on.',
+      points: [
+        'Weekly packs, plus packs for runs, wickets and wins',
+        'Special cards for centuries, five-fors, debuts and awards',
+        'Swaps, sets, challenges and a collectors board',
+        'No paid packs, and nothing is ever taken from a collection',
+      ],
+    },
+    {
       src: '/marketing/leaderboard.jpg',
       headline: 'Build your own table.',
       body: 'StatLab is a query builder over everything your club has ever recorded. Start from one of 200+ pre-built reports or build your own, sort any of 30+ columns, and save the view once you like it. Team records are in there too, such as your biggest successful chases, the lowest totals you defended and your closest wins by runs and by wickets.',
@@ -113,10 +135,17 @@ export const CORE_MARKETING = {
     },
   ],
   gallery: [
+    { src: '/marketing/club-room-stage.jpg', caption: 'Club Room Mode, full-screen on the clubhouse TV' },
+    { src: '/marketing/stats-by-competition.jpg', caption: 'Read the club by competition, grade type and match type' },
+    { src: '/marketing/premierships.jpg', caption: 'Premierships, filled in from grand final scorecards' },
+    { src: '/marketing/sponsors-major-slot.jpg', caption: 'A major sponsor slot on the club dashboard' },
+    { src: '/marketing/sponsors-tiers.jpg', caption: 'Sponsor tiers, and sections renamed to carry a sponsor' },
+    { src: '/marketing/statlab-team-records.jpg', caption: 'StatLab team records, such as biggest successful chases' },
+    { src: '/marketing/card-review.jpg', caption: 'Card review: choose which scorecard the site shows' },
+    { src: '/marketing/player-dashboard-phone.jpg', caption: 'The player dashboard on a phone' },
     { src: '/marketing/feature-opposition.jpg', caption: 'Per-player opposition analysis' },
     { src: '/marketing/feature-games.jpg', caption: 'A browsable match archive' },
     { src: '/marketing/feature-whitelabel.jpg', caption: "Make the public site your club's own" },
-    { src: '/marketing/feature-sponsors.jpg', caption: 'Your sponsors across the site' },
     { src: '/marketing/feature-milestones.jpg', caption: 'A milestone tracker for the whole club' },
   ],
 }
@@ -174,6 +203,17 @@ export const MODULES_MARKETING = [
     note: 'BetterSelect runs off the same player database as your stats, so your squads, form reads and profiles stay current without exporting anything between tools.',
     screenshot: '/marketing/modules/betterselect-selection.jpg',
     showcase: [
+      {
+        src: '/marketing/modules/betterselect-whiteboard.jpg',
+        headline: 'Every team for the day on one board.',
+        body: 'Each team playing that day is a column beside a pool of everyone not yet picked. Drag a player from one team to another, or into and out of the pool, and every team saves as its own draft until you confirm. Two-day games show who is free for each weekend.',
+        points: [
+          'Every team side by side with the pool',
+          'Drag between teams, or tap on an iPhone or iPad',
+          'Locked sides are tagged and ask before they change',
+          'W1 and W2 markers for two-day games',
+        ],
+      },
       {
         src: '/marketing/modules/betterselect-team-sheet.jpg',
         headline: 'Name your XI on a proper team sheet.',
@@ -237,6 +277,9 @@ export const MODULES_MARKETING = [
       { src: '/marketing/modules/betterselect-nets.jpg', caption: 'A net session timer that rolls the batting order' },
       { src: '/marketing/modules/betterselect-fixtures.jpg', caption: 'Fixtures grouped by round, synced from the association' },
       { src: '/marketing/modules/betterselect-ladders.jpg', caption: 'Live grade ladders for every team' },
+      { src: '/marketing/modules/betterselect-locked-history.jpg', caption: 'Selection History: every confirm, lock and change' },
+      { src: '/marketing/modules/betterselect-rules.jpg', caption: 'Selection rules, set as warnings or bars' },
+      { src: '/marketing/modules/betterselect-votes-medals.jpg', caption: 'Several medals, each with its own ballot and weighting' },
     ],
   },
   {
@@ -287,6 +330,17 @@ export const MODULES_MARKETING = [
         ],
       },
       {
+        src: '/marketing/modules/bettersocials-sizes.jpg',
+        headline: 'Square, portrait or story.',
+        body: 'Make the same post at 1080 by 1080, 1080 by 1350 or 1080 by 1920. Each layout has its own portrait and story design, so a tall post reads as a tall design and not a square one stretched. Your sponsors are already on the post when you open it.',
+        points: [
+          'Three sizes from one layout',
+          'A design for each size',
+          'Sponsor strip added for you',
+          'A scorecard can split into two squares',
+        ],
+      },
+      {
         src: '/marketing/modules/bettersocials-scorecard-broadcast.jpg',
         headline: 'Paste a link and the scorecard fills itself.',
         body: 'Drop in the match URL and the card builds from the data: both innings, the bowling figures and the result, with your sponsors along the bottom edge.',
@@ -326,6 +380,9 @@ export const MODULES_MARKETING = [
       { src: '/marketing/modules/bettersocials-fixtures.jpg', caption: 'Fixture announcement cards' },
       { src: '/marketing/modules/bettersocials-scorecard-app.jpg', caption: 'Scorecard, app-style dashboard layout' },
       { src: '/marketing/modules/bettersocials-website-editor.jpg', caption: 'Build pages with a simple editor' },
+      { src: '/marketing/modules/bettersocials-totw.jpg', caption: 'Team of the Week, scored from every grade’s scorecard' },
+      { src: '/marketing/modules/bettersocials-milestones.jpg', caption: 'A Milestones post from the ones your club has recorded' },
+      { src: '/marketing/modules/bettersocials-layers.jpg', caption: 'Every part of a layout is a layer you can move' },
     ],
   },
   {
@@ -367,6 +424,39 @@ export const MODULES_MARKETING = [
     ],
     screenshot: '/marketing/modules/betteradmin-overview.jpg',
     showcase: [
+      {
+        src: '/marketing/modules/betteradmin-roster-coverage.jpg',
+        headline: 'See which shifts are still open.',
+        body: 'The Coverage view lists every unfilled shift for the days you pick, each with a best-fit volunteer ready to assign in one tap. Areas hold several roles, such as umpires, scorers and team managers, and each role can need its own qualification.',
+        points: [
+          'A button for each day, or the full week',
+          'A best-fit volunteer ready to assign',
+          'Roles with their own qualifications',
+          'Confirmed shifts post to the hours ledger',
+        ],
+      },
+      {
+        src: '/marketing/modules/betteradmin-meeting-room.jpg',
+        headline: 'Run the meeting from one screen.',
+        body: 'Mark attendance, work down the agenda and put motions and votes against the item being discussed. A motion records who moved it, who seconded it and the vote as it happens, and the minutes download as a Word document or a PDF.',
+        points: [
+          'Attendance, agenda and minutes together',
+          'Mover, seconder and a vote table on every motion',
+          'Actions handed out with owners',
+          'Minutes as Word or PDF',
+        ],
+      },
+      {
+        src: '/marketing/modules/betteradmin-strategic-plan.jpg',
+        headline: 'See how the plan is actually going.',
+        body: 'Every theme, objective and action shows two bars: how far the work has got, and how the money is going against it. An upright mark shows where each should be by now, so a bar short of its mark is behind.',
+        points: [
+          'A schedule bar and a budget bar on every line',
+          'A mark for where it should be by now',
+          'Themes, objectives and actions in one tree',
+          'A starter plan in one button',
+        ],
+      },
       {
         src: '/marketing/modules/betteradmin-fees-payments.jpg',
         headline: 'Record the payment. The ledger does the rest.',
@@ -422,6 +512,9 @@ export const MODULES_MARKETING = [
           'Unsubscribes that meet the Spam Act',
         ],
       },
+    ],
+    gallery: [
+      { src: '/marketing/modules/betteradmin-permissions.jpg', caption: 'Choose what each person can open: Off, View or Manage' },
     ],
   },
   {
@@ -510,6 +603,7 @@ export const MODULES_MARKETING = [
       { src: '/marketing/modules/betteriq-selection-assistant.jpg', caption: 'Selection assistant' },
       { src: '/marketing/modules/betteriq-selection-squad.jpg', caption: 'Squad assistant' },
       { src: '/marketing/modules/betteriq-team-analysis.jpg', caption: 'Team analysis' },
+      { src: '/marketing/modules/betteriq-ask-iq.jpg', caption: 'Ask IQ asks you a question back when the answer depends on it' },
     ],
   },
   {
@@ -605,6 +699,8 @@ export const MODULES_MARKETING = [
     ],
     gallery: [
       { src: '/marketing/modules/betterfantasy-chips.jpg', caption: 'Chips: the wildcard, triple captain and more' },
+      { src: '/marketing/modules/betterfantasy-teams-cards.jpg', caption: 'My Team as player cards' },
+      { src: '/marketing/modules/betterfantasy-insights.jpg', caption: 'Round Insights: top players, trades and price movers' },
     ],
   },
 ]
