@@ -669,7 +669,7 @@ judged valid.
 
 <!-- END original CLAUDE.md L15164-15248 -->
 
-## v9.139.4.1: a hand-set Active BetterStats is not charged again
+## v9.139.5.1: a hand-set Active BetterStats is not charged again
 
 Reported on Kalamunda Cricket Club. It paid for BetterStats by bank transfer, a Super Admin set the module to Active in All Clubs (writes the `org_module_subscriptions` core row via `set_status_billing`, `billing_source` stays NULL, no Stripe subscription), and the Account page showed "Subscribed, renews 10 July 2027". Ticking BetterSocials then quoted BetterStats $399 + BetterSocials $149 = $548 (with a $48 bundle discount once two modules were ticked) and `/checkout-session` would have opened a second Stripe subscription with a Core line.
 
@@ -685,9 +685,9 @@ Not done on purpose: the new subscription starts a fresh twelve months from paym
 
 Proved by `backend/verification/verify_manual_core_checkout.py` (real Postgres, shipped route bodies, Stripe edge stubbed). Control run against the previous commit reports 9 failures: the quote, the Checkout line items, the add-on `existing_keys` and the invoice plan all still carry Core. `verify_invoice_billing.py` still passes (103).
 
-## v9.139.4.2: modules bought or set by hand after BetterStats are prorated onto its renewal date
+## v9.139.5.2: modules bought or set by hand after BetterStats are prorated onto its renewal date
 
-Follow-up to v9.139.4.1, by direct instruction. One renewal date per club: BetterStats's. (1) A card purchase of an add-on by a club whose BetterStats is paid but not on a Stripe subscription is prorated to that date. (2) The same holds when the club first took several modules by hand. (3) When a Super Admin sets an add-on Active by hand, it is prorated onto BetterStats's date too.
+Follow-up to v9.139.5.1, by direct instruction. One renewal date per club: BetterStats's. (1) A card purchase of an add-on by a club whose BetterStats is paid but not on a Stripe subscription is prorated to that date. (2) The same holds when the club first took several modules by hand. (3) When a Super Admin sets an add-on Active by hand, it is prorated onto BetterStats's date too.
 
 - One rule: `billing_pricing.prorate_to_renewal(price, today, renewal)` = price x days left / days in the year ending on `renewal` (Perth today). Returns None when `renewal` is missing, today or past, or over a year out; every caller then falls back and says so (rule 6). `auth.modules.core_renewal_date(org)` is the date (Core paid with a renewal date, else None). `add_years` moved into `billing_pricing`; `invoice_billing.add_years` is the same function.
 - Card: `/quote` returns `mode: new_subscription` with `prorated {days, of_days, renewal_date}`, line items carrying `full_price` and the prorated `amount`. The Checkout Session has one full-price recurring line per module and `subscription_data.billing_cycle_anchor` = 00:00 UTC on the renewal date with `proration_behavior: create_prorations`, so Stripe charges the part-year now and the full price on the anchor every year after. The anchor is 00:00 UTC deliberately: Perth midnight is 16:00 UTC the evening before and `epoch_to_date` reads UTC, which stamped modules a day early (the verification caught it). `metadata.renewal_date` is also stored and `handle_checkout_completed` uses it if Stripe's period end is absent. A discount code is refused (422) on a prorated add-on, the same as the invoice path. No usable Core date: full year from payment, no anchor.
@@ -696,4 +696,4 @@ Follow-up to v9.139.4.1, by direct instruction. One renewal date per club: Bette
 
 Not tested against live Stripe: the Checkout `billing_cycle_anchor` with `create_prorations` and automatic tax. The preview figure is a days-based estimate; Stripe's own proration is by the second, so it can differ by cents, and GST is added on Stripe's page. Run one test-mode checkout before relying on it.
 
-Proved by `backend/verification/verify_manual_core_checkout.py` (53 checks; control run against v9.139.4.1 fails 19). `verify_invoice_billing.py` still passes (103).
+Proved by `backend/verification/verify_manual_core_checkout.py` (53 checks; control run against v9.139.5.1 fails 19). `verify_invoice_billing.py` still passes (103).

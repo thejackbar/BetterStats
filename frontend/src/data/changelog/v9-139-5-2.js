@@ -1,8 +1,8 @@
 export default {
-  version: 'v9.139.4.2',
+  version: 'v9.139.5.2',
   date: '2026-11-04',
-  // Above v9.139.4.1's sortKey. Check origin/main at merge time.
-  sortKey: '2026-11-15T23:45:00Z',
+  // Above v9.139.5.1's sortKey. Check origin/main at merge time.
+  sortKey: '2026-11-16T00:30:00Z',
   title: 'Modules you add part way through the year renew with BetterStats',
   items: [
     'Changed: when a club that already has BetterStats buys another module on the Account page, the price is prorated up to its BetterStats renewal date, and the module then renews on that date each year. Before, it was quoted a full year from the day of payment. The quote shows the days it covers and the renewal date. Modules added this way take no discount code.',

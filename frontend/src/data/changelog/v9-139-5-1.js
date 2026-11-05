@@ -1,8 +1,8 @@
 export default {
-  version: 'v9.139.4.1',
+  version: 'v9.139.5.1',
   date: '2026-11-04',
-  // Above v9.139.4's sortKey. Check origin/main at merge time.
-  sortKey: '2026-11-15T23:30:00Z',
+  // Above v9.139.5's sortKey. Check origin/main at merge time.
+  sortKey: '2026-11-16T00:15:00Z',
   title: 'Account: a club that already has BetterStats is not charged for it again',
   items: [
     'Fixed: when a Super Admin set BetterStats to Active for a club that paid by bank transfer, the Account page showed it as Subscribed but still quoted BetterStats again whenever the club ticked another module. Ticking BetterSocials quoted $548 (BetterStats $399 plus BetterSocials $149) and would have opened a second subscription. It now quotes and charges BetterSocials only.',
