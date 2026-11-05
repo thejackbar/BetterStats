@@ -825,11 +825,6 @@ export default function AdminAccount() {
                         <span>{quote.prorated ? `$${li.amount.toFixed(2)}` : `$${li.price}/yr`}</span>
                       </div>
                     ))}
-                    {quote.core_included === false && (
-                      <p className="font-mono text-[10px] text-pb-faintest">
-                        BetterStats is already active on your account, so it isn't charged again.
-                      </p>
-                    )}
                     {quote.discount > 0 && (
                       <div className="flex items-center justify-between font-mono text-[11px] text-emerald-400">
                         <span>Bundle discount</span>
