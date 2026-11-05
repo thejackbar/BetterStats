@@ -337,3 +337,13 @@ Framing is `tools/frame_marketing_shot.py` (1920x1080, app window on a gradient 
 
 Still missing from the brief (never captured): the pack opening (4), Fines (18), Junior Rotation (19), the Glass Card layout (25), the BetterIQ named side (28) and the Fantasy live ladder (30). Those features are described in text only.
 
+## v9.139.6.2 (2026-11-05): screenshot-led pages, club dashboard hero, Aurora
+
+Request: BetterStats should lead with the club history and the leaderboards, screenshots are the hook, copy short, and the same logic across the whole site; the home page gets a club dashboard as the main image and the React Bits Aurora in brand colours.
+
+`data/modules-marketing.js` was rewritten short (a showcase entry is a headline, one or two sentences and three points; a feature is a title and one line; four highlights per module because Overview and the strip both show four). `ModuleDetail.jsx` now runs hero (tagline as the H1, module name as the eyebrow), highlights, showcase, gallery, a compact "Also in" grid, fundraiser, pricing, comparison. `Landing.jsx` drops ValueProps, the text feature grid and the commitment block and puts the showcase straight after the trust strip; the hero image is `club-dashboard-hero.jpg`, a tighter crop of the public club dashboard. `Features.jsx`, `Overview.jsx` and `Modules.jsx` follow the same rule.
+
+Aurora is `components/marketing/Aurora.jsx` and `.css`, vendored from React Bits (plain WebGL2, no new dependency). Licence is MIT plus Commons Clause: fine inside a website, but the copyright header stays on the file and it must not be offered for sale or redistributed on its own. It sits in a 520 to 600px strip at the top of the hero with a mask that fades it out, because at full strength it washed out the nav and the copy. Colours come from `--pb-accent` and `--pb-accent-2`. It is the only user of WebGL on the marketing site; if WebGL2 is missing it draws nothing and the existing `hero-glow` remains.
+
+Checked: production build, then 13 marketing pages in Chromium at 1440 and 390px (images load, no horizontal overflow), the hero with software WebGL (canvas created, no console errors), and a DOM check that module pages have one H1 and one footer.
+

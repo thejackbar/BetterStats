@@ -26,14 +26,6 @@ import { ModuleWordmark } from '../../components/ModuleLockup'
 import { usePageMeta } from '../../hooks/usePageMeta'
 import { useSelfServeTrialGate } from '../../hooks/useSelfServeTrialGate'
 
-// Old way vs BetterCricket — kept tight and scannable.
-const PROBLEMS = [
-  { old: 'History trapped in a spreadsheet only one volunteer understands.', fix: 'Your full history online: every player, every season, kept forever.' },
-  { old: 'A DIY website nobody updates, with stats that are always stale.', fix: 'A club-branded site wired to your match data. Always current.' },
-  { old: 'Selection by group chat. Posts by hand. Fees in a spreadsheet.', fix: 'Selection, socials, fees and comms on one platform, one player list.' },
-  { old: 'No clue who the danger batter is until they’ve hurt you.', fix: 'An opposition scout built from your own scorecards.' },
-]
-
 // Simple branded fallback for the module rows (real screenshots exist; this
 // only shows if an image 404s).
 function Placeholder({ icon, accent, label }) {
@@ -90,23 +82,20 @@ function Hero({ onCta }) {
 // ─── Visual showcase strip ───────────────────────────────────────────────
 function Showcase() {
   const shots = [
-    { src: SCREENSHOT_PATHS.showcaseLeaderboard, alt: 'Live leaderboards', label: 'Leaderboards', mock: <MockLeaderboard /> },
-    { src: SCREENSHOT_PATHS.showcaseProfile, alt: 'Player profiles', label: 'Player profiles', mock: <MockPlayerProfile /> },
-    { src: SCREENSHOT_PATHS.showcaseYearbook, alt: 'Season yearbook', label: 'Season yearbook', mock: <MockYearbook /> },
+    { src: SCREENSHOT_PATHS.shortCompetition, alt: 'Live leaderboards', label: 'Leaderboards', mock: <MockLeaderboard /> },
+    { src: SCREENSHOT_PATHS.landingHeroCard, alt: 'Player profiles', label: 'Career profiles', mock: <MockHeritageCard /> },
+    { src: SCREENSHOT_PATHS.featuresHonours, alt: 'Club records', label: 'Record books', mock: <MockPlayerProfile /> },
     { src: SCREENSHOT_PATHS.showcaseScorecard, alt: 'Full scorecards', label: 'Scorecards', mock: <MockLeaderboard /> },
   ]
   return (
-    <section id="showcase" className="px-4 sm:px-6 lg:px-10 py-24 border-t pb-hairline bg-black/20">
+    <section id="showcase" className="px-4 sm:px-6 lg:px-10 py-16 border-t pb-hairline bg-black/20">
       <div className="max-w-[1280px] mx-auto">
         <Reveal>
-          <div className="text-center mb-12">
-            <p className="pill-neutral inline-flex mb-5">What your members see</p>
+          <div className="text-center mb-10">
+            <p className="pill-neutral inline-flex mb-5">BetterStats · in every plan</p>
             <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
-              A club site they’ll <span className="gradient-text">actually open.</span>
+              Your whole history. <span className="gradient-text">One tap away.</span>
             </h2>
-            <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              Every player, every record, every season: live, mobile, and branded as yours.
-            </p>
           </div>
         </Reveal>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -126,41 +115,6 @@ function Showcase() {
   )
 }
 
-// ─── Problem → Solution ──────────────────────────────────────────────────
-function ProblemSolution() {
-  return (
-    <section className="px-4 sm:px-6 lg:px-10 py-24">
-      <div className="max-w-[1100px] mx-auto">
-        <Reveal>
-          <div className="text-center mb-14">
-            <p className="pill-neutral inline-flex mb-5">The problem</p>
-            <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
-              Five jobs. Five tools. <span className="gradient-text">One headache.</span>
-            </h2>
-            <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              Most clubs stitch together a spreadsheet, a site builder, a design app, an email tool and a few group chats. We replaced the lot.
-            </p>
-          </div>
-        </Reveal>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {PROBLEMS.map((p, i) => (
-            <Reveal key={i} delay={(i % 2) * 80}>
-              <div className="surface p-6 h-full">
-                <p className="flex items-start gap-3 text-sm text-pb-dim leading-relaxed mb-4">
-                  <span className="text-pb-faintest font-bold flex-shrink-0">✗</span>{p.old}
-                </p>
-                <p className="flex items-start gap-3 text-sm text-pb-text leading-relaxed pt-4 border-t pb-hairline">
-                  <span className="text-accent font-bold flex-shrink-0">✓</span>{p.fix}
-                </p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
-
 // ─── Core feature block ──────────────────────────────────────────────────
 function Core() {
   return (
@@ -172,9 +126,6 @@ function Core() {
             <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
               Start with BetterStats. <span className="gradient-text">Add what you need.</span>
             </h2>
-            <p className="text-lg text-pb-dim max-w-2xl mx-auto">
-              Every club gets BetterStats. The modules bolt straight on: same data, one login.
-            </p>
           </div>
         </Reveal>
         <Reveal>
@@ -189,13 +140,13 @@ function Core() {
                   </div>
                 </div>
                 <p className="text-pb-dim leading-relaxed mb-5">
-                  Your club’s full reconciled history and a public site to be proud of: profiles, leaderboards, records, scorecards, yearbooks, awards and shareable stat cards. All automatic.
+                  Your whole history on a public site that updates itself, with a dashboard and a collectable card for every player.
                 </p>
                 <Link to={CORE_MARKETING.to} className="inline-flex items-center gap-1 text-sm text-accent font-medium">Tour BetterStats →</Link>
               </div>
               <div className="col-span-1 lg:col-span-7">
                 <div className="product-shadow rounded-2xl">
-                  <ScreenshotOrMock src={SCREENSHOT_PATHS.featuresProfile || SCREENSHOT_PATHS.showcaseProfile} alt="BetterStats player profile" fallback={<MockPlayerProfile />} />
+                  <ScreenshotOrMock src={SCREENSHOT_PATHS.shortPlayerDash} alt="The BetterStats player dashboard" fallback={<MockPlayerProfile />} />
                 </div>
               </div>
             </div>
@@ -397,7 +348,6 @@ export default function Overview() {
       <div id="main-content" tabIndex="-1">
         <Hero onCta={triggerTrial} />
         <Showcase />
-        <ProblemSolution />
         <Core />
         <ModuleRows />
         <Comparison3Way which="platform" showCTA={false} />

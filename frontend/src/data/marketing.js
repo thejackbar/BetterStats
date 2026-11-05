@@ -350,6 +350,7 @@ export const SCREENSHOT_PATHS = {
   // Landing hero
   landingHeroCard:        '/marketing/hero-career-card.jpg',
   frontPageProfile:       '/marketing/front-page-profile.jpg',
+  clubDashboard:          '/marketing/club-dashboard-hero.jpg',
   // Landing showcase tabs
   showcaseLeaderboard:    '/marketing/leaderboard.jpg',
   showcaseProfile:        '/marketing/player-profile.jpg',
@@ -376,6 +377,8 @@ export const SCREENSHOT_PATHS = {
   shortCompetition:       '/marketing/stats-by-competition.jpg',
   shortClubRoom:          '/marketing/club-room-stage.jpg',
   shortImport:            '/marketing/card-review.jpg',
+  premierships:           '/marketing/premierships.jpg',
+  sponsorSlot:            '/marketing/sponsors-major-slot.jpg',
   // Club branding & back office (sponsors/milestones used directly in the Core gallery)
   featuresWhitelabel:     '/marketing/feature-whitelabel.jpg',
   // About page

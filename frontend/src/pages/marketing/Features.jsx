@@ -27,203 +27,130 @@ import { useSelfServeTrialGate } from '../../hooks/useSelfServeTrialGate'
 const HERO_SECTIONS = [
   {
     n: '01',
-    eyebrow: 'Automatic Stats Sync',
-    title: 'Connect once. Sync forever.',
-    desc: 'Connect your club once and your whole match history is imported. From then on every new game flows in on its own from PlayHQ or Play-Cricket. Stats stay current after every match, with zero data entry and no spreadsheets to keep up.',
+    eyebrow: 'Leaderboards',
+    title: 'The ladder, for every category.',
+    desc: 'Every batting, bowling and fielding leaderboard your club has ever had, live and filterable.',
     bullets: [
-      'Connect once and your full match history is imported automatically from PlayHQ or Play-Cricket',
-      'Old spreadsheets, scorebooks and stat exports merged in alongside your live sync, included in the plan',
-      'A whole club history can come in from one spreadsheet, or across from CricketStatz',
-      'Simple CSV templates to fill any gaps in older data',
-      'Batting, bowling, and fielding stats captured per player per game',
-      'Season aggregates and career totals computed automatically',
-      'Stays current after every match, with nothing to trigger and no data entry',
-      'Admin-triggered hard refresh available for on-demand updates',
+      'Every category, by season, grade, competition and match type',
+      'Juniors, women’s and masters in or out with a tap',
+      'Rank badges on every player',
+      'Updated after every sync',
     ],
-    src: SCREENSHOT_PATHS.featuresLeaderboard,
+    src: SCREENSHOT_PATHS.shortCompetition,
     mock: <MockLeaderboard />,
   },
   {
     n: '02',
-    eyebrow: 'Player Profiles',
-    title: 'A career page worth visiting.',
-    desc: "Every player gets a public profile page with their full career stats, season history, and achievements, automatically kept up to date.",
+    eyebrow: 'Player profiles',
+    title: 'A whole career on one page.',
+    desc: 'Every player gets a public page that keeps itself up to date, back to their first game.',
     bullets: [
-      'Career batting, bowling, and fielding totals with animated stat counters',
-      'Season-by-season breakdown with colour-coded best/worst seasons',
-      'Career progression charts: runs over time, averages by season',
-      'Dismissal breakdown chart showing how they typically got out',
-      'Partnership data and batting position analysis',
-      'Achievements: milestone badges (500 runs, 50 wickets, 100 games…)',
-      'Honours: club awards, hall of fame, caps, association honours',
-      'Junior seasons left out of a senior career by default, with a tap to add them back',
-      'A formats tab: two day, one day and T20 batting, bowling and fielding side by side',
-      'Filter the whole profile by grade, and see games played season by season and grade by grade',
-      'Player photo support with shareable stat card for social',
+      'Career and season batting, bowling and fielding',
+      'Charts, dismissals, partnerships and format splits',
+      'Milestones, honours and a shareable stat card',
+      'Junior seasons kept out of a senior career by default',
     ],
-    src: SCREENSHOT_PATHS.featuresProfile,
+    src: SCREENSHOT_PATHS.landingHeroCard,
     mock: <MockHeritageCard />,
   },
   {
     n: '03',
-    eyebrow: 'Player Merge Tool',
-    title: 'One player. One profile. Stats stop splitting.',
-    desc: "Duplicate profiles for the same player used to scatter stats across two or three records. The Player Merge Tool fixes that and keeps it fixed.",
+    eyebrow: 'Club records',
+    title: 'The record books, always current.',
+    desc: 'All-time and season bests across the club, with new ones flagged the week they are set.',
     bullets: [
-      'Smart sorting suggests which profiles likely belong to the same player',
-      'One click to merge: all batting, bowling, fielding history combines',
-      'Just as easy to undo if you change your mind',
-      'Every future sync routes new matches into the merged profile',
-      'No more career averages spread across two records',
-    ],
-    src: SCREENSHOT_PATHS.featuresMatch,
-    mock: <MockPlayerProfile />,
-  },
-  {
-    n: '04',
-    eyebrow: 'Leaderboards',
-    title: 'Live club leaderboards. Every category.',
-    desc: 'Live club leaderboards across every batting, bowling, and fielding category. Filter by season and grade to find exactly who led the club.',
-    bullets: [
-      'Batting: runs, average (min. 500 runs), high score, fifties, centuries, sixes, fours, ducks',
-      'Bowling: wickets, economy (min. 100 overs), average (min. 50 wickets), best figures, five-fors, maidens',
-      'Fielding: catches, run-outs, stumpings',
-      'Filter by any season or grade combination, by competition, and by match type',
-      'Count or leave out junior, women’s, masters and mixed grades, club-wide or page by page',
-      'Rank badges with colour coding (gold, silver, bronze)',
-      'All leaderboards update automatically after each sync',
-    ],
-    src: SCREENSHOT_PATHS.featuresLeaderboard,
-    mock: <MockLeaderboard />,
-  },
-  {
-    n: '05',
-    eyebrow: 'Season Yearbooks',
-    title: 'The annual that writes itself.',
-    desc: "A proper, shareable digital season publication for every year. Auto-populated with stats, honours, and results, then topped up with editorial content by your admin team.",
-    bullets: [
-      'Overview tab: season W/L/D record, win rate, progression chart',
-      'Batting, bowling, fielding, all-rounder honours auto-populated',
-      'Partnership records per season',
-      'Results: every match by grade with scores',
-      'Photo gallery: team and event photos',
-      "Editorial sections: President's Report, Coach's Report, Sponsor's Message",
-      'Honour board: record club positions and holders',
-      'AI-assisted season narrative generator',
-      "Publish/unpublish control: draft until you're ready",
-    ],
-    src: SCREENSHOT_PATHS.featuresYearbook,
-    mock: <MockYearbook />,
-  },
-  {
-    n: '06',
-    eyebrow: 'Club Records',
-    title: 'All-time records. Always current.',
-    desc: 'All-time and season-best records across batting, bowling, partnerships, all-rounders, and team achievements, always kept current.',
-    bullets: [
-      'Batting: most career runs, highest individual score, best average, most hundreds/fifties',
-      'Bowling: most career wickets, best innings figures, best economy, most five-fors',
-      'Partnerships: all-time records at every wicket position, top 25 cross-grade',
-      'All-rounder records: combined batting and bowling thresholds',
-      'Team records: most matches played, most seasons represented',
-      '"NEW" badge flags records set in the current season',
+      'Batting, bowling, all-rounders and partnerships',
+      'A record at every wicket',
+      'Team records such as biggest chases',
     ],
     src: SCREENSHOT_PATHS.featuresHonours,
     mock: <MockPlayerProfile />,
   },
   {
-    n: '07',
-    eyebrow: 'Player Comparison',
-    title: 'Side-by-side, head-to-head.',
-    desc: "Compare any two players over their full careers, then use the same view as a form indicator when you've got a tough selection to make.",
+    n: '04',
+    eyebrow: 'Scorecards and yearbooks',
+    title: 'Every game kept. Every season told.',
+    desc: 'The full card for every match, and a season annual that fills itself.',
     bullets: [
-      'Batting, bowling and fielding compared row by row',
-      'Career totals and per-season splits side by side',
-      'Recent-form view to support selection conversations',
-      'Dismissal patterns and opposition history per player',
-      'Shareable link so the whole selection panel sees the same numbers',
+      'Both innings, dismissals, fall of wickets and partnerships',
+      'A yearbook for each season with honours and top performers',
+      'A permanent link for every game and every year',
     ],
-    src: SCREENSHOT_PATHS.shortCompare,
+    src: SCREENSHOT_PATHS.featuresYearbook,
+    mock: <MockYearbook />,
+  },
+  {
+    n: '05',
+    eyebrow: 'Player Dashboard and Cards',
+    title: 'Give every player a reason to open it.',
+    desc: 'Each player gets their own page and a collectable card, from one club link.',
+    bullets: [
+      'Season panels, last five innings, and availability, Fantasy and fees if you run them',
+      'Weekly packs, swaps, sets and challenges, with no paid packs',
+      'Switched on from BetterStats',
+    ],
+    src: SCREENSHOT_PATHS.shortPlayerDash,
     mock: <MockPlayerProfile />,
   },
   {
-    n: '08',
-    eyebrow: 'Club Branding & Admin',
-    title: "Make it your club's own.",
-    desc: 'BetterStats runs your public site in your colours and looks after the back office behind it. Set your crest, palette and fonts, place your sponsors across the site, and keep the database clean without touching a spreadsheet.',
+    n: '06',
+    eyebrow: 'Your history',
+    title: 'Bring all of it. Keep one record.',
+    desc: 'Connect once and your history flows in, then merge the spreadsheets and scorebooks you already have.',
     bullets: [
-      'White-label the public site: your crest, club colours and display fonts, in dark or light',
-      'Give sponsors a tier, a major sponsor slot and a Presented by strip on the pages they back, and rename a section to carry their name',
-      'Merge duplicate players or rename a grade in a couple of clicks',
-      'A milestone tracker so nobody’s 100th game slips by',
-      'A notification centre for syncs, new milestones and pending requests',
-      'Trigger a manual sync any time, with separate logins for your committee',
+      'Automatic sync from PlayHQ or Play-Cricket after every game',
+      'One spreadsheet, CricketStatz or the scorebook, merged without doubling up',
+      'Card review: choose which scorecard the site shows, with an undo',
+      'Duplicate players merged in a click',
     ],
-    src: SCREENSHOT_PATHS.featuresWhitelabel,
+    src: SCREENSHOT_PATHS.shortImport,
+    mock: <MockLeaderboard />,
+  },
+  {
+    n: '07',
+    eyebrow: 'Your club, your colours',
+    title: 'A site that looks like you.',
+    desc: 'Your crest, colours and fonts, with sponsors placed by tier across every page.',
+    bullets: [
+      'A major sponsor slot, and Presented by strips on the pages they back',
+      'A notification centre for syncs and new milestones',
+      'Separate logins for your committee',
+    ],
+    src: SCREENSHOT_PATHS.sponsorSlot,
     mock: <MockPlayerProfile />,
   },
 ]
 
 const SHORT_SECTIONS = [
   {
-    title: 'Match Scorecards',
-    desc: 'Full scorecards for every game (batting, bowling, fall of wickets, and partnerships) linked directly from player profiles.',
-    src: SCREENSHOT_PATHS.shortScorecard,
-  },
-  {
     title: 'StatLab',
-    desc: 'A custom query builder for power users. Build your own leaderboards with any combination of metrics, filters, and thresholds. 50+ sortable metrics, preset queries, several seasons or grades at once, and team records such as biggest chases and closest wins.',
+    desc: 'Build any table you can think of. 50+ metrics, team records and saved reports.',
     src: SCREENSHOT_PATHS.shortStatlab,
   },
   {
-    title: 'Shareable Player Cards',
-    desc: 'Every player profile has a clean, branded stat card: career or season view, club rank badges, milestone indicators, one-tap native share.',
-    src: SCREENSHOT_PATHS.featuresCards,
+    title: 'Player comparison',
+    desc: 'Two players side by side across their careers.',
+    src: SCREENSHOT_PATHS.shortCompare,
   },
   {
-    title: 'Awards & Honours',
-    desc: "Your club's full honours history in one place: annual awards, hall of fame, life members, office bearers and association honours. A Premierships page fills in from your grand final scorecards. CSV bulk import for back-filling.",
-    src: SCREENSHOT_PATHS.shortAwards,
-  },
-  {
-    title: 'Admin Tools',
-    desc: 'Everything your stats volunteers need: display name overrides, grade renames, CSV import/export, manual sync trigger, and multiple admin logins. Card review lets you choose between the Cricket Australia scorecard and the club scorecard for a game, with an undo on every change.',
-    src: SCREENSHOT_PATHS.shortAdmin,
-  },
-  {
-    title: 'Opposition Analysis',
-    desc: "Every player's record broken down by opponent, so you can see who they pile runs on and who has had their number. Handy reading before a big game.",
-    src: SCREENSHOT_PATHS.shortOpposition,
-  },
-  {
-    title: 'Match Archive',
-    desc: 'Browse every game the club has played, filter by season and grade, and open the full scorecard for any one of them.',
-    src: SCREENSHOT_PATHS.shortGames,
-  },
-  {
-    title: 'Player Dashboard',
-    desc: 'Every player gets their own page from one club link and the last four digits of their mobile. Their photo, season dashboard, last five innings and spells, and their cards, plus availability, Fantasy and fees paid if your club runs them. Switch it on from BetterStats. It works without BetterSelect.',
-    src: SCREENSHOT_PATHS.shortPlayerDash,
-  },
-  {
-    title: 'Player Cards',
-    desc: 'A collectable card for every player, rated 1 to 99 from their career figures. Weekly packs, packs for runs and wickets, a Winner Winner pack after a win, special cards for centuries and five-fors, swaps, sets and challenges. No paid packs, and nothing is ever taken from a collection.',
-    src: SCREENSHOT_PATHS.shortPlayerCards,
-  },
-  {
-    title: 'Stats by Competition',
-    desc: 'Read the club, a team or a player one competition at a time, then narrow by grade type and match type. A club in several associations in one season no longer has them added together, and you can order your competitions the way you want them read.',
-    src: SCREENSHOT_PATHS.shortCompetition,
+    title: 'Premierships and honours',
+    desc: 'Flags fill in from grand final scorecards, beside awards and the honour board.',
+    src: SCREENSHOT_PATHS.premierships,
   },
   {
     title: 'Club Room Mode',
-    desc: 'A TV slideshow for the clubhouse: sponsors, fixtures and lineups, leaderboards, club records, honour boards and premiership squads, saved posts and your own images. It runs full-screen from a public link, so it keeps playing when nobody is logged in.',
+    desc: 'A TV slideshow for the clubhouse, fed by your own records.',
     src: SCREENSHOT_PATHS.shortClubRoom,
   },
   {
-    title: 'Import Your History',
-    desc: 'Load a whole club history from one spreadsheet, bring your records across from CricketStatz, or type in games from the scorebook. Choose whether a match you already hold is left alone or overwritten, and a hand-entered game is never overwritten by a sync.',
-    src: SCREENSHOT_PATHS.shortImport,
+    title: 'Opposition analysis',
+    desc: 'Every player’s record against each opponent.',
+    src: SCREENSHOT_PATHS.shortOpposition,
+  },
+  {
+    title: 'Match archive',
+    desc: 'Every game the club has played, with the full scorecard one click away.',
+    src: SCREENSHOT_PATHS.shortGames,
   },
 ]
 
@@ -265,7 +192,7 @@ function Hero() {
           <span className="gradient-text">BetterStats.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-xl mx-auto leading-relaxed">
-          Your club’s reconciled history and a public site to be proud of, included in every BetterCricket plan. Here’s everything it does.
+          Your club’s whole history, on a public site that updates itself. Included in every BetterCricket plan.
         </p>
       </div>
     </section>
@@ -281,7 +208,7 @@ function BeyondCore() {
           <div className="text-center mb-12">
             <p className="pill-neutral inline-flex mb-5">The other modules</p>
             <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">There’s more than stats.</h2>
-            <p className="text-pb-dim max-w-xl mx-auto">Everything above is BetterStats. Bolt on the modules that run your season and your club.</p>
+            <p className="text-pb-dim max-w-xl mx-auto">Bolt on the modules that run your season and your club.</p>
           </div>
         </Reveal>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -351,7 +278,7 @@ function ShortFeatures() {
         <Reveal>
           <div className="text-center mb-12">
             <p className="pill-neutral inline-flex mb-5">And the rest</p>
-            <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">More tools your committee will use.</h2>
+            <h2 className="font-display font-bold text-3xl md:text-5xl mb-4 tracking-tight">And a few more.</h2>
           </div>
         </Reveal>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -374,7 +301,7 @@ function FeaturesCTA({ onCta }) {
           <p className="pill mb-6 mx-auto"><span className="dot" />In every plan</p>
           <h2 className="font-display font-bold text-4xl md:text-5xl mb-5 tracking-tight">BetterStats, <span className="gradient-text">in every plan.</span></h2>
           <p className="text-lg text-pb-dim max-w-xl mx-auto mb-8">
-            Everything on this page is BetterStats, from $399 a year, flat rate per club. Add modules whenever you’re ready.
+            BetterStats is $399 a year, a flat rate per club. Add modules whenever you’re ready.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <button type="button" onClick={onCta} className="cta-primary">Request club access →</button>

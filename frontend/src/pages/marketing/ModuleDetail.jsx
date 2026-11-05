@@ -124,12 +124,15 @@ export default function ModuleDetail() {
               </div>
               <div className="flex items-center gap-3 mb-5">
                 <img src={m.logo} alt="" className="w-12 h-12 rounded-xl" />
-                <span className="pill-neutral">{m.audience}</span>
+                <div className="flex flex-col items-start gap-1">
+                  <span className="text-xl font-bold leading-none"><ModuleWordmark name={m.name} accent={m.accent} /></span>
+                  <span className="text-[11px] font-mono uppercase tracking-wide3 text-pb-faint">{m.audience}</span>
+                </div>
               </div>
-              <h1 className="font-display font-bold text-[40px] sm:text-[52px] lg:text-[64px] tracking-tight leading-[0.95] mb-6">
-                <ModuleWordmark name={m.name} accent={m.accent} />
+              <h1 className="font-display font-bold text-[34px] sm:text-[44px] lg:text-[54px] tracking-tight leading-[1.02] mb-5">
+                <span className="sr-only">{m.name}: </span>{m.tagline}
               </h1>
-              <p className="text-lg lg:text-xl text-pb-dim leading-relaxed mb-8 max-w-xl">{m.summary}</p>
+              <p className="text-lg text-pb-dim leading-relaxed mb-8 max-w-xl">{m.summary}</p>
               <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3">
                 <button type="button" onClick={triggerTrial} className="cta-primary">Get Your Club on BetterCricket today!</button>
                 {m.deepTour
@@ -162,46 +165,81 @@ export default function ModuleDetail() {
           </div>
         </section>
 
-        {/* Features */}
-        <section className="px-4 sm:px-6 lg:px-10 py-20">
-          <div className="max-w-[1100px] mx-auto">
-            <Reveal>
-              <div className="text-center mb-12">
-                <p className="pill-neutral inline-flex mb-5">What’s inside</p>
-                <h2 className="font-display font-bold text-3xl md:text-5xl tracking-tight">Everything {m.name} does.</h2>
-              </div>
-            </Reveal>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {m.features.map((f, i) => (
-                <Reveal key={f.title} delay={(i % 2) * 80}>
-                  <div className="surface p-6 h-full hover:border-accent/30 transition-colors">
-                    <h3 className="text-lg font-semibold mb-2">{f.title}</h3>
-                    <p className="text-sm text-pb-dim leading-relaxed">{f.desc}</p>
-                  </div>
-                </Reveal>
+        {/* Screens first: the screenshots are the hook */}
+        {m.showcase && m.showcase.length > 0 && (
+          <section className="px-4 sm:px-6 lg:px-10 pt-16 pb-6">
+            <div className="max-w-[1280px] mx-auto space-y-16 lg:space-y-24">
+              {m.showcase.map((s, i) => (
+                <div key={s.headline} className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                  <Reveal className={`col-span-1 lg:col-span-5 ${i % 2 === 1 ? 'lg:order-2' : ''}`}>
+                    <div>
+                      <h2 className="text-3xl lg:text-4xl font-bold leading-tight mb-3 tracking-tight">{s.headline}</h2>
+                      <p className="text-pb-dim leading-relaxed mb-5">{s.body}</p>
+                      <ul className="space-y-2">
+                        {s.points.map((p) => (
+                          <li key={p} className="flex items-center gap-3 text-sm"><span className="tick">✓</span>{p}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </Reveal>
+                  <Reveal className={`col-span-1 lg:col-span-7 ${i % 2 === 1 ? 'lg:order-1' : ''}`}>
+                    <div className="product-shadow rounded-2xl overflow-hidden">
+                      <ZoomableImage src={s.src} alt={s.headline} caption={s.headline} className="block w-full h-auto" />
+                    </div>
+                  </Reveal>
+                </div>
               ))}
             </div>
+          </section>
+        )}
 
+        {/* More screens */}
+        {m.gallery && m.gallery.length > 0 && (
+          <section className="px-4 sm:px-6 lg:px-10 py-16">
+            <div className="max-w-[1200px] mx-auto">
+              <Reveal>
+                <h2 className="font-display font-bold text-2xl md:text-3xl mb-8 tracking-tight text-center">More of {m.name}, on screen.</h2>
+              </Reveal>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {m.gallery.map((g, i) => (
+                  <Reveal key={g.src} delay={(i % 3) * 70}>
+                    <figure className="surface overflow-hidden product-shadow h-full">
+                      <ZoomableImage src={g.src} alt={g.caption} caption={g.caption} className="block w-full h-auto border-b pb-hairline" />
+                      <figcaption className="px-4 py-3 text-sm text-pb-dim">{g.caption}</figcaption>
+                    </figure>
+                  </Reveal>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* What else is in it: a compact checklist, not a wall of text */}
+        <section className="px-4 sm:px-6 lg:px-10 py-16 border-t pb-hairline bg-black/20">
+          <div className="max-w-[1100px] mx-auto">
+            <Reveal>
+              <h2 className="font-display font-bold text-2xl md:text-3xl mb-8 tracking-tight text-center">Also in {m.name}.</h2>
+            </Reveal>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {m.features.map((f) => (
+                <div key={f.title} className="surface p-4">
+                  <h3 className="text-sm font-semibold mb-1">{f.title}</h3>
+                  <p className="text-sm text-pb-dim leading-snug">{f.desc}</p>
+                </div>
+              ))}
+            </div>
             {m.note && (
-              <Reveal>
-                <div className="surface p-5 mt-6 border-accent/30 bg-accent/[0.05] flex items-start gap-3">
-                  <span className="text-accent text-lg">✦</span>
-                  <p className="text-sm text-pb-dim">{m.note}</p>
-                </div>
-              </Reveal>
+              <p className="text-sm text-pb-dim mt-6 text-center">{m.note}</p>
             )}
-
             {m.comingSoon && (
-              <Reveal>
-                <div className="surface p-6 mt-6 border-dashed">
-                  <p className="text-[10px] font-mono uppercase tracking-wide3 text-pb-faint mb-3">On the roadmap</p>
-                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {m.comingSoon.map((c) => (
-                      <li key={c} className="flex items-center gap-2.5 text-sm text-pb-dim"><span className="pill-neutral text-[10px]">Soon</span>{c}</li>
-                    ))}
-                  </ul>
-                </div>
-              </Reveal>
+              <div className="surface p-5 mt-6 border-dashed">
+                <p className="text-[10px] font-mono uppercase tracking-wide3 text-pb-faint mb-3">On the roadmap</p>
+                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {m.comingSoon.map((c) => (
+                    <li key={c} className="flex items-center gap-2.5 text-sm text-pb-dim"><span className="pill-neutral text-[10px]">Soon</span>{c}</li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
         </section>
@@ -234,66 +272,6 @@ export default function ModuleDetail() {
                   )}
                 </div>
               </Reveal>
-            </div>
-          </section>
-        )}
-
-        {/* Deep dives — the module's best four screens, each with real copy */}
-        {m.showcase && m.showcase.length > 0 && (
-          <section className="px-4 sm:px-6 lg:px-10 py-20 border-t pb-hairline">
-            <div className="max-w-[1280px] mx-auto">
-              <Reveal>
-                <div className="text-center mb-16">
-                  <p className="pill-neutral inline-flex mb-5">See it in action</p>
-                  <h2 className="font-display font-bold text-3xl md:text-5xl tracking-tight">{m.name}, screen by screen.</h2>
-                </div>
-              </Reveal>
-              <div className="space-y-20 lg:space-y-28">
-                {m.showcase.map((s, i) => (
-                  <div key={s.src} className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-                    <Reveal className={`col-span-1 lg:col-span-5 ${i % 2 === 1 ? 'lg:order-2' : ''}`}>
-                      <div className="lg:sticky lg:top-24">
-                        <h3 className="text-3xl lg:text-4xl font-bold leading-tight mb-4">{s.headline}</h3>
-                        <p className="text-pb-dim leading-relaxed mb-6">{s.body}</p>
-                        <ul className="space-y-2.5">
-                          {s.points.map((p) => (
-                            <li key={p} className="flex items-center gap-3 text-sm"><span className="tick">✓</span>{p}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </Reveal>
-                    <Reveal className={`col-span-1 lg:col-span-7 ${i % 2 === 1 ? 'lg:order-1' : ''}`}>
-                      <div className="product-shadow rounded-2xl overflow-hidden">
-                        <ZoomableImage src={s.src} alt={s.headline} caption={s.headline} className="block w-full h-auto" />
-                      </div>
-                    </Reveal>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* Gallery — the screenshots that didn't make the deep-dive cut */}
-        {m.gallery && m.gallery.length > 0 && (
-          <section className="px-4 sm:px-6 lg:px-10 py-16 border-t pb-hairline">
-            <div className="max-w-[1100px] mx-auto">
-              <Reveal>
-                <div className="text-center mb-10">
-                  <p className="pill-neutral inline-flex mb-5">{m.showcase && m.showcase.length > 0 ? 'And the rest' : 'See it in action'}</p>
-                  <h2 className="font-display font-bold text-3xl md:text-5xl tracking-tight">More of {m.name}, on screen.</h2>
-                </div>
-              </Reveal>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {m.gallery.map((g, i) => (
-                  <Reveal key={g.src} delay={(i % 2) * 80}>
-                    <figure className="surface overflow-hidden product-shadow">
-                      <ZoomableImage src={g.src} alt={g.caption} caption={g.caption} className="block w-full h-auto border-b pb-hairline" />
-                      <figcaption className="px-4 py-3 text-sm text-pb-dim">{g.caption}</figcaption>
-                    </figure>
-                  </Reveal>
-                ))}
-              </div>
             </div>
           </section>
         )}

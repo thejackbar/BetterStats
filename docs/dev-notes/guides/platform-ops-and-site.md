@@ -58,6 +58,8 @@
 
 33. Marketing copy goes stale because nothing ties it to releases. The module pages (`data/modules-marketing.js`), Features, the FAQ, `marketing.js` comparison rows, `pricing.js` blurbs and `public/llms.txt` were last swept at v9.139.6 (2026-11-05). The next sweep starts from the changelog entries after that version. A comparison row about a competitor's product is a claim about someone else's software: only add one you can stand behind.
 
+34. House style for the public pages: the screenshots are the hook, so copy stays short and history and leaderboards come first. A showcase entry is a headline, one or two sentences and three points; a feature is a title and one line. Do not add a text-only section to a marketing page. The home page Aurora (`components/marketing/Aurora.jsx`, React Bits, MIT plus Commons Clause) keeps its copyright header and stays masked to the top of the hero.
+
 ## Traps and failure signatures
 
 - **Site up, months-old marketing page, every club page blank (`/applecross` empty), looks like total data loss.** Cause: a deploy or restart without `COMPOSE_PROJECT_NAME` forked a second betterstats project. The real 370 MB DB sat in volume `docker_betterstats_pgdata`; the systemd stack came up on the empty `bltbox_docker_app_betterstats_pgdata` and stole the hardcoded `betterstats-*` names. Nothing was lost. Fix: clone the real volume into the live one: `docker run --rm -v docker_betterstats_pgdata:/from:ro -v bltbox_docker_app_betterstats_pgdata:/to postgres:15 bash -c 'find /to -mindepth 1 -delete; cp -a /from/. /to/; rm -f /to/postmaster.pid'`.
