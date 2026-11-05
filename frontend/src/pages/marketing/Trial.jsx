@@ -5,6 +5,7 @@ import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 import TrustedByStrip from '../../components/marketing/TrustedByStrip'
+import AuroraHero from '../../components/marketing/AuroraHero'
 import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
@@ -16,9 +17,9 @@ import TextType from '../../components/marketing/TextType'
 import { webinarState } from '../../data/webinar'
 
 // The ad-campaign landing page. Most visitors arrive on a phone, so the page is
-// mobile-first and forced LIGHT (a `data-theme="light"` wrapper — every pb-*
-// token flips to the light palette) for a brighter, clearer read on a small
-// screen. Search-first, and nothing else in the way: the giant search box sits
+// mobile-first and forced DARK (a `data-theme="dark"` wrapper, so the pb-*
+// tokens match the rest of the marketing site) with the brand Aurora behind the
+// hero. Search-first, and nothing else in the way: the giant search box sits
 // directly under the header, with an animated typing placeholder that literally
 // shows the action we want — type your club's name, then pick it from the list.
 // Clicking a result either opens their existing club page (if already on
@@ -398,6 +399,25 @@ export default function Trial() {
   // ("appl" → "applecross") logs its top match once, not once per keystroke.
   const searchedOrgRef = useRef(null)
 
+  // The search box is the call to action. While it is on screen nothing else
+  // competes with it. Once the hero has scrolled out of view a bar offers the
+  // way back, and the closing band does the same.
+  const inputRef = useRef(null)
+  const heroRef = useRef(null)
+  const [heroGone, setHeroGone] = useState(false)
+  useEffect(() => {
+    const el = heroRef.current
+    if (!el || typeof IntersectionObserver === 'undefined') return undefined
+    const io = new IntersectionObserver(([e]) => setHeroGone(!e.isIntersecting), { threshold: 0 })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+  const goToSearch = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    // let the scroll start before focusing, so the keyboard does not fight it
+    window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 350)
+  }
+
   useEffect(() => {
     let alive = true
     api.publicSelfServeStatus()
@@ -545,7 +565,7 @@ export default function Trial() {
   }
 
   return (
-    <div className="min-h-screen bg-pb-bg text-pb-text" data-theme="light">
+    <div className="min-h-screen bg-pb-bg text-pb-text" data-theme="dark">
       <MarketingNav />
       <div id="main-content" tabIndex="-1">
 
@@ -553,8 +573,8 @@ export default function Trial() {
             and most obvious thing to do. An animated placeholder demonstrates
             the action; a one-line instruction spells out the two steps. No
             image (removed as a distraction), no trial/credit-card framing. */}
-        <section className="relative pt-20 sm:pt-28 pb-6 sm:pb-8 px-4 sm:px-6 lg:px-10 overflow-hidden">
-          <div className="absolute inset-0 hero-glow opacity-60 pointer-events-none" />
+        <section ref={heroRef} className="relative pt-20 sm:pt-28 pb-6 sm:pb-8 px-4 sm:px-6 lg:px-10 overflow-hidden">
+          <AuroraHero />
           <div className="max-w-2xl mx-auto relative text-center">
             <h1 className="font-display font-bold text-[32px] sm:text-[46px] lg:text-[54px] tracking-tight leading-[1.03] mb-4">
               Check out your club on <span className="gradient-text">BetterCricket</span>
@@ -574,9 +594,13 @@ export default function Trial() {
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
+                    ref={inputRef}
                     aria-label="Search for your club"
-                    className="w-full bg-pb-surface text-pb-text rounded-2xl pl-14 sm:pl-16 pr-4 sm:pr-5 py-4 sm:py-6 text-lg sm:text-2xl font-display font-semibold outline-none shadow-lg border-2 transition focus:shadow-xl"
-                    style={{ borderColor: 'var(--pb-accent)' }}
+                    className="w-full bg-pb-surface text-pb-text rounded-2xl pl-14 sm:pl-16 pr-4 sm:pr-5 py-4 sm:py-6 text-lg sm:text-2xl font-display font-semibold outline-none border-2 transition"
+                    style={{
+                      borderColor: 'var(--pb-accent)',
+                      boxShadow: '0 0 0 5px rgba(22,199,132,0.16), 0 24px 70px -12px rgba(22,199,132,0.45)',
+                    }}
                   />
                   {/* Animated placeholder: shows the action (typing a club name)
                       while the box is empty. It names no real club on purpose:
@@ -665,8 +689,11 @@ export default function Trial() {
                     type="button"
                     onClick={openWizardBlank}
                     data-testid="trial-setup-yourself"
-                    className="inline-flex items-center justify-center gap-1 w-full sm:w-auto px-6 py-3 rounded-xl font-display font-semibold text-base border-2 text-pb-text bg-pb-surface hover:bg-pb-surface2 transition"
-                    style={{ borderColor: 'var(--pb-accent)' }}
+                    className="inline-flex items-center justify-center gap-1.5 w-full sm:w-auto px-8 py-4 rounded-xl font-display font-bold text-lg text-navy-950 hover:brightness-110 active:scale-[0.99] transition"
+                    style={{
+                      background: 'var(--pb-accent)',
+                      boxShadow: '0 12px 40px -8px rgba(22,199,132,0.65)',
+                    }}
                   >
                     Set up your club yourself <span aria-hidden="true">→</span>
                   </button>
@@ -730,6 +757,29 @@ export default function Trial() {
           </div>
         </section>
 
+        {/* Closing call to action: same destination as the search box at the top. */}
+        <section className="px-4 sm:px-6 lg:px-10 pb-16">
+          <div className="max-w-[900px] mx-auto relative overflow-hidden rounded-3xl border pb-hairline bg-pb-surface text-center px-6 py-12 sm:py-14">
+            <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(60% 90% at 50% 0%, rgba(22,199,132,0.22), transparent 70%)' }} />
+            <div className="relative">
+              <h2 className="font-display font-bold text-3xl sm:text-4xl tracking-tight leading-[1.05] mb-3">
+                Your club&rsquo;s history is <span className="gradient-text">waiting to be told.</span>
+              </h2>
+              <p className="text-pb-dim max-w-md mx-auto mb-7">Find your club and see every player, season and record in one place.</p>
+              <button
+                type="button"
+                onClick={goToSearch}
+                data-testid="trial-closing-cta"
+                className="inline-flex items-center justify-center gap-1.5 w-full sm:w-auto px-9 py-4 rounded-xl font-display font-bold text-lg text-navy-950 hover:brightness-110 active:scale-[0.99] transition"
+                style={{ background: 'var(--pb-accent)', boxShadow: '0 12px 40px -8px rgba(22,199,132,0.65)' }}
+              >
+                Find your club <span aria-hidden="true">→</span>
+              </button>
+              <p className="font-mono text-[11px] text-pb-dim mt-4">Free · No credit card · Live in under an hour</p>
+            </div>
+          </div>
+        </section>
+
         {/* Mini FAQ */}
         <section className="px-4 sm:px-6 lg:px-10 pb-20">
           <div className="max-w-[800px] mx-auto">
@@ -752,6 +802,25 @@ export default function Trial() {
         </section>
       </div>
       <MarketingFooter />
+
+      {heroGone && !wizardOpen && !actionClub && !extensionClub && (
+        <div
+          data-testid="trial-sticky-cta"
+          className="fixed bottom-0 inset-x-0 z-40 border-t pb-hairline bg-pb-bg/90 backdrop-blur-md px-4 py-3"
+        >
+          <div className="max-w-[900px] mx-auto flex items-center justify-between gap-3">
+            <p className="hidden sm:block text-sm font-medium">See your club&rsquo;s whole history on BetterCricket.</p>
+            <button
+              type="button"
+              onClick={goToSearch}
+              className="inline-flex items-center justify-center gap-1.5 w-full sm:w-auto px-6 py-3 rounded-xl font-display font-bold text-base text-navy-950 hover:brightness-110 transition"
+              style={{ background: 'var(--pb-accent)', boxShadow: '0 8px 30px -8px rgba(22,199,132,0.6)' }}
+            >
+              Find your club <span aria-hidden="true">→</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {extensionClub && (
         <ExtensionRequestModal club={extensionClub} days={status?.trial_extension_days || 7} onClose={() => setExtensionClub(null)} />
