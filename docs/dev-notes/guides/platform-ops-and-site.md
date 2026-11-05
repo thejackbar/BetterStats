@@ -60,6 +60,8 @@
 
 34. House style for the public pages: the screenshots are the hook, so copy stays short and history and leaderboards come first. A showcase entry is a headline, one or two sentences and three points; a feature is a title and one line. Do not add a text-only section to a marketing page. The home page Aurora (`components/marketing/Aurora.jsx`, React Bits, MIT plus Commons Clause) keeps its copyright header and stays masked to the top of the hero.
 
+35. The "Trusted by clubs at" strip names customers on a public page. It lists every club with an `active` Core subscription (`routers/public_trusted_clubs.py`), after the curated clubs in `data/trustedClubs.js`. Keep a club off with `TRUSTED_CLUBS_EXCLUDE` (comma-separated slugs). `active` includes a free grant a Super Admin set by hand, so look at the list after any change to the filter. Never widen what the route returns beyond `slug`, `name` and the crest path.
+
 ## Traps and failure signatures
 
 - **Site up, months-old marketing page, every club page blank (`/applecross` empty), looks like total data loss.** Cause: a deploy or restart without `COMPOSE_PROJECT_NAME` forked a second betterstats project. The real 370 MB DB sat in volume `docker_betterstats_pgdata`; the systemd stack came up on the empty `bltbox_docker_app_betterstats_pgdata` and stole the hardcoded `betterstats-*` names. Nothing was lost. Fix: clone the real volume into the live one: `docker run --rm -v docker_betterstats_pgdata:/from:ro -v bltbox_docker_app_betterstats_pgdata:/to postgres:15 bash -c 'find /to -mindepth 1 -delete; cp -a /from/. /to/; rm -f /to/postmaster.pid'`.

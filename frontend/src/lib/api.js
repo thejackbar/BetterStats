@@ -2408,6 +2408,7 @@ export const api = {
   // — unauthenticated mirrors of the selfServeTrial* endpoints above, same
   // wizard, no super-admin session. 404s while the platform flag is off.
   publicSelfServeStatus: () => request('/public/self-serve/status'),
+  publicTrustedClubs: () => request('/public/trusted-clubs'),
   publicSelfServeSearch: (q) => request(`/public/self-serve/search?q=${encodeURIComponent(q)}`),
   // /trial: a registered club whose trial has ended asks for more time. Emailed to staff.
   publicRequestTrialExtension: (data) =>

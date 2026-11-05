@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     # nginx strips the /api prefix, so the public route resolves at
     # {public_base_url}/api/public/comms/unsubscribe/{token}.
     public_base_url: str = "https://betterat.cricket"
+    # Comma-separated club slugs kept off the public "Trusted by clubs at" strip
+    # even when they hold an active BetterStats subscription (env:
+    # TRUSTED_CLUBS_EXCLUDE). The strip lists every paying club by default.
+    trusted_clubs_exclude: str = ""
 
     # ---- Instructional video storage ---------------------------------------
     # Video files live on the host's media volume, NOT in Postgres and NOT in
