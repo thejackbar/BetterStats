@@ -28,13 +28,13 @@ const MODULE_COMPARES = [
     which: 'betterselect',
     eyebrow: 'BetterSelect',
     intro:
-      'Live player availability, net attendance and current form, all feeding a smarter team-selection process, instead of the usual scatter of unrelated tools: group chats, email, SMS, spreadsheets and generic team apps.',
+      'Live player availability, net attendance and current form, all feeding a smarter team-selection process and a Selection Whiteboard that shows every team for the day side by side, instead of the usual scatter of unrelated tools: group chats, email, SMS, spreadsheets and generic team apps.',
   },
   {
     which: 'betteradmin',
     eyebrow: 'BetterAdmin',
     intro:
-      'Your cricket club back office: fees, member comms and merch in one place, instead of an expensive bulk email tool and yet more spreadsheets that most clubs stitch together.',
+      'Your cricket club back office: fees, member comms, merch, the volunteer roster and the committee in one place, instead of an expensive bulk email tool and yet more spreadsheets that most clubs stitch together.',
   },
 ]
 

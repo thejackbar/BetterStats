@@ -24,9 +24,9 @@ export const CORE = {
 // The bolt-on modules and their annual price. Logos/accents come from the shared
 // brand registry so the calculator looks like the dashboard.
 export const PRICED_MODULES = [
-  { key: 'select',  name: 'BetterSelect',  price: 149, icon: '◎', accent: BRAND.select.accent,  logo: BRAND.select.logo,  blurb: 'Player availability, team selection and net manager' },
-  { key: 'socials', name: 'BetterSocials', price: 149, icon: '◈', accent: BRAND.socials.accent, logo: BRAND.socials.logo, blurb: 'Social-post generation and a CRM for your club website' },
-  { key: 'admin',   name: 'BetterAdmin',   price: 149, icon: '⬢', accent: BRAND.admin.accent,   logo: BRAND.admin.logo,   blurb: 'Member fees, bulk emailing and club stock tracking' },
+  { key: 'select',  name: 'BetterSelect',  price: 149, icon: '◎', accent: BRAND.select.accent,  logo: BRAND.select.logo,  blurb: 'Availability, Whiteboard, nets, fines and votes' },
+  { key: 'socials', name: 'BetterSocials', price: 149, icon: '◈', accent: BRAND.socials.accent, logo: BRAND.socials.logo, blurb: 'Post designer and your club website' },
+  { key: 'admin',   name: 'BetterAdmin',   price: 149, icon: '⬢', accent: BRAND.admin.accent,   logo: BRAND.admin.logo,   blurb: 'Fees, bulk email, stock, roster and committee' },
   { key: 'iq',      name: 'BetterIQ',      price: 249, icon: '◇', accent: BRAND.iq.accent,      logo: BRAND.iq.logo,      blurb: 'Deep analytics and opposition scouting' },
 ]
 

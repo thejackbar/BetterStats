@@ -33,6 +33,7 @@ const HERO_SECTIONS = [
     bullets: [
       'Connect once and your full match history is imported automatically from PlayHQ or Play-Cricket',
       'Old spreadsheets, scorebooks and stat exports merged in alongside your live sync, included in the plan',
+      'A whole club history can come in from one spreadsheet, or across from CricketStatz',
       'Simple CSV templates to fill any gaps in older data',
       'Batting, bowling, and fielding stats captured per player per game',
       'Season aggregates and career totals computed automatically',
@@ -56,6 +57,8 @@ const HERO_SECTIONS = [
       'Achievements: milestone badges (500 runs, 50 wickets, 100 games…)',
       'Honours: club awards, hall of fame, caps, association honours',
       'Junior seasons left out of a senior career by default, with a tap to add them back',
+      'A formats tab: two day, one day and T20 batting, bowling and fielding side by side',
+      'Filter the whole profile by grade, and see games played season by season and grade by grade',
       'Player photo support with shareable stat card for social',
     ],
     src: SCREENSHOT_PATHS.featuresProfile,
@@ -85,7 +88,7 @@ const HERO_SECTIONS = [
       'Batting: runs, average (min. 500 runs), high score, fifties, centuries, sixes, fours, ducks',
       'Bowling: wickets, economy (min. 100 overs), average (min. 50 wickets), best figures, five-fors, maidens',
       'Fielding: catches, run-outs, stumpings',
-      'Filter by any season or grade combination',
+      'Filter by any season or grade combination, by competition, and by match type',
       'Count or leave out junior, women’s, masters and mixed grades, club-wide or page by page',
       'Rank badges with colour coding (gold, silver, bronze)',
       'All leaderboards update automatically after each sync',
@@ -150,7 +153,7 @@ const HERO_SECTIONS = [
     desc: 'BetterStats runs your public site in your colours and looks after the back office behind it. Set your crest, palette and fonts, place your sponsors across the site, and keep the database clean without touching a spreadsheet.',
     bullets: [
       'White-label the public site: your crest, club colours and display fonts, in dark or light',
-      'Place your sponsors across the site and in every season yearbook',
+      'Give sponsors a tier, a major sponsor slot and a Presented by strip on the pages they back, and rename a section to carry their name',
       'Merge duplicate players or rename a grade in a couple of clicks',
       'A milestone tracker so nobody’s 100th game slips by',
       'A notification centre for syncs, new milestones and pending requests',
@@ -169,7 +172,7 @@ const SHORT_SECTIONS = [
   },
   {
     title: 'StatLab',
-    desc: 'A custom query builder for power users. Build your own leaderboards with any combination of metrics, filters, and thresholds. 50+ sortable metrics, multiple filter operators, preset queries.',
+    desc: 'A custom query builder for power users. Build your own leaderboards with any combination of metrics, filters, and thresholds. 50+ sortable metrics, preset queries, several seasons or grades at once, and team records such as biggest chases and closest wins.',
     src: SCREENSHOT_PATHS.shortStatlab,
   },
   {
@@ -179,12 +182,12 @@ const SHORT_SECTIONS = [
   },
   {
     title: 'Awards & Honours',
-    desc: "Your club's full honours history in one place: annual awards, hall of fame, office bearers, association honours, and premierships. CSV bulk import for back-filling.",
+    desc: "Your club's full honours history in one place: annual awards, hall of fame, life members, office bearers and association honours. A Premierships page fills in from your grand final scorecards. CSV bulk import for back-filling.",
     src: SCREENSHOT_PATHS.shortAwards,
   },
   {
     title: 'Admin Tools',
-    desc: 'Everything your stats volunteers need: display name overrides, grade renames, CSV import/export, manual sync trigger, and multiple admin logins.',
+    desc: 'Everything your stats volunteers need: display name overrides, grade renames, CSV import/export, manual sync trigger, and multiple admin logins. Card review lets you choose between the Cricket Australia scorecard and the club scorecard for a game, with an undo on every change.',
     src: SCREENSHOT_PATHS.shortAdmin,
   },
   {
@@ -196,6 +199,26 @@ const SHORT_SECTIONS = [
     title: 'Match Archive',
     desc: 'Browse every game the club has played, filter by season and grade, and open the full scorecard for any one of them.',
     src: SCREENSHOT_PATHS.shortGames,
+  },
+  {
+    title: 'Player Dashboard',
+    desc: 'Every player gets their own page from one club link and the last four digits of their mobile. Their photo, season dashboard, last five innings and spells, and their cards, plus availability, Fantasy and fees paid if your club runs them. Switch it on from BetterStats. It works without BetterSelect.',
+  },
+  {
+    title: 'Player Cards',
+    desc: 'A collectable card for every player, rated 1 to 99 from their career figures. Weekly packs, packs for runs and wickets, a Winner Winner pack after a win, special cards for centuries and five-fors, swaps, sets and challenges. No paid packs, and nothing is ever taken from a collection.',
+  },
+  {
+    title: 'Stats by Competition',
+    desc: 'Read the club, a team or a player one competition at a time, then narrow by grade type and match type. A club in several associations in one season no longer has them added together, and you can order your competitions the way you want them read.',
+  },
+  {
+    title: 'Club Room Mode',
+    desc: 'A TV slideshow for the clubhouse: sponsors, fixtures and lineups, leaderboards, club records, honour boards and premiership squads, saved posts and your own images. It runs full-screen from a public link, so it keeps playing when nobody is logged in.',
+  },
+  {
+    title: 'Import Your History',
+    desc: 'Load a whole club history from one spreadsheet, bring your records across from CricketStatz, or type in games from the scorebook. Choose whether a match you already hold is left alone or overwritten, and a hand-entered game is never overwritten by a sync.',
   },
 ]
 
@@ -362,7 +385,7 @@ function FeaturesCTA({ onCta }) {
 export default function Features() {
   usePageMeta({
     title: 'Features — Automated Cricket Club Stats | BetterCricket',
-    description: 'Automatic stats sync, rich player profiles, leaderboards, records and season yearbooks, the foundation of every BetterCricket plan. Plus partnership records, StatLab custom queries, awards & honours management, and admin tools.',
+    description: 'Automatic stats sync, rich player profiles, leaderboards, records and season yearbooks, the foundation of every BetterCricket plan. Plus a dashboard and collectable cards for every player, stats by competition, StatLab custom queries, premierships and honour boards, Club Room Mode and history imports.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/features',
   })

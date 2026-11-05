@@ -317,3 +317,14 @@ Adding a club page to an iPhone home screen opened betterat.cricket, because the
 ## v9.124.4.1 (2026-10-20): the manifest link is set in the HTML, not by JavaScript
 
 v9.124.3.2 swapped the manifest link from React, and an iPhone still showed BetterCricket and https://betterat.cricket/ in the Add to Home Screen sheet, because iOS reads the link as the page loads. nginx now rewrites `href="/site.webmanifest"` in `index.html` per request (`map $request_uri $manifest_href`, `sub_filter` inside `location = /index.html`). Tested with a local nginx 1.24 against the real `index.html`: club slug and club sub-pages get `/api/clubs/{slug}/manifest`; `/`, reserved roots and `/index.html` keep the static file. The sheet's URL field is read-only on iOS whenever Open as Web App is on; the URL shown is the manifest `start_url`.
+
+
+## v9.139.6 (2026-11-05): public site sweep for August to November releases
+
+The public site had last been brought up to date in v9.26.2 (17 Aug). Three months of releases were missing from it, including the Player Dashboard, Player Cards, the Selection Whiteboard, Club Room Mode, sponsor tiers, stats by competition and the history imports.
+
+What changed: `data/modules-marketing.js` (Core, BetterSelect, BetterSocials, BetterAdmin, BetterIQ and BetterFantasyCricket features, summaries and highlights; the lineup showcase now says thirteen designs), `pages/marketing/Features.jsx` (bullets, meta description, five new short cards), `pages/marketing/FAQ.jsx` (module answers, a rewritten sponsor answer, two new answers, answer panel cap raised from 600px to 900px), `data/marketing.js` (new comparison rows), `pages/marketing/Compare.jsx` (two intros), `data/pricing.js` (module blurbs, kept short because the calculator truncates them) and `public/llms.txt` (BetterMerch is no longer "coming soon"; added BetterFantasyCricket at $49 and the new Core features).
+
+Facts were taken from the changelog entries, not from memory. New feature cards have no screenshots yet: the module pages' `showcase` and `gallery` images still show the August screens. Left alone on purpose: the FAQ answer "How do we pay?" (says bank transfer or PayID, card payments on the roadmap) because whether checkout is live is a runtime flag (`billing_checkout_enabled`) that the repo cannot show, and the BetterFootball pages, which the marketing site does not cover at all.
+
+Checked: production build, then every edited page driven in Chromium at 390px and 1280px with `/api` stubbed (new text present, no horizontal overflow, the longest FAQ answer not clipped). Not run: a control run against the previous commit, since the check is for text that did not exist before.
