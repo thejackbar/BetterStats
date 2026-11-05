@@ -44,7 +44,7 @@ from stripe import error as stripe_error
 from app.auth.capabilities import (
     require_full_admin,
 )  # route gates added by the access audit
-from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, account_plan_status
+from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, account_plan_status, core_already_paid, core_renewal_date, expand_billing_module
 from app.models.db import BillingInvoice, ClubMembership, Organisation, User, get_db
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
 from app.services import billing_address, billing_pricing, discount_coupons, invoice_billing, module_subscriptions, platform_settings, stripe_client
@@ -99,6 +99,39 @@ async def _require_primary_or_super_admin(db: AsyncSession, current_user: User, 
         raise HTTPException(status_code=403, detail="Only the club's primary admin can manage payment methods")
 
 
+def _paid_through_stripe(club: Organisation, billing_key: str) -> bool:
+    members = set(expand_billing_module(billing_key))
+    rows = [r for r in (club.module_subscriptions or []) if r.module_key in members]
+    return bool(rows) and all(r.billing_source == invoice_billing.SOURCE_STRIPE for r in rows)
+
+
+def _prorated_addon_quote(keys: list[str], renewal) -> dict | None:
+    """The part-year price of ``keys`` from today to ``renewal`` (the club's
+    BetterStats renewal date), in the quote shape the Account page reads, or
+    None when there is nothing to prorate to (no usable renewal date)."""
+    today = invoice_billing.perth_today()
+    base = billing_pricing.price_for(keys, include_core=False)
+    lines = []
+    for li in base["line_items"]:
+        pr = billing_pricing.prorate_to_renewal(li["price"], today, renewal)
+        if pr is None:
+            return None
+        lines.append({**li, "full_price": li["price"], "amount": pr["amount_cents"] / 100})
+    if not lines:
+        return None
+    total = round(sum(li["amount"] for li in lines), 2)
+    return {
+        **base, "line_items": lines, "subtotal": total, "discount": 0, "total": total,
+        "prorated": {"renewal_date": renewal.isoformat(), **{k: pr[k] for k in ("days", "of_days")}},
+    }
+
+
+_NO_CODE_ON_PRORATED = (
+    "A discount code applies to a first subscription or a renewal, not to modules added "
+    "part way through a year."
+)
+
+
 def _with_core(keys: list[str]) -> list[str]:
     # billing_pricing.price_for always force-includes Core as a line item
     # regardless of whether the frontend's checkbox for it was ticked (a
@@ -134,16 +167,31 @@ async def get_quote(
             raise HTTPException(status_code=502, detail=str(e) or "Could not price this change")
         return {"mode": "add_to_existing", **preview}
     schedule = await platform_settings.get_bundle_discount_schedule(db)
-    quote = billing_pricing.price_for(keys, schedule=schedule)
+    # BetterStats already paid (a Super Admin set it Active after a bank
+    # transfer, so no Stripe subscription carries it): price only what was
+    # picked. Quoting Core again here is what made such a club look as if it had
+    # to buy BetterStats a second time just to add BetterSocials.
+    core_paid = core_already_paid(club)
+    if core_paid:
+        keys = _addon_keys(keys)
+    # ...and it renews with BetterStats, so the price is the part-year from
+    # today to BetterStats's renewal date (every module on one date). Without a
+    # usable renewal date there is nothing to line up with: the modules are
+    # priced for a full year from payment and the quote says so.
+    prorated = _prorated_addon_quote(keys, core_renewal_date(club)) if core_paid else None
+    if prorated is not None and body.coupon_code:
+        raise HTTPException(status_code=422, detail=_NO_CODE_ON_PRORATED)
+    quote = prorated or billing_pricing.price_for(keys, schedule=schedule, include_core=not core_paid)
     if body.coupon_code:
         try:
             coupon = await discount_coupons.validate_redemption(
-                db, body.coupon_code, club, is_new_signup=True, candidate_module_keys=_with_core(keys),
+                db, body.coupon_code, club, is_new_signup=True,
+                candidate_module_keys=keys if core_paid else _with_core(keys),
             )
         except discount_coupons.CouponError as e:
             raise HTTPException(status_code=422, detail=str(e))
         quote = _apply_coupon_to_quote(quote, coupon)
-    return {"mode": "new_subscription", **quote}
+    return {"mode": "new_subscription", "core_included": not core_paid, **quote}
 
 
 @router.post("/checkout-session", dependencies=[Depends(require_billing_checkout_enabled)])
@@ -186,7 +234,16 @@ async def create_checkout_session(
         addon_keys = _addon_keys(keys)
         if not addon_keys:
             raise HTTPException(status_code=422, detail="Select at least one module to add")
-        existing_keys = [k for k in BILLABLE_MODULES if plan_by_key.get(k, {}).get("status") == "subscribed"]
+        # Only what the Stripe subscription actually carries. A BetterStats a
+        # Super Admin set Active by hand is "subscribed" too but is not on the
+        # subscription; written into its billing_keys, the next Stripe renewal
+        # would roll Core's renewal date forward unpaid and a cancelled
+        # subscription would remove Core.
+        existing_keys = [
+            k for k in BILLABLE_MODULES
+            if plan_by_key.get(k, {}).get("status") == "subscribed"
+            and _paid_through_stripe(club, k)
+        ]
         try:
             sub = await stripe_client.add_modules_to_subscription(
                 db, club.stripe_subscription_id, existing_keys, addon_keys,
@@ -244,6 +301,27 @@ async def create_checkout_session(
 
     schedule = await platform_settings.get_bundle_discount_schedule(db)
 
+    # Same rule as /quote: a club whose BetterStats is already paid buys only
+    # the modules it picked, so the Checkout Session has no Core line.
+    core_paid = core_already_paid(club)
+    if core_paid:
+        keys = _addon_keys(keys)
+        if not keys:
+            raise HTTPException(status_code=422, detail="Select at least one module to add")
+    priced_keys = keys if core_paid else _with_core(keys)
+    anchor_at = anchor_renewal = None
+    if core_paid:
+        renewal = core_renewal_date(club)
+        if _prorated_addon_quote(keys, renewal) is not None:
+            if body.coupon_code:
+                raise HTTPException(status_code=422, detail=_NO_CODE_ON_PRORATED)
+            # The subscription starts now, bills the part-year to BetterStats's
+            # renewal date, then renews on that date every year.
+            # 00:00 UTC on the date, not Perth midnight (the evening before in
+            # UTC): the webhook reads Stripe's period end as a UTC date, and a
+            # Perth-midnight anchor would stamp every module a day early.
+            anchor_renewal, anchor_at = renewal, datetime.combine(renewal, time.min, tzinfo=timezone.utc)
+
     redemption_id = None
     extra_coupon_id = None
     extra_stackable = False
@@ -252,7 +330,7 @@ async def create_checkout_session(
     if body.coupon_code:
         try:
             redeemed = await discount_coupons.redeem_for_new_signup(
-                db, body.coupon_code, club, _with_core(keys), current_user,
+                db, body.coupon_code, club, priced_keys, current_user,
             )
         except discount_coupons.CouponError as e:
             raise HTTPException(status_code=422, detail=str(e))
@@ -266,7 +344,7 @@ async def create_checkout_session(
         # stripe_billing._upsert_invoice). Same math /quote's preview uses
         # (_apply_coupon_to_quote), so what gets charged matches what was
         # previewed.
-        preview_quote = billing_pricing.price_for(keys, schedule=schedule)
+        preview_quote = billing_pricing.price_for(keys, schedule=schedule, include_core=not core_paid)
         extra_coupon_off = _apply_coupon_to_quote(preview_quote, redeemed["coupon"])["coupon"]["amount_off"]
 
     try:
@@ -289,6 +367,9 @@ async def create_checkout_session(
             extra_coupon_code=extra_coupon_code,
             extra_coupon_off_dollars=extra_coupon_off,
             coupon_redemption_id=redemption_id,
+            include_core=not core_paid,
+            anchor_at=anchor_at,
+            anchor_renewal=anchor_renewal,
         )
     except stripe_client.StripeNotConfigured:
         if redemption_id:

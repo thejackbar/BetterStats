@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -159,6 +159,13 @@ async def handle_checkout_completed(db: AsyncSession, session: dict) -> None:
             renewal_date = epoch_to_date(sub.get("current_period_end"))
         except Exception:
             logger.exception("Stripe: could not retrieve subscription %s for renewal date", subscription_id)
+    if renewal_date is None:
+        # A checkout anchored to the club's BetterStats renewal date remembers
+        # it in metadata (stripe_client.create_checkout_session).
+        try:
+            renewal_date = date.fromisoformat((session.get("metadata") or {}).get("renewal_date") or "")
+        except ValueError:
+            renewal_date = None
 
     now = datetime.now(timezone.utc)
     for key in billing_keys:

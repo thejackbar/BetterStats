@@ -291,3 +291,38 @@ async def sweep_expired_trials(db: AsyncSession, *, now: datetime | None = None)
     if affected:
         await db.commit()
     return affected
+
+
+def align_to_core_renewal(org, billing_key: str, *, today=None) -> dict:
+    """Where a module a Super Admin is about to set Active by hand should
+    renew, and what that part-year costs, so every module lines up with the
+    club's BetterStats renewal date.
+
+    Returns ``{"aligned": bool, "renewal_date": iso|None, "reason": str|None,
+    "days", "of_days", "full_price", "amount"}``. ``amount`` is the list price
+    prorated from today to the renewal date, in dollars before GST, with no
+    bundle discount or code: it is what to collect, not an invoice. When it
+    cannot be worked out (BetterStats is not paid, has no renewal date, or
+    renews today or in the past) ``aligned`` is False and ``reason`` says why,
+    so the screen explains itself instead of leaving a blank date."""
+    from zoneinfo import ZoneInfo
+    from app.auth.modules import core_renewal_date
+    from app.services import billing_pricing
+
+    today = today or _now().astimezone(ZoneInfo("Australia/Perth")).date()
+    out = {"module": billing_key, "aligned": False, "renewal_date": None, "reason": None,
+           "days": None, "of_days": None, "full_price": None, "amount": None}
+    renewal = core_renewal_date(org)
+    if renewal is None:
+        out["reason"] = ("BetterStats has no renewal date to line this module up with. "
+                         "Set BetterStats Active with its renewal date first.")
+        return out
+    price = next((li["price"] for li in billing_pricing.price_for_addon([billing_key])["line_items"]), None)
+    pr = billing_pricing.prorate_to_renewal(price or 0, today, renewal)
+    if pr is None:
+        out["reason"] = ("BetterStats renews today, has already passed its renewal date or renews more "
+                         "than a year away, so there is no part-year to prorate. Set the renewal date by hand.")
+        return out
+    out.update(aligned=True, renewal_date=renewal.isoformat(), days=pr["days"], of_days=pr["of_days"],
+               full_price=price, amount=pr["amount_cents"] / 100 if price else None)
+    return out

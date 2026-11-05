@@ -3462,6 +3462,20 @@ async def patch_module_subscription(
     if "status" in fields and fields["status"] not in ALL_STATUSES:
         raise HTTPException(status_code=422, detail=f"Status must be one of: {', '.join(ALL_STATUSES)}")
     now = _datetime.now(_timezone.utc)
+    # Setting an add-on Active by hand (the club paid by bank transfer): unless
+    # the Super Admin sent a renewal date, it renews on the club's BetterStats
+    # renewal date, so the whole club renews together, and the response says
+    # what that part-year is worth so the right amount is collected. A date that
+    # WAS sent (even null) is the Super Admin's own choice and is never replaced;
+    # a module that is already paid keeps its date.
+    from app.auth.modules import MODULE_CORE as _CORE_KEY, PAID_STATUSES as _PAID, STATUS_ACTIVE as _ACTIVE
+    proration = None
+    if (fields.get("status") == _ACTIVE and "renewal_date" not in fields and module_key != _CORE_KEY
+            and not any(s.status in _PAID for s in (org.module_subscriptions or [])
+                        if billing_key_for(s.module_key) == module_key)):
+        proration = mod_subs.align_to_core_renewal(org, module_key)
+        if proration["aligned"]:
+            fields["renewal_date"] = _date.fromisoformat(proration["renewal_date"])
     # Apply to every member of the billable module (BetterAdmin moves as one).
     if "status" in fields:
         mod_subs.set_status_billing(
@@ -3485,7 +3499,10 @@ async def patch_module_subscription(
         mod_subs.set_trial_end_billing(org, module_key, fields["trial_ends_at"], now=now)
     await db.commit()
     await db.refresh(org, attribute_names=["module_subscriptions"])
-    return _club_payload(org)
+    payload = _club_payload(org)
+    if proration is not None:
+        payload["proration"] = proration
+    return payload
 
 
 @router.delete("/super/clubs/{club_id}/modules/{module_key}")
