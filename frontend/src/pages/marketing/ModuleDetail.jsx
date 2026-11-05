@@ -3,6 +3,7 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
+import AuroraHero from '../../components/marketing/AuroraHero'
 import ZoomableImage from '../../components/marketing/ZoomableImage'
 import ComparisonTable from '../../components/marketing/ComparisonTable'
 import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
@@ -114,19 +115,19 @@ export default function ModuleDetail() {
       <div id="main-content" tabIndex="-1">
         {/* Hero */}
         <section className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
-          <div className="absolute inset-0 hero-glow opacity-70 pointer-events-none" />
+          <AuroraHero accent={m.accent} />
           <div className="max-w-[1280px] mx-auto relative grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
             <div className="col-span-1 lg:col-span-6">
               <div className="flex items-center gap-2.5 mb-6 text-sm">
-                <Link to="/modules" className="text-pb-faint hover:text-pb-text">Modules</Link>
-                <span className="text-pb-faintest">/</span>
+                <Link to="/modules" className="text-pb-dim hover:text-pb-text">Modules</Link>
+                <span className="text-pb-faint">/</span>
                 <span className="text-pb-dim">{m.name}</span>
               </div>
               <div className="flex items-center gap-3 mb-5">
                 <img src={m.logo} alt="" className="w-12 h-12 rounded-xl" />
                 <div className="flex flex-col items-start gap-1">
                   <span className="text-xl font-bold leading-none"><ModuleWordmark name={m.name} accent={m.accent} /></span>
-                  <span className="text-[11px] font-mono uppercase tracking-wide3 text-pb-faint">{m.audience}</span>
+                  <span className="text-[11px] font-mono uppercase tracking-wide3 text-pb-dim">{m.audience}</span>
                 </div>
               </div>
               <h1 className="font-display font-bold text-[34px] sm:text-[44px] lg:text-[54px] tracking-tight leading-[1.02] mb-5">

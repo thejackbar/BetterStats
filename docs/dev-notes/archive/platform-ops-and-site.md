@@ -347,3 +347,7 @@ Aurora is `components/marketing/Aurora.jsx` and `.css`, vendored from React Bits
 
 Checked: production build, then 13 marketing pages in Chromium at 1440 and 390px (images load, no horizontal overflow), the hero with software WebGL (canvas created, no console errors), and a DOM check that module pages have one H1 and one footer.
 
+
+## v9.139.6.3 (2026-11-05): menu legibility over the Aurora, Aurora on module pages
+
+On a real GPU the home page Aurora was far brighter than in the software-WebGL test, and the transparent home nav (`MarketingNav`, `isHome && !scrolled`) lost its links over it. The nav now has a dark top fade (`from-pb-bg/90 via-pb-bg/60 to-transparent`), the Aurora strip starts at `top-16` (below the nav) and runs softer (brightness 0.75, opacity 0.8). The strip is now `components/marketing/AuroraHero.jsx`, used by the home page (brand green and blue) and by `ModuleDetail` with `accent={m.accent}`, which builds a single-hue ramp (a deeper tone, the colour, a lighter tone). Lesson: a headless software render under-reads WebGL glow, so judge Aurora strength against a real-GPU screenshot, and keep any text that sits on it on a scrim.

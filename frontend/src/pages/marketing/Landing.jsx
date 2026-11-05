@@ -6,7 +6,7 @@ import Reveal from '../../components/marketing/Reveal'
 import CountUp from '../../components/marketing/CountUp'
 import Comparison3Way from '../../components/marketing/Comparison3Way'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
-import Aurora from '../../components/marketing/Aurora'
+import AuroraHero from '../../components/marketing/AuroraHero'
 import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
 import TrustedByStrip from '../../components/marketing/TrustedByStrip'
 import { DemoBand, WatchDemoLink } from '../../components/marketing/DemoLinks'
@@ -40,27 +40,7 @@ function Hero({ onCta }) {
   }, [])
   return (
     <section className="relative pt-32 pb-20 px-4 sm:px-6 lg:px-10 overflow-hidden">
-      {/* A glow along the top edge, faded out before the copy so it never fights the text */}
-      <div
-        className="absolute inset-x-0 top-0 h-[520px] sm:h-[600px] z-0 pointer-events-none"
-        style={{
-          WebkitMaskImage: 'linear-gradient(to bottom, #000 35%, transparent 100%)',
-          maskImage: 'linear-gradient(to bottom, #000 35%, transparent 100%)',
-        }}
-      >
-        <Aurora
-          colorStops={stops}
-          amplitude={0.9}
-          blend={0.55}
-          speed={0.6}
-          height={0.36}
-          glow={0.55}
-          brightness={0.9}
-          opacity={0.95}
-          layers={2}
-          dpr={1.5}
-        />
-      </div>
+      <AuroraHero colorStops={stops} />
       <div className="absolute inset-0 hero-glow pointer-events-none" />
 
       <div className="max-w-[1280px] mx-auto relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
