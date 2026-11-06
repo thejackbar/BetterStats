@@ -297,6 +297,117 @@ async def main() -> None:
     check("the lapsed club's pictures are due to be drawn; the others' are not", "L lapsed CC" in due_img3
           and not ({"L trialling CC", "L paying CC", "L stripe CC"} & due_img3), str(due_img3))
 
+
+    # ------------------------------------- re-crawling just these clubs
+    print("re-crawling only the archived and lapsed clubs")
+    async with Session() as s:
+        # put the two clubs the flip test changed back as they started
+        await s.execute(text("UPDATE organisations SET archived_at = now() WHERE id = CAST(:o AS uuid)"), {"o": arch_org2})
+        await s.execute(text("UPDATE organisations SET archived_at = NULL WHERE id = CAST(:o AS uuid)"), {"o": live_org})
+        await s.commit()
+        grp = await ct.due_clubs(s, 500, returning_only=True, force=True, type_modes={})
+        due_only = await ct.due_clubs(s, 500, returning_only=True, type_modes={})
+        everyone = {d["name"] for d in await ct.due_clubs(s, 500, force=True, type_modes={})}
+    why = {d["name"]: d["why"] for d in grp}
+    check("the group is exactly the archived clubs and the lapsed-trial clubs, labelled",
+          why == {"Archived Never Pulled CC": "archived", "Archived Pulled CC": "archived",
+                  "L lapsed CC": "lapsed", "L cancelled CC": "lapsed"}, str(why))
+    check("a club never linked to BetterCricket, a live customer, a trialling club and a paying club are not in it",
+          not ({"Plain Prospect CC", "Live Customer CC", "Trialist CC", "L trialling CC", "L paying CC", "L stripe CC", "L norows CC"} & set(why)))
+    check("and the force option on its own does reach other clubs (so the group filter is what narrows it)",
+          {"Plain Prospect CC", "Archived Pulled CC"} <= everyone and "Live Customer CC" not in everyone, str(sorted(everyone)))
+    check("due-only keeps just the group's clubs that are due now (never pulled), not the ones with a current snapshot",
+          {d["name"] for d in due_only} == {"Archived Never Pulled CC", "L cancelled CC"}, str({d["name"] for d in due_only}))
+    check("never-pulled clubs come first", [d["name"] for d in grp][:2] and set(d["name"] for d in grp[:2]) == {"Archived Never Pulled CC", "L cancelled CC"},
+          str([d["name"] for d in grp]))
+
+    class StubAPI:
+        pulls: list = []
+        calls = 0
+
+        def __init__(self, pacer=None):
+            pass
+
+        async def seasons(self, org):
+            StubAPI.pulls.append(org)
+            StubAPI.calls += 1
+            return [{"id": "S1", "name": "Summer 2025/26", "startDate": "2025-10-01"}]
+
+        async def batting(self, org, sid, grades=None):
+            return [{"id": f"p{i}", "name": f"Batter {i}", "statistics": {"battingAggregate": 400 - i * 10, "battingInnings": 12,
+                     "battingNotOuts": 1, "battingHighScore": 80, "batting50s": 2, "batting100s": 0}} for i in range(5)]
+
+        async def bowling(self, org, sid, grades=None):
+            return [{"id": f"w{i}", "name": f"Bowler {i}", "statistics": {"bowlingWickets": 20 - i, "bowlingRuns": 300,
+                     "bowlingBalls": 400, "bowlingBestInnings": "5/20"}} for i in range(5)]
+
+        async def fielding(self, org, sid, grades=None):
+            return []
+
+        async def teams(self, org, sid):
+            self._org = org
+            return [{"id": "T", "grades": [{"id": "G1", "name": "A Grade"}]}]
+
+        async def ladder(self, gid):
+            return {"ladders": [{"name": "Overall", "pools": [{"teams": [
+                {"rank": 2, "displayName": "Us", "owningOrganisation": {"id": self._org},
+                 "ladderData": [{"id": "played", "val": 14}, {"id": "won", "val": 9}, {"id": "lost", "val": 5}, {"id": "competitionPoints", "val": 30}]},
+                {"rank": 1, "displayName": "T1", "owningOrganisation": {"id": "x"}, "ladderData": []}]}]}]}
+
+    async with Session() as s:
+        before = {r[0]: r[1] for r in (await s.execute(text(
+            "SELECT mc.name, t.pulled_at FROM marketing_clubs mc LEFT JOIN club_teaser_snapshots t ON t.marketing_club_id = mc.id"))).all()}
+    out = await ct.run_batch(100, session_maker=Session, api_factory=StubAPI, type_modes={}, returning_only=True, force=True)
+    async with Session() as s:
+        after = {r[0]: r[1] for r in (await s.execute(text(
+            "SELECT mc.name, t.pulled_at FROM marketing_clubs mc LEFT JOIN club_teaser_snapshots t ON t.marketing_club_id = mc.id"))).all()}
+    touched = {n for n in after if after[n] != before.get(n)}
+    check("a forced run re-pulls every club in the group, including ones with a current snapshot, and no other club",
+          out["due"] == 4 and touched == {"Archived Never Pulled CC", "Archived Pulled CC", "L lapsed CC", "L cancelled CC"}, f"{out['due']} {sorted(touched)}")
+    check("the run reports what it found per status and its calls", out["ok"] + out["empty"] + out["junior_only"] + out["error"] == 4 and out["calls"] > 0, str(out))
+    check("the clubs it labelled carry their reason through to the run's detail",
+          {d["name"]: d["why"] for d in out["detail"]}["L lapsed CC"] == "lapsed")
+
+    # the script itself, with the live Cricket Australia client swapped for the stub
+    import contextlib
+    from app.scripts import pull_returning_club_teasers as script
+    from app.services import club_teaser as ct_mod
+    real = ct_mod.LiveAPI
+    ct_mod.LiveAPI = StubAPI
+    async with engine.begin() as c:
+        await c.execute(text("CREATE TABLE IF NOT EXISTS marketing_crawl_control (id SMALLINT PRIMARY KEY, paused BOOLEAN NOT NULL DEFAULT FALSE, "
+                             "updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"))
+        await c.execute(text("INSERT INTO marketing_crawl_control (id, paused) VALUES (1, FALSE) ON CONFLICT (id) DO UPDATE SET paused = FALSE"))
+    try:
+        async def run(argv):
+            buf = io.StringIO()
+            StubAPI.pulls.clear()
+            with contextlib.redirect_stdout(buf):
+                rc = await script.main(argv)
+            return rc, buf.getvalue()
+        rc, dry = await run(["--no-type-filter"])
+        check("the script's dry run says how many are in the group and makes no call at all",
+              rc == 0 and "clubs in the group: 4 (2 archived, 2 with an expired trial" in dry and StubAPI.pulls == [] and "Dry run" in dry, dry[:400])
+        check("it lists the clubs with their reason", "Archived Never Pulled CC" in dry and "archived" in dry and "lapsed" in dry)
+        rc, applied = await run(["--no-type-filter", "--apply", "--rate", "10", "--pause", "0"])
+        check("--apply pulls the group and says so", rc == 0 and len(set(StubAPI.pulls)) == 4 and "paced at 10 calls/s" in applied, applied[:500])
+        rc, sample = await run(["--no-type-filter", "--apply", "--rate", "10", "--pause", "0", "--limit", "1"])
+        check("--limit takes just the first club (never-pulled clubs first)", len(StubAPI.pulls) == 1, str(StubAPI.pulls))
+        async with engine.begin() as c:
+            await c.execute(text("UPDATE marketing_crawl_control SET paused = TRUE WHERE id = 1"))
+        rc, stopped = await run(["--no-type-filter", "--apply", "--rate", "10", "--pause", "0"])
+        check("the operator's Stop switch halts it before any club is pulled", StubAPI.pulls == [] and "Stopped by the operator" in stopped, stopped[-300:])
+        async with engine.begin() as c:
+            await c.execute(text("UPDATE marketing_crawl_control SET paused = FALSE WHERE id = 1"))
+        try:
+            await script.main(["--rate", "50"])
+            bad_rate = False
+        except SystemExit:
+            bad_rate = True
+        check("a rate above the allowed maximum is refused", bad_rate)
+    finally:
+        ct_mod.LiveAPI = real
+
     async with engine.begin() as c:
         await c.execute(text("DELETE FROM org_module_subscriptions WHERE organisation_id IN (SELECT id FROM organisations WHERE slug LIKE 'arch-%')"))
         await c.execute(text("DELETE FROM club_teaser_snapshots"))

@@ -50,7 +50,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.club_teaser_link import FINISHED_WITH_TRIAL_SQL, NOT_A_CUSTOMER_SQL
+from app.services.club_teaser_link import ARCHIVED_ORG_SQL, FINISHED_WITH_TRIAL_SQL, NOT_A_CUSTOMER_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -621,28 +621,42 @@ async def type_filtered_ids(session: AsyncSession, modes: Optional[dict]) -> Opt
 
 async def due_clubs(session: AsyncSession, limit: int, *, now: Optional[datetime] = None,
                     include_trialists: bool = False, club_id: Optional[str] = None,
-                    type_modes: Optional[dict] = None) -> list[dict]:
+                    type_modes: Optional[dict] = None, returning_only: bool = False,
+                    force: bool = False) -> list[dict]:
     """Clubs whose snapshot is missing or due, never-pulled first, then clubs
     with an emailable contact (the ones a campaign will actually reach), then
-    the longest overdue. ``type_modes`` is the Directory type filter."""
+    the longest overdue. ``type_modes`` is the Directory type filter.
+
+    ``returning_only`` narrows to clubs that were once BetterCricket's and may
+    come back: the BetterCricket club behind the directory row is archived, or
+    its trial expired with no subscription (``FINISHED_WITH_TRIAL_SQL``); each
+    row then carries ``why`` ('archived' or 'lapsed'). ``force`` ignores whether
+    a club is due, so a club with a current snapshot is chosen as well (never
+    pulled first, then the longest since pulled)."""
     now = now or datetime.now(timezone.utc)
     trial = "" if include_trialists else "AND " + _NOT_TRIALLING
     only = "AND mc.id = CAST(:club AS uuid)" if club_id else ""
     allowed = await type_filtered_ids(session, type_modes)
     if allowed is not None:
         only += " AND mc.id = ANY(CAST(:allowed AS uuid[]))"
+    if returning_only:
+        only += " AND " + FINISHED_WITH_TRIAL_SQL
+    why = (", CASE WHEN " + ARCHIVED_ORG_SQL + " THEN 'archived' ELSE 'lapsed' END AS why") if returning_only else ""
+    order_tail = ("t.pulled_at ASC NULLS FIRST, t.next_pull_at ASC NULLS FIRST" if force
+                  else "t.next_pull_at ASC NULLS FIRST")
+    is_due = "TRUE" if force else """(t.id IS NULL OR t.next_pull_at IS NULL OR t.next_pull_at <= :now
+               OR (t.status = 'ok' AND COALESCE((t.snapshot->>'schema')::int, 0) < :schema))"""
     rows = (await session.execute(text(f"""
-        SELECT {_CLUB_COLS}
+        SELECT {_CLUB_COLS}{why}
         FROM marketing_clubs mc
         LEFT JOIN club_teaser_snapshots t ON t.marketing_club_id = mc.id
         WHERE {_TARGET_WHERE} {trial} {only}
-          AND (t.id IS NULL OR t.next_pull_at IS NULL OR t.next_pull_at <= :now
-               OR (t.status = 'ok' AND COALESCE((t.snapshot->>'schema')::int, 0) < :schema))
+          AND {is_due}
         ORDER BY (t.id IS NULL) DESC,
                  EXISTS (SELECT 1 FROM marketing_club_contacts c
                           WHERE c.marketing_club_id = mc.id AND c.subscribed
                             AND COALESCE(c.email, '') <> '') DESC,
-                 t.next_pull_at ASC NULLS FIRST
+                 {order_tail}
         LIMIT :limit
     """), {"now": now, "limit": limit, "schema": SCHEMA_VERSION, **({"club": club_id} if club_id else {}),
            **({"allowed": allowed} if allowed is not None else {})})).mappings().all()
@@ -912,8 +926,10 @@ async def run_batch(limit: int, *, session_maker=None, api_factory: Callable[[],
                     should_stop: Optional[Callable[[AsyncSession], Awaitable[bool]]] = None,
                     club_concurrency: int = 2, pause_seconds: float = 0.0,
                     include_trialists: bool = False, club_id: Optional[str] = None,
-                    dry_run: bool = False, type_modes: Optional[dict] = None) -> dict:
-    """Pull every due club up to ``limit``. Each club runs on its own session
+                    dry_run: bool = False, type_modes: Optional[dict] = None,
+                    returning_only: bool = False, force: bool = False) -> dict:
+    """Pull every due club up to ``limit`` (``returning_only`` / ``force`` as in
+    ``due_clubs``). Each club runs on its own session
     with its own call counter, so one failure or stall touches nobody else, and
     ``should_stop`` is asked between clubs so the operator's Stop switch halts
     the traffic within one club's worth of calls."""
@@ -921,11 +937,11 @@ async def run_batch(limit: int, *, session_maker=None, api_factory: Callable[[],
     session_maker = session_maker or async_session_maker
     async with session_maker() as s:
         todo = await due_clubs(s, limit, include_trialists=include_trialists, club_id=club_id,
-                               type_modes=type_modes)
+                               type_modes=type_modes, returning_only=returning_only, force=force)
     summary = {"due": len(todo), "ok": 0, "empty": 0, "junior_only": 0, "error": 0,
                "changed": 0, "calls": 0, "stopped": False, "dry_run": dry_run,
                "detail": [{"name": c["name"], "state": c["state"], "status": None, "calls": 0,
-                           "secs": 0.0}
+                           "secs": 0.0, "why": c.get("why")}
                           for c in todo]}
     by_id = {str(c["id"]): d for c, d in zip(todo, summary["detail"])}
     if dry_run or not todo:
