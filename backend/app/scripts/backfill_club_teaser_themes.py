@@ -34,6 +34,12 @@ from app.services.club_teaser_link import NOT_A_CUSTOMER_SQL
 
 DEFAULT_RATE = 2.0
 MAX_RATE = 10.0
+CALL_TIMEOUT = 30.0     # a search or a logo download that takes longer is given up on, so one hung request cannot freeze a run
+PROGRESS_EVERY = 25     # clubs between progress lines
+
+
+def _say(message: str) -> None:
+    print(message, flush=True)   # flushed: redirected to a file, Python would otherwise hold it back until the end
 
 
 async def due(session, *, limit: int = 0, club: str = "", redo: bool = False) -> list:
@@ -58,7 +64,7 @@ async def due(session, *, limit: int = 0, club: str = "", redo: bool = False) ->
 
 
 async def run(session_maker, *, limit=0, club="", redo=False, apply=False, rate=DEFAULT_RATE,
-              ignore_stop=False, fetch=tt.fetch_logo, finder=tt.find_logo, pacer=None, out=print) -> dict:
+              ignore_stop=False, fetch=tt.fetch_logo, finder=tt.find_logo, pacer=None, out=_say) -> dict:
     async with session_maker() as s:
         clubs = await due(s, limit=limit, club=club, redo=redo)
     summary = {"due": len(clubs), "read": 0, "no_accent": 0, "unreadable": 0, "no_logo": 0,
@@ -71,7 +77,20 @@ async def run(session_maker, *, limit=0, club="", redo=False, apply=False, rate=
             out(f"  ... and {len(clubs) - 25} more")
         return summary
     pacer = pacer or CallPacer(rate)
-    for c in clubs:
+
+    async def bounded(coro):
+        try:
+            return await asyncio.wait_for(coro, CALL_TIMEOUT)
+        except asyncio.TimeoutError:
+            return None
+
+    async def fetch_bounded(url):
+        return await bounded(fetch(url))
+
+    for n, c in enumerate(clubs, 1):
+        if n > 1 and (n - 1) % PROGRESS_EVERY == 0:
+            out(f"  {n - 1}/{len(clubs)} clubs done: {summary['read']} read, "
+                f"{summary['found']} crests found, {summary['no_logo']} with none, {summary['unreadable']} unreadable")
         if not ignore_stop:
             async with session_maker() as s:
                 if await club_directory.is_crawl_paused(s):
@@ -80,7 +99,7 @@ async def run(session_maker, *, limit=0, club="", redo=False, apply=False, rate=
         logo = (c["logo_url"] or "").strip()
         if not logo:
             await pacer.wait()
-            logo = await finder(c["name"], c["guid"])
+            logo = await bounded(finder(c["name"], c["guid"]))
             if not logo:
                 summary["no_logo"] += 1
                 continue
@@ -89,7 +108,7 @@ async def run(session_maker, *, limit=0, club="", redo=False, apply=False, rate=
                 await tt.remember_logo(s, c["club_id"], logo)
         await pacer.wait()
         async with session_maker() as s:
-            theme = await tt.store_theme(s, c["club_id"], logo, fetch=fetch, force=True)
+            theme = await tt.store_theme(s, c["club_id"], logo, fetch=fetch_bounded, force=True)
         if theme is None:
             summary["unreadable"] += 1
         else:

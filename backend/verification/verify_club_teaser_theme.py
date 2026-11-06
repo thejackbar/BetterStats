@@ -272,6 +272,25 @@ async def main():
     searched.clear()
     old = await bf.run(Session, apply=False, fetch=stub_fetch, finder=finder, out=lines.append)
     check("a theme made under an older set of colour rules is due again (one with both colours is not)", old["due"] >= 1 and any("Crest Red CC" in l for l in lines[-5:]), f"{old} {lines[-3:]}")
+    async def slow_finder(name, guid):
+        await asyncio.sleep(5)
+        return "https://good.example/two.png"
+    real_timeout, real_every = bf.CALL_TIMEOUT, bf.PROGRESS_EVERY
+    bf.CALL_TIMEOUT = 0.05
+    async with Session() as s:
+        await s.execute(text("UPDATE marketing_clubs SET logo_url = NULL WHERE id = CAST(:i AS uuid)"), {"i": K["c"]["id"]})
+        await s.commit()
+    hung = await bf.run(Session, apply=True, club="Broken Logo", fetch=stub_fetch, finder=slow_finder, pacer=Pacer(), out=lines.append)
+    bf.CALL_TIMEOUT = real_timeout
+    check("a search that hangs is given up on, counted as no crest, and the run carries on", hung["no_logo"] == 1 and hung["found"] == 0, str(hung))
+    async with Session() as s:
+        await s.execute(text("UPDATE marketing_clubs SET logo_url = 'https://gone.example/x.png' WHERE id = CAST(:i AS uuid)"), {"i": K["c"]["id"]})
+        await s.commit()
+    bf.PROGRESS_EVERY = 2
+    progress: list[str] = []
+    await bf.run(Session, apply=True, redo=True, fetch=stub_fetch, finder=finder, pacer=Pacer(), out=progress.append)
+    bf.PROGRESS_EVERY = real_every
+    check("a long run says how far it has got every so many clubs, not only at the end", sum("clubs done" in l for l in progress) >= 1, str(progress))
     unfound = await bf.run(Session, apply=True, club="Nothing Like This", fetch=stub_fetch, finder=finder, pacer=Pacer(), out=lines.append)
     check("a club whose crest cannot be found is counted and left alone",
           unfound["due"] == 0)
