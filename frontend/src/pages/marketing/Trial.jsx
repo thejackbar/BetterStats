@@ -386,6 +386,7 @@ export default function Trial() {
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardClub, setWizardClub] = useState(null)
   const [actionClub, setActionClub] = useState(null)   // club whose choose-modal is open
+  const [picking, setPicking] = useState(null)         // id of the club whose teaser page is being looked up
   const [extensionClub, setExtensionClub] = useState(null)   // paused club asking for more trial time
 
   // Search-first hero state.
@@ -536,7 +537,7 @@ export default function Trial() {
   // status: a live club opens its page, a new one opens the Set Up / reach-out
   // choice. The beacon is fire-and-forget and survives the client-side navigate
   // (no page unload), so the click is logged either way.
-  const handleClubClick = (club) => {
+  const handleClubClick = async (club) => {
     api.publicSelfServeTrackStep('club_prepared', getVisitorId(), {
       name: orgName(club), org_id: club.id,
     }).catch(() => {})
@@ -550,6 +551,18 @@ export default function Trial() {
       navigate(`/${club.already_registered_slug}`)
       return
     }
+    // A club we hold a season page for (built from Cricket Australia's public
+    // figures) goes straight to it; the page invites them to claim the club. A
+    // club we hold none for, or a lookup that fails, gets the ordinary choice.
+    if (picking) return
+    setPicking(club.id || orgName(club))
+    let token = null
+    try {
+      const t = await api.publicTeaserByClub([club.id, club.organisationGuid, club.playHQId])
+      if (t?.found && t.token) token = t.token
+    } catch { /* fall through to the ordinary choice */ }
+    setPicking(null)
+    if (token) { navigate(`/preview/${encodeURIComponent(token)}`); return }
     setActionClub(club)
   }
 
@@ -638,11 +651,15 @@ export default function Trial() {
                       key={club.id || orgName(club)}
                       type="button"
                       onClick={() => handleClubClick(club)}
-                      className="w-full pb-card bg-pb-surface p-4 flex items-center gap-3 text-left hover:border-accent/50 transition"
+                      disabled={!!picking}
+                      aria-busy={picking === (club.id || orgName(club))}
+                      className="w-full pb-card bg-pb-surface p-4 flex items-center gap-3 text-left hover:border-accent/50 transition disabled:opacity-60"
                     >
                       <ClubLogo club={club} />
                       <span className="flex-1 min-w-0 font-display font-semibold text-base truncate">{orgName(club)}</span>
-                      <span className="text-pb-faint shrink-0">→</span>
+                      <span className="text-pb-faint shrink-0" data-testid="trial-pick-state">
+                        {picking === (club.id || orgName(club)) ? 'Opening…' : '→'}
+                      </span>
                     </button>
                   ))}
 

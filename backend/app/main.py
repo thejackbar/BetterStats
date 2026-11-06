@@ -6465,6 +6465,18 @@ async def lifespan(app: FastAPI):
         _teaser_task.add_done_callback(_BACKGROUND_TASKS.discard)
     except Exception:
         logger.exception("could not start the club teaser crawl")
+    # The teaser picture drawer: does nothing until "Draw pictures automatically"
+    # is switched on in the Club Directory teaser panel, then draws whatever the
+    # crawl has settled (services/club_teaser_images.run_forever). Same holding
+    # and shutdown as the crawl above; a failure to start never blocks boot.
+    _teaser_images_task = None
+    try:
+        from app.services import club_teaser_images as _club_teaser_images
+        _teaser_images_task = asyncio.create_task(_club_teaser_images.run_forever(), name="club_teaser_images")
+        _BACKGROUND_TASKS.add(_teaser_images_task)
+        _teaser_images_task.add_done_callback(_BACKGROUND_TASKS.discard)
+    except Exception:
+        logger.exception("could not start the club teaser picture drawer")
     # Apply the super-admin-set CRM sweep cadences (Tier 2 / Tier 3) to the
     # just-started scheduler — the jobs were registered with the defaults, this
     # reconciles them to the persisted values so a restart keeps a custom cadence.
@@ -6482,6 +6494,8 @@ async def lifespan(app: FastAPI):
     yield
     if _teaser_task is not None:
         _teaser_task.cancel()
+    if _teaser_images_task is not None:
+        _teaser_images_task.cancel()
     stop_scheduler()
     logger.info("BetterStats API stopped")
 

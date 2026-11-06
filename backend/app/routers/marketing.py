@@ -85,9 +85,11 @@ async def teaser_status(db: AsyncSession = Depends(get_db), _=Depends(require_su
 
 async def _images_block(db: AsyncSession) -> dict:
     from app.services import club_teaser_images as ti
+    from app.services import platform_settings as ps
     last = ti.RUN_STATE.get("last") or {}
     return {**await ti.images_progress(db),
             "running": bool(ti.RUN_STATE.get("running")),
+            "auto": await ps.get_club_teaser_auto_draw(db),
             "last": ({"drawn": last.get("drawn", 0), "failed": len(last.get("failed") or []),
                       "status": last.get("status"), "error": last.get("error")}
                      if last else None)}

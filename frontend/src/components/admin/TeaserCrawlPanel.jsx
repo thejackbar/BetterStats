@@ -168,6 +168,17 @@ export default function TeaserCrawlPanel() {
     } catch (e) { setErr(e.message || 'Could not start drawing.') } finally { setBusy('') }
   }
 
+  const toggleAuto = async () => {
+    setBusy('auto'); setMsg(''); setErr('')
+    try {
+      const on = !img.auto
+      await api.superUpdateGeneralSettings({ club_teaser_auto_draw_enabled: on })
+      setMsg(on ? 'Drawing pictures automatically. It works through the clubs the crawl has finished with.'
+                : 'Automatic drawing is off. A batch in progress finishes first.')
+      await load()
+    } catch (e) { setErr(e.message || 'Could not change automatic drawing.') } finally { setBusy('') }
+  }
+
   const achieved = p.calls_last_hour ? (p.calls_last_hour / 3600).toFixed(2) : null
 
   return (
@@ -266,12 +277,19 @@ export default function TeaserCrawlPanel() {
               Pictures for emails and ads: <span className="text-pb-text font-semibold" data-testid="teaser-images-ready">{num(img.ready)}</span> drawn
               {' · '}<span className="text-pb-text font-semibold" data-testid="teaser-images-pending">{num(img.pending)}</span> waiting
               {img.stale > 0 ? ` (${num(img.stale)} out of date)` : ''}
+              {img.waiting > 0 ? <> · <span data-testid="teaser-images-waiting">{num(img.waiting)}</span> wait for the crawl to refresh them first</> : ''}
               {img.running ? ' · drawing now' : ''}
             </p>
             <button className={BTN} data-testid="teaser-draw"
                     disabled={busy !== '' || img.running || img.pending === 0} onClick={draw}>
               {busy === 'draw' ? '...' : (img.pending > 0 ? `Draw ${Math.min(img.pending, RENDER_BATCH)} pictures` : 'Draw pictures')}
             </button>
+            <label className="flex items-center gap-1.5 cursor-pointer select-none"
+                   title="Draw the pictures by itself as the crawl finishes with each club, a batch at a time. It carries on after a restart.">
+              <input type="checkbox" className="accent-pb-accent" data-testid="teaser-auto"
+                     checked={!!img.auto} disabled={busy !== ''} onChange={toggleAuto} />
+              Draw pictures automatically
+            </label>
           </div>
         )}
         {img?.last && img.last.status === 'error' && (

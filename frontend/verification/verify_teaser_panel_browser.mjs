@@ -65,6 +65,9 @@ async function open({ initial = status(), width = 1400, refuse = null, pack = nu
                window_start: body.club_teaser_window_start ?? live.window_start,
                window_end: body.club_teaser_window_end ?? live.window_end,
                estimate: rate ? RUNNING.estimate : null }
+      if ('club_teaser_auto_draw_enabled' in body) {
+        live = { ...live, images: { ...live.images, auto: body.club_teaser_auto_draw_enabled } }
+      }
       return json({})
     }
     if (/marketing\/teaser\/refresh/.test(p) && req.method() === 'POST') {
@@ -114,6 +117,7 @@ const val = async (l) => (await l.count() ? await l.first().inputValue() : null)
 const t = (page, id) => page.locator(`[data-testid="${id}"]`)
 const dis = async (l) => (await l.count() ? await l.first().isDisabled() : false)
 const ena = async (l) => (await l.count() ? await l.first().isEnabled() : false)
+const chk = async (l) => (await l.count() ? await l.first().isChecked() : false)
 const press = async (l) => { if (await l.count()) await l.first().click() }
 const put = async (l, v) => { if (await l.count()) await l.first().fill(v) }
 const attr = async (l, a) => (await l.count() ? await l.first().getAttribute(a) : null)
@@ -452,6 +456,47 @@ const IMAGES = { ready: 12, pending: 7, stale: 2, running: false, last: null }
     return el ? { row: el.scrollWidth - el.clientWidth, page: document.documentElement.scrollWidth - document.documentElement.clientWidth } : null
   })
   ck('the ad pack row does not overflow at 390px', m && m.row <= 0 && m.page <= 0, JSON.stringify(m))
+  await ctx.close()
+}
+
+
+// ---- 12. Draw pictures automatically ------------------------------------------
+{
+  const { page, ctx, errors, patches } = await open({ initial: status({ images: { ...IMAGES, auto: false, waiting: 0 } }) })
+  const box = t(page, 'teaser-auto')
+  ck('the automatic drawing checkbox is there and starts off', await box.count() === 1 && !(await chk(box)))
+  const before = patches.length
+  await press(box)
+  await page.waitForTimeout(500)
+  ck('ticking it sends exactly one change, the one setting, as true',
+     patches.length === before + 1 && JSON.stringify(patches.at(-1)) === JSON.stringify({ club_teaser_auto_draw_enabled: true }), JSON.stringify(patches))
+  ck('and it then shows ticked, from what the server reports back', await chk(box))
+  ck('with a line saying what it will do', /automatically/i.test(await textOf(t(page, 'teaser-msg'))))
+  await press(box)
+  await page.waitForTimeout(500)
+  ck('unticking sends false', JSON.stringify(patches.at(-1)) === JSON.stringify({ club_teaser_auto_draw_enabled: false }) && !(await chk(box)))
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ initial: status({ images: { ...IMAGES, auto: true, waiting: 41 } }) })
+  ck('a switched-on drawer shows ticked', await t(page, 'teaser-auto').count() === 1 && await chk(t(page, 'teaser-auto')))
+  ck('clubs still waiting for the crawl to refresh them are counted, with the reason',
+     (await textOf(t(page, 'teaser-images-waiting'))) === '41' && /wait for the crawl/.test(await textOf(t(page, 'teaser-images'))))
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ initial: status({ images: { ...IMAGES, auto: false, waiting: 0 } }) })
+  ck('with none waiting on the crawl, that part of the line is not shown', await t(page, 'teaser-images-waiting').count() === 0)
+  await ctx.close()
+}
+{
+  const { page, ctx } = await open({ initial: status({ images: { ...IMAGES, auto: true, waiting: 41 } }), width: 390 })
+  const m = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="teaser-panel"]')
+    return el ? { panel: el.scrollWidth - el.clientWidth, page: document.documentElement.scrollWidth - document.documentElement.clientWidth } : null
+  })
+  ck('the pictures row with the checkbox does not overflow at 390px', m && m.panel <= 0 && m.page <= 0, JSON.stringify(m))
   await ctx.close()
 }
 

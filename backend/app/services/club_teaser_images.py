@@ -68,6 +68,15 @@ TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 RENDER_TIMEOUT_MS = 30_000
 # Never render more than this many clubs in one run, whatever the caller asks.
 MAX_BATCH = 500
+# How much one run draws at once. Each page is a small static card, but several
+# Chromium pages in the API container add up: at most this many pages are open
+# at any moment, however many clubs and formats are in flight.
+PAGES_AT_ONCE = 4
+CLUBS_AT_ONCE = 2
+# The always-on drawer (run_forever): clubs per batch, and how long a club that
+# failed is left alone before it is tried again.
+AUTO_BATCH = 25
+FAIL_SKIP_SECONDS = 6 * 3600
 
 
 def valid_format(fmt: str) -> bool:
@@ -183,30 +192,48 @@ _DUE_SQL = """
       AND mc.existing_org_id IS NULL
       AND t.image_version IS DISTINCT FROM t.version
 """
+# A snapshot written under an older schema is about to be replaced by the crawl
+# (any change of payload re-pulls it and moves its version), so a picture drawn
+# from it would be thrown away. Only current-schema snapshots are drawn, unless
+# the operator names a club.
+_CURRENT_SCHEMA = " AND COALESCE((t.snapshot->>'schema')::int, 0) >= :schema"
+
+
+def _schema_version() -> int:
+    from app.services.club_teaser import SCHEMA_VERSION
+    return SCHEMA_VERSION
 
 
 async def images_progress(session: AsyncSession) -> dict:
-    """What the panel shows: pictures drawn and pictures waiting. Counts only
-    clubs that are not customers yet, like the render itself."""
+    """What the panel shows: pictures drawn, pictures waiting to be drawn, and
+    pictures that cannot be drawn yet because the crawl has not re-pulled the
+    club under the current schema. Counts only clubs that are not customers yet,
+    like the render itself."""
     row = (await session.execute(text("""
-        SELECT count(*) FILTER (WHERE t.image_version IS NOT DISTINCT FROM t.version) AS ready,
-               count(*) FILTER (WHERE t.image_version IS DISTINCT FROM t.version) AS pending,
-               count(*) FILTER (WHERE t.image_version IS NOT NULL
-                                AND t.image_version <> t.version) AS stale
-        FROM club_teaser_snapshots t
-        JOIN marketing_clubs mc ON mc.id = t.marketing_club_id
-        WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND mc.existing_org_id IS NULL
-    """))).mappings().first()
-    return {"ready": row["ready"], "pending": row["pending"], "stale": row["stale"]}
+        WITH c AS (
+          SELECT t.version, t.image_version,
+                 COALESCE((t.snapshot->>'schema')::int, 0) >= :schema AS current
+          FROM club_teaser_snapshots t
+          JOIN marketing_clubs mc ON mc.id = t.marketing_club_id
+          WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND mc.existing_org_id IS NULL)
+        SELECT count(*) FILTER (WHERE image_version IS NOT DISTINCT FROM version) AS ready,
+               count(*) FILTER (WHERE image_version IS DISTINCT FROM version AND current) AS pending,
+               count(*) FILTER (WHERE image_version IS DISTINCT FROM version AND NOT current) AS waiting,
+               count(*) FILTER (WHERE image_version IS NOT NULL AND image_version <> version) AS stale
+        FROM c
+    """), {"schema": _schema_version()})).mappings().first()
+    return {"ready": row["ready"], "pending": row["pending"], "waiting": row["waiting"], "stale": row["stale"]}
 
 
 async def due_clubs(session: AsyncSession, limit: int, *, club_id: Optional[str] = None,
-                    force: bool = False, missing_files: bool = False) -> list:
+                    force: bool = False, missing_files: bool = False,
+                    skip: Optional[Iterable[str]] = None) -> list:
     """The clubs to draw now: never drawn first, then the longest out of date.
     ``force`` redraws clubs that are up to date (a design change).
     ``missing_files`` is for a restore or an unmounted volume: clubs marked as
     drawn whose card file is not on disk. Unlike ``force`` it makes progress
-    across runs, because a club drawn this time no longer matches."""
+    across runs, because a club drawn this time no longer matches.
+    ``skip`` is a set of tokens to leave out (clubs that just failed)."""
     limit = max(0, min(int(limit), MAX_BATCH))
     if limit == 0:
         return []
@@ -226,6 +253,13 @@ async def due_clubs(session: AsyncSession, limit: int, *, club_id: Optional[str]
     if club_id:
         where += " AND t.marketing_club_id = CAST(:cid AS uuid)"
         params["cid"] = str(club_id)
+    else:
+        where += _CURRENT_SCHEMA
+        params["schema"] = _schema_version()
+    skip = sorted({str(t) for t in (skip or [])})
+    if skip:
+        where += " AND t.token <> ALL(CAST(:skip AS text[]))"
+        params["skip"] = skip
     rows = (await session.execute(text(
         "SELECT t.id, t.token, t.version, t.image_version, mc.id AS club_id, mc.name " + where +
         " ORDER BY (t.image_version IS NULL) DESC, t.changed_at NULLS LAST LIMIT :n"),
@@ -251,6 +285,7 @@ class ChromiumRenderer:
         self._exe = executable_path if executable_path is not None else settings.teaser_chromium_path
         self._pw = None
         self._browser = None
+        self._pages = asyncio.Semaphore(PAGES_AT_ONCE)
 
     async def __aenter__(self):
         from playwright.async_api import async_playwright
@@ -274,6 +309,10 @@ class ChromiumRenderer:
                 await self._pw.stop()
 
     async def shoot(self, url: str, width: int, height: int) -> bytes:
+        async with self._pages:
+            return await self._shoot(url, width, height)
+
+    async def _shoot(self, url: str, width: int, height: int) -> bytes:
         ctx = await self._browser.new_context(viewport={"width": width, "height": height},
                                               device_scale_factor=1)
         try:
@@ -324,12 +363,10 @@ class ChromiumRenderer:
 
 async def render_club(renderer, token: str, *, base: Optional[str] = None,
                       formats: Iterable[str] = tuple(FORMATS)) -> dict:
-    """Draw every format for one club and write the files. Returns
-    ``{format: bytes_written}``; raises if any format fails, leaving whatever
-    was already on disk for that club untouched for the formats that did not
-    complete."""
-    sizes = {}
-    for fmt in formats:
+    """Draw every format for one club (the formats at the same time, within the
+    renderer's page cap) and write the files. Returns ``{format: bytes_written}``;
+    raises if any format fails. A format that completed keeps its file."""
+    async def one(fmt: str):
         spec = FORMATS[fmt]
         try:
             data = await renderer.shoot(card_url(token, fmt, base=base), spec["width"], spec["height"])
@@ -338,8 +375,13 @@ async def render_club(renderer, token: str, *, base: Optional[str] = None,
         if not data or data[:8] != b"\x89PNG\r\n\x1a\n":
             raise RuntimeError(f"{fmt}: the renderer did not return a PNG")
         _write_atomic(image_path(token, fmt), data)
-        sizes[fmt] = len(data)
-    return sizes
+        return fmt, len(data)
+
+    results = await asyncio.gather(*(one(f) for f in formats), return_exceptions=True)
+    failures = [r for r in results if isinstance(r, BaseException)]
+    if failures:
+        raise failures[0]
+    return dict(results)
 
 
 # One batch at a time per process. The panel's button and the script both go
@@ -351,7 +393,8 @@ RUN_STATE: dict = {"running": False, "started_at": None, "finished_at": None, "l
 
 async def render_pending(session_maker, *, limit: int = 50, club_id: Optional[str] = None,
                          force: bool = False, missing_files: bool = False, apply: bool = True, renderer_factory=None,
-                         base: Optional[str] = None, on_progress=None) -> dict:
+                         base: Optional[str] = None, on_progress=None,
+                         skip: Optional[Iterable[str]] = None) -> dict:
     """Draw the pictures that are due. With ``apply=False`` only reports what
     would be drawn. Never raises for one club's failure; the club is listed in
     ``failed`` and stays due."""
@@ -363,7 +406,7 @@ async def render_pending(session_maker, *, limit: int = 50, club_id: Optional[st
         try:
             async with session_maker() as s:
                 clubs = await due_clubs(s, limit, club_id=club_id, force=force,
-                                        missing_files=missing_files)
+                                        missing_files=missing_files, skip=skip)
             summary["due"] = len(clubs)
             if not apply or not clubs:
                 summary["clubs"] = [{"id": str(c["club_id"]), "name": c["name"], "token": c["token"]}
@@ -371,27 +414,32 @@ async def render_pending(session_maker, *, limit: int = 50, club_id: Optional[st
                 return summary
             factory = renderer_factory or ChromiumRenderer
             async with factory() as renderer:
-                for c in clubs:
-                    try:
-                        sizes = await render_club(renderer, c["token"], base=base)
-                    except Exception as e:  # noqa: BLE001 - one club must not stop the batch
-                        logger.warning("Teaser image failed for %s: %s", c["name"], e)
-                        summary["failed"].append({"id": str(c["club_id"]), "name": c["name"],
-                                                  "error": str(e)[:200]})
-                        continue
-                    async with session_maker() as s:
-                        # Only the version that was drawn, and only if it is
-                        # still the newest or older: a snapshot that moved on
-                        # while this ran stays due.
-                        await s.execute(text(
-                            "UPDATE club_teaser_snapshots SET image_version = :v, updated_at = now() "
-                            "WHERE id = :id AND version >= :v"),
-                            {"v": c["version"], "id": c["id"]})
-                        await s.commit()
-                    summary["drawn"] += 1
-                    summary["bytes"] += sum(sizes.values())
-                    if on_progress:
-                        on_progress(summary)
+                gate = asyncio.Semaphore(CLUBS_AT_ONCE)
+
+                async def draw(c):
+                    async with gate:
+                        try:
+                            sizes = await render_club(renderer, c["token"], base=base)
+                        except Exception as e:  # noqa: BLE001 - one club must not stop the batch
+                            logger.warning("Teaser image failed for %s: %s", c["name"], e)
+                            summary["failed"].append({"id": str(c["club_id"]), "name": c["name"],
+                                                      "token": c["token"], "error": str(e)[:200]})
+                            return
+                        async with session_maker() as s:
+                            # Only the version that was drawn, and only if it is
+                            # still the newest or older: a snapshot that moved on
+                            # while this ran stays due.
+                            await s.execute(text(
+                                "UPDATE club_teaser_snapshots SET image_version = :v, updated_at = now() "
+                                "WHERE id = :id AND version >= :v"),
+                                {"v": c["version"], "id": c["id"]})
+                            await s.commit()
+                        summary["drawn"] += 1
+                        summary["bytes"] += sum(sizes.values())
+                        if on_progress:
+                            on_progress(summary)
+
+                await asyncio.gather(*(draw(c) for c in clubs))
             return summary
         except Exception as e:  # noqa: BLE001 - no Chromium, no database: reported, never raised
             logger.exception("Teaser image batch failed")
@@ -399,3 +447,58 @@ async def render_pending(session_maker, *, limit: int = 50, club_id: Optional[st
             return summary
         finally:
             RUN_STATE.update(running=False, finished_at=time.time(), last=dict(summary))
+
+
+async def run_forever(*, session_maker=None, enabled_fn=None, renderer_factory=None,
+                      sleep=asyncio.sleep, batch: int = AUTO_BATCH,
+                      max_cycles: Optional[int] = None, clock=time.monotonic) -> None:
+    """Draw the pictures by itself. Runs for the life of the process (``max_cycles``
+    is for the tests), does nothing until the "Draw pictures automatically"
+    switch on the Club Directory panel is on, and then works through whatever is
+    due a batch at a time: new snapshots, snapshots whose figures changed, and
+    (only once the crawl has re-pulled them under the current schema) the clubs
+    still on an old one. A cycle that raises is logged and retried after a pause,
+    never allowed to end the loop or spin.
+
+    A club that fails (a card that cannot fit, say) is left alone for
+    ``FAIL_SKIP_SECONDS`` rather than retried every cycle. State is all in the
+    database (what is due is read from each snapshot), so a restart or a deploy
+    carries on where it stopped."""
+    if session_maker is None:
+        from app.models.db import async_session_maker as session_maker  # noqa: F811
+    if enabled_fn is None:
+        async def enabled_fn():
+            from app.services import platform_settings as ps
+            async with session_maker() as s:
+                return await ps.get_club_teaser_auto_draw(s)
+    failed_until: dict = {}
+    cycles = 0
+    while max_cycles is None or cycles < max_cycles:
+        cycles += 1
+        wait = 60
+        try:
+            if await enabled_fn():
+                now = clock()
+                failed_until = {t: u for t, u in failed_until.items() if u > now}
+                out = await render_pending(session_maker, limit=batch, skip=set(failed_until),
+                                           renderer_factory=renderer_factory)
+                for f in out.get("failed", []):
+                    failed_until[f["token"]] = clock() + FAIL_SKIP_SECONDS
+                if out["status"] == "busy":
+                    wait = 30
+                elif out["status"] == "error":
+                    logger.warning("Teaser picture drawer: %s", out.get("error"))
+                    wait = 900
+                elif out["due"] == 0:
+                    wait = 300
+                elif out["drawn"] == 0:
+                    wait = 600
+                else:
+                    wait = 2
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a marketing job must never take the app down
+            logger.exception("Teaser picture drawer cycle failed")
+            wait = 60
+        if wait:
+            await sleep(wait)

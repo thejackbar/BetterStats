@@ -5,6 +5,7 @@ own public Cricket Australia figures. Anything on the page opens the same
 invitation to claim the club through the trial wizard. Three unauthenticated
 routes:
 
+  GET  /public/teaser/by-club?id=..&id=..     the token for the club a visitor just picked on /trial
   GET  /public/teaser/{token}                 the snapshot and what the page leads with
   GET  /public/teaser/{token}/image/{fmt}.png the club's picture (email, share card, ads)
   POST /public/teaser/{token}/event           a view / tile tap / claim beacon
@@ -23,14 +24,14 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
-from app.services import club_teaser, club_teaser_images, rate_limit
+from app.services import club_teaser, club_teaser_images, club_teaser_link, rate_limit
 from app.services.login_audit import client_ip
 from app.services.usage_tracker import record_event_bg
 
@@ -58,6 +59,22 @@ async def _row(db: AsyncSession, token: str):
     if not row:
         raise HTTPException(status_code=404, detail="Not found")
     return row
+
+
+@router.get("/by-club")
+async def teaser_for_club(request: Request, id: list[str] = Query(default=[]),
+                          db: AsyncSession = Depends(get_db)):
+    """What /trial asks once a visitor has picked their club from the search:
+    is there a teaser page for it, and which. ``ids`` are every identifier the
+    picker gave for the club; the match rules (CA id first, then the directory
+    guid; a tie or a customer is no match) are
+    ``club_teaser_link.token_for_ca_org``. Public and rate limited like the page.
+    ``found: false`` for anything it cannot place, which /trial treats as "carry
+    on with the ordinary choice"."""
+    rate_limit.enforce(f"teaser:byclub:{client_ip(request)}", READ_LIMIT, READ_WINDOW,
+                       detail="Too many requests.")
+    token = await club_teaser_link.token_for_ca_org(db, id)
+    return {"found": True, "token": token} if token else {"found": False}
 
 
 @router.get("/{token}")

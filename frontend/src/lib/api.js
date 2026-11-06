@@ -2430,6 +2430,12 @@ export const api = {
   // this (see trackFunnelStep in SelfServeTrialModal.jsx).
   // A prospect club's teaser page (/preview/:token). Unauthenticated; the token is the credential.
   publicTeaser: (token) => request(`/public/teaser/${encodeURIComponent(token)}`),
+  // The teaser page for the club a visitor just picked on /trial. `ids` are
+  // every identifier the picker gave for it (CA's `id` / `organisationGuid`,
+  // PlayHQ's `playHQId`); the server matches on any of them and answers
+  // { found: false } for a club it holds no teaser for.
+  publicTeaserByClub: (ids) =>
+    request(`/public/teaser/by-club?${mktQS({ id: [...new Set((ids || []).filter(Boolean).map(String))] })}`),
   publicTeaserEvent: (token, kind, section = null, visitorId = null) =>
     request(`/public/teaser/${encodeURIComponent(token)}/event`, {
       method: 'POST', body: JSON.stringify({ kind, section, visitor_id: visitorId }),

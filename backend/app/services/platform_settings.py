@@ -59,6 +59,10 @@ _BOOL_KEYS = {
     # get_crm_show_past_events. It's listed here only so update_settings
     # validates/stores it as a real boolean.
     "crm_show_past_events",
+    # Draw the teaser pictures automatically as snapshots settle
+    # (services/club_teaser_images.run_forever). Off until switched on from the
+    # Club Directory teaser panel.
+    "club_teaser_auto_draw_enabled",
 }
 
 # Free-text settings. `webinar_recording_url` is where a super admin pastes the
@@ -245,6 +249,11 @@ async def get_club_teaser_nightly_limit(db: AsyncSession) -> int:
         return max(0, int(settings.get("club_teaser_nightly_limit")))
     except (TypeError, ValueError):
         return 0
+
+
+async def get_club_teaser_auto_draw(db: AsyncSession) -> bool:
+    """Whether the picture drawer runs by itself. Off (False) when unset."""
+    return await get_feature_flag(db, "club_teaser_auto_draw_enabled")
 
 
 async def get_club_teaser_rate(db: AsyncSession) -> float:
