@@ -121,6 +121,21 @@ async def main():
           (lambda x: x and (hue(x["accent"]) < 15 or hue(x["accent"]) > 345))(tt.theme_from_image(
               png(lambda d: (d.rectangle((0, 0, 60, 119), fill=(210, 20, 40, 255)), d.rectangle((60, 0, 119, 119), fill=(220, 30, 10, 255)))))))
 
+    print("the secondary colour")
+    red_blue = png(lambda d: (d.ellipse((10, 10, 110, 110), fill=(200, 30, 30, 255)), d.rectangle((40, 40, 80, 80), fill=(20, 60, 200, 255))))
+    t = tt.theme_from_image(red_blue)
+    check("a red and blue crest gives red as the primary and blue as the secondary",
+          t and (hue(t["accent"]) < 12 or hue(t["accent"]) > 348) and t["accent2"] and 205 < hue(t["accent2"]) < 235, str(t))
+    check("a one-colour crest has no secondary", tt.theme_from_image(red_crest)["accent2"] is None and tt.theme_from_image(blue_on_white)["accent2"] is None)
+    red_orange = png(lambda d: (d.rectangle((0, 0, 79, 119), fill=(210, 20, 40, 255)), d.rectangle((80, 0, 119, 119), fill=(225, 60, 20, 255))))
+    check("two reds of nearly the same hue are one colour, not a primary and a secondary", tt.theme_from_image(red_orange)["accent2"] is None, str(tt.theme_from_image(red_orange)))
+    speck = png(lambda d: (d.ellipse((10, 10, 110, 110), fill=(200, 30, 30, 255)), d.rectangle((0, 0, 3, 3), fill=(20, 60, 200, 255))))
+    check("a speck of another colour is not a secondary", tt.theme_from_image(speck)["accent2"] is None, str(tt.theme_from_image(speck)))
+    check("a logo with no colour has neither", (lambda x: x["accent"] is None and x["accent2"] is None)(tt.theme_from_image(grey)))
+    swapped = png(lambda d: (d.ellipse((10, 10, 110, 110), fill=(20, 60, 200, 255)), d.rectangle((40, 40, 80, 80), fill=(200, 30, 30, 255))))
+    t2 = tt.theme_from_image(swapped)
+    check("the bigger colour is the primary whichever colour it is", t2 and 205 < hue(t2["accent"]) < 235 and bool(t2.get("accent2")) and (hue(t2["accent2"]) < 12 or hue(t2["accent2"]) > 348), str(t2))
+
     print("the fetch guard")
     def handler(request):
         if "good" in request.url.host:
@@ -251,6 +266,12 @@ async def main():
     fetched.clear()
     out = await bf.run(Session, apply=True, redo=True, fetch=stub_fetch, finder=finder, pacer=Pacer(), out=lines.append)
     check("--redo reads every club that has a crest address again", out["due"] == 4, str(out))
+    async with Session() as s:
+        await s.execute(text("UPDATE club_teaser_snapshots SET theme = jsonb_set(theme, '{v}', '1') WHERE marketing_club_id = CAST(:i AS uuid)"), {"i": K["a"]["id"]})
+        await s.commit()
+    searched.clear()
+    old = await bf.run(Session, apply=False, fetch=stub_fetch, finder=finder, out=lines.append)
+    check("a theme made under an older set of colour rules is due again (one with both colours is not)", old["due"] >= 1 and any("Crest Red CC" in l for l in lines[-5:]), f"{old} {lines[-3:]}")
     unfound = await bf.run(Session, apply=True, club="Nothing Like This", fetch=stub_fetch, finder=finder, pacer=Pacer(), out=lines.append)
     check("a club whose crest cannot be found is counted and left alone",
           unfound["due"] == 0)
@@ -353,13 +374,24 @@ async def main():
     async with Session() as s:
         page = await pt.get_teaser(K["d"]["token"], req(), s)
         await s.execute(text("UPDATE club_teaser_snapshots SET theme = CAST(:t AS jsonb) WHERE marketing_club_id = CAST(:i AS uuid)"),
-                        {"t": json.dumps({"v": 1, "mode": "neon", "accent": "red;}</style><script>", "on_accent": "#fff"}), "i": K["a"]["id"]})
+                        {"t": json.dumps({"v": 2, "mode": "neon", "accent": "red;}</style><script>", "accent2": "#12", "on_accent": "#fff"}), "i": K["a"]["id"]})
         await s.commit()
         bad = await pt.get_teaser(K["a"]["token"], req("10.9.9.8"), s)
     check("the page gets the club's theme", page["theme"] and page["theme"]["mode"] == "light" and page["theme"]["accent"].startswith("#"), str(page.get("theme")))
     check("a stored colour that is not #rrggbb never reaches the page (it goes into a style), and an unknown mode is dark",
-          bad["theme"] == {"mode": "dark", "accent": None, "on_accent": None}, str(bad.get("theme")))
+          bad["theme"] == {"mode": "dark", "accent": None, "accent2": None, "on_accent": None}, str(bad.get("theme")))
     check("the page no longer carries a first year (it was Play-Cricket's, not what we mean)", "history" not in page and "first_year" not in json.dumps(page))
+    async with Session() as s:
+        await s.execute(text("UPDATE club_teaser_snapshots SET theme = CAST(:t AS jsonb) WHERE marketing_club_id = CAST(:i AS uuid)"),
+                        {"t": json.dumps({"v": 2, "mode": "dark", "accent": "#d02020", "accent2": "url(x)", "on_accent": "#ffffff"}), "i": K["a"]["id"]})
+        await s.commit()
+        half = await pt.get_teaser(K["a"]["token"], req("10.9.9.5"), s)
+        await s.execute(text("UPDATE club_teaser_snapshots SET theme = CAST(:t AS jsonb) WHERE marketing_club_id = CAST(:i AS uuid)"),
+                        {"t": json.dumps({"v": 2, "mode": "dark", "accent": "#d02020", "accent2": "#1040c0", "on_accent": "#ffffff"}), "i": K["a"]["id"]})
+        await s.commit()
+        both = await pt.get_teaser(K["a"]["token"], req("10.9.9.4"), s)
+    check("a well formed secondary colour reaches the page and a malformed one never does",
+          both["theme"]["accent2"] == "#1040c0" and half["theme"]["accent"] == "#d02020" and half["theme"]["accent2"] is None, f"{both['theme']} {half['theme']}")
     async with Session() as s:
         none_page = await pt.get_teaser(K["c"]["token"], req("10.9.9.7"), s)
     check("a club with no theme gets none (the page keeps BetterCricket's look)", none_page["theme"] is None)

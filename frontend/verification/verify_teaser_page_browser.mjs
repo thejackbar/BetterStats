@@ -213,12 +213,17 @@ await section('block 3', async () => {
 
 // ---- 3b. The club's own colours and light or dark ----------------------------------------
 const LOGO = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="30" fill="#1f5fbf"/></svg>')
-const BLUE = { ...BRIS, club: { ...BRIS.club, logo_url: LOGO }, theme: { mode: 'light', accent: '#1f5fbf', on_accent: '#ffffff' } }
+const BLUE = { ...BRIS, club: { ...BRIS.club, logo_url: LOGO }, theme: { mode: 'light', accent: '#1f5fbf', accent2: '#d9a21b', on_accent: '#ffffff' } }
 const RED_DARK = { ...BRIS, club: { ...BRIS.club, logo_url: LOGO }, theme: { mode: 'dark', accent: '#e23b3b', on_accent: '#ffffff' } }
 const cssVar = (page, name) => page.evaluate((n) => getComputedStyle(document.querySelector('[data-testid="teaser-page"]')).getPropertyValue(n).trim(), name)
 await section('block theme light', async () => {
   const { page, ctx, errors } = await open(`/preview/${TOKEN}`, { teaser: BLUE })
   ck('a club with a blue logo gets a blue accent through the club theme builder', (await cssVar(page, '--pb-accent')).toLowerCase() === '#1f5fbf', await cssVar(page, '--pb-accent'))
+  ck('the secondary colour is the club\'s second logo colour', (await cssVar(page, '--pb-accent-2')).toLowerCase() === '#d9a21b', await cssVar(page, '--pb-accent-2'))
+  ck('and the header bar and menu underline run from the primary to the secondary', await page.evaluate(() => {
+    const g = getComputedStyle(document.querySelector('[data-testid="teaser-page"]')).getPropertyValue('--pb-gradient')
+    return /31, 95, 191|#1f5fbf/i.test(g) && /217, 162, 27|#d9a21b/i.test(g)
+  }))
   ck('and the text on the accent is the stored white', ['#ffffff', 'white'].includes((await cssVar(page, '--pb-on-accent')).toLowerCase()), await cssVar(page, '--pb-on-accent'))
   ck('the page is on the LIGHT theme', await page.locator('[data-testid="teaser-page"]').getAttribute('data-mode') === 'light'
      && await page.evaluate(() => { const c = getComputedStyle(document.querySelector('[data-testid="teaser-page"]')).backgroundColor.match(/\d+/g).map(Number); return c[0] > 220 && c[1] > 220 }))
@@ -237,6 +242,7 @@ await section('block theme light', async () => {
 })
 await section('block theme dark', async () => {
   const { page, ctx } = await open(`/preview/${TOKEN}`, { teaser: RED_DARK })
+  ck('a one-colour logo has no secondary, so the second colour is the first (never the site\'s blue)', (await cssVar(page, '--pb-accent-2')).toLowerCase() === '#e23b3b', await cssVar(page, '--pb-accent-2'))
   ck('a red club on a dark page: red accent, dark theme', (await cssVar(page, '--pb-accent')).toLowerCase() === '#e23b3b' && await page.locator('[data-testid="teaser-page"]').getAttribute('data-mode') === 'dark')
   await page.screenshot({ path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/dashboard-dark.png` : '/tmp/dashboard-dark.png' })
   await page.locator('[data-testid="teaser-header-cta"]').click()

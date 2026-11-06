@@ -16,9 +16,13 @@ BetterCricket look.
 
 The rules:
 
-* Accent: the most common clearly coloured pixel group in the logo (not white,
-  black or grey, and not the logo's own background). A logo with no colour at
-  all (a black and white crest) has no accent and the page keeps the default.
+* Primary colour (the accent): the most common clearly coloured pixel group in
+  the logo (not white, black or grey, and not the logo's own background). A logo
+  with no colour at all (a black and white crest) has no accent and the page
+  keeps the default.
+* Secondary colour: the biggest other colour in the logo, at least 36 degrees
+  round the colour wheel from the first and not a speck. A one colour logo has
+  none, and the page then uses the primary for both.
 * Light or dark page: a logo on a white background, or dark artwork on a
   transparent one, sits on a LIGHT page. A logo on a dark background, or light
   artwork on a transparent one, sits on a DARK page. Colourful artwork with no
@@ -44,12 +48,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-THEME_VERSION = 1
+THEME_VERSION = 2
 MAX_LOGO_BYTES = 3_000_000
 FETCH_TIMEOUT = 8.0
 SAMPLE = 64                      # logos are shrunk to this many pixels a side
 MIN_SATURATION = 0.28            # below this a pixel is grey, white or black
 MIN_COLOURED_SHARE = 0.015       # fewer coloured pixels than this: no accent
+SECOND_MIN_SHARE = 0.12          # a second colour needs this much of the first one's weight
+SECOND_MIN_APART = 3             # and to sit at least this many 12-degree buckets (36) away from it
 PAGE_BG = {"dark": (11, 14, 19), "light": (246, 247, 249)}
 MIN_CONTRAST = 3.0
 DARK_ARTWORK = 0.12              # mean relative luminance of the artwork at or below this
@@ -130,23 +136,34 @@ def theme_from_image(data: bytes) -> Optional[dict]:
     if not fg:
         return None
 
-    # Accent: group the coloured foreground pixels into 12-degree hue buckets and
-    # take the biggest, averaging its pixels.
+    # Primary and secondary colour: group the coloured foreground pixels into
+    # 12-degree hue buckets. The primary is the biggest group; the secondary is the
+    # biggest group that is a different colour (at least 36 degrees away on the
+    # wheel) and not a speck. A logo of one colour has no secondary.
     buckets: dict[int, list] = {}
     for r, g, b, _a in fg:
         hh, ss, vv = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
         if ss >= MIN_SATURATION and vv >= 0.18:
             buckets.setdefault(int(hh * 30) % 30, []).append((r, g, b, ss * vv))
     coloured = sum(len(v) for v in buckets.values())
-    accent_rgb = None
+    accent_rgb = accent2_rgb = None
     if coloured >= MIN_COLOURED_SHARE * len(fg) and coloured >= 8:
         # A hue and its neighbours are one colour (red straddles the wrap).
         def weight(k):
             return sum(len(buckets.get((k + d) % 30, ())) for d in (-1, 0, 1))
+
+        def average(k):
+            members = [p for d in (-1, 0, 1) for p in buckets.get((k + d) % 30, ())]
+            total = sum(m[3] for m in members) or 1.0
+            return tuple(sum(m[i] * m[3] for m in members) / total for i in range(3))
+
         best = max(buckets, key=weight)
-        members = [p for d in (-1, 0, 1) for p in buckets.get((best + d) % 30, ())]
-        total = sum(m[3] for m in members) or 1.0
-        accent_rgb = tuple(sum(m[i] * m[3] for m in members) / total for i in range(3))
+        accent_rgb = average(best)
+        apart = [k for k in buckets if min((k - best) % 30, (best - k) % 30) >= SECOND_MIN_APART]
+        if apart:
+            second = max(apart, key=weight)
+            if weight(second) >= max(8, SECOND_MIN_SHARE * weight(best)):
+                accent2_rgb = average(second)
 
     # Light or dark page.
     if bg_rgb is not None:
@@ -156,7 +173,12 @@ def theme_from_image(data: bytes) -> Optional[dict]:
         # Dark artwork on a transparent logo disappears on a dark page.
         mode = "light" if transparent_share >= 0.10 and mean_fg <= DARK_ARTWORK else "dark"
 
-    out = {"v": THEME_VERSION, "mode": mode, "accent": None, "on_accent": None}
+    out = {"v": THEME_VERSION, "mode": mode, "accent": None, "accent2": None, "on_accent": None}
+    if accent2_rgb is not None:
+        # Stored as read: the site's theme builder guards a secondary colour per
+        # page (a black or white one never paints invisible ink), as it does for a
+        # paid club.
+        out["accent2"] = _hex(accent2_rgb)
     if accent_rgb is not None:
         usable = _readable(accent_rgb, mode)
         out["accent"] = _hex(usable)

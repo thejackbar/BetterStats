@@ -215,6 +215,7 @@ export default function TeaserPreview() {
   const name = data?.club?.name || 'Your club'
   const seasonName = data?.season?.name || 'this season'
   const accent = data?.theme?.accent || null
+  const accent2 = data?.theme?.accent2 || null
 
   // The club's colours, through the same builder a paid club's theme uses.
   useEffect(() => {
@@ -228,9 +229,11 @@ export default function TeaserPreview() {
       style.id = 'club-theme'
       document.head.appendChild(style)
     }
-    style.textContent = buildThemeCss({ accent }, null)
+    // A one-colour logo has no secondary: the gradient is then that one colour
+    // rather than the site's blue.
+    style.textContent = buildThemeCss({ accent, accent2: accent2 || accent }, null)
     return () => { document.getElementById('club-theme')?.remove() }
-  }, [accent])
+  }, [accent, accent2])
 
   useEffect(() => {
     if (!data) return

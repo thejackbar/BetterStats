@@ -74,6 +74,7 @@ def _public_theme(theme):
     mode = theme.get("mode") if theme.get("mode") in ("dark", "light") else "dark"
     accent = theme.get("accent") if ok(theme.get("accent")) else None
     return {"mode": mode, "accent": accent,
+            "accent2": theme.get("accent2") if accent and ok(theme.get("accent2")) else None,
             "on_accent": theme.get("on_accent") if accent and ok(theme.get("on_accent")) else None}
 
 
