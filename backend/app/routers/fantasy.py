@@ -35,7 +35,7 @@ from app.models.db import (
     FantasySeason, FantasyLeague, FantasyLeagueMember, FantasyRound, FantasyPoolPlayer,
     FantasyManager, FantasySquad, FantasySquadPlayer, FantasyDraft, FANTASY_ROLES,
 )
-from app.services import fantasy_engine, fantasy_draft, fantasy_pool_check, fantasy_grades, fantasy_pricing, fantasy_live, fantasy_realign
+from app.services import fantasy_engine, fantasy_draft, fantasy_pool_check, fantasy_grades, fantasy_pricing, fantasy_live, fantasy_realign, fantasy_round_rank
 from app.routers import public_fantasy
 from app.services.fantasy_scoring import DEFAULT_SCORING, DEFAULT_RULES
 from app.services.session_safety import rollback_keeping
@@ -1113,6 +1113,16 @@ async def list_rounds(season_id: str, club=Depends(get_current_club), db: AsyncS
             for r in rows
         ]
     }
+
+
+@router.get("/season/{season_id}/round-winners")
+async def round_winners(season_id: str, club=Depends(get_current_club), db: AsyncSession = Depends(get_db), _=_require):
+    """Every scored round of the club-wide ladder ranked, with its winner(s) and the win tally. Derived on
+    each call (services/fantasy_round_rank), so any round already settled shows without a backfill."""
+    fs = await _load_season(db, club, season_id)
+    league = await public_fantasy._global_league(db, fs)
+    rounds = await fantasy_round_rank.season_round_rankings(db, fs.id, league.id) if league is not None else []
+    return {"rounds": rounds, "tally": fantasy_round_rank.win_tally(rounds)}
 
 
 @router.get("/season/{season_id}/rounds/realign")

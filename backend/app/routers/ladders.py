@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.natural_order import natural_key
 from app.models.db import Grade, Organisation, Season, Team, User, get_db
 from app.routers.auth import get_current_club, get_optional_user, public_junior_hiding, user_can_view_org_private
 from app.routers.teams import ensure_team_grades, _grade_name_map
@@ -110,9 +111,10 @@ async def _compute_team_ladders(
         # A player's own page asks for their squads' ladders only, so it never
         # fetches (or caches) a ladder for every team the club has.
         team_q = team_q.where(Team.id.in_(list(only_team_ids)))
-    teams = (await db.execute(
-        team_q.order_by(Team.sequence.asc(), Team.name.asc())
-    )).scalars().all()
+    teams = sorted(
+        (await db.execute(team_q.order_by(Team.sequence.asc(), Team.name.asc()))).scalars().all(),
+        key=lambda t: (t.sequence is None, t.sequence or 0, natural_key(t.name)),
+    )
     grade_names = await _grade_name_map(db, org.id)
     # grade_id -> raw CA grade GUID. The ladder API is keyed on the shared GUID,
     # while Team.grade_id may be a per-club uuid5 (grassroots_id == id for legacy).

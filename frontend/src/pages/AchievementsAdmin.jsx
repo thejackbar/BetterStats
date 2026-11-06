@@ -1,7 +1,7 @@
-import { useParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/api'
-import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
+import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel, addClubGrades, defaultTeamAwards } from '../lib/achievementOptions'
 import { PbSpinner } from '../lib/presskit'
 import { CATEGORY_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import Dropdown from '../components/Dropdown'
@@ -647,12 +647,18 @@ function ImportPanel({ orgId, onImported, players }) {
   )
 }
 
-function AchievementFields({ form, setForm, seasons, awardDefs }) {
+function AchievementFields({ form, setForm, seasons, awardDefs, clubGrades }) {
   const [customSubcat, setCustomSubcat] = useState(false)
   const [customAchievement, setCustomAchievement] = useState(false)
 
-  const subcatOptions = getSubcategoriesFromDefs(awardDefs, form.category)
-  const achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
+  const subcatOptions = addClubGrades(getSubcategoriesFromDefs(awardDefs, form.category), clubGrades, form.category)
+  let achievementOptions = getAchievementsFromDefs(awardDefs, form.category, form.subcategory)
+  // A club grade the award setup says nothing about still gets the usual team awards to choose from.
+  if (!achievementOptions.length && form.subcategory
+      && subcatOptions.some(o => o.value === form.subcategory)
+      && !getSubcategoriesFromDefs(awardDefs, form.category).some(o => o.value === form.subcategory)) {
+    achievementOptions = defaultTeamAwards(form.category)
+  }
   const seasonOpts = seasonOptionList(seasons, form.season, form.season_end)
 
   const setCategory = (cat) => {
@@ -736,7 +742,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
   )
 }
 
-function AchievementForm({ orgId, initial, players, seasons, awardDefs, onSave, onCancel }) {
+function AchievementForm({ orgId, initial, players, seasons, awardDefs, clubGrades, onSave, onCancel }) {
   const [form, setForm] = useState(initial || { season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', player_name: '', player_id: null, detail: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -779,7 +785,7 @@ function AchievementForm({ orgId, initial, players, seasons, awardDefs, onSave, 
             onChange={({ name, id }) => setForm(f => ({ ...f, player_name: name, player_id: id }))}
           />
         </div>
-        <AchievementFields form={form} setForm={setForm} seasons={seasons} awardDefs={awardDefs} />
+        <AchievementFields form={form} setForm={setForm} seasons={seasons} awardDefs={awardDefs} clubGrades={clubGrades} />
       </div>
       {error && <p className="font-mono text-[10px] text-pb-red mb-2">{error}</p>}
       <div className="flex gap-2">
@@ -802,7 +808,7 @@ function AchievementForm({ orgId, initial, players, seasons, awardDefs, onSave, 
   )
 }
 
-function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) {
+function BulkAddPanel({ orgId, players, seasons, awardDefs, clubGrades, onSave, onCancel }) {
   const [form, setForm] = useState({ season: '', season_end: '', category: 'Club Award', subcategory: '', achievement: '', detail: '' })
   const [selectedPlayers, setSelectedPlayers] = useState([])
   const [saving, setSaving] = useState(false)
@@ -842,7 +848,7 @@ function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) 
       <p className="font-mono text-[10px] text-pb-faintest mb-4">Select an achievement, then add all players who received it. One record is created per player.</p>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-        <AchievementFields form={form} setForm={setForm} seasons={seasons} awardDefs={awardDefs} />
+        <AchievementFields form={form} setForm={setForm} seasons={seasons} awardDefs={awardDefs} clubGrades={clubGrades} />
       </div>
 
       <div className="mb-4">
@@ -904,6 +910,92 @@ function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) 
   )
 }
 
+// Premierships the club's grand-final scorecards earn, written automatically after every sync. This
+// is the same pass on demand: look first, then add. Nothing typed in by hand is removed by it.
+function PremiershipAutoPanel({ orgId, onApplied }) {
+  const [busy, setBusy] = useState(false)
+  const [report, setReport] = useState(null)
+  const [done, setDone] = useState(null)
+  const [error, setError] = useState(null)
+
+  const check = async () => {
+    setBusy(true); setError(null); setDone(null)
+    try { setReport(await api.previewAutoPremierships(orgId)) }
+    catch (e) { setError(e.message || 'Could not read the scorecards') }
+    finally { setBusy(false) }
+  }
+  const apply = async () => {
+    setBusy(true); setError(null)
+    try {
+      const res = await api.applyAutoPremierships(orgId)
+      setDone(res); setReport(null); onApplied?.()
+    } catch (e) { setError(e.message || 'Could not add the premierships') }
+    finally { setBusy(false) }
+  }
+
+  const changes = report ? (report.create || 0) + (report.link || 0) + (report.delete || 0) + (report.update_detail || 0) : 0
+  const gaps = (report?.unresolved || done?.unresolved || [])
+
+  return (
+    <div className="pb-card mb-6 px-4 py-3" data-testid="premiership-auto-panel">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-pb-text text-sm font-medium">Premierships from scorecards</div>
+          <div className="text-pb-faint text-[12px] mt-0.5">
+            When the club wins a grand final, every player in the side gets the Premiership honour and it
+            links to the scorecard. This runs after each sync. Use it to check now.
+          </div>
+        </div>
+        <button onClick={check} disabled={busy}
+                className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-dim hover:text-pb-text transition-colors disabled:opacity-50">
+          {busy && !report ? 'Checking…' : 'Check scorecards'}
+        </button>
+      </div>
+
+      {error && <p className="mt-3 text-[12px] text-pb-red">{error}</p>}
+
+      {report && (
+        <div className="mt-3 text-[13px] text-pb-dim" data-testid="premiership-auto-report">
+          <p>
+            {report.wins} grand final{report.wins === 1 ? '' : 's'} won on the scorecards.
+            {' '}{report.create || 0} honour{report.create === 1 ? '' : 's'} to add
+            {report.link ? `, ${report.link} typed in by hand to link to a scorecard` : ''}
+            {report.delete ? `, ${report.delete} automatic one${report.delete === 1 ? '' : 's'} to remove because the result changed` : ''}.
+            {report.delete_blocked ? ` ${report.delete_blocked} removals were held back because they would take most of the club's automatic honours.` : ''}
+          </p>
+          {report.wins === 0 && (
+            <p className="mt-1 text-pb-faint">
+              Older grand finals show up after the club's next full sync, which is when the round names arrive.
+            </p>
+          )}
+          {changes > 0 && (
+            <button onClick={apply} disabled={busy}
+                    className="mt-2 px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50"
+                    style={{ background: 'var(--pb-accent)' }}>
+              {busy ? 'Adding…' : 'Add them'}
+            </button>
+          )}
+          {changes === 0 && report.wins > 0 && <p className="mt-1 text-pb-faint">Everything is already up to date.</p>}
+        </div>
+      )}
+
+      {done && !done.error && (
+        <p className="mt-3 text-[13px] text-pb-dim" data-testid="premiership-auto-done">
+          Added {done.create || 0}, linked {done.link || 0}, removed {done.delete || 0}.
+        </p>
+      )}
+
+      {gaps.length > 0 && (
+        <div className="mt-3 text-[12px] text-pb-faint">
+          No winner is recorded on {gaps.length} grand final{gaps.length === 1 ? '' : 's'} the club played
+          (a draw or a missing result), so nothing was added for {gaps.length === 1 ? 'it' : 'them'}:
+          {' '}{gaps.map(g => `${g.grade_name} v ${g.opponent}`).join(', ')}. Add those by hand if the club won.
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AchievementsAdmin({ embeddedOrgId }) {
   const params = useParams()
   const orgId = embeddedOrgId || params.orgId
@@ -911,6 +1003,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
   const [players, setPlayers] = useState([])
   const [seasons, setSeasons] = useState(null)
   const [awardDefs, setAwardDefs] = useState([])
+  const [clubGrades, setClubGrades] = useState([])
   const [loading, setLoading] = useState(true)
   const [filterSeason, setFilterSeason] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
@@ -932,6 +1025,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
     api.listPlayers(orgId, { includeHidden: true }).then(data => setPlayers(data || [])).catch(() => {})
     api.getOrgSeasons(orgId).then(data => setSeasons(data || [])).catch(() => {})
     api.listAwardDefinitions(orgId).then(data => setAwardDefs(data || [])).catch(() => {})
+    api.getOrgGrades(orgId).then(data => setClubGrades(data || [])).catch(() => {})
   }, [orgId])
 
   const handleDelete = async (id) => {
@@ -1011,14 +1105,16 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
         </div>
       </div>
 
+      <PremiershipAutoPanel orgId={orgId} onApplied={load} />
+
       <ImportPanel orgId={orgId} onImported={load} players={players} />
 
       {showBulk && (
-        <BulkAddPanel orgId={orgId} players={players} seasons={seasons} awardDefs={awardDefs} onSave={handleSaved} onCancel={() => setShowBulk(false)} />
+        <BulkAddPanel orgId={orgId} players={players} seasons={seasons} awardDefs={awardDefs} clubGrades={clubGrades} onSave={handleSaved} onCancel={() => setShowBulk(false)} />
       )}
 
       {showAdd && !editItem && (
-        <AchievementForm orgId={orgId} players={players} seasons={seasons} awardDefs={awardDefs} onSave={handleSaved} onCancel={() => setShowAdd(false)} />
+        <AchievementForm orgId={orgId} players={players} seasons={seasons} awardDefs={awardDefs} clubGrades={clubGrades} onSave={handleSaved} onCancel={() => setShowAdd(false)} />
       )}
 
       {/* Filters */}
@@ -1085,6 +1181,16 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
                           </span>
                         )}
                         {a.detail && <span className="font-mono text-[10px] text-pb-faint italic">{a.detail}</span>}
+                        {a.auto_created && (
+                          <span className="font-mono text-[9px] tracking-wide2 text-pb-faint border pb-hairline rounded px-1"
+                                title="Added from the grand final scorecard. Edit it and it becomes yours.">AUTO</span>
+                        )}
+                        {a.game_id && (
+                          <Link to={`/games/${a.game_id}?org=${orgId}`}
+                                className="font-mono text-[10px] hover:underline" style={{ color: 'var(--pb-accent)' }}>
+                            Scorecard →
+                          </Link>
+                        )}
                       </div>
                       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                         <button
@@ -1109,6 +1215,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
                           players={players}
                           seasons={seasons}
                           awardDefs={awardDefs}
+                          clubGrades={clubGrades}
                           onSave={handleSaved}
                           onCancel={() => setEditItem(null)}
                         />

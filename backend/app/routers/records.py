@@ -21,6 +21,7 @@ from app.services.game_status import appearance_counts_as_match
 from app.services.grade_labels import suggest_category
 from app.services import player_visibility
 from app.services import rate_coverage as rc
+from app.services import records_residuals
 from app.services.aggregations import _with_rate_coverage, raise_board_games_to_grid
 from app.services.session_safety import rollback_keeping
 
@@ -43,7 +44,7 @@ _CLUB_PSS = "_club_pss"
 # same way (see `ensure_club_innings` in get_records): batting innings, bowling
 # spells, fielding rows, bare roster appearances, and the games those rows are
 # in. Anything named here is created on first use.
-_CLUB_INNINGS_TABLES = ("_club_bi", "_club_bs", "_club_fs", "_club_ga", "_club_games")
+_CLUB_INNINGS_TABLES = ("_club_bi", "_club_bs", "_club_fs", "_club_ga", "_club_roles", "_club_games")
 
 
 def _appearances_sql(match_grade_filter: str, season_clause: str, finals_clause: str) -> str:
@@ -516,6 +517,8 @@ async def get_records(
             ("_club_bs", "v_effective_bowling_spells"),
             ("_club_fs", "v_effective_fielding_stats"),
             ("_club_ga", "game_appearances"),
+            # Who captained / kept, synced and hand-entered games alike (migration 382).
+            ("_club_roles", "v_game_roles"),
         ):
             await db.execute(text(
                 f"CREATE TEMP TABLE {table} AS SELECT * FROM {source} x "
@@ -526,9 +529,10 @@ async def get_records(
             "CREATE TEMP TABLE _club_games AS SELECT * FROM v_effective_games g "
             "WHERE g.id = ANY(ARRAY("
             " SELECT game_id FROM _club_bi UNION SELECT game_id FROM _club_bs"
-            " UNION SELECT game_id FROM _club_fs UNION SELECT game_id FROM _club_ga))"))
+            " UNION SELECT game_id FROM _club_fs UNION SELECT game_id FROM _club_ga"
+            " UNION SELECT game_id FROM _club_roles))"))
         await db.execute(text(
-            "ANALYZE _club_bi, _club_bs, _club_fs, _club_ga, _club_games"))
+            "ANALYZE _club_bi, _club_bs, _club_fs, _club_ga, _club_roles, _club_games"))
 
     async def _create_club_pss() -> None:
         await db.execute(text(f"DROP TABLE IF EXISTS {_CLUB_PSS}"))
@@ -543,11 +547,11 @@ async def get_records(
     _gw_season = "AND s.id = ANY(:season_ids)" if season_ids else ""
     finals_clause = "AND g.is_final = TRUE" if finals_only else ""
     captain_bat_join = (
-        " JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE"
+        " JOIN v_game_roles gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE"
         if captain_only else ""
     )
     captain_bowl_join = (
-        " JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE"
+        " JOIN v_game_roles gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE"
         if captain_only else ""
     )
     _bat_join = (
@@ -671,6 +675,75 @@ async def get_records(
     _eff_bowl_join = _bowl_join if grade_name else _bowl_join_ng
     _eff_bowl_where = _bowl_where if grade_name else _bowl_where_ng
 
+    # A CLUB'S HISTORY AND HAND-TYPED TOTALS HAVE NO SCORECARDS, SO A FILTERED
+    # BOARD LOST THEM. The default junior lens (every club with a junior
+    # programme) and any match type or competition send the career boards down
+    # the per-innings path, which cannot see a history-book import, a season
+    # adjustment, the career lump or a season CA reports with no scorecards.
+    # Kalamunda's leading run scorer and wicket takers were all of that kind.
+    # The Leaderboard reads them back; this does too, for the plain lens only
+    # (a picked grade, finals and captain are a different question, as they are
+    # for the Leaderboard's own residual CTE). Players without such a row keep
+    # the exact row they had. See services/records_residuals.py.
+    p["blimit"] = _LIMIT
+    merge_residuals = bool(
+        use_game_level and scope_active
+        and not (grade_id or grade_name or finals_only or captain_only))
+    residual_by_player: dict[str, dict] = {}
+    residual_bat: dict[str, dict] = {}
+    residual_bowl: dict[str, dict] = {}
+    if merge_residuals:
+        try:
+            await ensure_club_innings()
+            await ensure_club_pss()
+            await db.execute(text("SET LOCAL enable_nestloop = off"))
+            residual_by_player = await _timed(
+                "residual_totals",
+                records_residuals.load_totals(
+                    db, scope, p,
+                    season_clause=(" " + pss_season_clause) if pss_season_clause else "",
+                    gender_clause=(" " + pss_gender_clause) if pss_gender_clause else ""))
+            await db.execute(text("SET LOCAL enable_nestloop = on"))
+            if residual_by_player:
+                rp = {**p, "res_ids": list(residual_by_player)}
+                for r in await q(f"""
+                    SELECT p.id::text AS player_id,
+                           COALESCE(SUM(bi.runs), 0) AS runs, COUNT(*) AS innings,
+                           COUNT(*) FILTER (WHERE bi.not_out) AS not_outs,
+                           COUNT(DISTINCT bi.game_id) AS matches, MAX(bi.runs) AS high_score,
+                           COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100) AS fifties,
+                           COUNT(*) FILTER (WHERE bi.runs >= 100) AS hundreds
+                    FROM players p {_eff_bat_join}
+                    {_eff_bat_where}
+                      AND p.id = ANY(CAST(:res_ids AS uuid[]))
+                    GROUP BY p.id
+                """, rp):
+                    residual_bat[r["player_id"]] = r
+                for r in await q(f"""
+                    SELECT p.id::text AS player_id,
+                           COALESCE(SUM(bs.wickets), 0) AS wickets, COALESCE(SUM(bs.runs), 0) AS runs,
+                           COUNT(DISTINCT bs.game_id) AS matches,
+                           COUNT(*) FILTER (WHERE bs.wickets >= 5) AS five_fors,
+                           COALESCE(SUM({rc.overs_to_balls_sql('bs.overs')}), 0) AS balls
+                    FROM players p {_eff_bowl_join}
+                    {_eff_bowl_where}
+                      AND p.id = ANY(CAST(:res_ids AS uuid[]))
+                    GROUP BY p.id
+                """, rp):
+                    residual_bowl[r["player_id"]] = r
+                # Room for the residual players the boards are about to replace.
+                p["blimit"] = _LIMIT + len(residual_by_player)
+        except Exception:
+            # A failure here must leave the boards as they were, not blank the page.
+            await rollback_keeping(db, viewer)
+            logging.getLogger(__name__).exception(
+                "records residual totals failed for org %s", org_id)
+            residual_by_player = {}
+            p["blimit"] = _LIMIT
+            # The temp copies went with the rolled-back transaction.
+            club_innings_ready = False
+            club_pss_ready = False
+
     # ── Batting ────────────────────────────────────────────────────────────────────────
 
     if use_game_level:
@@ -687,7 +760,7 @@ async def get_records(
             {_eff_bat_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(bi.runs) > 0
-            ORDER BY runs DESC LIMIT :limit
+            ORDER BY runs DESC LIMIT :blimit
         """)
     else:
         top_career_runs = await q("""
@@ -731,7 +804,7 @@ async def get_records(
             {_eff_bat_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING (COUNT(*) - COUNT(*) FILTER (WHERE bi.not_out)) >= 10
-            ORDER BY average DESC LIMIT :limit
+            ORDER BY average DESC LIMIT :blimit
         """)
     else:
         top_batting_avg = await q("""
@@ -760,7 +833,7 @@ async def get_records(
             {_eff_bat_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100) > 0
-            ORDER BY fifties DESC LIMIT :limit
+            ORDER BY fifties DESC LIMIT :blimit
         """)
     else:
         most_fifties = await q("""
@@ -787,7 +860,7 @@ async def get_records(
             {_eff_bat_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING COUNT(*) FILTER (WHERE bi.runs >= 100) > 0
-            ORDER BY hundreds DESC LIMIT :limit
+            ORDER BY hundreds DESC LIMIT :blimit
         """)
     else:
         most_hundreds = await q("""
@@ -910,7 +983,7 @@ async def get_records(
             {_eff_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(bs.wickets) > 0
-            ORDER BY wickets DESC LIMIT :limit
+            ORDER BY wickets DESC LIMIT :blimit
         """)
     else:
         top_career_wickets = await q("""
@@ -953,7 +1026,7 @@ async def get_records(
             {_eff_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(bs.wickets) >= 20
-            ORDER BY average ASC LIMIT :limit
+            ORDER BY average ASC LIMIT :blimit
         """)
     else:
         top_bowling_avg = await q("""
@@ -1010,7 +1083,7 @@ async def get_records(
             {_eff_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING COUNT(*) FILTER (WHERE bs.wickets >= 5) > 0
-            ORDER BY five_fors DESC LIMIT :limit
+            ORDER BY five_fors DESC LIMIT :blimit
         """)
     else:
         most_five_fors = await q("""
@@ -1255,7 +1328,7 @@ async def get_records(
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(DISTINCT ga.game_id) AS matches,
                    COUNT(DISTINCT gr.season_id) AS seasons
-            FROM _club_ga ga
+            FROM _club_roles ga
             JOIN _club_games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -1381,7 +1454,7 @@ async def get_records(
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
                    COUNT(DISTINCT gr.season_id) AS seasons,
                    COUNT(DISTINCT ga.game_id) AS matches
-            FROM _club_ga ga
+            FROM _club_roles ga
             JOIN _club_games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -1519,7 +1592,7 @@ async def get_records(
             JOIN bowl ON bowl.player_id = p.id
             WHERE p.organisation_id = :org_id{gender_clause}
               AND bat.runs >= 1000 AND bowl.wickets >= 100
-            ORDER BY index_score DESC LIMIT :limit
+            ORDER BY index_score DESC LIMIT :blimit
         """)
     else:
         top_allrounders = await q("""
@@ -1540,6 +1613,44 @@ async def get_records(
             HAVING SUM(pss.runs) >= 1000 AND SUM(pss.wickets) >= 100
             ORDER BY index_score DESC LIMIT :limit
         """)
+
+    # The residual totals found above, folded into the career boards. Only the
+    # players who hold one are rebuilt; every other row is untouched.
+    if residual_by_player:
+        merged = records_residuals.apply(
+            {
+                "top_career_runs": top_career_runs, "top_batting_avg": top_batting_avg,
+                "most_fifties": most_fifties, "most_hundreds": most_hundreds,
+                "top_career_wickets": top_career_wickets, "top_bowling_avg": top_bowling_avg,
+                "most_five_fors": most_five_fors, "top_allrounders": top_allrounders,
+            },
+            residual_by_player, residual_bat, residual_bowl, _LIMIT)
+        top_career_runs, top_batting_avg = merged["top_career_runs"], merged["top_batting_avg"]
+        most_fifties, most_hundreds = merged["most_fifties"], merged["most_hundreds"]
+        top_career_wickets, top_bowling_avg = merged["top_career_wickets"], merged["top_bowling_avg"]
+        most_five_fors, top_allrounders = merged["most_five_fors"], merged["top_allrounders"]
+
+    # HIGHEST INDIVIDUAL SCORES reads per-innings rows on every path, so a high
+    # score typed against a season (Manual Entries, Adjustments) or carried by
+    # an import never reached it, lens or no lens. Added here; a score the
+    # scorecards already hold is not listed twice.
+    if not (grade_id or grade_name or finals_only or captain_only):
+        try:
+            await ensure_club_pss()
+            typed_scores = await _timed(
+                "residual_high_scores",
+                records_residuals.high_score_rows(
+                    db, scope, p,
+                    season_clause=(" " + pss_season_clause) if pss_season_clause else "",
+                    gender_clause=(" " + pss_gender_clause) if pss_gender_clause else "",
+                    limit=_LIMIT))
+            top_high_scores = records_residuals.merge_high_scores(top_high_scores, typed_scores, _LIMIT)
+        except Exception:
+            await rollback_keeping(db, viewer)
+            logging.getLogger(__name__).exception(
+                "records typed high scores failed for org %s", org_id)
+            club_innings_ready = False
+            club_pss_ready = False
 
     # Collapse rows that describe the same physical stand. A stand can be present
     # both as a synced `partnerships` row AND as a hand-entered
@@ -1824,9 +1935,10 @@ async def get_records_milestones(
         next_threshold, reach_window, crossed_thresholds, is_displayable,
     )
     from app.services.grade_milestone_schemes import load_book
-    from app.services import milestone_scan
+    from app.services import milestone_activity, milestone_scan
 
     book = await load_book(db, org_id)
+    activity = await milestone_activity.load_grade_activity(db, org_id)
     # Career figures follow the club's scheme; a grade's own follow that
     # grade's, where the club set one.
     scheme = book.for_grade(grade_name) if grade_name else book.club
@@ -1915,7 +2027,8 @@ async def get_records_milestones(
                 SELECT p.id::text AS player_id,
                        COALESCE(p.display_name_override, p.name) AS player_name,
                        p.gender AS gender,
-                       COALESCE(SUM(bi.runs), 0) AS total
+                       COALESCE(SUM(bi.runs), 0) AS total,
+                       MAX(g.played_at) AS last_played
                 FROM players p
                 JOIN v_effective_batting_innings bi ON bi.player_id = p.id
                 JOIN v_effective_games g ON g.id = bi.game_id
@@ -1931,7 +2044,8 @@ async def get_records_milestones(
                 SELECT p.id::text AS player_id,
                        COALESCE(p.display_name_override, p.name) AS player_name,
                        p.gender AS gender,
-                       COALESCE(SUM(bs.wickets), 0) AS total
+                       COALESCE(SUM(bs.wickets), 0) AS total,
+                       MAX(g.played_at) AS last_played
                 FROM players p
                 JOIN v_effective_bowling_spells bs ON bs.player_id = p.id
                 JOIN v_effective_games g ON g.id = bs.game_id
@@ -1945,7 +2059,8 @@ async def get_records_milestones(
                 SELECT p.id::text AS player_id,
                        COALESCE(p.display_name_override, p.name) AS player_name,
                        p.gender AS gender,
-                       COALESCE(SUM(fs.catches), 0) AS total
+                       COALESCE(SUM(fs.catches), 0) AS total,
+                       MAX(g.played_at) AS last_played
                 FROM players p
                 JOIN v_effective_fielding_stats fs ON fs.player_id = p.id
                 JOIN v_effective_games g ON g.id = fs.game_id
@@ -1959,7 +2074,8 @@ async def get_records_milestones(
                 SELECT p.id::text AS player_id,
                        COALESCE(p.display_name_override, p.name) AS player_name,
                        p.gender AS gender,
-                       COUNT(DISTINCT ga.game_id) AS total
+                       COUNT(DISTINCT ga.game_id) AS total,
+                       MAX(g.played_at) AS last_played
                 FROM players p
                 JOIN game_appearances ga ON ga.player_id = p.id
                 JOIN v_effective_games g ON g.id = ga.game_id
@@ -1988,6 +2104,10 @@ async def get_records_milestones(
                     })
                 if r["player_id"] not in active_ids:
                     continue
+                # A grade he has gone quiet in, or one the club has no side in
+                # this season, has nothing to count down to.
+                if not milestone_activity.upcoming_grade_ok(activity, grade_name, r["last_played"]):
+                    continue
                 target = next_threshold(mt, n, scheme)
                 if target is None:
                     continue
@@ -2011,9 +2131,15 @@ async def get_records_milestones(
         set() if await user_can_view_org_private(db, viewer, org_id)
         else await player_visibility.hidden_player_ids(db, org_id)
     )
+    upcoming = player_visibility.drop_hidden(upcoming, hidden)
+    achieved = player_visibility.drop_hidden(achieved, hidden)
+    # What the filter bar reads, on the players left after hiding.
+    lens = await milestone_activity.annotate_players(
+        db, org_id, [*upcoming, *achieved], activity)
     return {
-        "upcoming": player_visibility.drop_hidden(upcoming, hidden),
-        "achieved": player_visibility.drop_hidden(achieved, hidden),
+        "upcoming": upcoming,
+        "achieved": achieved,
+        "lens": lens,
         "scope": "grade" if grade_name else "career",
     }
 

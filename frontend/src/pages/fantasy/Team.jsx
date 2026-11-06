@@ -5,15 +5,18 @@ import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
 import {
   Aurora, StatTile, DISP, tintBg, mix, ROLE_ORDER, ROLE_GROUP, ROLE_LABEL,
-  money, pts, Btn, CapBadge, Avatar, PriceTag,
+  money, pts, Btn, CapBadge, Avatar, PriceTag, Segmented,
 } from './ui'
 import { PlayerRow, RowPoints, SectionLabel } from './shell'
+import SquadCards from './PlayerCards'
 
 const ord = (n) => {
   if (n == null) return ''
   if (n % 100 >= 11 && n % 100 <= 13) return 'th'
   return { 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th'
 }
+const VIEW_KEY = 'bfc_team_view'
+const readView = () => { try { return localStorage.getItem(VIEW_KEY) === 'cards' ? 'cards' : 'sheet' } catch { return 'sheet' } }
 const teamInitials = (name) => (name || 'My XI').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
 
 export function Onboarding({ manager, season, startPoints, onBuild }) {
@@ -71,6 +74,7 @@ export default function MyTeam({ token, manager, squad, season, round, startPoin
   const [gwPts, setGwPts] = useState(null)   // player_id -> points in the round shown (running while one is being played)
   const [liveRound, setLiveRound] = useState(null)   // { number, points } while the current round is being played
   const [snapshot, setSnapshot] = useState(null)   // club-ladder snapshot for the desktop rail
+  const [squadView, setSquadView] = useState(readView)   // 'sheet' (rows) or 'cards' (one card per player)
   const active = season?.status === 'active'
   const locked = !!round?.locked
 
@@ -148,6 +152,10 @@ export default function MyTeam({ token, manager, squad, season, round, startPoin
     .filter(g => g.rows.length)
 
   const onPlayer = (pid) => setOpenId(openId === pid ? null : pid)
+  const pickView = (v) => { setSquadView(v); setOpenId(null); try { localStorage.setItem(VIEW_KEY, v) } catch { /* private window */ } }
+  const viewToggle = (
+    <div style={{ width: 190 }}><Segmented options={[['sheet', 'Sheet'], ['cards', 'Cards']]} value={squadView} onChange={pickView} /></div>
+  )
   const actions = (p) => openId === p.player_id && (
     <div style={{ display: 'flex', gap: 6, padding: '7px 2px 2px' }}>
       {active && !locked && !p.is_captain && <Btn variant="soft" style={{ flex: 1, padding: '8px', fontSize: 12 }} onClick={() => setCap(p.player_id, false)}>Make captain</Btn>}
@@ -155,6 +163,8 @@ export default function MyTeam({ token, manager, squad, season, round, startPoin
       <Btn variant="ghost" style={{ flex: 1, padding: '8px', fontSize: 12 }} onClick={() => nav('player', { playerId: p.player_id })}>View profile</Btn>
     </div>
   )
+
+  const cards = <SquadCards groups={groups} gwPts={gwPts} openId={openId} onPlayer={onPlayer} actions={actions} desktop={desktop} />
 
   const statRibbon = (
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${desktop ? 6 : 3}, 1fr)`, gap: desktop ? 10 : 7, padding: desktop ? '16px 0 4px' : '10px 0 4px' }}>
@@ -171,9 +181,12 @@ export default function MyTeam({ token, manager, squad, season, round, startPoin
           <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div style={{ font: `700 12px ${DISP}`, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--dim)' }}>Your XI · team sheet</div>
-              <button onClick={() => nav('pick')} style={{ background: 'none', border: 'none', color: 'var(--accent-strong)', font: `600 11px 'Hanken Grotesk'`, cursor: 'pointer' }}>{transfersOnly ? 'Captain ›' : 'Edit squad ›'}</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                {viewToggle}
+                <button onClick={() => nav('pick')} style={{ background: 'none', border: 'none', color: 'var(--accent-strong)', font: `600 11px 'Hanken Grotesk'`, cursor: 'pointer' }}>{transfersOnly ? 'Captain ›' : 'Edit squad ›'}</button>
+              </div>
             </div>
-            {groups.map(g => (
+            {squadView === 'cards' ? cards : groups.map(g => (
               <div key={g.role} style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '11px 0', borderTop: '1px solid var(--surface2)' }}>
                 <div style={{ width: 112, flex: 'none', overflowWrap: 'anywhere' }}>
                   <div style={{ font: `700 13px ${DISP}`, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text)' }}>{ROLE_GROUP[g.role]}</div>
@@ -216,8 +229,10 @@ export default function MyTeam({ token, manager, squad, season, round, startPoin
         </div>
       )}
 
+      <div style={{ paddingTop: 10, display: 'flex', justifyContent: 'center' }}>{viewToggle}</div>
+
       <div style={{ paddingTop: 6 }}>
-        {groups.map(g => (
+        {squadView === 'cards' ? cards : groups.map(g => (
           <div key={g.role}>
             <SectionLabel right={<span style={{ font: `600 10.5px 'Hanken Grotesk'`, color: 'var(--faint)' }}>{g.rows.length}{g.quota ? ` / ${g.quota}` : ''}</span>}>{ROLE_GROUP[g.role]}</SectionLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>

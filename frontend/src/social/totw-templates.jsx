@@ -162,6 +162,9 @@ function masthead({ pal, team, meta, width, big, parts }) {
   // `meta.heading` is 'JUNIOR' or 'SENIOR' on a scoped team and absent otherwise,
   // so an unscoped post stays byte for byte what it was.
   const round = [meta.heading, meta.round, meta.date].filter(Boolean).join(' · ')
+  // `meta.basis` is 'round' on a team that counted games still in play and absent
+  // otherwise; a heading the club typed wins over either.
+  const title2 = meta.basis === 'round' ? 'THE ROUND' : 'THE WEEK'
   return (
     <div data-layer="Masthead" style={{
       position: 'absolute', left: 0, right: 0, top: 0, padding: '44px 56px 26px',
@@ -172,8 +175,8 @@ function masthead({ pal, team, meta, width, big, parts }) {
         <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 3, color: pc(parts, 'roundColor', pal.accent), fontWeight: 600 }}>{`// ${round}`.toUpperCase()}</div>
         <div style={{ fontFamily: DISPLAY, fontSize: big, letterSpacing: -1, lineHeight: 0.86, marginTop: 8 }}>
           <span style={{ color: pc(parts, 'title1Color', pal.ink) }}>{pt(parts, 'title1', 'TEAM OF')}</span>
-          {pt(parts, 'title1', 'TEAM OF') && pt(parts, 'title2', 'THE WEEK') ? ' ' : null}
-          <span style={{ color: pc(parts, 'title2Color', pal.accent) }}>{pt(parts, 'title2', 'THE WEEK')}</span>
+          {pt(parts, 'title1', 'TEAM OF') && pt(parts, 'title2', title2) ? ' ' : null}
+          <span style={{ color: pc(parts, 'title2Color', pal.accent) }}>{pt(parts, 'title2', title2)}</span>
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>

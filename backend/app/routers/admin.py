@@ -38,6 +38,7 @@ from app.services import junior_hiding
 from app.services import merge_carry
 from app.services import merge_profile
 from app.services import merge_safety
+from app.services import merge_figures
 from app.services import grade_duplicates
 from app.services.import_reconcile import reconcile_imported_totals
 from app.auth.modules import require_module
@@ -96,7 +97,9 @@ async def get_player_info(player_id: str, org_id: str, db: AsyncSession = Depend
     p = await db.get(Player, uuid.UUID(player_id))
     if not p or str(p.organisation_id) != org_id:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await _enrich_player(db, p)
+    card = await _enrich_player(db, p)
+    await merge_figures.fill_figures(db, [card])
+    return card
 
 
 FUZZY_MERGE_THRESHOLD = 0.90
@@ -330,6 +333,9 @@ async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), 
             "player_b": b,
         })
 
+    # The cards count what the profile counts (scorebook games included), for the whole list in a few
+    # queries. A player in several pairs is one dict, so it is filled once.
+    await merge_figures.fill_figures(db, enriched_cache.values())
     return candidate_pairs
 
 
@@ -2122,19 +2128,24 @@ async def get_social_fixtures(q: str = "", db: AsyncSession = Depends(get_db), c
 
 
 @router.get("/social/results", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
-async def get_social_results(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+async def get_social_results(
+    q: str = "", live: bool = False, db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
+):
     """Recent completed results across the club's grades, grouped by match-day,
     for the BetterSocials Results roundup posts. Scores come from each match's
     scorecard — the same Grassroots source as the single-scorecard import.
 
     ``q`` (optional) is a pasted match link/ID that anchors the pull on that
     match's round instead — the whole round's completed club matches, however
-    far back, not just the last 90 days."""
+    far back, not just the last 90 days.
+
+    ``live`` also returns the matches still in play, as rows whose outcome is
+    ``LIVE`` and whose margin reads ``IN PROGRESS``."""
     from app.services.social_rounds import social_results, social_results_for_reference
     try:
         if q.strip():
-            return await social_results_for_reference(db, club, q)
-        return await social_results(db, club)
+            return await social_results_for_reference(db, club, q, include_live=live)
+        return await social_results(db, club, include_live=live)
     except HTTPException:
         raise
     except Exception as exc:
@@ -2160,7 +2171,7 @@ async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), clu
 @router.get("/social/totw", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
 async def get_social_totw(
     q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
-    date_from: str = "", date_to: str = "", scope: str = "all",
+    date_from: str = "", date_to: str = "", scope: str = "all", mode: str = "week",
 ):
     """Team-of-the-week pool for the BetterSocials post: every completed club
     match in one round, each performance scored with the same points as the
@@ -2170,10 +2181,12 @@ async def get_social_totw(
     club whose round runs Tuesday to Sunday. Otherwise ``q`` (optional) is a
     pasted match link/ID naming the round, and with none it is the club's latest
     match-day and the games within a weekend of it. ``scope`` is ``all``,
-    ``junior`` or ``senior``. The post takes its team off the front of the list."""
+    ``junior`` or ``senior``. ``mode`` is ``week`` (finished matches only) or
+    ``round`` (also matches still in play, flagged ``live``). The post takes its
+    team off the front of the list."""
     from app.services.social_rounds import social_totw
     try:
-        return await social_totw(db, club, q, date_from, date_to, scope)
+        return await social_totw(db, club, q, date_from, date_to, scope, mode)
     except HTTPException:
         raise
     except Exception as exc:
@@ -2205,6 +2218,35 @@ async def get_social_debuts(
     except Exception as exc:
         log.exception("social debuts failed for %s", getattr(club, "id", "?"))
         raise HTTPException(500, f"Debut check error: {exc}") from exc
+
+
+@router.get("/social/milestone-watch", dependencies=[Depends(require_cap(MANAGE_SOCIAL)), Depends(require_module("socials"))])
+async def get_social_milestone_watch(
+    player_ids: str = "", on: str = "",
+    db: AsyncSession = Depends(get_db), club=Depends(get_current_club),
+):
+    """Upcoming club milestones for a lineup's players, for the BetterSocials
+    lineup posts: a gold badge beside a name and a "Milestone watch" strip.
+
+    ``player_ids`` is a comma separated list of this club's player ids and ``on``
+    the match day (ISO, today when absent). The figures and the thresholds are
+    the Milestones page's own, read through the club's increments. The answer
+    carries ``freshness`` (``fresh``, ``stale`` or ``unknown``): ``stale`` means
+    the last round has not been pulled yet, and the editor will not make the post
+    until it has been."""
+    from datetime import date as _date
+    from app.services.social_milestones import parse_ids, social_milestones
+    day = None
+    if on.strip():
+        try:
+            day = _date.fromisoformat(on.strip()[:10])
+        except ValueError:
+            raise HTTPException(400, "on must be an ISO date (YYYY-MM-DD)")
+    try:
+        return await social_milestones(db, club, parse_ids(player_ids), day)
+    except Exception as exc:
+        log.exception("social milestone watch failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Milestone watch error: {exc}") from exc
 
 
 async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None):

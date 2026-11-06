@@ -536,7 +536,22 @@ export default function SuperClubs() {
       'Add-on subscriptions are kept and return when you reactivate BetterStats. Continue?'
     )) return
     clearTrialEdit(key)
-    runModuleAction(key, () => api.superPatchModule(clubId, key, { status }))
+    runModuleAction(key, async () => {
+      const res = await api.superPatchModule(clubId, key, { status })
+      // Setting an add-on Active by hand lines its renewal up with the club's
+      // BetterStats renewal date (the server does it). Say what that was worth,
+      // or why it could not be worked out, so the right amount is collected.
+      const p = res?.proration
+      if (!p) return
+      if (!p.aligned) {
+        setMsg(`Set Active, but not lined up with BetterStats. ${p.reason}`)
+        return
+      }
+      const fee = p.amount != null
+        ? ` Prorated fee to collect: $${p.amount.toFixed(2)} before GST (${p.days} of ${p.of_days} days of $${p.full_price}/yr, list price, no bundle discount or code).`
+        : ''
+      setMsg(`Set Active, renewing ${fmtDate(p.renewal_date)} with BetterStats.${fee}`)
+    })
   }
 
   const syncClub = async (club) => {

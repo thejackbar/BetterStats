@@ -27,6 +27,7 @@ silently dropped. Unsettling a round puts its carried-out transfers back in the 
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select, text
@@ -34,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
     FantasyPoolPlayer, FantasyQueuedTransfer, FantasyRound, FantasySquad,
-    FantasySquadPlayer, FantasyTransaction,
+    FantasySquadPlayer, FantasyTransaction, Player,
 )
 from app.services import fantasy_squad
 from app.services.fantasy_scoring import DEFAULT_RULES
@@ -48,6 +49,39 @@ class QueueError(Exception):
 
 def _f(x) -> float:
     return float(x) if x is not None else 0.0
+
+
+ROLE_WORDS = {"keeper": "wicketkeeper", "batter": "batter", "allrounder": "all-rounder", "bowler": "bowler"}
+
+
+def role_word(role) -> str:
+    return ROLE_WORDS.get(role, str(role or "player"))
+
+
+def money_str(x) -> str:
+    return f"${_f(x):.1f}"
+
+
+async def player_names(session: AsyncSession, ids) -> dict[str, str]:
+    """player id (as str) -> name, so a refusal can say WHO it is about. An id that is
+    not a valid uuid is simply left out; callers fall back to ``name_of``."""
+    good = []
+    for i in ids:
+        try:
+            good.append(uuid.UUID(str(i)))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    if not good:
+        return {}
+    # Player.display_name is a property, not a column: read the two columns it is built from.
+    rows = (await session.execute(
+        select(Player.id, Player.name, Player.display_name_override).where(Player.id.in_(good))
+    )).all()
+    return {str(pid): (override or nm or "") for pid, nm, override in rows}
+
+
+def name_of(names: dict, pid) -> str:
+    return names.get(str(pid)) or "That player"
 
 
 async def _pool(session: AsyncSession, season_id, player_id) -> FantasyPoolPlayer | None:
@@ -73,21 +107,27 @@ async def queue_transfer(session: AsyncSession, season, squad, rnd, out_player_i
     sps = (await session.execute(
         select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
     )).scalars().all()
+    names = await player_names(session, [out_player_id, in_player_id])
+    out_name, in_name = name_of(names, out_player_id), name_of(names, in_player_id)
     out_sp = next((s for s in sps if str(s.player_id) == str(out_player_id)), None)
     if out_sp is None:
-        raise QueueError("That player isn't in your squad.")
+        raise QueueError(f"{out_name} isn't in your team, so can't be transferred out. "
+                         "Reload the page: your team may have changed.")
     if any(str(s.player_id) == str(in_player_id) for s in sps):
-        raise QueueError("You already have that player.")
+        raise QueueError(f"{in_name} is already in your team.")
     waiting = await pending_for_round(session, squad.id, rnd.id)
     if any(str(q.out_player_id) == str(out_player_id) for q in waiting):
-        raise QueueError("You have already queued a transfer for that player.")
+        raise QueueError(f"You have already queued a transfer for {out_name}. Cancel it first to queue a different one.")
     if any(str(q.in_player_id) == str(in_player_id) for q in waiting):
-        raise QueueError("You have already queued that player in.")
+        raise QueueError(f"You have already queued {in_name} in for another player.")
     in_pool = await _pool(session, season.id, in_player_id)
-    if in_pool is None or not in_pool.is_available:
-        raise QueueError("That player isn't available.")
+    if in_pool is None:
+        raise QueueError(f"{in_name} isn't in this season's player pool.")
+    if not in_pool.is_available:
+        raise QueueError(f"{in_name} has been marked unavailable by your club, so can't be picked.")
     if in_pool.role != out_sp.role:
-        raise QueueError(f"Transfers must be like-for-like by role ({out_sp.role}).")
+        raise QueueError(f"{in_name} is a {role_word(in_pool.role)} but {out_name} is a {role_word(out_sp.role)}. "
+                         "Transfers must be like-for-like by role.")
 
     out_pool = await _pool(session, season.id, out_player_id)
     sell_now = _f(out_pool.current_price) if out_pool else _f(out_sp.purchase_price)
@@ -108,8 +148,9 @@ async def queue_transfer(session: AsyncSession, season, squad, rnd, out_player_i
         bank += (_f(o.current_price) if o else _f(sp_out.purchase_price if sp_out else 0)) - (_f(i.current_price) if i else 0)
     warning = None
     if bank < -1e-6:
-        warning = (f"At today's prices this is {abs(bank):.1f} over your budget. Prices move when the round is "
-                   f"scored; if you still can't afford it then, the transfer is cancelled.")
+        warning = (f"At today's prices your queued transfers are {money_str(abs(bank))} over budget. Prices move when "
+                   f"Round {rnd.round_number} is scored; if you still can't afford them then, the ones you can't "
+                   f"afford are cancelled and you are told why.")
     return {"id": str(q.id), "warning": warning, "sell_now": round(sell_now, 1)}
 
 
@@ -147,12 +188,16 @@ async def apply_pending(session: AsyncSession, fs) -> dict:
     def cancel(q, reason):
         q.status, q.reason = "cancelled", reason
 
-    for q in rows:
+    async def attempt(q):
+        """Carry out one queued swap. Returns "applied", "cancelled", or a shortfall
+        message when only the budget stops it: the swap is left pending so the others
+        can free money first (a manager who queued two sales to afford one dearer pick)."""
+        nonlocal applied, cancelled
         squad = await session.get(FantasySquad, q.squad_id)
         if squad is None:
             cancel(q, "The team no longer exists.")
             cancelled += 1
-            continue
+            return "cancelled"
         sps = (await session.execute(
             select(FantasySquadPlayer).where(FantasySquadPlayer.squad_id == squad.id)
         )).scalars().all()
@@ -160,29 +205,27 @@ async def apply_pending(session: AsyncSession, fs) -> dict:
         if out_sp is None:
             cancel(q, "The player going out is no longer in your team.")
             cancelled += 1
-            continue
+            return "cancelled"
         if any(s.player_id == q.in_player_id for s in sps):
             cancel(q, "The player coming in is already in your team.")
             cancelled += 1
-            continue
+            return "cancelled"
         in_pool = await _pool(session, fs.id, q.in_player_id)
         if in_pool is None or not in_pool.is_available:
             cancel(q, "The player coming in is no longer available.")
             cancelled += 1
-            continue
+            return "cancelled"
         if in_pool.role != out_sp.role:
             cancel(q, "The player coming in is no longer the same role.")
             cancelled += 1
-            continue
+            return "cancelled"
         out_pool = await _pool(session, fs.id, q.out_player_id)
         sell = round(_f(out_pool.current_price) if out_pool else _f(out_sp.purchase_price), 1)
         buy = round(_f(in_pool.current_price), 1)
         bank = _f(squad.budget_remaining) + sell - buy
         if bank < -1e-6:
-            cancel(q, f"After the round's price changes you were {abs(bank):.1f} short (sold for {sell:.1f}, "
-                      f"{buy:.1f} to buy).")
-            cancelled += 1
-            continue
+            return (f"After the round's price changes you were {abs(bank):.1f} short (sold for {sell:.1f}, "
+                    f"{buy:.1f} to buy).")
 
         if squad.free_transfers and squad.free_transfers > 0:
             squad.free_transfers -= 1
@@ -210,6 +253,25 @@ async def apply_pending(session: AsyncSession, fs) -> dict:
         q.sell_value, q.buy_price, q.hit, q.free_used = sell, buy, hit, free_used
         q.applied_round_number = nxt.round_number if nxt else None
         applied += 1
+        return "applied"
+
+    # A swap that only the budget stops waits for the rest of the squad's queue to go
+    # first; it is cancelled only when a whole pass applies nothing new.
+    todo = list(rows)
+    while todo:
+        short, progress = [], False
+        for q in todo:
+            r = await attempt(q)
+            if r in ("applied", "cancelled"):
+                progress = True
+            else:
+                short.append((q, r))
+        if not progress:
+            for q, msg in short:
+                cancel(q, msg)
+                cancelled += 1
+            break
+        todo = [q for q, _ in short]
     await session.flush()
     if applied:
         await fantasy_squad.recount_ownership(session, fs.id)

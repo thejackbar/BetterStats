@@ -14,25 +14,30 @@ function ModuleCard({ m, delay }) {
   const to = `/modules/${m.slug}`
   return (
     <Reveal delay={delay} className="h-full">
-      <Link to={to} className="surface p-7 h-full flex flex-col transition-colors group block"
+      <Link to={to} className="surface overflow-hidden h-full flex flex-col transition-colors group block"
         style={{ '--card-accent': m.accent }}
         onMouseEnter={(e) => { e.currentTarget.style.borderColor = `${m.accent}55` }}
         onMouseLeave={(e) => { e.currentTarget.style.borderColor = '' }}>
-        <div className="flex items-center mb-5">
-          <img src={m.logo} alt="" className="w-11 h-11 rounded-xl" />
+        <div className="border-b pb-hairline overflow-hidden aspect-[16/9] bg-black/20">
+          <img src={m.screenshot} alt={`${m.name} screenshot`} loading="lazy" className="w-full h-full object-cover object-top group-hover:scale-[1.02] transition-transform duration-500" />
         </div>
-        <h3 className="text-xl font-bold mb-2"><ModuleWordmark name={m.name} accent={m.accent} /></h3>
-        <p className="text-sm text-pb-dim leading-relaxed mb-5">{m.tagline}</p>
-        {m.highlights && (
-          <ul className="space-y-1.5 mb-6">
-            {m.highlights.slice(0, 3).map((h) => (
-              <li key={h} className="flex items-start gap-2 text-xs text-pb-dim"><span className="mt-0.5" style={{ color: m.accent }}>✓</span>{h}</li>
-            ))}
-          </ul>
-        )}
-        <span className="mt-auto pt-4 border-t pb-hairline text-sm font-medium inline-flex items-center gap-1" style={{ color: m.accent }}>
-          Explore {m.name} <span className="group-hover:translate-x-0.5 transition-transform">→</span>
-        </span>
+        <div className="p-6 flex flex-col flex-1">
+          <div className="flex items-center gap-2.5 mb-2">
+            <img src={m.logo} alt="" className="w-8 h-8 rounded-lg" />
+            <h3 className="text-xl font-bold"><ModuleWordmark name={m.name} accent={m.accent} /></h3>
+          </div>
+          <p className="text-sm text-pb-dim leading-relaxed mb-4">{m.tagline}</p>
+          {m.highlights && (
+            <ul className="space-y-1.5 mb-5">
+              {m.highlights.slice(0, 3).map((h) => (
+                <li key={h} className="flex items-start gap-2 text-xs text-pb-dim"><span className="mt-0.5" style={{ color: m.accent }}>✓</span>{h}</li>
+              ))}
+            </ul>
+          )}
+          <span className="mt-auto pt-4 border-t pb-hairline text-sm font-medium inline-flex items-center gap-1" style={{ color: m.accent }}>
+            Explore {m.name} <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+          </span>
+        </div>
       </Link>
     </Reveal>
   )
@@ -48,8 +53,7 @@ function Hero() {
           Built in modules. <span className="gradient-text">Pick what you run.</span>
         </h1>
         <p className="text-lg lg:text-xl text-pb-dim max-w-2xl mx-auto leading-relaxed">
-          BetterCricket is everything your cricket club runs on. Every club starts with BetterStats,
-          then adds the parts that fit how the club actually runs.
+          Every club starts with BetterStats, then adds the parts that fit how it runs.
         </p>
       </div>
     </section>
@@ -58,7 +62,7 @@ function Hero() {
 
 function Showcase() {
   return (
-    <section className="px-4 sm:px-6 lg:px-10 pb-12">
+    <section className="px-4 sm:px-6 lg:px-10 pb-12 overflow-x-clip">
       <div className="max-w-[1080px] mx-auto">
         <Reveal>
           <div className="relative">

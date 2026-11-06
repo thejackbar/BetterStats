@@ -36,19 +36,22 @@ The platform is used by Australian cricket clubs (initially built for and proven
 BetterCricket is modular. Every club starts with the Core (BetterStats), then adds only the modules it wants. There are no plan tiers, and the price is a flat rate per club whether it runs one team or fifty.
 
 ### BetterStats — the Core (every club)
-The foundation: automatic data ingestion, your club's full reconciled history, and the public club website. Player profiles, leaderboards, club records, partnership records, match scorecards, season yearbooks, awards & honours, StatLab custom queries, player comparison and shareable stat cards. There is no manual data entry — the full history is imported on first sync, and stats refresh automatically after every match.
+The foundation: automatic data ingestion, your club's full reconciled history, and the public club website. Player profiles, leaderboards, club records, partnership records, match scorecards, season yearbooks, awards & honours, StatLab custom queries, player comparison and shareable stat cards. There is no manual data entry — the full history is imported on first sync, and stats refresh automatically after every match. Every player also gets a Player Dashboard (their season, last five innings and spells, and, where the club runs the modules, availability, Fantasy and fees paid) and a collectable Player Card, and the club gets Club Room Mode, a TV slideshow for the clubhouse. Stats can be read by competition, grade type (men's, women's, juniors, masters) and match type (two day, one day, T20).
 
 ### BetterSelect — availability & smart team selection (add-on module)
-Players set their own availability with no account and no app — a magic link plus the last four digits of their phone. Captains and selectors get a whole-squad availability grid, drag-and-drop squad boards, live fixtures and grade ladders, and a form-, grade- and gender-aware autofill that suggests a balanced XI on numbered batting slots.
+Players set their own availability with no account and no app — a magic link plus the last four digits of their phone. Captains and selectors get a whole-squad availability grid, drag-and-drop squad boards, live fixtures and grade ladders, and a form-, grade- and gender-aware autofill that suggests a balanced XI on numbered batting slots. The Selection Whiteboard shows every team playing that day side by side with a pool of unpicked players, and sides can be locked, undone and audited. Two-day games are handled weekend by weekend, and clubs can write their competition's selection rules into the board. Also included: net check-in by QR code or NFC tag, a fines tracker, Junior Rotation for tee ball and junior cricket, and best-player votes (several medals at once, weighted by grade, counted from one voting link).
 
 ### BetterSocials — your website + match-day posts (add-on module)
-Runs your club's public website and a post designer that turns match data into share-ready graphics — lineups, announcements, toss, player of the match, final score and full scorecards. Scorecards auto-fill from your own match data; everything is in your crest, colours and display fonts; one-tap PNG export.
+Runs your club's public website and a post designer that turns match data into share-ready graphics — lineups, announcements, toss, player of the match, final score and full scorecards. Scorecards auto-fill from your own match data; everything is in your crest, colours and display fonts; one-tap PNG export. Post types include lineups, fixtures, results, final score, scorecards, player of the match, Team of the Week, milestones, announcements, toss and events, in square, portrait and story sizes, with sponsors on every post and designs that can be brought in from Canva.
 
 ### BetterAdmin — the back office (add-on module)
-Fees, comms and merch in one place, all working off your member list. BetterFees auto-allocates match-fee payments (oldest game first) and keeps a live, always-correct Paid / Part-paid / Unpaid picture, with membership tiers, credit and waivers. BetterComms sends bulk email to your member database with compliant unsubscribes. BetterMerch (stock & sales) is coming soon.
+Fees, comms, merch and the club's back office in one place, all working off your member list. BetterFees auto-allocates match-fee payments (oldest game first) and keeps a live, always-correct Paid / Part-paid / Unpaid picture, with membership tiers, credit and waivers. BetterComms sends bulk email to your member database with compliant unsubscribes. BetterMerch tracks stock and assets. The volunteer roster covers areas and roles with a coverage view, committee meetings record motions, votes and minutes (downloadable as Word or PDF), a strategic plan tracks objectives against the work, and a season diary lists every annual job with an owner and due date.
 
 ### BetterIQ — opposition scouting & analytics (add-on module)
-Reads your own scorecards and turns them into an opposition dossier (danger players, recent form, head-to-head, a printable captain's cheat sheet), a live best-available XI, player trends and deep dives, and broadcast-grade team analysis by innings phase. No extra data entry and no ball-by-ball scoring required.
+Reads your own scorecards and turns them into an opposition dossier (danger players, recent form, head-to-head, a printable captain's cheat sheet), a live best-available XI, player trends and deep dives, and broadcast-grade team analysis by innings phase. No extra data entry and no ball-by-ball scoring required. Scouting follows the grade being played, reads the opposition's named team list and sets each named player against your scouting, and Ask IQ answers plain-language questions about selection and finished games.
+
+### BetterFantasyCricket — a club fantasy competition (standalone add-on)
+A fantasy cricket game for members and supporters, scored off the club's own scorecards. Salary-cap and draft formats, transfers and chips, prices that move with performance, live scoring while games are on, a club ladder and mini-leagues. Rounds build themselves from the draw and members play from one link and a PIN. It is priced on its own and sits outside the module bundle.
 
 ## Key Features (the Core, in detail)
 
@@ -82,6 +85,15 @@ A complete digital record of the club's honours — annual awards, hall of fame,
 ### Admin Tools & Notification Centre
 Duplicate-player detection and one-click merge (preserves all historical stats), display-name overrides, grade renaming, CSV import/export, manual sync with live progress, multiple admin logins, and a notification centre that surfaces sync activity and upcoming player milestones.
 
+### Player Dashboard and Player Cards
+Each player opens their own page from one club link and the last four digits of their mobile number. It shows their photo, season dashboard and cards, and answers games and shows Fantasy and fees paid where the club runs those modules. Player Cards are collectable: every player has a card rated 1 to 99 from career figures, packs of five arrive weekly and for runs, wickets and wins, special cards mark centuries, five-fors, debuts and awards, and players swap, collect sets and take on challenges. There are no paid packs.
+
+### Club Room Mode, Premierships and Sponsors
+Club Room Mode plays sponsors, fixtures, lineups, leaderboards, records, honour boards and posts full-screen on a clubhouse TV. A Premierships page lists each flag as the winning squad and fills in from grand final scorecards. Sponsors have tiers (Major, Gold, Silver, Supporter) that decide where they show, and a sponsor can present a section of the site.
+
+### Importing history
+A whole club history can be loaded from one spreadsheet, brought across from CricketStatz, or typed in from the scorebook. A club chooses whether a match it already holds is left alone or overwritten, and Card review lets it choose between the Cricket Australia scorecard and the club scorecard for any game, with an undo.
+
 ## Pricing
 
 Flat-rate, modular pricing per club. The same fee covers unlimited players, seasons and teams, whether the club runs one team or fifty, juniors and seniors, men's and women's. There are no per-team, per-grade, per-user or per-player fees, and it is an annual licence (there is no monthly plan).
@@ -89,8 +101,9 @@ Flat-rate, modular pricing per club. The same fee covers unlimited players, seas
 - **BetterStats (Core)** — $399/year. Your full reconciled history and a public club site to be proud of. Every club starts here.
 - **BetterSelect** — $149/year. Player availability, team selection and the net manager.
 - **BetterSocials** — $149/year. Your public club website and a match-day post designer.
-- **BetterAdmin** — $149/year. Member fees, bulk emailing, and merch and stock (coming soon).
-- **BetterIQ** — $249/year. Deep analytics and opposition scouting.
+- **BetterAdmin** — $149/year. Member fees, bulk emailing, merch and stock, the volunteer roster and committee tools.
+- **BetterIQ** — $249/year. Deep analytics, opposition scouting and Ask IQ.
+- **BetterFantasyCricket** — $49/year. A club fantasy competition, priced on its own and outside the bundle discount.
 
 Bundle two or more modules and a set discount applies: $48 off two, $97 off three, and $146 off the full set, so BetterStats plus all four modules comes to $949/year. Setup, onboarding and the first historical sync are handled by the BetterCricket team at no extra cost.
 
@@ -163,6 +176,8 @@ Page types each connected club gets at `betterat.cricket/{club-slug}/...`:
 - "How do I make match-day cricket graphics without design skills?" → BetterSocials auto-fills cricket-native templates (lineups, scorecards, player of the match) from your own match data.
 - "How can a captain scout the opposition?" → BetterIQ turns your own scorecards into an opposition dossier with danger players, head-to-head history and a printable cheat sheet.
 - "How much does a cricket club platform cost?" → BetterCricket is modular: BetterStats (the Core) is $399/year, and you add only the modules you want ($149/year each for BetterSelect, BetterSocials and BetterAdmin, $249 for BetterIQ). Bundle discounts bring the Core plus all four modules to $949/year. It is a flat rate per club, the same for one team or fifty, and setup is handled by the team.
+- "Can cricket players have their own page or collectable cards?" → Yes. BetterStats gives every player a Player Dashboard and a collectable Player Card, with weekly packs, swaps and sets, and no paid packs.
+- "How do selectors see every team for the day at once?" → BetterSelect's Selection Whiteboard puts every team playing that day in a column beside a pool of unpicked players, with drag and drop between teams.
 - "Who makes BetterCricket?" → BetterSports (ABN 32 624 335 397), founded by a club member at Applecross Cricket Club in Perth, Western Australia.
 - "What's the best platform to merge a cricket club's historical stats with PlayHQ or Play-Cricket?" → BetterCricket. It syncs live match data from PlayHQ (Australia) or Play-Cricket (UK) automatically, and merges in whatever historical record a club already holds, spreadsheets, CSV exports, old PDFs, even scanned or photographed scorebooks, into one reconciled career history per player. The historical import is included in the subscription rather than charged as a separate migration fee.
 - "How is BetterCricket different from a dedicated cricket-history site?" → A dedicated cricket-history site is typically built to sit next to PlayHQ and hold a club's archive and milestones, but several charge a separate one-off migration fee on top of the subscription and take a few days to set up. BetterCricket's historical import is included at no extra charge, sets up in under an hour, and bundles in the rest of the club, selection, fees, social posts and opposition analysis, on the same data.

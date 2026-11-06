@@ -1,6 +1,6 @@
 // BetterSelect — the player's own page (public, no login).
 //
-// Reached via a per-club magic link (/avail/:token) pinned in a group chat or a
+// Reached via a per-club magic link (/playerdash/:token, which the older /avail/:token still opens) pinned in a group chat or a
 // QR. Pick your name, prove it's you with the last 4 digits of your mobile, and
 // land on one dashboard: your photo and squads, the next games to answer
 // (Available / Maybe / Unavailable), and whichever cards the club has turned on
@@ -13,26 +13,57 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
+import { formatPlayerName, nameMatchesSearch } from '../lib/nameFormat'
 import { AvailabilityEditor, ALL_CHOICES, unansweredNextWeek } from './playerhome/AvailabilityEditor'
 import Group, { useOpenSections } from './playerhome/Group'
 import DetailsModal from './playerhome/DetailsModal'
+import CardsSummary from './playerhome/CardsSummary'
+import PlayerCardsApp from './playercards/PlayerCardsApp'
 import FantasyCard, { fmtLockShort, nextDeadline, ordinal } from './playerhome/FantasyCard'
 import PlayerHero from './playerhome/PlayerHero'
 import SeasonDashboard from './playerhome/SeasonDashboard'
 import { Muted, Section, fmtShort, money } from './playerhome/ui'
 
 
-function ClubHeader({ club }) {
+function ClubHeader({ club, hasAvailability = true }) {
   const initials = (club?.name || 'Club').split(' ').map((w) => w[0]).join('').slice(0, 3).toUpperCase()
   return (
     <div className="flex flex-col items-center text-center gap-3 mb-6">
+      {club?.slug && (
+        <a href={`/${club.slug}`} data-back-to-site className="self-start text-[13px] font-semibold text-pb-dim hover:text-pb-text">
+          <span aria-hidden="true">←</span> Back to BetterCricket
+        </a>
+      )}
       {club?.logo_url
         ? <img src={club.logo_url} alt="" className="w-16 h-16 rounded-xl object-contain bg-pb-surface2 p-1" />
         : <span className="w-16 h-16 rounded-xl flex items-center justify-center font-display font-bold text-xl" style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{initials}</span>}
       <div>
-        <div className="font-display font-bold text-xl leading-tight">{club?.name || 'Set your availability'}</div>
-        <div className="font-mono text-[11px] tracking-wide2 text-pb-faint mt-1">SET YOUR AVAILABILITY</div>
+        <div className="font-display font-bold text-xl leading-tight">{club?.name || 'Your player page'}</div>
+        <div className="font-mono text-[11px] tracking-wide2 text-pb-faint mt-1">{hasAvailability ? 'SET YOUR AVAILABILITY' : 'YOUR PLAYER PAGE'}</div>
       </div>
+    </div>
+  )
+}
+
+// The PIN step's answer to "who is this trying to log in as?". Players who typed
+// their own mobile and were refused had very often tapped somebody else's name
+// (or arrived on a link that had someone else picked), so the name is the
+// biggest thing on the screen and the label names whose mobile is wanted.
+function SigningInAs({ player, club, onSwitch }) {
+  const shownName = formatPlayerName(player?.display_name, club?.player_name_format)
+  const initials = (shownName || '?').trim().split(/\s+/).filter(Boolean)
+    .map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
+  return (
+    <div data-signing-in-as className="rounded-2xl border-2 p-4 mb-4 text-center"
+      style={{ borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' }}>
+      <div className="font-mono text-[11px] tracking-wide2 text-pb-faint uppercase mb-3">You are logging in as</div>
+      <span aria-hidden="true" className="mx-auto mb-2 w-14 h-14 rounded-2xl flex items-center justify-center font-display font-bold text-xl"
+        style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{initials}</span>
+      <div data-signing-in-name className="font-display font-bold text-3xl leading-tight break-words">{shownName}</div>
+      <button type="button" onClick={onSwitch} data-not-you
+        className="mt-4 w-full py-2.5 rounded-xl border pb-hairline bg-pb-surface2 text-sm font-semibold hover:text-pb-accent transition-colors">
+        This isn’t me. Pick a different name
+      </button>
     </div>
   )
 }
@@ -55,7 +86,8 @@ function Banner({ tone = 'error', children }) {
 // they have already cast with who they gave 3, 2 and 1 to. Each to-cast game links
 // to its ballot on the vote page (which asks for their PIN once); a cast vote on a
 // game still open links to the same ballot to change it.
-function VotesModule({ data }) {
+function VotesModule({ data, club }) {
+  const fmt = (n) => formatPlayerName(n, club?.player_name_format)
   const due = data.votes || []
   const cast = data.votes_cast || []
   return (
@@ -90,7 +122,10 @@ function VotesModule({ data }) {
                     {c.picks.map((pk, i) => (
                       <div key={i} className="flex items-baseline gap-2 text-[13px]" data-pick>
                         <span className="font-mono font-bold w-5 text-right shrink-0" style={{ color: 'var(--pb-accent)' }}>{pk.points ?? ''}</span>
-                        <span className="min-w-0 truncate">{pk.name}</span>
+                        <div className="min-w-0">
+                          <div className="truncate">{fmt(pk.name)}</div>
+                          {pk.stats && <div className="text-[11px] leading-snug text-pb-faint" data-pick-stats>{pk.stats}</div>}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -341,17 +376,25 @@ function FinesModule({ data }) {
   )
 }
 
-// The sections of the page, in the order a player reads them. Each holds the club's
-// modules that belong to it, in the club's own order; a section with none drops out.
-// Availability always shows, because the answer buttons are in it.
-const GROUPS = [
-  { id: 'availability', title: 'Availability', keys: [] },
-  { id: 'selection', title: 'Selection', keys: ['squad', 'selected', 'training', 'ladder'] },
-  { id: 'admin', title: 'Club admin', keys: ['fees', 'fines'] },
-  { id: 'voting', title: 'Voting', keys: ['votes'], hideTitle: true },
-  { id: 'stats', title: 'Stats', keys: ['season'] },
-  { id: 'fantasy', title: 'Fantasy', keys: ['fantasy'], hideTitle: true },
-]
+// The sections of the page. Each holds the club's modules that belong to it, in the
+// club's own order; a section with none drops out. Availability always shows for a club
+// with BetterSelect, because the answer buttons are in it.
+const GROUPS = {
+  availability: { title: 'Availability', keys: [] },
+  selection: { title: 'Selection', keys: ['squad', 'selected', 'training', 'ladder'] },
+  cards: { title: 'Player Cards', keys: ['cards'], hideTitle: true },
+  fantasy: { title: 'Fantasy', keys: ['fantasy'], hideTitle: true },
+  stats: { title: 'Stats', keys: ['season'] },
+  voting: { title: 'Voting', keys: ['votes'], hideTitle: true },
+  admin: { title: 'Club admin', keys: ['fees', 'fines'] },
+}
+
+// The order the sections are read in, one grid of equal cells: two across on a wide screen,
+// one on a phone. It follows the week: answer Availability, then see the Selection it feeds;
+// the two games on top of the club (Player Cards, Fantasy); how you went (Stats) and what you
+// thought (Voting); then the housekeeping. A club without a section just has fewer cells, and
+// the rest fill in behind it, so four sections make a 2x2 and seven make three rows and one.
+const ORDER = ['availability', 'selection', 'cards', 'fantasy', 'stats', 'voting', 'admin']
 
 // The Selection modules drawn together as one block of short rows.
 const GLANCE = ['squad', 'selected', 'training']
@@ -361,11 +404,18 @@ const GREEN = 'var(--pb-positive)'
 
 // One line per section, from data the page already holds, shown even when the
 // section is closed. Left empty rather than made up when there is nothing true to say.
-function summaryFor(id, { me, data, ladder }) {
+function summaryFor(id, { me, data, ladder, cardsReady }) {
   if (id === 'availability') {
     const n = unansweredNextWeek(me)
     if (n > 0) return { text: `${n} to answer`, tone: AMBER }
     return (me.dates || []).length ? { text: 'All answered', tone: GREEN } : { text: 'No games to answer yet' }
+  }
+  if (id === 'cards') {
+    const n = cardsReady ?? data?.cards?.ready
+    if (n == null) return {}
+    if (n > 0) return { text: n === 1 ? '1 pack to open' : `${n} packs to open`, tone: AMBER }
+    const w = data?.cards?.swaps_waiting || 0
+    return w > 0 ? { text: w === 1 ? '1 swap request' : `${w} swap requests`, tone: AMBER } : { text: 'Card book' }
   }
   if (!data) return {}
   if (id === 'selection') {
@@ -406,7 +456,7 @@ function summaryFor(id, { me, data, ladder }) {
 // the same PIN cookie as the availability answers. The answers live in the page's own
 // state (`availability` is the editor, built by the parent so a tap saves from here);
 // the rest arrives in one call. A phone gets one column, a wide screen two.
-function MyPage({ token, me, club, availability, onSwitch }) {
+function MyPage({ token, me, club, availability, onSwitch, prefetch }) {
   const [data, setData] = useState(null)
   const [failed, setFailed] = useState(false)
   const [ladder, setLadder] = useState({ status: 'loading', ladders: [] })
@@ -414,9 +464,17 @@ function MyPage({ token, me, club, availability, onSwitch }) {
   const [showDetails, setShowDetails] = useState(false)
   const [notice, setNotice] = useState(null) // {text, tone} after a save
   const [ranks, setRanks] = useState(null) // club ranks for the season shown; read once, when Stats opens
+  const [cardsReady, setCardsReady] = useState(null) // packs to open, kept current as the player opens them
   useEffect(() => {
     let alive = true
-    const load = () => api.availPublicProfile(token).then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
+    // The first read is the one the page started with its other two; later reads are fresh.
+    let early = prefetch?.current || null
+    if (prefetch) prefetch.current = null
+    const load = () => {
+      const first = early; early = null
+      const read = first ? first.then((d) => d || api.availPublicProfile(token)) : api.availPublicProfile(token)
+      return read.then((d) => { if (alive) setData(d) }).catch(() => { if (alive) setFailed(true) })
+    }
     load()
     // Coming back with the browser's Back button restores this page as it was, so a vote
     // cast in between would still read as due. Read it again when that happens.
@@ -450,7 +508,8 @@ function MyPage({ token, me, club, availability, onSwitch }) {
 
   const render = (key) => {
     switch (key) {
-      case 'votes': return <VotesModule key={key} data={data} />
+      case 'cards': return <CardsSummary key={key} token={token} club={club} swapsWaiting={data?.cards?.swaps_waiting || 0} onReady={setCardsReady} />
+      case 'votes': return <VotesModule key={key} data={data} club={club} />
       case 'ladder': return <LadderModule key={key} state={ladder} />
       case 'season': return <SeasonDashboard key={key} data={data} ranks={ranks} />
       case 'fantasy': return <FantasyCard key={key} data={data} />
@@ -463,13 +522,19 @@ function MyPage({ token, me, club, availability, onSwitch }) {
   // The profile call names the squads the club lets players see; until it lands the
   // availability call already carries them, so the hero does not wait.
   const squads = data ? (data.squads || []) : (me.squads || [])
-  const shown = GROUPS
-    .map((g) => ({ ...g, mods: modules.filter((m) => g.keys.includes(m)) }))
-    .filter((g) => g.id === 'availability' || g.mods.length > 0)
+  const shown = ORDER
+    .map((id) => ({ id, ...GROUPS[id], mods: modules.filter((m) => GROUPS[id].keys.includes(m)) }))
+    .filter((g) => (g.id === 'availability' ? me.has_availability !== false : g.mods.length > 0))
   const allOpen = shown.every((g) => sections.isOpen(g.id))
 
   return (
     <div data-my-page>
+      {club?.slug && (
+        <a href={`/${club.slug}`} data-back-to-site
+          className="inline-flex items-center gap-1.5 mb-3 text-[13px] font-semibold text-pb-dim hover:text-pb-text">
+          <span aria-hidden="true">←</span> Back to BetterCricket
+        </a>
+      )}
       <PlayerHero club={club} player={data?.player || me.player} squads={squads} selected={data?.selected || []} onSwitch={onSwitch}
         onUpdateDetails={data?.can_update_details ? () => { setNotice(null); setShowDetails(true) } : null} />
       {notice && (
@@ -494,9 +559,10 @@ function MyPage({ token, me, club, availability, onSwitch }) {
         <button type="button" data-toggle-all onClick={() => sections.setAll(shown.map((g) => g.id), !allOpen)}
           className="text-[12px] text-pb-faint underline">{allOpen ? 'Collapse all' : 'Expand all'}</button>
       </div>
-      <div className="md:columns-2 md:gap-3" data-groups>
+      {/* items-start: opening one section never stretches the closed one beside it. */}
+      <div className="grid gap-3 md:grid-cols-2 items-start" data-groups>
         {shown.map((g) => {
-          const { text, tone } = summaryFor(g.id, { me, data, ladder })
+          const { text, tone } = summaryFor(g.id, { me, data, ladder, cardsReady })
           return (
             <Group key={g.id} id={g.id} hideTitle={g.hideTitle}
               title={g.id === 'fantasy' && data?.fantasy?.name ? data.fantasy.name : g.title}
@@ -513,15 +579,28 @@ function MyPage({ token, me, club, availability, onSwitch }) {
 }
 
 export default function PublicAvailability() {
-  const { token } = useParams()
+  const { token, '*': rest } = useParams()
+  // /playerdash/:token is the dashboard; /playerdash/:token/cards and what is under it is the Player Cards page.
+  const inCards = rest === 'cards' || (rest || '').startsWith('cards/')
   // Arriving from the voting page: `?player=<id>` has them already picked, so it is
   // only the PIN left to type. (`?tab=mine` on older links is ignored: there is one page now.)
-  const [searchParams] = useSearchParams()
-  const playerParam = searchParams.get('player') || ''
+  const [searchParams, setSearchParams] = useSearchParams()
+  // Read once. The address bar is then cleaned (below), so a link copied from it
+  // is the plain club link and never has one player picked for the next person.
+  const playerParam = useRef(searchParams.get('player') || '').current
+  useEffect(() => {
+    if (!searchParams.has('player') && !searchParams.has('tab')) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('player'); next.delete('tab')
+    setSearchParams(next, { replace: true })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const autoPicked = useRef(false)
+  const profileRef = useRef(null) // the profile read started with the page, for MyPage to use once
   const [step, setStep] = useState('loading') // loading | pick | pin | weekend | dead
   const [club, setClub] = useState(null)
   const [requirePin, setRequirePin] = useState(true)
+  const [hasAvailability, setHasAvailability] = useState(true) // false for a club without BetterSelect: no games to answer
   const [players, setPlayers] = useState([])
   const [search, setSearch] = useState('')
   const [chosen, setChosen] = useState(null) // {id, display_name, has_phone}
@@ -555,21 +634,23 @@ export default function PublicAvailability() {
   // Load branding + roster, and resume an existing verified session if present.
   useEffect(() => {
     let alive = true
-    api.availPublicLanding(token)
+    // The three reads do not depend on each other, so they go out together instead of one
+    // after another (the page used to wait for the club list, then for who is signed in,
+    // then for the profile). A device that is not signed in simply gets a 401 on the last
+    // two. The profile is handed to MyPage through a ref, which uses it once.
+    const landingP = api.availPublicLanding(token)
+    const meP = api.availPublicMe(token).then((d) => ({ ok: true, d }), () => ({ ok: false }))
+    profileRef.current = api.availPublicProfile(token).catch(() => null)
+    landingP
       .then(async (d) => {
+        const mine = await meP
         if (!alive) return
         setClub(d.club)
         setRequirePin(d.require_pin)
+        setHasAvailability(d.has_availability !== false)
         setPlayers(d.players || [])
         // Already verified on this device? Jump straight to the weekend.
-        try {
-          const mine = await api.availPublicMe(token)
-          if (!alive) return
-          setMe(mine)
-          setStep('weekend')
-        } catch {
-          if (alive) setStep('pick')
-        }
+        if (mine.ok) { setMe(mine.d); setStep('weekend') } else { profileRef.current = null; setStep('pick') }
       })
       .catch(() => { if (alive) setStep('dead') })
     return () => { alive = false }
@@ -592,10 +673,11 @@ export default function PublicAvailability() {
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [step, token])
 
+  const fmtName = (n) => formatPlayerName(n, club?.player_name_format)
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return players
-    return players.filter((p) => p.display_name.toLowerCase().includes(q))
+    return players.filter((p) => nameMatchesSearch(p.display_name, q))
   }, [players, search])
 
   const pickPlayer = async (p) => {
@@ -687,6 +769,14 @@ export default function PublicAvailability() {
     setSavingDate((cur) => (cur === pair.key ? null : cur))
   }
 
+  if (step === 'weekend' && me && inCards) {
+    return (
+      <div className="min-h-screen bg-pb-bg text-pb-text" style={accent ? { '--pb-accent': accent } : undefined}>
+        <PlayerCardsApp token={token} club={club} me={me} onSwitch={switchPlayer} />
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text" style={accent ? { '--pb-accent': accent } : undefined}>
       {/* The dashboard opens out on a wide screen; the name and PIN steps stay a phone-width column. */}
@@ -703,11 +793,13 @@ export default function PublicAvailability() {
           </div>
         )}
 
-        {(step === 'pick' || step === 'pin') && <ClubHeader club={club} />}
+        {(step === 'pick' || step === 'pin') && <ClubHeader club={club} hasAvailability={hasAvailability} />}
 
         {/* Step 1 — pick your name */}
         {step === 'pick' && (
           <div>
+            <h1 className="font-display font-bold text-xl text-center mb-1">Who are you?</h1>
+            <p className="text-center text-pb-faint text-sm mb-4">Tap your own name in the list. Your mobile number is checked against that name, so it has to be yours.</p>
             <input
               autoFocus
               value={search}
@@ -725,7 +817,7 @@ export default function PublicAvailability() {
                   onClick={() => pickPlayer(p)}
                   className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-pb-surface2 transition-colors"
                 >
-                  <span className="text-[15px] font-medium">{p.display_name}</span>
+                  <span className="text-[15px] font-medium">{fmtName(p.display_name)}</span>
                   {requirePin && !p.has_phone
                     ? <span className="font-mono text-[10px] text-pb-faintest uppercase shrink-0">no mobile</span>
                     : <span className="text-pb-faintest shrink-0">→</span>}
@@ -741,20 +833,23 @@ export default function PublicAvailability() {
         {/* Step 2 — prove it's you */}
         {step === 'pin' && chosen && (
           <form onSubmit={submitPin}>
-            <div className="text-center mb-5">
-              <div className="text-sm text-pb-faint">Hi</div>
-              <div className="font-display font-bold text-2xl">{chosen.display_name}</div>
-            </div>
-            <Banner>{error}</Banner>
+            <SigningInAs player={chosen} club={club} onSwitch={switchPlayer} />
+            {error && (
+              <Banner>
+                <div>{error}</div>
+                <div className="mt-1.5 font-semibold">
+                  You are logging in as {fmtName(chosen.display_name)}. If that is not you, pick your own name.
+                </div>
+              </Banner>
+            )}
             {!chosen.has_phone ? (
               <div className="text-center text-pb-faint text-sm py-4">
-                There’s no mobile number on file for you yet. Ask your club admin to add it, or to set your availability for you.
-                <div className="mt-5"><button type="button" onClick={switchPlayer} className="text-pb-accent text-sm underline">← Pick a different name</button></div>
+                There’s no mobile number on file for {fmtName(chosen.display_name)} yet. Ask your club admin to add it, or to set your availability for you.
               </div>
             ) : (
               <>
-                <label className="block text-center font-mono text-[11px] tracking-wide2 text-pb-faint uppercase mb-2">
-                  Last 4 digits of your mobile
+                <label className="block text-center text-sm font-semibold mb-2">
+                  Enter the last 4 digits of <span style={{ color: 'var(--pb-accent)' }}>{fmtName(chosen.display_name)}’s</span> mobile
                 </label>
                 <input
                   ref={pinRef}
@@ -771,10 +866,7 @@ export default function PublicAvailability() {
                   className="w-full mt-4 py-3.5 rounded-xl font-semibold text-pb-bg transition disabled:opacity-50"
                   style={{ background: 'var(--pb-accent)' }}
                 >
-                  {verifying ? 'Checking…' : 'Continue'}
-                </button>
-                <button type="button" onClick={switchPlayer} className="block mx-auto mt-4 text-pb-faint text-sm hover:text-pb-text">
-                  ← Not you? Pick a different name
+                  {verifying ? 'Checking…' : `Log in as ${fmtName(chosen.display_name)}`}
                 </button>
               </>
             )}
@@ -786,6 +878,7 @@ export default function PublicAvailability() {
           <div>
             <Banner>{error}</Banner>
             <MyPage
+              prefetch={profileRef}
               token={token}
               me={me}
               club={club}

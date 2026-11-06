@@ -37,6 +37,14 @@ import { MARKETING_PATHS, isMarketingPath, rendersOwnMarketingNav } from './lib/
 // Also the reference list for ClubCTABar (which BetterCricket pages vs. club public
 // pages get the "get your club on BetterCricket" bar shown to every visitor).
 export { MARKETING_PATHS, isMarketingPath, rendersOwnMarketingNav }
+// An old /avail/<token> link (pinned in a group chat, on a poster, in a QR code) opens the same page at its new address,
+// keeping whatever followed it: a sub page, ?player=<id>, a hash.
+function LegacyAvailRedirect() {
+  const { token, '*': rest } = useParams()
+  const { search, hash } = useLocation()
+  return <Navigate replace to={`/playerdash/${token}${rest ? `/${rest}` : ''}${search}${hash}`} />
+}
+
 function ConditionalNavbar() {
   const { pathname } = useLocation()
   // Two lists, because /trial and /demo draw their own MarketingNav without
@@ -46,7 +54,7 @@ function ConditionalNavbar() {
   // mobile page — it renders its own minimal header, no club nav. The BetterPosts
   // editor is a full-viewport takeover with its own header, so suppress the club
   // nav there too.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/nets-checkin/') || pathname.startsWith('/admin/social-post') || pathname.startsWith('/betterscout')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/playerdash/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/nets-checkin/') || pathname.startsWith('/rotation/') || (pathname.startsWith('/admin/betterselect/rotation/') && pathname.includes('/print/')) || pathname.startsWith('/admin/social-post') || pathname.startsWith('/betterscout')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -168,6 +176,8 @@ const SalesLists = lazy(() => import('./pages/admin/SalesLists'))
 const SalesManagement = lazy(() => import('./pages/admin/SalesManagement'))
 const SuperWizardClubs = lazy(() => import('./pages/admin/SuperWizardClubs'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
+const AdminPlayerCards = lazy(() => import('./pages/admin/AdminPlayerCards'))
+const AdminPlayerDashboard = lazy(() => import('./pages/admin/AdminPlayerDashboard'))
 const AdminClubRoom = lazy(() => import('./pages/admin/AdminClubRoom'))
 const ClubRoomPlayer = lazy(() => import('./pages/admin/ClubRoomPlayer'))
 const AdminSocialPost = lazy(() => import('./pages/admin/AdminSocialPost'))
@@ -206,9 +216,13 @@ const BsSelection = lazy(() => import('./pages/admin/betterselect/AdminSelection
 const BsSelectionOverview = lazy(() => import('./pages/admin/betterselect/AdminSelectionOverview'))
 const BsSelectionDraftTable = lazy(() => import('./pages/admin/betterselect/AdminSelectionDraftTable'))
 const BsAuditHistory = lazy(() => import('./pages/admin/betterselect/AuditHistory'))
+const BsPastLineups = lazy(() => import('./pages/admin/betterselect/PastLineups'))
 const BsLadders = lazy(() => import('./pages/admin/betterselect/AdminLadders'))
 const BsNets = lazy(() => import('./pages/admin/betterselect/Nets'))
 const BsNetSession = lazy(() => import('./pages/admin/betterselect/NetSession'))
+const BsRotation = lazy(() => import('./pages/admin/betterselect/Rotation'))
+const BsRotationGroup = lazy(() => import('./pages/admin/betterselect/RotationGroup'))
+const BsRotationPrint = lazy(() => import('./pages/admin/betterselect/rotation/RotationPrint'))
 const BsVotes = lazy(() => import('./pages/admin/betterselect/AdminVotes'))
 const BsRules = lazy(() => import('./pages/admin/betterselect/AdminSelectionRules'))
 const BsSettings = lazy(() => import('./pages/admin/betterselect/AdminSelectSettings'))
@@ -231,6 +245,7 @@ const FantasySettings = lazy(() => import('./pages/admin/fantasy/FantasySettings
 const FantasyScoring = lazy(() => import('./pages/admin/fantasy/FantasyScoring'))
 const FantasyPool = lazy(() => import('./pages/admin/fantasy/FantasyPool'))
 const FantasyPrices = lazy(() => import('./pages/admin/fantasy/FantasyPrices'))
+const FantasyWinners = lazy(() => import('./pages/admin/fantasy/FantasyWinners'))
 const FantasyPlayers = lazy(() => import('./pages/admin/fantasy/FantasyPlayers'))
 const FantasyLeagues = lazy(() => import('./pages/admin/fantasy/FantasyLeagues'))
 
@@ -283,6 +298,7 @@ const TeaserCard = lazy(() => import('./pages/marketing/TeaserCard'))
 // Public, login-free net check-in — the QR code on the fence and the NFC tag
 // beside it hold this same URL.
 const PublicNetCheckIn = lazy(() => import('./pages/PublicNetCheckIn'))
+const PublicRotation = lazy(() => import('./pages/PublicRotation'))
 const PublicClubRoom = lazy(() => import('./pages/PublicClubRoom'))
 // Public, login-free fantasy play (BetterFantasyCricket magic link + PIN)
 const PublicFantasy = lazy(() => import('./pages/PublicFantasy'))
@@ -405,13 +421,17 @@ export default function App() {
           </Route>
 
           {/* Public self-service availability (no login — magic link + PIN) */}
-          <Route path="/avail/:token" element={<PublicAvailability />} />
+          {/* The player dashboard. /avail is the address players already have pinned in group chats and on posters, so it stays
+              as an alias that moves on to the same page at its new address. */}
+          <Route path="/playerdash/:token/*" element={<PublicAvailability />} />
+          <Route path="/avail/:token/*" element={<LegacyAvailRedirect />} />
           <Route path="/vote/:token" element={<PublicVoting />} />
           <Route path="/preview/:token" element={<TeaserPreview />} />
           {/* The picture the renderer screenshots; see TeaserCard.jsx. */}
           <Route path="/preview/:token/card/:fmt" element={<TeaserCard />} />
           {/* Public net check-in (no login — QR code / NFC tag + optional PIN) */}
           <Route path="/nets-checkin/:token" element={<PublicNetCheckIn />} />
+          <Route path="/rotation/:token" element={<PublicRotation />} />
           <Route path="/room/:token" element={<PublicClubRoom />} />
           {/* Public fantasy play (no login — magic link + PIN) */}
           <Route path="/fantasy/:token" element={<PublicFantasy />} />
@@ -546,6 +566,7 @@ export default function App() {
           <Route path="/admin/fantasy/scoring" element={<ProtectedRoute requireModule="fantasy"><FantasyScoring /></ProtectedRoute>} />
           <Route path="/admin/fantasy/pool" element={<ProtectedRoute requireModule="fantasy"><FantasyPool /></ProtectedRoute>} />
           <Route path="/admin/fantasy/prices" element={<ProtectedRoute requireModule="fantasy"><FantasyPrices /></ProtectedRoute>} />
+          <Route path="/admin/fantasy/winners" element={<ProtectedRoute requireModule="fantasy"><FantasyWinners /></ProtectedRoute>} />
           <Route path="/admin/fantasy/players" element={<ProtectedRoute requireModule="fantasy"><FantasyPlayers /></ProtectedRoute>} />
           <Route path="/admin/fantasy/leagues" element={<ProtectedRoute requireModule="fantasy"><FantasyLeagues /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute requireActivePlan><AdminSettings /></ProtectedRoute>} />
@@ -555,6 +576,8 @@ export default function App() {
               on the server, so the route itself needs no capability. */}
           <Route path="/admin/notifications" element={<ProtectedRoute><AdminNotifications /></ProtectedRoute>} />
           <Route path="/admin/sponsors" element={<ProtectedRoute requireCore><AdminSponsors /></ProtectedRoute>} />
+          <Route path="/admin/player-cards" element={<ProtectedRoute requireCore><AdminPlayerCards /></ProtectedRoute>} />
+          <Route path="/admin/player-dashboard" element={<ProtectedRoute requireCore><AdminPlayerDashboard /></ProtectedRoute>} />
           <Route path="/admin/club-room" element={<ProtectedRoute requireCore><AdminClubRoom /></ProtectedRoute>} />
           {/* Standalone full-screen player, no surrounding sidebar — same pattern as
               /admin/yearbook: a club leaves this open on a TV, so a refresh must land
@@ -606,12 +629,16 @@ export default function App() {
           <Route path="/admin/betterselect/availability" element={<ProtectedRoute requireModule="select"><BsAvailability /></ProtectedRoute>} />
           <Route path="/admin/betterselect/selection" element={<ProtectedRoute requireModule="select"><BsSelectionOverview /></ProtectedRoute>} />
           <Route path="/admin/betterselect/whiteboard" element={<ProtectedRoute requireModule="select"><BsSelectionDraftTable /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/past-lineups" element={<ProtectedRoute requireModule="select"><BsPastLineups /></ProtectedRoute>} />
           <Route path="/admin/betterselect/audit" element={<ProtectedRoute requireModule="select"><BsAuditHistory /></ProtectedRoute>} />
           {/* Its old address, from before it had its own place in the menu. */}
           <Route path="/admin/betterselect/selection/draft-table" element={<RedirectKeepingSearch to="/admin/betterselect/whiteboard" />} />
           <Route path="/admin/betterselect/select/:fixtureId" element={<ProtectedRoute requireModule="select"><BsSelection /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets" element={<ProtectedRoute requireModule="select"><BsNets /></ProtectedRoute>} />
           <Route path="/admin/betterselect/nets/:id" element={<ProtectedRoute requireModule="select"><BsNetSession /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/rotation" element={<ProtectedRoute requireModule="select"><BsRotation /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/rotation/:groupId" element={<ProtectedRoute requireModule="select"><BsRotationGroup /></ProtectedRoute>} />
+          <Route path="/admin/betterselect/rotation/:groupId/print/:roundId" element={<ProtectedRoute requireModule="select"><BsRotationPrint /></ProtectedRoute>} />
           <Route path="/admin/betterselect/ladders" element={<ProtectedRoute requireModule="select"><BsLadders /></ProtectedRoute>} />
           <Route path="/admin/betterselect/votes" element={<ProtectedRoute requireModule="select"><BsVotes /></ProtectedRoute>} />
           <Route path="/admin/betterselect/settings" element={<ProtectedRoute requireModule="select"><BsSettings /></ProtectedRoute>} />

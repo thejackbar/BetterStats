@@ -105,6 +105,29 @@ STATEMENTS: tuple[str, ...] = (
     # created against a column that is not there yet.
     "ALTER TABLE manual_batting_innings ADD COLUMN IF NOT EXISTS "
     "caught_behind BOOLEAN",
+    # A PERSON'S CHOICE OF CARD, from Card review (migration 349, guarded here for the reason the
+    # columns above are: the view below reads it, and this module runs before that mirror).
+    "ALTER TABLE manual_games ADD COLUMN IF NOT EXISTS review_choice TEXT",
+    # Tiny by construction: only the matches a person chose a card for.
+    "CREATE INDEX IF NOT EXISTS ix_manual_games_chosen_pair ON manual_games (season_id) "
+    "WHERE superseded_by_game_id IS NOT NULL AND pair_prefers_import AND review_choice IS NOT NULL",
+    # A SEASON THE CLUB COUNTS MATCH BY MATCH, derived on read and never stored. Two ways in: the
+    # season was re-sourced by an overwrite import (`import_authoritative`), or a person chose the
+    # club's own card over Cricket Australia's for any match in it (Card review). Cricket
+    # Australia's season total has no per-match granularity, so it cannot step aside for one match:
+    # the moment a club's card is preferred anywhere in a season, the season has to be counted from
+    # its matches, or the profile, the leaderboard and every record would keep printing PlayHQ's
+    # figure beside the scorecard the club chose. Derived, so a choice undone, a pair unlinked or a
+    # game deleted takes the season straight back to CA's total with nothing to tidy. An automatic
+    # pair nobody decided (`review_choice` NULL, a CricketStatz match completing a PlayHQ one)
+    # does not count here: those seasons keep the rule the views always had.
+    """CREATE OR REPLACE VIEW v_club_sourced_seasons AS
+    SELECT s.id AS season_id FROM seasons s WHERE s.import_authoritative
+    UNION
+    SELECT mg.season_id FROM manual_games mg
+     WHERE mg.superseded_by_game_id IS NOT NULL
+       AND mg.pair_prefers_import
+       AND mg.review_choice IS NOT NULL""",
     # Migration 266's column, guarded for the same reason: this module owns
     # v_effective_games and v_effective_player_season_stats, both of which read
     # `games.status`, and it runs BEFORE the 266 mirror further down the boot.
@@ -203,6 +226,7 @@ STATEMENTS: tuple[str, ...] = (
         JOIN games g ON g.id = ga.game_id
         JOIN grades gr ON gr.id = g.grade_id
         WHERE g.status IN ('ABANDONED', 'CANCELLED')
+          AND __OFF_g__
           AND NOT EXISTS (
               SELECT 1 FROM batting_innings bi
               WHERE bi.game_id = ga.game_id AND bi.player_id = ga.player_id
@@ -264,7 +288,7 @@ STATEMENTS: tuple[str, ...] = (
                     JOIN grades xgr ON xgr.id = xg.grade_id
                     JOIN seasons xs ON xs.id = xgr.season_id
                     WHERE xs.year = rs.year
-                      AND (x.has_row OR (COALESCE(xg.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+                      AND (x.has_row OR (NOT __OFF_xg__
                                           AND xg.ca_called_off IS NOT TRUE))
                     GROUP BY x.game_id
                ) z) AS held_games
@@ -276,7 +300,7 @@ STATEMENTS: tuple[str, ...] = (
             WHERE ga.player_id = pss.player_id
               AND (ga.is_reserve IS TRUE OR g.ca_called_off IS TRUE)
               AND gr.season_id = pss.season_id
-              AND COALESCE(g.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+              AND NOT __OFF_g__
               AND NOT EXISTS (
                   SELECT 1 FROM batting_innings bi
                   WHERE bi.game_id = ga.game_id AND bi.player_id = ga.player_id
@@ -322,7 +346,7 @@ STATEMENTS: tuple[str, ...] = (
           -- game with a preferred imported twin is in the second, never the
           -- first), so the season is the union of both sources counted once.
           -- Everywhere else this is FALSE and nothing changes.
-          AND NOT s.import_authoritative
+          AND NOT EXISTS (SELECT 1 FROM v_club_sourced_seasons cs WHERE cs.season_id = s.id)
     )
 
     UNION ALL
@@ -354,7 +378,12 @@ STATEMENTS: tuple[str, ...] = (
         NULL::numeric AS bowling_economy,
         NULL::numeric AS bowling_average,
         NULL::numeric AS bowling_strike_rate,
-        bowling_best_wickets AS best_bowling_wickets,
+        -- The wickets are read off the figures when the figures are a real "4-13": one entry
+        -- carries both, and a row saved with figures and no wickets (the old adjustment form allowed
+        -- it) must not read as having no best at all. Figures win over a stale wickets box.
+        COALESCE(CASE WHEN bowling_best_figures ~ '^[0-9]+-[0-9]+$'
+                      THEN SPLIT_PART(bowling_best_figures, '-', 1)::integer END,
+                 bowling_best_wickets) AS best_bowling_wickets,
         bowling_best_figures AS best_bowling_figures,
         bowling_five_wicket_innings AS five_wicket_innings,
         bowling_wides AS wides,
@@ -402,7 +431,12 @@ STATEMENTS: tuple[str, ...] = (
         NULL::numeric AS bowling_economy,
         NULL::numeric AS bowling_average,
         NULL::numeric AS bowling_strike_rate,
-        bowling_best_wickets AS best_bowling_wickets,
+        -- The wickets are read off the figures when the figures are a real "4-13": one entry
+        -- carries both, and a row saved with figures and no wickets (the old adjustment form allowed
+        -- it) must not read as having no best at all. Figures win over a stale wickets box.
+        COALESCE(CASE WHEN bowling_best_figures ~ '^[0-9]+-[0-9]+$'
+                      THEN SPLIT_PART(bowling_best_figures, '-', 1)::integer END,
+                 bowling_best_wickets) AS best_bowling_wickets,
         bowling_best_figures AS best_bowling_figures,
         bowling_five_wicket_innings AS five_wicket_innings,
         0 AS wides,
@@ -500,8 +534,8 @@ STATEMENTS: tuple[str, ...] = (
             FROM manual_games mg
             WHERE mg.superseded_by_game_id IS NULL
                OR (mg.pair_prefers_import
-                   AND EXISTS (SELECT 1 FROM seasons s
-                               WHERE s.id = mg.season_id AND s.import_authoritative))
+                   AND EXISTS (SELECT 1 FROM v_club_sourced_seasons cs
+                               WHERE cs.season_id = mg.season_id))
         ),
         player_games AS NOT MATERIALIZED (
             SELECT ch.manual_game_id, ch.season_id, ch.grade_id, mbi.player_id
@@ -558,6 +592,14 @@ STATEMENTS: tuple[str, ...] = (
                 COALESCE(SUM(mbs.runs), 0)::integer AS runs_conceded,
                 COALESCE(SUM(mbs.maidens), 0)::integer AS maidens,
                 MAX(mbs.wickets) AS best_bowling_wickets,
+                -- The figures of that best spell as `wickets-runs`, fewest runs
+                -- winning a tie on wickets. Without them every reader fell back
+                -- to printing the bare wicket count ("5 wickets") for a club
+                -- whose bowling is all hand-entered. Nothing for a spell with no
+                -- wicket in it: a best of 0-20 is not a figure.
+                (ARRAY_AGG(mbs.wickets::text || '-' || mbs.runs::text
+                           ORDER BY mbs.wickets DESC, mbs.runs ASC)
+                 FILTER (WHERE mbs.wickets > 0))[1] AS best_bowling_figures,
                 COUNT(*) FILTER (WHERE mbs.wickets >= 5)::integer AS five_wicket_innings,
                 COALESCE(SUM(mbs.wides), 0)::integer AS wides,
                 COALESCE(SUM(mbs.no_balls), 0)::integer AS no_balls
@@ -597,7 +639,7 @@ STATEMENTS: tuple[str, ...] = (
             COALESCE(w.runs_conceded, 0) AS runs_conceded,
             COALESCE(w.maidens, 0) AS maidens,
             w.best_bowling_wickets,
-            NULL::text AS best_bowling_figures,
+            w.best_bowling_figures,
             COALESCE(w.five_wicket_innings, 0) AS five_wicket_innings,
             COALESCE(w.wides, 0) AS wides,
             COALESCE(w.no_balls, 0) AS no_balls,
@@ -669,7 +711,7 @@ STATEMENTS: tuple[str, ...] = (
         NULL::numeric AS bowling_average,
         NULL::numeric AS bowling_strike_rate,
         ca_agg.best_bowling_wickets,
-        NULL::text AS best_bowling_figures,
+        ca_agg.best_bowling_figures,
         ca_agg.five_wicket_innings,
         ca_agg.wides,
         ca_agg.no_balls,
@@ -700,10 +742,10 @@ STATEMENTS: tuple[str, ...] = (
             SELECT g.id AS game_id, s.id AS season_id, g.grade_id,
                    s.organisation_id, g.status, g.ca_called_off
             FROM seasons s
+            JOIN v_club_sourced_seasons cs ON cs.season_id = s.id
             JOIN grades gr ON gr.season_id = s.id
             JOIN games g ON g.grade_id = gr.id
-            WHERE s.import_authoritative
-              AND NOT EXISTS (SELECT 1 FROM manual_games pm
+            WHERE NOT EXISTS (SELECT 1 FROM manual_games pm
                                WHERE pm.superseded_by_game_id = g.id
                                  AND pm.pair_prefers_import)
             UNION
@@ -713,13 +755,13 @@ STATEMENTS: tuple[str, ...] = (
                        g.id AS game_id, s.id AS season_id, g.grade_id,
                        s.organisation_id, g.status, g.ca_called_off
                 FROM seasons s
+                JOIN v_club_sourced_seasons cs ON cs.season_id = s.id
                 JOIN games g ON (g.home_org_id = s.organisation_id
                                  OR g.away_org_id = s.organisation_id)
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons theirs ON theirs.id = gr.season_id
                                    AND theirs.organisation_id <> s.organisation_id
-                WHERE s.import_authoritative
-                  AND ((s.grassroots_id IS NOT NULL
+                WHERE ((s.grassroots_id IS NOT NULL
                         AND s.grassroots_id = theirs.grassroots_id)
                        OR (s.year IS NOT NULL AND s.year = theirs.year))
                   AND NOT EXISTS (SELECT 1 FROM manual_games pm
@@ -751,7 +793,7 @@ STATEMENTS: tuple[str, ...] = (
             UNION
             SELECT ag.game_id, ag.season_id, ag.grade_id, ag.organisation_id, ga.player_id
             FROM auth_games ag JOIN game_appearances ga ON ga.game_id = ag.game_id
-            WHERE COALESCE(ag.status, '') NOT IN ('ABANDONED', 'CANCELLED')
+            WHERE NOT __OFF_ag__
               AND ag.ca_called_off IS NOT TRUE
               AND ga.is_reserve IS NOT TRUE
         ),
@@ -809,6 +851,14 @@ STATEMENTS: tuple[str, ...] = (
                 COALESCE(SUM(bs.runs), 0)::integer AS runs_conceded,
                 COALESCE(SUM(bs.maidens), 0)::integer AS maidens,
                 MAX(bs.wickets) AS best_bowling_wickets,
+                -- The figures of that best spell as `wickets-runs`, fewest runs
+                -- winning a tie on wickets. Without them every reader fell back
+                -- to printing the bare wicket count ("5 wickets") for a club
+                -- whose bowling is all hand-entered. Nothing for a spell with no
+                -- wicket in it: a best of 0-20 is not a figure.
+                (ARRAY_AGG(bs.wickets::text || '-' || bs.runs::text
+                           ORDER BY bs.wickets DESC, bs.runs ASC)
+                 FILTER (WHERE bs.wickets > 0))[1] AS best_bowling_figures,
                 COUNT(*) FILTER (WHERE bs.wickets >= 5)::integer AS five_wicket_innings,
                 COALESCE(SUM(bs.wides), 0)::integer AS wides,
                 COALESCE(SUM(bs.no_balls), 0)::integer AS no_balls
@@ -846,6 +896,7 @@ STATEMENTS: tuple[str, ...] = (
             COALESCE(w.runs_conceded, 0) AS runs_conceded,
             COALESCE(w.maidens, 0) AS maidens,
             w.best_bowling_wickets,
+            w.best_bowling_figures,
             COALESCE(w.five_wicket_innings, 0) AS five_wicket_innings,
             COALESCE(w.wides, 0) AS wides,
             COALESCE(w.no_balls, 0) AS no_balls,
@@ -1012,6 +1063,18 @@ PER_INNINGS_ORIGINALS: tuple[str, ...] = tuple(
 
 STATEMENTS = STATEMENTS + PER_INNINGS_VIEWS
 
+# "CA's status says this fixture did not happen", written once in services/game_status.py
+# (an ABANDONED game with play in it still counts) and dropped into the views here. Only the
+# live definitions carry these placeholders; DOWNGRADE keeps the older text on purpose.
+from app.services.game_status import abandoned_without_play_sql as _awp  # noqa: E402
+
+STATEMENTS = tuple(
+    st.replace("__OFF_g__", _awp("g.status", "g.id"))
+      .replace("__OFF_xg__", _awp("xg.status", "xg.id"))
+      .replace("__OFF_ag__", _awp("ag.status", "ag.game_id"))
+    for st in STATEMENTS
+)
+
 # NOTHING MARKS A SEASON ANY MORE. The earlier rule set
 # `seasons.stats_source = 'cricketstatz'` for every season holding an imported
 # match, which hid that season's whole synced side — and with it every match
@@ -1021,6 +1084,10 @@ STATEMENTS = STATEMENTS + PER_INNINGS_VIEWS
 # destroying a club's own earlier choice to tidy up would be its own bug.
 
 _DROP_PAIR: tuple[str, ...] = (
+    # Reads import_authoritative, pair_prefers_import and review_choice, so it goes first. The
+    # DOWNGRADE views above reference nothing of it.
+    "DROP VIEW IF EXISTS v_club_sourced_seasons",
+    "DROP INDEX IF EXISTS ix_manual_games_chosen_pair",
     "DROP INDEX IF EXISTS uq_manual_games_superseded_by_game",
     "ALTER TABLE manual_games DROP CONSTRAINT IF EXISTS "
     "fk_manual_games_superseded_by_game",

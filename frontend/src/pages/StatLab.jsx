@@ -143,6 +143,13 @@ const METRIC_LABELS = {
   batter2_runs: { label: 'Batter 2 Runs', short: 'B2 R', decimal: false },
   member_count: { label: 'Members', short: 'Members', decimal: false },
   played_at: { label: 'Date', short: 'Date', decimal: false },
+  match_runs: { label: 'Match Runs (Both Sides)', short: 'Match', decimal: false },
+  target: { label: 'Target Chased', short: 'Target', decimal: false },
+  is_chase: { label: 'Successful Chase (1 = yes)', short: 'Chase', decimal: false },
+  is_defended: { label: 'Total Defended (1 = yes)', short: 'Defended', decimal: false },
+  won: { label: 'Batting Side Won (1 = yes)', short: 'Won', decimal: false },
+  won_by_runs: { label: 'Won By (Runs, batting first)', short: 'By runs', decimal: false },
+  won_by_wickets: { label: 'Won By (Wickets, chasing)', short: 'By wkts', decimal: false },
 }
 
 const OPERATORS = [
@@ -356,15 +363,26 @@ const PRESET_GROUPS = [
   {
     key: 'match', label: 'Match', defaultOpen: false,
     items: [
+      { type: 'preset', label: 'Biggest successful chases',          target: 'team_innings_list', sortBy: 'target', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '1' }, { field: 'is_chase', op: 'eq', value: '1' }], context: {} },
+      { type: 'preset', label: 'Biggest chases against us',          target: 'team_innings_list', sortBy: 'target', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '0' }, { field: 'is_chase', op: 'eq', value: '1' }], context: {} },
+      { type: 'preset', label: 'Lowest totals we defended',          target: 'team_innings_list', sortBy: 'runs',   sortDir: 'asc',  filters: [{ field: 'is_ours', op: 'eq', value: '1' }, { field: 'is_defended', op: 'eq', value: '1' }, { field: 'runs', op: 'gt', value: '0' }], context: {} },
       { type: 'preset', label: 'Highest innings totals',   target: 'team_innings_list', sortBy: 'runs', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '1' }], context: {} },
       { type: 'preset', label: 'Lowest all-out totals',    target: 'team_innings_list', sortBy: 'runs', sortDir: 'asc',  filters: [{ field: 'is_ours', op: 'eq', value: '1' }, { field: 'runs', op: 'gt', value: '0' }, { field: 'wickets', op: 'gte', value: '10' }], context: {} },
       { type: 'preset', label: 'Highest opposition totals',target: 'team_innings_list', sortBy: 'runs', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '0' }], context: {} },
       { type: 'preset', label: 'Lowest opposition totals', target: 'team_innings_list', sortBy: 'runs', sortDir: 'asc',  filters: [{ field: 'is_ours', op: 'eq', value: '0' }, { field: 'runs', op: 'gt', value: '0' }, { field: 'wickets', op: 'gte', value: '10' }], context: {} },
       { type: 'preset', label: 'Most extras conceded',     target: 'team_innings_list', sortBy: 'extras', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '0' }], context: {} },
+      { type: 'preset', label: 'Lowest totals defended against us',  target: 'team_innings_list', sortBy: 'runs',   sortDir: 'asc',  filters: [{ field: 'is_ours', op: 'eq', value: '0' }, { field: 'is_defended', op: 'eq', value: '1' }, { field: 'runs', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Highest totals in a loss',           target: 'team_innings_list', sortBy: 'runs',   sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '1' }], context: { result: 'lost' } },
+      { type: 'preset', label: 'Lowest totals in a win',             target: 'team_innings_list', sortBy: 'runs',   sortDir: 'asc',  filters: [{ field: 'is_ours', op: 'eq', value: '1' }, { field: 'runs', op: 'gt', value: '0' }], context: { result: 'won' } },
       { type: 'preset', label: 'Highest match totals',     target: 'match_list', sortBy: 'team_runs',    sortDir: 'desc', filters: [], context: {} },
-      { type: 'preset', label: 'Biggest winning margins',  target: 'match_list', sortBy: 'margin_runs',  sortDir: 'desc', filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
-      { type: 'preset', label: 'Closest wins',             target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'gt', value: '0' }], context: { result: 'won' } },
-      { type: 'preset', label: 'Biggest defeats',          target: 'match_list', sortBy: 'margin_runs',  sortDir: 'asc',  filters: [{ field: 'margin_runs', op: 'lt', value: '0' }], context: { result: 'lost' } },
+      { type: 'preset', label: 'Highest-scoring matches (both sides)', target: 'match_list', sortBy: 'match_runs', sortDir: 'desc', filters: [], context: {} },
+      { type: 'preset', label: 'Lowest-scoring matches (both sides)',  target: 'match_list', sortBy: 'match_runs', sortDir: 'asc',  filters: [{ field: 'team_runs', op: 'gt', value: '0' }, { field: 'opp_runs', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Biggest wins (Runs)', target: 'team_innings_list', sortBy: 'won_by_runs', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '1' }, { field: 'won_by_runs', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Biggest wins (Wickets)', target: 'team_innings_list', sortBy: 'won_by_wickets', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '1' }, { field: 'won_by_wickets', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Closest wins (Runs)',     target: 'team_innings_list', sortBy: 'won_by_runs',    sortDir: 'asc', filters: [{ field: 'is_ours', op: 'eq', value: '1' }, { field: 'won_by_runs', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Closest wins (Wickets)',  target: 'team_innings_list', sortBy: 'won_by_wickets', sortDir: 'asc', filters: [{ field: 'is_ours', op: 'eq', value: '1' }, { field: 'won_by_wickets', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Biggest defeats (Runs)', target: 'team_innings_list', sortBy: 'won_by_runs', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '0' }, { field: 'won_by_runs', op: 'gt', value: '0' }], context: {} },
+      { type: 'preset', label: 'Biggest defeats (Wickets)', target: 'team_innings_list', sortBy: 'won_by_wickets', sortDir: 'desc', filters: [{ field: 'is_ours', op: 'eq', value: '0' }, { field: 'won_by_wickets', op: 'gt', value: '0' }], context: {} },
       { type: 'preset', label: 'Finals',                   target: 'match_list', sortBy: 'played_at',   sortDir: 'desc', filters: [], context: { finals_only: true } },
     ],
   },
@@ -400,8 +418,8 @@ const COLUMN_SETS = {
   family_grade:     ['member_count','matches','batting_innings','runs','batting_average','high_score','wickets','bowling_average','catches','catches_wk','catches_non_wk'],
   innings_list:     ['runs','balls','fours','sixes','strike_rate','batting_position'],
   spell_list:       ['overs','maidens','runs','wickets','economy'],
-  match_list:       ['team_runs','team_wickets','opp_runs','opp_wickets','margin_runs'],
-  team_innings_list:['runs','wickets','extras','innings_number'],
+  match_list:       ['team_runs','team_wickets','opp_runs','opp_wickets','margin_runs','match_runs'],
+  team_innings_list:['runs','wickets','target','won_by_runs','won_by_wickets','extras','innings_number'],
   partnership_list: ['runs','balls','wicket_number','batter1_runs','batter2_runs'],
 }
 
@@ -483,7 +501,7 @@ const FILTER_CATEGORIES = [
   { key: 'fielding', label: 'Fielding',
     fields: ['catches','catches_wk','catches_non_wk','run_outs','stumpings'] },
   { key: 'match', label: 'Match',
-    fields: ['team_runs','team_wickets','opp_runs','opp_wickets','margin_runs','innings_number'] },
+    fields: ['team_runs','team_wickets','opp_runs','opp_wickets','margin_runs','match_runs','innings_number','target','is_chase','is_defended','won','won_by_runs','won_by_wickets'] },
   { key: 'partnership', label: 'Partnership',
     fields: ['wicket_number','batter1_runs','batter2_runs'] },
 ]
@@ -2298,6 +2316,14 @@ function entityHeader(target, activeDerived) {
         { key: 'grade_name',  label: 'GRADE' },
         { key: 'played_at',   label: 'DATE' },
       ]
+    case 'team_innings_list':
+      return [
+        { key: 'batting_team', label: 'TEAM' },
+        { key: 'against',      label: 'VS' },
+        { key: 'grade_name',   label: 'GRADE' },
+        { key: 'played_at',    label: 'DATE' },
+        { key: 'result',       label: 'OUR RESULT' },
+      ]
     case 'match_list':
       return [
         { key: 'opposition', label: 'VS' },
@@ -2317,7 +2343,14 @@ function entityHeader(target, activeDerived) {
   }
 }
 
+// The tables whose every row IS a match (or one side's innings in it): a row opens that
+// match's scorecard. A click that lands on a link inside the row still goes to the link, and
+// Enter opens it from the keyboard. Same behaviour as a partnership row on Records.
+const SCORECARD_TARGETS = new Set(['team_innings_list', 'match_list'])
+
 function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort, sortBy, clubSlug, rowOffset = 0 }) {
+  const navigate = useNavigate()
+  const opensScorecard = !activeDerived && SCORECARD_TARGETS.has(target)
   const dimCols = activeDerived
     ? (DUO_DERIVED.has(activeDerived)
         ? [{ key: 'player_a_name', label: 'BOWLER' }, { key: 'player_b_name', label: 'FIELDER' }]
@@ -2345,8 +2378,18 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+          {rows.map((row, i) => {
+            const gameId = opensScorecard ? row.game_id : null
+            const open = () => navigate(`/games/${gameId}`)
+            return (
+            <tr key={i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2${gameId ? ' cursor-pointer' : ''}`}
+              {...(gameId ? {
+                tabIndex: 0,
+                title: 'Open the scorecard',
+                'data-game-id': gameId,
+                onClick: e => { if (!e.target.closest('a')) open() },
+                onKeyDown: e => { if (e.key === 'Enter' && e.target === e.currentTarget) open() },
+              } : {})}>
               <td className="py-2.5 pl-5 font-mono text-pb-faintest">{rowOffset + i + 1}</td>
               {dimCols.map(dc => (
                 <td key={dc.key} className="py-2.5 pr-3 font-medium text-pb-text">
@@ -2362,7 +2405,8 @@ function ResultsTable({ rows, columns, target, activeDerived, clientSort, onSort
                 </td>
               ))}
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
     </div>

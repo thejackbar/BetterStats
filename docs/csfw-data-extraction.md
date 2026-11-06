@@ -356,6 +356,8 @@ An innings counts as played when its total is present and non-negative.
 |---|---|
 | 0 | Player id (`-1` or `>= 200` means empty slot) |
 | 2 | Batting position (`255` or `-1` means did not bat; stored 0-indexed) |
+| 4 | Captain flag (`int16`, Visual Basic boolean: `-1` is True, `0` is False). See section 12 |
+| 6 | Wicketkeeper flag (same encoding). See section 12 |
 | 8 | Runs |
 | 12 | Sixes |
 | 14 | Fours |
@@ -823,6 +825,7 @@ The converter writes three files:
 | `match_detail.xlsx` | The full archive as sheets: Notes, Matches, Batting, Bowling, Fielding, Fall of wickets, Votes, Players, Data quality, Cross-check |
 | `manual_games_scorecards.csv` | **The one to import.** One row per player per match, in the Manual Games importer's columns |
 | `betterimport_season_stats.csv` | The simpler alternative: season totals per player, no match detail |
+| `manual_game_roles.csv` | Captain and wicketkeeper per match, for a club that has **already** imported its scorecards (see section 12). Not an import file for the Manual Games page |
 
 **Import one of the two CSVs, never both**, or the same runs are counted twice.
 The scorecard CSV is the richer route: it lands real match records, so match
@@ -1076,3 +1079,49 @@ that changed, and what it taught:
 - **A check that crashes on a missing file is not a control run**, hit again -
   the C2 text reports do not exist in the older archive, so the reader returns
   nothing rather than raising, and the suite reports the absence.
+
+---
+
+## 12. Captain and wicketkeeper (Oct 2026)
+
+Shoalwater Bay entered a captain and a wicketkeeper in CSFW for each match its scorebook named one, and neither
+reached BetterCricket. Both are in the player block.
+
+- **Offset 4 is the captain flag and offset 6 is the wicketkeeper flag.** Each is an `int16` Visual Basic boolean:
+  `-1` is True, `0` is False. Found by scanning every block field across the archive for one that is only ever 0 or
+  -1 and then testing each candidate against something already known.
+- **The keeper flag is proved.** Every stumping (`60`) and every keeper catch (`56`) in the archive belongs to a
+  player whose offset 6 flag is set, and no player without the flag has either.
+- **The captain flag is inferred, so the club should look at it.** There is nothing in the file to test it against.
+  It is set on exactly one player in 894 of 918 matches and a grade and season has one regular holder. That is the
+  pattern a captain flag would leave and a random bitmask would not, but it is not a proof. Shoalwater's copy has 880 of 903 imported matches naming a captain, one
+  match with two (1999-01-23 B grade v Warnbro), and 23 with none.
+- **A match can name two keepers** (27 do): a change of gloves mid-match. Both are kept. The converter reads each
+  flag across the duplicate blocks a person can have in one innings and ORs them, so a player listed twice is one
+  player with the flag.
+
+What the converter writes:
+
+- The scorecard CSV has `is_captain` and `is_wicketkeeper` columns (`true` or blank), so a club that has not imported
+  yet brings both in with the matches. A blank cell means "not said": an overwrite import keeps what the match
+  already holds.
+- `manual_game_roles.csv`: one row per match and player holding a role (`game_key, season_name, grade_name,
+  played_at, opposition, player_name, is_captain, is_wicketkeeper`). It is for the script below, not the importer.
+
+**A club that has already imported does not re-import.** Run `app.scripts.apply_game_roles` from the backend image:
+
+```bash
+docker compose cp manual_game_roles.csv betterstats-backend:/tmp/manual_game_roles.csv
+docker compose exec betterstats-backend python -u -m app.scripts.apply_game_roles <org> /tmp/manual_game_roles.csv
+# read the plan, then:
+docker compose exec betterstats-backend python -u -m app.scripts.apply_game_roles <org> /tmp/manual_game_roles.csv \
+    --apply --expect <matches changed> --by "Name"
+# undo, whole run:  ... --restore <audit id> --by "Name"
+```
+
+It finds each match the way the importer does (date, opposition, grade) and each player only among the players on
+that match's own card, adds roles and never overwrites one a club has set, lists everything it could not place
+instead of guessing, and writes one audit entry that `--restore` reverses (taking back only the flags the run set).
+
+After that an admin can set or change both on any hand-entered or imported match: Match Info on the full form, or the
+Details editor, which never touches the scorecard.

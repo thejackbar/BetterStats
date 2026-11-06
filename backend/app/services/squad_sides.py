@@ -359,7 +359,8 @@ async def replace_sides(db: AsyncSession, club_id, team, specs: list[SideSpec]) 
     grade being taken from another squad leaves that squad (returned as
     ``moved_from`` so the screen can say so). ``team.grade_id`` follows the first
     team, which keeps the ladder and the old single-grade readers working.
-    Returns ``{"moved_from": [squad names], "keys": [grade keys]}``.
+    Returns ``{"moved_from": [squad names], "keys": [grade keys],
+    "medals_extended": [medal names]}``.
     """
     ids = []
     for s in specs:
@@ -389,6 +390,21 @@ async def replace_sides(db: AsyncSession, club_id, team, specs: list[SideSpec]) 
         seen.add(k)
         ordered.append((k, gname, str(s.grade_id), clean_label(s.label)))
 
+    # A squad whose one team is re-pointed at another grade (the association moved
+    # it) keeps its votes: the medals that counted the old grade count the new one.
+    old_grade_id = team.grade_id
+    old_keys = {r[0] for r in (await db.execute(
+        text("SELECT grade_key FROM team_sides WHERE team_id = :tid"), {"tid": team.id})).fetchall()}
+    if not old_keys and old_grade_id:
+        old_name = (await db.execute(
+            text("SELECT name FROM grades WHERE id = :g"), {"g": old_grade_id})).scalar()
+        if old_name:
+            old_keys = {grade_key(old_name)}
+    medals_extended: list[str] = []
+    if len(old_keys) == 1 and len(ordered) == 1 and ordered[0][0] not in old_keys and old_grade_id:
+        from app.services import grade_move
+        medals_extended = await grade_move.extend_medals(db, club_id, old_grade_id, ordered[0][2])
+
     moved: list[str] = []
     if ordered:
         taken = (await db.execute(
@@ -411,7 +427,7 @@ async def replace_sides(db: AsyncSession, club_id, team, specs: list[SideSpec]) 
         )
     if ordered:
         team.grade_id = uuid.UUID(ordered[0][2])
-    return {"moved_from": moved, "keys": [o[0] for o in ordered]}
+    return {"moved_from": moved, "keys": [o[0] for o in ordered], "medals_extended": medals_extended}
 
 
 async def assign_fixtures(db: AsyncSession, club_id, team_id, today: Optional[date] = None) -> int:

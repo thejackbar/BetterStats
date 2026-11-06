@@ -104,10 +104,13 @@ function ProfileModal({ playerId, teams, canEdit, index, total, onPrev, onNext, 
     onSaved?.({ id: playerId, photo_url: url })
   }, [playerId, onSaved])
 
-  // The action shot never appears on a list row — only the headshot does — so
-  // this reflects into the open panel alone.
+  // The hero photo and the action shot never appear on a list row — only the
+  // headshot does — so these reflect into the open panel alone.
   const onHeroPhotoChange = useCallback((url) => {
     setProfile((p) => p ? { ...p, hero_photo_url: url } : p)
+  }, [])
+  const onActionPhotoChange = useCallback((url) => {
+    setProfile((p) => p ? { ...p, action_photo_url: url } : p)
   }, [])
 
   const pickAvail = async (status) => {
@@ -156,7 +159,7 @@ function ProfileModal({ playerId, teams, canEdit, index, total, onPrev, onNext, 
             : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
                 dirty={dirty} saved={saved} onSave={onSave} canEdit={canEdit}
                 canEditAvail={canEdit} onEditAvail={(pl, date) => setAvailEdit({ player: pl, date })}
-                onClose={onClose} onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange}
+                onClose={onClose} onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange} onActionPhotoChange={onActionPhotoChange}
                 onPrivacyReleased={(updated) => { setProfile(updated); setDraft(draftFromProfile(updated)); onSaved?.(updated) }}
                 footer={showMerch ? <PlayerMerchPanel playerId={playerId} /> : null} />}
         </div>

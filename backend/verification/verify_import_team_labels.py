@@ -81,12 +81,16 @@ def total(rows, key="matches"):
 
 
 async def main() -> int:
+    # The reconciler reads the club's own typed games through v_effective_player_season_stats
+    # (import_reconcile.fetch_typed_by_player), so the schema needs the app's real views, not
+    # tables alone: the shared harness builds them, then the lifespan's own definitions go on top.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import verify_records_timing as base  # noqa: E402
+    from app.services import superseded_ddl  # noqa: E402
+    await base.build_schema()
     async with engine.begin() as conn:
-        await conn.execute(text("DROP SCHEMA public CASCADE"))
-        await conn.execute(text("CREATE SCHEMA public"))
-        await conn.run_sync(Base.metadata.create_all)
-        # Lifespan DDL (main.py), not on the ORM model: the shared "not played" predicate reads it.
-        await conn.execute(text("ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"))
+        for stmt in superseded_ddl.STATEMENTS:
+            await conn.execute(text(stmt))
 
     print("\n── the pure helpers")
     check("one grade label is not a team-labelled sheet",

@@ -30,7 +30,8 @@ from app.services.merge_profile import image_url_owner, player_image_url
 # url column -> (bytes column, label)
 _KINDS = {
     "photo_url": ("photo_data", "headshot"),
-    "hero_photo_url": ("hero_photo_data", "action photo"),
+    "hero_photo_url": ("hero_photo_data", "hero photo"),
+    "action_photo_url": ("action_photo_data", "action shot"),
 }
 
 

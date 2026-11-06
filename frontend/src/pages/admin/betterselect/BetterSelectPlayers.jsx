@@ -422,11 +422,16 @@ export default function BetterSelectPlayers() {
     setPlayers((rows) => (rows || []).map((r) => r.id === selId ? { ...r, photo_url: url } : r))
   }, [selId])
 
-  // The action shot is only ever read by the post templates, so it reflects
-  // into the open panel and the row's own record, not into any avatar.
+  // The hero photo and the action shot are only ever read by the cards and post
+  // templates, so they reflect into the open panel and the row's own record, not
+  // into any avatar.
   const onHeroPhotoChange = useCallback((url) => {
     setProfile((p) => p ? { ...p, hero_photo_url: url } : p)
     setPlayers((rows) => (rows || []).map((r) => r.id === selId ? { ...r, hero_photo_url: url } : r))
+  }, [selId])
+  const onActionPhotoChange = useCallback((url) => {
+    setProfile((p) => p ? { ...p, action_photo_url: url } : p)
+    setPlayers((rows) => (rows || []).map((r) => r.id === selId ? { ...r, action_photo_url: url } : r))
   }, [selId])
 
   const onBulkSquad = async (ids, squadId) => {
@@ -485,7 +490,7 @@ export default function BetterSelectPlayers() {
               : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
                   dirty={dirty} saved={savedTick} onSave={onSave} canEdit={canEdit}
                   onEditAvail={openAvail} canEditAvail={canEdit}
-                  onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange}
+                  onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange} onActionPhotoChange={onActionPhotoChange}
                   onPrivacyReleased={(updated) => { setProfile(updated); setDraft(draftFromProfile(updated)) }} />}
         </div>
       </div>

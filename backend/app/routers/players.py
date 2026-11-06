@@ -262,6 +262,8 @@ async def list_players(
             "claimed": p.claimed,
             "photo_url": p.photo_url,
             "hero_photo_url": p.hero_photo_url,
+            "action_photo_url": p.action_photo_url,
+            "hero_source": p.hero_source,
             "player_role": p.player_role,
         }
         for p in players
@@ -401,7 +403,7 @@ async def get_player_stats(
                 "match coverage failed for player %s", player_id)
 
     return {
-        "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url, "is_overseas": player.is_overseas, "overseas_country": player.overseas_country, **(await _public_player_attrs(db, player))},
+        "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url, "hero_photo_url": player.hero_photo_url, "action_photo_url": player.action_photo_url, "hero_source": player.hero_source, "is_overseas": player.is_overseas, "overseas_country": player.overseas_country, **(await _public_player_attrs(db, player))},
         "career_batting": _str_keys(batting),
         "career_bowling": _str_keys(bowling),
         "career_fielding": _str_keys(fielding),
@@ -810,10 +812,18 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
     # Team tab does so canonical/merged grade names line up.
     breakdown = await get_player_team_breakdown(
         db, player_id, str(player.organisation_id), scope=await _hidden_only_scope(db, player))
+    # A grade he has gone quiet in, or one his club has no side in this season,
+    # has nothing to count down to (services/milestone_activity).
+    from app.services import milestone_activity
+    activity = await milestone_activity.load_grade_activity(db, player.organisation_id)
+    season_rows = breakdown.get("season_rows") or []
     for row in breakdown.get("rows", []):
         matches_in_grade = int(row.get("matches") or 0)
         grade_name = row.get("grade_name")
         if not grade_name or matches_in_grade <= 0:
+            continue
+        if player.organisation_id and not milestone_activity.profile_grade_ok(
+                activity, season_rows, grade_name):
             continue
         grade_scheme = book.for_grade(grade_name)
         target = next_threshold("grade_matches", matches_in_grade, grade_scheme)
@@ -868,7 +878,7 @@ async def get_player_captain_stats(
             SUM(CASE WHEN g.result = 'WIN' THEN 1 ELSE 0 END) AS wins,
             SUM(CASE WHEN g.result = 'LOSS' THEN 1 ELSE 0 END) AS losses,
             SUM(CASE WHEN g.result IS NULL OR g.result NOT IN ('WIN', 'LOSS') THEN 1 ELSE 0 END) AS draws
-        FROM game_appearances ga
+        FROM v_game_roles ga
         JOIN v_effective_games g ON g.id = ga.game_id
         WHERE ga.player_id = :pid AND ga.is_captain = TRUE""" + club + """
     """), params)
@@ -884,7 +894,7 @@ async def get_player_captain_stats(
             SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds
         FROM v_effective_batting_innings bi
         JOIN v_effective_games g ON g.id = bi.game_id
-        JOIN game_appearances ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
+        JOIN v_game_roles ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
         WHERE bi.player_id = :pid""" + club + """
           AND NOT COALESCE(bi.did_not_bat, FALSE)
           AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -901,7 +911,7 @@ async def get_player_captain_stats(
             SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds
         FROM v_effective_batting_innings bi
         JOIN v_effective_games g ON g.id = bi.game_id
-        LEFT JOIN game_appearances ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
+        LEFT JOIN v_game_roles ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
         WHERE bi.player_id = :pid""" + club + """
           AND NOT COALESCE(bi.did_not_bat, FALSE)
           AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -926,7 +936,7 @@ async def get_player_captain_stats(
             COUNT(*) AS econ_of
         FROM v_effective_bowling_spells bs
         JOIN v_effective_games g ON g.id = bs.game_id
-        JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
+        JOIN v_game_roles ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
         WHERE bs.player_id = :pid""" + club + """
     """), params)
     bowl_cap = rc.with_coverage(dict(bowl_cap_res.mappings().first() or {}))
@@ -948,7 +958,7 @@ async def get_player_captain_stats(
             COUNT(*) AS econ_of
         FROM v_effective_bowling_spells bs
         JOIN v_effective_games g ON g.id = bs.game_id
-        LEFT JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
+        LEFT JOIN v_game_roles ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
         WHERE bs.player_id = :pid""" + club + """
           AND ga.game_id IS NULL
     """), params)
@@ -957,7 +967,7 @@ async def get_player_captain_stats(
     by_season_res = await db.execute(text("""
         WITH captain_games AS (
             SELECT ga.game_id, g.result, s.name AS season_name, s.year AS season_year
-            FROM game_appearances ga
+            FROM v_game_roles ga
             JOIN v_effective_games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -1093,6 +1103,10 @@ class PlayerProfileUpdate(BaseModel):
     # null clears it — the PATCH reads exclude_unset, so a present blank IS the
     # intent.
     shirt_number: Optional[str] = None
+    # Which of the hero photo and the action shot fills the hero position on a card, a share
+    # card and a post (migration 375). "hero" or "action" pins one; null (or "auto") is
+    # automatic. Read through exclude_unset like the rest, so an absent key leaves it alone.
+    hero_source: Optional[str] = None
     # Where they live and who to call (migration 356). Plain text, "" or null clears.
     address_line1: Optional[str] = None
     suburb: Optional[str] = None
@@ -1100,6 +1114,19 @@ class PlayerProfileUpdate(BaseModel):
     postcode: Optional[str] = None
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
+
+
+HERO_SOURCES = ("hero", "action")
+
+
+def _clean_hero_source(value) -> Optional[str]:
+    """`hero` or `action`, or None for automatic. Anything else is a 422, never stored."""
+    v = (value or "").strip().lower() if isinstance(value, str) else value
+    if v in (None, "", "auto"):
+        return None
+    if v not in HERO_SOURCES:
+        raise HTTPException(status_code=422, detail="hero_source must be 'hero', 'action' or empty for automatic")
+    return v
 
 
 def _profile_fields(player: Player) -> dict:
@@ -1135,6 +1162,8 @@ def _profile_fields(player: Player) -> dict:
         "emergency_contact_phone": player.emergency_contact_phone,
         "photo_url": player.photo_url,
         "hero_photo_url": player.hero_photo_url,
+        "action_photo_url": player.action_photo_url,
+        "hero_source": player.hero_source,
         "playhq_id": player.playhq_id,
         "squad_team_id": str(player.squad_team_id) if player.squad_team_id else None,
         "is_overseas": player.is_overseas,
@@ -1354,6 +1383,8 @@ async def update_player_profile(
     # bulk importer — see services/player_kit.py.
     if "shirt_number" in data:
         data["shirt_number"] = clean_shirt_number(data["shirt_number"])
+    if "hero_source" in data:
+        data["hero_source"] = _clean_hero_source(data["hero_source"])
     # Capture the effective display name before display_name_override changes,
     # so a rename via this route also gets remembered as an alias — same as
     # the club's rename path (club_admin PATCH /players/{id}).
@@ -1393,6 +1424,11 @@ async def update_player_profile(
     if old_display_name and old_display_name != player.display_name:
         await seed_alias_on_rename(db, player.organisation_id, player.id, old_display_name)
     await db.commit()
+    if "hero_source" in data:
+        # The collectable cards keep a snapshot of the club's players, the pick included, for a few
+        # minutes. A new pick has to show on the card now.
+        from app.services import player_cards
+        player_cards.forget(player.organisation_id)
     await db.refresh(player)
     return await _full_profile(db, player)
 

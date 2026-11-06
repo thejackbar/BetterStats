@@ -13,7 +13,7 @@ const CLUB_SECTIONS = new Set([
 
 // Single-segment paths that are NOT club slugs (marketing + app routes).
 const RESERVED_ROOTS = new Set([
-  'login', 'admin', 'onboard', 'club-inactive', 'avail', 'games', 'players',
+  'login', 'admin', 'onboard', 'club-inactive', 'avail', 'playerdash', 'games', 'players',
   'overview', 'features', 'pricing', 'compare', 'modules', 'about', 'contact',
   'faq', 'terms', 'privacy', 'blog', 'videos', 'betterscout', 'trial', 'demo', 'preview',
 ])

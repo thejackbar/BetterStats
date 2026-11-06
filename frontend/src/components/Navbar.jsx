@@ -40,7 +40,7 @@ function ThemeToggle() {
 const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'competitions', 'yearbook', 'yearbooks', 'games', 'fixtures', 'teams', 'website', 'premierships', 'honour-board'];
 // Single-segment paths that are NOT club slugs (must stay in sync with App.jsx routes)
 const RESERVED_ROOT_SEGMENTS = new Set([
-  'login', 'admin', 'onboard', 'club-inactive',
+  'login', 'admin', 'onboard', 'club-inactive', 'avail', 'playerdash',
   'games', 'match', 'scorecards', 'players',
   'features', 'pricing', 'compare', 'about', 'contact', 'faq',
   'terms', 'privacy', 'blog', 'videos', 'trial', 'demo',

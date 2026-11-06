@@ -56,6 +56,8 @@ export const GROUPS = [
       { to: '/admin/yearbook', label: 'Yearbooks', icon: 'sheet', cap: CAP.MANAGE_YEARBOOKS, desc: 'Write and publish season yearbooks.' },
       { to: '/admin/reports', label: 'Saved Reports', icon: 'ladders', cap: CAP.MANAGE_REPORTS, desc: 'Your saved stat reports.' },
       { to: '/admin/sponsors', label: 'Sponsors', icon: 'share', cap: CAP.MANAGE_SPONSORS, desc: 'Manage the sponsors shown on your site.' },
+      { to: '/admin/player-dashboard', label: 'Player Dashboard', icon: 'player', cap: CAP.MANAGE_SETTINGS, desc: 'The page each player opens with your link: switch it on, set the PIN and the club site button, and choose what it shows.' },
+      { to: '/admin/player-cards', label: 'Player Cards', icon: 'player', cap: CAP.MANAGE_SETTINGS, desc: 'Collectable cards for your players: switch them on, set the weekly packs and choose who is in.' },
       { to: '/admin/club-room', label: 'Club Room Mode', icon: 'tv', cap: CAP.MANAGE_CLUB_ROOM, desc: 'Set up a TV slideshow of sponsors, fixtures, lineups and more.' },
     ],
   },

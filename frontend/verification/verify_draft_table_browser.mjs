@@ -11,7 +11,7 @@
 //   * a draft changed by someone else is refused (409), shown on the column, and
 //     "Keep mine" saves over it only after asking
 //   * the board fits the screen: no list scrolls with a full side at 1440x900
-//   * 390px: a short note instead of a cramped table, no horizontal overflow
+//   * 390px: the board as swipe pages, no horizontal overflow
 //
 //   Selection board (Dual rail)
 //   * the Selected XI shows all eleven without scrolling at common laptop heights,
@@ -461,8 +461,10 @@ const run = async () => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`${BASE}/admin/betterselect/whiteboard`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(1200)
-  const phoneNote = /needs a wider screen/.test(await page.locator('body').innerText())
-  ok('the draft table says it needs a wider screen on a phone', phoneNote || CONTROL)
+  // A phone gets the board as swipe pages now (verify_whiteboard_phone_browser.mjs drives it); the
+  // old "needs a wider screen" note is gone.
+  const phoneBoard = await page.locator('[data-draft-table]').count()
+  ok('the draft table shows its board on a phone, not a "needs a wider screen" note', phoneBoard === 1 && !/needs a wider screen/.test(await page.locator('body').innerText()))
   const ov = await page.evaluate(() => document.documentElement.scrollWidth - window.screen.width)
   ok('no horizontal overflow at 390px', ov <= 0, String(ov))
   await page.goto(`${BASE}/admin/betterselect/select/${F1}`, { waitUntil: 'domcontentloaded' })

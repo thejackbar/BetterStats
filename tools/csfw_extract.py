@@ -121,6 +121,13 @@ class Layout:
     # within a 116-byte player block
     b_player: int = 0
     b_position: int = 2
+    # The captain and wicket-keeper flags, two int16 booleans in the way Visual Basic stores them:
+    # -1 is True, 0 is False. Found by inspection and proved on the Shoalwater archive (see "Captain
+    # and wicket keeper" in docs/csfw-data-extraction.md): offset 6 marks the keeper (every stumping
+    # and keeper catch in 918 matches belongs to a flagged player, none to anyone else) and offset 4
+    # the captain (one per match in 894 of 918, one regular captain per grade and season).
+    b_captain: int = 4
+    b_keeper: int = 6
     b_runs: int = 8
     b_sixes: int = 12
     b_fours: int = 14
@@ -427,6 +434,11 @@ MATCH_TYPES = {1: "Two day", 4: "One day", 6: "Semi Final",
 # which final it was survives in the workbook and not in the import.
 FINALS_TYPES = frozenset({6, 7, 8, 9})
 
+
+def is_grand_final_type(code) -> bool:
+    """The match type the club's own list names the Grand Final (a profile's `match_types` says which code)."""
+    return MATCH_TYPES.get(code, "").strip().lower() == "grand final"
+
 # The two types that state a FORMAT, in the vocabulary BetterStats parses:
 # `grade_labels.format_from_match_type` reads "Two Day"/"One Day" (the same
 # strings Cricket Australia's own matchType uses) and returns None for anything
@@ -650,6 +662,9 @@ def parse_blocks(rec: bytes, lay: Layout = LAYOUT_V1) -> list:
             "byes": opt(i16(rec, off + lay.b_byes)),
             "votes": currency(rec, off + lay.b_votes),
             "flags": opt(i16(rec, off + lay.b_flags)),
+            # True only for the stored -1. Any other value is not a flag.
+            "captain": i16(rec, off + lay.b_captain) == -1,
+            "keeper": i16(rec, off + lay.b_keeper) == -1,
         })
     return blocks
 
@@ -705,6 +720,9 @@ def merge_duplicate_blocks(blocks: list) -> tuple:
                     "wk_catches", "stumpings", "byes"):
             first[key] = total(key)
         first["votes"] = sum(g["votes"] or 0 for g in group) or group[0]["votes"]
+        # A role on either entry is the person's role in the match.
+        first["captain"] = any(g.get("captain") for g in group)
+        first["keeper"] = any(g.get("keeper") for g in group)
         first["merged_from"] = len(group)
         out.append(first)
         merged.append({"player_id": pid, "entries": len(group),
@@ -1459,13 +1477,15 @@ def verify(seasons: list) -> list:
 
 GAME_CSV_COLUMNS = [
     "game_key", "played_at", "opposition", "venue", "season_name", "grade_name",
-    "is_final", "match_format", "home_team", "away_team", "winning_team", "result",
+    "is_final", "is_grand_final", "match_format", "home_team", "away_team", "winning_team", "result",
     "player_name", "innings_number", "batting_position",
     "batting_runs", "batting_balls", "batting_fours", "batting_sixes",
     "batting_not_out", "did_not_bat", "dismissal_type", "batting_caught_behind",
     "bowling_overs", "bowling_maidens", "bowling_runs", "bowling_wickets",
     "bowling_wides", "bowling_no_balls",
     "fielding_catches", "fielding_catches_wk", "fielding_run_outs", "fielding_stumpings",
+    # Who captained the side and who kept wicket in this match, true on that player's row.
+    "is_captain", "is_wicketkeeper",
     # The importer's optional innings columns (see GAME_CSV_COLUMNS in
     # backend/app/routers/manual_entries.py for what each means).
     "opp_innings_number", "batting_order_known",
@@ -1604,6 +1624,7 @@ def build_game_rows(seasons: list, club: str,
                         "opposition": opponent, "venue": l["ground"],
                         "season_name": s["season"], "grade_name": grade_label(team),
                         "is_final": "true" if type_code in FINALS_TYPES else "",
+                        "is_grand_final": "true" if is_grand_final_type(type_code) else "",
                         "match_format": fmt,
                         "home_team": "", "away_team": "",
                         "winning_team": winner, "result": result,
@@ -1644,6 +1665,10 @@ def build_game_rows(seasons: list, club: str,
                         "fielding_catches_wk": b["wk_catches"] or "",
                         "fielding_run_outs": "",                   # not in the format
                         "fielding_stumpings": b["stumpings"] or "",
+                        # Blank, never "false": CSFW holds a flag for the one person the club
+                        # named, and a match with none recorded says nothing either way.
+                        "is_captain": "true" if b.get("captain") else "",
+                        "is_wicketkeeper": "true" if b.get("keeper") else "",
                         **inn_cols,
                         "fow_wicket": fell[b["position"]]["wicket"]
                                       if b["position"] in fell else "",
@@ -1669,6 +1694,7 @@ def build_game_rows(seasons: list, club: str,
                     # blank here because this branch builds its row from an
                     # empty template rather than from the one above.
                     "is_final": "true" if type_code in FINALS_TYPES else "",
+                    "is_grand_final": "true" if is_grand_final_type(type_code) else "",
                     "match_format": fmt,
                     # The scores are still worth having where nobody was named.
                     **(innings_columns(played[0], 1) if played else {}),
@@ -2516,6 +2542,54 @@ def write_xlsx(sheets: dict, checks: list, path: Path, notes: list | None = None
     wb.save(path)
 
 
+ROLE_COLUMNS = ["game_key", "season_name", "grade_name", "played_at", "opposition", "player_name",
+                "is_captain", "is_wicketkeeper"]
+
+
+def game_role_rows(games: list) -> list:
+    """One row per player flagged captain or wicket keeper in a match, from the scorecard rows.
+
+    The same flags are on `manual_games_scorecards.csv`, which a club that has not imported it yet
+    simply imports. This is the file for a club that HAS: `app.scripts.apply_game_roles` reads it
+    and adds the roles to the matches already in BetterCricket, so nothing is imported twice.
+    A match is found by its season, grade, date and opposition, a player by name among those on
+    that match's card.
+    """
+    # A two-innings match has a row per player per innings, so one person can be flagged on more
+    # than one row. The role is the person's in the match: one row each, a flag on any of theirs.
+    by_person: dict = {}
+    for g in games:
+        if not (g.get("is_captain") or g.get("is_wicketkeeper")):
+            continue
+        key = (g["game_key"], g["player_name"])
+        row = by_person.setdefault(key, {k: g.get(k, "") for k in ROLE_COLUMNS})
+        for flag in ("is_captain", "is_wicketkeeper"):
+            if g.get(flag):
+                row[flag] = "true"
+    return list(by_person.values())
+
+
+def role_report(games: list) -> dict:
+    """What the archive names, and the matches that need a look: more than one captain flagged."""
+    by_match: dict = {}
+    for g in games:
+        m = by_match.setdefault(g["game_key"], {"captains": [], "keepers": [], "row": g, "named": False})
+        if g.get("player_name"):
+            m["named"] = True
+        if g.get("is_captain") and g["player_name"] not in m["captains"]:
+            m["captains"].append(g["player_name"])
+        if g.get("is_wicketkeeper") and g["player_name"] not in m["keepers"]:
+            m["keepers"].append(g["player_name"])
+    played = [m for m in by_match.values() if m["named"]]
+    return {
+        "matches": len(played),
+        "with_captain": sum(1 for m in played if m["captains"]),
+        "with_keeper": sum(1 for m in played if m["keepers"]),
+        "two_captains": [m for m in played if len(m["captains"]) > 1],
+        "two_keepers": sum(1 for m in played if len(m["keepers"]) > 1),
+    }
+
+
 def listed_twice_rows(seasons: list) -> list:
     """One row per person CSFW lists twice in one match leg (see
     `merge_duplicate_blocks`), so the club can check the merge against its book."""
@@ -2671,6 +2745,18 @@ def main() -> None:
     unresolved = []
     games = build_game_rows(seasons, club, absent_is_out, unresolved)
     write_csv(games, args.out / "manual_games_scorecards.csv")
+    roles = game_role_rows(games)
+    if roles:
+        write_csv(roles, args.out / "manual_game_roles.csv")
+        rep = role_report(games)
+        print(f"captain named on {rep['with_captain']} of {rep['matches']} matches, wicket keeper on "
+              f"{rep['with_keeper']} ({rep['two_keepers']} with two keepers, a change mid-match): "
+              f"see manual_game_roles.csv")
+        if rep["two_captains"]:
+            print(f"{len(rep['two_captains'])} match(es) flag more than one captain, so check them against "
+                  f"the scorebook: " + "; ".join(
+                      f"{m['row']['played_at']} {m['row']['grade_name']} v {m['row']['opposition']} "
+                      f"({' and '.join(m['captains'])})" for m in rep["two_captains"][:6]))
     twice = listed_twice_rows(seasons)
     if twice:
         write_csv(twice, args.out / "players_listed_twice.csv")

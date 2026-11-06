@@ -28,15 +28,34 @@ docs/dev-notes/archive/data-sources-and-sync.md ("The 12th man audit") and
 docs/dev-notes/archive/stats-figures-records-and-filters.md ("A 12th man who did not play").
 `app.scripts.audit_twelfth_man` re-runs the test against any club.
 
+A LATE WITHDRAWAL is the other way a named player never played: the sync stores an appearance for
+everyone on the sheet when it first reads a game, and a sheet read before the game can still name
+somebody CA drops later. Nothing used to remove that row, so the game counted for a player CA does not
+list (Applecross, Nuwani Jayaweera: 51 against CA's 50). `classify_withdrawal` and
+`services/withdrawn_appearances.py` handle it; the mark is `is_reserve` TRUE with `sheet_slot` NULL.
+
 Pure functions: no I/O, no database.
 """
 from __future__ import annotations
+
+from app.services import participant_names
 
 XI = 11  # the side is 11; a name past this slot is a reserve
 
 TWELFTH_MAN = "TWELFTH_MAN"
 CODES = (TWELFTH_MAN, "ON_CARD_DNB", "SIDE_DID_NOT_BAT", "INSIDE_XI", "HAS_STATS", "NOT_ON_SHEET", "NO_CARD")
 _DNB_TEXT = {"did not bat", "dnb", "absent"}
+
+# A WITHDRAWAL is a different thing from a reserve and shares the flag. We stored the player as named
+# (a team sheet read before the game) and CA's final sheet no longer names them: a late withdrawal.
+# `is_reserve` TRUE with `sheet_slot` NULL is that mark. A real reserve always carries the slot it held
+# (`reserve_flags` and the backfill both write it), so the pair cannot be mistaken for one, and every
+# reader that already skips a reserve skips a withdrawal with no change.
+WITHDRAWN = "WITHDRAWN"
+SAME_NAME_ON_SHEET = "SAME_NAME_ON_SHEET"
+# More than this share of a side's stored appearances missing from the final sheet reads as a damaged or
+# partial sheet, not as that many people pulling out. Nothing is marked, and a person is told.
+WITHDRAWN_MAX_SHARE = 0.5
 
 
 def _lower(v) -> str:
@@ -84,6 +103,55 @@ def classify(card: dict | None, guids: set[str]) -> dict:
                 out["code"] = _judge(card, t, i + 1, guids)
                 return out
     out["code"] = "NOT_ON_SHEET"
+    return out
+
+
+def card_is_settled(card: dict | None) -> bool:
+    """Can this card say who was NOT in the match?
+
+    CA calls it COMPLETED, both team sheets name somebody and a side batted. A card read mid-game, a
+    sheet CA has not filled in, or a game nobody batted in cannot rule a name out, so absence from it
+    is not evidence of anything.
+    """
+    if not card or (card.get("status") or "").upper() != "COMPLETED":
+        return False
+    teams = card.get("teams") or []
+    if len(teams) < 2 or any(not (t.get("players") or []) for t in teams):
+        return False
+    return any(inn.get("batting") for inn in (card.get("innings") or []))
+
+
+def _sheet_name(p: dict) -> str | None:
+    # The same three fields `participant_names.resolve_roster_by_name` reads, so "same name" means one thing.
+    return p.get("playerShortName") or p.get("displayName") or p.get("name")
+
+
+def classify_withdrawal(card: dict | None, guids: set[str], name: str | None = None) -> dict:
+    """`classify`, with a `NOT_ON_SHEET` verdict taken further.
+
+    `NOT_ON_SHEET` alone cannot tell a person who pulled out from one CA lists under another id (a new id
+    per registration: the sync attaches those by full name). Taking the second kind off would delete a
+    match somebody played, so:
+
+      SAME_NAME_ON_SHEET  a player on a sheet carries this player's full name under an id we do not hold.
+                          Left alone: very likely the same person.
+      WITHDRAWN           not on either sheet by id or by name, and the card is settled: a late withdrawal.
+      NOT_ON_SHEET        the card cannot rule anyone out (see `card_is_settled`). Left alone.
+
+    Every other code is `classify`'s, unchanged.
+    """
+    out = classify(card, guids)
+    if out["code"] != "NOT_ON_SHEET":
+        return out
+    if participant_names.looks_full(name):
+        key = participant_names.full_name_key(name)
+        for t in (card or {}).get("teams") or []:
+            for p in t.get("players") or []:
+                if participant_names.full_name_key(_sheet_name(p)) == key:
+                    out["code"] = SAME_NAME_ON_SHEET
+                    return out
+    if card_is_settled(card):
+        out["code"] = WITHDRAWN
     return out
 
 

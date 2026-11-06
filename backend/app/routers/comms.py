@@ -38,6 +38,7 @@ from sqlalchemy import select, func, or_, text, update, exists, distinct, case
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.natural_order import natural_key
 from app.auth.capabilities import require_cap, MANAGE_COMMS
 from app.auth.modules import MODULE_COMMS, STATUS_TRIAL
 from app.config.settings import settings
@@ -2790,10 +2791,10 @@ async def segment_options(
         return {"context": "directory", "states": states, "associations": assocs,
                 "countries": countries}
 
-    teams = (await db.execute(
-        select(Team).where(Team.organisation_id == club.id, Team.is_active.is_(True))
-        .order_by(Team.name)
-    )).scalars().all()
+    teams = sorted(
+        (await db.execute(select(Team).where(Team.organisation_id == club.id, Team.is_active.is_(True)))).scalars().all(),
+        key=lambda t: natural_key(t.name),
+    )
     # The directory-attribute vocab (Lists→Segments merge): the club's own
     # membership types + fee tiers + squads, so the new Active rule fields draw
     # real values rather than guessing. `directory.filter_options` is the same

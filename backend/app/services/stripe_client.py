@@ -13,7 +13,7 @@ API call never blocks the event loop — this is an async FastAPI app.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import stripe
 from sqlalchemy import text
@@ -150,7 +150,10 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
                                    extra_coupon_id: str | None = None, extra_stackable: bool = False,
                                    extra_coupon_code: str | None = None,
                                    extra_coupon_off_dollars: float | None = None,
-                                   coupon_redemption_id: str | None = None):
+                                   coupon_redemption_id: str | None = None,
+                                   include_core: bool = True,
+                                   anchor_at: datetime | None = None,
+                                   anchor_renewal: date | None = None):
     """A Stripe Checkout Session in subscription mode, priced from
     billing_pricing.price_for (dynamic price_data line items, so no Stripe
     Price objects need pre-creating in the dashboard for every module
@@ -204,7 +207,9 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
     event fired, never a second lookup against our own DB to know what was
     bought."""
     _require_configured()
-    quote = billing_pricing.price_for(billing_keys, schedule=discount_schedule)
+    # include_core=False: BetterStats is already paid (hand-set Active after a
+    # bank transfer), so this subscription carries only the modules chosen.
+    quote = billing_pricing.price_for(billing_keys, schedule=discount_schedule, include_core=include_core)
 
     line_items = [
         {
@@ -226,6 +231,12 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
     ]
 
     metadata = {"org_id": str(org_id), "billing_keys": ",".join(sorted(billing_keys))}
+    if anchor_at is not None:
+        # The club's BetterStats renews on anchor_renewal and is not on this
+        # subscription (it was paid another way). Remembered in metadata so the
+        # webhook can still stamp the right renewal date if Stripe's own
+        # period fields are not where it looks.
+        metadata["renewal_date"] = anchor_renewal.isoformat() if anchor_renewal else ""
     if coupon_redemption_id:
         # Read back by stripe_billing.handle_checkout_completed to flip the
         # matching discount_coupon_redemptions row from 'pending' to
@@ -249,6 +260,13 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
         "success_url": settings.stripe_checkout_success_url,
         "cancel_url": settings.stripe_checkout_cancel_url,
     }
+
+    if anchor_at is not None:
+        # Bill the first, part-year period from now to the anchor (Stripe works
+        # out the prorated charge), then every full year from the anchor on, so
+        # these modules renew with BetterStats rather than a year from today.
+        params["subscription_data"]["billing_cycle_anchor"] = int(anchor_at.timestamp())
+        params["subscription_data"]["proration_behavior"] = "create_prorations"
 
     discounts: list[dict] = []
     if extra_coupon_id and not extra_stackable:

@@ -21,6 +21,9 @@ const BODY = "'Inter', sans-serif"
 // Win / loss / tie coding — fixed semantics, independent of palette accent.
 const WIN = '#2fd07a'
 const LOSS = '#ff5d6c'
+// A game still being played: neither a win nor a loss yet.
+const LIVE = '#f5b942'
+const isLive = (r) => r.outcome === 'LIVE'
 const TIE = '#9aa0b4'
 
 // ── Local atoms ──────────────────────────────────────────────────────────────
@@ -1459,19 +1462,20 @@ export function ResultsList({ palette: pal, width = 1080, height = 1080, meta = 
           const bar = t(n >= 9 ? 38 : 52)
           return rows.map((r, i) => {
             const w = r.outcome === 'W'
-            const c = w ? win : loss
+            const lv = isLive(r)
+            const c = lv ? LIVE : w ? win : loss
             return (
               <div key={i} style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'grid', gridTemplateColumns: '6px 172px minmax(0,1fr) 210px', alignItems: 'center', gap: 14, borderBottom: i < rows.length - 1 ? `1px solid ${rrFaint(parts, 'dividerColor', pal.ink, '1a')}` : 'none' }}>
                 <div style={{ width: 6, height: bar, background: c }} />
                 <div style={{ fontFamily: DISPLAY, fontSize: gradeF, letterSpacing: 0.5, lineHeight: 0.95, overflow: 'hidden', color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                   <span style={{ fontFamily: DISPLAY, fontSize: scoreF, letterSpacing: -0.5, color: pc(parts, 'statColor', pal.ink), opacity: w ? 1 : 0.85, flexShrink: 0 }}>{r.us}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: c, fontWeight: 700, flexShrink: 0 }}>{w ? 'DEF' : 'DEF BY'}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1.5, color: c, fontWeight: 700, flexShrink: 0 }}>{lv ? 'V' : w ? 'DEF' : 'DEF BY'}</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: oppF, letterSpacing: 0.5, lineHeight: 1, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85, color: pc(parts, 'nameColor', undefined) }}>{r.opp} {r.them}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
                   <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1, color: pc(parts, 'subColor', pal.ink), opacity: 0.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.margin}</span>
-                  <span style={{ fontFamily: DISPLAY, fontSize: badgeF, letterSpacing: 1, color: rrOnFill(parts, w ? 'winColor' : 'lossColor', c, pal.primary), background: c, padding: '5px 12px', minWidth: 64, textAlign: 'center', flexShrink: 0 }}>{w ? 'WON' : 'LOST'}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: badgeF, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, padding: '5px 12px', minWidth: 64, textAlign: 'center', flexShrink: 0 }}>{lv ? 'LIVE' : w ? 'WON' : 'LOST'}</span>
                 </div>
               </div>
             )
@@ -1545,7 +1549,8 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
         </div>
         {rows.map((r, i) => {
           const w = r.outcome === 'W'
-          const c = w ? win : loss
+          const lv = isLive(r)
+          const c = lv ? LIVE : w ? win : loss
           const bats = (r[keys.bat] || []).filter((p) => p && (p.name || p.line))
           const bowls = (r[keys.bowl] || []).filter((p) => p && (p.name || p.line))
           return (
@@ -1555,12 +1560,12 @@ export function ResultsListLeaders({ palette: pal, width = 1080, height = 1080, 
                 <div style={{ fontFamily: DISPLAY, fontSize: gradeF, letterSpacing: 0.5, lineHeight: 0.95, overflow: 'hidden', color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   <span style={{ fontFamily: DISPLAY, fontSize: scoreF, letterSpacing: -0.5, color: pc(parts, 'statColor', pal.ink), opacity: w ? 1 : 0.85, flexShrink: 0 }}>{r.us}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1.2, color: c, fontWeight: 700, flexShrink: 0 }}>{w ? 'DEF' : 'DEF BY'}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1.2, color: c, fontWeight: 700, flexShrink: 0 }}>{lv ? 'V' : w ? 'DEF' : 'DEF BY'}</span>
                   <span style={{ fontFamily: DISPLAY, fontSize: oppF, letterSpacing: 0.5, lineHeight: 1, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85, color: pc(parts, 'nameColor', undefined) }}>{r.opp} {r.them}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
                   <span style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pc(parts, 'subColor', pal.ink), opacity: 0.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.margin}</span>
-                  <span style={{ fontFamily: DISPLAY, fontSize: badgeF, letterSpacing: 1, color: rrOnFill(parts, w ? 'winColor' : 'lossColor', c, pal.primary), background: c, padding: '5px 12px', minWidth: 60, textAlign: 'center', flexShrink: 0 }}>{w ? 'WON' : 'LOST'}</span>
+                  <span style={{ fontFamily: DISPLAY, fontSize: badgeF, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, padding: '5px 12px', minWidth: 60, textAlign: 'center', flexShrink: 0 }}>{lv ? 'LIVE' : w ? 'WON' : 'LOST'}</span>
                 </div>
               </div>
               {(bats.length > 0 || bowls.length > 0) && (
@@ -1640,13 +1645,14 @@ export function ResultsScoreboard({ palette: pal, width = 1080, height = 1080, m
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(188), bottom: rrFoot(width, height).reserve, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: `repeat(${Math.max(3, Math.ceil(rows.length / 2))}, 1fr)`, gap: 24 }}>
         {rows.map((r, i) => {
           const w = r.outcome === 'W'
-          const c = w ? win : loss
+          const lv = isLive(r)
+          const c = lv ? LIVE : w ? win : loss
           return (
             <div key={i} style={{ position: 'relative', background: pc(parts, 'cardBg', pal.secondary), border: `1px solid ${rrFaint(parts, 'cardBorder', pal.ink, '22')}`, borderTop: `3px solid ${c}`, borderRadius: 4, padding: '18px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
-              {texture ? <div style={{ position: 'absolute', right: 14, bottom: 8, fontFamily: DISPLAY, fontSize: 120, lineHeight: 1, color: c, opacity: 0.09, letterSpacing: -6, userSelect: 'none' }}>{w ? 'W' : 'L'}</div> : null}
+              {texture ? <div style={{ position: 'absolute', right: 14, bottom: 8, fontFamily: DISPLAY, fontSize: 120, lineHeight: 1, color: c, opacity: 0.09, letterSpacing: -6, userSelect: 'none' }}>{lv ? '' : w ? 'W' : 'L'}</div> : null}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, position: 'relative' }}>
                 <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.95, minWidth: 0, overflow: 'hidden', paddingRight: 2, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
-                <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 1.5, padding: '4px 11px', background: c, color: rrOnFill(parts, w ? 'winColor' : 'lossColor', c, pal.primary), flexShrink: 0 }}>{w ? 'WON' : 'LOST'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 1.5, padding: '4px 11px', background: c, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), flexShrink: 0 }}>{lv ? 'LIVE' : w ? 'WON' : 'LOST'}</span>
               </div>
               <div style={{ position: 'relative' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1718,13 +1724,14 @@ export function ResultsRecord({ palette: pal, width = 1080, height = 1080, meta 
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {rows.map((r, i) => {
             const w = r.outcome === 'W'
-            const c = w ? win : loss
+            const lv = isLive(r)
+            const c = lv ? LIVE : w ? win : loss
             return (
               <div key={i} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 18, borderBottom: i < rows.length - 1 ? `1px solid ${rrFaint(parts, 'dividerColor', pal.ink, '1a')}` : 'none' }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 1, color: rrOnFill(parts, w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 44, height: 32, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{w ? 'W' : 'L'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 44, height: 32, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{lv ? 'LV' : w ? 'W' : 'L'}</span>
                 <div style={{ width: 150, fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, flexShrink: 0, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
                 <div style={{ flex: 1, minWidth: 0, fontFamily: DISPLAY, fontSize: t(24), letterSpacing: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}>
-                  <span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{w ? 'DEF' : 'LOST TO'}</span> {r.opp}
+                  <span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv ? 'V' : w ? 'DEF' : 'LOST TO'}</span> {r.opp}
                 </div>
                 <div style={{ fontFamily: MONO, fontSize: 13, letterSpacing: 1, color: pc(parts, 'statColor', pal.ink), opacity: 0.7, flexShrink: 0 }}>{r.us} v {r.them}</div>
                 <div style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 1, color: c, width: 130, textAlign: 'right', flexShrink: 0 }}>{r.margin}</div>
@@ -1775,7 +1782,8 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
   const f = rows[0] || { grade: '', opp: '', oppMono: '', us: '', them: '', outcome: 'W', margin: '' }
   const rest = rows.slice(1)
   const fw = f.outcome === 'W'
-  const fc = fw ? win : loss
+  const flv = isLive(f)
+  const fc = flv ? LIVE : fw ? win : loss
   // A taller post gives the feature card a little more room, so a long club name that wraps to a third line still sits inside it.
   const lift = pick(S.A, { square: 0, portrait: 16, story: 56 })
   return (
@@ -1798,7 +1806,7 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(196), height: S.head(560) - S.head(196) - 24 + lift, background: pc(parts, 'cardBg', pal.secondary), borderTop: `3px solid ${fc}`, padding: '26px 32px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: 2, color: pc(parts, 'rr4FeatureColor', pal.accent) }}>{`// ${pt(parts, 'rr4FeatureWord', 'FEATURE')} · ${f.grade}`}</span>
-          <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 2, color: rrOnFill(parts, fw ? 'winColor' : 'lossColor', fc, pal.primary), background: fc, padding: '5px 12px' }}>{fw ? 'WON' : 'LOST'}</span>
+          <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 2, color: rrOnFill(parts, flv ? 'liveColor' : fw ? 'winColor' : 'lossColor', fc, pal.primary), background: fc, padding: '5px 12px' }}>{flv ? 'LIVE' : fw ? 'WON' : 'LOST'}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, marginTop: 22 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -1808,22 +1816,23 @@ export function ResultsHeadline({ palette: pal, width = 1080, height = 1080, met
           <span style={{ fontFamily: DISPLAY, fontSize: 34, color: pc(parts, 'vsColor', pal.accent) }}>v</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <span style={{ fontFamily: DISPLAY, fontSize: b(64), letterSpacing: -1, lineHeight: 1, opacity: 0.85, color: pc(parts, 'oppScoreColor', undefined) }}>{f.them}</span>
-            <Monogram text={f.oppMono} logo={f.oppLogo} size={66} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={!fw ? pc(parts, 'rr4WinnerRing', pal.accent) : pc(parts, 'crestRing', `${pal.ink}40`)} />
+            <Monogram text={f.oppMono} logo={f.oppLogo} size={66} fg={pc(parts, 'crestColor', pal.ink)} bg={pc(parts, 'crestBg', `${pal.ink}14`)} ring={!fw && !flv ? pc(parts, 'rr4WinnerRing', pal.accent) : pc(parts, 'crestRing', `${pal.ink}40`)} />
           </div>
         </div>
-        <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: b(40), letterSpacing: 0, marginTop: 20, lineHeight: 1, color: pc(parts, 'rr4SummaryColor', undefined) }}>{club.name} {fw ? 'DEF' : 'LOST TO'} {f.opp} {f.margin}</div>
+        <div style={{ textAlign: 'center', fontFamily: DISPLAY, fontSize: b(40), letterSpacing: 0, marginTop: 20, lineHeight: 1, color: pc(parts, 'rr4SummaryColor', undefined) }}>{club.name} {flv ? 'V' : fw ? 'DEF' : 'LOST TO'} {f.opp} {f.margin}</div>
       </div>
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(560) + lift, bottom: rrFoot(width, height).reserve }}>
         <Kicker color={pc(parts, 'rr4OtherColor', pal.ink)} size={12} style={{ opacity: 0.55, marginBottom: 8 }}>{`// ${pt(parts, 'rr4OtherWord', 'OTHER RESULTS')}`}</Kicker>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {rest.map((r, i) => {
             const w = r.outcome === 'W'
-            const c = w ? win : loss
+            const lv = isLive(r)
+            const c = lv ? LIVE : w ? win : loss
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '9px 0', borderBottom: `1px solid ${rrFaint(parts, 'dividerColor', pal.ink, '14')}` }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 1, color: rrOnFill(parts, w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 40, height: 28, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{w ? 'W' : 'L'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 16, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 40, height: 28, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{lv ? 'LV' : w ? 'W' : 'L'}</span>
                 <span style={{ fontFamily: DISPLAY, fontSize: 22, width: 132, flexShrink: 0, lineHeight: 1, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</span>
-                <span style={{ fontFamily: DISPLAY, fontSize: 22, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}><span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{w ? 'def' : 'lost to'}</span> {r.opp}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 22, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}><span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv ? 'v' : w ? 'def' : 'lost to'}</span> {r.opp}</span>
                 <span style={{ fontFamily: MONO, fontSize: 12, color: pc(parts, 'statColor', pal.ink), opacity: 0.65, flexShrink: 0, whiteSpace: 'nowrap' }}>{r.us} v {r.them}</span>
                 <span style={{ fontFamily: MONO, fontSize: 12, color: c, width: 124, textAlign: 'right', flexShrink: 0 }}>{r.margin}</span>
               </div>
@@ -1890,17 +1899,18 @@ export function ResultsBoard({ palette: pal, width = 1080, height = 1080, meta =
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(242), bottom: rrFoot(width, height).reserve, display: 'flex', flexDirection: 'column' }}>
         {rows.map((r, i) => {
           const w = r.outcome === 'W'
-          const c = w ? win : loss
+          const lv = isLive(r)
+          const c = lv ? LIVE : w ? win : loss
           return (
             <div key={i} style={{ flex: 1, display: 'grid', gridTemplateColumns: cols, gap: 18, alignItems: 'center', padding: '0 14px', background: i % 2 ? rrFaint(parts, 'cardBg', pal.ink, '08') : 'transparent' }}>
               <div style={{ fontFamily: DISPLAY, fontSize: t(26), letterSpacing: 0.5, lineHeight: 0.92, color: pc(parts, 'gradeColor', undefined) }}>{r.grade}</div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: DISPLAY, fontSize: t(24), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}><span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{w ? 'DEF' : 'LOST TO'}</span> {r.opp}</div>
+                <div style={{ fontFamily: DISPLAY, fontSize: t(24), letterSpacing: 0.5, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: pc(parts, 'nameColor', undefined) }}><span style={{ color: w ? pc(parts, 'defColor', pal.ink) : c }}>{lv ? 'V' : w ? 'DEF' : 'LOST TO'}</span> {r.opp}</div>
                 <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: 1, color: c, marginTop: 4 }}>{r.margin}</div>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 17, letterSpacing: 0.5, color: pc(parts, 'statColor', pal.ink), opacity: 0.85, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.us} v {r.them}</div>
               <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 1, color: rrOnFill(parts, w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 60, textAlign: 'center', padding: '5px 0' }}>{w ? 'WON' : 'LOST'}</span>
+                <span style={{ fontFamily: DISPLAY, fontSize: 18, letterSpacing: 1, color: rrOnFill(parts, lv ? 'liveColor' : w ? 'winColor' : 'lossColor', c, pal.primary), background: c, width: 60, textAlign: 'center', padding: '5px 0' }}>{lv ? 'LIVE' : w ? 'WON' : 'LOST'}</span>
               </div>
             </div>
           )
@@ -1934,6 +1944,7 @@ export function ResultsSplit({ palette: pal, width = 1080, height = 1080, meta =
   const rows = results
   const wins = rows.filter(r => r.outcome === 'W')
   const losses = rows.filter(r => r.outcome === 'L')
+  const inPlay = rows.filter(isLive)
   const win = pc(parts, 'winColor', WIN)
   const loss = pc(parts, 'lossColor', LOSS)
   const band = pc(parts, 'bandBg', pal.accent)
@@ -1973,6 +1984,7 @@ export function ResultsSplit({ palette: pal, width = 1080, height = 1080, meta =
       <div style={{ position: 'absolute', left: 56, right: 56, top: S.head(200), bottom: rrFoot(width, height).reserve, display: 'flex', gap: 22, alignItems: 'stretch' }}>
         <Side title={pt(parts, 'rr6WonTitle', 'WON')} items={wins} color={win} count={wins.length} fillKey="winColor" />
         <Side title={pt(parts, 'rr6LostTitle', 'LOST')} items={losses} color={loss} count={losses.length} fillKey="lossColor" />
+        {inPlay.length ? <Side title={pt(parts, 'rr6LiveTitle', 'IN PLAY')} items={inPlay} color={LIVE} count={inPlay.length} fillKey="liveColor" /> : null}
       </div>
       {rrFooter(pal, width, height, parts)}
       <Grain opacity={0.3} id="rsp-g" />
@@ -1988,6 +2000,7 @@ registerParts({
     RRP.win, RRP.loss,
     textPart('rr6WonTitle', 'Left column title', RR_WL, () => 'WON'),
     textPart('rr6LostTitle', 'Right column title', RR_WL, () => 'LOST'),
+    textPart('rr6LiveTitle', 'Games in progress column title', RR_WL, () => 'IN PLAY'),
     colorPart('badgeColor', 'Text on the two column bars', RR_WL, (p) => p.primary),
     RRP.grade, colorPart('subColor', 'Margin', RR_ROWS, (p) => p.ink), RRP.name, colorPart('statColor', 'Score', RR_ROWS, (p) => p.ink), RRP.divider,
     RRP.footerBg, RRP.footerRule,

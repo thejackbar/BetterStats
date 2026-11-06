@@ -346,16 +346,23 @@ _FIXTURE_STATUS_LIVE = 2
 _FIXTURE_STATUS_COMPLETED = 3
 
 
-async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> list[dict]:
+async def get_grade_results(
+    grade_id: str, *, since: Optional[str] = None, include_live: bool = False,
+) -> list[dict]:
     """Completed matches for one grade, normalised (the results mirror of
     ``get_grade_fixtures``).
 
     Reuses ``get_grade_matches`` (same in-process cache). Returns
-    ``{id, home_team, away_team, played_at, round, venue, grade_id}`` for
+    ``{id, home_team, away_team, played_at, round, venue, grade_id, live}`` for
     matches in the terminal COMPLETED state (statusId 3). Scores/result are NOT
     in the match list — the caller fetches ``get_match_scorecard(id)`` for those,
     exactly like the single-scorecard import. ``since`` (YYYY-MM-DD) drops
     anything older, keeping the scorecard fan-out bounded to recent rounds.
+
+    ``include_live`` also returns matches still in play (statusId 2), flagged
+    ``live: True``, for a team of the round that counts games not yet finished.
+    Off by default so the Results roundup, which prints a final score, never
+    sees one.
     """
     matches = await get_grade_matches(grade_id)
     out: list[dict] = []
@@ -364,13 +371,17 @@ async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> li
             sid = int(m.get("statusId"))
         except (TypeError, ValueError):
             continue
-        if sid != _FIXTURE_STATUS_COMPLETED:
+        if sid != _FIXTURE_STATUS_COMPLETED and not (include_live and sid == _FIXTURE_STATUS_LIVE):
             continue
-        sched = (m.get("matchSchedule") or [{}])
-        dt = (sched[0].get("startDateTime") if sched else "") or ""
-        day = dt[:10]
-        if not day:
+        # A two-day game has one schedule entry per day, a week apart, in no
+        # reliable order, so `matchSchedule[0]` could be either weekend. A result
+        # belongs to the weekend it was FINISHED, so the roundup files it under
+        # the last day of play: the one-day grades that finished that same
+        # weekend sit beside it. `starts_at` keeps the first day.
+        days = schedule_days(m)
+        if not days:
             continue
+        day, first_day = days[-1][0], days[0][0]
         if since and day < since:
             continue
         teams = m.get("teams") or []
@@ -385,9 +396,11 @@ async def get_grade_results(grade_id: str, *, since: Optional[str] = None) -> li
             "home_org_id": ((home_t or {}).get("owningOrganisation") or {}).get("id"),
             "away_org_id": ((away_t or {}).get("owningOrganisation") or {}).get("id"),
             "played_at": day,
+            "starts_at": first_day,
             "round": (m.get("round") or {}).get("name"),
             "venue": (m.get("venue") or {}).get("name"),
             "grade_id": grade_id,
+            "live": sid == _FIXTURE_STATUS_LIVE,
         })
     return out
 

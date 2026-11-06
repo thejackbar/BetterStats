@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
+import { GRAND_FINAL_HELP, grandFinalMessage, withFinalTick, withGrandFinalTick } from '../../lib/grandFinal'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { formatSeason } from '../../lib/cricketFormat'
 import { isNotOutDismissal } from '../../lib/dismissal'
@@ -430,9 +431,10 @@ export default function AdminScorecardUpload() {
   const [tracked, setTracked] = useState(ALL_TRACKED)
   const [warnings, setWarnings] = useState([])
 
-  const [form, setForm] = useState({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, match_format: '', opp_name: '', opp_org_id: '' })
+  const [form, setForm] = useState({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, is_grand_final: false, match_format: '', opp_name: '', opp_org_id: '' })
   const [confirm, setConfirm] = useState(false)
   const [createdId, setCreatedId] = useState(null)
+  const [gfNote, setGfNote] = useState(null)
   const [dupes, setDupes] = useState([])
 
   // editingId is set when we've jumped back into an already-saved upload from the
@@ -519,6 +521,7 @@ export default function AdminScorecardUpload() {
         result: full.result || '',
         winning_team: full.winning_team || '',
         is_final: !!full.is_final,
+        is_grand_final: !!full.is_grand_final,
         match_format: full.match_format || '',
         opp_name: full.opposition || '',
         opp_org_id: full.opp_org_id || '',
@@ -915,6 +918,7 @@ export default function AdminScorecardUpload() {
       result: form.result || null,
       winning_team: form.winning_team || null,
       is_final: !!form.is_final,
+      is_grand_final: !!form.is_grand_final,
       match_format: form.match_format || null,
       notes: 'Imported from scorecard photo' + (extract?.read_notes ? ` — ${extract.read_notes}` : ''),
       extracted_payload: { match, innings, source: 'ai_scorecard_upload' },
@@ -928,11 +932,13 @@ export default function AdminScorecardUpload() {
     setErr(null); setBusy(true)
     try {
       if (editingId) {
-        await api.adminPatchManualGame(editingId, buildPayload())
+        const saved = await api.adminPatchManualGame(editingId, buildPayload())
         setCreatedId(editingId)
+        setGfNote(grandFinalMessage(saved?.grand_final))
       } else {
         const created = await api.adminCreateManualGame(buildPayload())
         setCreatedId(created?.id || null)
+        setGfNote(grandFinalMessage(created?.grand_final))
       }
       setStep('done')
       loadUploads()
@@ -1144,10 +1150,17 @@ export default function AdminScorecardUpload() {
                   <label className={LABEL_CLS}>Format</label>
                   <input className={INPUT_CLS} placeholder="e.g. 40-over" value={form.match_format} onChange={e => setForm(f => ({ ...f, match_format: e.target.value }))} />
                 </div>
-                <label className="flex items-center gap-2 text-sm text-pb-text mt-5">
-                  <input type="checkbox" checked={form.is_final} onChange={e => setForm(f => ({ ...f, is_final: e.target.checked }))} />
-                  Final
-                </label>
+                <div className="mt-5 space-y-1">
+                  <label className="flex items-center gap-2 text-sm text-pb-text">
+                    <input type="checkbox" checked={form.is_final} onChange={e => setForm(f => withFinalTick(f, e.target.checked))} />
+                    Final
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-pb-text">
+                    <input type="checkbox" data-testid="gf-tick" checked={!!form.is_grand_final} onChange={e => setForm(f => withGrandFinalTick(f, e.target.checked))} />
+                    Grand Final
+                  </label>
+                </div>
+                {form.is_grand_final && <p className="text-xs text-pb-faint md:col-span-3" data-testid="gf-help">{GRAND_FINAL_HELP}</p>}
               </div>
             </div>
 
@@ -1382,11 +1395,12 @@ export default function AdminScorecardUpload() {
           <div className="bg-pb-surface border pb-hairline rounded-lg p-6 max-w-xl">
             <h2 className="text-lg font-semibold text-pb-text mb-2">{editingId ? 'Scorecard updated' : 'Match imported'}</h2>
             <p className="text-sm text-pb-faint mb-4">It now counts in the stats like any other game, and the match page shows both teams. Every change is reversible from the Manual Entries audit tab.</p>
+            {gfNote && <p className="text-sm text-pb-text mb-4" data-testid="gf-note">{gfNote}</p>}
             <div className="flex gap-3">
               {createdId && <Link to={`/games/${createdId}`} className={BTN_PRIMARY}>View match</Link>}
               <button className={BTN_SECONDARY} onClick={() => {
-                setStep('upload'); setFiles([]); setPreviews([]); setExtract(null); setInnings([]); setWkByPid({}); setFieldingExtra([]); setTracked(ALL_TRACKED); setWarnings([]); setCreatedId(null); setEditingId(null)
-                setForm({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, match_format: '', opp_name: '', opp_org_id: '' })
+                setStep('upload'); setFiles([]); setPreviews([]); setExtract(null); setInnings([]); setWkByPid({}); setFieldingExtra([]); setTracked(ALL_TRACKED); setWarnings([]); setCreatedId(null); setEditingId(null); setGfNote(null)
+                setForm({ season_id: '', grade_id: '', played_at: '', venue: '', result: '', winning_team: '', is_final: false, is_grand_final: false, match_format: '', opp_name: '', opp_org_id: '' })
               }}>{editingId ? 'Back to list' : 'Upload another'}</button>
             </div>
           </div>

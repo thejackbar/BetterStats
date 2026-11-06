@@ -56,6 +56,45 @@ def card_called_off(card: dict | None) -> bool | None:
     return all((t.get("resultType") or "").strip().upper() == "ABANDONED" for t in teams)
 
 
+def abandoned_without_play_sql(status_expr: str, game_id_expr: str) -> str:
+    """SQL predicate, never NULL: CA's own STATUS says this fixture did not happen.
+
+    CANCELLED always. ABANDONED only when no cricket was played in it: a game
+    abandoned after the first ball (rain after a few overs, a pitch or an
+    injury) is a match the club turned up to, so a player named in it keeps it
+    whether or not they got a bat, a bowl or a catch. "Play started" is a
+    scored innings, a real batting line, or a bowling spell on the game.
+    Applecross, 19 Oct 2025: Applecross A were 0 for 17 when the game was
+    abandoned and CA counts a player named in it; a washout with no score does not.
+
+    `ca_called_off` (COMPLETED but both teams ABANDONED) is a separate signal and
+    is deliberately NOT softened here: CA leaves named-only players out of those
+    even after overs were bowled (Leederville, 14 Nov 2020).
+
+    A CASE so the correlated probes only run for an ABANDONED row. `status_expr` and
+    `game_id_expr` are SQL for the row's status and its `games.id`, because the views
+    that use this alias them differently (`ag.status` with `ag.game_id`).
+    """
+    runs = ("COALESCE(NULLIF(left(regexp_replace(_it.v->>'runs_scored', "
+            "'[^0-9]', '', 'g'), 9), ''), '0')::int")
+    wkts = ("COALESCE(NULLIF(left(regexp_replace(_it.v->>'wickets', "
+            "'[^0-9]', '', 'g'), 9), ''), '0')::int")
+    return f"""(CASE
+                WHEN COALESCE({status_expr}, '') = 'CANCELLED' THEN TRUE
+                WHEN COALESCE({status_expr}, '') = 'ABANDONED' THEN NOT (
+                    EXISTS (SELECT 1 FROM games _pg, jsonb_array_elements(
+                                CASE WHEN jsonb_typeof(_pg.innings_totals) = 'array'
+                                     THEN _pg.innings_totals ELSE '[]'::jsonb END) AS _it(v)
+                            WHERE _pg.id = {game_id_expr} AND jsonb_typeof(_it.v) = 'object'
+                              AND ({runs} > 0 OR {wkts} > 0))
+                    OR EXISTS (SELECT 1 FROM batting_innings _pb WHERE _pb.game_id = {game_id_expr}
+                               AND NOT COALESCE(_pb.did_not_bat, FALSE))
+                    OR EXISTS (SELECT 1 FROM bowling_spells _pw WHERE _pw.game_id = {game_id_expr})
+                )
+                ELSE FALSE
+            END)"""
+
+
 def called_off_sql(g: str) -> str:
     """SQL predicate, never NULL: CA called this fixture off, by `status` or by `ca_called_off`.
 
@@ -64,7 +103,7 @@ def called_off_sql(g: str) -> str:
     column list stays as it was and a copy made before the column existed still works.
     This is the CA-says-so half of `not_played_game_sql`, without the empty-scorecard inference.
     """
-    return (f"(COALESCE({g}.status, '') IN ({NOT_PLAYED_SQL_LIST}) OR EXISTS ("
+    return (f"({abandoned_without_play_sql(f'{g}.status', f'{g}.id')} OR EXISTS ("
             f"SELECT 1 FROM games _cog WHERE _cog.id = {g}.id AND _cog.ca_called_off IS TRUE))")
 
 
@@ -155,7 +194,7 @@ def not_played_game_sql(g: str) -> str:
     `g` is the alias of a `games` row. COALESCE so `NOT` over it can never turn a
     NULL status into a row that silently drops out of a WHERE.
     """
-    return (f"COALESCE(({g}.status IN ({NOT_PLAYED_SQL_LIST}) "
+    return (f"COALESCE(({abandoned_without_play_sql(f'{g}.status', f'{g}.id')} "
             f"OR {g}.ca_called_off IS TRUE "
             f"OR {looks_unplayed_sql(g)}), FALSE)")
 

@@ -7,7 +7,7 @@ persisted in every deployment.
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
@@ -15,7 +15,7 @@ from app.models.db import (
     Player, SocialMediaAsset, Sponsor, get_db,
 )
 from app.models.scout import ScoutedPlayer
-from app.services import fonts as font_service
+from app.services import fonts as font_service, image_sizes
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -127,31 +127,56 @@ async def get_gallery_image(image_id: str, db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.get("/card-packs/{design_id}/{kind}")
+async def get_card_pack_image(design_id: str, kind: str, db: AsyncSession = Depends(get_db)):
+    """A club's pack background or centre image. The ?v= in its URL changes on every upload, so the bytes at a URL never change."""
+    from app.services import player_card_designs
+
+    found = await player_card_designs.image_bytes(db, str(_parse_uuid(design_id)), kind)
+    if not found:
+        raise HTTPException(404, "No image")
+    return Response(content=found[0], media_type=found[1], headers={**_CACHE_HEADERS, "X-Content-Type-Options": "nosniff"})
+
+
+# The three player photographs. Only the one asked for is read (`db.get(Player)` used to pull all three, up to 24 MB, for every
+# image on a page), and `?w=` asks for a copy no wider than that, for a card that draws it at a few hundred pixels.
+_PLAYER_IMAGES = {
+    "photo": (Player.photo_data, Player.photo_mime, "No photo"),
+    "hero-photo": (Player.hero_photo_data, Player.hero_photo_mime, "No hero photo"),
+    "action-photo": (Player.action_photo_data, Player.action_photo_mime, "No action photo"),
+}
+
+
+async def _player_image(player_id: str, kind: str, w: int | None, v: str | None, db: AsyncSession) -> Response:
+    data_col, mime_col, missing = _PLAYER_IMAGES[kind]
+    pid = _parse_uuid(player_id)
+    row = (await db.execute(select(data_col, mime_col).where(Player.id == pid))).first()
+    if not row or not row[0]:
+        raise HTTPException(404, missing)
+    data, mime = bytes(row[0]), row[1] or "image/png"
+    width = image_sizes.bucket(w)
+    if width:
+        data, mime = await image_sizes.resized((str(pid), kind, v or "", len(data), width), data, mime, width)
+    return Response(content=data, media_type=mime, headers=_CACHE_HEADERS)
+
+
 @router.get("/players/{player_id}/photo")
-async def get_player_photo(player_id: str, db: AsyncSession = Depends(get_db)):
-    player = await db.get(Player, _parse_uuid(player_id))
-    if not player or not player.photo_data:
-        raise HTTPException(404, "No photo")
-    return Response(
-        content=player.photo_data,
-        media_type=player.photo_mime or "image/png",
-        headers=_CACHE_HEADERS,
-    )
+async def get_player_photo(player_id: str, db: AsyncSession = Depends(get_db), w: int | None = None, v: str | None = None):
+    return await _player_image(player_id, "photo", w, v, db)
 
 
 @router.get("/players/{player_id}/hero-photo")
-async def get_player_hero_photo(player_id: str, db: AsyncSession = Depends(get_db)):
-    """The player's action shot — see migration 274 for why it is a separate
-    photograph from the headshot above. Same no-auth posture as that one: a
-    low-sensitivity image behind an unguessable id."""
-    player = await db.get(Player, _parse_uuid(player_id))
-    if not player or not player.hero_photo_data:
-        raise HTTPException(404, "No hero photo")
-    return Response(
-        content=player.hero_photo_data,
-        media_type=player.hero_photo_mime or "image/png",
-        headers=_CACHE_HEADERS,
-    )
+async def get_player_hero_photo(player_id: str, db: AsyncSession = Depends(get_db), w: int | None = None, v: str | None = None):
+    """The player's hero photo, a separate photograph from the headshot above (migration 274). Same no-auth posture as that one:
+    a low-sensitivity image behind an unguessable id."""
+    return await _player_image(player_id, "hero-photo", w, v, db)
+
+
+@router.get("/players/{player_id}/action-photo")
+async def get_player_action_photo(player_id: str, db: AsyncSession = Depends(get_db), w: int | None = None, v: str | None = None):
+    """The player's action shot (migration 375), a third photograph beside the headshot and the hero photo. Same no-auth posture
+    as those: a low-sensitivity image behind an unguessable id, and a privacy removal clears it."""
+    return await _player_image(player_id, "action-photo", w, v, db)
 
 
 @router.get("/scouted-players/{scouted_player_id}/photo")

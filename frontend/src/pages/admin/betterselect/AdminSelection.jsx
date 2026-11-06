@@ -42,6 +42,7 @@ import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRul
 import { teamSeq, teamNameOf, oppLabelOf, commonPrefixWord, stripPrefix } from './teamOrder'
 import { confirmSig, restoreDraft } from './selectionDraft'
 import { sideFit, sideLabel, sideProblem } from '../../../lib/sideSize'
+import { naturalCompare } from '../../../lib/naturalSort'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
 // displayed positional *hints* are gone, but the eligibility model is useful).
@@ -70,7 +71,7 @@ function TeamSwitcher({ fixtureId, fx, fixtures, navigate, shortTeam }) {
       g = [{ id: fixtureId, team_name: fx.team_name, grade_name: fx.grade_name, team_sequence: fx.team_sequence,
              opponent_name: fx.opponent_name, label: fx.label, home_away: fx.home_away, played_on: fx.played_on }, ...g]
     }
-    return g.slice().sort((a, b) => teamSeq(a) - teamSeq(b) || teamNameOf(a).localeCompare(teamNameOf(b)))
+    return g.slice().sort((a, b) => teamSeq(a) - teamSeq(b) || naturalCompare(teamNameOf(a), teamNameOf(b)))
   }, [fixtures, dayKey, fixtureId, fx])
 
   const idx = group.findIndex((f) => f.id === fixtureId)
@@ -995,6 +996,7 @@ export default function AdminSelection() {
       <Btn variant="soft" sm icon="share" onClick={() => setShowSheet(true)} disabled={count === 0}><span className="hidden sm:inline">Share</span></Btn>
       {canManage && <Btn variant="soft" sm icon="share" onClick={() => setShowSend(true)} title="Email the confirmed side to the captain or the players"><span className="hidden sm:inline">Email</span></Btn>}
       {/* Below `lg` Confirm lives in the bar pinned to the bottom of the screen. */}
+      <Btn variant="ghost" sm icon="history" onClick={() => navigate(`/admin/betterselect/past-lineups?fixture=${fixtureId}`)} title="Look back at this team's earlier sides" data-past-sides><span className="hidden sm:inline">Past sides</span></Btn>
       {canManage && <Btn variant="ghost" sm icon="reset" onClick={() => setShowHistory(true)} title="Who changed this side, and what it was before"><span className="hidden sm:inline">History</span></Btn>}
       {canEdit && <Btn variant="ghost" sm icon="undo" onClick={undo} disabled={!undoDepth} title="Undo the last change (Ctrl or Cmd + Z)" data-undo><span className="hidden sm:inline">Undo</span></Btn>}
       {canManage && locked && <Btn variant="soft" sm icon="lock" onClick={unlockNow} disabled={locking} data-unlock>Unlock</Btn>}

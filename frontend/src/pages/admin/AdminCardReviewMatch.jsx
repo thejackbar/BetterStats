@@ -202,9 +202,14 @@ export default function AdminCardReviewMatch() {
       return res
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
+  // Choosing the club's card for any match also counts that season match by match, so every total
+  // follows the card chosen. Said straight away, and said again when an undo puts the season back.
+  const basisWords = b => (b?.by_match
+    ? ` ${b.season ? `${b.season} totals` : 'The season totals'} now count each match from its own scorecard.`
+    : '')
   const choose = key => run(() => api.cardReviewChoose(matchId, key, note), r => {
     const n = (r.left_out || []).length
-    return `Now showing ${CHOICE_NAME[key]}${key === 'hybrid' && n ? `. ${n} item${n === 1 ? '' : 's'} left out` : ''}`
+    return `Now showing ${CHOICE_NAME[key]}${key === 'hybrid' && n ? `. ${n} item${n === 1 ? '' : 's'} left out` : ''}.${basisWords(r.season_basis)}`
   })
 
   let queue = null
@@ -278,12 +283,12 @@ export default function AdminCardReviewMatch() {
           <div className="mt-3"><Button variant={m.current === 'ca' ? 'soft' : 'primary'} disabled={busy || inconsistent || m.current === 'ca'} onClick={() => choose('ca')} data-testid="choose-ca">Show this</Button></div>
         </Choice>
         <Choice title="Club scorecard" tone={TONES.warn.hex} active={m.current === 'club'}>
-          <p className="mt-1.5 text-[12.5px] text-pb-dim">The club's numbers only, as recorded: no opposition card and no bowler or fielder names beyond what the card already has.</p>
+          <p className="mt-1.5 text-[12.5px] text-pb-dim">The club's numbers only, as recorded: no opposition card and no bowler or fielder names beyond what the card already has. Profiles, the leaderboard and records follow this card too.</p>
           <div className="mt-3"><Button disabled={busy || inconsistent || m.current === 'club'} onClick={() => choose('club')} data-testid="choose-club">Show this</Button></div>
         </Choice>
         <div id="hybrid-choice">
           <Choice title="Club numbers with Cricket Australia detail" rec active={m.current === 'hybrid'}>
-            <p className="mt-1.5 text-[12.5px] text-pb-dim">Runs, wickets and result stay as the club recorded them. Detail Cricket Australia holds is added wherever it fits; whatever does not fit is left out and listed.</p>
+            <p className="mt-1.5 text-[12.5px] text-pb-dim">Runs, wickets and result stay as the club recorded them. Detail Cricket Australia holds is added wherever it fits; whatever does not fit is left out and listed. Profiles, the leaderboard and records follow the club's numbers.</p>
             {!preview && !previewing && <div className="mt-3"><Button size="sm" onClick={loadPreview} disabled={busy || inconsistent} data-testid="preview">Preview what would come over</Button></div>}
             {previewing && <p className="mt-3 text-[12.5px] text-pb-dim">Reading Cricket Australia's card…</p>}
             {preview && !preview.ok && <p className="mt-3 text-[12.5px]" style={{ color: TONES.block.ink }} data-testid="preview-reason">{preview.reason}</p>}
@@ -319,6 +324,9 @@ export default function AdminCardReviewMatch() {
           <TextArea id="review-note" rows={2} value={note} maxLength={500} placeholder="e.g. Club scorecard correct: Pike made 35 and extras were 12." onChange={e => setNote(e.target.value)} />
           <p className="mt-2 text-[12px] text-pb-faint">
             The note is saved with your next choice. You can switch back at any time: both scorecards stay stored.
+            Once the club's card is chosen for any match in a season, that season's totals count each match from its own
+            scorecard (Cricket Australia's for the others), so a total always agrees with the match pages. Switching every
+            match in the season back to Cricket Australia returns the season to Cricket Australia's own totals.
           </p>
           <div className="mt-3 flex flex-wrap gap-2 text-[12.5px]">
             <a className="text-pb-accent-ink hover:underline" href={matchPageUrl(m.game_id)} target="_blank" rel="noreferrer">Open the Cricket Australia page</a>
@@ -326,7 +334,7 @@ export default function AdminCardReviewMatch() {
             <a className="text-pb-accent-ink hover:underline" href={matchPageUrl(m.match_id)} target="_blank" rel="noreferrer">Open the club scorecard page</a>
           </div>
         </div>
-        <History rows={m.history} busy={busy} onUndo={() => run(() => api.cardReviewUndo(matchId), r => `Put back: now showing ${CHOICE_NAME[r.to]}`)} />
+        <History rows={m.history} busy={busy} onUndo={() => run(() => api.cardReviewUndo(matchId), r => `Put back: now showing ${CHOICE_NAME[r.to]}.${basisWords(r.season_basis)}`)} />
       </div>
     </BetterStatsLayout>
   )

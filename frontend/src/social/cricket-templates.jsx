@@ -14,6 +14,7 @@ import brandWhite from '../assets/bettercricket-white.svg'
 import { IS_AFL, PLATFORM_NAME } from '../lib/sport'
 import { pc, pt, inkOn, registerParts, colorPart, textPart, picked as partPicked } from './layoutParts'
 import { usePostLook } from './postLook'
+import { pickHero } from '../lib/playerShots'
 
 // The BetterCricket credit mark used in every template's footer — the real
 // brand logo (black on a light footer, white on a dark one), no wordmark text.
@@ -293,6 +294,85 @@ export function DebutTag({ accent = '#ffc233', ink = '#0b1530', style = {} }) {
   )
 }
 
+// ── Milestone watch (lineup posts) ───────────────────────────────────────────
+// A gold badge beside a player who is about to reach a club milestone, and a
+// strip of up to three of them above the footer. Both are absent when the post
+// carries none (`p.milestone` unset, `watch` empty), so a lineup without
+// milestones stays byte for byte what it was.
+//
+// The gold is fixed on purpose. The role chips and the debut tag take the
+// club's accent, and on the default palette that is a gold of its own; a badge
+// in the same colour and shape reads as one more role. This one is a rounded
+// pill with a star in a gold the club cannot repaint, so it cannot be mistaken
+// for C, VC, WK or DEBUT.
+export const WATCH_GOLD = '#f0b429'
+const WATCH_INK = '#2a1c00'
+
+export function MilestoneBadge({ m, compact = false, em = false, style = {} }) {
+  if (!m) return null
+  const text = compact ? m.short : m.badge
+  // `em` sizes the badge from the type around it (a name fitted into a row that
+  // can shrink to 15px); otherwise it is the chips' own 24px, or 20px compact.
+  const h = em ? '0.8em' : compact ? 20 : 24
+  const star = em ? '0.48em' : compact ? 10 : 12
+  return (
+    <span data-milestone-badge="1" style={{
+      display: 'inline-flex', alignItems: 'center', gap: em ? '0.1em' : compact ? 3 : 4, flexShrink: 0,
+      height: h, padding: em ? '0 0.26em 0 0.2em' : compact ? '0 7px 0 5px' : '0 10px 0 7px',
+      background: `linear-gradient(180deg, #ffe08a 0%, ${WATCH_GOLD} 55%, #c98a0b 100%)`,
+      color: WATCH_INK, boxShadow: '0 0 0 1px #8a5a00',
+      fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: em ? '0.52em' : compact ? 12 : 14, fontWeight: 400,
+      letterSpacing: 0.8, lineHeight: 1, borderRadius: 999, whiteSpace: 'nowrap', verticalAlign: 'middle',
+      ...style,
+    }}>
+      <svg width={star} height={star} viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0 }}>
+        <path d="M12 1.5l3.1 6.9 7.4.8-5.5 5.1 1.6 7.4L12 18l-6.6 3.7L7 14.3 1.5 9.2l7.4-.8z" fill={WATCH_INK} />
+      </svg>
+      {text}
+    </span>
+  )
+}
+
+export const watchLineH = (A) => pick(A, { square: 24, portrait: 26, story: 30 })
+// The room the strip takes, 0 with nothing to say. Layouts subtract this from
+// the list above it, so the strip is never drawn over a name.
+export const watchStripH = (count, A) => (count > 0 ? 36 + count * watchLineH(A) : 0)
+
+// A plain function, not a component: it returns the element itself so it keeps
+// its own `data-layer` as a root child (see the Layers panel notes).
+export function watchStrip({ items, A, ink = '#ffffff', style = {} }) {
+  if (!items || !items.length) return null
+  const lineH = watchLineH(A)
+  return (
+    <div data-layer="milestone-watch" data-milestone-watch="1" style={{
+      boxSizing: 'border-box', height: watchStripH(items.length, A), padding: '8px 16px 8px 14px',
+      background: 'rgba(0,0,0,0.34)', borderLeft: `4px solid ${WATCH_GOLD}`,
+      display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'hidden',
+      ...style,
+    }}>
+      <div style={{
+        height: 20, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+        fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 700, letterSpacing: 2.4, color: WATCH_GOLD,
+      }}>
+        <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 1.5l3.1 6.9 7.4.8-5.5 5.1 1.6 7.4L12 18l-6.6 3.7L7 14.3 1.5 9.2l7.4-.8z" fill={WATCH_GOLD} />
+        </svg>
+        MILESTONE WATCH
+      </div>
+      {items.map((it, i) => (
+        <div key={it.key || i} data-watch-line="1" style={{ height: lineH, flexShrink: 0, display: 'flex', alignItems: 'center', minWidth: 0 }}>
+          <AutoFitText max={lineH - 6} min={9} lines={1} pad={4} measureDeps={[A, items.length]}
+            style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.8, lineHeight: 1.1, color: ink, width: '100%' }}>
+            <span style={{ color: WATCH_GOLD }}>{String(it.name || '').toUpperCase()}</span>
+            {' \u2014 '}
+            {String(it.label || '').toUpperCase()}
+          </AutoFitText>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // The row of the player who is in the photo, when the admin asks for it to be
 // marked: a wash of the accent behind the name and a bar down its leading edge.
 // Returns null when off (and for every other row), so a spread of it into a
@@ -395,13 +475,17 @@ export function heroFocusStyle(focus) {
     : { objectPosition: pos }
 }
 
-// The photo for a player's BIG slot. A club can store two: a square headshot
-// that reads at 44px, and an action shot for exactly this. The action shot
-// wins here and nowhere else — a grid or a card front stays on the headshot,
-// which is the photo that works at that size.
+// The photo for a player's BIG slot. A club can store three: a square headshot
+// that reads at 44px, a tall hero photo and an action shot for exactly this.
+// The hero position takes the club's pick between the last two (`heroSource`,
+// from the player's saved choice or the editor's own), the hero photo first
+// when nothing is picked, and falls back to the headshot. A grid or a card
+// front stays on the headshot, which is the photo that works at that size.
+// `heroSource: 'photo'` is the editor asking for the headshot here as well.
 export function heroSrcOf(player) {
   if (!player) return null
-  return player.hero || player.headshot || null
+  if (player.heroSource === 'photo') return player.headshot || null
+  return pickHero({ hero: player.hero, action: player.action }, player.heroSource) || player.headshot || null
 }
 
 // Picks the player shown in the hero image slot. An explicit `featuredId`
@@ -512,11 +596,14 @@ export const LINEUP_MAX = 15
 // nothing reads it through here.
 const realComp = (m) => (m && m.competition && m.competition !== 'COMPETITION' ? m.competition : '')
 
-export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero, parts }) {
+export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero, watch, parts }) {
   const texture = usePostLook().texture !== false
   const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   const slot = SLOT_T1(width, height)
+  // The milestone strip sits under the names, inside the same rail, so the
+  // headline gives up the room it takes (absent watch: 0, nothing changes).
+  const watchH = watchStripH((watch || []).length, A)
   // ── T1 at 4:5 and 9:16 ────────────────────────────────────────────────────
   // The square is a spine, a hero column and a name rail. The rail is what the
   // extra height lands in, so the design decision is how the names spend it.
@@ -614,7 +701,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
             }}>{match.season}</div>
           </div>
         </div>
-        <div style={{ maxHeight: pick(A, { square: 300, portrait: 360, story: 440 }), display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', marginTop: 20, overflow: 'hidden' }}>
+        <div style={{ maxHeight: pick(A, { square: 300, portrait: 360, story: 440 }) - watchH, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', marginTop: 20, overflow: 'hidden' }}>
           <AutoFitText
             text={(headline || 'SQUAD').toUpperCase()} max={pick(A, { square: 180, portrait: 210, story: 250 })} min={48} lines={2} pad={14}
             style={{
@@ -659,7 +746,7 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
             return (
               <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, width: '100%', ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), pc(parts, 'markColor', palette.accent), { side: 'right' }) }}>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
-                  <AutoFitText max={rowMax} min={16} lines={1} pad={8} measureDeps={[chip ? 1 : 0, p.debut ? 1 : 0]}
+                  <AutoFitText max={rowMax} min={16} lines={1} pad={8} measureDeps={[chip ? 1 : 0, p.debut ? 1 : 0, p.milestone ? 1 : 0]}
                     style={{
                       fontFamily: "var(--social-display-font, 'Anton', sans-serif)", lineHeight: 1.05,
                       letterSpacing: 0.5, color: palette.ink,
@@ -672,10 +759,12 @@ export function T1_HeroList({ width = 1080, height = 1080, team, opponent, match
                 </div>
                 {chip && <RoleChip kind={chip} accent={pc(parts, 'chipBg', palette.accent)} ink={pc(parts, 'chipColor', palette.primary)} />}
                 {p.debut && <DebutTag accent={pc(parts, 'debutBg', palette.ink)} ink={pc(parts, 'debutColor', palette.primary)} />}
+                {p.milestone && <MilestoneBadge m={p.milestone} compact={P.length >= 12} />}
               </div>
             )
           })}
         </div>
+        {watchStrip({ items: watch, A, ink: palette.ink, style: { marginTop: 10, flexShrink: 0 } })}
       </div>
       <div style={{
         position: 'absolute', right: 40, bottom: 36,
@@ -724,11 +813,15 @@ registerParts({
 // so the slot stops well short of it. The grid opens under the slot on every
 // canvas shape.
 const SLOT_T2 = (width, height) => ({ x: 56, y: 268, w: 500, h: 100, pad: 8, gap: 14, panel: 'light' })
-export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match, players, palette, headline, parts }) {
+export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match, players, palette, headline, watch, parts }) {
   const texture = usePostLook().texture !== false
   const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   const slot = SLOT_T2(width, height)
+  // The watch strip sits between the grid and the credit; the grid gives it the
+  // room (absent watch: the grid keeps its own 100px foot).
+  const watchH = watchStripH((watch || []).length, A)
+  const gridFoot = watchH ? 88 + watchH + 14 : 100
   // ── T2 at 4:5 and 9:16 ────────────────────────────────────────────────────
   // These are trading cards, so the design question is the card's own shape.
   // PORTRAIT keeps 4×3 and spends the extra height on the cards themselves —
@@ -817,7 +910,7 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
         <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 26, letterSpacing: 1, color: pc(parts, 'clubColor', palette.ink), lineHeight: 0.95, textAlign: 'center', marginTop: 8 }}>{(team.fullName || team.name).toUpperCase()}</div>
       </div>
       <div style={{
-        position: 'absolute', left: 56, right: 56, top: gridTop, bottom: 100,
+        position: 'absolute', left: 56, right: 56, top: gridTop, bottom: gridFoot,
         display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)`,
         gap: 14,
       }}>
@@ -842,6 +935,7 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
                   <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 96, color: palette.accent, opacity: 0.85, letterSpacing: -2, lineHeight: 1 }}>{team.monogram}</div>
                 )}
                 {chip && <div style={{ position: 'absolute', top: 8, right: 8 }}><RoleChip kind={chip} accent={pc(parts, 'chipBg', palette.accent)} ink={pc(parts, 'chipColor', palette.primary)} /></div>}
+                {p.milestone && <div style={{ position: 'absolute', left: 8, bottom: 8, zIndex: 2 }}><MilestoneBadge m={p.milestone} compact /></div>}
                 <div style={{ position: 'absolute', top: 8, left: 8, fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: pc(parts, 'numColor', palette.ink), opacity: 0.4, letterSpacing: 1.5 }}>#{String(i + 1).padStart(2, '0')}</div>
               </div>
               <div style={{
@@ -855,6 +949,7 @@ export function T2_CardGrid({ width = 1080, height = 1080, team, opponent, match
           )
         })}
       </div>
+      {watchStrip({ items: watch, A, ink: palette.ink, style: { position: 'absolute', left: 56, right: 56, bottom: 88, zIndex: 2 } })}
       <div style={{ position: 'absolute', left: 56, right: 56, bottom: 32, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
         <CreditMark ink={palette.ink} h={44} />
       </div>
@@ -894,7 +989,7 @@ const SLOT_T3 = (width, height) => {
   const x = strip + 80
   return { x, y: height - 40 - 96, w: width - 40 - 64 - x, h: 96, pad: 8, gap: 14, panel: 'light' }
 }
-export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero, parts }) {
+export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero, watch, parts }) {
   const texture = usePostLook().texture !== false
   const P = players.slice(0, LINEUP_MAX)
   const slot = SLOT_T3(width, height)
@@ -912,8 +1007,11 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
   const spineSize = Math.max(34, Math.min(pick(A, { square: 80, portrait: 96, story: 120 }), Math.floor((height * 0.93) / Math.max(spine.length, 1))))
   // Past eleven the rows have to share the column at every shape (the square's
   // natural rows only fit eleven), and the type steps down with the count.
-  const crowd = P.length > 11 ? 11 / P.length : 1
-  const flexRows = A !== 'square' || P.length > 11
+  // The watch strip is paid for by the rows too: they share what is left, so the
+  // type steps down with the room the strip takes (watch absent: no change).
+  const watchH = watchStripH((watch || []).length, A)
+  const crowd = (P.length > 11 ? 11 / P.length : 1) * (watchH ? Math.max(0.6, 1 - (watchH + 10) / pick(A, { square: 640, portrait: 840, story: 1180 })) : 1)
+  const flexRows = A !== 'square' || P.length > 11 || watchH > 0
   const numSize = Math.round(pick(A, { square: 40, portrait: 48, story: 56 }) * crowd)
   // The square's rows are naturally sized, so the sponsor slot at the foot is
   // paid for by a touch less padding per row (7 to 5), not by cutting a row.
@@ -1020,7 +1118,7 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
               <div key={i} style={{ ...(flexRows ? { flex: 1, minHeight: 0 } : null), display: 'flex', alignItems: 'center', gap: 12, padding: `${rowPad}px 0`, borderBottom: `1px solid ${pc(parts, 'dividerColor', palette.ink)}${partPicked(parts, 'dividerColor') ? '' : '1c'}`, ...heroRowMark(isHeroRow(p, featuredOf(players, featuredId), markHero), pc(parts, 'markColor', palette.accent), { bleed: 8, padY: rowPad }) }}>
                 <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: numSize, color: pc(parts, 'numColor', palette.accent), lineHeight: 1, width: Math.round(numSize * 1.2), textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-start' }}>
-                  <AutoFitText max={nameMax} min={16} lines={1} pad={8} measureDeps={[p.debut ? 1 : 0]}
+                  <AutoFitText max={nameMax} min={16} lines={1} pad={8} measureDeps={[p.debut ? 1 : 0, p.milestone ? 1 : 0]}
                     style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 0.5, color: palette.ink, lineHeight: 1 }}>
                     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.26em', whiteSpace: 'nowrap' }}>
                       <span style={{ opacity: 0.65, fontWeight: 300, fontSize: '0.74em', color: pc(parts, 'firstColor', undefined) }}>{p.first.toUpperCase()}</span>
@@ -1030,10 +1128,12 @@ export function T3_SideNumbered({ width = 1080, height = 1080, team, opponent, m
                 </div>
                 {chip && <RoleChip kind={chip} accent={pc(parts, 'chipBg', palette.accent)} ink={pc(parts, 'chipColor', palette.primary)} />}
                 {p.debut && <DebutTag accent={pc(parts, 'debutBg', palette.ink)} ink={pc(parts, 'debutColor', palette.primary)} />}
+                {p.milestone && <MilestoneBadge m={p.milestone} compact={P.length >= 12 || watchH > 0} />}
               </div>
             )
           })}
         </div>
+        {watchStrip({ items: watch, A, ink: palette.ink, style: { marginTop: 10, flexShrink: 0 } })}
         {/* The footer is as tall as the sponsor slot (the grid sits in its left
             side, bottom-aligned with the column), with the credit on the right. */}
         <div style={{ boxSizing: 'border-box', height: slot.h + 12, flexShrink: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 12, paddingTop: 10, borderTop: `2px solid ${pc(parts, 'footerRule', palette.accent)}` }}>
@@ -2005,7 +2105,7 @@ export const SLOT_T10 = (width = 1080, height = 1080) => {
   return { x: width - 44 - 40 - 22 - w, y: height - strip + 12, w, h, pad: 6, gap: 20, panel: 'light' }
 }
 
-export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero, parts }) {
+export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus, markHero, watch, parts }) {
   const P = players.slice(0, LINEUP_MAX)
   const A = aspectOf(width, height)
   // ── T10 at 4:5 and 9:16 ───────────────────────────────────────────────────
@@ -2016,7 +2116,8 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
   // read as a list somebody forgot to finish.
   // Shrink the rows as the squad grows so a full 13 still fits the column.
   const base = P.length >= 15 ? 27 : P.length >= 14 ? 29 : P.length >= 13 ? 32 : P.length >= 12 ? 36 : P.length >= 11 ? 40 : P.length >= 9 ? 46 : 52
-  const rowMax = Math.round(base * pick(A, { square: 1, portrait: 1.2, story: 1.55 }))
+  const watchH = watchStripH((watch || []).length, A)
+  const rowMax0 = Math.round(base * pick(A, { square: 1, portrait: 1.2, story: 1.55 }))
   const featured = featuredOf(players, featuredId)
   const photo = heroImage || heroSrcOf(featured)
   // The strip is the club's ink colour (off-white on every built-in palette),
@@ -2043,6 +2144,14 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
   const PHOTO_H = share(height, 780)
   const HEAD_TOP = share(height, 96)
   const HEAD_H = share(height, 232)
+  // The names run from under the wordmark to just above the torn edge. The
+  // watch strip takes its room off the foot of that run, and the rows (natural
+  // height, so their sum is the run) shrink by the same share.
+  const namesTop = HEAD_TOP + HEAD_H + 20
+  const namesBottom = STRIP_H + TEAR_H + 34
+  const namesRun = height - namesTop - namesBottom
+  const stripGap = watchH ? 12 : 0
+  const rowMax = watchH ? Math.max(15, Math.floor(rowMax0 * Math.max(0.5, (namesRun - watchH - stripGap) / namesRun))) : rowMax0
   const meta = [match.date, match.time].filter(Boolean).join('  ·  ')
   const fixture = [team.short || team.name, opponent.short || opponent.name].filter(Boolean).join(' V ').toUpperCase()
   const comp = [match.competition, match.round].filter(Boolean).join('  ·  ').toUpperCase()
@@ -2147,7 +2256,7 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
 
       {/* The XI itself. */}
       <div style={{
-        position: 'absolute', left: 44, top: HEAD_TOP + HEAD_H + 20, width: 560, bottom: STRIP_H + TEAR_H + 34,
+        position: 'absolute', left: 44, top: namesTop, width: 560, bottom: namesBottom + (watchH ? watchH + stripGap : 0),
         zIndex: 4, display: 'flex', flexDirection: 'column',
         gap: 2, justifyContent: P.length >= 10 ? 'space-between' : 'flex-start',
       }}>
@@ -2155,7 +2264,7 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
           const chip = p.captain ? pt(parts, 't10CapMark', '(C)') : p.viceCaptain ? pt(parts, 't10ViceMark', '(VC)') : p.keeper ? pt(parts, 't10KeeperMark', '(WK)') : null
           const debutMark = pt(parts, 't10Debut', '(DEBUT)')
           return (
-            <AutoFitText key={i} max={rowMax} min={15} lines={1} pad={8} measureDeps={[chip ? 1 : 0, p.debut ? 1 : 0]}
+            <AutoFitText key={i} max={rowMax} min={15} lines={1} pad={8} measureDeps={[chip ? 1 : 0, p.debut ? 1 : 0, p.milestone ? 1 : 0]}
               style={{
                 fontFamily: "var(--social-display-font, 'Anton', sans-serif)",
                 lineHeight: 1.08, letterSpacing: 0.6, color: pc(parts, 'nameColor', palette.ink),
@@ -2166,11 +2275,13 @@ export function T10_TeamSheet({ width = 1080, height = 1080, team, opponent, mat
                 <span>{`${p.first || ''} ${p.last || ''}`.trim().toUpperCase()}</span>
                 {chip && <span style={{ color: pc(parts, 't10TagColor', palette.accent), fontSize: '0.62em', letterSpacing: 1 }}>{chip}</span>}
                 {p.debut && debutMark && <span style={{ color: pc(parts, 't10TagColor', palette.accent), fontSize: '0.62em', letterSpacing: 1 }}>{debutMark}</span>}
+                {p.milestone && <MilestoneBadge m={p.milestone} em compact />}
               </span>
             </AutoFitText>
           )
         })}
       </div>
+      {watchStrip({ items: watch, A, ink: palette.ink, style: { position: 'absolute', left: 44, width: 560, bottom: namesBottom, zIndex: 4 } })}
 
       {/* Torn paper strip — crests, competition, credit. */}
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: STRIP_H, zIndex: 5 }}>

@@ -260,6 +260,12 @@ export default function ManualGamesImportWizard({ onDone }) {
           your team played under (Portland Over 60s, say), with the other one matching the
           opposition column. The template has a worked example.
         </p>
+        <p className="text-sm text-pb-dim mb-3" data-testid="gf-column-help">
+          To mark a match as the grand final, put yes in its is_grand_final column. If your
+          side won it (winning_team names your side, or result starts with Won), the players
+          on that card get the premiership automatically. Leave the cell blank on any other
+          match, and on a match you are overwriting a blank keeps whatever was set before.
+        </p>
         <div className="flex flex-wrap items-center gap-3">
           <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={pickFile}
                  className="text-sm text-pb-dim file:mr-3 file:px-3 file:py-1.5 file:rounded file:border-0 file:bg-pb-surface2 file:text-pb-text file:text-xs" />
@@ -297,6 +303,18 @@ export default function ManualGamesImportWizard({ onDone }) {
               )}
             </div>
           )}
+          {result.grand_finals > 0 && (
+            <p className="text-sm text-pb-text mt-3" data-testid="gf-result">
+              {result.grand_finals} match{result.grand_finals === 1 ? ' is' : 'es are'} marked as the grand final.
+              Where your side won, the players on the card now have the premiership.
+            </p>
+          )}
+          {(result.captains_named > 0 || result.keepers_named > 0) && (
+            <p className="text-sm text-pb-text mt-3" data-testid="roles-result">
+              A captain is named on {result.captains_named || 0} match{result.captains_named === 1 ? '' : 'es'} and a
+              wicketkeeper on {result.keepers_named || 0}.
+            </p>
+          )}
           {result.seasons_import_sourced > 0 && (
             <p className="text-xs text-pb-dim mt-3">
               {result.seasons_import_sourced} season{result.seasons_import_sourced === 1 ? '' : 's'} now count your
@@ -332,6 +350,12 @@ export default function ManualGamesImportWizard({ onDone }) {
             <Figure label="New grades" value={willCreate.grades || 0} tone={willCreate.grades ? 'text-pb-accent-ink' : undefined} />
             <Figure label="New players" value={willCreate.players || 0} tone={willCreate.players ? 'text-pb-accent-ink' : undefined} />
           </div>
+
+          {review.grand_finals > 0 && (
+            <p className="text-xs text-pb-dim" data-testid="gf-review">
+              {review.grand_finals} match{review.grand_finals === 1 ? '' : 'es'} in this sheet {review.grand_finals === 1 ? 'is' : 'are'} marked as the grand final.
+            </p>
+          )}
 
           {(review.warnings || []).map((w, i) => (
             <div key={i} className="border border-amber-400/40 bg-amber-400/10 text-amber-200 text-sm rounded p-3">{w}</div>

@@ -6,10 +6,17 @@
 // fills the next empty slot; tapping a filled slot or a chosen name clears it.
 // Three taps and Submit — no stepper, no separate review screen.
 //
+// It is one portal: a player finds their name, enters their PIN, and is taken to
+// the next game they played that is open for voting and that they have not voted
+// on. After each ballot they are offered the next one, until none are left. The
+// games list stays for changing a ballot already cast.
+//
 // No tallies are ever shown here; the count stays with the club's admins.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
+import { formatPlayerName, nameMatchesSearch, splitDisplayName, canonicalPlayerName } from '../lib/nameFormat'
+import { SignedInAs, SignInHint } from '../components/player/SignedInAs'
 
 const initialsOf = (n = '') => n.split(/[ ,]+/).filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase()
 
@@ -18,16 +25,22 @@ const fmtDay = (d) => {
   catch { return d }
 }
 
+// The game to take a player to: open, and nothing from them on it yet. The server
+// has already cut the list to the games a verified player is on, newest first.
+const nextToVote = (fixtures = [], skipId) => fixtures.find((f) => f.state === 'open' && !f.voted && f.id !== skipId)
+
 const STATE_LABEL = { open: null, awaiting_team: 'Team list not in yet', closed: 'Voting closed', locked: 'Voting closed' }
 const NOT_OPEN = {
   upcoming: 'This game hasn’t been played yet.',
   awaiting_team: 'The team list for this game isn’t in yet — check back soon.',
   closed: 'Voting has closed for this game.',
   locked: 'Voting is closed for this game.',
+  cancelled: 'This game is no longer on the draw, so it can’t be voted on. Look for your team’s current game.',
 }
 const REASON = {
   captain_only: 'Only the captain submits votes for this club. Ask your skipper to cast them.',
-  counter_only: 'The captain has nominated someone to submit the votes for this team.',
+  chosen_only: 'The votes for this team are submitted by the people the club has chosen.',
+  no_voters_chosen: 'No one has been chosen to vote for this team yet. Ask your club admin.',
   did_not_play: 'Only players who played in this game can vote at this club.',
   verify_required: 'Find your name to vote on this game.',
 }
@@ -109,7 +122,10 @@ function Ballot({ fixture, values, votable, picks, setPicks, onSubmit, busy, vot
               className="w-full flex items-center gap-3 px-4 py-3 text-left border-b pb-hairline last:border-0 transition-colors"
               style={{ background: chosen ? 'color-mix(in srgb, var(--pb-accent) 7%, transparent)' : 'transparent' }}>
               <Face player={p} chosen={chosen} />
-              <span className="flex-1 text-[15.5px] font-medium">{p.name}</span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-[15.5px] font-medium">{p.name}</span>
+                {p.stats && <span className="block text-[11.5px] leading-snug text-pb-faint mt-0.5" data-player-stats>{p.stats}</span>}
+              </span>
               <span className="w-[26px] h-[26px] rounded-lg flex items-center justify-center font-mono text-xs font-bold shrink-0"
                 style={chosen
                   ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }
@@ -171,13 +187,18 @@ export default function PublicVoting() {
   const accent = club?.accent_color || club?.primary_color || null
   const values = fixture?.ballot_values || landing?.ballot_values || [3, 2, 1]
 
+  const fetchLanding = useCallback(
+    () => api.votePublicLanding(token, { team: teamParam || undefined, round_key: roundParam || undefined, q: qParam || undefined }),
+    [token, teamParam, roundParam, qParam],
+  )
+
   useEffect(() => {
     let alive = true
-    api.votePublicLanding(token, { team: teamParam || undefined, round_key: roundParam || undefined, q: qParam || undefined })
-      .then((d) => { if (!alive) return; setLanding(d); setMe(d.me); setStep((s) => (s === 'loading' ? 'games' : s)) })
+    fetchLanding()
+      .then((d) => { if (!alive) return; setLanding(d); setMe(d.me) })
       .catch(() => alive && setStep('dead'))
     return () => { alive = false }
-  }, [token, teamParam, roundParam, qParam, landingKey])
+  }, [fetchLanding, landingKey])
 
   useEffect(() => { if (step === 'pin') pinRef.current?.focus() }, [step])
 
@@ -201,12 +222,22 @@ export default function PublicVoting() {
       if (d.fixture?.state !== 'open' || d.role === 'none') { seedPicks(d); setStep('ballot'); return }
       if (!d.me && !supporterName) { seedPicks(d); setStep('pick'); return }
       seedPicks(d); setStep('ballot')
-    } catch (e) { setError(e.message || 'Something went wrong. Try again.') }
-    finally { setBusy(false) }
+    } catch (e) {
+      setError(e.message || 'Something went wrong. Try again.')
+      setStep((s) => (s === 'loading' ? 'games' : s))
+    } finally { setBusy(false) }
   }, [token, me, supporterName])
 
+  // First load: a link to one game opens that game. Otherwise someone already
+  // signed in goes straight to the next game they have to vote on, and everyone
+  // else starts at "find your name".
   useEffect(() => {
-    if (landing && fixtureParam && !autoOpened.current) { autoOpened.current = true; openFixture(fixtureParam) }
+    if (!landing || autoOpened.current) return
+    autoOpened.current = true
+    if (fixtureParam) { openFixture(fixtureParam); return }
+    const next = landing.me ? nextToVote(landing.fixtures) : null
+    if (next) openFixture(next.id)
+    else setStep(landing.me ? 'games' : 'pick')
   }, [landing, fixtureParam, openFixture])
 
   const updateFilter = useCallback((key, value) => {
@@ -224,16 +255,28 @@ export default function PublicVoting() {
     setStep('games')
   }, [searchParams, setSearchParams])
 
+  // Forget who is signed in (best effort on the cookie) and go back to "find your name".
+  const switchPlayer = useCallback(async () => {
+    try { await api.votePublicSwitch(token) } catch { /* cookie clear is best-effort */ }
+    setMe(null); setChosen(null); setFixture(null); setError(''); setLandingKey((k) => k + 1); setStep('pick')
+  }, [token])
+
   const doVerify = async (player, pinValue) => {
     setBusy(true); setError('')
     try {
       const r = await api.votePublicVerify(token, player.id, pinValue)
       setMe(r.player)
-      setLandingKey((k) => k + 1)
+      // Read again now they are known: the list is cut to the games they played.
+      const fresh = await fetchLanding()
+      setLanding(fresh)
       if (fixture) {
         const d = await api.votePublicFixture(token, fixture.fixture.id)
         setFixture(d); seedPicks(d); setStep('ballot')
-      } else setStep('games')
+      } else {
+        const next = nextToVote(fresh.fixtures)
+        if (next) await openFixture(next.id)
+        else setStep('games')
+      }
     } catch (e) { setError(e.message || 'That didn’t match. Please try again.') }
     finally { setBusy(false) }
   }
@@ -248,25 +291,35 @@ export default function PublicVoting() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, playerParam, landing])
 
+  // The club's name format (Settings), applied to every name printed on this page.
+  const nameFormat = club?.player_name_format || fixture?.club?.player_name_format
+  const fmtName = (n) => formatPlayerName(n, nameFormat)
+  // Thanked by first name, whichever way the club prints names.
+  const firstNameOf = (n) => splitDisplayName(canonicalPlayerName(n)).first
   const votable = useMemo(() => {
-    const players = fixture?.players || []
+    const players = (fixture?.players || []).map((p) => ({ ...p, name: formatPlayerName(p.name, nameFormat) }))
     if (me && !fixture?.allow_self_vote) return players.filter((p) => p.id !== me.id)
     return players
-  }, [fixture, me])
+  }, [fixture, me, nameFormat])
 
   const submitBallot = async () => {
     setBusy(true); setError('')
     try {
       await api.votePublicSubmit(token, fixture.fixture.id, { picks, voter_name: me ? undefined : supporterName })
+      // So the next game offered is one they have not voted on.
+      try { setLanding(await fetchLanding()) } catch { /* the list is only refreshed for the next game */ }
       setStep('done')
     } catch (e) { setError(e.message || 'Couldn’t save your votes. Please try again.') }
     finally { setBusy(false) }
   }
 
+  // Only a verified player is offered "the next game"; a supporter's list is not cut to anything.
+  const nextGame = me ? nextToVote(landing?.fixtures, fixture?.fixture?.id) : null
+
   const filteredPlayers = useMemo(() => {
     const q = search.trim().toLowerCase()
     const players = landing?.players || []
-    return q ? players.filter((p) => p.display_name.toLowerCase().includes(q)) : players
+    return q ? players.filter((p) => nameMatchesSearch(p.display_name, q)) : players
   }, [landing, search])
 
   return (
@@ -281,6 +334,10 @@ export default function PublicVoting() {
               It may have been turned off or replaced. Ask your club for the current voting link.
             </p>
           </div>
+        )}
+
+        {me && step !== 'loading' && step !== 'dead' && (
+          <SignedInAs name={fmtName(me.display_name)} onSwitch={switchPlayer} />
         )}
 
         {step !== 'loading' && step !== 'dead' && (
@@ -298,24 +355,16 @@ export default function PublicVoting() {
                 {(landing?.medal?.name || 'Best-player votes').toUpperCase()}
               </div>
             </div>
-            {me && (
-              <div className="ml-auto flex items-center gap-3 shrink-0">
-                {me.my_page && (
-                  <a href={me.my_page} data-my-page-link
-                    className="text-xs font-semibold underline" style={{ color: 'var(--pb-accent)' }}>My page</a>
-                )}
-                <button onClick={async () => {
-                  try { await api.votePublicSwitch(token) } catch { /* cookie clear is best-effort */ }
-                  setMe(null); setChosen(null); setLandingKey((k) => k + 1); setStep('games')
-                }} className="text-xs text-pb-faint hover:text-pb-text underline">Not you?</button>
-              </div>
+            {me?.my_page && (
+              <a href={me.my_page} data-my-page-link
+                className="ml-auto shrink-0 text-xs font-semibold underline" style={{ color: 'var(--pb-accent)' }}>My page</a>
             )}
           </div>
         )}
 
         {step === 'games' && landing && (
           <div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={me ? fmtName(me.display_name) : undefined} onSwitch={switchPlayer} /></> : null}</Banner>
             {((landing.grades?.length || 0) > 1 || (landing.rounds?.length || 0) > 1) && (
               <div className="flex gap-2 mb-3.5">
                 {(landing.grades?.length || 0) > 1 && (
@@ -333,6 +382,11 @@ export default function PublicVoting() {
                   </select>
                 )}
               </div>
+            )}
+            {me && landing.fixtures.some((f) => f.state === 'open') && !nextToVote(landing.fixtures) && (
+              <p className="text-center text-sm text-pb-faint mb-3.5" data-all-caught-up>
+                You’re all caught up. Tap a game to change your votes.
+              </p>
             )}
             {landing.fixtures.length === 0 && (
               <div className="rounded-xl border pb-hairline px-4 py-10 text-center text-pb-faint text-sm">
@@ -373,7 +427,7 @@ export default function PublicVoting() {
         {step === 'pick' && landing && (
           <div>
             <div className="text-center mb-4 text-sm text-pb-faint">Find your name to vote</div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={me ? fmtName(me.display_name) : undefined} onSwitch={switchPlayer} /></> : null}</Banner>
             <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search your name…"
               className="w-full bg-pb-surface2 border pb-hairline rounded-xl px-4 py-3 text-base focus:outline-none focus:border-pb-accent mb-3" />
             <div className="rounded-xl border pb-hairline overflow-hidden divide-y divide-pb-hairline max-h-[45vh] overflow-y-auto">
@@ -382,7 +436,7 @@ export default function PublicVoting() {
                   setChosen(p); setPin(''); setError('')
                   if (landing.require_pin) setStep('pin'); else doVerify(p, '')
                 }} className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-pb-surface2 transition-colors">
-                  <span className="text-[15px] font-medium">{p.display_name}</span>
+                  <span className="text-[15px] font-medium">{fmtName(p.display_name)}</span>
                   {landing.require_pin && !p.has_phone
                     ? <span className="font-mono text-[10px] text-pb-faintest uppercase shrink-0">no mobile</span>
                     : <span className="text-pb-faintest shrink-0">→</span>}
@@ -394,7 +448,6 @@ export default function PublicVoting() {
                 I didn’t play (coach / supporter)
               </button>
             )}
-            <button onClick={backToGames} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text">← Back to games</button>
           </div>
         )}
 
@@ -402,9 +455,9 @@ export default function PublicVoting() {
           <form onSubmit={(e) => { e.preventDefault(); if (pin.length >= 4) doVerify(chosen, pin) }}>
             <div className="text-center mb-5">
               <div className="text-sm text-pb-faint">Hi</div>
-              <div className="font-display font-bold text-2xl">{chosen.display_name}</div>
+              <div className="font-display font-bold text-2xl">{fmtName(chosen.display_name)}</div>
             </div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={me ? fmtName(me.display_name) : undefined} onSwitch={switchPlayer} /></> : null}</Banner>
             {!chosen.has_phone ? (
               <div className="text-center text-pb-faint text-sm py-4">
                 There’s no mobile number on file for you yet. Ask your club admin to add it, or to record your votes for you.
@@ -441,7 +494,7 @@ export default function PublicVoting() {
                 This club lets non-players vote. Enter your name so the club knows whose ballot this is.
               </p>
             </div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={me ? fmtName(me.display_name) : undefined} onSwitch={switchPlayer} /></> : null}</Banner>
             <input autoFocus value={supporterName} onChange={(e) => setSupporterName(e.target.value)}
               placeholder="Your name (e.g. Coach Dave)"
               className="w-full bg-pb-surface2 border pb-hairline rounded-xl px-4 py-3 text-base focus:outline-none focus:border-pb-accent" />
@@ -460,7 +513,7 @@ export default function PublicVoting() {
               </div>
               <div className="text-xs text-pb-faint mt-0.5">{fmtDay(fixture.fixture.date)}</div>
             </div>
-            <Banner>{error}</Banner>
+            <Banner>{error ? <>{error}<SignInHint name={me ? fmtName(me.display_name) : undefined} onSwitch={switchPlayer} /></> : null}</Banner>
 
             {fixture.fixture.state !== 'open' ? (
               <div className="rounded-xl border pb-hairline px-4 py-8 text-center text-pb-faint text-sm">
@@ -470,18 +523,19 @@ export default function PublicVoting() {
             ) : fixture.role === 'none' ? (
               <div className="rounded-xl border pb-hairline px-4 py-8 text-center text-pb-faint text-sm">
                 {REASON[fixture.reason] || 'You can’t vote on this game.'}
+                {fixture.reason !== 'no_voters_chosen' && <SignInHint name={me ? fmtName(me.display_name) : undefined} onSwitch={switchPlayer} />}
                 <div className="mt-4"><button onClick={backToGames} className="text-pb-accent underline">← Back to games</button></div>
               </div>
             ) : (
               <>
-              {fixture.is_counter && (
+              {fixture.is_chosen && (
                 <p className="text-xs text-pb-faint mb-3">
-                  You are counting the votes for this team, in place of the captain.
+                  You are one of the people chosen to vote for this team.
                 </p>
               )}
               <Ballot fixture={fixture} values={values} votable={votable} picks={picks} setPicks={setPicks}
                 onSubmit={submitBallot} busy={busy} onBack={backToGames}
-                voterLabel={me?.display_name || supporterName} />
+                voterLabel={me ? fmtName(me.display_name) : supporterName} />
               </>
             )}
           </div>
@@ -491,11 +545,28 @@ export default function PublicVoting() {
           <div className="py-14 text-center">
             <div className="font-display font-bold text-xl">Votes in!</div>
             <p className="text-pb-faint text-sm mt-2">
-              Thanks{me ? `, ${me.display_name.split(' ')[0]}` : supporterName ? `, ${supporterName.split(' ')[0]}` : ''}.
+              Thanks{me ? `, ${firstNameOf(me.display_name)}` : supporterName ? `, ${supporterName.split(' ')[0]}` : ''}.
               Your ballot is with the club. You can come back and change it while voting stays open.
             </p>
-            <button onClick={backToGames} className="mt-6 px-6 py-3 rounded-xl font-semibold text-pb-bg"
-              style={{ background: 'var(--pb-accent)' }}>Back to games</button>
+            {nextGame ? (
+              <>
+                <button onClick={() => openFixture(nextGame.id)} disabled={busy} data-next-game
+                  className="mt-6 px-6 py-3 rounded-xl font-semibold text-pb-bg w-full"
+                  style={{ background: 'var(--pb-accent)' }}>
+                  Vote on the next game
+                  <span className="block text-[12px] font-normal opacity-80">
+                    {nextGame.round} · {nextGame.home_away === 'AWAY' ? '@' : 'vs'} {nextGame.opponent || 'TBC'}
+                  </span>
+                </button>
+                <button onClick={backToGames} className="block mx-auto mt-3 text-pb-faint text-sm hover:text-pb-text">See all my games</button>
+              </>
+            ) : (
+              <>
+                {me && <p className="text-pb-dim text-sm mt-4" data-all-caught-up>You’re all caught up.</p>}
+                <button onClick={backToGames} className="mt-6 px-6 py-3 rounded-xl font-semibold text-pb-bg"
+                  style={{ background: 'var(--pb-accent)' }}>{me ? 'See my games' : 'Back to games'}</button>
+              </>
+            )}
             {me?.my_page && (
               <div className="mt-4">
                 <a href={me.my_page} data-my-page-done className="text-sm underline text-pb-dim">Go to my page</a>

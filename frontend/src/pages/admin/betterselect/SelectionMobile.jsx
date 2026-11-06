@@ -203,7 +203,7 @@ export function AddPlayersSheet({ vm, onClose }) {
 }
 
 /* ── One batting-order row's actions ─────────────────────────────────────── */
-function SheetAction({ icon, rotate, children, onClick, disabled, danger, on, to }) {
+export function SheetAction({ icon, rotate, children, onClick, disabled, danger, on, to }) {
   const cls = `w-full flex items-center gap-3.5 px-4 min-h-[54px] text-left text-[15px] font-medium border-b pb-hairline transition-colors ${disabled ? 'opacity-35' : 'active:bg-pb-surface2'} ${danger ? 'text-pb-red' : on ? 'text-pb-accent' : 'text-pb-text'}`
   const inner = <><Icon name={icon} size={18} className="shrink-0" style={rotate ? { transform: `rotate(${rotate}deg)` } : undefined} /><span className="flex-1 min-w-0 truncate">{children}</span></>
   if (to) return <Link to={to} className={cls}>{inner}</Link>

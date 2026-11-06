@@ -317,3 +317,53 @@ Adding a club page to an iPhone home screen opened betterat.cricket, because the
 ## v9.124.4.1 (2026-10-20): the manifest link is set in the HTML, not by JavaScript
 
 v9.124.3.2 swapped the manifest link from React, and an iPhone still showed BetterCricket and https://betterat.cricket/ in the Add to Home Screen sheet, because iOS reads the link as the page loads. nginx now rewrites `href="/site.webmanifest"` in `index.html` per request (`map $request_uri $manifest_href`, `sub_filter` inside `location = /index.html`). Tested with a local nginx 1.24 against the real `index.html`: club slug and club sub-pages get `/api/clubs/{slug}/manifest`; `/`, reserved roots and `/index.html` keep the static file. The sheet's URL field is read-only on iOS whenever Open as Web App is on; the URL shown is the manifest `start_url`.
+
+
+## v9.139.6 (2026-11-05): public site sweep for August to November releases
+
+The public site had last been brought up to date in v9.26.2 (17 Aug). Three months of releases were missing from it, including the Player Dashboard, Player Cards, the Selection Whiteboard, Club Room Mode, sponsor tiers, stats by competition and the history imports.
+
+What changed: `data/modules-marketing.js` (Core, BetterSelect, BetterSocials, BetterAdmin, BetterIQ and BetterFantasyCricket features, summaries and highlights; the lineup showcase now says thirteen designs), `pages/marketing/Features.jsx` (bullets, meta description, five new short cards), `pages/marketing/FAQ.jsx` (module answers, a rewritten sponsor answer, two new answers, answer panel cap raised from 600px to 900px), `data/marketing.js` (new comparison rows), `pages/marketing/Compare.jsx` (two intros), `data/pricing.js` (module blurbs, kept short because the calculator truncates them) and `public/llms.txt` (BetterMerch is no longer "coming soon"; added BetterFantasyCricket at $49 and the new Core features).
+
+Facts were taken from the changelog entries, not from memory. New feature cards have no screenshots yet: the module pages' `showcase` and `gallery` images still show the August screens. Left alone on purpose: the FAQ answer "How do we pay?" (says bank transfer or PayID, card payments on the roadmap) because whether checkout is live is a runtime flag (`billing_checkout_enabled`) that the repo cannot show, and the BetterFootball pages, which the marketing site does not cover at all.
+
+Checked: production build, then every edited page driven in Chromium at 390px and 1280px with `/api` stubbed (new text present, no horizontal overflow, the longest FAQ answer not clipped). Not run: a control run against the previous commit, since the check is for text that did not exist before.
+
+## v9.139.6.1 (2026-11-05): screenshots for the new public pages
+
+Cowork captured the shots from the brief and uploaded them through GitHub's web uploader, some into the repo root. They were cropped, framed and wired in here: 26 JPGs in `frontend/public/marketing/` (BetterStats images) and `frontend/public/marketing/modules/`. The raw PNGs, three test files and an 8 MB stray capture were removed from the repo; the originals stay in the uploader's Downloads folder.
+
+Framing is `tools/frame_marketing_shot.py` (1920x1080, app window on a gradient in the module accent, under 700 KB). Admin captures include the club-site header, which draws the app version number for a signed-in admin (`Navbar.jsx`, `showVersion`); those were cropped with `--crop 0,130,...` so the number stays off public pages. Check any new admin capture for it before publishing. The lineup grid and the three-size image are composites built from the exported posts.
+
+Still missing from the brief (never captured): the pack opening (4), Fines (18), Junior Rotation (19), the Glass Card layout (25), the BetterIQ named side (28) and the Fantasy live ladder (30). Those features are described in text only.
+
+## v9.139.6.2 (2026-11-05): screenshot-led pages, club dashboard hero, Aurora
+
+Request: BetterStats should lead with the club history and the leaderboards, screenshots are the hook, copy short, and the same logic across the whole site; the home page gets a club dashboard as the main image and the React Bits Aurora in brand colours.
+
+`data/modules-marketing.js` was rewritten short (a showcase entry is a headline, one or two sentences and three points; a feature is a title and one line; four highlights per module because Overview and the strip both show four). `ModuleDetail.jsx` now runs hero (tagline as the H1, module name as the eyebrow), highlights, showcase, gallery, a compact "Also in" grid, fundraiser, pricing, comparison. `Landing.jsx` drops ValueProps, the text feature grid and the commitment block and puts the showcase straight after the trust strip; the hero image is `club-dashboard-hero.jpg`, a tighter crop of the public club dashboard. `Features.jsx`, `Overview.jsx` and `Modules.jsx` follow the same rule.
+
+Aurora is `components/marketing/Aurora.jsx` and `.css`, vendored from React Bits (plain WebGL2, no new dependency). Licence is MIT plus Commons Clause: fine inside a website, but the copyright header stays on the file and it must not be offered for sale or redistributed on its own. It sits in a 520 to 600px strip at the top of the hero with a mask that fades it out, because at full strength it washed out the nav and the copy. Colours come from `--pb-accent` and `--pb-accent-2`. It is the only user of WebGL on the marketing site; if WebGL2 is missing it draws nothing and the existing `hero-glow` remains.
+
+Checked: production build, then 13 marketing pages in Chromium at 1440 and 390px (images load, no horizontal overflow), the hero with software WebGL (canvas created, no console errors), and a DOM check that module pages have one H1 and one footer.
+
+
+## v9.139.6.3 (2026-11-05): menu legibility over the Aurora, Aurora on module pages
+
+On a real GPU the home page Aurora was far brighter than in the software-WebGL test, and the transparent home nav (`MarketingNav`, `isHome && !scrolled`) lost its links over it. The nav now has a dark top fade (`from-pb-bg/90 via-pb-bg/60 to-transparent`), the Aurora strip starts at `top-16` (below the nav) and runs softer (brightness 0.75, opacity 0.8). The strip is now `components/marketing/AuroraHero.jsx`, used by the home page (brand green and blue) and by `ModuleDetail` with `accent={m.accent}`, which builds a single-hue ramp (a deeper tone, the colour, a lighter tone). Lesson: a headless software render under-reads WebGL glow, so judge Aurora strength against a real-GPU screenshot, and keep any text that sits on it on a scrim.
+
+## v9.139.6.4 (2026-11-05): /trial goes dark, Aurora, a louder call to action
+
+`Trial.jsx` was forced light (`data-theme="light"`) for a brighter read on a phone; it is now `data-theme="dark"` with `AuroraHero` behind the hero, and the comment in `marketingPaths.js` says so (`/demo` is still light). The page's structure is unchanged: search first, no trial framing above the box, the webinar promo below the hero. What changed is emphasis: the search input has an accent ring and glow, the cold-club button (`data-testid="trial-setup-yourself"`) is filled, a sticky "Find your club" bar (`data-testid="trial-sticky-cta"`) appears only after the hero leaves the viewport (IntersectionObserver on `heroRef`) so it never competes with the search, and a closing band (`data-testid="trial-closing-cta"`) repeats it. Both call `goToSearch`, which scrolls to the top and focuses the input. The hooks sit above the early `Navigate` return. The old comment about keeping the cold-club button outlined so it does not compete with the search no longer holds; that was the trade the request asked to change. Worth watching the trial-signup conversion rate (about 3.4% per the note in the file) after deploy.
+
+Checked in Chromium at 1440 and 390px with the self-serve status and search stubbed at the network layer: dark tokens applied, Aurora canvas present, sticky bar appears after scrolling and a click returns to the top with the search focused, the club pop-up reads in dark, no horizontal overflow, no console errors.
+
+## v9.139.7 (2026-11-05): paying clubs on the "Trusted by clubs at" strip
+
+The strip (`components/marketing/TrustedByStrip.jsx`, home and `/trial`) was a hand-kept list (`data/trustedClubs.js`). It now shows that curated list first, then every paying club from `GET /public/trusted-clubs` (`routers/public_trusted_clubs.py`, unauthenticated, `Cache-Control: public, max-age=900`), newest subscriber first, capped at 60. The strip fetches once per page load and falls back to the curated list if the call fails or returns nothing.
+
+Who is listed (all must hold): `is_active`, not archived, has a slug, no `access_pin_hash`, not `is_marketing_outreach`, a non-empty `logo_data`, whole-account `subscription_status` in the active set, and the club's Core `org_module_subscriptions` row is exactly `active`. A trial, a lapsed trial, paused, cancelled and `past_due` are left out. `settings.trusted_clubs_exclude` (env `TRUSTED_CLUBS_EXCLUDE`, comma-separated slugs) keeps a club off. Only `slug`, `name` and the crest path leave the route.
+
+Honest limit: an `active` Core row cannot tell a paid subscription from one a Super Admin set Active by hand (a bank transfer, or a free grant). If a free or internal club must not appear, add its slug to `TRUSTED_CLUBS_EXCLUDE`. A club that has not agreed to be named is the failure to avoid, so check the list at `/api/public/trusted-clubs` after the first deploy.
+
+Proved against a real Postgres (16, schema from the ORM) with `backend/verification/verify_trusted_clubs.py`: 29 checks through the shipped route body, pairing every "not listed" check with a club that is listed; the control run on the previous commit reports the route missing and exits 1. `audit_route_access` still passes and the route is registered on the real app. The strip itself was driven in Chromium with the endpoint stubbed (20 distinct clubs with no repeat of a curated one, fallback to the 8 curated on a 500 and on an empty list, scroll duration scaling, initials for a broken crest). Not run: the endpoint behind the real nginx, or against production data.

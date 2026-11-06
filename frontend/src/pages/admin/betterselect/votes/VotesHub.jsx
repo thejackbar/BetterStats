@@ -4,7 +4,6 @@ import { api } from '../../../../lib/api'
 import { Chip, Icon, Search } from '../ui'
 import BallotProgress from './BallotProgress'
 import VoteStateBadge from './VoteStateBadge'
-import ShareVotePanel from './ShareVotePanel'
 import OutstandingVoters from './OutstandingVoters'
 import { STATUS_FILTERS, fmtDate, seasonLabel } from './votesTokens'
 
@@ -210,15 +209,8 @@ export default function VotesHub({ canManage, medalId, onOpenFixture }) {
         })}
       </div>
 
-      {/* Share + chase */}
+      {/* Chase */}
       <div className="flex flex-col lg:flex-row gap-5">
-        <div className="flex-1 min-w-0">
-          <ShareVotePanel
-            settings={data.settings}
-            scope={{ gradeId, roundKey, label: gradeId ? (data.grades.find((g) => g.id === gradeId)?.name) : 'Whole club' }}
-            fixtures={rows}
-          />
-        </div>
         {canManage && focus && (
           <div className="w-full lg:w-[300px] shrink-0">
             <OutstandingVoters

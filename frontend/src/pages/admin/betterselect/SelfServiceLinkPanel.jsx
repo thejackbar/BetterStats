@@ -16,7 +16,7 @@ import { setAllowMaybe } from '../../../lib/useAvailabilityConfig'
 // player sees the same set. A module can be ticked while something it depends on
 // is off (the fees module needs BetterAdmin fees and the PIN); the page simply
 // leaves it out until that is sorted, and the note here says what is missing.
-function PageModules({ modules, canEdit, busy, onChange }) {
+export function PageModules({ modules, canEdit, busy, onChange }) {
   const on = modules.filter((m) => m.enabled)
   const off = modules.filter((m) => !m.enabled)
   const keys = on.map((m) => m.key)
@@ -55,7 +55,7 @@ function PageModules({ modules, canEdit, busy, onChange }) {
     <div data-page-modules>
       <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Player dashboard</div>
       <p className="text-[12px] text-pb-faintest mb-1.5">
-        What players see on their dashboard after they sign in, below their availability. Tick what you want and use the arrows to set the order. It is the same for every player.
+        What players see on their dashboard after they sign in. Tick what you want and use the arrows to set the order. It is the same for every player.
       </p>
       {on.map(row)}
       {off.map((m) => row(m, -1))}
@@ -73,7 +73,7 @@ export default function SelfServiceLinkPanel() {
   const [busy, setBusy] = useState(false)
   const [qr, setQr] = useState(null)
 
-  const fullUrl = cfg?.token ? `${window.location.origin}/avail/${cfg.token}` : ''
+  const fullUrl = cfg?.token ? `${window.location.origin}/playerdash/${cfg.token}` : ''
   const message = fullUrl ? `🏏 Set your availability: ${fullUrl}` : ''
 
   const load = useCallback(() => {
@@ -208,6 +208,11 @@ export default function SelfServiceLinkPanel() {
             </p>
           )}
 
+          <p className="text-[11.5px] text-pb-faintest -mt-2" data-dashboard-pointer>
+            This switch is for availability and votes. The Player Dashboard (Player Cards, season) has its own switch in{' '}
+            <a href="/admin/player-dashboard" className="underline">BetterStats &gt; Player Dashboard</a>.
+          </p>
+
           {!enabled ? (
             <p className="text-sm text-pb-faint">
               Turn this on to generate a shareable link. Players open it, find their name, prove it’s them with the last 4 digits of their mobile, and tap their availability for the weekend.
@@ -225,7 +230,7 @@ export default function SelfServiceLinkPanel() {
                   {canEdit && <Btn sm variant="ghost" onClick={regenerate} disabled={busy}>Regenerate</Btn>}
                 </div>
                 <p className="text-[11px] text-pb-faintest mt-1.5">
-                  Pin it in your team’s group chat or Facebook group. Anyone with the link still needs a player’s own PIN to set their availability.
+                  Pin it in your team’s group chat or Facebook group. This is the one link to share: it never picks a name for anybody, each person finds their own and enters the last 4 digits of their own mobile. Share it from here, not from your browser’s address bar.
                 </p>
               </div>
 

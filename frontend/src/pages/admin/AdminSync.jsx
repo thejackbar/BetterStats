@@ -18,7 +18,6 @@ export default function AdminSync() {
   const [actionLoading, setActionLoading] = useState(null)
   const [hardRefreshing, setHardRefreshing] = useState(false)
   const [backfilling, setBackfilling] = useState(false)
-  const [cleaningOpp, setCleaningOpp] = useState(false)
   const [syncWarnings, setSyncWarnings] = useState({})
   const [drift, setDrift] = useState(null)
 
@@ -154,32 +153,6 @@ export default function AdminSync() {
     }
   }
 
-  const handleCleanupOpposition = async () => {
-    if (!orgId || cleaningOpp || syncing || quickSyncing || hardRefreshing || backfilling) return
-    const ok = window.confirm(
-      'Remove batting / bowling / fielding rows that belong to players who were on the OPPOSITION team in those games. ' +
-      'Inflated match counts (e.g. a current club member who played against us a few times having those games counted as theirs) get corrected. ' +
-      'Cheaper than a Full Rebuild — runs in seconds. Continue?'
-    )
-    if (!ok) return
-    setCleaningOpp(true)
-    try {
-      const res = await api.adminCleanupOppositionStats()
-      const d = res.deleted || {}
-      const total = (d.batting_innings || 0) + (d.bowling_spells || 0) + (d.fielding_stats || 0)
-      toast.success(
-        `Cleanup complete — removed ${total} opposition stat rows ` +
-        `(${d.batting_innings || 0} batting, ${d.bowling_spells || 0} bowling, ${d.fielding_stats || 0} fielding), ` +
-        `dropped ${d.player_season_stats_phantom || 0} phantom season rows, ` +
-        `re-backfilled ${d.player_season_stats_backfilled || 0}.`
-      )
-    } catch (e) {
-      toast.error(`Cleanup failed: ${e.message}`)
-    } finally {
-      setCleaningOpp(false)
-    }
-  }
-
   const handleHardRefresh = async () => {
     if (!orgId || hardRefreshing || syncing || quickSyncing || backfilling) return
     const ok = window.confirm(
@@ -227,7 +200,7 @@ export default function AdminSync() {
             checkedAt={drift?.last_checked_at}
             onRebuild={handleHardRefresh}
             onDismiss={handleDismissDrift}
-            busy={hardRefreshing || syncing || quickSyncing || backfilling || cleaningOpp || !orgId}
+            busy={hardRefreshing || syncing || quickSyncing || backfilling || !orgId}
           />
         )}
 
@@ -244,7 +217,7 @@ export default function AdminSync() {
           <div className="flex items-start gap-4 py-3">
             <button
               onClick={handleQuickSync}
-              disabled={quickSyncing || syncing || hardRefreshing || backfilling || cleaningOpp || !orgId}
+              disabled={quickSyncing || syncing || hardRefreshing || backfilling || !orgId}
               className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
@@ -269,7 +242,7 @@ export default function AdminSync() {
           <div className="flex items-start gap-4 py-3 pb-hairline-t">
             <button
               onClick={handleSync}
-              disabled={syncing || quickSyncing || hardRefreshing || backfilling || cleaningOpp || !orgId}
+              disabled={syncing || quickSyncing || hardRefreshing || backfilling || !orgId}
               className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-bg"
               style={{ background: 'var(--pb-accent)' }}
             >
@@ -289,63 +262,11 @@ export default function AdminSync() {
             </div>
           </div>
 
-          {/* Fix missing totals */}
-          <div className="flex items-start gap-4 py-3 pb-hairline-t">
-            <button
-              onClick={handleBackfillAggregates}
-              disabled={backfilling || syncing || quickSyncing || hardRefreshing || cleaningOpp || !orgId}
-              className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-text"
-              style={{ borderColor: 'var(--pb-hairline)', background: 'transparent' }}
-            >
-              {backfilling ? (
-                <>
-                  <span className="w-3 h-3 border-2 border-pb-text/30 border-t-pb-text rounded-full animate-spin" />
-                  FIXING…
-                </>
-              ) : 'FIX MISSING TOTALS'}
-            </button>
-            <div className="flex-1">
-              <p className="text-pb-text text-sm font-medium mb-0.5">Repair players showing 0 matches</p>
-              <p className="text-pb-faint text-xs leading-relaxed">
-                Recomputes career totals from scorecards already in BetterStats. Use when a player&apos;s
-                headline reads 0 despite having visible innings. No new data pulled —
-                runs in seconds.
-              </p>
-              {backfilling && <LoadingBar expectedMs={12000} className="mt-2" />}
-            </div>
-          </div>
-
-          {/* Clean opposition stats */}
-          <div className="flex items-start gap-4 py-3 pb-hairline-t">
-            <button
-              onClick={handleCleanupOpposition}
-              disabled={cleaningOpp || backfilling || syncing || quickSyncing || hardRefreshing || !orgId}
-              className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-text"
-              style={{ borderColor: 'var(--pb-hairline)', background: 'transparent' }}
-            >
-              {cleaningOpp ? (
-                <>
-                  <span className="w-3 h-3 border-2 border-pb-text/30 border-t-pb-text rounded-full animate-spin" />
-                  CLEANING…
-                </>
-              ) : 'CLEAN OPPOSITION STATS'}
-            </button>
-            <div className="flex-1">
-              <p className="text-pb-text text-sm font-medium mb-0.5">Remove opposition appearances counted as ours</p>
-              <p className="text-pb-faint text-xs leading-relaxed">
-                Drops batting / bowling / fielding rows belonging to players who were on the opposition team
-                in those games. Fixes inflated match counts (e.g. a current club member who played against us
-                having those games attributed to their club record). Runs in seconds.
-              </p>
-              {cleaningOpp && <LoadingBar expectedMs={8000} className="mt-2" />}
-            </div>
-          </div>
-
           {/* Full rebuild */}
           <div className="flex items-start gap-4 py-3 pb-hairline-t">
             <button
               onClick={handleHardRefresh}
-              disabled={hardRefreshing || syncing || quickSyncing || backfilling || cleaningOpp || !orgId}
+              disabled={hardRefreshing || syncing || quickSyncing || backfilling || !orgId}
               className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-amber"
               style={{ borderColor: 'var(--pb-amber)', background: 'transparent' }}
             >
@@ -365,6 +286,35 @@ export default function AdminSync() {
               </p>
             </div>
           </div>
+
+          {/* Rarely needed: sync already rebuilds these totals after any run that adds games. */}
+          <details className="pb-hairline-t">
+            <summary className="py-3 cursor-pointer text-pb-faint text-xs font-mono tracking-wide2">REPAIRS</summary>
+            <div className="flex items-start gap-4 py-3 pb-hairline-t">
+              <button
+                onClick={handleBackfillAggregates}
+                disabled={backfilling || syncing || quickSyncing || hardRefreshing || !orgId}
+                className="w-44 shrink-0 px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-pb-text"
+                style={{ borderColor: 'var(--pb-hairline)', background: 'transparent' }}
+              >
+                {backfilling ? (
+                  <>
+                    <span className="w-3 h-3 border-2 border-pb-text/30 border-t-pb-text rounded-full animate-spin" />
+                    FIXING…
+                  </>
+                ) : 'FIX MISSING TOTALS'}
+              </button>
+              <div className="flex-1">
+                <p className="text-pb-text text-sm font-medium mb-0.5">Repair players showing 0 matches</p>
+                <p className="text-pb-faint text-xs leading-relaxed">
+                  Recomputes career totals from scorecards already in BetterStats. Use when a player&apos;s
+                  headline reads 0 despite having visible innings. No new data pulled —
+                  runs in seconds.
+                </p>
+                {backfilling && <LoadingBar expectedMs={12000} className="mt-2" />}
+              </div>
+            </div>
+          </details>
 
           {(syncing || quickSyncing || hardRefreshing || runningLog) && (
             <div className="mt-3 pt-3 pb-hairline-t">

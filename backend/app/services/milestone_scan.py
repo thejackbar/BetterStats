@@ -40,13 +40,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import milestone_totals
 from app.services.grade_milestone_schemes import load_book
+from app.services.milestone_activity import ACTIVE_SEASON_YEARS, load_grade_activity
 from app.services.milestone_rules import (
     Scheme, crossed_thresholds, load_scheme, next_threshold, reach_window,
 )
 
 # Current year and the two before it. A season with no year at all is kept —
-# an unknown date is not evidence the player has stopped playing.
-ACTIVE_SEASON_YEARS = 2
+# an unknown date is not evidence the player has stopped playing. Defined in
+# milestone_activity (imported above), which also judges whether a GRADE is
+# still in play.
 
 # (milestone type, category, the column its total arrives in).
 STAT_DEFS = (
@@ -256,6 +258,8 @@ async def grade_milestones(session: AsyncSession, org_id: str, *,
     # Each grade reads its own increments where the club set them, else the
     # club's (services/grade_milestone_schemes).
     book = await load_book(session, org_id)
+    # A grade the club has no side in this season has no game to count down to.
+    activity = await load_grade_activity(session, org_id)
     cutoff_year = datetime.date.today().year - ACTIVE_SEASON_YEARS
     people = (await session.execute(text("""
         SELECT p.id::text AS player_id,
@@ -324,6 +328,8 @@ async def grade_milestones(session: AsyncSession, org_id: str, *,
                                         "current": total})
         last = r["last_played"]
         if last is None or last < still_playing_from:
+            continue
+        if not activity.is_fielded(name):
             continue
         target = next_threshold(mt, total, scheme)
         if target is None or target - total > reach_window(mt, target, scheme):

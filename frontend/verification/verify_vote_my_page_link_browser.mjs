@@ -179,11 +179,11 @@ const run = async () => {
     const page = await ctx.newPage(); page.setDefaultTimeout(8000)
     await availStubs(page, { verified: false })
     await page.goto(`${BASE}${MY}`)
-    await page.getByText('Last 4 digits of your mobile').waitFor()
+    await page.getByText(/last 4 digits of/i).first().waitFor()
     check('not signed in: the player is already picked, only the PIN is asked', /Sam Sledge/.test(await page.locator('body').innerText()))
     check('...and the other player is not', !/Ann Anchor/.test(await page.locator('body').innerText()))
     // Not you? goes back to the name list and does not pick them again.
-    await page.getByText('Not you? Pick a different name').click()
+    await page.locator('[data-not-you]').click()
     await page.waitForTimeout(400)
     check('"Not you?" returns to the name list and stays there', (await page.getByPlaceholder('Search your name…').count()) === 1)
     await ctx.close()

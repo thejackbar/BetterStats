@@ -499,6 +499,158 @@ def covered_by_year(gr_season_ids, year_by_season: dict) -> set:
     return ids | {s for s, y in year_by_season.items() if y in years}
 
 
+_TYPED_COLUMNS = COUNT_METRICS + ("high_score", "is_hs_not_out", "best_bowling_wickets", "best_bowling_figures")
+
+
+async def fetch_typed_by_player(session, org_uuid, pids) -> dict:
+    """{pid: {season_id: metrics}} the club's own typed or imported GAMES roll up to.
+
+    A season-totals sheet and the same matches typed in as games are one body of
+    figures counted twice, and the reconciler used to subtract only Cricket
+    Australia's record, never the club's own games. Hamilton Veterans (Oct 2026):
+    a season-by-season sheet committed in August, every game typed in from the
+    same records in September and October, and 2016/17 to 2022/23 read exactly
+    double for 26 player-seasons. Reads ``source = 'manual_game'`` of the
+    effective view only, so the import's own deltas are never read back (no
+    circle) and a game paired to a synced twin, which already counts from that
+    twin, is not counted twice here.
+    """
+    from sqlalchemy import text
+
+    if not pids:
+        return {}
+    cols = ", ".join(f"v.{c}" for c in _TYPED_COLUMNS)
+    rows = (await session.execute(
+        text(f"""
+            SELECT v.player_id, v.season_id, {cols}
+              FROM v_effective_player_season_stats v
+              JOIN seasons s ON s.id = v.season_id
+             WHERE v.source = 'manual_game'
+               AND s.organisation_id = CAST(:org AS UUID)
+               AND v.player_id = ANY(CAST(:pids AS uuid[]))
+        """),
+        {"org": str(org_uuid), "pids": [str(p) for p in pids]},
+    )).mappings().all()
+    out: dict = {}
+    for r in rows:
+        by_season = out.setdefault(r["player_id"], {})
+        by_season[r["season_id"]] = accumulate(by_season.get(r["season_id"]), dict(r))
+    return out
+
+
+# The figures a typed game and a totals sheet can honestly be compared on. Balls faced, fours, sixes,
+# wides, no-balls and keeper catches are columns a typed game often leaves unrecorded (NULL, which reads
+# as 0), so a sheet that carries them would always look "more" than the games and add detail that is
+# not a duplicate of anything. They are never part of a shortfall.
+SHORTFALL_METRICS = (
+    "matches", "batting_innings", "runs", "not_outs", "fifties", "hundreds", "ducks",
+    "bowling_innings", "wickets", "bowling_balls", "runs_conceded", "maidens", "five_wicket_innings",
+    "catches", "run_outs", "stumpings",
+)
+
+
+def shortfall(sheet: dict, held: dict) -> Optional[dict]:
+    """What a season's sheet figures hold beyond the same season's typed games, or None.
+
+    Per figure, never below zero: a figure the games hold more of than the sheet is not taken off
+    another figure, and a season is never pulled below what the games say.
+    """
+    out = _blank()
+    any_more = False
+    for k in SHORTFALL_METRICS:
+        d = max(0, (sheet.get(k, 0) or 0) - (held.get(k, 0) or 0))
+        out[k] = d
+        any_more = any_more or d > 0
+    if not any_more:
+        return None
+    if sheet.get("high_score") is not None and sheet["high_score"] > (held.get("high_score") or -1):
+        out["high_score"] = sheet["high_score"]
+        out["is_hs_not_out"] = bool(sheet.get("is_hs_not_out"))
+    if (sheet.get("best_bowling_wickets") or -1) > (held.get("best_bowling_wickets") or -1):
+        out["best_bowling_wickets"] = sheet.get("best_bowling_wickets")
+        out["best_bowling_figures"] = sheet.get("best_bowling_figures")
+    return out
+
+
+class Settled:
+    """The sheet after the club's typed games have been settled against it, season by season."""
+
+    def __init__(self, club, import_seasons, deltas, held):
+        self.club = club                      # the club's totals without the seasons settled here
+        self.import_seasons = import_seasons  # the seasons still to reconcile against Cricket Australia
+        self.deltas = deltas                  # [(season_id, metrics)]: what the sheet holds beyond the games
+        self.held = held                      # metrics of the typed games in those seasons, or None
+
+
+def settle_typed(club: dict, import_seasons, typed_by_season: Optional[dict], year_by_season: dict) -> Settled:
+    """Settle a sheet against the club's own typed games ONE SEASON AT A TIME.
+
+    A season the club typed games for is decided on its own: the sheet's row for it is replaced by
+    whatever the sheet holds BEYOND that season's games (`shortfall`), kept on that season. It no
+    longer reaches the career-wide leftover, which is what made it unreliable: a season where the
+    games held MORE than the sheet cancelled a season where they held less (Hamilton's Forsyth: five
+    games typed against the sheet's four in 2012/13 hid his missing 2013/14 game), and a player with a
+    big Cricket Australia record absorbed a shortfall whole (Barker 2020/21). Seasons the club typed
+    nothing for go on to the Cricket Australia comparison exactly as before, with the club total
+    reduced by the seasons settled here so nothing is counted against two rules.
+
+    Only seasons the sheet itself names count, and a year held under two season rows is one season
+    (the same widening Cricket Australia's rows get).
+    """
+    if not typed_by_season:
+        return Settled(club, list(import_seasons), [], None)
+
+    def key(sid):
+        y = year_by_season.get(sid)
+        return ("year", y) if y is not None else ("season", sid)
+
+    typed_groups: dict = {}
+    for tsid, m in typed_by_season.items():
+        typed_groups[key(tsid)] = accumulate(typed_groups.get(key(tsid)), m)
+
+    grouped: dict = {}
+    rest = []
+    for sid, m in import_seasons:
+        if sid is not None and key(sid) in typed_groups:
+            grouped.setdefault(key(sid), []).append((sid, m))
+        else:
+            rest.append((sid, m))
+    if not grouped:
+        return Settled(club, rest, [], None)
+
+    deltas, removed, held_total = [], None, None
+    for k, rows in grouped.items():
+        sheet = None
+        for _sid, m in rows:
+            sheet = accumulate(sheet, m)
+        removed = accumulate(removed, sheet)
+        held_total = accumulate(held_total, typed_groups[k])
+        extra = shortfall(sheet, typed_groups[k])
+        if extra:
+            deltas.append((rows[0][0], extra))
+
+    club_rest = dict(club)
+    for k in COUNT_METRICS:
+        club_rest[k] = max(0, (club.get(k, 0) or 0) - (removed.get(k, 0) or 0))
+    return Settled(club_rest, rest, deltas, held_total)
+
+
+def summarize_typed(club: dict, gr: dict, import_seasons, gr_season_ids, typed_by_season: Optional[dict],
+                    year_by_season: dict) -> dict:
+    """`summarize` for a whole-book sheet, with the typed games settled first: the preview the
+    wizard shows must be the commit's own answer (`reconcile_imported_totals`)."""
+    st = settle_typed(club, import_seasons, typed_by_season, year_by_season)
+    out = summarize(st.club, gr, st.import_seasons, gr_season_ids)
+    held = st.held or {}
+    extra = {k: sum((m.get(k, 0) or 0) for _s, m in st.deltas) for k in COUNT_METRICS}
+    for k in COUNT_METRICS:
+        out["gr"][k] += held.get(k, 0) or 0
+        out["emitted"][k] += extra[k]
+        out["final"][k] += (held.get(k, 0) or 0) + extra[k]
+    out["season_delta_count"] += len(st.deltas)
+    return out
+
+
 def season_rows_by_grade(items, season_ids) -> list:
     """(season_id, grade_label, metrics) for the given seasons, one per grade,
     so a season delta written for a team-labelled sheet keeps the grade its
@@ -696,6 +848,9 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
         # Ungraded GR fetch (existing all-grades comparison), only for players
         # who actually have an ungraded group.
         gr_by_player = await fetch_gr_by_player(session, org_uuid, ungraded_pids)
+        # The club's own typed games, for the same players (whole-book comparisons only: a
+        # sheet scoped to one grade cannot be compared to a season's games across grades).
+        typed_by_player = await fetch_typed_by_player(session, org_uuid, ungraded_pids)
         # One fetch per distinct cut-off, covering the players whose book stops there.
         gr_by_cut: dict = {}
         for cut in sorted({c for _pid, _g, c in by_group.keys() if c is not None}):
@@ -726,6 +881,11 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
             gr = gr_pool.get(pid, {"season_ids": set(), "totals": None})
             gr_totals = gr["totals"] if gr["totals"] is not None else _blank()
             covered = gr["season_ids"] if grade is not None else covered_by_year(gr["season_ids"], year_by_season)
+            typed_deltas: list = []
+            if grade is None:
+                # Whole-book sheets only: settle the club's typed games season by season first.
+                settled = settle_typed(club, import_seasons, typed_by_player.get(pid), year_by_season)
+                club, import_seasons, typed_deltas = settled.club, settled.import_seasons, settled.deltas
 
             season_deltas, career = reconcile_player(
                 club, gr_totals, import_seasons, covered
@@ -737,6 +897,9 @@ async def reconcile_imported_totals(org_id_str: str) -> int:
                 emitted_rows = season_rows_by_grade(items, [sid for sid, _m in season_deltas])
             else:
                 emitted_rows = [(sid, grade, m) for sid, m in season_deltas]
+            # What the sheet holds beyond the typed games of a season stays ON that season. It cannot
+            # be split by team (the games, not the sheet, are the baseline), so it carries no grade.
+            emitted_rows = list(emitted_rows) + [(sid, None, m) for sid, m in typed_deltas]
             for season_id, label, metrics in emitted_rows:
                 session.add(ImportEffectiveDelta(
                     organisation_id=org_uuid, player_id=pid,

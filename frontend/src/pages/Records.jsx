@@ -14,6 +14,8 @@ import { useNameFormat } from '../lib/nameFormat'
 import { fmtOvers, formatSeason } from '../lib/cricketFormat'
 import { normalizeGender } from '../lib/playerAttributes'
 import MilestoneSplitNote from '../components/MilestoneSplitNote'
+import MilestoneLensFilters from '../components/MilestoneLensFilters'
+import { lensMatch } from '../lib/milestoneLens'
 import { useSectionNames } from '../lib/sectionNames'
 
 const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th']
@@ -961,14 +963,17 @@ function MilestonesTab({ data, loading, gradeName, fmt = n => n }) {
   const [status, setStatus] = useState('upcoming')
   const [category, setCategory] = useState('all')
   const [gender, setGender] = useState('all')
+  const [ageGroup, setAgeGroup] = useState('all')
+  const [since, setSince] = useState('any')
 
   if (loading) return <PbSpinner message="Loading milestones…" />
   if (!data) return <p className="text-pb-faint text-sm py-8 text-center">No milestones data available.</p>
 
   const catMatch = item => category === 'all' || item.category === category
   const genderMatch = item => gender === 'all' || normalizeGender(item.gender) === gender
-  const upcomingFiltered = (data.upcoming || []).filter(i => catMatch(i) && genderMatch(i))
-  const achievedFiltered = (data.achieved || []).filter(i => catMatch(i) && genderMatch(i))
+  const lensOk = i => lensMatch(i, { ageGroup, since }, data.lens?.current_season)
+  const upcomingFiltered = (data.upcoming || []).filter(i => catMatch(i) && genderMatch(i) && lensOk(i))
+  const achievedFiltered = (data.achieved || []).filter(i => catMatch(i) && genderMatch(i) && lensOk(i))
   const showUpcoming = status === 'upcoming' || status === 'all'
   const showAchieved = status === 'achieved' || status === 'all'
 
@@ -1016,6 +1021,13 @@ function MilestonesTab({ data, loading, gradeName, fmt = n => n }) {
             </button>
           ))}
         </div>
+        <MilestoneLensFilters
+          lens={data.lens}
+          ageGroup={ageGroup}
+          onAgeGroup={setAgeGroup}
+          since={since}
+          onSince={setSince}
+        />
       </div>
 
       <div className="space-y-6">

@@ -404,6 +404,8 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     for grade in grade_labels:
         grade_pids = [uuid.UUID(pid) for pid, g in items_by_player_grade if g == grade]
         gr_by_grade[grade] = await recon.fetch_gr_by_player_for_grade(db, org_id, grade_pids, grade)
+    # The club's own typed games are settled against the sheet season by season, as in the commit.
+    typed_by_player = await recon.fetch_typed_by_player(db, org_id, ungraded_pids)
 
     preview_by_player: dict = {}
     for (pid_str, grade), items in items_by_player_grade.items():
@@ -412,7 +414,11 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         gr = gr_pool.get(uuid.UUID(pid_str), {"season_ids": set(), "totals": None})
         gr_tot = gr["totals"] if gr["totals"] is not None else recon._blank()
         covered = gr["season_ids"] if grade is not None else recon.covered_by_year(gr["season_ids"], year_by_season)
-        s = recon.summarize(club, gr_tot, import_seasons, covered)
+        if grade is None:
+            s = recon.summarize_typed(
+                club, gr_tot, import_seasons, covered, typed_by_player.get(uuid.UUID(pid_str)), year_by_season)
+        else:
+            s = recon.summarize(club, gr_tot, import_seasons, covered)
         agg = preview_by_player.setdefault(pid_str, {
             "player_id": pid_str, "player_name": name_by_pid.get(pid_str), "new": False,
             "club_games": 0, "club_runs": 0, "gr_games": 0, "gr_runs": 0,

@@ -47,6 +47,7 @@ SELECT_SQUADS = "select_squads"               # BetterSelect: squads and ladders
 SELECT_AVAILABILITY = "select_availability"   # BetterSelect: who can play each weekend
 SELECT_SELECTION = "select_selection"         # BetterSelect: naming the side, and the whiteboard
 SELECT_NETS = "select_nets"                   # BetterSelect: training and net sessions
+SELECT_ROTATION = "select_rotation"           # BetterSelect: Junior Rotation (batting order and fielding rotation)
 SELECT_FINES = "select_fines"                 # BetterSelect: the post-game fines session and pot
 SELECT_RULES = "select_rules"                 # BetterSelect: settings and selection rules
 SELECT_AUDIT = "select_audit"                 # BetterSelect: who changed what in selection and availability
@@ -88,6 +89,7 @@ ALL_CAPABILITIES = (
     SELECT_AVAILABILITY,
     SELECT_SELECTION,
     SELECT_NETS,
+    SELECT_ROTATION,
     SELECT_FINES,
     SELECT_RULES,
     SELECT_AUDIT,
@@ -113,7 +115,7 @@ ALL_CAPABILITIES = (
 # whole module, and the legacy allowlists all hold it). A route gates on
 # `require_any_cap(SELECT_<ITEM>, MANAGE_SELECTIONS)`.
 SELECT_ITEM_CAPS = (
-    SELECT_SQUADS, SELECT_AVAILABILITY, SELECT_SELECTION, SELECT_NETS,
+    SELECT_SQUADS, SELECT_AVAILABILITY, SELECT_SELECTION, SELECT_NETS, SELECT_ROTATION,
     SELECT_FINES, SELECT_RULES, SELECT_AUDIT,
 )
 # Shared reads every BetterSelect screen leans on (squad lists, the availability

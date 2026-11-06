@@ -743,10 +743,17 @@ async def get_career_bowling(
                 ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS average,
                 ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS economy,
                 MAX(pss.best_bowling_wickets) AS best_figures_wickets,
-                (ARRAY_AGG(pss.best_bowling_figures
+                -- The figures come from the row that holds the best wicket count, or
+                -- from none. Picking the best of the rows that merely HAVE figures
+                -- printed 5-20 beside a career best of 6 whenever the 6-wicket
+                -- season was a typed adjustment with no figures; with no figures
+                -- the page says "6 wickets", which is true.
+                (ARRAY_AGG(CASE WHEN pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'
+                                THEN pss.best_bowling_figures END
                     ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
-                             NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
-                 ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL AND pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'))[1] AS best_bowling_figures,
+                             CASE WHEN pss.best_bowling_figures ~ '^[0-9]+-[0-9]+$'
+                                  THEN SPLIT_PART(pss.best_bowling_figures, '-', 2)::integer END ASC NULLS LAST
+                 ) FILTER (WHERE pss.best_bowling_wickets IS NOT NULL))[1] AS best_bowling_figures,
                 COALESCE(SUM(pss.maidens), 0) AS total_maidens,
                 COALESCE(SUM(pss.overs), 0) AS total_overs,
                 COALESCE(SUM(pss.runs_conceded), 0) AS total_runs,
@@ -1175,7 +1182,7 @@ async def get_fielding_leaderboard(
 
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
-    captain_join = (" JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE" if captain_only else "")
+    captain_join = (" JOIN v_game_roles gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE" if captain_only else "")
     gender_clause = f" AND p.gender = :gender" if gender else ""
     if overseas == "only":
         overseas_clause = " AND p.is_overseas = TRUE"
@@ -1368,7 +1375,7 @@ async def get_fielding_leaderboard(
             JOIN v_effective_games g ON g.id = fs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
-            JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE
+            JOIN v_game_roles gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE
             -- Player-scoped for the same reason as the finals branch above.
             JOIN players p ON p.id = fs.player_id AND p.organisation_id = CAST(:org_id AS UUID)
             WHERE {_OURS_GAMES}{season_clause}{scope_clause}{gender_clause}{overseas_clause}
@@ -3777,7 +3784,7 @@ async def get_batting_leaderboard_extended(
 
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
-    captain_join = (" JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE" if captain_only else "")
+    captain_join = (" JOIN v_game_roles gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE" if captain_only else "")
     gender_clause = f" AND p.gender = :gender" if gender else ""
     if overseas == "only":
         overseas_clause = " AND p.is_overseas = TRUE"
@@ -4020,7 +4027,7 @@ async def get_batting_leaderboard_extended(
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE
+                JOIN v_game_roles gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE
                 WHERE {_OURS_GAMES}{season_clause}{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -4241,7 +4248,7 @@ async def get_bowling_leaderboard_extended(
 
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
-    captain_join = (" JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE" if captain_only else "")
+    captain_join = (" JOIN v_game_roles gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE" if captain_only else "")
     gender_clause = f" AND p.gender = :gender" if gender else ""
     if overseas == "only":
         overseas_clause = " AND p.is_overseas = TRUE"
@@ -4549,7 +4556,7 @@ async def get_bowling_leaderboard_extended(
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE
+                JOIN v_game_roles gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE
                 WHERE {_OURS_GAMES}{season_clause}
                 ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
             )
@@ -4572,7 +4579,7 @@ async def get_bowling_leaderboard_extended(
             JOIN v_effective_games g ON g.id = bs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
-            JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE
+            JOIN v_game_roles gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
             WHERE {_OURS_GAMES}{season_clause}
@@ -5586,7 +5593,7 @@ async def _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only
     elif _scoped(scope):
         grade_clause = scope.clause("g.grade_id")
         scope.bind(params)
-    captain_join = (f" JOIN game_appearances gap ON gap.game_id = {stat_alias}.game_id AND gap.player_id = {stat_alias}.player_id AND gap.is_captain = TRUE" if captain_only else "")
+    captain_join = (f" JOIN v_game_roles gap ON gap.game_id = {stat_alias}.game_id AND gap.player_id = {stat_alias}.player_id AND gap.is_captain = TRUE" if captain_only else "")
     return season_clause, finals_clause, grade_clause, captain_join
 
 

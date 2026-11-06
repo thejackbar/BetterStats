@@ -46,7 +46,7 @@ async def club_player_ids(session: AsyncSession, org_id) -> list[str]:
     return [str(i) for i in res.scalars().all()]
 
 
-def held_years_cte(games_where: str, player_pred) -> str:
+def held_years_cte(games_where: str, player_pred, rels: dict | None = None) -> str:
     """CTEs `held_games` and `held_years`: which calendar years a player has an
     in-scope SCORECARD in, as (player_id, year).
 
@@ -74,27 +74,39 @@ def held_years_cte(games_where: str, player_pred) -> str:
     it once per season-stats row, 3.8s against 0.15s on a synthetic club), and
     NOT IN is unknown, not true, when the list holds a NULL. A NULL-year game
     could never have matched a season with a year anyway.
+
+    `rels` names the relation each read uses, for a caller that already holds its
+    own copies (the record book copies the club's rows once; reading the views
+    again inside that request was measured 25x slower). Keys `bi`, `bs`, `fs`,
+    `ga`, `games`; anything missing reads the shipped view. The copies are of
+    exactly what the views return, so the answer is the same.
     """
+    rels = rels or {}
+    r_bi = rels.get("bi", "v_effective_batting_innings")
+    r_bs = rels.get("bs", "v_effective_bowling_spells")
+    r_fs = rels.get("fs", "v_effective_fielding_stats")
+    r_ga = rels.get("ga", "game_appearances")
+    r_games = rels.get("games", "v_effective_games")
     held_ids = "ANY(ARRAY(SELECT id FROM held_games))"
     return f"""
         held_games AS MATERIALIZED (
             SELECT g.id, {season_key_sql('hs.year', 'hs.name')} AS year
-            FROM v_effective_games g
+            FROM {r_games} g
             JOIN seasons hs ON hs.id = g.season_id
             WHERE {games_where}
         ), held_years AS MATERIALIZED (
             SELECT DISTINCT ap.player_id, hg.year
             FROM (
-                SELECT bi.player_id, bi.game_id FROM v_effective_batting_innings bi
+                SELECT bi.player_id, bi.game_id FROM {r_bi} bi
                  WHERE {player_pred('bi')} AND bi.game_id = {held_ids}
                 UNION
-                SELECT bs.player_id, bs.game_id FROM v_effective_bowling_spells bs
+                SELECT bs.player_id, bs.game_id FROM {r_bs} bs
                  WHERE {player_pred('bs')} AND bs.game_id = {held_ids}
                 UNION
-                SELECT fs.player_id, fs.game_id FROM v_effective_fielding_stats fs
+                SELECT fs.player_id, fs.game_id FROM {r_fs} fs
                  WHERE {player_pred('fs')} AND fs.game_id = {held_ids}
                 UNION
-                SELECT ga.player_id, ga.game_id FROM game_appearances ga
+                SELECT ga.player_id, ga.game_id FROM {r_ga} ga
                  WHERE {player_pred('ga')} AND ga.game_id = {held_ids}
                    AND {_APPEARANCE_PLAYED}
             ) ap

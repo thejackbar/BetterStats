@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, ManualInnings, User, get_db
 from app.routers.auth import get_optional_user, public_junior_hiding
-from app.services import dismissal, grade_scope, participant_names
+from app.services import dismissal, grade_scope, merge_redirects, participant_names
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services.club_match import fixture_side
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
@@ -343,6 +343,36 @@ def _extras_breakdown(inn: dict) -> dict:
         "leg_byes": inn.get("legByesRuns"),
         "penalties": inn.get("penalties"),
     }
+
+
+async def _live_merge_redirects(db: AsyncSession, org_id) -> dict[str, uuid.UUID]:
+    """``{removed player id (lower-case str): kept player id}`` for the club's merges
+    that have not been undone, chains followed to the final keeper and redirects to a
+    player who is gone left out (the same rule sync applies). Best effort: a failure
+    only means a merged player is not linked, so it runs in a savepoint and never
+    raises."""
+    try:
+        async with db.begin_nested():
+            res = await db.execute(
+                text("SELECT removed_player_id::text, keep_player_id::text FROM merge_logs "
+                     "WHERE org_id = :org AND undone_at IS NULL "
+                     "AND removed_player_id IS NOT NULL AND keep_player_id IS NOT NULL"),
+                {"org": str(org_id)},
+            )
+            raw = {r[0].lower(): r[1].lower() for r in res.fetchall()}
+            resolved: dict[str, str] = {}
+            for removed, target in raw.items():
+                seen = {removed}
+                while target in raw and target not in seen:
+                    seen.add(target)
+                    target = raw[target]
+                if target != removed:
+                    resolved[removed] = target
+            live, _gone = await merge_redirects.drop_dangling(db, resolved)
+        return {k: uuid.UUID(v) for k, v in live.items()}
+    except Exception:
+        logger.exception("merge_logs lookup failed for scorecard link resolution")
+        return {}
 
 
 def _looks_redacted(name: Optional[str]) -> bool:
@@ -1034,14 +1064,19 @@ async def get_scorecard(
             # columns behind it and compute the same fallback in Python.
             player_rows = []
             alias_map: dict[str, str] = {}
+            merged_redirect: dict[str, uuid.UUID] = {}
             if org:
                 player_res = await db.execute(
                     select(Player.id, Player.grassroots_id, Player.display_name_override, Player.name)
                     .where(Player.organisation_id == org.id)
                 )
                 player_rows = player_res.all()
-                from app.services.player_aliases import normalise_name_key, org_alias_map
+                from app.services.player_aliases import normalise_name_key, org_alias_map, short_name_alias
                 alias_map = await org_alias_map(db, org.id)
+                # A merged-away player's id (the raw CA GUID, or uuid5(org, guid)) is
+                # still what a team sheet carries. Sync follows merge_logs for it; the
+                # card has to as well, or a merged player reads as a FILL-IN.
+                merged_redirect = await _live_merge_redirects(db, org.id)
             known_ids: set = {r[0] for r in player_rows}
             guid_to_pid: dict[str, uuid.UUID] = {r[1]: r[0] for r in player_rows if r[1]}
             id_to_display: dict[uuid.UUID, str] = {r[0]: (r[2] or r[3]) for r in player_rows}
@@ -1075,8 +1110,17 @@ async def get_scorecard(
                     return pid
                 if pid_str in guid_to_pid:
                     return guid_to_pid[pid_str]
+                if merged_redirect and pid_str:
+                    kept = merged_redirect.get(pid_str.lower())
+                    if kept is None and org is not None:
+                        kept = merged_redirect.get(str(uuid.uuid5(uuid.UUID(str(org.id)), pid_str)))
+                    if kept is not None and kept in known_ids:
+                        return kept
                 if name:
                     alias_pid = alias_map.get(normalise_name_key(name))
+                    if alias_pid:
+                        return id_by_str.get(alias_pid)
+                    alias_pid = short_name_alias(alias_map, name)
                     if alias_pid:
                         return id_by_str.get(alias_pid)
                 roster_name = pid_to_name.get(pid_str)

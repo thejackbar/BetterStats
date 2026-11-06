@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.natural_order import natural_key
 from app.auth.capabilities import (
     MANAGE_SELECTIONS, SELECT_ANY, SELECT_AVAILABILITY, SELECT_SQUADS, require_any_cap,
 )  # BetterSelect item permissions
@@ -546,7 +547,7 @@ async def availability_matrix(
     from app.services.selection_pool import club_rule_context
     rules = await club_rule_context(db, club, players)
 
-    all_squads = sorted({s for names in squads_map.values() for s in names})
+    all_squads = sorted({s for names in squads_map.values() for s in names}, key=natural_key)
     squad_meta = await _squad_meta(db, club.id, sq_sides, all_squads)
     competitions, comp_by_squad = await _current_competitions(db, club.id, by_date, sq_sides, all_squads)
 
@@ -939,7 +940,7 @@ async def _self_service_payload(db: AsyncSession, club: Organisation) -> dict:
         "dashboard_modules": player_dashboard.catalogue_for(club),
         "token": club.availability_link_token,
         # The link is a frontend route; the admin UI prefixes its own origin.
-        "path": f"/avail/{club.availability_link_token}" if club.availability_link_token else None,
+        "path": f"/playerdash/{club.availability_link_token}" if club.availability_link_token else None,
         "phone_coverage": {"with_phone": with_phone, "total": len(players)},
     }
 

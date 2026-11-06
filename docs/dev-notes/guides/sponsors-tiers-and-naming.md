@@ -5,7 +5,7 @@
 - Adding a public club page or changing how a page finds its club (`lib/clubSlug.js`).
 - Touching `social/blank-template.jsx`'s `sponsors` block, `services/post_sponsors.py` or the Sponsors tool in `AdminSocialPost.jsx`.
 
-**Archive**: `docs/dev-notes/archive/sponsors-tiers-and-naming.md`. Grep hints: `v9.103.0`, `v9.104.0`, `v9.105.0`.
+**Archive**: `docs/dev-notes/archive/sponsors-tiers-and-naming.md`. Grep hints: `v9.103.0`, `v9.104.0`, `v9.105.0`, `v9.131.2`.
 
 ## Standing rules
 
@@ -25,3 +25,4 @@
 14. Prose follows the humanizer rules.
 15. A slot function may read `count` when the layout's bar depends on it (T12's white bar is 150, 175 or 235 tall). The editor then passes `sponsorCount` to the layout, and `pickSponsors` re-seats a grid still sitting in the old slot.
 16. A slot that depends on an editor choice (the Glass Card's position) gets it as the fourth argument of the slot function via `sponsorSlotFor(..., opts)`; the editor must pass the same `opts` everywhere it seats a grid.
+17. A player card shows ONE sponsor, chosen by `cardSponsor(data, surface, choice)`: the choice made while sharing, the club's pick for the surface (`organisations.card_sponsors`, read through `services/card_sponsors.py`, only sponsors with a logo), then the top Major with a logo. A new surface that draws a card sponsor passes its surface name, and a new card-sharing screen offers the same picker (`NO_SPONSOR` for none).

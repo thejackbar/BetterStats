@@ -16,8 +16,8 @@ export function isMarketingPath(pathname) {
 // THE TWO LISTS ARE NOT INTERCHANGEABLE, and that is the whole reason this one
 // exists. MARKETING_PATHS carries three behaviours at once — suppress the club
 // Navbar, force the dark marketing theme, and show ClubCTABar's "get your club
-// on BetterCricket" bar. /trial and /demo want only the first: each forces
-// LIGHT with its own `data-theme` wrapper, and each IS a conversion page with
+// on BetterCricket" bar. /trial and /demo want only the first: each sets
+// its own `data-theme` wrapper (/trial is dark with the Aurora, /demo is light), and each IS a conversion page with
 // its own call to action, so a second competing CTA bar across the bottom is
 // exactly the friction they are built to avoid.
 //

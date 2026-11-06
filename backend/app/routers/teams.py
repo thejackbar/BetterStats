@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.natural_order import natural_key
 from app.auth.capabilities import (
     MANAGE_SELECTIONS, SELECT_ANY, SELECT_SQUADS, require_any_cap,
 )  # BetterSelect item permissions
@@ -270,7 +271,8 @@ async def list_teams(
     grades = await _grade_name_map(db, club.id)
     sides = await squad_sides.load(db, club.id)
     matched = await _matched_grades(db, club.id)
-    return [_serialize(t, grades, sides.squads.get(str(t.id)), matched) for t in res.scalars().all()]
+    teams = sorted(res.scalars().all(), key=lambda t: (t.sequence is None, t.sequence or 0, natural_key(t.name)))
+    return [_serialize(t, grades, sides.squads.get(str(t.id)), matched) for t in teams]
 
 
 @router.get("/grade-options", dependencies=[Depends(require_any_cap(*SELECT_ANY))])
@@ -294,7 +296,7 @@ async def grade_options(
         select(Grade).where(Grade.season_id.in_(season_ids)).order_by(Grade.name)
     )
     by_season: dict = {}
-    for g in grades_res.scalars().all():
+    for g in sorted(grades_res.scalars().all(), key=lambda g: natural_key(g.display_name)):
         by_season.setdefault(str(g.season_id), []).append({"id": str(g.id), "name": g.display_name, "key": grade_key(g.display_name)})
     live_res = await db.execute(text(
         "SELECT DISTINCT g.season_id FROM fixtures f JOIN grades g ON g.id = f.grade_id"
@@ -366,7 +368,8 @@ async def _apply_sides(db: AsyncSession, club_id, t: Team, sides_in: list, assig
     if assign and specs:
         await db.flush()
         assigned = await squad_sides.assign_fixtures(db, club_id, t.id)
-    return {"moved_from": out["moved_from"], "fixtures_assigned": assigned}
+    return {"moved_from": out["moved_from"], "fixtures_assigned": assigned,
+            "medals_extended": out.get("medals_extended", [])}
 
 
 async def _squad_response(db: AsyncSession, club_id, t: Team, extra: Optional[dict] = None) -> dict:

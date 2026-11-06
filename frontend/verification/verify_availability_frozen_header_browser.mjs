@@ -1,11 +1,12 @@
 // Drives the real BetterSelect Availability matrix in Chromium with the API
-// stubbed at the network layer. Ask (Oct 2026): keep the top row with the dates
-// visible while scrolling the players, like the Selection Whiteboard does.
+// stubbed at the network layer.
 //
-// The header cells were already `sticky top-0`, but the card around the table was
-// `overflow-auto` with no height, so it never scrolled and the page did: nothing
-// for the header to stick to. The card now has a measured height (useFitHeight,
-// lg and up) and scrolls inside itself.
+// Oct 2026: the date row must stay visible while the players scroll past.
+// Nov 2026: the fitted-height card (useFitHeight) left only ~3 rows visible when
+// the filters above were tall. The list now flows down the page (no inner
+// vertical scroll). The date row is a separate strip, sticky under the layout's
+// own header, kept in step with the body's sideways scroll through one shared
+// colgroup. Run with a TALL stack above the matrix (the 600px window) as well.
 //
 //   APP_URL=http://localhost:4173 node verify_availability_frozen_header_browser.mjs
 //   (serve a production build; never rebuild dist under a running server)
@@ -19,7 +20,8 @@ const check = (name, cond, detail = '') => {
 }
 const plusDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10) }
 const iso = (daysAgo) => plusDays(-daysAgo)
-const W1 = plusDays(3), W2 = plusDays(10), W3 = plusDays(17)
+const DAYS = Array.from({ length: 14 }, (_, i) => plusDays(3 + 7 * i))
+const W1 = DAYS[0]
 
 const N = 60
 const P = (id, name) => ({
@@ -29,7 +31,7 @@ const P = (id, name) => ({
 })
 const players = Array.from({ length: N }, (_, i) => P('p' + i, 'Player ' + String(i).padStart(2, '0')))
 const MATRIX = {
-  dates: [W1, W2, W3].map((date, i) => ({ date, fixtures: [{ id: 'f' + i, opponent_name: 'Opp ' + i, home_away: 'HOME', role: 'single', two_day: false }] })),
+  dates: DAYS.map((date, i) => ({ date, fixtures: [{ id: 'f' + i, opponent_name: 'Opp ' + i, home_away: 'HOME', role: 'single', two_day: false }] })),
   players,
   all_squads: [], dormancy_months: 24, rules: { active: false, applied: [] },
   availability: Object.fromEntries(players.map((p, i) => [p.id, { [W1]: { status: i % 2 ? 'AVAILABLE' : 'UNAVAILABLE', source: 'admin' } }])),
@@ -50,16 +52,21 @@ async function stub(page) {
 }
 const geo = (page) => page.evaluate(() => {
   const card = document.querySelector('[data-avail-matrix]')
-  const th = card?.querySelector('thead th:nth-child(2)')
-  const corner = card?.querySelector('thead th:nth-child(1)')
-  const rect = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left } }
-  const c = card && rect(card), t = th && rect(th)
+  const headEl = card?.querySelector('[data-avail-head]')
+  const bodyEl = card?.querySelector('[data-avail-body]')
+  const layoutHeader = document.querySelector('header.sticky')
+  const rect = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, width: r.width } }
+  const th = headEl?.querySelector('th:nth-child(3)'), td = bodyEl?.querySelector('tbody tr td:nth-child(3)')
+  const corner = headEl?.querySelector('th:nth-child(1)')
   let topmost = null
   if (th) { const r = th.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + 6); topmost = !!hit && th.contains(hit) }
   return {
-    has: !!card, fit: card?.getAttribute('data-fit'), card: c, th: t, corner: corner && rect(corner), topmost,
-    cardScroll: card?.scrollTop ?? null, cardClient: card?.clientHeight ?? null, cardScrollH: card?.scrollHeight ?? null,
-    scrollY: window.scrollY, innerH: window.innerHeight,
+    has: !!card, card: rect(card), head: rect(headEl), th: rect(th), td: rect(td), corner: rect(corner), layoutBottom: layoutHeader ? layoutHeader.getBoundingClientRect().bottom : 0,
+    topmost, rows: bodyEl ? bodyEl.querySelectorAll('tbody tr').length : 0,
+    bodyClient: bodyEl?.clientHeight ?? null, bodyScrollH: bodyEl?.scrollHeight ?? null,
+    headLeft: headEl?.scrollLeft ?? null, bodyLeft: bodyEl?.scrollLeft ?? null,
+    scrollY: window.scrollY, innerH: window.innerHeight, docH: document.documentElement.scrollHeight,
+    lastRow: bodyEl ? rect(bodyEl.querySelector('tbody tr:last-child')) : null,
   }
 })
 
@@ -81,51 +88,54 @@ const run = async () => {
   for (const [w, h] of [[1440, 900], [1280, 720], [1440, 600]]) {
     const page = await open(browser, w, h)
     let g = await geo(page)
-    check(`${w}x${h}: the matrix card is found with ${N} players`, g.has && (await page.locator('tbody tr').count()) === N)
-    check(`${w}x${h}: card is fitted to the window`, g.fit === 'on' && g.card.bottom <= g.innerH + 1, JSON.stringify(g.card) + ' fit=' + g.fit)
-    check(`${w}x${h}: card scrolls inside itself (content taller than card)`, g.cardScrollH > g.cardClient + 100, `${g.cardScrollH} vs ${g.cardClient}`)
+    check(`${w}x${h}: the matrix is found with ${N} players`, g.has && g.rows === N, `rows=${g.rows}`)
+    check(`${w}x${h}: card is NOT cut to the window (it runs off the page)`, g.card.bottom > g.innerH + 200, JSON.stringify(g.card))
+    check(`${w}x${h}: no inner vertical scroll (body is as tall as its rows)`, g.bodyScrollH <= g.bodyClient + 1, `${g.bodyScrollH} vs ${g.bodyClient}`)
+    check(`${w}x${h}: the page is long enough to scroll the whole list`, g.docH > g.innerH + 800, `${g.docH}`)
 
-    // Wheel over the players, a long way, as a real scroll would.
-    const cx = g.card.left + 600, cy = g.card.top + (g.cardClient / 2)
-    await page.mouse.move(cx, cy)
+    // Wheel over the players: the PAGE scrolls.
+    await page.mouse.move(g.card.left + 600, Math.min(g.innerH - 80, g.card.top + 400))
     await page.mouse.wheel(0, 1200)
     await page.waitForTimeout(300)
     g = await geo(page)
-    check(`${w}x${h}: wheel scrolled the players, not the page`, g.cardScroll > 400 && g.scrollY < 5, `card=${g.cardScroll} page=${g.scrollY}`)
-    check(`${w}x${h}: date row stays at the top of the card`, Math.abs(g.th.top - g.card.top) <= 3, `th=${g.th.top} card=${g.card.top}`)
-    check(`${w}x${h}: date row is still on screen`, g.th.top >= 0 && g.th.bottom <= g.innerH, JSON.stringify(g.th))
-    check(`${w}x${h}: date row is what you hit there (nothing scrolls over it)`, g.topmost === true)
-    check(`${w}x${h}: Player corner cell frozen too`, Math.abs(g.corner.top - g.card.top) <= 3 && Math.abs(g.corner.left - g.card.left) <= 3)
+    check(`${w}x${h}: wheel scrolled the page`, g.scrollY > 800, `page=${g.scrollY}`)
+    check(`${w}x${h}: date row pinned just under the page header`, Math.abs(g.head.top - g.layoutBottom) <= 2, `head=${g.head.top} header=${g.layoutBottom}`)
+    check(`${w}x${h}: date row is on screen and is what you hit there`, g.th.top >= 0 && g.th.bottom <= g.innerH && g.topmost === true, JSON.stringify(g.th))
+    check(`${w}x${h}: Player corner cell pinned with it`, Math.abs(g.corner.top - g.head.top) <= 2)
 
-    // Scroll sideways too: the Player column and the date row both hold.
-    await page.evaluate(() => { document.querySelector('[data-avail-matrix]').scrollLeft = 200 })
+    // To the very end: the last player is reachable and fully visible.
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    await page.waitForTimeout(200)
+    g = await geo(page)
+    check(`${w}x${h}: last player reachable by scrolling the page`, g.lastRow.bottom <= g.innerH + 1 && g.lastRow.top >= 0, JSON.stringify(g.lastRow))
+
+    // Sideways: the strip follows the body and the columns still line up.
+    await page.evaluate(() => { document.querySelector('[data-avail-body]').scrollLeft = 200 })
     await page.waitForTimeout(150)
     g = await geo(page)
-    check(`${w}x${h}: corner holds when scrolled across as well`, Math.abs(g.corner.top - g.card.top) <= 3 && Math.abs(g.corner.left - g.card.left) <= 3, JSON.stringify(g.corner))
+    check(`${w}x${h}: date strip follows the sideways scroll`, g.bodyLeft > 100 && g.headLeft === g.bodyLeft, `head=${g.headLeft} body=${g.bodyLeft}`)
+    check(`${w}x${h}: a date column lines up with its cells`, Math.abs(g.th.left - g.td.left) <= 1 && Math.abs(g.th.width - g.td.width) <= 1, `${JSON.stringify(g.th)} ${JSON.stringify(g.td)}`)
+    await page.evaluate(() => { document.querySelector('[data-avail-head]').scrollLeft = 80 })
+    await page.waitForTimeout(150)
+    g = await geo(page)
+    check(`${w}x${h}: scrolling the strip drags the body`, g.bodyLeft === 80 && g.headLeft === 80, `head=${g.headLeft} body=${g.bodyLeft}`)
     check(`${w}x${h}: no page errors`, page.errors.length === 0, page.errors.join(' | '))
-    if (process.env.SHOT_DIR && w === 1440 && h === 900) await page.screenshot({ path: process.env.SHOT_DIR + '/avail_frozen_desktop.png' })
+    if (process.env.SHOT_DIR && w === 1440 && h === 900) {
+      await page.evaluate(() => window.scrollTo(0, 500))
+      await page.screenshot({ path: process.env.SHOT_DIR + '/avail_flow_desktop.png' })
+    }
     await page.context().close()
   }
 
-  // Window resized after load: the card follows.
-  {
-    const page = await open(browser, 1440, 900)
-    await page.setViewportSize({ width: 1440, height: 650 })
-    await page.waitForTimeout(400)
-    const g = await geo(page)
-    check('resize 900 -> 650: card still ends inside the window', g.card.bottom <= g.innerH + 1, JSON.stringify(g.card))
-    await page.context().close()
-  }
-
-  // Phone: unchanged. No fixed height, no sideways overflow.
+  // Phone: no sideways overflow of the page, list still flows.
   {
     const page = await open(browser, 390, 844, { hasTouch: true, isMobile: true })
     const g = await geo(page)
     const over = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: screen.width }))
-    check('390px: card is left alone (no fitted height)', g.fit === 'off')
+    check('390px: no inner vertical scroll', g.bodyScrollH <= g.bodyClient + 1)
     check('390px: page does not overflow sideways', over.sw <= over.cw, JSON.stringify(over))
     check('390px: no page errors', page.errors.length === 0, page.errors.join(' | '))
-    if (process.env.SHOT_DIR) await page.screenshot({ path: process.env.SHOT_DIR + '/avail_frozen_390.png' })
+    if (process.env.SHOT_DIR) await page.screenshot({ path: process.env.SHOT_DIR + '/avail_flow_390.png' })
     await page.context().close()
   }
 

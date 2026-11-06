@@ -266,6 +266,9 @@ export default function AdminAccount() {
   // apply to any of your selected modules", since there's nothing held to
   // apply it to.
   const hasSubscribedModule = rows.some((r) => r.status === 'subscribed')
+  // BetterStats is paid and has a renewal date: what the club adds now is priced
+  // for the part-year up to that date, and a discount code does not apply to it.
+  const coreAnchored = coreRow?.status === 'subscribed' && !!coreRow?.renewal_date
 
   // Any row the club can still subscribe to can be selected for the bulk
   // Subscribe request below — that's every status EXCEPT 'subscribed'
@@ -777,7 +780,7 @@ export default function AdminAccount() {
               <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-3">
                 {selected.size} module{selected.size === 1 ? '' : 's'} selected
               </p>
-                {plan.billing_checkout_enabled && !plan.stripe_subscription_active && (
+                {plan.billing_checkout_enabled && !plan.stripe_subscription_active && !coreAnchored && (
                   <div className="mb-3">
                     <div className="flex gap-2">
                       <input
@@ -818,8 +821,8 @@ export default function AdminAccount() {
                   <div className="mb-3 space-y-1">
                     {quote.line_items.map((li) => (
                       <div key={li.key} className="flex items-center justify-between font-mono text-[11px] text-pb-faint">
-                        <span>{li.name}</span>
-                        <span>${li.price}/yr</span>
+                        <span>{li.name}{quote.prorated ? ` ($${li.full_price}/yr)` : ''}</span>
+                        <span>{quote.prorated ? `$${li.amount.toFixed(2)}` : `$${li.price}/yr`}</span>
                       </div>
                     ))}
                     {quote.discount > 0 && (
@@ -835,9 +838,22 @@ export default function AdminAccount() {
                       </div>
                     )}
                     <div className="flex items-center justify-between font-mono text-[12px] text-pb-text font-semibold pt-2 mt-1 border-t pb-hairline">
-                      <span>Total, billed annually</span>
-                      <span>${quote.total}/yr</span>
+                      <span>{quote.prorated ? 'Total today (prorated)' : 'Total, billed annually'}</span>
+                      <span>{quote.prorated ? `$${quote.total.toFixed(2)}` : `$${quote.total}/yr`}</span>
                     </div>
+                    {quote.prorated && (
+                      <p className="font-mono text-[10px] text-pb-faintest pt-1">
+                        Prorated for {quote.prorated.days} of {quote.prorated.of_days} days, up to your
+                        BetterStats renewal on {fmtDate(quote.prorated.renewal_date)}. From then each
+                        module renews at its full annual price, together with BetterStats.
+                      </p>
+                    )}
+                    {quote.core_included === false && !quote.prorated && (
+                      <p className="font-mono text-[10px] text-pb-faintest pt-1">
+                        BetterStats has no renewal date on file to line these up with, so they run for a
+                        full year from today.
+                      </p>
+                    )}
                     <p className="font-mono text-[10px] text-pb-faintest pt-1">
                       Plus GST, calculated on Stripe's secure checkout page (this preview can't show
                       the exact figure until then).

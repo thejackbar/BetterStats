@@ -29,10 +29,12 @@ export function useOpenSections() {
   return { isOpen, toggle, setAll }
 }
 
+// Every section is the same width and header height; the page lays them out in rows
+// (see ROWS in PublicAvailability), so the spacing between them belongs to that grid.
 export default function Group({ id, title, summary, tone, open, onToggle, hideTitle = false, children }) {
   const panel = `group-${id}`
   return (
-    <section data-group={id} data-open={open ? 'yes' : 'no'} className="rounded-2xl border pb-hairline mb-3 min-w-0 break-inside-avoid">
+    <section data-group={id} data-open={open ? 'yes' : 'no'} className="rounded-2xl border pb-hairline min-w-0">
       <button type="button" onClick={() => onToggle(id)} aria-expanded={open} aria-controls={panel} data-group-toggle={id}
         className="w-full flex items-center gap-3 px-4 py-3 text-left">
         <span className="font-display font-bold text-[16px] shrink-0">{title}</span>

@@ -202,6 +202,19 @@ async def status_of(target, viewer="A"):
         return e.status_code
 
 
+async def teams(viewer="A"):
+    VIEWER["id"] = MGR[viewer]
+    return await call(public_fantasy.teams_view, token="t", request=SimpleNamespace())
+
+
+async def teams_status(viewer="A"):
+    try:
+        await teams(viewer)
+        return 200
+    except HTTPException as e:
+        return e.status_code
+
+
 async def ladder(viewer="A"):
     VIEWER["id"] = MGR[viewer]
     return await call(public_fantasy.ladder, token="t", request=SimpleNamespace())
@@ -234,6 +247,7 @@ async def main() -> None:
         await s.commit()
     check("before any round has locked it is refused (403)", await status_of("B") == 403 if has_route else False)
     check("and the ladder says teams cannot be opened yet", (await ladder()).get("teams_visible") is False)
+    check("the all-teams list is refused too before any round has locked (403)", await teams_status() == 403 if hasattr(public_fantasy, "teams_view") else False)
     async with Session() as s:
         await s.execute(text("UPDATE fantasy_rounds SET lock_at = NOW() - INTERVAL '20 days' WHERE id=:a"), {"a": R1})
         await s.execute(text("UPDATE fantasy_rounds SET lock_at = NOW() - INTERVAL '1 day' WHERE id=:a"), {"a": R2})
@@ -313,6 +327,56 @@ async def main() -> None:
     check("someone not signed in is refused (401)", anon == 401, str(anon))
     check("a squad id that is not in the league is a 404", await status_of(str(uuid.uuid4())) == 404)
     check("so is one that is not an id", await status_of("not-an-id") == 404)
+
+    print("\n-- 8. All teams in one request (the Teams screen's list and cards) --")
+    if not hasattr(public_fantasy, "teams_view"):
+        check("the all-teams route exists", False, "teams_view missing")
+    else:
+        # B queues a transfer for AFTER round 3 (Dan in for Cara). It is real, and must stay private.
+        async with Session() as s:
+            await s.execute(text("INSERT INTO fantasy_queued_transfers (fantasy_season_id, squad_id, after_round_id, out_player_id, in_player_id) "
+                                 "VALUES (:fs, :s, :r, :o, :i)"), {"fs": FS_ID, "s": SQ["B"], "r": R3, "o": P3, "i": P4})
+            await s.commit()
+        async with Session() as s:
+            n = (await s.execute(text("SELECT COUNT(*) FROM fantasy_queued_transfers WHERE squad_id=:s AND in_player_id=:p"),
+                                 {"s": SQ["B"], "p": P4})).scalar()
+        check("(B really has Dan queued)", n == 1, str(n))
+        allv = await teams("A")
+        blob = json.dumps(allv)
+        by = {t["squad_id"]: t for t in allv["teams"]}
+        check("every team in the league is listed", set(by) == {str(SQ[k]) for k in "ABC"}, str(sorted(by)))
+        check("the round is the most recently locked one, as for a single team", allv["round"]["number"] == 3)
+        lad = await ladder("A")
+        check("in ladder order, with the ladder's rank and arrow",
+              [(t["squad_id"], t["rank"], t["rank_delta"]) for t in allv["teams"]]
+              == [(r["squad_id"], r["rank"], r["rank_delta"]) for r in lad["ladder"]])
+        same = True
+        for k in "ABC":
+            one = await team(k, "A")
+            row = {kk: vv for kk, vv in by[str(SQ[k])].items() if kk not in ("rank", "rank_delta")}
+            if row != one:
+                same = False
+                print("    differs for", k, "\n     list:", row, "\n     one :", one)
+        check("each team is exactly what opening that team on its own returns", same)
+        check("B shows the team locked for round 3 (Alice and Cara)", set(pids_of(by[str(SQ["B"])])) == {str(P1), str(P3)})
+        b_blob = json.dumps(by[str(SQ["B"])])
+        check("nothing about B's queued player appears in B's team", str(P4) not in b_blob and "Dan Quick" not in b_blob)
+        check("(Dan is in the response, as A's own player, so the check above can fail)", "Dan Quick" in blob)
+        allowed_row = {"squad_id", "team_name", "manager", "you", "total_points", "round", "lineup", "points", "chip_used", "rank", "rank_delta", "note"}
+        check("no field beyond the single-team view's, plus rank", all(set(t) <= allowed_row for t in allv["teams"]),
+              str([sorted(set(t) - allowed_row) for t in allv["teams"]]))
+        check("only the viewer's own row is flagged you", [t["you"] for t in allv["teams"] if t["you"]] == [True] and by[str(SQ["A"])]["you"])
+        check("a team that joined after the lock is listed with no lineup and a note",
+              by[str(SQ["C"])]["lineup"] is None and "joined after" in (by[str(SQ["C"])].get("note") or ""))
+        check("a manager with no squad yet is refused (403)", await teams_status("D") == 403)
+        check("a manager from another club is refused (401)", await teams_status("X") == 401)
+        VIEWER["id"] = None
+        try:
+            await call(public_fantasy.teams_view, token="t", request=SimpleNamespace())
+            anon = 200
+        except HTTPException as e:
+            anon = e.status_code
+        check("someone not signed in is refused (401)", anon == 401, str(anon))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     await engine.dispose()

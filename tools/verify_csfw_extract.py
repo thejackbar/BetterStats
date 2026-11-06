@@ -84,7 +84,7 @@ V2 = dict(
     b_position=4, b_runs=6, b_sixes=10, b_fours=12, b_howout=18,
     b_overs=20, b_maidens=28, b_wickets=30, b_flags=36, b_conceded=38,
     b_wides=40, b_noballs=42, b_catches=44, b_wk_catches=48, b_stumpings=52,
-    b_byes=56, b_votes=70,
+    b_byes=56, b_votes=70, b_captain=60, b_keeper=62,
 )
 V2["file_len"] = V2["match_base"] + V2["match_n"] * V2["match_rec"]
 
@@ -153,6 +153,11 @@ def build_av(lay, club, year, fixtures, matches, players):
             i16(off + lay.b_position, pos)
             i16(off + lay.b_runs, runs)
             i16(off + lay.b_howout, howout)
+        # Captain and wicketkeeper flags are Visual Basic booleans: -1 is True, 0 is False.
+        for b, (cap, keep) in (mt.get("roles") or {}).items():
+            off = rec + lay.block_base + b * lay.block_rec
+            i16(off + lay.b_captain, -1 if cap else 0)
+            i16(off + lay.b_keeper, -1 if keep else 0)
     return bytes(buf)
 
 
@@ -736,6 +741,68 @@ with tempfile.TemporaryDirectory() as td:
           (1, 20, 4.3, 2, 1, 1, True, True))
     check("a leg with nobody listed twice comes back as it went in",
           merge(blocks[:1]) if merge else None, (blocks[:1], []))
+
+# ---------------------------------------------------------------------------
+# 11. Captain and wicketkeeper (player block offsets 4 and 6, Visual Basic booleans)
+# ---------------------------------------------------------------------------
+# Read at the layout's own offsets (the V2 layout puts them elsewhere, so a parser that still had 4 and 6
+# hard-wired would read the batting position as a captain), carried to the scorecard CSV, and written once per
+# person per match to the roles file the apply script reads.
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    flagged = {
+        # Jones captains, Smith keeps; Smith is listed twice and only one of his entries carries the flag
+        0: dict(type=4, result=0, us=(30, 3), them=(20, 10), ground="Home Oval",
+                bat=[(0, 0, 10, 1), (1, 1, 15, 11), (2, 2, 2, 1), (0, 4, 3, 11)],
+                roles={1: (True, False), 0: (False, False), 3: (False, True)}),
+        # two keepers (a change of gloves), no captain
+        1: dict(type=4, result=1, us=(50, 5), them=(60, 2), ground="Home Oval",
+                bat=[(0, 0, 20, 1), (1, 1, 20, 11), (2, 2, 10, 1)],
+                roles={0: (False, True), 2: (False, True)}),
+        # nobody flagged
+        2: dict(type=4, result=0, us=(70, 5), them=(60, 2), ground="Home Oval",
+                bat=[(0, 0, 30, 1), (1, 1, 40, 11)]),
+    }
+    (td / "DATA2025.AV").write_bytes(build_av(
+        m.layout_from_dict(dict(V2)), "Role CC", 2025,
+        [(0, datetime.date(2025, 10, 11), 1, "Fulham"), (1, datetime.date(2025, 10, 18), 1, "Glenunga"),
+         (2, datetime.date(2025, 10, 25), 1, "Goodwood")], flagged, PLAYERS))
+    seasons = [m.parse_file(td / "DATA2025.AV")]
+    legs = {x["opponent"]: x for x in seasons[0]["matches"]}
+    check("the flags are read at the layout's offsets: Jones captain, Smith (listed twice, one entry flagged) the keeper",
+          sorted((seasons[0]["players"][b["player_id"]]["surname"], b["captain"], b["keeper"])
+                 for b in legs["Fulham"]["blocks"]),
+          [("Jones", True, False), ("Patel", False, False), ("Smith", False, True)])
+    rows = m.build_game_rows(seasons, "Role CC")
+    cols = m.GAME_CSV_COLUMNS
+    check("the scorecard CSV has the two columns", ("is_captain" in cols, "is_wicketkeeper" in cols), (True, True))
+    by = {(r["opposition"], r["player_name"]): r for r in rows if r["player_name"]}
+    check("Jones is the captain on the row, true or blank",
+          (by[("Fulham", "Jones, Ben")]["is_captain"], by[("Fulham", "Jones, Ben")]["is_wicketkeeper"]), ("true", ""))
+    check("Smith listed twice is one person, and the keeper flag on either entry makes him the keeper",
+          (by[("Fulham", "Smith, Alan")]["is_wicketkeeper"], by[("Fulham", "Smith, Alan")]["is_captain"]), ("true", ""))
+    check("a match with nobody flagged leaves both columns blank",
+          {(r["is_captain"], r["is_wicketkeeper"]) for r in rows if r["opposition"] == "Goodwood"}, {("", "")})
+    roles = m.game_role_rows(rows)
+    check("the roles file has one row per person holding a role, none for the rest",
+          sorted((r["opposition"], r["player_name"], r["is_captain"], r["is_wicketkeeper"]) for r in roles),
+          [("Fulham", "Jones, Ben", "true", ""), ("Fulham", "Smith, Alan", "", "true"),
+           ("Glenunga", "Patel, Raj", "", "true"), ("Glenunga", "Smith, Alan", "", "true")])
+    check("and carries what finds the match again (season, grade, date, opposition)",
+          sorted(set(roles[0]) ^ set(m.ROLE_COLUMNS)), [])
+    rep = m.role_report(rows)
+    check("the report counts matches, captains, keepers and two-keeper matches",
+          (rep["matches"], rep["with_captain"], rep["with_keeper"], rep["two_keepers"], len(rep["two_captains"])),
+          (3, 1, 2, 1, 0))
+    flagged[2]["roles"] = {0: (True, False), 1: (True, False)}
+    (td / "DATA2025.AV").write_bytes(build_av(
+        m.layout_from_dict(dict(V2)), "Role CC", 2025,
+        [(0, datetime.date(2025, 10, 11), 1, "Fulham"), (1, datetime.date(2025, 10, 18), 1, "Glenunga"),
+         (2, datetime.date(2025, 10, 25), 1, "Goodwood")], flagged, PLAYERS))
+    two = m.role_report(m.build_game_rows([m.parse_file(td / "DATA2025.AV")], "Role CC"))
+    check("a match flagging two captains is listed for the club to check",
+          [(x["row"]["opposition"], x["captains"]) for x in two["two_captains"]],
+          [("Goodwood", ["Smith, Alan", "Jones, Ben"])])
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

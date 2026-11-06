@@ -95,10 +95,11 @@ export default function MarketingNav() {
     setWatchOpen(false)
   }, [pathname, setModOpen, setWatchOpen])
 
-  // Home page gets a transparent nav until scrolled; other pages get a solid one.
+  // Home page gets a see-through nav until scrolled; other pages get a solid one.
+  // The dark fade keeps the links readable over the hero's Aurora.
   const navBg =
     isHome && !scrolled
-      ? 'bg-transparent'
+      ? 'bg-gradient-to-b from-pb-bg/90 via-pb-bg/60 to-transparent'
       : 'bg-pb-bg/85 backdrop-blur-md border-b pb-hairline'
 
   const modulesActive =

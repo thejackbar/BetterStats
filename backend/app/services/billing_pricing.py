@@ -12,6 +12,8 @@ cents only right before handing an amount to Stripe (which is cents-native).
 """
 from __future__ import annotations
 
+from datetime import date
+
 CORE = {"key": "core", "name": "BetterStats", "price": 399}
 
 # The four bolt-on modules and their annual price — mirrors PRICED_MODULES in
@@ -68,14 +70,24 @@ def bundle_discount(module_count: int, schedule: dict | None = None) -> int:
     return table[max(table)] if module_count > max(table) else 0
 
 
-def price_for(selected_keys, schedule: dict | None = None) -> dict:
+def price_for(selected_keys, schedule: dict | None = None, *, include_core: bool = True) -> dict:
     """Price a selection of billable module keys (besides Core, which is always
     included). Returns whole-AUD subtotal/discount/total plus a per-line-item
     breakdown, in the same shape the frontend's priceFor() returns — Fantasy, if
     selected, is priced as its own line item outside the bundle discount.
     `schedule` overrides the seed-default BUNDLE_DISCOUNT table (pass the live,
-    super-admin-configured one — see platform_settings.get_bundle_discount_schedule)."""
+    super-admin-configured one — see platform_settings.get_bundle_discount_schedule).
+
+    ``include_core=False`` is for a club whose BetterStats is already paid for
+    some other way (a Super Admin set it Active after a bank transfer, so there
+    is no Stripe subscription carrying it). Core is then not a line and not
+    charged again, and there is no bundle discount: the bundle rewards
+    subscribing to everything at once, and the club has already subscribed."""
     keys = set(selected_keys or [])
+    if not include_core:
+        quote = price_for_addon(keys)
+        quote["module_count"] = len([m for m in PRICED_MODULES if m["key"] in keys])
+        return quote
     bundle_mods = [m for m in PRICED_MODULES if m["key"] in keys]
     line_items = [dict(CORE)] + [dict(m) for m in bundle_mods]
     if FANTASY["key"] in keys:
@@ -164,3 +176,30 @@ def apply_coupon_to_quote(quote: dict, coupon) -> dict:
         "stackable_with_bundle": coupon.stackable_with_bundle,
     }
     return quote
+
+
+def add_years(d: date, years: int) -> date:
+    """Same calendar date ``years`` on. 29 February lands on the 28th in a
+    non-leap year rather than raising or rolling into March."""
+    try:
+        return d.replace(year=d.year + years)
+    except ValueError:
+        return d.replace(year=d.year + years, day=28)
+
+
+def prorate_to_renewal(full_price_dollars: float, today: date, renewal: date | None) -> dict | None:
+    """What part of a module's annual price covers ``today`` up to the club's
+    renewal date: price x days left / days in the year that ends on that date.
+
+    The ONE rule behind every "line this module up with BetterStats" price: the
+    card Checkout preview, an invoice for a module added part way through, and
+    the amount a Super Admin is told to collect when they set a module Active
+    by hand. ``None`` when there is nothing sensible to prorate to (no renewal
+    date, one that is today or already past, or one more than a year out) so
+    the caller can say so and fall back rather than guess."""
+    if renewal is None or renewal <= today or renewal > add_years(today, 1):
+        return None
+    of_days = (renewal - add_years(renewal, -1)).days
+    days = min((renewal - today).days, of_days)
+    return {"days": days, "of_days": of_days,
+            "amount_cents": round(full_price_dollars * 100 * days / of_days)}

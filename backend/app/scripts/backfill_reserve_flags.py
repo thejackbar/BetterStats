@@ -6,8 +6,15 @@ evidence for it) and sets the flag on every named-only appearance it can judge. 
 bowling or fielding row of their own is never touched: the flag cannot change what they count.
 
   TRUE   a reserve: the side batted, the player is not on its card, no bowling or fielding, slot 12 or later
+  TRUE   a late withdrawal, with no slot: a settled card whose sheets name neither the player's id nor anyone
+         with their full name (`reserve_players.classify_withdrawal`). The sync stored them as named from a sheet
+         read before the game. Listed separately so each name can be read before --apply.
   FALSE  judged and not a reserve (on the card as Did Not Bat, the side never batted, inside the XI, ...)
-  NULL   left alone: CA returned nothing, the id is not on the sheet, or CA does not call the game COMPLETED
+  NULL   left alone: CA returned nothing, CA does not call the game COMPLETED, the card cannot rule a name out,
+         or the sheet carries the player's full name under another id (probably the same person)
+
+A game where more than half the club's stored appearances would be marked withdrawn is left alone: that reads
+as a damaged card, and it is listed.
 
 Only rows still NULL are read, so a second run costs nothing, and a flag a person set is never replaced.
 
@@ -34,7 +41,9 @@ from sqlalchemy import text
 from app.models.db import async_session_maker
 from app.scripts.audit_twelfth_man import _all_orgs, _candidates, _merged_guids, _resolve_org, say
 from app.services import grassroots_scores_client as gr
-from app.services.reserve_players import TWELFTH_MAN, classify
+from app.services.reserve_players import (SAME_NAME_ON_SHEET, TWELFTH_MAN, WITHDRAWN, WITHDRAWN_MAX_SHARE,
+                                          classify_withdrawal)
+from app.services.withdrawn_appearances import ACTION as SYNC_ACTION
 
 ACTION = "backfill_reserve_flags"
 RESTORE_ACTION = "backfill_reserve_flags_restore"
@@ -50,11 +59,17 @@ async def plan(org: str, args, budget: list[int]) -> tuple[list[dict], Counter]:
         await session.execute(text(f"SET LOCAL statement_timeout = {int(args.timeout) * 1000}"))
         cands = [c for c in await _candidates(session, org, args.year) if c["stored_reserve"] is None]
         merged = await _merged_guids(session, sorted({c["player_id"] for c in cands}))
+        # Every appearance the club holds per game, judged or not: the denominator for the damaged-card check.
+        stored = {r[0]: r[1] for r in (await session.execute(text(
+            "SELECT ga.game_id::text, COUNT(*) FROM game_appearances ga JOIN players p ON p.id = ga.player_id "
+            "WHERE ga.game_id = ANY(CAST(:g AS uuid[])) AND p.organisation_id = CAST(:org AS UUID) GROUP BY 1"),
+            {"g": sorted({c["game_id"] for c in cands}), "org": org})).all()}
     say(f"{len(cands)} appearances not yet judged across {len({c['game_id'] for c in cands})} games")
 
     cards: dict[str, dict | None] = {}
     rows: list[dict] = []
     left: Counter = Counter()
+    same_name: list[str] = []
     for c in cands:
         gid = c["game_id"]
         if gid not in cards:
@@ -69,22 +84,41 @@ async def plan(org: str, args, budget: list[int]) -> tuple[list[dict], Counter]:
             left["CA does not call it COMPLETED, or returned no card"] += 1
             continue
         guids = {str(c["raw_guid"]).lower(), str(c["player_id"]).lower()} | merged.get(c["player_id"], set())
-        res = classify(card, guids)
+        res = classify_withdrawal(card, guids, c["player_name"])
         if res["code"] == TWELFTH_MAN:
             rows.append({"game_id": gid, "player_id": c["player_id"], "is_reserve": True, "slot": res["slot"],
+                         "name": c["player_name"], "date": str(c["played_at"])[:10], "grade": c["grade"]})
+        elif res["code"] == WITHDRAWN:
+            rows.append({"game_id": gid, "player_id": c["player_id"], "is_reserve": True, "slot": None,
                          "name": c["player_name"], "date": str(c["played_at"])[:10], "grade": c["grade"]})
         elif res["code"] in _NOT_RESERVE:
             rows.append({"game_id": gid, "player_id": c["player_id"], "is_reserve": False, "slot": res["slot"],
                          "name": c["player_name"], "date": str(c["played_at"])[:10], "grade": c["grade"]})
+        elif res["code"] == SAME_NAME_ON_SHEET:
+            left[f"{res['code']}: a sheet player has this full name under another id, so probably the same person"] += 1
+            same_name.append(f"{str(c['played_at'])[:10]}  {c['player_name']}  {gid}")
         else:
             left[res["code"]] += 1
+    # A game where most of the club's stored appearances look withdrawn is a damaged card, not a mass walkout.
+    for gid in {r["game_id"] for r in rows if r["slot"] is None and r["is_reserve"]}:
+        gone = [r for r in rows if r["game_id"] == gid and r["slot"] is None and r["is_reserve"]]
+        if len(gone) > WITHDRAWN_MAX_SHARE * stored.get(gid, 0):
+            rows[:] = [r for r in rows if r not in gone]
+            left[f"WITHDRAWN but {len(gone)} of {stored.get(gid, 0)} stored appearances in one game: "
+                 f"treated as a damaged card ({gid})"] += len(gone)
+    if same_name:
+        say("\nnot withdrawn, same full name on the sheet under another id (check these are one person):")
+        for line in same_name:
+            say(f"  {line}")
     return rows, left
 
 
 def report(rows: list[dict], left: Counter, limit: int) -> None:
-    flagged = [r for r in rows if r["is_reserve"]]
+    withdrawn = [r for r in rows if r["is_reserve"] and r["slot"] is None]
+    flagged = [r for r in rows if r["is_reserve"] and r["slot"] is not None]
     say(f"\nwould set is_reserve TRUE  on {len(flagged)} appearances (12th man, no row of their own)")
-    say(f"would set is_reserve FALSE on {len(rows) - len(flagged)} appearances (judged, played or not a reserve)")
+    say(f"would set is_reserve TRUE  on {len(withdrawn)} appearances (withdrawn: not on CA's final team sheet)")
+    say(f"would set is_reserve FALSE on {len(rows) - len(flagged) - len(withdrawn)} appearances (judged, played or not a reserve)")
     for why, n in left.most_common():
         say(f"left NULL: {n}  ({why})")
     if flagged:
@@ -93,6 +127,12 @@ def report(rows: list[dict], left: Counter, limit: int) -> None:
             say(f"  {r['date']}  {r['name']:<28} slot {r['slot']!s:<3} {str(r['grade']):<24} {r['game_id']}")
         if len(flagged) > limit:
             say(f"  ... {len(flagged) - limit} more (raise --list)")
+    if withdrawn:
+        say("\nwithdrawn, read each before --apply (newest first):")
+        for r in sorted(withdrawn, key=lambda r: r["date"], reverse=True)[:limit]:
+            say(f"  {r['date']}  {r['name']:<28} {str(r['grade']):<24} {r['game_id']}")
+        if len(withdrawn) > limit:
+            say(f"  ... {len(withdrawn) - limit} more (raise --list)")
 
 
 async def apply(org: str, rows: list[dict], expect: int | None, by: str | None) -> None:
@@ -124,8 +164,8 @@ async def restore(audit_id: int, by: str | None) -> None:
     async with async_session_maker() as s:
         row = (await s.execute(text(
             "SELECT org_id::text AS org, details, action FROM audit_logs WHERE id = :i"), {"i": audit_id})).mappings().first()
-        if not row or row["action"] != ACTION:
-            raise SystemExit(f"Audit entry {audit_id} is not a {ACTION} entry.")
+        if not row or row["action"] not in (ACTION, SYNC_ACTION):
+            raise SystemExit(f"Audit entry {audit_id} is not a {ACTION} or {SYNC_ACTION} entry.")
         details = row["details"] if isinstance(row["details"], dict) else json.loads(row["details"])
         if details.get("restored_at"):
             raise SystemExit(f"Audit entry {audit_id} was already restored ({details['restored_at']}).")

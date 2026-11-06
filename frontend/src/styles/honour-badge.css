@@ -108,6 +108,18 @@
   text-overflow: ellipsis;
 }
 
+/* Scorecard link — sits at the right of the season row, reads the grand final it came from */
+.hb-season { justify-content: space-between; gap: 6px; }
+.hb-scorecard {
+  color: var(--hb-accent-text, var(--pb-accent));
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+.hb-scorecard:hover { text-decoration: underline; }
+/* An editor's Edit / delete buttons take the same corner on hover */
+.hb-card:has(.hb-admin-btns):hover .hb-scorecard { opacity: 0; pointer-events: none; }
+
 /* Admin buttons — hover overlay, bottom-right */
 .hb-admin-btns {
   position: absolute;

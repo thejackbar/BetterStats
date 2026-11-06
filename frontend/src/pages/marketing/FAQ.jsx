@@ -71,7 +71,7 @@ const CATEGORIES = [
     items: [
       {
         q: 'What is BetterCricket?',
-        a: "BetterCricket is a modular platform for Australian club cricket, owned by BetterSports. Every club starts with BetterStats: it brings in every batting, bowling and fielding stat and turns it into a beautiful public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. On top of BetterStats you can add modules: BetterSelect (player availability, team selection and net manager), BetterSocials (social-post generation and a CRM to manage your club's website), BetterAdmin (one member directory, fee management, bulk emailing, stock, the volunteer roster and committee meetings) and BetterIQ (deep analytics and opposition scouting).",
+        a: "BetterCricket is a modular platform for Australian club cricket, owned by BetterSports. Every club starts with BetterStats: it brings in every batting, bowling and fielding stat and turns it into a beautiful public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. Every player also gets a dashboard and a collectable player card. On top of BetterStats you can add modules: BetterSelect (player availability, team selection, the Selection Whiteboard, net manager, fines and best-player votes), BetterSocials (match-day post designer and your club's website), BetterAdmin (one member directory, fee management, bulk emailing, stock, the volunteer roster, committee meetings and a strategic plan) and BetterIQ (deep analytics, opposition scouting and Ask IQ). BetterFantasyCricket is a separate add-on: a fantasy competition for your members, scored off your real games.",
       },
       {
         q: 'Do we have to change how our club scores or registers to use BetterCricket?',
@@ -84,6 +84,14 @@ const CATEGORIES = [
       {
         q: 'Can BetterCricket publish a season yearbook?',
         a: 'Yes. BetterCricket automatically generates a publishable digital yearbook for each season, populated with results, batting/bowling/fielding/all-rounder honours, partnership records and a season-progression chart. Admins can layer on a President\'s Report, Coach\'s Report, photo galleries and custom awards.',
+      },
+      {
+        q: 'What is the Player Dashboard?',
+        a: "A page for each player, opened from one club link with the last four digits of their mobile number. It shows their photo, shirt number and squads, a season dashboard with batting, bowling and fielding panels, and their last five innings and spells. If your club runs BetterSelect, BetterFantasyCricket or fees, players also answer games, follow the Fantasy round and see fees paid from the same page. You switch it on from BetterStats, and it works whether or not you have BetterSelect.",
+      },
+      {
+        q: 'What are Player Cards?',
+        a: "Every player at your club has a collectable card showing their career figures, with a rarity rating from 1 to 99. Players open a pack of five cards each week, earn more for runs, wickets and dismissals, and get a Winner Winner pack the day after a win. Centuries, five-wicket hauls, debuts and club awards earn special cards. Players swap with each other and work through sets and challenges. There are no paid packs, and a card is never taken from a collection. Clubs can switch cards off, include juniors, and take any player out of the pool.",
       },
       {
         q: 'Can I get a shareable cricket stat card?',
@@ -105,7 +113,7 @@ const CATEGORIES = [
       },
       {
         q: 'Where do sponsor logos appear?',
-        a: 'Currently in the site footer and in the season yearbook. We\'ll be expanding sponsor placements over time.',
+        a: 'Each sponsor has a tier: Major, Gold, Silver or Supporter. A major sponsor gets a slot on the club dashboard, and Major, Gold and Silver sponsors share the bottom bar. Every tier is on the full sponsor list, in the season yearbook, on the club room TV and, with BetterSocials, on every post. You can also link a sponsor to a section of the site so its logo shows as Presented by on that page.',
       },
     ],
   },
@@ -119,7 +127,7 @@ const CATEGORIES = [
       },
       {
         q: 'What does each module include?',
-        a: "BetterStats brings in every batting, bowling and fielding stat and turns it into your public club site, with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. BetterSelect adds player availability, team selection and the net manager. BetterSocials adds social-post generation and a CRM with template pages and your club stats to run your public website. BetterAdmin adds one member directory for the whole club, fee management, bulk emailing, stock, the volunteer roster and committee meetings with minutes and motions. BetterIQ adds deep analytics and opposition scouting.",
+        a: "BetterStats brings in every batting, bowling and fielding stat and turns it into your public club site, with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. BetterSelect adds player availability, team selection on the Selection Whiteboard, the net manager, fines, junior rotation and best-player votes. BetterSocials adds the post designer for lineups, fixtures, results, scorecards and more, and the editor for your club website. BetterAdmin adds one member directory for the whole club, fee management, bulk emailing, stock and assets, the volunteer roster, and committee meetings with minutes, motions and a strategic plan. BetterIQ adds deep analytics, opposition scouting and Ask IQ.",
       },
       {
         q: 'Can I add just one module?',
@@ -195,7 +203,7 @@ function FAQItem({ q, a }) {
         <span className="text-base md:text-lg font-semibold pr-4">{q}</span>
         <span className="w-8 h-8 rounded-full bg-pb-surface2 flex items-center justify-center text-accent text-lg flex-shrink-0">{open ? '−' : '+'}</span>
       </button>
-      <div className={`overflow-hidden transition-all duration-500 ${open ? 'max-h-[600px]' : 'max-h-0'}`}>
+      <div className={`overflow-hidden transition-all duration-500 ${open ? 'max-h-[900px]' : 'max-h-0'}`}>
         <p className="px-5 pb-5 text-sm text-pb-dim leading-relaxed">{a}</p>
       </div>
     </div>

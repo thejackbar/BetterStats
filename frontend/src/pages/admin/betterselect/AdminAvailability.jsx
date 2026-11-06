@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -11,10 +11,9 @@ import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useAllowMaybe, useSelectConfig, useWeekNames } from '../../../lib/useAvailabilityConfig'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
-import { useFitHeight } from './useFitHeight'
 import {
   Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
-  playedWithinYears, RuleTags, Chip, RecencySelect, RECENCY_OPTIONS, RECENCY_OVER, recencyOf, monthsAgoISO,
+  playedWithinYears, RuleTags, Chip, RecencySelect, recencyOf, monthsAgoISO,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
 import { normGender } from './selectionMeta'
@@ -75,6 +74,48 @@ function fixtureSub(dateObj, names) {
   }).join(' · ')
 }
 
+// ── Who is listed, and "last game played" ────────────────────────────────────
+// A player is in exactly one state. The server sends `is_inactive` (the club
+// marked them) and `is_dormant` (no game inside the dormancy window); the two
+// never overlap, and the rest are active.
+const PLAYER_STATES = [
+  { value: 'active', label: 'Active', title: 'Players who are still around' },
+  { value: 'dormant', label: 'Dormant', title: 'Players with no game for a long while' },
+  { value: 'inactive', label: 'Inactive', title: 'Players the club has marked inactive' },
+]
+const playerState = (p) => (p.is_inactive ? 'inactive' : p.is_dormant ? 'dormant' : 'active')
+
+// A season starts on 1 September (the same default the age rules use). A game on
+// 14 Nov 2026 and one on 20 Mar 2027 are both the 2026 season.
+const SEASON_START_MONTH = 9
+const seasonOfDate = (iso) => {
+  const y = Number(iso.slice(0, 4)), m = Number(iso.slice(5, 7))
+  return m >= SEASON_START_MONTH ? y : y - 1
+}
+const currentSeason = () => {
+  const d = new Date()
+  return d.getMonth() + 1 >= SEASON_START_MONTH ? d.getFullYear() : d.getFullYear() - 1
+}
+// 0 any time, 1 this season, 2 one season ago, 3 two seasons ago, 4 three, 5 four
+// or more, LAST_GAME_NEVER no game at all.
+const LAST_GAME_NEVER = 6
+const LAST_GAME_OPTIONS = [
+  { value: 0, label: 'Last game: any time' },
+  { value: 1, label: 'Last game: this season' },
+  { value: 2, label: 'Last game: 1 season ago' },
+  { value: 3, label: 'Last game: 2 seasons ago' },
+  { value: 4, label: 'Last game: 3 seasons ago' },
+  { value: 5, label: 'Last game: 4 or more seasons ago' },
+  { value: LAST_GAME_NEVER, label: 'Last game: never played' },
+]
+function lastGameMatches(lastPlayed, choice) {
+  if (!choice) return true
+  if (!lastPlayed) return choice === LAST_GAME_NEVER
+  if (choice === LAST_GAME_NEVER) return false
+  const ago = currentSeason() - seasonOfDate(lastPlayed)
+  return choice === 5 ? ago >= 4 : ago === choice - 1
+}
+
 export default function AdminAvailability() {
   const fmt = useAdminNameFormat()
   const { hasCapability, canEditCap } = useAuth()
@@ -88,15 +129,23 @@ export default function AdminAvailability() {
 
   // Filters — roster + recency are quiet view controls; the rest are facets.
   // Remembered on this device so they survive moving to another screen.
-  const [roster, setRoster] = usePersistedState('avail.roster', 'current', (v) => v === 'current' || v === 'all') // 'current' hides dormant/inactive; 'all' shows everyone
+  // Which kinds of player are listed. Active only to begin with: dormant (no game
+  // for the club's dormancy window) and inactive (marked by the club) are one tap
+  // each to add, and one tap to take out again.
+  const [show, setShow] = usePersistedState('avail.show', ['active'], (v) => Array.isArray(v) && v.every((x) => PLAYER_STATES.some((o) => o.value === x)))
+  const showSet = useMemo(() => new Set(show), [show])
+  const shown = useCallback((p) => showSet.has(playerState(p)), [showSet])
+  const toggleShow = (v) => setShow((cur) => {
+    const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]
+    return next.length ? PLAYER_STATES.map((o) => o.value).filter((x) => next.includes(x)) : cur // keep at least one
+  })
   // How far back a player may have last played to be listed is a club setting (Settings, Players listed).
   const years = useSelectConfig().playedYears?.availability ?? 0
   // Junior grades (per Manage Grades) are left out until asked for.
   // Whether junior grades show is a Settings choice now, not a switch on this screen.
   const [showJuniors] = usePersistedState('select.juniors', false, (v) => typeof v === 'boolean')
-  // "Hasn't played since": a RECENCY_OVER + N value (last played more than N years
-  // ago), 0 for off. Sits beside the club's own "played within" window, never replaces it.
-  const [lapsed, setLapsed] = usePersistedState('avail.lapsed', 0, (v) => Number.isInteger(v) && (v === 0 || v > RECENCY_OVER))
+  // "Last game played": which season a player's most recent game fell in.
+  const [lastGame, setLastGame] = usePersistedState('avail.lastGame', 0, (v) => Number.isInteger(v) && v >= 0 && v <= LAST_GAME_NEVER)
   const [selectedIds, setSelectedIds] = useState(() => new Set()) // picked in any XI this round
 
   // Selected week (column) — drives the Pick XI handoff and single-week bulk.
@@ -162,25 +211,13 @@ export default function AdminAvailability() {
     const meta = data?.squad_meta || {}
     const inRoster = new Set()
     for (const p of data?.players || []) {
-      if (roster === 'current' && !p.is_current) continue
+      if (!shown(p)) continue
       for (const s of p.squads || []) inRoster.add(s)
     }
     return (data?.all_squads || []).filter((s) => (
       inRoster.has(s) && meta[s]?.active !== false && (showJuniors || !meta[s]?.junior)
     ))
-  }, [data, roster, showJuniors])
-
-  // "Last played more than N years ago" choices that can still return someone:
-  // narrower than the club's played-within window, and (on Current squad) inside
-  // the dormancy window that roster is already limited to.
-  const lapsedOptions = useMemo(() => {
-    const maxYears = Math.min(
-      years < 0 ? 0 : (years || Infinity),
-      roster === 'current' ? (data?.dormancy_months || 24) / 12 : Infinity,
-    )
-    return RECENCY_OPTIONS.filter((o) => o.value > RECENCY_OVER && o.value - RECENCY_OVER < maxYears)
-  }, [years, roster, data])
-  const lapsedYears = lapsedOptions.some((o) => o.value === lapsed) ? lapsed : 0
+  }, [data, shown, showJuniors])
 
   // Competitions the club has games in from here on (server: matrix `competitions`).
   // Facet values are the names, so a remembered pick still reads as a name.
@@ -189,14 +226,16 @@ export default function AdminAvailability() {
   const compsOf = useCallback((p) => (p.competitions || []).map((id) => compNameById[id]).filter(Boolean), [compNameById])
   // Offer Gender once anyone shown has one recorded; before that it has nothing to split.
   const showGender = useMemo(() => (data?.players || []).some(
-    (p) => (roster !== 'current' || p.is_current) && normGender(p.gender),
-  ), [data, roster])
+    (p) => shown(p) && normGender(p.gender),
+  ), [data, shown])
 
   const facets = useMemo(() => [
-    { key: 'squad', label: 'Squad', type: 'multi', options: squadOptions.map((s) => ({ value: s, label: s })) },
+    { key: 'squad', label: 'Squad', type: 'multi', display: 'chips', options: squadOptions.map((s) => ({ value: s, label: s })) },
     ...(competitions.length ? [
-      { key: 'comp', label: 'Competition', type: 'multi', options: competitions.map((c) => ({ value: c.name, label: c.name })) },
-      { key: 'notComp', label: 'Leave out', type: 'multi', options: competitions.map((c) => ({ value: c.name, label: c.name })) },
+      { key: 'comp', label: 'Competition', type: 'multi', display: 'chips', options: competitions.map((c) => ({ value: c.name, label: c.name })) },
+      // Same list as Competition, so it has no list of its own in the panel: the
+      // Leave out row under the filter bar is its one control (the chip still shows).
+      { key: 'notComp', label: 'Leave out', type: 'multi', hidden: true, options: competitions.map((c) => ({ value: c.name, label: c.name })) },
     ] : []),
     ...(showGender ? [{ key: 'gender', label: 'Gender', type: 'single', options: GENDER_FACET_OPTS }] : []),
     { key: 'avail', label: 'Availability', type: 'multi', options: AVAIL_ORDER.map((s) => ({ value: s, label: AVAILABILITY[s].label, dot: AVAILABILITY[s].cssVar })) },
@@ -262,7 +301,7 @@ export default function AdminAvailability() {
   const players = useMemo(() => {
     return (data?.players || []).filter((p) => {
       // Roster visibility — 'current' hides dormant (and never-played inactive).
-      if (roster === 'current' && !p.is_current) return false
+      if (!shown(p)) return false
       if (values.squad?.length && !values.squad.some((s) => (p.squads || []).includes(s))) return false
       if (values.role?.length && !values.role.includes(p.player_role)) return false
       if (values.gender && genderKey(p.gender) !== values.gender) return false
@@ -276,12 +315,12 @@ export default function AdminAvailability() {
       if (values.selected === 'selected' && !selectedIds.has(p.id)) return false
       if (values.selected === 'unselected' && selectedIds.has(p.id)) return false
       if (!playedWithinYears(recencyOf(p), years)) return false
-      if (!playedWithinYears(p.last_played, lapsedYears)) return false
+      if (!lastGameMatches(p.last_played, lastGame)) return false
       if (search.trim() && !nameMatchesSearch(p.display_name, search)) return false
       if (!matchesResponse(p)) return false
       return true
     })
-  }, [data, roster, values, years, lapsedYears, search, selectedIds, matchesResponse, compsOf])
+  }, [data, shown, values, years, lastGame, search, selectedIds, matchesResponse, compsOf])
 
   // Per-date player list as objects carrying a flat `availability` status, so we
   // can hand the matched-player set straight to <AvailSummary statusOf=…>.
@@ -375,11 +414,56 @@ export default function AdminAvailability() {
     }
   }
 
-  // The matrix card scrolls inside itself, so the date row (sticky top-0) stays
-  // put while the players scroll. It needs a height to scroll against: measured
-  // from where the card starts to the bottom of the window, like the whiteboard.
-  // Only measured once the card exists (not on the spinner or empty screens).
-  const [matrixRef, matrixH] = useFitHeight({ enabled: !isPhone && data !== null && dates.length > 0, bottom: 20 })
+  // The matrix flows down the page like any other list: the page scrolls, never
+  // the card. The date row is a separate strip pinned under the layout's own
+  // sticky header (so it stays in view while the players scroll past), and it
+  // follows the body's sideways scroll. A sticky row inside an overflow box needs
+  // a height on that box, which is what left only a few rows visible when the
+  // filters above were tall. The BODY sizes its own columns (the Player column is
+  // as wide as the longest name, never cut; the date columns share the rest) and
+  // the strip copies those widths, so the two always line up.
+  const headScrollRef = useRef(null)
+  const bodyScrollRef = useRef(null)
+  const bodyTableRef = useRef(null)
+  const [colW, setColW] = useState(null)
+  const [stickyTop, setStickyTop] = useState(0)
+  const matrixOn = data !== null && dates.length > 0
+  useLayoutEffect(() => {
+    if (!matrixOn) return undefined
+    const read = () => {
+      const h = document.querySelector('header.sticky')
+      const next = h ? Math.round(h.getBoundingClientRect().height) : 0
+      setStickyTop((t) => (t === next ? t : next))
+    }
+    read()
+    window.addEventListener('resize', read)
+    const hdr = document.querySelector('header.sticky')
+    const ro = hdr && typeof ResizeObserver === 'function' ? new ResizeObserver(read) : null
+    if (ro) ro.observe(hdr)
+    return () => { window.removeEventListener('resize', read); if (ro) ro.disconnect() }
+  }, [matrixOn])
+  useLayoutEffect(() => {
+    if (!matrixOn) return undefined
+    const el = bodyTableRef.current
+    if (!el) return undefined
+    const measure = () => {
+      const cells = el.rows[0]?.cells
+      if (!cells || cells.length !== dates.length + 1) { setColW((c) => (c === null ? c : null)); return }
+      const next = Array.from(cells, (c) => Math.round(c.getBoundingClientRect().width * 100) / 100)
+      setColW((c) => (c && c.length === next.length && c.every((w, i) => w === next[i]) ? c : next))
+    }
+    measure()
+    if (typeof ResizeObserver !== 'function') return undefined
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [matrixOn, dates, players])
+  // Either strip scrolled sideways drags the other. Setting an equal value fires
+  // no event, so the two cannot ping-pong.
+  const syncScroll = (from, to) => {
+    const a = from.current, b = to.current
+    if (a && b && b.scrollLeft !== a.scrollLeft) b.scrollLeft = a.scrollLeft
+  }
 
   if (data === null) {
     return <BetterSelectLayout title="Availability"><PbSpinner message="Loading availability…" /></BetterSelectLayout>
@@ -396,6 +480,13 @@ export default function AdminAvailability() {
     )
   }
 
+  // The strip's column plan, copied from the body once it has been measured.
+  const matrixMinW = Math.max(760, 170 + 120 * dates.length)
+  const colgroup = colW ? (
+    <colgroup>{colW.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
+  ) : null
+  const headW = colW ? colW.reduce((a, b) => a + b, 0) : null
+
   return (
     <BetterSelectLayout
       title="Availability"
@@ -411,15 +502,23 @@ export default function AdminAvailability() {
         filters={filters} facets={facets} searchPlaceholder="Search players…"
         count={players.length} total={data.players?.length} className="mb-4"
         right={(<>
-          <Segmented value={roster} onChange={setRoster} sm options={[
-            { value: 'current', label: 'Current squad' },
-            { value: 'all', label: 'All' },
-          ]} />
-          {lapsedOptions.length > 0 && (
-            <RecencySelect value={lapsedYears} onChange={setLapsed}
-              title={roster === 'current' ? "Only players who haven't played since. Switch to All to look further back." : "Only players who haven't played since"}
-              options={[{ value: 0, label: "Hasn't played: any time" }, ...lapsedOptions.map((o) => ({ ...o, group: undefined }))]} />
-          )}
+          <span className="inline-flex items-center gap-1.5" data-avail-show>
+            <span className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faintest">Show</span>
+            <span className="inline-flex p-[3px] gap-0.5 bg-pb-surface2 rounded-lg border border-pb-hairline">
+              {PLAYER_STATES.map((o) => {
+                const on = showSet.has(o.value)
+                return (
+                  <button key={o.value} type="button" onClick={() => toggleShow(o.value)} aria-pressed={on} title={o.title}
+                    className={`rounded-md font-display font-semibold transition text-xs px-2.5 py-1 ${on ? 'bg-pb-accent/15 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>
+                    {o.label}
+                  </button>
+                )
+              })}
+            </span>
+          </span>
+          <RecencySelect value={lastGame} onChange={setLastGame}
+            title="Only players whose most recent game was in this season. A season runs from 1 September."
+            options={LAST_GAME_OPTIONS} />
           <button onClick={() => setRangeOn((v) => !v)}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${rangeOn ? 'border-pb-accent text-pb-accent bg-pb-accent/10' : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}>
             <Icon name="fixtures" size={14} /> Date range {rangeOn ? '▲' : '▼'}
@@ -522,12 +621,15 @@ export default function AdminAvailability() {
       )}
 
       {/* Matrix */}
-      <div ref={matrixRef} data-avail-matrix data-fit={matrixH != null ? 'on' : 'off'} className="pb-card overflow-auto"
-        style={matrixH != null ? { height: matrixH } : undefined}>
-        <table className="border-separate w-full" style={{ borderSpacing: 0, minWidth: 760 }}>
+      <div data-avail-matrix className="pb-card">
+        <div ref={headScrollRef} data-avail-head onScroll={() => syncScroll(headScrollRef, bodyScrollRef)}
+          className="sticky z-20 overflow-x-auto bg-pb-surface2 rounded-t-[9px] border-b pb-hairline"
+          style={{ top: stickyTop, scrollbarWidth: 'none' }}>
+          <table className="border-separate" style={{ borderSpacing: 0, tableLayout: 'fixed', width: headW || '100%', minWidth: headW || matrixMinW }}>
+            {colgroup}
           <thead>
             <tr>
-              <th className="sticky left-0 top-0 z-30 bg-pb-surface2 text-left px-4 py-3 border-b pb-hairline" style={{ minWidth: 170 }}>
+              <th className="sticky left-0 z-10 bg-pb-surface2 text-left px-4 py-3 border-b pb-hairline" style={{ minWidth: 170 }}>
                 <div className="flex items-center gap-2.5">
                   {canEdit && (
                     <input type="checkbox" checked={allSelected} onChange={toggleSelAll}
@@ -542,7 +644,7 @@ export default function AdminAvailability() {
                 const sub = fixtureSub(d, weekNames)
                 return (
                   <th key={d.date} onClick={() => { setSelDate(d.date); setFilterCols([]) }}
-                    className="sticky top-0 z-20 px-3 py-2.5 border-b border-l pb-hairline text-center cursor-pointer"
+                    className="px-3 py-2.5 border-b border-l pb-hairline text-center cursor-pointer"
                     style={{
                       minWidth: 120,
                       background: sel ? 'color-mix(in srgb, var(--pb-accent) 7%, var(--pb-surface2))' : 'var(--pb-surface2)',
@@ -572,25 +674,29 @@ export default function AdminAvailability() {
               })}
             </tr>
           </thead>
+          </table>
+        </div>
+        <div ref={bodyScrollRef} data-avail-body onScroll={() => syncScroll(bodyScrollRef, headScrollRef)} className="overflow-x-auto">
+          <table ref={bodyTableRef} className="border-separate w-full" style={{ borderSpacing: 0, minWidth: matrixMinW }}>
           <tbody>
             {players.length === 0 && (
               <tr>
                 <td colSpan={dates.length + 1} className="border-t pb-hairline px-4 py-8 text-center">
-                  <Empty>No players match these filters. Try clearing the search or response filter, picking another week for it, or switching to “All”.</Empty>
+                  <Empty>No players match these filters. Try clearing the search or response filter, picking another week for it, or adding Dormant or Inactive players under Show.</Empty>
                 </td>
               </tr>
             )}
             {players.map((p) => (
               <tr key={p.id} style={{ background: selected.has(p.id) ? 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' : 'transparent' }}>
-                <td className="sticky left-0 z-10 px-4 py-1.5 border-b pb-hairline"
-                  style={{ background: selected.has(p.id) ? 'var(--pb-surface2)' : 'var(--pb-surface)' }}>
+                <td className="sticky left-0 z-10 px-4 py-1.5 border-b pb-hairline whitespace-nowrap"
+                  style={{ width: '1%', minWidth: 170, background: selected.has(p.id) ? 'var(--pb-surface2)' : 'var(--pb-surface)' }}>
                   <div className="flex items-center gap-2.5">
                     {canEdit && (
                       <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSel(p.id)}
                         className="accent-pb-accent" style={{ width: 15, height: 15 }} />
                     )}
                     <Avatar player={p} size={28} />
-                    <span className="text-sm font-medium truncate">{fmt(p.display_name)}</span>
+                    <span className="text-sm font-medium shrink-0">{fmt(p.display_name)}</span>
                     <RuleTags player={p} />
                     {p.is_dormant && <span className="font-mono text-[9px] text-amber-300/80 uppercase shrink-0" title={`Dormant${p.last_played ? ' since ' + fmtYear(p.last_played) : ''}`}>dormant</span>}
                     {canEdit && p.is_dormant && (
@@ -631,7 +737,7 @@ export default function AdminAvailability() {
                   return (
                     <td key={d.date} className="text-center border-b border-l pb-hairline"
                       style={{
-                        padding: '6px 0',
+                        padding: '6px 0', minWidth: 120,
                         background: sel ? 'color-mix(in srgb, var(--pb-accent) 4%, transparent)' : 'transparent',
                       }}>
                       <span className="relative inline-block">
@@ -665,6 +771,7 @@ export default function AdminAvailability() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Quick-update modal — set one player's availability on one date */}

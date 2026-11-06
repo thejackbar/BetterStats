@@ -6,6 +6,7 @@ export const VOTE_STATES = {
   locked:        { label: 'LOCKED',    cssVar: 'var(--pb-red)' },
   awaiting_team: { label: 'NO TEAM',   cssVar: 'var(--pb-amber)' },
   upcoming:      { label: 'UPCOMING',  cssVar: 'var(--pb-faintest)' },
+  cancelled:     { label: 'CANCELLED', cssVar: 'var(--pb-faint)' },
 }
 
 // Hub status filter → the fixture states it covers.
@@ -13,7 +14,7 @@ export const STATUS_FILTERS = [
   { key: 'all',      label: 'All',        states: null },
   { key: 'open',     label: 'Open',       states: ['open'] },
   { key: 'awaiting', label: 'Needs team', states: ['awaiting_team'] },
-  { key: 'closed',   label: 'Closed',     states: ['closed', 'locked'] },
+  { key: 'closed',   label: 'Closed',     states: ['closed', 'locked', 'cancelled'] },
 ]
 
 export const seasonLabel = (y) => `${y}/${String((y + 1) % 100).padStart(2, '0')}`

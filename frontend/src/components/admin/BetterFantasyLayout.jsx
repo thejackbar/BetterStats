@@ -10,6 +10,7 @@ const NAV = [
   { to: '/admin/fantasy/settings', label: 'Team & budget', icon: 'settings', cap: CAP.MANAGE_FANTASY },
   { to: '/admin/fantasy/scoring', label: 'Scoring', icon: 'bolt', cap: CAP.MANAGE_FANTASY },
   { to: '/admin/fantasy/pool', label: 'Player pool', icon: 'list', cap: CAP.MANAGE_FANTASY },
+  { to: '/admin/fantasy/winners', label: 'Round winners', icon: 'ladders', cap: CAP.MANAGE_FANTASY },
   { to: '/admin/fantasy/prices', label: 'Price movements', icon: 'ladders', cap: CAP.MANAGE_FANTASY },
   { to: '/admin/fantasy/players', label: 'Registered players', icon: 'teams', cap: CAP.MANAGE_FANTASY },
   { to: '/admin/fantasy/leagues', label: 'Draft leagues', icon: 'ladders', cap: CAP.MANAGE_FANTASY },

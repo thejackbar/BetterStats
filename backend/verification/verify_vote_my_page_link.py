@@ -4,7 +4,7 @@ Asked for: "When you get to the voting page you should be able to link back to y
 player profile dashboard section."
 
 Drives the SHIPPED `public_votes.get_landing`, `fixture_state` and `verify` route
-bodies against a real Postgres. The link is `/avail/<token>?tab=mine&player=<id>`.
+bodies against a real Postgres. The link is `/playerdash/<token>?tab=mine&player=<id>`.
 
   * a verified player gets `my_page` on the landing, the fixture and the verify reply
   * nobody else does: an unidentified visitor (a supporter) is never sent the
@@ -77,7 +77,7 @@ async def main():
 
     print("\n# A. The landing")
     me = (await landing(sam)).get("me") or {}
-    want = f"/avail/{avail_tok}?tab=mine&player={sam}"
+    want = f"/playerdash/{avail_tok}?tab=mine&player={sam}"
     check("a verified player is given the way back to their page", me.get("my_page"), want)
     check("the link names them and nobody else", str(ann) in (me.get("my_page") or ""), False)
     check("an unidentified visitor gets no me and no availability token", (await landing()).get("me"), None)

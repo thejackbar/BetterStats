@@ -105,7 +105,15 @@ export function MilestoneCards({ palette: pal, width = 1080, height = 1080, team
   const bandH = Math.max(70, Math.min(116, Math.round(cardH * 0.3)))
   const nameMax = Math.max(18, Math.min(44, Math.round((wide ? cardH : cardW) * 0.16)))
   const unitSize = Math.max(11, Math.min(19, Math.round(short * 0.058)))
-  const valueMax = wide ? Math.round(cardH * 0.46) : Math.round(cardW * 0.4)
+  const firstSize = Math.max(11, Math.round(nameMax * 0.42))
+  // A wide card stacks the unit, the number, the date and the name band inside the card's own
+  // height, so the number gets what the rest leaves it. Sized off the card alone it could ask
+  // for more than that and push the name band out of the bottom of the card.
+  const wideBandH = 28 + firstSize + 2 + nameMax
+  const wideInfoRoom = cardH - wideBandH - 28 - Math.round(unitSize * 1.5) - Math.round((unitSize - 3) * 1.5) - 8
+  const valueMax = wide
+    ? Math.max(28, Math.min(Math.round(cardH * 0.46), Math.floor(wideInfoRoom / 0.95)))
+    : Math.round(cardW * 0.4)
   const big = pick(F.A, { square: 78, portrait: 90, story: 104 })
   // The name band's text follows the band's colour once the club has set one, so a
   // white band does not keep the pale text the default band had.
@@ -137,7 +145,10 @@ export function MilestoneCards({ palette: pal, width = 1080, height = 1080, team
           )
           const nameBand = (
             <div style={{ height: wide ? undefined : bandH, flexShrink: 0, background: bandBg, color: nameInk, padding: wide ? '14px 18px' : '0 12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2, boxSizing: 'border-box', minWidth: 0 }}>
-              {m.first ? <div style={{ fontFamily: DISPLAY, fontSize: Math.max(11, Math.round(nameMax * 0.42)), letterSpacing: 1.5, opacity: 0.75, lineHeight: 1, color: pc(parts, 'firstColor', undefined), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: wide ? 'left' : 'center' }}>{String(m.first).toUpperCase()}</div> : null}
+              {m.first ? (
+                <AutoFitText text={String(m.first).toUpperCase()} max={firstSize} min={9} lines={1}
+                  style={{ fontFamily: DISPLAY, letterSpacing: 1.5, opacity: 0.75, lineHeight: 1, color: pc(parts, 'firstColor', undefined), maxWidth: '100%', textAlign: wide ? 'left' : 'center' }} />
+              ) : null}
               <AutoFitText text={m.last} max={nameMax} min={12} lines={1}
                 style={{ fontFamily: DISPLAY, letterSpacing: 1, lineHeight: 1, maxWidth: '100%', textAlign: wide ? 'left' : 'center' }} />
             </div>
@@ -157,7 +168,7 @@ export function MilestoneCards({ palette: pal, width = 1080, height = 1080, team
               </div>
               {wide ? (
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ flex: 1, padding: '14px 18px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, minWidth: 0, boxSizing: 'border-box' }}>{info}</div>
+                  <div style={{ flex: 1, padding: '14px 18px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, minWidth: 0, minHeight: 0, overflow: 'hidden', boxSizing: 'border-box' }}>{info}</div>
                   {nameBand}
                 </div>
               ) : nameBand}

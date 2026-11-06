@@ -35,7 +35,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
-from app.services import selection_audit, selection_clash, selection_notify, selection_rules, selection_seed, squad_sides
+from app.services import grade_move, selection_audit, selection_clash, selection_notify, selection_rules, selection_seed, squad_sides
 from app.services.fixture_days import combine_status, fixture_days
 from app.services.junior_fixtures import junior_fixture_ids
 from app.services.selection_pool import assemble_selection, rule_context, side_size
@@ -334,6 +334,181 @@ async def selected_players(
     }
 
 
+def _past_team_key(sides: "squad_sides.SquadSides", f: Fixture) -> Optional[str]:
+    """Which of the club's teams a fixture was: the squad, plus the squad's own
+    team when it covers several. None when nothing says (no squad, no known grade).
+    The same resolution the board and `previous_xi` use, so the three agree."""
+    sq, side = sides.resolve(f.team_id, f.grade_id, f.side_key)
+    if sq is None:
+        return None
+    return f"{sq.id}:{side.key}" if sq.multi and side is not None else sq.id
+
+
+async def _past_fixtures(db: AsyncSession, club: Organisation, hide_juniors: bool = False) -> list[Fixture]:
+    """The club's games up to today that have a saved XI, newest first."""
+    has_xi = select(FixtureLineup.fixture_id).where(FixtureLineup.fixture_id == Fixture.id).exists()
+    fixtures = (await db.execute(
+        select(Fixture)
+        .where(
+            Fixture.organisation_id == club.id,
+            Fixture.played_on.is_not(None),
+            Fixture.played_on <= date.today(),
+            Fixture.status != "CANCELLED",
+            has_xi,
+        )
+        .order_by(Fixture.played_on.desc(), Fixture.start_time.desc().nullslast(), Fixture.id)
+    )).scalars().all()
+    if hide_juniors and fixtures:
+        junior_ids = await junior_fixture_ids(db, club.id, fixtures)
+        fixtures = [f for f in fixtures if str(f.id) not in junior_ids]
+    return list(fixtures)
+
+
+@router.get("/past-lineups/teams", dependencies=[Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS))])
+async def past_lineup_teams(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    hide_juniors: bool = False,
+):
+    """The teams that have a past XI to look back at, top team first.
+
+    One entry per team: a squad, or each team of a squad that covers several.
+    `key` is what `/past-lineups?team=` takes. A team with no saved XI is not
+    listed, and a game that no squad claims has no team to be listed under.
+    Declared before /{fixture_id} so the literal path is not read as an id.
+    """
+    sides = await squad_sides.load(db, club.id)
+    teams: dict[str, dict] = {}
+    for f in await _past_fixtures(db, club, hide_juniors):  # newest first
+        key = _past_team_key(sides, f)
+        if key is None:
+            continue
+        t = teams.get(key)
+        if t is None:
+            rank = sides.rank(f.team_id, f.grade_id, f.side_key)
+            teams[key] = {
+                "key": key,
+                "name": sides.name(f.team_id, f.grade_id, f.side_key) or "Team",
+                "squad_name": sides.squad_name(f.team_id, f.grade_id, f.side_key),
+                "rank": rank,
+                "games": 1,
+                "last_played": f.played_on.isoformat(),
+            }
+        else:
+            t["games"] += 1
+
+    def _order(t: dict):
+        return (
+            not (t["rank"] or 0) > 0, t["rank"] or 0,
+            [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", t["name"].lower())],
+        )
+
+    return {"teams": sorted(teams.values(), key=_order)}
+
+
+@router.get("/past-lineups", dependencies=[Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS))])
+async def past_lineups(
+    team: Optional[str] = None,
+    fixture_id: Optional[str] = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(8, ge=1, le=30),
+    hide_juniors: bool = False,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """One team's saved XIs going back in time, newest first, a page at a time.
+
+    Name the team with `team` (a key from `/past-lineups/teams`), or with
+    `fixture_id` to mean "the team this fixture belongs to" (the builder's Past
+    sides button). Each game carries its players in batting order and what changed
+    against the game before it FOR THIS TEAM: who came in and who dropped out. That
+    comparison reads one game past the page, so the oldest card of a page is
+    never shown as "all new". The oldest game ever has `vs_previous: null`.
+    `has_more`/`next_offset` page further back.
+    """
+    sides = await squad_sides.load(db, club.id)
+    key = team
+    if not key and fixture_id:
+        fx = await _get_owned_fixture(db, fixture_id, club.id)
+        key = _past_team_key(sides, fx)
+    empty = {"team": None, "entries": [], "total": 0, "has_more": False, "next_offset": offset}
+    if not key:
+        return empty
+
+    games = [f for f in await _past_fixtures(db, club, hide_juniors) if _past_team_key(sides, f) == key]
+    if not games:
+        return empty
+    f0 = games[0]
+    team_info = {
+        "key": key,
+        "name": sides.name(f0.team_id, f0.grade_id, f0.side_key) or "Team",
+        "squad_name": sides.squad_name(f0.team_id, f0.grade_id, f0.side_key),
+        "rank": sides.rank(f0.team_id, f0.grade_id, f0.side_key),
+    }
+
+    page = games[offset:offset + limit]
+    # One game past the page: the baseline for the oldest card's in/out.
+    window = games[offset:offset + limit + 1]
+    xi: dict[str, list] = {str(f.id): [] for f in window}
+    if window:
+        rows = await db.execute(
+            select(
+                FixtureLineup.fixture_id, FixtureLineup.player_id, FixtureLineup.batting_order,
+                FixtureLineup.is_captain, FixtureLineup.is_wicket_keeper,
+                func.coalesce(Player.display_name_override, Player.name),
+            )
+            .join(Player, Player.id == FixtureLineup.player_id)
+            .where(
+                FixtureLineup.organisation_id == club.id,
+                FixtureLineup.fixture_id.in_([f.id for f in window]),
+            )
+            .order_by(FixtureLineup.batting_order.asc().nullslast(), Player.name)
+        )
+        for fid, pid, order, cap, wk, name in rows.fetchall():
+            xi[str(fid)].append({
+                "player_id": str(pid), "display_name": name, "batting_order": order,
+                "is_captain": cap, "is_wicket_keeper": wk,
+            })
+
+    entries = []
+    for i, f in enumerate(page):
+        players = xi[str(f.id)]
+        older = games[offset + i + 1] if offset + i + 1 < len(games) else None
+        vs = None
+        if older is not None:
+            before = {p["player_id"]: p for p in xi[str(older.id)]}
+            now = {p["player_id"] for p in players}
+            vs = {
+                "fixture_id": str(older.id),
+                "played_on": older.played_on.isoformat(),
+                "added": [p for p in players if p["player_id"] not in before],
+                "removed": [p for pid, p in before.items() if pid not in now],
+            }
+        entries.append({
+            "fixture_id": str(f.id),
+            "played_on": f.played_on.isoformat(),
+            "end_on": f.end_on.isoformat() if f.end_on and f.end_on > f.played_on else None,
+            "start_time": f.start_time,
+            "round": f.round,
+            "label": f.label,
+            "opponent_name": f.opponent_name,
+            "home_away": f.home_away,
+            "venue": f.venue,
+            "locked": f.locked_at is not None,
+            "players": players,
+            "vs_previous": vs,
+        })
+
+    end = offset + len(page)
+    return {
+        "team": team_info,
+        "entries": entries,
+        "total": len(games),
+        "has_more": end < len(games),
+        "next_offset": end,
+    }
+
+
 @router.get("/{fixture_id}", dependencies=[Depends(require_any_cap(SELECT_SELECTION, MANAGE_SELECTIONS))])
 async def get_selection(
     fixture_id: str,
@@ -365,7 +540,8 @@ async def previous_xi(
     re-linked, so reading by squad mixed two sides' players together: the grade is
     what says which side played. Only when the grade has no saved XI of its own does
     it fall back to the SAME squad's last fixture (the same team of a multi-team
-    squad), then to the same grade for a fixture with no squad. It never borrows
+    squad), then to the same grade for a fixture with no squad, and last to our own
+    team's name, which survives a move to another grade. It never borrows
     another team's XI: a women's side with no history of its own used to be filled
     with the men's last XI, because the lookup fell back to "any of the club's prior
     fixtures". Returns player ids in batting order plus the captain/keeper, so the
@@ -402,6 +578,19 @@ async def previous_xi(
         scopes.append(scope)
     elif fx.grade_id:
         scopes.append(Fixture.grade_id == fx.grade_id)
+
+    # 3. The association moved the team to another grade, so neither the grade nor
+    # a squad that now covers one team finds its history: our own team's NAME does
+    # ("Applecross 8th XI" in Grade 6 last month, Grade 5 now).
+    ours = grade_move.our_side_name(fx.home_away, fx.home_team, fx.away_team)
+    if ours:
+        def _same_name(col):
+            return func.lower(func.trim(col)) == ours
+        by_name = or_(
+            and_(Fixture.home_away == "HOME", _same_name(Fixture.home_team)),
+            and_(Fixture.home_away == "AWAY", _same_name(Fixture.away_team)),
+        )
+        scopes.append(and_(Fixture.team_id == fx.team_id, by_name) if fx.team_id else by_name)
 
     if not scopes:
         return empty  # nothing says which side this is, so there is no "last week"

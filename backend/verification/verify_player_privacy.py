@@ -134,6 +134,7 @@ TRENT, PLAIN, CLUBHID = uid(), uid(), uid()
 OTHER, NEWORG, SIB = uid(), uid(), uid()   # Trent's row at ANOTHER club, and a club that joins later
 PHOTO = b"\x89PNG-fake-headshot"
 HERO = b"\x89PNG-fake-action"
+ACTION = b"\x89PNG-fake-mid-shot"   # the third photograph (migration 374)
 
 
 async def build_schema() -> None:
@@ -229,6 +230,10 @@ async def seed(session) -> None:
             photo_url=f"/api/images/players/{pid}/photo?v=1",
             hero_photo_data=HERO, hero_photo_mime="image/png",
             hero_photo_url=f"/api/images/players/{pid}/hero-photo?v=1",
+            # The third photograph and the pin that picks it. Absent on the control run's old model.
+            **({"action_photo_data": ACTION, "action_photo_mime": "image/png",
+                "action_photo_url": f"/api/images/players/{pid}/action-photo?v=1",
+                "hero_source": "action"} if hasattr(Player, "action_photo_data") else {}),
         ))
     # The same person at another club: a per-club row (uuid5 id) carrying the
     # SAME Cricket Australia participant id, with its own photo.
@@ -384,6 +389,17 @@ async def main() -> None:
               await col("SELECT photo_data IS NULL AND photo_url IS NULL FROM players WHERE id=:i", i=TRENT) is True)
         check("Trent's action photo is gone",
               await col("SELECT hero_photo_data IS NULL AND hero_photo_url IS NULL FROM players WHERE id=:i", i=TRENT) is True)
+        async def _safe(sql, **kw):
+            try:
+                return await col(sql, **kw)
+            except Exception:  # the control run's schema has no such column: report, do not crash
+                return None
+        check("Trent's third photograph (the action shot) is gone too",
+              await _safe("SELECT action_photo_data IS NULL AND action_photo_url IS NULL FROM players WHERE id=:i", i=TRENT) is True)
+        check("and so is the pin that chose it",
+              await _safe("SELECT hero_source IS NULL FROM players WHERE id=:i", i=TRENT) is True)
+        check("the control player's action shot and pin are untouched",
+              await _safe("SELECT action_photo_data IS NOT NULL AND hero_source = 'action' FROM players WHERE id=:i", i=PLAIN) is True)
         check("the BetterIQ scouting copy of his photo is gone",
               await col("SELECT photo_data IS NULL AND photo_url IS NULL FROM scouted_players "
                         "WHERE grassroots_participant_id=:g", g=str(TRENT)) is True)

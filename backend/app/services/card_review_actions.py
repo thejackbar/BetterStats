@@ -112,6 +112,21 @@ async def recompute(db, org_id, player_ids) -> None:
         await _compute_milestones(db, ids[i:i + 300], org_id, reconcile=True)
 
 
+async def season_basis(db, org_id, mid) -> dict:
+    """How the match's season is counted now: match by match, or from Cricket Australia's total.
+
+    A season counts match by match as soon as a person's choice prefers the club's card for any
+    match in it (`v_club_sourced_seasons`), so the page that makes the choice says what it did to
+    the totals. Read after the change, so it also says when an undo has put the season back.
+    """
+    row = (await db.execute(text("""
+        SELECT s.name, EXISTS (SELECT 1 FROM v_club_sourced_seasons cs WHERE cs.season_id = s.id) AS by_match
+          FROM manual_games mg JOIN seasons s ON s.id = mg.season_id
+         WHERE mg.id = CAST(:mid AS UUID) AND mg.organisation_id = CAST(:org AS UUID)"""),
+        {"mid": str(mid), "org": str(org_id)})).first()
+    return {"season": row[0] if row else None, "by_match": bool(row[1]) if row else False}
+
+
 async def set_choice(db, org_id, mid, choice: str, user_id, *, note: Optional[str] = None,
                      source: str = "hand", batch_id=None, commit: bool = True,
                      do_recompute: bool = True) -> dict:
