@@ -2,7 +2,7 @@
 ads) for clubs whose picture is missing or out of date.
 
     python -m app.scripts.render_club_teasers [--limit N] [--club TEXT]
-        [--force | --missing] [--base-url URL] [--apply]
+        [--returning-only] [--force | --missing] [--base-url URL] [--apply]
 
 Dry run by default: lists the clubs that would be drawn and writes nothing.
 ``--apply`` opens headless Chromium on the site, takes the three pictures per
@@ -12,7 +12,9 @@ that have not registered are drawn; a registered club is left alone.
 
 ``--limit`` is the most clubs drawn in one run (default 50, never above 500).
 ``--club TEXT`` draws the one club whose name contains TEXT (it must match
-exactly one). ``--force`` redraws clubs that are already up to date, for after
+exactly one). ``--returning-only`` draws only clubs behind an archived or expired-trial
+BetterCricket club (the group ``pull_returning_club_teasers`` re-crawls) and
+nobody else. ``--force`` redraws clubs that are already up to date, for after
 a design change to the card (it starts from the same clubs every run, so use
 it with ``--club`` or one big ``--limit``). ``--missing`` draws clubs marked as
 drawn whose picture file is not on disk, which is what to run after a restore
@@ -40,6 +42,8 @@ async def main(argv=None) -> int:
     grp = ap.add_mutually_exclusive_group()
     grp.add_argument("--force", action="store_true")
     grp.add_argument("--missing", action="store_true")
+    ap.add_argument("--returning-only", action="store_true",
+                    help="only archived and expired-trial clubs")
     ap.add_argument("--base-url")
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args(argv)
@@ -60,7 +64,8 @@ async def main(argv=None) -> int:
         club_id = str(rows[0][0])
 
     out = await ti.render_pending(async_session_maker, limit=a.limit, club_id=club_id,
-                                  force=a.force, missing_files=a.missing, apply=a.apply, base=a.base_url)
+                                  force=a.force, missing_files=a.missing, apply=a.apply, base=a.base_url,
+                                  returning_only=a.returning_only)
     if out["status"] == "busy":
         print("a render is already running")
         return 1
