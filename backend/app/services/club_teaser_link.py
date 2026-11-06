@@ -24,8 +24,11 @@ Rules:
 * The token-to-club direction answers for any snapshot status; the
   identifier-to-token directions answer only for ``ok`` snapshots, because
   those are the only ones that have a page or a picture.
-* A club that has registered (``existing_org_id`` set) has no teaser to show
-  and is not returned by the identifier lookups.
+* A club that is a LIVE customer (see ``NOT_A_CUSTOMER_SQL``: a live BetterCricket
+  club that is paying or still on a running trial) has no teaser to show and is
+  not returned by the identifier lookups. A club whose BetterCricket club is
+  archived, or whose trial has expired without a subscription, is a prospect again
+  and is.
 """
 from __future__ import annotations
 
@@ -35,6 +38,43 @@ from typing import Iterable, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# Who counts as a customer. A directory club is a prospect for a teaser unless
+# the BetterCricket club it is linked to is a LIVE customer:
+#
+#   * no linked club                      -> prospect
+#   * the linked club is ARCHIVED         -> prospect (a test club, an abandoned
+#                                            trial, a club that left: its admin can
+#                                            come back and start a trial)
+#   * the linked club's trial has EXPIRED and it does not subscribe
+#                                         -> prospect (a lapsed trial: whoever comes
+#                                            back should see something good about
+#                                            their club)
+#   * on a trial that is still running, or paying (any module active or past due,
+#     or a Stripe subscription), or a club we cannot tell about -> customer
+#
+# "Cannot tell" is a linked club with no module subscription rows at all (an
+# internal or hand-arranged club): left alone rather than guessed at. A trial is
+# live until ``trial_ends_at`` (an open-ended trial never lapses), as
+# OrgModuleSubscription documents. All of these use the alias ``mc`` for
+# marketing_clubs.
+_LIVE_ORG = ("EXISTS (SELECT 1 FROM organisations o "
+             "WHERE o.id = mc.existing_org_id AND o.archived_at IS NULL)")
+LAPSED_TRIAL_ORG_SQL = (
+    "EXISTS (SELECT 1 FROM organisations o WHERE o.id = mc.existing_org_id AND o.archived_at IS NULL "
+    "AND o.stripe_subscription_id IS NULL "
+    "AND EXISTS (SELECT 1 FROM org_module_subscriptions s WHERE s.organisation_id = o.id "
+    "AND s.status = 'trial' AND s.trial_ends_at IS NOT NULL AND s.trial_ends_at < now()) "
+    "AND NOT EXISTS (SELECT 1 FROM org_module_subscriptions s WHERE s.organisation_id = o.id "
+    "AND (s.status IN ('active', 'past_due') "
+    "OR (s.status = 'trial' AND (s.trial_ends_at IS NULL OR s.trial_ends_at >= now())))))")
+LIVE_CUSTOMER_SQL = "(" + _LIVE_ORG + " AND NOT " + LAPSED_TRIAL_ORG_SQL + ")"
+NOT_A_CUSTOMER_SQL = "NOT " + LIVE_CUSTOMER_SQL
+ARCHIVED_ORG_SQL = ("EXISTS (SELECT 1 FROM organisations o "
+                    "WHERE o.id = mc.existing_org_id AND o.archived_at IS NOT NULL)")
+# A club that has finished with whatever trial the directory row still records
+# (archived, or lapsed) is not held back as a "trialist".
+FINISHED_WITH_TRIAL_SQL = "(" + ARCHIVED_ORG_SQL + " OR " + LAPSED_TRIAL_ORG_SQL + ")"
+
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 ID_RE = re.compile(r"^[0-9a-fA-F-]{8,64}$")
 MAX_IDS = 6
@@ -42,8 +82,10 @@ MAX_IDS = 6
 _CLUB = """
     SELECT t.token, t.status, t.version, t.image_version,
            mc.id AS club_id, mc.name, mc.utm_code, mc.grassroots_guid, mc.existing_org_id,
+           (""" + LIVE_CUSTOMER_SQL + """) AS live_customer,
            lower(t.snapshot->'club'->>'ca_org_id') AS ca_org_id,
-           (SELECT o.slug FROM organisations o WHERE o.id = mc.existing_org_id AND o.archived_at IS NULL) AS slug
+           (CASE WHEN """ + LIVE_CUSTOMER_SQL + """ THEN
+              (SELECT o.slug FROM organisations o WHERE o.id = mc.existing_org_id) END) AS slug
     FROM club_teaser_snapshots t
     JOIN marketing_clubs mc ON mc.id = t.marketing_club_id
 """
@@ -76,13 +118,13 @@ async def token_for_utm(session: AsyncSession, code) -> Optional[str]:
     if not want:
         return None
     rows = (await session.execute(text(
-        "SELECT mc.id, mc.existing_org_id, t.token, t.status FROM marketing_clubs mc "
+        "SELECT mc.id, " + LIVE_CUSTOMER_SQL + " AS live_customer, t.token, t.status FROM marketing_clubs mc "
         "LEFT JOIN club_teaser_snapshots t ON t.marketing_club_id = mc.id "
         "WHERE lower(mc.utm_code) = :c LIMIT 3"), {"c": want})).mappings().all()
     if len(rows) != 1:
         return None
     r = rows[0]
-    if r["token"] is None or r["status"] != "ok" or r["existing_org_id"] is not None:
+    if r["token"] is None or r["status"] != "ok" or r["live_customer"]:
         return None
     return r["token"]
 
@@ -97,7 +139,7 @@ async def token_for_ca_org(session: AsyncSession, ids: Iterable) -> Optional[str
     if not want:
         return None
     rows = (await session.execute(text(_CLUB + """
-        WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND mc.existing_org_id IS NULL
+        WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND """ + NOT_A_CUSTOMER_SQL + """
           AND (lower(t.snapshot->'club'->>'ca_org_id') = ANY(:ids) OR lower(mc.grassroots_guid) = ANY(:ids))
         LIMIT 20"""), {"ids": want})).mappings().all()
     if not rows:
@@ -119,7 +161,7 @@ async def link_health(session: AsyncSession) -> dict:
                  lower(NULLIF(t.snapshot->'club'->>'ca_org_id', '')) AS ca,
                  lower(NULLIF(btrim(mc.grassroots_guid), '')) AS guid
           FROM club_teaser_snapshots t JOIN marketing_clubs mc ON mc.id = t.marketing_club_id
-          WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND mc.existing_org_id IS NULL
+          WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND __NOT_CUSTOMER__
         ),
         utm_use AS (SELECT lower(NULLIF(btrim(utm_code), '')) AS u, count(*) AS n FROM marketing_clubs GROUP BY 1),
         ca_use AS (SELECT lower(NULLIF(snapshot->'club'->>'ca_org_id', '')) AS c, count(*) AS n
@@ -135,7 +177,7 @@ async def link_health(session: AsyncSession) -> dict:
         FROM ok
         LEFT JOIN utm_use ON utm_use.u = ok.utm
         LEFT JOIN ca_use ON ca_use.c = ok.ca
-    """))).mappings().first()
+    """.replace("__NOT_CUSTOMER__", NOT_A_CUSTOMER_SQL)))).mappings().first()
     return dict(r)
 
 
@@ -151,7 +193,7 @@ async def unlinked_clubs(session: AsyncSession, kind: str, limit: int = 25) -> l
         SELECT mc.name, t.token, {col} AS k, u.n
         FROM club_teaser_snapshots t JOIN marketing_clubs mc ON mc.id = t.marketing_club_id
         LEFT JOIN ({use}) u ON u.k = {col}
-        WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND mc.existing_org_id IS NULL
+        WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND {NOT_A_CUSTOMER_SQL}
           AND ({col} IS NULL OR u.n > 1)
         ORDER BY mc.name LIMIT :n"""), {"n": max(1, min(int(limit), 500))})).mappings().all()
     return [{"name": r["name"], "token": r["token"], "why": "missing" if r["k"] is None else f"shared by {r['n']}"}

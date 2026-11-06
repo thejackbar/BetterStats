@@ -48,10 +48,14 @@ EVENT_KINDS = {"view", "tile", "claim_open", "claim_go"}
 async def _row(db: AsyncSession, token: str):
     if not TOKEN_RE.match(token or ""):
         raise HTTPException(status_code=404, detail="Not found")
+    # ``registered_slug`` is set only for a LIVE customer (paying, or still on a
+    # running trial), whose page redirects to its own site. An archived club, or
+    # one whose trial lapsed without a subscription, keeps its teaser page: it is
+    # what a returning admin should see.
     row = (await db.execute(text("""
         SELECT t.snapshot, t.version, mc.id AS club_id, mc.existing_org_id,
-               (SELECT o.slug FROM organisations o
-                 WHERE o.id = mc.existing_org_id AND o.archived_at IS NULL) AS registered_slug
+               (CASE WHEN """ + club_teaser_link.LIVE_CUSTOMER_SQL + """ THEN
+                  (SELECT o.slug FROM organisations o WHERE o.id = mc.existing_org_id) END) AS registered_slug
         FROM club_teaser_snapshots t
         JOIN marketing_clubs mc ON mc.id = t.marketing_club_id
         WHERE t.token = :t AND t.status = 'ok' AND t.snapshot IS NOT NULL

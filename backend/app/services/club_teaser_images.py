@@ -46,6 +46,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import settings
+from app.services.club_teaser_link import NOT_A_CUSTOMER_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,7 @@ _DUE_SQL = """
     FROM club_teaser_snapshots t
     JOIN marketing_clubs mc ON mc.id = t.marketing_club_id
     WHERE t.status = 'ok' AND t.snapshot IS NOT NULL
-      AND mc.existing_org_id IS NULL
+      AND """ + NOT_A_CUSTOMER_SQL + """
       AND t.image_version IS DISTINCT FROM t.version
 """
 # A snapshot written under an older schema is about to be replaced by the crawl
@@ -215,13 +216,13 @@ async def images_progress(session: AsyncSession) -> dict:
                  COALESCE((t.snapshot->>'schema')::int, 0) >= :schema AS current
           FROM club_teaser_snapshots t
           JOIN marketing_clubs mc ON mc.id = t.marketing_club_id
-          WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND mc.existing_org_id IS NULL)
+          WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND __NOT_CUSTOMER__)
         SELECT count(*) FILTER (WHERE image_version IS NOT DISTINCT FROM version) AS ready,
                count(*) FILTER (WHERE image_version IS DISTINCT FROM version AND current) AS pending,
                count(*) FILTER (WHERE image_version IS DISTINCT FROM version AND NOT current) AS waiting,
                count(*) FILTER (WHERE image_version IS NOT NULL AND image_version <> version) AS stale
         FROM c
-    """), {"schema": _schema_version()})).mappings().first()
+    """.replace("__NOT_CUSTOMER__", NOT_A_CUSTOMER_SQL)), {"schema": _schema_version()})).mappings().first()
     return {"ready": row["ready"], "pending": row["pending"], "waiting": row["waiting"], "stale": row["stale"]}
 
 
@@ -241,13 +242,13 @@ async def due_clubs(session: AsyncSession, limit: int, *, club_id: Optional[str]
         rows = (await session.execute(text(
             "SELECT t.id, t.token, t.version, t.image_version, mc.id AS club_id, mc.name "
             "FROM club_teaser_snapshots t JOIN marketing_clubs mc ON mc.id = t.marketing_club_id "
-            "WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND mc.existing_org_id IS NULL "
+            "WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND " + NOT_A_CUSTOMER_SQL + " "
             "AND t.image_version IS NOT NULL ORDER BY t.changed_at NULLS LAST"))).mappings().all()
         return [dict(r) for r in rows if not image_path(r["token"], EMAIL_FORMAT).is_file()][:limit]
     where = _DUE_SQL if not force else """
     FROM club_teaser_snapshots t
     JOIN marketing_clubs mc ON mc.id = t.marketing_club_id
-    WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND mc.existing_org_id IS NULL
+    WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND """ + NOT_A_CUSTOMER_SQL + """
     """
     params: dict = {"n": limit}
     if club_id:

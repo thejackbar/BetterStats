@@ -50,6 +50,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.club_teaser_link import FINISHED_WITH_TRIAL_SQL, NOT_A_CUSTOMER_SQL
+
 logger = logging.getLogger(__name__)
 
 # 2: draws removed (played - won - lost is abandoned/tied/no-result, not draws),
@@ -562,9 +564,16 @@ _CLUB_COLS = """mc.id, mc.grassroots_guid AS guid, mc.name, mc.short_name, mc.su
 # Not a customer, not excluded, not asked to be left alone, real CA guid. A
 # club already trialling through the sales pipeline has done a trial, so it is
 # left out unless asked for.
-_TARGET_WHERE = """mc.kind = 'club' AND NOT mc.excluded AND NOT mc.not_interested
-                   AND mc.existing_org_id IS NULL
-                   AND mc.grassroots_guid ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'"""
+#
+# "Customer" means a club whose BetterCricket club is LIVE (see
+# club_teaser_link.NOT_A_CUSTOMER_SQL). A club whose BetterCricket club is
+# archived (a test club, an abandoned trial, a club that left), or whose trial
+# has expired with no subscription, is a prospect again, and its admin may come
+# back, so it is pulled like any other. Such a club is also not held back as a
+# "trialist": its trial is over.
+_TARGET_WHERE = ("mc.kind = 'club' AND NOT mc.excluded AND NOT mc.not_interested AND " + NOT_A_CUSTOMER_SQL + """
+                   AND mc.grassroots_guid ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'""")
+_NOT_TRIALLING = ("(jsonb_array_length(COALESCE(mc.trial_modules, '[]'::jsonb)) = 0 OR " + FINISHED_WITH_TRIAL_SQL + ")")
 
 
 # The Club Directory's own type filters, applied as the default for who gets a
@@ -617,7 +626,7 @@ async def due_clubs(session: AsyncSession, limit: int, *, now: Optional[datetime
     with an emailable contact (the ones a campaign will actually reach), then
     the longest overdue. ``type_modes`` is the Directory type filter."""
     now = now or datetime.now(timezone.utc)
-    trial = "" if include_trialists else "AND jsonb_array_length(COALESCE(mc.trial_modules, '[]'::jsonb)) = 0"
+    trial = "" if include_trialists else "AND " + _NOT_TRIALLING
     only = "AND mc.id = CAST(:club AS uuid)" if club_id else ""
     allowed = await type_filtered_ids(session, type_modes)
     if allowed is not None:
@@ -661,7 +670,7 @@ async def refresh_now(session: AsyncSession, *, limit: Optional[int] = None,
         SELECT t.id, t.pulled_at
         FROM marketing_clubs mc
         JOIN club_teaser_snapshots t ON t.marketing_club_id = mc.id
-        WHERE {_TARGET_WHERE} AND jsonb_array_length(COALESCE(mc.trial_modules, '[]'::jsonb)) = 0
+        WHERE {_TARGET_WHERE} AND {_NOT_TRIALLING}
               {only}
           AND t.next_pull_at > :now
           AND NOT (t.status = 'ok' AND COALESCE((t.snapshot->>'schema')::int, 0) < :schema)"""
@@ -729,7 +738,7 @@ async def teaser_progress(session: AsyncSession, *, now: Optional[datetime] = No
                COALESCE(SUM(t.api_calls) FILTER (WHERE t.pulled_at > :hour_ago), 0) AS calls_last_hour
         FROM marketing_clubs mc
         LEFT JOIN club_teaser_snapshots t ON t.marketing_club_id = mc.id
-        WHERE {_TARGET_WHERE} AND jsonb_array_length(COALESCE(mc.trial_modules, '[]'::jsonb)) = 0
+        WHERE {_TARGET_WHERE} AND {_NOT_TRIALLING}
               {only}
     """), params)).mappings().one()
     out = {k: int(row[k] or 0) for k in ("targets", "with_snapshot", "never_pulled", "due", "ok",

@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import club_directory as cd
 from app.services import club_teaser, club_teaser_images as ti
+from app.services.club_teaser_link import NOT_A_CUSTOMER_SQL
 
 PACK_FORMATS = ("feed", "story")
 DEFAULT_LIMIT = 50
@@ -131,7 +132,7 @@ _SQL = """
     FROM marketing_clubs mc
     JOIN club_teaser_snapshots t ON t.marketing_club_id = mc.id
     WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND t.image_version IS NOT NULL
-      AND mc.existing_org_id IS NULL AND mc.excluded IS NOT TRUE AND mc.not_interested IS NOT TRUE
+      AND """ + NOT_A_CUSTOMER_SQL + """ AND mc.excluded IS NOT TRUE AND mc.not_interested IS NOT TRUE
       AND mc.kind = 'club' AND mc.id = ANY(CAST(:ids AS uuid[]))
     ORDER BY mc.name, mc.id
 """

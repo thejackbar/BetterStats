@@ -467,7 +467,12 @@ export default function Trial() {
         const list = Array.isArray(found) ? found : []
         const hit = (want && list.find((c) => String(c.id || '').toLowerCase() === want))
           || (list.length === 1 ? list[0] : null)
-        if (hit && hit.already_registered && hit.already_registered_slug) {
+        if (hit && hit.already_registered && hit.already_registered_paused) {
+          // Claiming from the season page of a club whose trial has ended: it
+          // asks for more time, it does not start another trial or open the
+          // paused club site.
+          setExtensionClub(hit)
+        } else if (hit && hit.already_registered && hit.already_registered_slug) {
           navigate(`/${hit.already_registered_slug}`, { replace: true })
         } else if (hit && status.enabled) {
           setWizardClub(hit)
@@ -541,6 +546,25 @@ export default function Trial() {
     api.publicSelfServeTrackStep('club_prepared', getVisitorId(), {
       name: orgName(club), org_id: club.id,
     }).catch(() => {})
+    // A registered club that is live goes to its own site.
+    if (club.already_registered && !club.already_registered_paused && club.already_registered_slug) {
+      navigate(`/${club.already_registered_slug}`)
+      return
+    }
+    // Every other club, including one whose trial has ended (its page is
+    // paused), gets its season page when we hold one: built from Cricket
+    // Australia's public figures, it is what someone coming back should see, and
+    // it invites them to claim the club. No page, or a lookup that fails, falls
+    // through to what each case had before.
+    if (picking) return
+    setPicking(club.id || orgName(club))
+    let token = null
+    try {
+      const t = await api.publicTeaserByClub([club.id, club.organisationGuid, club.playHQId])
+      if (t?.found && t.token) token = t.token
+    } catch { /* fall through */ }
+    setPicking(null)
+    if (token) { navigate(`/preview/${encodeURIComponent(token)}`); return }
     // A registered club whose trial has ended has a paused page; offer an
     // extension request rather than sending them to it.
     if (club.already_registered && club.already_registered_paused) {
@@ -551,18 +575,6 @@ export default function Trial() {
       navigate(`/${club.already_registered_slug}`)
       return
     }
-    // A club we hold a season page for (built from Cricket Australia's public
-    // figures) goes straight to it; the page invites them to claim the club. A
-    // club we hold none for, or a lookup that fails, gets the ordinary choice.
-    if (picking) return
-    setPicking(club.id || orgName(club))
-    let token = null
-    try {
-      const t = await api.publicTeaserByClub([club.id, club.organisationGuid, club.playHQId])
-      if (t?.found && t.token) token = t.token
-    } catch { /* fall through to the ordinary choice */ }
-    setPicking(null)
-    if (token) { navigate(`/preview/${encodeURIComponent(token)}`); return }
     setActionClub(club)
   }
 

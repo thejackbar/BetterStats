@@ -16,6 +16,7 @@ import { chromium } from 'playwright'
 const BASE = process.argv[2] || process.env.APP_URL || 'http://127.0.0.1:5204'
 const EXECUTABLE = process.env.PW_CHROMIUM || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
 const TOKEN = 'TokenForRenmark0001'
+const PAUSED_TOKEN = 'TokenForPaused00001'
 
 let pass = 0, fail = 0
 const ck = (name, cond, extra = '') => {
@@ -30,6 +31,8 @@ const RESULTS = [
   { id: 'CA-RENMARK', playHQId: 'PH-RENMARK', organisationGuid: 'CA-RENMARK', name: 'Renmark North Cricket Club', already_registered: false },
   { id: 'CA-PLAIN', playHQId: 'PH-PLAIN', name: 'Plainville Cricket Club', already_registered: false },
   { id: 'CA-REG', playHQId: 'PH-REG', name: 'Registered Cricket Club', already_registered: true, already_registered_slug: 'registered-cc' },
+  { id: 'CA-PAUSED', playHQId: 'PH-PAUSED', name: 'Lapsed Cricket Club', already_registered: true, already_registered_paused: true, already_registered_slug: 'lapsed-cc' },
+  { id: 'CA-PAUSED2', playHQId: 'PH-PAUSED2', name: 'Lapsed No Page Cricket Club', already_registered: true, already_registered_paused: true, already_registered_slug: 'lapsed-two-cc' },
 ]
 const TEASER = {
   club: { name: 'Renmark North Cricket Club', suburb: 'Renmark', state: 'SA', association: 'Riverland Cricket Association', logo_url: null },
@@ -42,7 +45,7 @@ const TEASER = {
 
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function open({ byClub, delay = 0, width = 1300 } = {}) {
+async function open({ byClub, delay = 0, width = 1300, path = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 } })
   const page = await ctx.newPage()
   page.setDefaultTimeout(6000)
@@ -61,15 +64,22 @@ async function open({ byClub, delay = 0, width = 1300 } = {}) {
       if (delay) await new Promise((r) => setTimeout(r, delay))
       if (byClub === 'error') return json({ detail: 'boom' }, 500)
       const ids = u.searchParams.getAll('id')
-      return json(ids.includes('CA-RENMARK') ? { found: true, token: TOKEN } : { found: false })
+      if (ids.includes('CA-RENMARK')) return json({ found: true, token: TOKEN })
+      if (ids.includes('CA-PAUSED')) return json({ found: true, token: PAUSED_TOKEN })
+      return json({ found: false })
     }
     if (/public\/teaser\/[^/]+\/event/.test(p)) return json({ ok: true })
-    if (/public\/teaser\//.test(p)) return json(TEASER)
+    if (/public\/teaser\//.test(p)) {
+      if (p.includes(PAUSED_TOKEN)) return json({ ...TEASER, club: { ...TEASER.club, name: 'Lapsed Cricket Club' }, claim: { ca_org_id: 'CA-PAUSED', name: 'Lapsed Cricket Club' }, registered: null })
+      return json(TEASER)
+    }
     return json([])
   })
-  await page.goto(`${BASE}/trial`, { waitUntil: 'domcontentloaded' })
-  await page.getByLabel('Search for your club').fill('club')
-  await page.waitForSelector('button:has-text("Renmark North Cricket Club")')
+  await page.goto(`${BASE}${path || '/trial'}`, { waitUntil: 'domcontentloaded' })
+  if (!path) {
+    await page.getByLabel('Search for your club').fill('club')
+    await page.waitForSelector('button:has-text("Renmark North Cricket Club")')
+  }
   return { page, ctx, errors, lookups }
 }
 const row = (page, name) => page.locator('button', { hasText: name }).first()
@@ -125,6 +135,44 @@ await section('while the lookup runs', async () => {
   await r.click({ force: true, noWaitAfter: true, timeout: 500 }).catch(() => {})
   await page.waitForURL(`**/preview/${TOKEN}`)
   ck('a second press made no second lookup', lookups.length === 1, String(lookups.length))
+  await ctx.close()
+})
+
+await section('a club whose trial has ended', async () => {
+  const { page, ctx, lookups } = await open()
+  await row(page, 'Lapsed Cricket Club').click()
+  await page.waitForURL(`**/preview/${PAUSED_TOKEN}`)
+  ck('with a season page, it opens that page (what someone coming back should see), not the paused club site',
+     new URL(page.url()).pathname === `/preview/${PAUSED_TOKEN}`)
+  ck('after one lookup with that club\'s ids', lookups.length === 1 && lookups[0].includes('CA-PAUSED'), JSON.stringify(lookups))
+  await page.waitForSelector('[data-testid="teaser-page"]')
+  ck('and that page is not a redirect to the club site (no registered notice)', await page.locator('[data-testid="teaser-registered"]').count() === 0)
+  await ctx.close()
+})
+
+await section('a club whose trial has ended and has no season page', async () => {
+  const { page, ctx, lookups } = await open()
+  await row(page, 'Lapsed No Page Cricket Club').click()
+  await page.waitForSelector('[data-testid="trial-extension-form"]')
+  ck('it gets the extension request, as before (not the set-up choice, not the paused site)',
+     await page.locator('[data-testid="trial-not-yet-heading"]').count() === 0 && new URL(page.url()).pathname === '/trial')
+  ck('after a lookup that found nothing', lookups.length === 1 && lookups[0].includes('CA-PAUSED2'), JSON.stringify(lookups))
+  await ctx.close()
+})
+
+await section('a club whose trial has ended and the lookup fails', async () => {
+  const { page, ctx } = await open({ byClub: 'error' })
+  await row(page, 'Lapsed Cricket Club').click()
+  await page.waitForSelector('[data-testid="trial-extension-form"]')
+  ck('the visitor still gets the extension request', new URL(page.url()).pathname === '/trial')
+  await ctx.close()
+})
+
+await section('claiming from a lapsed club\'s page', async () => {
+  const { page, ctx } = await open({ path: `/trial?teaser=${PAUSED_TOKEN}` })
+  await page.waitForSelector('[data-testid="trial-extension-form"]')
+  ck('asks for more trial time (the club has had its trial), rather than opening the paused club site or a new wizard',
+     new URL(page.url()).pathname === '/trial' && await page.locator('[data-testid="trial-extension-form"]').count() === 1)
   await ctx.close()
 })
 

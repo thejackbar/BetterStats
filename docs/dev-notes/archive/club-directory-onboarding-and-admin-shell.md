@@ -1032,3 +1032,15 @@ The requirement: a visitor does a partial search for their club on the site, pic
 
 **Environment.** The sandbox was reset mid-session (no node_modules, no Python environment, no local Postgres, Chromium at a new path). Everything was rebuilt from `package-lock.json` and `requirements.txt` alone, which doubled as a clean-install check of the pinned dependencies (greenlet 3.0.3, playwright 1.47.0).
 
+## Archived and lapsed clubs are prospects (v9.139.9, Nov 2026)
+
+Found from a screenshot: picking "Wesley College" on /trial gave the set-up popup instead of a season page. The directory row was linked to an archived BetterCricket club (a test club), so every part of the teaser work treated it as a customer: the crawl never pulled it, nothing drew it, and the lookups ignored it. The user's point was that an admin could come back and start a trial, so archived clubs need a page; a follow-up said the same for clubs whose trial has expired and who do not subscribe, so that anyone returning finds something good about their club.
+
+**One definition.** `existing_org_id IS NULL` was repeated in about a dozen queries across five files. It is now one constant in the linkage service, so the next change to "who is a customer" is made in one place. A live customer is a live BetterCricket club that is paying or still on a running trial; archived, or lapsed (every trial expired, nothing paid, no Stripe subscription), is a prospect. The conservative edges are deliberate: a linked club with no subscription records is left alone, an open-ended trial never lapses, and past-due still counts as paying.
+
+**Reaching the page.** Fixing only the data would have left lapsed clubs unable to see it, because /trial sent a paused club to the extension request before any lookup, and a claim from a teaser page opened the paused club site. Both now try the season page first for a paused club and fall back to what they did before, and a claim from a lapsed club's page opens the extension request (more trial time) instead of a second trial.
+
+**Testing notes.** Two control runs against broken versions of the rule (the old "any link is a customer", and "lapsed ignores paying clubs and running trials") fail 17 and 3 checks. The old /trial fails the three lapsed-club behaviours. One check I wrote could not fail (`... or True`) and was caught on re-reading, then replaced by a real one.
+
+**Not done.** A cancelled paying subscriber with no expired trial row is not treated as lapsed; widening it to "cancelled subscribers" is a business choice. The directory has no marker for these clubs, so the panel does not count them separately from other targets.
+
