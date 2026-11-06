@@ -2,7 +2,7 @@
 
     python -m app.scripts.pull_returning_club_teasers [--limit N] [--due-only]
         [--rate CALLS_PER_SECOND] [--concurrency N] [--pause SECONDS]
-        [--type KEY=MODE] [--no-type-filter] [--apply]
+        [--type KEY=MODE] [--no-type-filter] [--ignore-stop] [--apply]
 
 Which clubs: a directory club whose BetterCricket club is ARCHIVED (a test club,
 an abandoned trial, a club that left), or whose trial has EXPIRED and who does
@@ -23,6 +23,12 @@ By default EVERY club in the group is re-pulled, whether or not it is due (that
 is what "re-crawl" means here). ``--due-only`` pulls only those whose snapshot is
 missing, overdue or on an old schema. ``--limit N`` takes the first N, for a
 sample.
+
+The operator's Stop switch (the Club Directory page) halts this script between
+clubs, like every other crawl. The switch is shared: it also holds the always-on
+crawl. To pull just this group while leaving the Stop switch ON, so the always-on
+crawl stays held, pass ``--ignore-stop``. It says so when it does, and the switch
+is not changed.
 
 Calls are paced (rule: outbound traffic to Cricket Australia is bounded and
 polite). ``--rate`` is calls a second on average; unset, it uses the rate
@@ -52,6 +58,8 @@ async def main(argv=None) -> int:
     ap.add_argument("--rate", type=float, default=None, metavar="CALLS_PER_SECOND")
     ap.add_argument("--type", action="append", default=[], metavar="KEY=MODE")
     ap.add_argument("--no-type-filter", action="store_true")
+    ap.add_argument("--ignore-stop", action="store_true",
+                    help="run even though the operator Stop switch is on (it is left on)")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     if a.limit < 0 or a.concurrency < 1:
@@ -92,10 +100,20 @@ async def main(argv=None) -> int:
             print(f"  ... and {len(chosen) - 25} more")
         return 0
 
+    should_stop = club_directory.is_crawl_paused
+    if a.ignore_stop:
+        async with async_session_maker() as s:
+            if await club_directory.is_crawl_paused(s):
+                print("The Stop switch is ON. Ignoring it because --ignore-stop was given; "
+                      "the switch is not changed, so the always-on crawl stays held.")
+
+        async def should_stop(_session):  # noqa: F811 - the operator asked for this run
+            return False
+
     pacer = CallPacer(rate)
     started = time.monotonic()
     summary = await club_teaser.run_batch(
-        limit, should_stop=club_directory.is_crawl_paused, pause_seconds=a.pause,
+        limit, should_stop=should_stop, pause_seconds=a.pause,
         club_concurrency=a.concurrency, type_modes=modes, returning_only=True, force=not a.due_only,
         api_factory=lambda: club_teaser.LiveAPI(pacer=pacer))
     elapsed = time.monotonic() - started

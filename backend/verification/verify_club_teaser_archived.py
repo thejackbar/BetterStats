@@ -397,8 +397,16 @@ async def main() -> None:
             await c.execute(text("UPDATE marketing_crawl_control SET paused = TRUE WHERE id = 1"))
         rc, stopped = await run(["--no-type-filter", "--apply", "--rate", "10", "--pause", "0"])
         check("the operator's Stop switch halts it before any club is pulled", StubAPI.pulls == [] and "Stopped by the operator" in stopped, stopped[-300:])
+        rc, forced = await run(["--no-type-filter", "--apply", "--rate", "10", "--pause", "0", "--ignore-stop"])
+        async with Session() as s2:
+            still_stopped = await s2.scalar(text("SELECT paused FROM marketing_crawl_control WHERE id = 1"))
+        check("with --ignore-stop it pulls the group even though the Stop switch is on, and says it is ignoring it",
+              len(set(StubAPI.pulls)) == 4 and "Ignoring it because --ignore-stop" in forced, forced[:400])
+        check("and it leaves the Stop switch ON (so the always-on crawl stays held)", still_stopped is True)
         async with engine.begin() as c:
             await c.execute(text("UPDATE marketing_crawl_control SET paused = FALSE WHERE id = 1"))
+        rc, quiet = await run(["--no-type-filter", "--apply", "--rate", "10", "--pause", "0", "--ignore-stop", "--limit", "1"])
+        check("with the switch OFF the flag says nothing and changes nothing", "Ignoring" not in quiet and len(StubAPI.pulls) == 1)
         try:
             await script.main(["--rate", "50"])
             bad_rate = False
