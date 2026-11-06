@@ -252,3 +252,50 @@ async def store_theme(session: AsyncSession, club_id, logo_url: Optional[str], *
         except Exception:  # noqa: BLE001
             pass
         return None
+
+
+def logo_from_result(org: dict) -> Optional[str]:
+    """The crest address in a Cricket Australia club search result. The search
+    returns it as ``logoURL``; other casings are kept as fallbacks. Only an
+    http(s) address is kept."""
+    for k in ("logoURL", "logoUrl", "logo_url"):
+        v = org.get(k)
+        if isinstance(v, str) and v.strip().lower().startswith(("http://", "https://")):
+            return v.strip()
+    logo = org.get("logo")
+    if isinstance(logo, dict):
+        return logo_from_result({"logoURL": logo.get("url")})
+    return None
+
+
+async def remember_logo(session: AsyncSession, club_id, logo_url: str) -> None:
+    """Record a club's crest address on its directory row, but only where the row
+    has none: an address somebody typed there is theirs and is never replaced.
+    Commits. Never raises."""
+    try:
+        await session.execute(text(
+            "UPDATE marketing_clubs SET logo_url = :l WHERE id = CAST(:c AS uuid) "
+            "AND (logo_url IS NULL OR btrim(logo_url) = '')"), {"l": logo_url, "c": str(club_id)})
+        await session.commit()
+    except Exception:  # noqa: BLE001 - never fails a pull
+        logger.exception("Remembering the logo failed for %s", club_id)
+        try:
+            await session.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def find_logo(name: str, directory_guid: str, *, search=None) -> Optional[str]:
+    """The crest address for a directory club, from the same Cricket Australia name
+    search the crawl and /trial use: found by name, confirmed on the id the
+    directory holds (a name alone is never trusted). One call."""
+    from app.services import playhq_client
+    want = (directory_guid or "").lower()
+    try:
+        for o in await (search or playhq_client.search_organisations)(name or ""):
+            ca = o.get("organisationGuid") or o.get("id")
+            if ca and want in {str(o.get("playHQId") or "").lower(), str(ca).lower()}:
+                return logo_from_result(o)
+    except Exception as exc:  # noqa: BLE001 - a failed search is not an error here
+        logger.info("Logo search failed for %s: %s", name, exc)
+    return None

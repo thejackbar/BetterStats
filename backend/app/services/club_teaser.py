@@ -125,6 +125,12 @@ class LiveAPI:
         for o in await self._run(self._ph.search_organisations, club.get("name") or ""):
             ca = o.get("organisationGuid") or o.get("id")
             if ca and want in {str(o.get("playHQId") or "").lower(), str(ca).lower()}:
+                # The same search result carries the club's crest. Keep it on the
+                # club being pulled: it costs no further call, and it is what the
+                # season page shows and reads its colours from.
+                logo = club_teaser_theme.logo_from_result(o)
+                if logo and club is not None:
+                    club["logo_url"] = logo
                 return str(ca)
         return None
 
@@ -916,6 +922,8 @@ async def save_result(session: AsyncSession, club: dict, result: dict, *,
              "ss": result.get("season_start"), "calls": result.get("calls", 0),
              "now": now, "nxt": now + delay, "id": prior["id"]})
     await session.commit()
+    if status == "ok" and club.get("logo_url"):
+        await club_teaser_theme.remember_logo(session, cid, club["logo_url"])
     if status == "ok":
         # The club's look (accent colour, light or dark) is read from its logo
         # when it has none yet or the logo changed. One GET; never fails the pull.

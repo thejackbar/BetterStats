@@ -215,9 +215,16 @@ async def main():
     print("the backfill script")
     fetched.clear()
     lines: list[str] = []
-    out = await bf.run(Session, apply=False, fetch=stub_fetch, out=lines.append)
-    check("the dry run lists the clubs that have a logo and no theme, and fetches nothing",
-          out["due"] == 3 and not fetched and any("Crest Red CC" in l for l in lines) and not any("No Logo CC" in l for l in lines), f"{out} {lines}")
+    searched: list[str] = []
+
+    async def finder(name, guid):
+        searched.append(name)
+        return "https://good.example/two.png" if name == "No Logo CC" else None
+
+    out = await bf.run(Session, apply=False, fetch=stub_fetch, finder=finder, out=lines.append)
+    check("the dry run lists clubs with a crest and no theme, and clubs with no crest address yet, and fetches and searches nothing",
+          out["due"] == 4 and not fetched and not searched and any("Crest Red CC" in l for l in lines)
+          and any("No Logo CC" in l and "will be searched for" in l for l in lines), f"{out} {lines}")
 
     class Pacer:
         calls = 0
@@ -225,18 +232,36 @@ async def main():
         async def wait(self):
             Pacer.calls += 1
 
-    out = await bf.run(Session, apply=True, fetch=stub_fetch, pacer=Pacer(), out=lines.append)
-    check("--apply reads each due club's logo once, paced", out["read"] == 2 and out["unreadable"] == 1 and Pacer.calls == 3 and len(fetched) == 3, f"{out} {fetched}")
+    out = await bf.run(Session, apply=True, fetch=stub_fetch, finder=finder, pacer=Pacer(), out=lines.append)
+    check("--apply searches only for the club with no crest address, and reads each logo once, every outbound call paced",
+          searched == ["No Logo CC"] and out["found"] == 1 and out["read"] == 3 and out["unreadable"] == 1 and Pacer.calls == 5 and len(fetched) == 4,
+          f"{out} {searched} {fetched} {Pacer.calls}")
+    async with Session() as s:
+        crest = (await s.execute(text("SELECT logo_url FROM marketing_clubs WHERE id = CAST(:i AS uuid)"), {"i": K["b"]["id"]})).scalar()
+    check("the crest address it found is stored on the directory row", crest == "https://good.example/two.png", str(crest))
     s_a = await snap_state("a")
     check("the clubs with readable logos now have themes; the broken one still has none",
-          s_a["theme"] and (await snap_state("d"))["theme"]["mode"] == "light" and (await snap_state("c"))["theme"] is None)
+          s_a["theme"] and (await snap_state("d"))["theme"]["mode"] == "light" and (await snap_state("b"))["theme"] and (await snap_state("c"))["theme"] is None)
     check("no snapshot or picture was touched", s_a["version"] == 3 and s_a["image_version"] == 3 and (await snap_state("d"))["image_version"] == 3)
     fetched.clear()
-    out = await bf.run(Session, apply=True, fetch=stub_fetch, pacer=Pacer(), out=lines.append)
-    check("a second run only retries the club that could not be read", out["due"] == 1 and fetched == ["https://gone.example/x.png"], f"{out} {fetched}")
+    searched.clear()
+    out = await bf.run(Session, apply=True, fetch=stub_fetch, finder=finder, pacer=Pacer(), out=lines.append)
+    check("a second run only retries the club that could not be read, and searches for nobody",
+          out["due"] == 1 and fetched == ["https://gone.example/x.png"] and searched == [], f"{out} {fetched} {searched}")
     fetched.clear()
-    out = await bf.run(Session, apply=True, redo=True, fetch=stub_fetch, pacer=Pacer(), out=lines.append)
-    check("--redo reads every club with a logo again", out["due"] == 3, str(out))
+    out = await bf.run(Session, apply=True, redo=True, fetch=stub_fetch, finder=finder, pacer=Pacer(), out=lines.append)
+    check("--redo reads every club that has a crest address again", out["due"] == 4, str(out))
+    unfound = await bf.run(Session, apply=True, club="Nothing Like This", fetch=stub_fetch, finder=finder, pacer=Pacer(), out=lines.append)
+    check("a club whose crest cannot be found is counted and left alone",
+          unfound["due"] == 0)
+    async with Session() as s:
+        await s.execute(text("UPDATE marketing_clubs SET logo_url = NULL WHERE id = CAST(:i AS uuid)"), {"i": K["c"]["id"]})
+        await s.commit()
+    out = await bf.run(Session, apply=True, club="Broken Logo", fetch=stub_fetch, finder=finder, pacer=Pacer(), out=lines.append)
+    check("a club the search cannot place is counted as having no crest, not as an error", out["no_logo"] == 1 and out["read"] == 0, str(out))
+    async with Session() as s:
+        await s.execute(text("UPDATE marketing_clubs SET logo_url = 'https://gone.example/x.png' WHERE id = CAST(:i AS uuid)"), {"i": K["c"]["id"]})
+        await s.commit()
 
     async with Session() as s:
         await s.execute(text("DELETE FROM club_teaser_snapshots WHERE marketing_club_id = CAST(:i AS uuid)"), {"i": K["d"]["id"]})
@@ -281,6 +306,49 @@ async def main():
         r2 = await ct.save_result(s, {"id": K["b"]["id"], "guid": g(), "logo_url": "https://x"}, {"status": "error", "error": "boom", "calls": 1})
     check("a failed pull neither reads a logo nor loses the theme", r2["status"] == "error" and (await snap_state("b"))["theme"]["accent"])
 
+
+    print("the crest from the crawl's own search")
+    class FakePH:
+        @staticmethod
+        async def search_organisations(name):
+            return [{"id": "ca-other", "playHQId": "ph-other", "name": "Other", "logoURL": "https://cdn.example/other.png"},
+                    {"id": "ca-1", "organisationGuid": "ca-1", "playHQId": "ph-1", "name": name, "logoURL": "https://cdn.example/mine.png"}]
+    api = ct.LiveAPI()
+    api._ph = FakePH
+    club_dict = {"name": "Mine CC"}
+    got = await api.resolve_org(club_dict, "ph-1")
+    check("resolving a club for the pull keeps its crest from the same search result, at no extra call",
+          got == "ca-1" and club_dict.get("logo_url") == "https://cdn.example/mine.png" and api.calls == 1, f"{got} {club_dict} {api.calls}")
+    other = {"name": "Mine CC"}
+    check("a club the search does not confirm on its id gets no crest", await api.resolve_org(other, "ph-nope") is None and "logo_url" not in other)
+    check("only an http(s) address is kept as a crest",
+          tt.logo_from_result({"logoURL": "javascript:alert(1)"}) is None and tt.logo_from_result({"logoURL": "https://a/b.png"}) == "https://a/b.png"
+          and tt.logo_from_result({"logo": {"url": "https://a/c.png"}}) == "https://a/c.png")
+    check("find_logo confirms the club on its id, as the crawl does",
+          await tt.find_logo("Mine CC", "ph-1", search=FakePH.search_organisations) == "https://cdn.example/mine.png"
+          and await tt.find_logo("Mine CC", "ph-zzz", search=FakePH.search_organisations) is None)
+    async with Session() as s:
+        b_before = (await s.execute(text("SELECT logo_url FROM marketing_clubs WHERE id = CAST(:i AS uuid)"), {"i": K["b"]["id"]})).scalar()
+        await tt.remember_logo(s, K["d"]["id"], "https://cdn.example/should-not-replace.png")
+        await tt.remember_logo(s, K["b"]["id"], "https://cdn.example/should-not-replace-either.png")
+        d_logo = (await s.execute(text("SELECT logo_url FROM marketing_clubs WHERE id = CAST(:i AS uuid)"), {"i": K["d"]["id"]})).scalar()
+        b_logo = (await s.execute(text("SELECT logo_url FROM marketing_clubs WHERE id = CAST(:i AS uuid)"), {"i": K["b"]["id"]})).scalar()
+    check("an address already on the directory row is never replaced", d_logo == "https://good.example/two.png" and b_logo == b_before and b_before, f"{d_logo} {b_logo} {b_before}")
+    async with Session() as s:
+        await s.execute(text("UPDATE marketing_clubs SET logo_url = NULL WHERE id = CAST(:i AS uuid)"), {"i": K["d"]["id"]})
+        await s.commit()
+        await tt.remember_logo(s, K["d"]["id"], "https://cdn.example/filled.png")
+        d_logo = (await s.execute(text("SELECT logo_url FROM marketing_clubs WHERE id = CAST(:i AS uuid)"), {"i": K["d"]["id"]})).scalar()
+    check("an empty one is filled", d_logo == "https://cdn.example/filled.png", str(d_logo))
+    async with Session() as s:
+        res = {"status": "ok", "snapshot": {"schema": ct.SCHEMA_VERSION, "club": {"name": "Mine CC", "logo_url": "https://cdn.example/mine.png"}, "season": {"name": "S"},
+                                            "totals": {"matches": 12}, "batting": [{"name": "A", "runs": 1}], "bowling": []}, "calls": 3}
+        await s.execute(text("UPDATE marketing_clubs SET logo_url = NULL WHERE id = CAST(:i AS uuid)"), {"i": K["c"]["id"]})
+        await s.commit()
+        await ct.save_result(s, {"id": K["c"]["id"], "guid": g(), "logo_url": "https://cdn.example/mine.png"}, res)
+        c_logo = (await s.execute(text("SELECT logo_url FROM marketing_clubs WHERE id = CAST(:i AS uuid)"), {"i": K["c"]["id"]})).scalar()
+    check("a pull records the crest it found on the directory row", c_logo == "https://cdn.example/mine.png", str(c_logo))
+
     print("the public page")
     async with Session() as s:
         page = await pt.get_teaser(K["d"]["token"], req(), s)
@@ -295,6 +363,13 @@ async def main():
     async with Session() as s:
         none_page = await pt.get_teaser(K["c"]["token"], req("10.9.9.7"), s)
     check("a club with no theme gets none (the page keeps BetterCricket's look)", none_page["theme"] is None)
+    async with Session() as s:
+        await s.execute(text("UPDATE club_teaser_snapshots SET snapshot = jsonb_set(snapshot, '{club,logo_url}', 'null'::jsonb) WHERE marketing_club_id = CAST(:i AS uuid)"), {"i": K["d"]["id"]})
+        await s.execute(text("UPDATE marketing_clubs SET logo_url = 'https://cdn.example/dir.png' WHERE id = CAST(:i AS uuid)"), {"i": K["d"]["id"]})
+        await s.commit()
+        overlay = await pt.get_teaser(K["d"]["token"], req("10.9.9.6"), s)
+    check("a snapshot pulled before the crest was captured shows the directory row's crest, with no re-pull",
+          (overlay.get("club") or {}).get("logo_url") == "https://cdn.example/dir.png", str(overlay["club"]))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     await engine.dispose()

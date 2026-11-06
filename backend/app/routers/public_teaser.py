@@ -53,7 +53,7 @@ async def _row(db: AsyncSession, token: str):
     # one whose trial lapsed without a subscription, keeps its teaser page: it is
     # what a returning admin should see.
     row = (await db.execute(text("""
-        SELECT t.snapshot, t.version, t.theme, mc.id AS club_id, mc.existing_org_id,
+        SELECT t.snapshot, t.version, t.theme, mc.logo_url AS directory_logo, mc.id AS club_id, mc.existing_org_id,
                (CASE WHEN """ + club_teaser_link.LIVE_CUSTOMER_SQL + """ THEN
                   (SELECT o.slug FROM organisations o WHERE o.id = mc.existing_org_id) END) AS registered_slug
         FROM club_teaser_snapshots t
@@ -104,6 +104,10 @@ async def get_teaser(token: str, request: Request, db: AsyncSession = Depends(ge
     snap = row["snapshot"]
     view = club_teaser.presentation(snap)
     club = snap.get("club") or {}
+    # A snapshot pulled before the crest was captured has none; the directory row
+    # may. Read it here so the page shows the crest without re-pulling the club.
+    if not (view.get("club") or {}).get("logo_url") and row["directory_logo"]:
+        view["club"] = {**(view.get("club") or {}), "logo_url": row["directory_logo"]}
     return {
         **view,
         "version": row["version"],
