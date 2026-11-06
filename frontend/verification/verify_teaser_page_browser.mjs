@@ -3,10 +3,12 @@
 //   npx vite --port 5204 &
 //   node frontend/verification/verify_teaser_page_browser.mjs [baseUrl]
 //
-// Measured: what the page leads with and what it leaves out, that EVERY tile
-// opens the same claim sheet, the exact events sent, that Escape and the
-// backdrop close it, the registered and not-found states, no club navbar or
-// CTA bar, and 390px. Then the other half: /trial?teaser=... opens the wizard
+// Measured: the page laid out as the club dashboard (header, tiles, top batters,
+// top bowlers, season best), the paid club's menu bar, that EVERY tile, row and
+// menu item opens an invitation and reports where, the club's own accent and
+// light or dark (and BetterCricket's green when there is none), the exact events
+// sent, that Escape and the backdrop close it, the registered and not-found
+// states, and 390px with the menu folded. Then the other half: /trial?teaser=... opens the wizard
 // on the right club (or the club's own site, or a prefilled search).
 import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
@@ -25,6 +27,7 @@ const FLEM = {
   club: { name: 'Flemington Cricket Club', suburb: 'Ascot Vale', state: 'VIC', association: 'Mercantile Cricket Association', logo_url: null },
   season: { name: 'Summer 2025/26', year: 2025 },
   hero: { kind: 'runs', player: 'K. Parekh', value: 565, unit: 'runs', detail: 'average 56.5, highest score 100*, 1 hundred' },
+  theme: null,
   lead: { grade: 'A Reserve', rank: 8, teams: 8 }, teams: 4, matches: 61, record: null, ladders_shown: [],
   history: { seasons_listed: 20, first_year: 2005 }, version: 3,
   batting: [['K. Parekh', 565, 56.5], ['J. Little', 419, 32.23], ['S. Molligoda', 384, 29.54], ['R. Two', 300, 20], ['R. Three', 250, 18]]
@@ -83,45 +86,87 @@ const textOf = async (l) => (await l.count() ? await l.first().innerText() : '')
 const tile = (page, id) => page.locator(`[data-tile="${id}"]`)
 const sheet = (page) => page.locator('[data-testid="teaser-sheet"]')
 
-// ---- 1. The page a club at the foot of its ladder sees -----------------------
+// ---- 1. The dashboard a club at the foot of its ladder sees -------------------
+const NAV_KEYS = ['players', 'stats', 'games', 'compare', 'yearbook', 'website']
 await section('block 1', async () => {
   const { page, ctx, errors, events } = await open(`/preview/${TOKEN}`)
-  ck('the club and its place are named', /Flemington Cricket Club/.test(await textOf(page.locator('[data-testid="teaser-club"]')))
-     && /Ascot Vale, VIC/.test(await textOf(page.locator('main'))))
-  ck('the season is shown', /Summer 2025\/26/i.test(await textOf(page.locator('main'))))
-  ck('it LEADS with the top run-scorer: 565 runs, named', (await textOf(page.locator('[data-testid="teaser-hero-value"]'))) === '565'
-     && /K\. Parekh/.test(await textOf(page.locator('[data-testid="teaser-hero-player"]'))))
-  ck('with the average, highest score and hundred beneath', /average 56\.5, highest score 100\*, 1 hundred/.test(await textOf(tile(page, 'hero'))))
-  ck('there is NO season record tile for a club that lost most of its games', await tile(page, 'record').count() === 0)
-  ck('and no ladder tile when no grade is in the top half', await tile(page, 'ladder').count() === 0)
-  ck('batting, bowling, fielding and records are shown',
-     await tile(page, 'batting').count() === 1 && await tile(page, 'bowling').count() === 1
-     && await tile(page, 'fielding').count() === 1 && await tile(page, 'records').count() === 1)
+  const main = await textOf(page.locator('main'))
+  ck('the club and its place are named', /Flemington Cricket Club/.test(await textOf(page.locator('[data-testid="teaser-club"]'))) && /ASCOT VALE, VIC/.test(main), main.slice(0, 200))
+  ck('it is laid out as the club dashboard, with the season named', /CLUB DASHBOARD/.test(main) && /SUMMER 2025\/26/i.test(main))
+  ck('there is no hero tile any more (the top lists carry it)', await tile(page, 'hero').count() === 0 && await page.locator('[data-testid="teaser-hero-value"]').count() === 0)
+  const kpi = await textOf(page.locator('[data-testid="teaser-record"]'))
+  ck('the tiles show matches played and, with no flattering record, no win rate, won or lost', /MATCHES PLAYED/.test(kpi) && /61/.test(kpi) && !/WIN RATE|WON|LOST/.test(kpi), kpi)
+  ck('there is no ladder card when no grade is in the top half', await page.locator('[data-testid="teaser-ladders"]').count() === 0)
+  ck('top batters, top bowlers and season best are shown, with fielding inside season best',
+     await tile(page, 'batting').count() === 1 && await tile(page, 'bowling').count() === 1 && await tile(page, 'records').count() === 1
+     && await page.locator('[data-tile="records"] [data-tile="fielding"]').count() === 1)
+  ck('the three cards sit side by side at desktop width', await page.evaluate(() => {
+    const ys = ['batting', 'bowling', 'records'].map((t) => Math.round(document.querySelector(`[data-tile="${t}"]`).getBoundingClientRect().top))
+    return new Set(ys).size === 1
+  }))
+  const best = await textOf(page.locator('[data-testid="teaser-season-best"]'))
+  ck('season best names the highest score and the best figures in place of milestones',
+     /K\. Parekh/.test(best) && /100\*/.test(best) && /BEST BOWLING FIGURES/.test(best) && /6-11/.test(best), best)
+  const bat = await textOf(tile(page, 'batting'))
+  ck('batting rows read like the dashboard: name, AVG and HS beneath, runs on the right', /K\. Parekh/.test(bat) && /AVG 56\.50 · HS 90/.test(bat) && /565/.test(bat), bat)
+  const bowl = await textOf(tile(page, 'bowling'))
+  ck('bowling rows read AVG, ECON and BEST', /AVG 16\.70 · ECON 4\.40 · BEST 6\/11/.test(bowl), bowl)
   const rows = await page.locator('[data-tile="batting"] li').evaluateAll((els) => els.map((e) => getComputedStyle(e).opacity))
   ck('batting shows five rows, the first three full and the last two dimmed', rows.length === 5
      && rows.slice(0, 3).every((o) => o === '1') && rows.slice(3).every((o) => Number(o) < 0.6), rows.join(','))
-  ck('the page carries no source line, only the tell-us link', !/public match data/i.test(await textOf(page.locator('main')))
-     && /Something not right\?\s*Tell us/.test(await textOf(page.locator('main'))))
+  ck('no year is claimed anywhere (the first year was Play-Cricket\'s, not what we mean)', !/2005|back to|every player's career/i.test(await textOf(page.locator('body'))))
+  ck('the footer says it is one season of public figures and offers the tell-us link', /one season of Cricket Australia's public match data/.test(main) && /Something not right\?\s*Tell us/.test(main))
   ck('the tab title names the club and season', /Flemington Cricket Club: your Summer 2025\/26/.test(await page.title()))
-  ck('the page tells search engines not to index it',
-     await page.locator('meta[name="robots"]').first().getAttribute('content') === 'noindex, nofollow')
+  ck('the page tells search engines not to index it', await page.locator('meta[name="robots"]').first().getAttribute('content') === 'noindex, nofollow')
   ck('a view event was sent exactly once', events.filter((e) => e.kind === 'view').length === 1, JSON.stringify(events))
-  ck('there is no club navbar and no CTA bar of the site', await page.locator('nav').count() === 0
-     && !/get your club on BetterCricket/i.test(await textOf(page.locator('body'))))
   ck('no page errors', errors.length === 0, errors.join(' | '))
+  await page.screenshot({ path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/dashboard-default.png` : '/tmp/dashboard-default.png' })
   await ctx.close()
 })
 
-// ---- 2. Every tile opens the SAME sheet, and reports where -------------------
-for (const id of ['hero', 'batting', 'bowling', 'fielding', 'records']) await section(`tile ${id}`, async () => {
+// ---- 1b. The menu bar a paid club has -----------------------------------------------
+await section('block menu', async () => {
+  const { page, ctx } = await open(`/preview/${TOKEN}`)
+  const nav = page.locator('[data-testid="teaser-nav"]')
+  const t = await textOf(nav)
+  ck('the bar carries the paid menu: Home, Players, Stats, Games, Compare, Yearbook, Website',
+     ['Home', 'Players', 'Stats', 'Games', 'Compare', 'Yearbook', 'Website'].every((w) => t.includes(w)), t)
+  ck('and the player search, Player Dashboard, the admin button and Powered by BetterCricket',
+     /Search players/.test(t) && /PLAYER DASHBOARD/.test(t) && /CLAIM YOUR CLUB/.test(t) && await nav.locator('img[alt="BetterCricket"]').count() === 1, t)
+  ck('Home is the current page', await nav.locator('[aria-current="page"]').count() === 1)
+  ck('the menu does not run under the search box', await page.evaluate(() => {
+    const n = document.querySelector('nav[aria-label="Club menu"]').getBoundingClientRect()
+    const q = document.querySelector('[data-nav="search"]').getBoundingClientRect()
+    return n.right <= q.left + 0.5
+  }))
+  ck('the bar is sticky', await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="teaser-nav"]')).position) === 'sticky')
+  await ctx.close()
+})
+
+// ---- 2. Every tile, row and menu item opens an invitation, and reports where ---------
+for (const id of ['batting', 'bowling', 'records', 'fielding', 'kpi-pl']) await section(`tile ${id}`, async () => {
   const { page, ctx, events } = await open(`/preview/${TOKEN}`)
-  await tile(page, id).click()
+  await tile(page, id).first().click()
   await page.waitForTimeout(300)
   const s = await textOf(sheet(page))
   ck(`tapping ${id} opens the claim sheet naming the club`, /Flemington Cricket Club's season/.test(s), s.slice(0, 80))
-  ck(`${id}: the tap is reported with its section, then claim_open`,
-     events.some((e) => e.kind === 'tile' && e.section === id) && events.some((e) => e.kind === 'claim_open' && e.section === id),
-     JSON.stringify(events))
+  ck(`${id}: the tap is reported, then claim_open`, events.some((e) => e.kind === 'claim_open'), JSON.stringify(events))
+  await ctx.close()
+})
+const SECTION_TITLES = {
+  players: /Every Flemington Cricket Club player, in one place/, stats: /Leaderboards, records and Stat Lab/,
+  games: /Every result, fixture and ladder/, compare: /Put two players side by side/,
+  yearbook: /A yearbook for every season/, website: /A club website that keeps itself up to date/,
+  search: /Find any player the club has had/, dashboard: /A dashboard for every player/, leaderboard: /The full leaderboard/,
+  season: /Every season, every grade/,
+}
+for (const [key, re] of Object.entries(SECTION_TITLES)) await section(`nav ${key}`, async () => {
+  const { page, ctx, events } = await open(`/preview/${TOKEN}`)
+  await page.locator(`[data-nav="${key}"]:visible`).first().click()
+  await page.waitForTimeout(250)
+  const s = await textOf(sheet(page))
+  ck(`${key}: opens a card that says what that section is, with the claim button`, re.test(s) && /Free trial, no card/.test(s) && /Claim Flemington Cricket Club free/.test(s), s.slice(0, 160))
+  ck(`${key}: the press is reported with that section`, events.some((e) => e.kind === 'tile' && e.section === key), JSON.stringify(events))
   await ctx.close()
 })
 await section('block 2', async () => {
@@ -129,7 +174,7 @@ await section('block 2', async () => {
   await tile(page, 'batting').click()
   await page.waitForTimeout(200)
   const s = await textOf(sheet(page))
-  ck('the sheet says what the club gets, including the years back', /back to 2005/.test(s) && /Free trial, no card/.test(s), s)
+  ck('the generic sheet says what the club gets, with no year in it', /Free trial, no card/.test(s) && !/back to \d{4}/.test(s), s)
   ck('the primary button has the focus when it opens', await page.evaluate(() => document.activeElement?.getAttribute('data-testid')) === 'teaser-sheet-go')
   await page.keyboard.press('Escape')
   await page.waitForTimeout(200)
@@ -138,8 +183,7 @@ await section('block 2', async () => {
   await page.locator('[data-testid="teaser-bar-cta"]').click()
   await page.waitForTimeout(200)
   ck('the bottom button reads "Claim <club> free" and opens the same sheet', /Claim Flemington Cricket Club free/.test(await textOf(page.locator('[data-testid="teaser-bar-cta"]'))) && await sheet(page).count() === 1)
-  ck('opened from a button it reports claim_open for the header, not a tile',
-     events.some((e) => e.kind === 'claim_open' && e.section === 'header'))
+  ck('opened from a button it reports claim_open for the header, not a tile', events.some((e) => e.kind === 'claim_open' && e.section === 'header'))
   await page.locator('[data-testid="teaser-sheet-backdrop"]').click({ position: { x: 5, y: 5 } })
   await page.waitForTimeout(200)
   ck('the backdrop closes it', await sheet(page).count() === 0)
@@ -157,15 +201,55 @@ await section('block 2', async () => {
   await ctx.close()
 })
 
-// ---- 3. A club that did well is shown its record and ladder places ---------------
+// ---- 3. A club that did well is shown its record and ladder places -----------------
 await section('block 3', async () => {
   const { page, ctx } = await open(`/preview/${TOKEN}`, { teaser: BRIS })
-  ck('a wicket-taker can lead: "Leading wicket-taker", 26', /leading wicket-taker/i.test(await textOf(tile(page, 'hero')))
-     && await textOf(page.locator('[data-testid="teaser-hero-value"]')) === '26')
-  const rec = await textOf(page.locator('[data-testid="teaser-record"]'))
-  ck('the record is shown when it flatters: 69 played, 33 won, 21 lost', /69/.test(rec) && /33/.test(rec) && /21/.test(rec), rec)
+  const kpi = await textOf(page.locator('[data-testid="teaser-record"]'))
+  ck('the tiles show win rate 48%, 69 played, 33 won, 21 lost when the record flatters', /WIN RATE/.test(kpi) && /48/.test(kpi) && /69/.test(kpi) && /33/.test(kpi) && /21/.test(kpi), kpi)
   const lad = await textOf(page.locator('[data-testid="teaser-ladders"]'))
   ck('ladder places read "2nd of 10"', /O50 Div 1/.test(lad) && /2nd/.test(lad) && /of 10/.test(lad), lad)
+  await ctx.close()
+})
+
+// ---- 3b. The club's own colours and light or dark ----------------------------------------
+const LOGO = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="30" fill="#1f5fbf"/></svg>')
+const BLUE = { ...BRIS, club: { ...BRIS.club, logo_url: LOGO }, theme: { mode: 'light', accent: '#1f5fbf', on_accent: '#ffffff' } }
+const RED_DARK = { ...BRIS, club: { ...BRIS.club, logo_url: LOGO }, theme: { mode: 'dark', accent: '#e23b3b', on_accent: '#ffffff' } }
+const cssVar = (page, name) => page.evaluate((n) => getComputedStyle(document.querySelector('[data-testid="teaser-page"]')).getPropertyValue(n).trim(), name)
+await section('block theme light', async () => {
+  const { page, ctx, errors } = await open(`/preview/${TOKEN}`, { teaser: BLUE })
+  ck('a club with a blue logo gets a blue accent through the club theme builder', (await cssVar(page, '--pb-accent')).toLowerCase() === '#1f5fbf', await cssVar(page, '--pb-accent'))
+  ck('and the text on the accent is the stored white', ['#ffffff', 'white'].includes((await cssVar(page, '--pb-on-accent')).toLowerCase()), await cssVar(page, '--pb-on-accent'))
+  ck('the page is on the LIGHT theme', await page.locator('[data-testid="teaser-page"]').getAttribute('data-mode') === 'light'
+     && await page.evaluate(() => { const c = getComputedStyle(document.querySelector('[data-testid="teaser-page"]')).backgroundColor.match(/\d+/g).map(Number); return c[0] > 220 && c[1] > 220 }))
+  ck('the Leaderboard button and the claim bar use the accent', await page.evaluate(() => {
+    const bg = (el) => getComputedStyle(el).backgroundColor
+    return bg(document.querySelector('[data-nav="leaderboard"]')) === 'rgb(31, 95, 191)' && bg(document.querySelector('[data-testid="teaser-bar-cta"]')) === 'rgb(31, 95, 191)'
+  }))
+  ck('the crest is in the menu bar and in the header', await page.locator(`img[src="${LOGO}"]`).count() === 2, String(await page.locator(`img[src="${LOGO}"]`).count()))
+  ck('the BetterCricket mark flips to its dark version on a light page', await page.locator('[data-testid="teaser-nav"] img[alt="BetterCricket"]').getAttribute('src').then((v) => /black/.test(v)))
+  await page.locator('[data-testid="teaser-mode-toggle"]').click()
+  ck('the visitor can flip to dark and the accent stays', await page.locator('[data-testid="teaser-page"]').getAttribute('data-mode') === 'dark' && (await cssVar(page, '--pb-accent')).toLowerCase() === '#1f5fbf')
+  await page.locator('[data-testid="teaser-mode-toggle"]').click()
+  await page.screenshot({ path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/dashboard-light.png` : '/tmp/dashboard-light.png' })
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+})
+await section('block theme dark', async () => {
+  const { page, ctx } = await open(`/preview/${TOKEN}`, { teaser: RED_DARK })
+  ck('a red club on a dark page: red accent, dark theme', (await cssVar(page, '--pb-accent')).toLowerCase() === '#e23b3b' && await page.locator('[data-testid="teaser-page"]').getAttribute('data-mode') === 'dark')
+  await page.screenshot({ path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/dashboard-dark.png` : '/tmp/dashboard-dark.png' })
+  await page.locator('[data-testid="teaser-header-cta"]').click()
+  await page.locator('[data-testid="teaser-sheet-go"]').click()
+  await page.waitForTimeout(500)
+  ck('the club colours are removed when the visitor leaves for the trial wizard', await page.evaluate(() => document.getElementById('club-theme') === null))
+  await ctx.close()
+})
+await section('block theme none', async () => {
+  const { page, ctx } = await open(`/preview/${TOKEN}`, { teaser: { ...FLEM, theme: null } })
+  ck('a club with no readable logo keeps BetterCricket\'s green and the dark theme',
+     (await cssVar(page, '--pb-accent')).toLowerCase() === '#16c784' && await page.locator('[data-testid="teaser-page"]').getAttribute('data-mode') === 'dark' && await page.evaluate(() => document.getElementById('club-theme') === null))
+  ck('with no crest to show, the bar and header carry none (no broken image)', await page.locator('[data-testid="teaser-nav-logo"]').count() === 0)
   await ctx.close()
 })
 
@@ -190,10 +274,18 @@ await section('block 5', async () => {
 
 // ---- 5. Phone width --------------------------------------------------------------
 await section('block 6', async () => {
-  const { page, ctx } = await open(`/preview/${TOKEN}`, { teaser: BRIS, width: 390 })
+  const { page, ctx } = await open(`/preview/${TOKEN}`, { teaser: BLUE, width: 390 })
   const m = await page.evaluate(() => ({ over: document.documentElement.scrollWidth - document.documentElement.clientWidth }))
   ck('no horizontal overflow at 390px', m.over <= 0, JSON.stringify(m))
-  await tile(page, 'bowling').click()
+  ck('on a phone the desktop menu is folded into the menu button', await page.locator('[data-testid="teaser-menu-button"]').isVisible()
+     && !(await page.locator('nav[aria-label="Club menu"]').isVisible()))
+  await page.screenshot({ path: process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/dashboard-390.png` : '/tmp/dashboard-390.png', fullPage: true })
+  await page.locator('[data-testid="teaser-menu-button"]').click()
+  const mm = await textOf(page.locator('[data-testid="teaser-mobile-menu"]'))
+  ck('the phone menu lists the same sections', ['Players', 'Stats', 'Games', 'Compare', 'Yearbook', 'Website', 'Player dashboard', 'Search players'].every((w) => mm.includes(w)), mm)
+  const over2 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  ck('and it does not overflow either', over2 <= 0, String(over2))
+  await page.locator('[data-testid="teaser-mobile-menu"] [data-nav="players"]').click()
   await page.waitForTimeout(250)
   const box = await sheet(page).boundingBox()
   ck('the sheet sits inside the viewport at 390px', box && box.x >= 0 && box.x + box.width <= 390.5 && box.y >= 0 && box.y + box.height <= 900, JSON.stringify(box))

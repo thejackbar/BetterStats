@@ -50,6 +50,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import club_teaser_theme
 from app.services.club_teaser_link import ARCHIVED_ORG_SQL, FINISHED_WITH_TRIAL_SQL, NOT_A_CUSTOMER_SQL
 
 logger = logging.getLogger(__name__)
@@ -523,7 +524,6 @@ async def pull_club(api, org_guid: str, club: Optional[dict] = None, *,
             totals["matches_vs_prev_pct"] = round(100 * (totals["matches"] - prev["matches"]) / prev["matches"])
         totals["prev"] = prev
 
-        starts = [d for d in (season_start(s) for s in seasons) if d]
         snapshot = {
             "schema": SCHEMA_VERSION,
             "club": {**{k: club.get(k) for k in ("name", "short_name", "suburb", "state",
@@ -535,8 +535,7 @@ async def pull_club(api, org_guid: str, club: Optional[dict] = None, *,
             "season": {"id": chosen["id"], "name": chosen.get("name"),
                        "year": season_year(chosen),
                        "start": season_start(chosen).isoformat() if season_start(chosen) else None},
-            "history": {"seasons_listed": len(seasons),
-                        "first_year": min(starts).year if starts else None},
+            "history": {"seasons_listed": len(seasons)},
             "totals": totals,
             "ladders": ladders,
             "batting": top_batting(bat),
@@ -860,7 +859,6 @@ def presentation(snap: dict) -> dict:
                    if matches >= MIN_SEASON_MATCHES and (totals.get("win_rate") or 0) >= FLATTERING_WIN_RATE
                    else None),
         "ladders_shown": shown[:MAX_LADDERS_SHOWN],
-        "history": snap.get("history") or {},
     }
 
 
@@ -918,6 +916,10 @@ async def save_result(session: AsyncSession, club: dict, result: dict, *,
              "ss": result.get("season_start"), "calls": result.get("calls", 0),
              "now": now, "nxt": now + delay, "id": prior["id"]})
     await session.commit()
+    if status == "ok":
+        # The club's look (accent colour, light or dark) is read from its logo
+        # when it has none yet or the logo changed. One GET; never fails the pull.
+        await club_teaser_theme.store_theme(session, cid, club.get("logo_url"))
     return {"status": status, "changed": changed, "version": version,
             "next_pull_at": now + delay, "calls": result.get("calls", 0)}
 

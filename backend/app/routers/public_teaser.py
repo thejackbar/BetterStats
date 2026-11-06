@@ -53,7 +53,7 @@ async def _row(db: AsyncSession, token: str):
     # one whose trial lapsed without a subscription, keeps its teaser page: it is
     # what a returning admin should see.
     row = (await db.execute(text("""
-        SELECT t.snapshot, t.version, mc.id AS club_id, mc.existing_org_id,
+        SELECT t.snapshot, t.version, t.theme, mc.id AS club_id, mc.existing_org_id,
                (CASE WHEN """ + club_teaser_link.LIVE_CUSTOMER_SQL + """ THEN
                   (SELECT o.slug FROM organisations o WHERE o.id = mc.existing_org_id) END) AS registered_slug
         FROM club_teaser_snapshots t
@@ -63,6 +63,18 @@ async def _row(db: AsyncSession, token: str):
     if not row:
         raise HTTPException(status_code=404, detail="Not found")
     return row
+
+
+def _public_theme(theme):
+    """Only what the page needs, and only if it is well formed: the colour goes
+    into a style attribute, so anything that is not ``#rrggbb`` is dropped."""
+    if not isinstance(theme, dict):
+        return None
+    ok = lambda v: isinstance(v, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", v) is not None  # noqa: E731
+    mode = theme.get("mode") if theme.get("mode") in ("dark", "light") else "dark"
+    accent = theme.get("accent") if ok(theme.get("accent")) else None
+    return {"mode": mode, "accent": accent,
+            "on_accent": theme.get("on_accent") if accent and ok(theme.get("on_accent")) else None}
 
 
 @router.get("/by-club")
@@ -102,6 +114,9 @@ async def get_teaser(token: str, request: Request, db: AsyncSession = Depends(ge
         "fielding": snap.get("fielding") or [],
         "records": snap.get("records") or [],
         "claim": {"ca_org_id": club.get("ca_org_id"), "name": club.get("name")},
+        # The club's look, read from its logo (accent colour and light or dark);
+        # None when it has no readable logo and the page keeps BetterCricket's.
+        "theme": _public_theme(row["theme"]),
         # A club that is already on BetterCricket is sent to its own site
         # rather than to a trial it cannot start.
         "registered": {"slug": row["registered_slug"]} if row["registered_slug"] else None,

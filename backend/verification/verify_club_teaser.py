@@ -244,7 +244,8 @@ async def main() -> None:
           s["season"]["name"] == "Summer 2025/26" and r["season_pending"] is True)
     check("seasons are ordered by date, not by the order CA listed them",
           [x["id"] for x in ct.order_seasons(api.w["seasons"])] == [S_NEW, S_CUR, S_OLD])
-    check("history says how many seasons and the first year", s["history"] == {"seasons_listed": 3, "first_year": 2024}, str(s["history"]))
+    check("history says how many seasons and no longer a first year (Play-Cricket's date is not what the page means)",
+          s["history"] == {"seasons_listed": 3}, str(s["history"]))
     check("batting leads with the top scorer and skips the redacted 999",
           [p["name"] for p in s["batting"]] == ["J. Smith", "L. McDonald", "T. Kelly"]
           and all(p["runs"] != 999 for p in s["batting"]), str(s["batting"]))

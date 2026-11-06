@@ -41,6 +41,18 @@ STATEMENTS = [
     "ON club_teaser_snapshots(next_pull_at)",
 ]
 
+# Migration 384: the club's look on its season page (accent colour and light or
+# dark, read from its logo). Its own column, not part of the snapshot, so a
+# theme change never moves the snapshot's content hash and never marks a
+# picture out of date.
+THEME_STATEMENTS = [
+    "ALTER TABLE club_teaser_snapshots ADD COLUMN IF NOT EXISTS theme JSONB",
+]
+STATEMENTS = STATEMENTS + THEME_STATEMENTS
+
 DOWNGRADE = [
     "DROP TABLE IF EXISTS club_teaser_snapshots",
+]
+THEME_DOWNGRADE = [
+    "ALTER TABLE club_teaser_snapshots DROP COLUMN IF EXISTS theme",
 ]
