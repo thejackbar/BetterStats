@@ -1,4 +1,4 @@
-// Clubs shown in the "Trusted by clubs at" logo strip (Landing + Trial pages).
+// Clubs shown in the "Trusted by" logo strip (Landing + Trial pages).
 // Real clubs already live on BetterCricket, each pointed at the same uploaded
 // logo their own public club page shows (`/api/images/organisations/{id}/logo`)
 // rather than a static duplicate — one source of truth for a club's crest.

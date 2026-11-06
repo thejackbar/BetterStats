@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { TRUST_CLUBS } from '../../data/trustedClubs'
 import { api } from '../../lib/api'
 
-// Full-width "Trusted by clubs at" logo marquee. Shared between the homepage
+// Full-width "Trusted by" logo marquee. Shared between the homepage
 // (compact=false, the original size) and the Trial landing page (compact=true
 // : smaller logos/text and lighter padding, just enough to build trust without
 // competing with the search box above it).
@@ -56,7 +56,7 @@ export default function TrustedByStrip({ compact = false }) {
     <section className={`px-4 sm:px-6 lg:px-10 border-y pb-hairline ${compact ? 'py-6' : 'py-12'}`}>
       <div className="max-w-[1200px] mx-auto flex flex-col sm:flex-row sm:items-center gap-x-10 gap-y-3">
         <p className={`font-mono uppercase tracking-wide3 font-medium shrink-0 text-pb-faint ${compact ? 'text-[10px]' : 'text-xs'}`}>
-          Trusted by clubs at
+          Trusted by
         </p>
         <div className="logo-marquee">
           <div className="logo-marquee-track" style={{ animationDuration: `${seconds}s` }}>
