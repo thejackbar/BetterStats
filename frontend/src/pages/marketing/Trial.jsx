@@ -642,7 +642,6 @@ export default function Trial() {
                         className="text-pb-faint font-display font-semibold text-lg sm:text-2xl whitespace-nowrap"
                         text={[
                           'Search for your club…',
-                          'Start with your suburb…',
                           'Type your club’s name…',
                         ]}
                         typingSpeed={70}
