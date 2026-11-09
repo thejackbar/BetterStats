@@ -4669,6 +4669,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _NET_SESSION_LINK_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 385: time-slot nets (a grid of nets by time slots). Same
+        # one-copy rule: this and alembic's 385 both run
+        # services/net_slots_ddl.STATEMENTS.
+        from app.services.net_slots_ddl import STATEMENTS as _NET_SLOTS_DDL
+        for _stmt in _NET_SLOTS_DDL:
+            await conn.execute(text(_stmt))
+
         # Migration 336: a squad can cover several teams. Same one-copy rule: this
         # and alembic's 336 both run services/team_sides_ddl.STATEMENTS.
         from app.services.team_sides_ddl import STATEMENTS as _TEAM_SIDES_DDL

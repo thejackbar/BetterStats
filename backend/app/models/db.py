@@ -1996,6 +1996,10 @@ class NetSession(Base):
     # the session has to see the same clock. ends_at is absolute, so each device
     # derives its own countdown from it against the server time it is handed.
     live_state = Column(JSONB, nullable=True)
+    # Migration 385. 'manual' = the batting queue and timer; 'auto' = a grid of
+    # nets by time slots, planned in slot_plan (see services/net_slots.py).
+    mode = Column(Text, nullable=False, server_default="manual")
+    slot_plan = Column(JSONB, nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
@@ -2063,6 +2067,13 @@ class NetAttendance(Base):
     # The live screen uses it to announce somebody arriving on their own and
     # stay quiet for a row the manager just added themselves.
     source = Column(Text, nullable=False, server_default="admin")
+    # Migration 385: where they sit on an automatic session's grid. net_key is a
+    # net id from the session's slot_plan, slot_index is the slot (0 = first),
+    # slot_manual is True once somebody dragged them there so a re-plan leaves
+    # them put. Clock times are derived from the plan, never stored.
+    net_key = Column(Text, nullable=True)
+    slot_index = Column(Integer, nullable=True)
+    slot_manual = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     session = relationship("NetSession", back_populates="attendees")

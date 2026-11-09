@@ -16,6 +16,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import SessionLinkModal from './SessionLinkModal'
+import NetGrid from './NetGrid'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
@@ -517,6 +518,10 @@ export default function NetSession() {
           </div>
         </div>
 
+        {/* A time-slot session is a grid of nets, not a queue and a timer. */}
+        {live.mode === 'auto' ? (
+          <NetGrid live={live} canEdit={canEdit} ended={ended} squads={squads} act={act} id={id} holdPoll={dragActive} skewRef={skewRef} />
+        ) : (<>
         {/* Timer hero */}
         <div className="pb-card overflow-hidden" style={{ borderColor: activeTone ? `color-mix(in srgb, ${timerColor} 45%, transparent)` : undefined }}>
           <div className="px-6 py-6 flex flex-col items-center text-center"
@@ -714,6 +719,7 @@ export default function NetSession() {
             )}
           </div>
         </div>
+        </>)}
       </div>
 
       {checkInOpen && (

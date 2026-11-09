@@ -3871,6 +3871,12 @@ export const api = {
   nmUpdateSession: (id, data) =>
     request(`/nets/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   nmDeleteSession: (id) => request(`/nets/sessions/${id}`, { method: 'DELETE' }),
+  // Time-slot sessions: save the grid's plan (first time, slot length, finish,
+  // second go, nets and their squads), and put one person in a chosen cell.
+  nmSetPlan: (id, body) =>
+    request(`/nets/sessions/${id}/plan`, { method: 'PUT', body: JSON.stringify(body) }),
+  nmMoveSlot: (id, body) =>
+    request(`/nets/sessions/${id}/slots`, { method: 'POST', body: JSON.stringify(body) }),
   // The live session. Every device open on it polls nmLive with the version it
   // last saw; a matching version comes back as {version, server_time,
   // unchanged: true} and costs almost nothing. Every write below is a small,
