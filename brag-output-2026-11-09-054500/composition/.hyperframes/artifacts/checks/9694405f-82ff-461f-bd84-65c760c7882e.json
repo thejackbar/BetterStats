@@ -1,0 +1,1483 @@
+{
+  "ok": true,
+  "strict": false,
+  "browserSkipped": false,
+  "lint": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 14,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "duplicate_media_discovery_risk",
+        "severity": "warning",
+        "message": "Detected 2 matching img entries with the same source/start/duration.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Avoid duplicated media nodes that can be discovered twice during compilation."
+      },
+      {
+        "code": "composition_file_too_large",
+        "severity": "warning",
+        "message": "This HTML composition file has 352 lines. Smaller sub-compositions are easier to read, iterate on, and diff.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Split coherent scenes or layers into separate .html files under compositions/, then mount them from the parent with data-composition-src so each file stays small enough to inspect, revise, and validate independently."
+      },
+      {
+        "code": "timeline_track_too_dense",
+        "severity": "warning",
+        "message": "Track 1 has 10 timed elements in this HTML file. Smaller sub-compositions keep timelines easier to read, iterate on, and diff.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move coherent scene groups into separate .html files under compositions/ and mount them from the parent with data-composition-src so the timeline stays easier to inspect, revise, and validate."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s0\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s0",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s0\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s1\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s1",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s1\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s2\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s2",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s2\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s3\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s3",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s3\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s4\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s4",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s4\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s5\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s5",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s5\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s6\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s6",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s6\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s7\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s7",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s7\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s8\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s8",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s8\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s9\"> is a timeline element that contains nested <img id=\"end-logo\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s9",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s9\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"phone\"> is a timeline element that contains nested <div id=\"ph-body\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#phone",
+        "dataAttributes": {},
+        "sourceFile": "/home/user/BetterStats/brag-output-2026-11-09-054500/composition/index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"phone\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      }
+    ],
+    "filesScanned": 1
+  },
+  "runtime": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": []
+  },
+  "layout": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 3,
+    "infoCount": 8,
+    "findings": [
+      {
+        "code": "escaped_container",
+        "severity": "warning",
+        "time": 18.817,
+        "selector": "#long0",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 1264,
+          "top": -166.82,
+          "right": 1674,
+          "bottom": 2830.38,
+          "width": 410,
+          "height": 2997.2
+        },
+        "containerSelector": "#dash-scroll",
+        "text": "",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 1264,
+          "top": -166.82,
+          "right": 1674,
+          "bottom": 37.07,
+          "width": 410,
+          "height": 203.89
+        },
+        "dataAttributes": {
+          "data-hf-render-id": "long0",
+          "data-hf-authored-opacity": ""
+        },
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1264,
+          "y": -166.82,
+          "width": 410,
+          "height": 2997.2
+        },
+        "firstSeen": 18.817,
+        "lastSeen": 106.628,
+        "occurrences": 8,
+        "heldMs": 0,
+        "times": [
+          18.817,
+          31.361,
+          43.906,
+          56.45,
+          68.994,
+          81.539,
+          94.083,
+          106.628
+        ]
+      },
+      {
+        "code": "container_overflow",
+        "severity": "warning",
+        "time": 31.361,
+        "selector": "#dash-scroll",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": 1238.07,
+          "top": 983.69,
+          "right": 1715.81,
+          "bottom": 1230.77,
+          "width": 477.74,
+          "height": 247.08
+        },
+        "containerSelector": "#ly-dash",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 1238.07,
+          "top": 1238.06,
+          "right": 1715.81,
+          "bottom": 2209.22,
+          "width": 477.74,
+          "height": 971.17
+        },
+        "overflow": {
+          "top": 254.37
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1238.07,
+          "y": 983.69,
+          "width": 477.74,
+          "height": 247.08
+        },
+        "firstSeen": 18.817,
+        "lastSeen": 106.628,
+        "occurrences": 8,
+        "heldMs": 0,
+        "times": [
+          18.817,
+          31.361,
+          43.906,
+          56.45,
+          68.994,
+          81.539,
+          94.083,
+          106.628
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "warning",
+        "time": 31.361,
+        "selector": "#long1",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": 1238.07,
+          "top": 983.69,
+          "right": 1715.81,
+          "bottom": 4120.12,
+          "width": 477.74,
+          "height": 3136.43
+        },
+        "containerSelector": "#dash-scroll",
+        "text": "",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 1238.07,
+          "top": 983.69,
+          "right": 1715.81,
+          "bottom": 1230.77,
+          "width": 477.74,
+          "height": 247.08
+        },
+        "dataAttributes": {
+          "data-hf-render-id": "long1",
+          "data-hf-authored-opacity": "0"
+        },
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1238.07,
+          "y": 983.69,
+          "width": 477.74,
+          "height": 3136.43
+        },
+        "firstSeen": 31.361,
+        "lastSeen": 106.628,
+        "occurrences": 7,
+        "heldMs": 0,
+        "times": [
+          31.361,
+          43.906,
+          56.45,
+          68.994,
+          81.539,
+          94.083,
+          106.628
+        ]
+      },
+      {
+        "code": "canvas_overflow",
+        "severity": "info",
+        "time": 6.272,
+        "selector": "span.tm",
+        "message": "Text extends outside the composition canvas.",
+        "rect": {
+          "left": 1261.01,
+          "top": 1227.03,
+          "right": 1298.95,
+          "bottom": 1251.7,
+          "width": 37.94,
+          "height": 24.67
+        },
+        "containerSelector": "#root",
+        "text": "6:42",
+        "fixHint": "Move the text inward, reduce its size, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 171.7
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1261.01,
+          "y": 1227.03,
+          "width": 37.94,
+          "height": 24.67
+        },
+        "firstSeen": 6.272,
+        "lastSeen": 106.628,
+        "occurrences": 8,
+        "heldMs": 0,
+        "times": [
+          6.272,
+          31.361,
+          43.906,
+          56.45,
+          68.994,
+          81.539,
+          94.083,
+          106.628
+        ]
+      },
+      {
+        "code": "container_overflow",
+        "severity": "info",
+        "time": 6.272,
+        "selector": "#ab1",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": -329.19,
+          "top": -456.23,
+          "right": 909.81,
+          "bottom": 782.77,
+          "width": 1239,
+          "height": 1239
+        },
+        "containerSelector": "#aur",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "left": 329.19,
+          "top": 456.23
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": -329.19,
+          "y": -456.23,
+          "width": 1239,
+          "height": 1239
+        },
+        "firstSeen": 6.272,
+        "lastSeen": 106.628,
+        "occurrences": 9,
+        "heldMs": 0,
+        "times": [
+          6.272,
+          18.817,
+          31.361,
+          43.906,
+          56.45,
+          68.994,
+          81.539,
+          94.083,
+          106.628
+        ]
+      },
+      {
+        "code": "container_overflow",
+        "severity": "info",
+        "time": 6.272,
+        "selector": "#ab2",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": 1021.86,
+          "top": -166.49,
+          "right": 2044.16,
+          "bottom": 855.81,
+          "width": 1022.3,
+          "height": 1022.3
+        },
+        "containerSelector": "#aur",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "right": 124.16,
+          "top": 166.49
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1021.86,
+          "y": -166.49,
+          "width": 1022.3,
+          "height": 1022.3
+        },
+        "firstSeen": 6.272,
+        "lastSeen": 106.628,
+        "occurrences": 9,
+        "heldMs": 0,
+        "times": [
+          6.272,
+          18.817,
+          31.361,
+          43.906,
+          56.45,
+          68.994,
+          81.539,
+          94.083,
+          106.628
+        ]
+      },
+      {
+        "code": "container_overflow",
+        "severity": "info",
+        "time": 6.272,
+        "selector": "#ab3",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": 421.33,
+          "top": 463.07,
+          "right": 1545.86,
+          "bottom": 1587.6,
+          "width": 1124.53,
+          "height": 1124.53
+        },
+        "containerSelector": "#aur",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "bottom": 507.6
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 421.33,
+          "y": 463.07,
+          "width": 1124.53,
+          "height": 1124.53
+        },
+        "firstSeen": 6.272,
+        "lastSeen": 106.628,
+        "occurrences": 9,
+        "heldMs": 0,
+        "times": [
+          6.272,
+          18.817,
+          31.361,
+          43.906,
+          56.45,
+          68.994,
+          81.539,
+          94.083,
+          106.628
+        ]
+      },
+      {
+        "code": "container_overflow",
+        "severity": "info",
+        "time": 6.272,
+        "selector": "#ab4",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": 1181.91,
+          "top": 434.24,
+          "right": 2101.98,
+          "bottom": 1354.31,
+          "width": 920.07,
+          "height": 920.07
+        },
+        "containerSelector": "#aur",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "right": 181.98,
+          "bottom": 274.31
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1181.91,
+          "y": 434.24,
+          "width": 920.07,
+          "height": 920.07
+        },
+        "firstSeen": 6.272,
+        "lastSeen": 106.628,
+        "occurrences": 9,
+        "heldMs": 0,
+        "times": [
+          6.272,
+          18.817,
+          31.361,
+          43.906,
+          56.45,
+          68.994,
+          81.539,
+          94.083,
+          106.628
+        ]
+      },
+      {
+        "code": "container_overflow",
+        "severity": "info",
+        "time": 31.361,
+        "selector": "#wbi",
+        "message": "Element extends outside a clipping layout container.",
+        "rect": {
+          "left": 157.81,
+          "top": -148.34,
+          "right": 2879.25,
+          "bottom": 1382.47,
+          "width": 2721.44,
+          "height": 1530.81
+        },
+        "containerSelector": "#wb",
+        "fixHint": "Resize/reposition the child or container, or mark intentional overflow with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 160,
+          "top": 150,
+          "right": 1760,
+          "bottom": 1050,
+          "width": 1600,
+          "height": 900
+        },
+        "overflow": {
+          "left": 2.19,
+          "right": 1119.25,
+          "top": 298.34,
+          "bottom": 332.47
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 157.81,
+          "y": -148.34,
+          "width": 2721.44,
+          "height": 1530.81
+        },
+        "firstSeen": 31.361,
+        "lastSeen": 94.083,
+        "occurrences": 5,
+        "heldMs": 0,
+        "times": [
+          31.361,
+          43.906,
+          68.994,
+          81.539,
+          94.083
+        ]
+      },
+      {
+        "code": "escaped_container",
+        "severity": "info",
+        "time": 43.906,
+        "selector": "#wbi",
+        "message": "Positioned element renders far outside its offset parent — its coordinates were likely computed in a different frame (canvas/viewport pixels).",
+        "rect": {
+          "left": -610.32,
+          "top": -65,
+          "right": 2429.68,
+          "bottom": 1645,
+          "width": 3040,
+          "height": 1710
+        },
+        "containerSelector": "#wb",
+        "text": "",
+        "fixHint": "Compute left/top in the offset parent's frame (subtract its rect), or mark intentional placement with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 160,
+          "top": 150,
+          "right": 1760,
+          "bottom": 1050,
+          "width": 1600,
+          "height": 900
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": -610.32,
+          "y": -65,
+          "width": 3040,
+          "height": 1710
+        },
+        "firstSeen": 43.906,
+        "lastSeen": 43.906,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          43.906
+        ]
+      },
+      {
+        "code": "panel_out_of_canvas",
+        "severity": "info",
+        "time": 94.083,
+        "selector": "#r-aud1",
+        "message": "Painted panel extends outside the composition canvas.",
+        "rect": {
+          "left": 103.2,
+          "top": 276,
+          "right": 2824.8,
+          "bottom": 862.8,
+          "width": 2721.6,
+          "height": 586.8
+        },
+        "containerSelector": "#root",
+        "text": "",
+        "fixHint": "Move the panel inward, or mark intentional off-canvas animation with data-layout-allow-overflow.",
+        "containerRect": {
+          "left": 0,
+          "top": 0,
+          "right": 1920,
+          "bottom": 1080,
+          "width": 1920,
+          "height": 1080
+        },
+        "overflow": {
+          "right": 904.8
+        },
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 103.2,
+          "y": 276,
+          "width": 2721.6,
+          "height": 586.8
+        },
+        "firstSeen": 94.083,
+        "lastSeen": 94.083,
+        "occurrences": 1,
+        "heldMs": 0,
+        "times": [
+          94.083
+        ]
+      }
+    ],
+    "duration": 112.9,
+    "samples": [
+      6.272,
+      18.817,
+      31.361,
+      43.906,
+      56.45,
+      68.994,
+      81.539,
+      94.083,
+      106.628
+    ],
+    "transitionSamples": [],
+    "transitionSamplesDropped": 0,
+    "tolerance": 2,
+    "totalIssueCount": 11,
+    "truncated": false
+  },
+  "motion": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": [],
+    "enabled": false,
+    "samples": 0
+  },
+  "contrast": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": [],
+    "enabled": true,
+    "samples": [
+      6.272,
+      31.361,
+      56.45,
+      81.539,
+      106.628
+    ],
+    "checked": 51,
+    "passed": 51
+  },
+  "craft": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 5,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "first_frame_empty",
+        "severity": "warning",
+        "message": "Frame 0 shows only the background, and the first frame is the thumbnail on social players: have the title or key image already on screen at 0 s instead of entering from nothing; see references/review.md.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0
+      },
+      {
+        "code": "text_below_floor",
+        "severity": "warning",
+        "message": "Type floor is 28 px (2.6% of the 1080 px short side, what a phone can read) and 38 text elements stay under it for 0.5 s or more, the smallest \"6:42 pm\" at 11 px: set reading text to at least 28 px, or put data-layout-ignore on text that is texture rather than reading; see references/look.md.",
+        "text": "6:42 pm",
+        "selector": "#c2 > span:nth-of-type(1)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1512.62,
+          "y": 419.57,
+          "width": 42.76,
+          "height": 13.84
+        },
+        "time": 10.178,
+        "times": [
+          7.539,
+          7.728,
+          7.728,
+          7.728,
+          7.728,
+          8.105,
+          8.859,
+          8.859,
+          8.859,
+          8.859,
+          10.178,
+          10.178,
+          10.178,
+          10.932,
+          10.932,
+          10.932,
+          11.686,
+          11.686,
+          11.686,
+          21.675,
+          37.508,
+          48.628,
+          50.136,
+          51.267,
+          52.398,
+          52.398,
+          53.529,
+          55.979,
+          55.979,
+          55.979,
+          55.979,
+          57.864,
+          57.864,
+          57.864,
+          57.864,
+          66.157,
+          82.932,
+          90.659
+        ],
+        "fontPx": 10.87,
+        "floorPx": 28,
+        "seconds": 3.204,
+        "elements": [
+          {
+            "selector": "#c2 > span:nth-of-type(1)",
+            "text": "6:42 pm",
+            "fontPx": 10.87,
+            "time": 10.178,
+            "seconds": 3.204
+          },
+          {
+            "selector": "#c3 > span:nth-of-type(1)",
+            "text": "6:42 pm",
+            "fontPx": 10.91,
+            "time": 10.932,
+            "seconds": 2.45
+          },
+          {
+            "selector": "div.wa-date",
+            "text": "TODAY",
+            "fontPx": 10.93,
+            "time": 7.728,
+            "seconds": 5.654
+          },
+          {
+            "selector": "div.tx > span:nth-of-type(1)",
+            "text": "6:41 pm",
+            "fontPx": 10.95,
+            "time": 8.859,
+            "seconds": 4.523
+          },
+          {
+            "selector": "#c4 > span:nth-of-type(1)",
+            "text": "6:43 pm",
+            "fontPx": 10.97,
+            "time": 11.686,
+            "seconds": 1.696
+          },
+          {
+            "selector": "div.tt > span:nth-of-type(1)",
+            "text": "Tom, Sam, Liam, Max, you",
+            "fontPx": 11.92,
+            "time": 7.728,
+            "seconds": 5.654
+          },
+          {
+            "selector": "div.lp > div:nth-of-type(1) > span:nth-of-type(1)",
+            "text": "betterat.cricket",
+            "fontPx": 11.94,
+            "time": 8.859,
+            "seconds": 4.523
+          },
+          {
+            "selector": "#c2 > b:nth-of-type(1)",
+            "text": "Tom",
+            "fontPx": 12.35,
+            "time": 10.178,
+            "seconds": 3.204
+          },
+          {
+            "selector": "#c3 > b:nth-of-type(1)",
+            "text": "Sam",
+            "fontPx": 12.4,
+            "time": 10.932,
+            "seconds": 2.45
+          },
+          {
+            "selector": "#c4 > b:nth-of-type(1)",
+            "text": "Liam",
+            "fontPx": 12.47,
+            "time": 11.686,
+            "seconds": 1.696
+          },
+          {
+            "selector": "div.lp > div:nth-of-type(1)",
+            "text": "Applecross Availability",
+            "fontPx": 13.93,
+            "time": 8.859,
+            "seconds": 4.523
+          },
+          {
+            "selector": "span.tm",
+            "text": "6:42",
+            "fontPx": 14.76,
+            "time": 7.539,
+            "seconds": 14.513
+          },
+          {
+            "selector": "div.av",
+            "text": "5X",
+            "fontPx": 14.9,
+            "time": 7.728,
+            "seconds": 5.654
+          },
+          {
+            "selector": "div.tx",
+            "text": "Availability for Sat 31 Oct. Tap the link, pick your name:",
+            "fontPx": 15.42,
+            "time": 8.859,
+            "seconds": 4.523
+          },
+          {
+            "selector": "#c2",
+            "text": "Done, in",
+            "fontPx": 15.81,
+            "time": 10.178,
+            "seconds": 3.204
+          },
+          {
+            "selector": "#c3",
+            "text": "Can't make it this week",
+            "fontPx": 15.88,
+            "time": 10.932,
+            "seconds": 2.45
+          },
+          {
+            "selector": "#c4",
+            "text": "Sorted, thanks",
+            "fontPx": 15.96,
+            "time": 11.686,
+            "seconds": 1.696
+          },
+          {
+            "selector": "div.pill",
+            "text": "Message",
+            "fontPx": 15.99,
+            "time": 8.105,
+            "seconds": 5.277
+          },
+          {
+            "selector": "#ic0 > b:nth-of-type(1)",
+            "text": "TB",
+            "fontPx": 16.7,
+            "time": 50.136,
+            "seconds": 11.874
+          },
+          {
+            "selector": "#ic1 > b:nth-of-type(1)",
+            "text": "JH",
+            "fontPx": 16.8,
+            "time": 51.267,
+            "seconds": 10.743
+          },
+          {
+            "selector": "#ic2 > b:nth-of-type(1)",
+            "text": "RM",
+            "fontPx": 16.8,
+            "time": 52.398,
+            "seconds": 9.612
+          },
+          {
+            "selector": "#ic3 > b:nth-of-type(1)",
+            "text": "OP",
+            "fontPx": 16.87,
+            "time": 53.529,
+            "seconds": 8.481
+          },
+          {
+            "selector": "div.tt > b:nth-of-type(1)",
+            "text": "Applecross 5th XI",
+            "fontPx": 16.89,
+            "time": 7.728,
+            "seconds": 5.654
+          },
+          {
+            "selector": "#ic2 > em:nth-of-type(1)",
+            "text": "OUT",
+            "fontPx": 19.76,
+            "time": 52.398,
+            "seconds": 9.612
+          },
+          {
+            "selector": "#wp1 > b:nth-of-type(1)",
+            "text": "SB",
+            "fontPx": 19.76,
+            "time": 55.979,
+            "seconds": 6.031
+          },
+          {
+            "selector": "#wp2 > b:nth-of-type(1)",
+            "text": "EB",
+            "fontPx": 19.9,
+            "time": 57.864,
+            "seconds": 4.146
+          },
+          {
+            "selector": "#wp1 > span:nth-of-type(2) > b:nth-of-type(1)",
+            "text": "W1",
+            "fontPx": 21.74,
+            "time": 55.979,
+            "seconds": 6.031
+          },
+          {
+            "selector": "#wp1 > span:nth-of-type(2) > b:nth-of-type(2)",
+            "text": "W2",
+            "fontPx": 21.74,
+            "time": 55.979,
+            "seconds": 6.031
+          },
+          {
+            "selector": "#wp2 > span:nth-of-type(2) > b:nth-of-type(1)",
+            "text": "W1",
+            "fontPx": 21.89,
+            "time": 57.864,
+            "seconds": 4.146
+          },
+          {
+            "selector": "#wp2 > span:nth-of-type(2) > b:nth-of-type(2)",
+            "text": "W2",
+            "fontPx": 21.89,
+            "time": 57.864,
+            "seconds": 4.146
+          },
+          {
+            "selector": "#wp1 > em:nth-of-type(1)",
+            "text": "W1 ONLY",
+            "fontPx": 23.71,
+            "time": 55.979,
+            "seconds": 6.031
+          },
+          {
+            "selector": "#wp2 > em:nth-of-type(1)",
+            "text": "W2 ONLY",
+            "fontPx": 23.88,
+            "time": 57.864,
+            "seconds": 4.146
+          },
+          {
+            "selector": "#s2 > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Availability, live",
+            "fontPx": 24,
+            "time": 21.675,
+            "seconds": 15.078
+          },
+          {
+            "selector": "#s3 > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Selection Whiteboard",
+            "fontPx": 24,
+            "time": 37.508,
+            "seconds": 10.177
+          },
+          {
+            "selector": "#s4 > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Availability, colour coded",
+            "fontPx": 24,
+            "time": 48.628,
+            "seconds": 16.586
+          },
+          {
+            "selector": "#s5 > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Drag and drop",
+            "fontPx": 24,
+            "time": 66.157,
+            "seconds": 16.02
+          },
+          {
+            "selector": "#s6 > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Confirm",
+            "fontPx": 24,
+            "time": 82.932,
+            "seconds": 6.784
+          },
+          {
+            "selector": "#s7 > div:nth-of-type(1) > div:nth-of-type(1)",
+            "text": "Audit History",
+            "fontPx": 24,
+            "time": 90.659,
+            "seconds": 8.104
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"One tap: Available, Maybe or Out The same answers sit on ...\" (14 words) is on screen 1.46 s (±0.01 s), under its 3.53 s floor: hold it about 0.5 s + 0.3 s a word (4.70 s here) before it leaves or changes; see references/motion.md.",
+        "text": "One tap: Available, Maybe or Out The same answers sit on their Player Dashboard",
+        "selector": "#pt3 > span:nth-of-type(1)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 200,
+          "y": 721.23,
+          "width": 696.05,
+          "height": 54
+        },
+        "time": 19.143,
+        "words": 14,
+        "seconds": 1.46,
+        "floorSeconds": 3.525,
+        "measured": [
+          {
+            "time": 18.66,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 18.848,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 19.037,
+            "opacity": 0.16,
+            "heightPx": 54
+          },
+          {
+            "time": 19.225,
+            "opacity": 0.68,
+            "heightPx": 54
+          },
+          {
+            "time": 19.414,
+            "opacity": 0.94,
+            "heightPx": 54
+          },
+          {
+            "time": 19.602,
+            "opacity": 1,
+            "heightPx": 54
+          },
+          {
+            "time": 19.79,
+            "opacity": 1,
+            "heightPx": 54
+          },
+          {
+            "time": 19.979,
+            "opacity": 1,
+            "heightPx": 54
+          },
+          {
+            "time": 20.167,
+            "opacity": 0.99,
+            "heightPx": 54
+          },
+          {
+            "time": 20.356,
+            "opacity": 0.87,
+            "heightPx": 54
+          },
+          {
+            "time": 20.544,
+            "opacity": 0.56,
+            "heightPx": 54
+          },
+          {
+            "time": 20.733,
+            "opacity": 0.22,
+            "heightPx": 54
+          },
+          {
+            "time": 20.921,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 21.11,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"The same answers sit on their Player Dashboard\" (8 words) is on screen 1.46 s (±0.01 s), under its 2.17 s floor: hold it about 0.5 s + 0.3 s a word (2.90 s here) before it leaves or changes; see references/motion.md.",
+        "text": "The same answers sit on their Player Dashboard",
+        "selector": "#pt3 > span:nth-of-type(1) > small:nth-of-type(1)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 200,
+          "y": 779.82,
+          "width": 644.56,
+          "height": 34
+        },
+        "time": 19.143,
+        "words": 8,
+        "seconds": 1.46,
+        "floorSeconds": 2.175,
+        "measured": [
+          {
+            "time": 18.66,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 18.848,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 19.037,
+            "opacity": 0.16,
+            "heightPx": 34
+          },
+          {
+            "time": 19.225,
+            "opacity": 0.68,
+            "heightPx": 34
+          },
+          {
+            "time": 19.414,
+            "opacity": 0.94,
+            "heightPx": 34
+          },
+          {
+            "time": 19.602,
+            "opacity": 1,
+            "heightPx": 34
+          },
+          {
+            "time": 19.79,
+            "opacity": 1,
+            "heightPx": 34
+          },
+          {
+            "time": 19.979,
+            "opacity": 1,
+            "heightPx": 34
+          },
+          {
+            "time": 20.167,
+            "opacity": 0.99,
+            "heightPx": 34
+          },
+          {
+            "time": 20.356,
+            "opacity": 0.87,
+            "heightPx": 34
+          },
+          {
+            "time": 20.544,
+            "opacity": 0.56,
+            "heightPx": 34
+          },
+          {
+            "time": 20.733,
+            "opacity": 0.22,
+            "heightPx": 34
+          },
+          {
+            "time": 20.921,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 21.11,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"Two colours, one for each weekend. Your club picks them.\" (10 words) is on screen 2.03 s (±0.01 s), under its 2.63 s floor: hold it about 0.5 s + 0.3 s a word (3.50 s here) before it leaves or changes; see references/motion.md.",
+        "text": "Two colours, one for each weekend. Your club picks them.",
+        "selector": "#ikey",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 513.84,
+          "y": 941.98,
+          "width": 892.2999999999998,
+          "height": 39
+        },
+        "time": 59.807,
+        "words": 10,
+        "seconds": 2.027,
+        "floorSeconds": 2.625,
+        "measured": [
+          {
+            "time": 59.371,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 59.56,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 59.748,
+            "opacity": 0.4,
+            "heightPx": 39
+          },
+          {
+            "time": 59.937,
+            "opacity": 0.8,
+            "heightPx": 39
+          },
+          {
+            "time": 60.125,
+            "opacity": 0.97,
+            "heightPx": 39
+          },
+          {
+            "time": 60.314,
+            "opacity": 1,
+            "heightPx": 39
+          },
+          {
+            "time": 60.502,
+            "opacity": 1,
+            "heightPx": 39
+          },
+          {
+            "time": 61.256,
+            "opacity": 1,
+            "heightPx": 39
+          },
+          {
+            "time": 61.445,
+            "opacity": 1,
+            "heightPx": 39
+          },
+          {
+            "time": 61.633,
+            "opacity": 0.87,
+            "heightPx": 39
+          },
+          {
+            "time": 61.822,
+            "opacity": 0.5,
+            "heightPx": 39
+          },
+          {
+            "time": 62.01,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 62.199,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 62.387,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      }
+    ],
+    "enabled": true,
+    "step": 0.1880000000000024,
+    "samples": 599
+  },
+  "audio": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": []
+  },
+  "hdr": {
+    "autoPromotion": null,
+    "inspection": "available"
+  },
+  "snapshots": {
+    "enabled": false,
+    "files": [],
+    "times": [],
+    "findingFiles": []
+  }
+}
