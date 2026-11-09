@@ -3527,6 +3527,10 @@ export const api = {
     request(`/public/availability/${token}/switch`, { method: 'POST' }),
   availPublicMe: (token) => request(`/public/availability/${token}/me${tzQuery()}`),
   // The verified player's own page: squads, locked selections, training.
+  // Tonight's nets for the verified player, and checking themselves in to one.
+  availPublicNets: (token) => request(`/public/availability/${token}/me/nets`),
+  availPublicNetsCheckIn: (token, sessionId) =>
+    request(`/public/availability/${token}/me/nets/${sessionId}/checkin`, { method: 'POST' }),
   availPublicProfile: (token) => request(`/public/availability/${token}/me/profile${tzQuery()}`),
   // The competition ladder for the player's squads (the page's Ladder module).
   // Where the player ranks in the club this season (runs, wickets, catches). Read when Stats opens.
@@ -3875,6 +3879,9 @@ export const api = {
   // second go, nets and their squads), and put one person in a chosen cell.
   nmSetPlan: (id, body) =>
     request(`/nets/sessions/${id}/plan`, { method: 'PUT', body: JSON.stringify(body) }),
+  // Change when a slot starts; every later time moves with it.
+  nmSetSlotTime: (id, body) =>
+    request(`/nets/sessions/${id}/slot-time`, { method: 'POST', body: JSON.stringify(body) }),
   nmMoveSlot: (id, body) =>
     request(`/nets/sessions/${id}/slots`, { method: 'POST', body: JSON.stringify(body) }),
   // The live session. Every device open on it polls nmLive with the version it

@@ -309,6 +309,50 @@ async def main():
         check("the session list says which mode each runs", sorted({s.get("mode") for s in lst["sessions"]}), ["auto", "manual"])
     await guarded("Manual untouched", step_9)
 
+    print("\n── Clicking a time: it moves, and everything below moves with it ──")
+    async def step_time():
+        PINNED[0] = T_EARLY
+        r, e = await as_admin(nm.create_session, nm.SessionCreate(
+            session_date=DAY, label="Time edit", mode="auto", slot_plan={"tz_offset_minutes": 480}))
+        tid = r["id"]
+        await as_admin(nm.put_slot_plan, tid, nm.SlotPlanBody(
+            first_time="16:45", slot_minutes=7, finish_time="18:09", tz_offset_minutes=480,
+            nets=[{"id": "n1", "name": "1st", "squad_team_ids": [str(seniors)]}, {"id": "n3", "name": "Rest", "catch_all": True}]))
+        for pid in (jack, brad):
+            await as_admin(nm.add_attendee, tid, nm.AttendeeAdd(player_id=str(pid)))
+        r = (await as_reader(nm.get_session, tid))[0]
+        check("the plan has a pad up warning by default", r["slot_plan"].get("pad_up_seconds"), 120)
+        check("the grid carries cumulative offsets, one more than there are slots", (r["grid"]["offsets"][:3], len(r["grid"]["offsets"])), ([0, 7, 14], 13))
+        before = places(r)
+        r, e = await as_admin(nm.set_slot_time, tid, nm.SlotTime(slot_index=1, time="16:55"))
+        g = r["grid"]
+        check("setting the second row to 4:55 lengthens the first slot to ten minutes", (g["times"][:4], g["custom_slots"]), (["16:45", "16:55", "17:02", "17:09"], [0]))
+        check("everyone keeps their slot", places(r), before)
+        check("a longer slot means fewer fit before the finish", g["slots"], 11)
+        r, e = await as_admin(nm.set_slot_time, tid, nm.SlotTime(slot_index=1, time="16:52"))
+        check("putting it back to the standard length clears the change", (r["grid"]["times"][1], r["grid"]["custom_slots"]), ("16:52", []))
+        r, e = await as_admin(nm.set_slot_time, tid, nm.SlotTime(slot_index=0, time="16:30"))
+        check("the first row is the first net time and moves every slot", (r["grid"]["times"][:2], r["slot_plan"]["first_time"]), (["16:30", "16:37"], "16:30"))
+        r, e = await as_admin(nm.set_slot_time, tid, nm.SlotTime(slot_index=2, time="16:31"))
+        check("a time before the slot above is refused with 422", getattr(e, "status_code", None), 422)
+        r, e = await as_admin(nm.set_slot_time, tid, nm.SlotTime(slot_index=2, time="nope"))
+        check("something that is not a time is refused with 422", getattr(e, "status_code", None), 422)
+        # Pushing the night past the finish flags people, it does not drop them.
+        await as_admin(nm.set_slot_time, tid, nm.SlotTime(slot_index=0, time="16:45"))
+        r, e = await as_admin(nm.set_slot_time, tid, nm.SlotTime(slot_index=1, time="18:00"))
+        check("a 75 minute first slot leaves room for one more slot before the finish", r["grid"]["slots"], 2)
+        check("and nobody is dropped for it", r["attendee_count"], 2)
+        r, e = await as_admin(nm.put_slot_plan, tid, nm.SlotPlanBody(slot_minutes=7))
+        check("sending the same standard length keeps the stretched slot", r["grid"]["custom_slots"], [0])
+        r, e = await as_admin(nm.put_slot_plan, tid, nm.SlotPlanBody(slot_minutes=8))
+        check("a new standard length starts the night afresh", r["grid"]["custom_slots"], [])
+        r, e = await as_admin(nm.put_slot_plan, tid, nm.SlotPlanBody(pad_up_seconds=45))
+        check("the pad up warning can be set", r["slot_plan"]["pad_up_seconds"], 45)
+        mid = await as_admin(nm.create_session, nm.SessionCreate(session_date=DAY, label="Queue"))
+        r, e = await as_admin(nm.set_slot_time, mid[0]["id"], nm.SlotTime(slot_index=1, time="17:00"))
+        check("a queue session refuses a time edit with 409", getattr(e, "status_code", None), 409)
+    await guarded("Clicking a time", step_time)
+
     print("\n── The DDL ──")
     async def step_10():
         async with base.engine.begin() as conn:

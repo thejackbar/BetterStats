@@ -31,11 +31,16 @@ const att = (id, name, net, slot, extra = {}) => ({
 })
 
 let state, wire
+// 16:45 plus the (possibly stretched) slot lengths: where each slot starts, in minutes.
+const startsOf = () => { let t = 16 * 60 + 45; return state.lens.map((l) => { const out = t; t += l; return out }) }
+const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 const mkGrid = () => {
   if (!state.configured) return { configured: false, nets: [], times: [], no_net: [], overflow_count: 0, slots: 0 }
-  // Slot 0 started ten minutes ago, 7-minute slots: the running slot is 1.
-  const start = new Date(Date.now() - 10 * 60000).toISOString()
-  const times = ['16:45', '16:52', '16:59', '17:06', '17:13']
+  // The first slot began `elapsedMin` minutes ago.
+  const start = new Date(Date.now() - state.elapsedMin * 60000).toISOString()
+  const starts = startsOf()
+  const times = starts.map(hhmm)
+  const offsets = [0]; state.lens.forEach((l) => offsets.push(offsets[offsets.length - 1] + l))
   const cell = (net, i) => {
     const a = state.attendees.find((x) => x.net_key === net && x.slot_index === i)
     return { slot: i, attendee_id: a ? a.id : null, repeat: false }
@@ -50,15 +55,16 @@ const mkGrid = () => {
     count: state.attendees.filter((a) => a.net_key === n.id && a.bats).length,
   }))
   return {
-    configured: true, slot_minutes: 7, first_time: '16:45', finish_time: '17:20', second_go: false, slots: 5, times,
+    configured: true, slot_minutes: 7, first_time: '16:45', finish_time: '17:20', second_go: false, pad_up_seconds: 120, slots: times.length, times,
+    offsets, custom_slots: state.lens.map((l, i) => (l !== 7 ? i : null)).filter((x) => x != null),
     start_at: start, now_slot: 1, nets,
     no_net: state.attendees.filter((a) => !a.net_key && a.bats).map((a) => a.id),
     overflow_count: nets.reduce((n, x) => n + x.overflow.length, 0),
   }
 }
 const payload = () => ({
-  id: 'sess1', version: state.version, server_time: new Date().toISOString(), mode: 'auto',
-  slot_plan: { first_time: state.configured ? '16:45' : null, slot_minutes: 7, finish_time: '17:20', second_go: false, tz_offset_minutes: 480, nets: [] },
+  id: 'sess1', version: state.version, server_time: new Date().toISOString(), mode: state.mode || 'auto',
+  slot_plan: { first_time: state.configured ? '16:45' : null, slot_minutes: 7, finish_time: '17:20', second_go: false, pad_up_seconds: 120, tz_offset_minutes: 480, nets: [] },
   grid: mkGrid(), session_date: '2026-11-10', label: 'Tuesday nets', notes: null, status: 'active', settings: SETTINGS,
   timer: { running: false, ends_at: null, remaining_seconds: 600, duration_seconds: 600, turn_seq: 0 },
   attendees: state.attendees, attendee_count: state.attendees.length, batted_count: 0, sitting_out_count: 0,
@@ -73,15 +79,16 @@ const run = async () => {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   state = {
-    version: 1, configured: false,
+    version: 1, configured: false, elapsedMin: 10, lens: [7, 7, 7, 7, 7],
     attendees: [
       att('a1', 'Adams, Zed', 'n1', 0), att('a2', 'Brown, Anna', 'n1', 1), att('a3', 'Cole, Cara', 'n2', 0),
+      att('a7', 'Gray, Gus', 'n1', 2),
       att('a4', 'Doe, Dan', 'n2', null),                       // does not fit
       att('a5', 'Eve, Ed', null, null),                         // not in a net
       att('a6', 'Fox, Finn', null, null, { bats: false, note: 'sore shoulder' }),
     ],
   }
-  wire = { plan: [], slots: [], create: [] }
+  wire = { plan: [], slots: [], create: [], times: [], patch: [] }
   const json = (r, body, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
 
   await page.route('**/api/**', (r) => json(r, {}))
@@ -110,7 +117,23 @@ const run = async () => {
     state.version += 1
     return json(r, payload())
   })
-  await page.route('**/api/nets/sessions/sess1', (r) => json(r, payload()))
+  await page.route('**/api/nets/sessions/sess1/slot-time', (r) => {
+    const b = JSON.parse(r.request().postData() || '{}')
+    wire.times.push(b)
+    const [h, m] = b.time.split(':').map(Number)
+    const want = h * 60 + m
+    if (b.slot_index > 0) state.lens[b.slot_index - 1] = want - startsOf()[b.slot_index - 1]
+    state.version += 1
+    return json(r, payload())
+  })
+  await page.route('**/api/nets/sessions/sess1', (r) => {
+    if (r.request().method() === 'PATCH') {
+      const b = JSON.parse(r.request().postData() || '{}')
+      wire.patch.push(b)
+      if (b.mode) state.mode = b.mode
+    }
+    return json(r, payload())
+  })
 
   await page.goto(`${BASE}/admin/betterselect/nets/sess1`)
   await page.waitForSelector('text=Tuesday nets', { timeout: 20000 })
@@ -155,6 +178,63 @@ const run = async () => {
     check('someone not batting is listed with their note', (await page.locator('[data-not-batting]').innerText()).includes('Fox, Finn') && (await page.locator('[data-not-batting]').innerText()).includes('sore shoulder'))
   })
 
+  const reloadAt = async (elapsedMin) => {
+    state.elapsedMin = elapsedMin
+    await page.goto(`${BASE}/admin/betterselect/nets/sess1`)
+    await page.locator('[data-net-grid]').waitFor({ timeout: 20000 })
+  }
+  const bgOf = (sel) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).backgroundColor)
+
+  await safe('Now and next', async () => {
+    console.log('\n── The strip at the top and the shading ──')
+    await reloadAt(10)                                   // slot 1 (4:52) has 4 minutes left
+    const now = await page.locator('[data-hero-line="now"]').innerText()
+    check('who is in now: the people in the running slot', now.includes('Brown, Anna') && /in now/i.test(now), now)
+    check('a net with nobody in the slot says nobody', /nobody/.test(now))
+    const next = await page.locator('[data-hero-line="next"]').innerText()
+    check('who is next, with the time, outside the pad up window', next.includes('Gray, Gus') && /4:59/.test(next) && /next/i.test(next), next)
+    check('no pad up line yet', (await page.locator('[data-hero-line="pad"]').count()) === 0)
+    const timer = await page.locator('[data-slot-timer]').innerText()
+    check('the timer counts down the running slot', /this slot ends in/i.test(timer) && /\b[34]:\d\d\b/.test(timer), timer)
+    check('the rows carry their state as a word and an attribute', JSON.stringify(await page.locator('[data-row-state]').evaluateAll((els) => els.map((e) => e.dataset.rowState))) === JSON.stringify(['past', 'now', 'next', '', '']))
+    check('the running row is shaded', (await bgOf('[data-cell][data-slot="1"]')) !== 'rgba(0, 0, 0, 0)')
+    check('the next row is shaded too, and differently', (await bgOf('[data-cell][data-slot="2"]')) !== 'rgba(0, 0, 0, 0)' && (await bgOf('[data-cell][data-slot="2"]')) !== (await bgOf('[data-cell][data-slot="1"]')))
+    check('a row after that is not shaded', (await bgOf('[data-cell][data-slot="4"]')) === 'rgba(0, 0, 0, 0)')
+    check('a slot that has gone is dimmed', (await page.locator('[data-cell][data-slot="0"]').first().evaluate((el) => getComputedStyle(el).opacity)) === '0.55')
+    const key = await page.locator('[data-grid-key]').innerText()
+    check('a key names every shade in words', /in now/i.test(key) && /pad up/i.test(key) && /next/i.test(key), key)
+    check('no alarm is showing', (await page.locator('[data-alarm-banner]').count()) === 0)
+  })
+
+  await safe('Pad up', async () => {
+    console.log('\n── Padding up ──')
+    await reloadAt(12.5)                                 // 90 seconds left, inside the 2 minute window
+    const pad = await page.locator('[data-hero-line="pad"]').innerText()
+    check('inside the window the next line becomes PAD UP, with the names', /pad up/i.test(pad) && pad.includes('Gray, Gus'), pad)
+    check('and the next row is shaded as pad up', (await page.locator('[data-slot-time="2"]').getAttribute('data-row-state')) === 'pad')
+    check('opening the page inside the window does not sound the alarm for it', (await page.locator('[data-alarm-banner]').count()) === 0)
+    await reloadAt(14 - 122 / 60)                        // 122 seconds left: the window opens in two seconds
+    await page.locator('[data-alarm-banner="Pad up"]').waitFor({ timeout: 8000 })
+    const banner = await page.locator('[data-alarm-banner="Pad up"]').innerText()
+    check('the pad up alarm names who is next', /Next:/.test(banner) && banner.includes('Gray, Gus (1st & 2nd XI)'), banner)
+    check('and says so once, not every second', (await page.locator('[data-alarm-banner="Pad up"]').count()) === 1)
+  })
+
+  await safe('Change over', async () => {
+    console.log('\n── The change over ──')
+    await reloadAt(14 - 3 / 60)                          // three seconds to the change
+    await page.locator('[data-alarm-banner="Change over"]').waitFor({ timeout: 9000 })
+    const banner = await page.locator('[data-alarm-banner="Change over"]').innerText()
+    check('the change over alarm says who is in now', /In now:/.test(banner) && banner.includes('Gray, Gus'), banner)
+    check('and the strip has moved on to that slot', (await page.locator('[data-hero-line="now"]').innerText()).includes('Gray, Gus'))
+    check('the row state follows', (await page.locator('[data-slot-time="2"]').getAttribute('data-row-state')) === 'now')
+    wire.patch.length = 0
+    await page.locator('[data-alarm-toggle]').click()
+    await page.waitForTimeout(300)
+    check('the alarm switch sends the session\'s sound setting', wire.patch.length === 1 && wire.patch[0].settings && typeof wire.patch[0].settings.sound === 'boolean', JSON.stringify(wire.patch))
+    await reloadAt(10)
+  })
+
   await safe('Tap to move', async () => {
     console.log('\n── Tap a name, tap a cell ──')
     wire.slots.length = 0
@@ -192,6 +272,58 @@ const run = async () => {
     await page.mouse.up()
     await page.waitForTimeout(400)
     check('the drop POSTs Cara into net 2, slot 3', JSON.stringify(wire.slots) === JSON.stringify([{ attendee_id: 'a3', net_id: 'n2', slot_index: 3 }]), JSON.stringify(wire.slots))
+  })
+
+  await safe('Edit a time', async () => {
+    console.log('\n── Click a time ──')
+    check('the screen says times can be clicked', /click a time to change it/i.test(await page.locator('[data-time-hint]').innerText()))
+    wire.times.length = 0
+    await page.locator('[data-time-edit="2"]').click()
+    await page.locator('[data-time-input="2"]').fill('17:01')
+    await page.locator('[data-time-input="2"]').press('Enter')
+    await page.waitForTimeout(500)
+    check('one POST with the slot and the new time, nothing else', JSON.stringify(wire.times) === JSON.stringify([{ slot_index: 2, time: '17:01' }]), JSON.stringify(wire.times))
+    const t = await page.locator('[data-slot-time]').allInnerTexts()
+    check('that row now starts at 5:01 and the rows below moved with it', /5:01/.test(t[2]) && /5:08/.test(t[3]) && /5:15/.test(t[4]), JSON.stringify(t))
+    check('the row after a stretched slot is marked as changed', /underline/.test(await page.locator('[data-time-edit="2"]').getAttribute('class')))
+    check('and the header says a slot was changed', /1 changed/.test(await page.locator('[data-net-grid]').innerText()))
+    wire.times.length = 0
+    await page.locator('[data-time-edit="3"]').click()
+    await page.locator('[data-time-input="3"]').fill('17:40')
+    await page.locator('[data-time-input="3"]').press('Escape')
+    await page.waitForTimeout(300)
+    check('Escape cancels without sending anything', wire.times.length === 0 && (await page.locator('[data-time-input]').count()) === 0)
+  })
+
+  await safe('Print', async () => {
+    console.log('\n── Printing ──')
+    const btn = page.locator('[data-print-btn]')
+    check('the session has a Print button that opens a new tab', (await btn.getAttribute('href')) === '/admin/betterselect/nets/sess1/print' && (await btn.getAttribute('target')) === '_blank')
+    await page.goto(`${BASE}/admin/betterselect/nets/sess1/print`)
+    await page.locator('[data-print-grid]').waitFor({ timeout: 20000 })
+    const g = await page.locator('[data-print-grid]').innerText()
+    check('the sheet has the times and a column per net', /4:45/.test(g) && /1st & 2nd XI/.test(g) && /3rd & 4th XI/.test(g) && /Juniors \/ etc/.test(g), g)
+    check('and the names where they sit', g.includes('Adams, Zed') && g.includes('Cole, Cara'))
+    check('who does not fit is written under it', /Does not fit/.test(await page.locator('[data-print-overflow]').innerText()))
+    check('there is no admin chrome on the sheet', !/Check in players/.test(await page.locator('body').innerText()))
+    check('the sheet is set to print landscape', /size: landscape/.test(await page.locator('style').allInnerTexts().then((x) => x.join(' '))))
+    check('the Print button is there on screen', (await page.locator('[data-print-now]').isVisible()))
+    await page.emulateMedia({ media: 'print' })
+    check('and left off the paper', !(await page.locator('[data-print-now]').isVisible()))
+    await page.emulateMedia({ media: 'screen' })
+    await page.goto(`${BASE}/admin/betterselect/nets/sess1`)
+    await page.locator('[data-net-grid]').waitFor()
+  })
+
+  await safe('Switch', async () => {
+    console.log('\n── Switching how the night is run ──')
+    check('the switcher offers both ways', (await page.locator('[data-mode-switch] button').allInnerTexts()).join('|') === 'Queue|Time slots')
+    wire.patch.length = 0
+    page.once('dialog', (d) => d.accept())
+    await page.locator('[data-mode-switch] button', { hasText: 'Queue' }).click()
+    await page.waitForTimeout(500)
+    check('going back to the queue PATCHes just the mode', JSON.stringify(wire.patch) === JSON.stringify([{ mode: 'manual' }]), JSON.stringify(wire.patch))
+    state.mode = 'auto'
   })
 
   await safe('Phone', async () => {

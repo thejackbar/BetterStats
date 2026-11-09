@@ -45,6 +45,7 @@ from app.models.db import (
 from app.routers.ladders import _compute_team_ladders
 from app.routers import public_fantasy as pf
 from app.routers import public_votes as pv
+from app.routers import net_manager as nets_svc
 from app.routers.availability import (
     MAYBE_OFF,
     active_self_service_players,
@@ -696,6 +697,14 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
     season = fees = fines = fantasy = cards = None
     votes: list[dict] = []
     votes_cast: list[dict] = []
+    nets: list[dict] = []
+    if "training" in modules:
+        try:
+            nets = await _nets_for_player(db, club, player)
+        except Exception:
+            logger.exception("player page: nets failed for %s", player.id)
+            await rollback_keeping(db, club, player)
+        lap("nets")
     if "cards" in modules:
         try:
             cards = await cards_svc.dashboard_summary(db, club, player)
@@ -775,6 +784,8 @@ async def get_my_profile(token: str, request: Request, tz: Optional[str] = None,
         "squads_visible": squads_visible,
         "selected": selected,
         "training": training,
+        # Tonight's nets: check yourself in, and where and when you bat once you are in.
+        "nets": nets,
         "season": season,
         "fees": fees,
         "fines": fines,
@@ -873,6 +884,43 @@ async def _selected_sides(db: AsyncSession, club: Organisation, player: Player, 
     ]
 
 
+async def _nets_for_player(db: AsyncSession, club: Organisation, player: Player) -> list[dict]:
+    """The net sessions on right now that this player can see, and where they
+    sit in each.
+
+    "On right now" is the same window the QR code uses (`live_sessions`: active,
+    dated within a day of today). A session limited to squads is offered to
+    members of those squads, and to anyone already checked into it (the coach
+    may have added them from the admin screen). `can_check_in` also needs the
+    club to have self check-in switched on: a club that never wanted players
+    checking themselves in must not get a button, though a player still sees
+    their own place once the coach has put them in.
+    """
+    my_team_ids = {r[0] for r in (await db.execute(
+        text("SELECT team_id FROM team_members WHERE player_id = :p AND organisation_id = :org"),
+        {"p": player.id, "org": club.id},
+    )).fetchall()}
+    out: list[dict] = []
+    for s in await nets_svc.live_sessions(db, club.id):
+        place = await nets_svc.player_net_view(db, s, player.id)
+        for_me = not s.squad_team_ids or bool(my_team_ids.intersection(s.squad_team_ids))
+        if place is None and not for_me:
+            continue
+        started = nets_svc.session_started(s)
+        out.append({
+            "id": str(s.id),
+            "label": s.label,
+            "date": s.session_date.isoformat() if s.session_date else None,
+            "mode": s.mode or "manual",
+            "checked_in": place is not None,
+            "can_check_in": place is None and for_me and bool(club.net_checkin_enabled) and not started,
+            # The nets have begun: check-in from here has closed, say so.
+            "started": started,
+            "place": place,
+        })
+    return out[:3]
+
+
 async def _training(db: AsyncSession, club: Organisation, player: Player, today: date) -> dict:
     """The sessions still to come that are for everyone or for a squad this player
     is in, and how often they have turned up lately."""
@@ -907,6 +955,55 @@ async def _training(db: AsyncSession, club: Organisation, player: Player, today:
         "attended_8_weeks": int(att[0] or 0) if att else 0,
         "last_attended": att[1].isoformat() if att and att[1] else None,
     }
+
+
+@router.get("/{token}/me/nets")
+async def get_my_nets(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Tonight's nets for the verified player: the poll behind the nets card, so
+    the page learns of a move the coach makes without reloading everything."""
+    club = await _club_for_token(db, token, need_select=False)
+    player = await _player_for_session(db, request, club)
+    modules = player_dashboard.served_modules(club)
+    return {"sessions": await _nets_for_player(db, club, player) if "training" in modules else []}
+
+
+@router.post("/{token}/me/nets/{session_id}/checkin")
+async def check_in_to_nets(token: str, session_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The verified player checks THEMSELVES in to a session that is on now.
+
+    Same single writer as the QR code and the admin screen (`check_in_person`), so
+    a queue session puts them at the back of the batting order and a time-slot
+    session gives them their squad's net and the first slot that has not started.
+    Only ever the cookie's own player; the session has to be one `_nets_for_player`
+    would offer them, and the club's self check-in switch has to be on. It closes
+    when the nets start (a time-slot session's first slot): this is for filling the
+    grid beforehand. The QR code and the coach still take late arrivals.
+    """
+    club = await _club_for_token(db, token)
+    club_id = club.id                 # read before any rollback expires the club
+    player = await _player_for_session(db, request, club)
+    pid = player.id
+    if not club.net_checkin_enabled:
+        raise HTTPException(status_code=403, detail="Your club has not turned on self check-in.")
+    rate_limit.enforce(f"nets-checkin:{pid}", 20, 60)
+    offered = {o["id"]: o for o in await _nets_for_player(db, club, player)}
+    offer = offered.get(str(session_id))
+    if offer is None:
+        raise HTTPException(status_code=409, detail="That session is not on right now.")
+    if offer["checked_in"]:
+        return {"status": "ok", "added": 0, "sessions": list(offered.values())}
+    if offer["started"]:
+        raise HTTPException(status_code=409, detail="The nets have started. Check in with whoever is running them.")
+    s = next((x for x in await nets_svc.live_sessions(db, club_id) if str(x.id) == str(session_id)), None)
+    if s is None:
+        raise HTTPException(status_code=409, detail="That session is not on right now.")
+    row = await nets_svc.check_in_person(db, s, club_id, player_id=pid, source="self")
+    if row is not None:
+        nets_svc.touch_session(s)         # so the coach's screen announces the arrival
+    await db.commit()
+    club = await db.get(Organisation, club_id)
+    player = await db.get(Player, pid)
+    return {"status": "ok", "added": 1 if row is not None else 0, "sessions": await _nets_for_player(db, club, player)}
 
 
 @router.post("/{token}/me")

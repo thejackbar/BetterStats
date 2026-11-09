@@ -12,14 +12,23 @@ THE PLAN (`net_sessions.slot_plan`, JSONB)::
     {
       "first_time": "16:45",         # first slot starts, club wall-clock time
       "slot_minutes": 7,
+      "slot_overrides": {"3": 10},   # optional: slot 3 runs ten minutes
       "finish_time": "18:09",        # optional; nets end. NULL = no end, no overflow
       "second_go": true,             # spare cells at the foot repeat the order
+      "pad_up_seconds": 120,         # warn the next batters this long before the change; 0 = off
       "tz_offset_minutes": 480,      # minutes EAST of UTC when the plan was saved
       "nets": [
         {"id": "n1", "name": "Net 1", "squad_team_ids": ["<uuid>", ...], "catch_all": false},
         {"id": "n3", "name": "Juniors", "squad_team_ids": [], "catch_all": true}
       ]
     }
+
+SLOT LENGTHS. Every slot is `slot_minutes` long unless `slot_overrides`
+(`{"3": 10}`: slot 3 is ten minutes) says otherwise. A coach edits a TIME on the
+grid, not a length: setting the 4:37 row to 4:40 makes the slot above it three
+minutes longer and every later time moves with it, because start times are
+cumulative. People keep their slot numbers, so "fewer players than expected, give
+the early batters longer" is one edit. See `set_slot_time`.
 
 WHAT IS STORED AND WHAT IS DERIVED. Stored per attendee: `net_key` (a plan net
 id), `slot_index` (0 = the first slot) and `slot_manual` (somebody dragged them
@@ -50,7 +59,9 @@ from typing import Iterable, Optional
 
 MAX_NETS = 8
 MAX_SLOTS = 96
+MAX_SLOT_MINUTES = 240
 DEFAULT_SLOT_MINUTES = 7
+DEFAULT_PAD_UP_SECONDS = 120
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
@@ -73,8 +84,10 @@ def default_plan() -> dict:
     return {
         "first_time": None,
         "slot_minutes": DEFAULT_SLOT_MINUTES,
+        "slot_overrides": {},
         "finish_time": None,
         "second_go": False,
+        "pad_up_seconds": DEFAULT_PAD_UP_SECONDS,
         "tz_offset_minutes": 0,
         "nets": [],
     }
@@ -100,12 +113,26 @@ def clean_plan(raw, valid_team_ids: Optional[Iterable[str]] = None) -> dict:
     except (TypeError, ValueError):
         pass
 
+    ov_raw = raw.get("slot_overrides")
+    if isinstance(ov_raw, dict):
+        for k, v in ov_raw.items():
+            try:
+                i, n = int(k), int(v)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < MAX_SLOTS and 1 <= n <= MAX_SLOT_MINUTES and n != out["slot_minutes"]:
+                out["slot_overrides"][str(i)] = n
+
     fin = parse_hhmm(raw.get("finish_time"))
     # A finish at or before the start would read as "no slots at all"; an
     # evening session does not cross midnight, so treat it as not set.
     out["finish_time"] = fmt_hhmm(fin) if (fin is not None and first is not None and fin > first) else None
 
     out["second_go"] = bool(raw.get("second_go"))
+    try:
+        out["pad_up_seconds"] = max(0, min(1800, int(raw.get("pad_up_seconds", DEFAULT_PAD_UP_SECONDS))))
+    except (TypeError, ValueError):
+        pass
     try:
         out["tz_offset_minutes"] = max(-840, min(840, int(raw.get("tz_offset_minutes", 0))))
     except (TypeError, ValueError):
@@ -145,13 +172,44 @@ def is_configured(plan: dict) -> bool:
     return bool(plan.get("first_time")) and bool(plan.get("nets"))
 
 
+def slot_length(plan: dict, i: int) -> int:
+    """How many minutes slot `i` runs."""
+    ov = plan.get("slot_overrides") or {}
+    return int(ov.get(str(i), plan.get("slot_minutes") or DEFAULT_SLOT_MINUTES))
+
+
+def slot_offsets(plan: dict, n: int) -> list[int]:
+    """Minutes from the first slot's start to the start of each of `n` slots,
+    plus the end of the last: `n + 1` numbers. Cumulative, which is why editing
+    one time moves everything below it."""
+    out, t = [0], 0
+    for i in range(n):
+        t += slot_length(plan, i)
+        out.append(t)
+    return out
+
+
+def slot_starts(plan: dict, n: int) -> list[int]:
+    """Clock start (minutes after midnight) of each of the first `n` slots."""
+    first = parse_hhmm(plan.get("first_time"))
+    if first is None:
+        return []
+    return [first + o for o in slot_offsets(plan, n)[:n]]
+
+
 def slot_total(plan: dict) -> Optional[int]:
-    """How many slots the night has, or None when there is no finish time."""
+    """How many whole slots fit before the finish, or None with no finish time."""
     first = parse_hhmm(plan.get("first_time"))
     fin = parse_hhmm(plan.get("finish_time"))
     if first is None or fin is None:
         return None
-    return max(0, min(MAX_SLOTS, (fin - first) // int(plan.get("slot_minutes") or DEFAULT_SLOT_MINUTES)))
+    n, t = 0, first
+    while n < MAX_SLOTS:
+        t += slot_length(plan, n)
+        if t > fin:
+            break
+        n += 1
+    return n
 
 
 def start_utc(plan: dict, session_date: date) -> Optional[datetime]:
@@ -163,6 +221,14 @@ def start_utc(plan: dict, session_date: date) -> Optional[datetime]:
     return local - timedelta(minutes=int(plan.get("tz_offset_minutes") or 0))
 
 
+def slot_start_at(plan: dict, session_date: date, i: int) -> Optional[datetime]:
+    """The absolute moment slot `i` starts."""
+    st = start_utc(plan, session_date)
+    if st is None:
+        return None
+    return st + timedelta(minutes=slot_offsets(plan, i + 1)[i])
+
+
 def now_slot(plan: dict, session_date: date, now: datetime) -> Optional[int]:
     """The slot running right now: -1 before the first, None when not planned."""
     st = start_utc(plan, session_date)
@@ -171,7 +237,11 @@ def now_slot(plan: dict, session_date: date, now: datetime) -> Optional[int]:
     mins = (now - st).total_seconds() / 60.0
     if mins < 0:
         return -1
-    return int(mins // int(plan.get("slot_minutes") or DEFAULT_SLOT_MINUTES))
+    i, acc = 0, 0
+    while acc + slot_length(plan, i) <= mins and i < MAX_SLOTS * 4:
+        acc += slot_length(plan, i)
+        i += 1
+    return i
 
 
 def first_open_slot(plan: dict, session_date: date, now: datetime) -> int:
@@ -187,9 +257,50 @@ def first_open_slot(plan: dict, session_date: date, now: datetime) -> int:
     mins = (now - st).total_seconds() / 60.0
     if mins <= 0:
         return 0
-    step = int(plan.get("slot_minutes") or DEFAULT_SLOT_MINUTES)
-    k = int(mins // step)
-    return k if k * step == mins else k + 1
+    i, start = 0, 0
+    while start < mins and i < MAX_SLOTS * 4:
+        start += slot_length(plan, i)
+        i += 1
+    return i
+
+
+def has_started(plan: dict, session_date: date, now: datetime) -> bool:
+    """Whether the first slot has begun. False when there is no start time to
+    measure against, so a queue session or an unplanned grid never "starts"."""
+    st = start_utc(plan, session_date) if is_configured(plan) else None
+    return st is not None and now >= st
+
+
+def set_slot_time(plan: dict, i: int, hhmm: str) -> dict:
+    """A copy of `plan` with slot `i` starting at `hhmm`.
+
+    Slot 0 is the first net time, and moving it moves every slot. Any other slot
+    is set by lengthening or shortening the slot ABOVE it, so every later time
+    moves by the same amount. Raises ValueError with a sentence a coach can read
+    when the time cannot be."""
+    want = parse_hhmm(hhmm)
+    first = parse_hhmm(plan.get("first_time"))
+    if want is None or first is None:
+        raise ValueError("That is not a time.")
+    out = clean_plan(plan)
+    if i == 0:
+        out["first_time"] = fmt_hhmm(want)
+        return clean_plan(out)
+    if i < 0 or i >= MAX_SLOTS:
+        raise ValueError("That slot is not on the grid.")
+    prev_start = first + slot_offsets(plan, i)[i - 1]
+    new_len = want - prev_start
+    if new_len < 1:
+        raise ValueError("A slot has to start after the one above it.")
+    if new_len > MAX_SLOT_MINUTES:
+        raise ValueError("That slot would run for more than four hours.")
+    ov = dict(out["slot_overrides"])
+    if new_len == out["slot_minutes"]:
+        ov.pop(str(i - 1), None)
+    else:
+        ov[str(i - 1)] = new_len
+    out["slot_overrides"] = ov
+    return clean_plan(out)
 
 
 def pick_net(plan: dict, squads: Iterable[tuple[str, Optional[int]]], is_guest: bool = False) -> Optional[str]:
@@ -232,7 +343,6 @@ def build_grid(plan: dict, session_date: Optional[date], rows: list[dict], now: 
     configured = is_configured(plan)
     total = slot_total(plan)
     step = int(plan.get("slot_minutes") or DEFAULT_SLOT_MINUTES)
-    first = parse_hhmm(plan.get("first_time"))
     st = start_utc(plan, session_date) if session_date else None
     net_ids = {n["id"] for n in plan.get("nets") or []}
 
@@ -284,8 +394,13 @@ def build_grid(plan: dict, session_date: Optional[date], rows: list[dict], now: 
         "first_time": plan.get("first_time"),
         "finish_time": plan.get("finish_time"),
         "second_go": bool(plan.get("second_go")),
+        "pad_up_seconds": int(plan.get("pad_up_seconds") or 0),
         "slots": n_rows if configured else 0,
-        "times": [fmt_hhmm(first + i * step) for i in range(n_rows)] if (configured and first is not None) else [],
+        "times": [fmt_hhmm(t) for t in slot_starts(plan, n_rows)] if configured else [],
+        # Minutes from `start_at` to the start of each slot, and the end of the
+        # last: what a device needs to find the running slot from its own clock.
+        "offsets": slot_offsets(plan, n_rows) if configured else [],
+        "custom_slots": sorted(int(k) for k in (plan.get("slot_overrides") or {})),
         "start_at": st.isoformat() if st else None,
         "now_slot": now_slot(plan, session_date, now) if (configured and session_date) else None,
         "nets": nets_out,

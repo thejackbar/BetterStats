@@ -267,10 +267,17 @@ class SlotPlanBody(BaseModel):
     # Only what is sent changes (an explicit null clears finish_time).
     first_time: Optional[str] = None
     slot_minutes: Optional[int] = None
+    slot_overrides: Optional[dict] = None
     finish_time: Optional[str] = None
     second_go: Optional[bool] = None
+    pad_up_seconds: Optional[int] = None
     tz_offset_minutes: Optional[int] = None
     nets: Optional[list[dict]] = None
+
+
+class SlotTime(BaseModel):
+    slot_index: int
+    time: str
 
 
 class SlotMove(BaseModel):
@@ -462,6 +469,68 @@ async def _live_payload(db: AsyncSession, s: NetSession) -> dict:
         "checkin_path": f"/nets-checkin/{s.checkin_token}" if s.checkin_token else None,
         "created_at": s.created_at.isoformat() if s.created_at else None,
     }
+
+
+def session_started(s: NetSession) -> bool:
+    """A time-slot session whose first slot has begun. Self check-in from a
+    player's own page is for BEFORE the nets start (it fills the grid ahead of
+    time); after that the coach and the QR code at the fence take late arrivals
+    into the next free slot. A queue session has no start time and never closes."""
+    return _is_auto(s) and net_slots.has_started(_plan_of(s), s.session_date, _utcnow())
+
+
+async def player_net_view(db: AsyncSession, s: NetSession, player_id) -> Optional[dict]:
+    """Where one player sits in a session, for their own page. None when they
+    are not checked in.
+
+    Time-slot session: their net, their slot's clock time (the club's wall
+    clock, as planned) and the absolute moment it starts, so their phone can say
+    "in 12 minutes" in its own timezone; plus any second-go times. Queue
+    session: how many are ahead of them and whether they are in the nets right
+    now. Nothing here leaks anyone else: the others only ever appear as counts.
+    """
+    rows = await _attendee_rows(db, s.id)
+    mine = next((r for r in rows if r.player_id == player_id), None)
+    if mine is None:
+        return None
+    out: dict = {"mode": s.mode or "manual", "bats": bool(mine.bats), "batted": bool(mine.batted)}
+    if _is_auto(s):
+        plan = _plan_of(s)
+        out.update({
+            "configured": net_slots.is_configured(plan), "net": None, "time": None, "start_at": None,
+            "slot_minutes": plan["slot_minutes"], "also": [], "fits": True,
+        })
+        net = next((n for n in plan["nets"] if n["id"] == mine.net_key), None)
+        first = net_slots.parse_hhmm(plan.get("first_time"))
+        if net and mine.bats and first is not None:
+            out["net"] = {"id": net["id"], "name": net["name"]}
+            if mine.slot_index is None:
+                out["fits"] = False
+            else:
+                out["time"] = net_slots.fmt_hhmm(net_slots.slot_starts(plan, mine.slot_index + 1)[mine.slot_index])
+                at = net_slots.slot_start_at(plan, s.session_date, mine.slot_index)
+                if at is not None:
+                    out["start_at"] = at.isoformat()
+                grid = net_slots.build_grid(
+                    plan, s.session_date,
+                    [{"id": str(r.id), "net_key": r.net_key, "slot_index": r.slot_index, "bats": bool(r.bats)}
+                     for r in _creation_order(rows)],
+                    _utcnow(),
+                )
+                gnet = next((n for n in grid["nets"] if n["id"] == net["id"]), None)
+                if gnet:
+                    out["also"] = [grid["times"][c["slot"]] for c in gnet["cells"]
+                                   if c["repeat"] and c["attendee_id"] == str(mine.id)]
+        return out
+    waiting = _waiting(rows)
+    pos = next((i for i, r in enumerate(waiting) if r.id == mine.id), None)
+    nets = _clean_settings(s.settings)["nets"]
+    out.update({
+        "position": (pos + 1) if pos is not None else None,
+        "ahead": pos, "waiting": len(waiting), "nets": nets,
+        "in_nets_now": pos is not None and pos < nets,
+    })
+    return out
 
 
 async def _club_squad_ids(db: AsyncSession, club_id, raw) -> Optional[list[uuid.UUID]]:
@@ -1178,10 +1247,45 @@ async def put_slot_plan(
         raise HTTPException(status_code=409, detail="This session is not set to run in time slots.")
     merged = _plan_of(s)
     sent = body.model_fields_set
-    for key in ("first_time", "slot_minutes", "finish_time", "second_go", "tz_offset_minutes", "nets"):
+    for key in ("first_time", "slot_minutes", "slot_overrides", "finish_time", "second_go", "pad_up_seconds", "tz_offset_minutes", "nets"):
         if key in sent:
             merged[key] = getattr(body, key)
+    if "slot_minutes" in sent and "slot_overrides" not in sent and body.slot_minutes != _plan_of(s)["slot_minutes"]:
+        # A new standard slot length starts the night afresh: the slots a coach
+        # had stretched were stretched relative to the old one.
+        merged["slot_overrides"] = {}
     s.slot_plan = net_slots.clean_plan(merged, await _club_team_ids(db, club_id))
+    await db.flush()
+    await _replan(db, s, club_id)
+    return await _commit_live(db, s)
+
+
+@router.post("/sessions/{session_id}/slot-time")
+async def set_slot_time(
+    session_id: str,
+    body: SlotTime,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_any_cap(SELECT_NETS, MANAGE_SELECTIONS)),
+):
+    """Change the time a slot starts. Every later time moves with it.
+
+    Fewer players than expected? Set the second row's time later and the first
+    slot runs longer; everyone below keeps their place and their time shifts. The
+    first row is the first net time. Anyone pushed past the finish by a later
+    start is flagged, not dropped.
+    """
+    club_id = club.id
+    s = await _owned_session(db, session_id, club_id)
+    if not _is_auto(s):
+        raise HTTPException(status_code=409, detail="This session is not set to run in time slots.")
+    plan = _plan_of(s)
+    if not net_slots.is_configured(plan):
+        raise HTTPException(status_code=409, detail="Set up the nets first.")
+    try:
+        s.slot_plan = net_slots.set_slot_time(plan, body.slot_index, body.time)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     await db.flush()
     await _replan(db, s, club_id)
     return await _commit_live(db, s)
