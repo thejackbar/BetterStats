@@ -293,7 +293,7 @@ async def _org_logo_by_ca_id(db: AsyncSession, ca_ids: list[str]) -> dict[str, s
         return {}
     rows = await db.execute(text("""
         SELECT id, logo_url, (logo_data IS NOT NULL) AS has_data
-        FROM organisations WHERE LOWER(id::text) = ANY(:ids)
+        FROM organisations WHERE LOWER(id::text) = ANY(:ids) AND archived_at IS NULL
     """), {"ids": ids})
     out: dict[str, str] = {}
     for r in rows.mappings().all():
@@ -338,6 +338,18 @@ def _match_logos(m: dict) -> tuple[str | None, str | None, str | None, str | Non
     home_org = (home_t or {}).get("owningOrganisation") or {}
     away_org = (away_t or {}).get("owningOrganisation") or {}
     return home_org.get("id"), home_org.get("logoUrl"), away_org.get("id"), away_org.get("logoUrl")
+
+
+def _match_org_names(m: dict) -> tuple[str, str]:
+    """(home club name, away club name) from a raw match: the OWNING organisation's
+    name ("Maddington Cricket Club"), not the grade-level team's ("Maddington Seventh
+    Grade"). Same dual-shape read as ``_match_logos``."""
+    ms_teams = (m.get("matchSummary") or {}).get("teams") or []
+    teams = ms_teams or (m.get("teams") or [])
+    home_t = next((t for t in teams if t.get("isHome")), None)
+    away_t = next((t for t in teams if not t.get("isHome")), None)
+    return (((home_t or {}).get("owningOrganisation") or {}).get("name") or "",
+            ((away_t or {}).get("owningOrganisation") or {}).get("name") or "")
 
 
 def _result_row(
@@ -412,6 +424,7 @@ def _result_row(
         "grade": (grade_name or "").upper(),
         "gradeOrder": grade_order,
         "opp": strip_team_suffix(opp_name).upper(),
+        "oppClub": (opp_org.get("name") or "").upper(),
         "oppMono": _mono(opp_name),
         "us": us,
         "them": them,
@@ -453,11 +466,13 @@ async def social_fixtures(db: AsyncSession, org) -> dict:
             bucket["round"] = _round_label(fx.get("round"))
         opp_org_id, opp_logo_raw = (fx.get("away_org_id"), fx.get("away_logo")) if ha == "H" \
             else (fx.get("home_org_id"), fx.get("home_logo"))
+        opp_club = (fx.get("away_org_name") if ha == "H" else fx.get("home_org_name")) or ""
         bucket["fixtures"].append({
             "grade": (fx.get("grade_name") or "").upper(),
             "gradeOrder": grade_orders.get(fx.get("grade_id")),
             "categories": cats_of(fx.get("grade_name")),
             "opp": strip_team_suffix(opp).upper(),
+            "oppClub": opp_club.upper(),
             "oppMono": _mono(opp),
             "ha": ha,
             "time": _to_12h(fx.get("time")),
@@ -805,12 +820,14 @@ async def social_fixtures_for_reference(db: AsyncSession, org, raw: str) -> dict
         else:
             ha, opp = "H", away
         opp_org_id, opp_logo_raw = (away_org_id, away_logo) if ha == "H" else (home_org_id, home_logo)
+        opp_club = _match_org_names(m)[1 if ha == "H" else 0]
         day, tm = _match_day_time(m)
         rows.append((day, tm, {
             "grade": (ctx["grade_name_by_guid"].get(guid) or "").upper(),
             "gradeOrder": ctx["grade_orders"].get(guid),
             "categories": cats_of(ctx["grade_name_by_guid"].get(guid)),
             "opp": strip_team_suffix(opp).upper(),
+            "oppClub": opp_club.upper(),
             "oppMono": _mono(opp),
             "ha": ha,
             "time": _to_12h(tm),

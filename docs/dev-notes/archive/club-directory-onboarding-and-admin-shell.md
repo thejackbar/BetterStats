@@ -1097,7 +1097,7 @@ While planning the full picture draw the user asked whether the crawler had alre
 
 **Not obvious.** The crest copy is made from the same download as the colours, so it costs no further request. The `.png` regex rule in the frontend nginx would have answered the crest address from disk with its own 404, exactly as it did for the pictures, so the existing rule was widened and its check extended; the check fails against the old config. The backfill's due query gained "no kept crest", so clubs that already had colours are revisited once.
 
-## The email picture becomes the dashboard (v9.141.0, Nov 2026)
+## The email picture becomes the dashboard (v9.141.1, Nov 2026)
 
 With the drawing about to start for every club, the user shared a preview page and said the email image should look the same as it. The existing email picture was the BetterCricket-styled season card, which had been kept on purpose when the page was redesigned, so drawing it for 3,300 clubs would have meant drawing everything again later. The decision was made before the big draw.
 

@@ -1,5 +1,5 @@
 import logging
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +41,9 @@ class OrganisationOut(BaseModel):
     primary_color: str | None = None
     accent_color: str | None = None
     logo_url: str | None = None
+    # Set when the club has been archived. A post does not use an archived club's stored
+    # crest (it is a stale upload; Cricket Australia's own is the better source).
+    archived_at: datetime | None = None
     hero_image_url: str | None = None
     theme_mode: str | None = None
     theme_config: dict | None = None

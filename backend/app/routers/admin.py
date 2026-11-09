@@ -1939,6 +1939,18 @@ _DNB_TYPES = {"did not bat", "dnb", "absent", "absent hurt"}
 _NOT_OUT_ID = 1  # dismissalTypeId == 1 means "not out" in GR API
 
 
+def _how_out_text(dismissal_text) -> str:
+    """Cricket Australia's ``dismissalText`` ("c: C Cecchi b: A Ricci") as a scorebook
+    writes it ("c C Cecchi b A Ricci"): the colon after each dismissal word goes, the
+    rest is left alone. Empty when the payload carries none (a not-out or a game that
+    was never scored ball by ball), so the caller falls back to the dismissal type."""
+    text = str(dismissal_text or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"\b([A-Za-z]+)\s*:\s*", r"\1 ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _overs_str(overs_raw) -> str:
     """Convert oversBowled string/float or balls int to 'X.Y' display string."""
     if overs_raw is None:
@@ -1982,6 +1994,23 @@ def _org_colour(org) -> str | None:
     return theme.get("accent") or org.accent_color or org.primary_color or None
 
 
+# Words every club name carries. They say nothing about WHICH club, so a match on
+# one of them alone is not a match: "KARDINYA LAKES CRICKET CLUB" shares CRICKET and
+# CLUB with "Leeming Spartan Cricket Club", and used to be taken for it.
+_GENERIC_CLUB_WORDS = frozenset({
+    "CRICKET", "CLUB", "CLUBS", "ASSOCIATION", "ASSOC", "JUNIOR", "JUNIORS", "SENIOR", "SENIORS",
+    "DISTRICT", "SPORTS", "SPORT", "SOCIAL", "UNITED", "CITY", "THE", "FOOTBALL", "COLTS",
+    "MENS", "WOMENS", "GIRLS", "BOYS", "FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH", "SIXTH",
+    "SEVENTH", "EIGHTH", "GRADE", "DIVISION", "TEAM",
+})
+
+
+def _club_words(text: str | None) -> list[str]:
+    """The distinctive words of a club or team name (generic ones dropped)."""
+    return [w for w in re.split(r"\W+", (text or "").upper())
+            if len(w) > 3 and w not in _GENERIC_CLUB_WORDS]
+
+
 async def _org_for_team(team_raw: dict, team_name: str, db: AsyncSession, club=None):
     """Which club in our own data is this side of the match?
 
@@ -2020,12 +2049,11 @@ async def _org_for_team(team_raw: dict, team_name: str, db: AsyncSession, club=N
     # An owning organisation with a name of its own beats the grade-level
     # team name, which carries the sponsor ("A Grade (Gatorade)").
     for candidate in (own.get("name"), team_name):
-        words = [w for w in re.split(r"\W+", (candidate or "").upper()) if len(w) > 3]
+        words = _club_words(candidate)
         if not words:
             continue
         if club is not None and club.name:
-            club_words = {w for w in re.split(r"\W+", club.name.upper()) if len(w) > 3}
-            if club_words & set(words):
+            if set(_club_words(club.name)) & set(words):
                 return club
         # Every meaningful word has to appear, not just one of them — a
         # single shared word is how an unrelated club gets picked.
@@ -2464,6 +2492,8 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None
                 "sixes": int(b.get("sixesScored") or 0),
                 "sr": round(runs / balls * 100, 2) if balls > 0 else 0,
                 "out": dt if not dnb and not not_out else ("not out" if not_out else "did not bat"),
+                # "c C Cecchi b A Ricci", the way PlayCricket and a scorebook print it.
+                "howOut": "" if dnb or not_out else _how_out_text(b.get("dismissalText")),
                 "notOut": not_out,
                 "didNotBat": dnb,
                 "role": None,
@@ -2590,6 +2620,10 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None
         else:
             away_org = None
     for side, org in ((home, home_org), (away, away_org)):
+        # An archived club's stored crest and colour are an old upload: take Cricket
+        # Australia's own instead (our own club is never treated this way).
+        if org is not None and org is not club and getattr(org, "archived_at", None) is not None:
+            org = None
         if org is not None:
             side["color"] = _org_colour(org) or side["color"]
             # A crest the club uploaded to us beats whatever Grassroots has:
