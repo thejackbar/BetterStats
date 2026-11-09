@@ -8,6 +8,7 @@ Pasteable HTML emails for the Cricket Australia outreach, plus plain-text fallba
 | `email-preseason-2026.html` | The branded version, for the warm list | {Club}: stats sorted before round one | Dark navy, one CTA, compact module list, static trusted-by strip |
 | `email-preseason-2026-lapsed.html` | Re-engagement: past enquiries and unfinished trials | Come and see what you're missing | Same shell. The example clubs ARE the pitch and sit above the button |
 | `email-selfserve-launch.html` | The self-serve launch (sent alongside the BC_AU_SelfServe_Aug2026 Meta campaign) | Get all of your club's stats online today! Free 14 day trial, no strings attached | Dark navy, echoes the /trial page |
+| `email-features-nov2026.html` | Features push to Club Directory prospects with a drawn picture. Leads with the club's own dashboard, the picture `{{teaser_image_url}}` resolves to. **Send through BetterComms** to the audience "Club has a teaser snapshot: Snapshot and picture ready", not `make_sends.py` | See what we can do with {Club}'s data | Dark navy, club dashboard hero, five compact feature rows, trusted-by strip. Needs the five new feature screenshots and the Gisborne and Bannockburn crests deployed first (see the comment at the top of the file) |
 | `email-initial-demo.html` | First email of the original sequence | How many volunteer hours did your club burn this week? | Dark navy, with the module section |
 | `email-followup-demo.html` | The short follow-up | Worth two minutes of your time | Light body, navy header/footer |
 
