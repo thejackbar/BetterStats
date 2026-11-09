@@ -10,7 +10,7 @@ import brandWhite from '../../assets/bettercricket-white.svg'
 // and the page behind it are the same product.
 //
 // The sizes and the names flag MUST match club_teaser_images.FORMATS (a backend
-// check reads this file to prove they do). Names: the email card goes to the
+// check reads this file to prove they do). Names: the card (link previews) goes to the
 // club's own people, who know who their top run-scorer is; the two ad sizes
 // leave the player's name off, because putting a named individual into public
 // paid creative is the club's decision to make, not ours.

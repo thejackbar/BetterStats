@@ -295,6 +295,7 @@ const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
 const PublicVoting = lazy(() => import('./pages/PublicVoting'))
 const TeaserPreview = lazy(() => import('./pages/marketing/TeaserPreview'))
 const TeaserCard = lazy(() => import('./pages/marketing/TeaserCard'))
+const TeaserDashboardCapture = lazy(() => import('./pages/marketing/TeaserPreview').then((m) => ({ default: m.TeaserDashboardCapture })))
 // Public, login-free net check-in — the QR code on the fence and the NFC tag
 // beside it hold this same URL.
 const PublicNetCheckIn = lazy(() => import('./pages/PublicNetCheckIn'))
@@ -429,6 +430,8 @@ export default function App() {
           <Route path="/preview/:token" element={<TeaserPreview />} />
           {/* The picture the renderer screenshots; see TeaserCard.jsx. */}
           <Route path="/preview/:token/card/:fmt" element={<TeaserCard />} />
+          {/* The email picture: the season page in capture mode (TeaserPreview.jsx). */}
+          <Route path="/preview/:token/dashboard" element={<TeaserDashboardCapture />} />
           {/* Public net check-in (no login — QR code / NFC tag + optional PIN) */}
           <Route path="/nets-checkin/:token" element={<PublicNetCheckIn />} />
           <Route path="/rotation/:token" element={<PublicRotation />} />

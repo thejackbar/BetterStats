@@ -29,6 +29,8 @@ import { SUPPORT_EMAIL } from '../../data/marketing'
 
 const SHEET_ID = 'teaser-claim-sheet'
 const PREVIEW_ROWS = 3   // rows shown in full; the rest are dimmed, claiming unlocks them
+const CAPTURE_WIDTH = 1280   // the width the email picture is taken at: the page's full desktop layout
+const CAPTURE_LOGO_WAIT_MS = 5000   // a crest host that hangs must not hold a picture up for ever
 
 // What each menu item stands for, in plain terms. These are the real sections of
 // a club's site (see components/Navbar.jsx); nothing here promises a figure.
@@ -73,11 +75,11 @@ const Chevron = () => (
 )
 
 // The menu bar a subscribed club has. Every item opens the invitation.
-function TeaserNav({ name, short, logo, mode, onMode, onOpen, registered }) {
+function TeaserNav({ name, short, logo, mode, onMode, onOpen, registered, capture = false }) {
   const [open, setOpen] = useState(false)
   const item = 'relative px-2.5 py-1.5 text-[11px] font-mono font-semibold tracking-wide3 whitespace-nowrap transition flex items-center gap-1 text-pb-faint hover:text-pb-dim'
   return (
-    <header className="sticky top-0 z-30 bg-pb-surface pb-hairline-b" data-testid="teaser-nav">
+    <header className={`${capture ? 'relative' : 'sticky top-0 z-30'} bg-pb-surface pb-hairline-b`} data-testid="teaser-nav">
       <div className="max-w-[1400px] mx-auto px-4 sm:px-6">
         <div className="flex items-center gap-0 h-14">
           <button type="button" onClick={() => onOpen(null)} className="flex items-center gap-3 mr-6 shrink-0 text-left">
@@ -193,7 +195,13 @@ function Rows({ rows, empty }) {
   )
 }
 
-export default function TeaserPreview() {
+// ``capture`` is the page as a PICTURE: /preview/:token/dashboard, which the
+// renderer screenshots for the email. Same components and the same data, at a
+// fixed width, with everything that only makes sense on a live page left out
+// (the claim bar, the claim card, the ladder card, the footer text), no events and
+// no page title. The element marked data-card is as tall as its content and says
+// data-card-ready once the fonts and the crest have settled.
+export default function TeaserPreview({ capture = false }) {
   const { token } = useParams()
   const navigate = useNavigate()
   const [data, setData] = useState(null)      // null loading, false = not found
@@ -201,6 +209,8 @@ export default function TeaserPreview() {
   const [section, setSection] = useState(null)
   const [mode, setMode] = useState('dark')
   const viewed = useRef(false)
+  const rootRef = useRef(null)
+  const [ready, setReady] = useState(false)
   const primaryRef = useRef(null)
   const lastFocus = useRef(null)
 
@@ -236,7 +246,7 @@ export default function TeaserPreview() {
   }, [accent, accent2])
 
   useEffect(() => {
-    if (!data) return
+    if (!data || capture) return
     document.title = `${name}: your ${seasonName} | BetterCricket`
     setRobots('noindex, nofollow')
     if (viewed.current) return
@@ -245,7 +255,24 @@ export default function TeaserPreview() {
     if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
       window.fbq('track', 'ViewContent', { content_name: 'Club teaser page', content_category: 'club_teaser' })
     }
-  }, [data, name, seasonName, token])
+  }, [data, name, seasonName, token, capture])
+
+  // Capture mode: ready once the club's colours are applied, the fonts are loaded and
+  // every crest has loaded or failed (or the wait ran out).
+  useEffect(() => {
+    if (!capture || !data) return undefined
+    if (data.theme?.mode && data.theme.mode !== mode) return undefined
+    let alive = true
+    const imgs = rootRef.current ? Array.from(rootRef.current.querySelectorAll('img')) : []
+    const settled = imgs.map((im) => (im.complete ? Promise.resolve() : new Promise((done) => {
+      im.addEventListener('load', done, { once: true })
+      im.addEventListener('error', done, { once: true })
+    })))
+    const giveUp = new Promise((done) => setTimeout(done, CAPTURE_LOGO_WAIT_MS))
+    Promise.all([document.fonts?.ready || Promise.resolve(), Promise.race([Promise.all(settled), giveUp])])
+      .then(() => { if (alive) setReady(true) })
+    return () => { alive = false }
+  }, [capture, data, accent, mode])
 
   const openSheet = (key) => {
     lastFocus.current = document.activeElement
@@ -289,6 +316,8 @@ export default function TeaserPreview() {
     sub: ['CATCHES', f.stumpings ? `${f.stumpings} ST` : '', f.run_outs ? `${f.run_outs} RO` : ''].filter(Boolean).join(' · '),
   })), [data])
 
+  if (capture && data === null) return <div data-testid="teaser-card-loading" />
+  if (capture && data === false) return <div data-testid="teaser-card-missing" />
   if (data === null) {
     return (
       <div className="min-h-screen bg-pb-bg text-pb-text" data-theme="dark">
@@ -335,11 +364,14 @@ export default function TeaserPreview() {
   const info = section ? (MENU.find((m) => m.key === section) || OTHER[section]) : null
 
   return (
-    <div className="min-h-screen bg-pb-bg text-pb-text pb-28" data-theme={mode} data-mode={mode} data-testid="teaser-page">
-      <TeaserNav name={name} short={short} logo={club.logo_url} mode={mode}
+    <div ref={rootRef} data-theme={mode} data-mode={mode}
+         className={capture ? 'bg-pb-bg text-pb-text' : 'min-h-screen bg-pb-bg text-pb-text pb-28'}
+         style={capture ? { width: CAPTURE_WIDTH } : undefined}
+         {...(capture ? { 'data-card': '', 'data-card-ready': ready ? '1' : '0' } : { 'data-testid': 'teaser-page' })}>
+      <TeaserNav name={name} short={short} logo={club.logo_url} mode={mode} capture={capture}
                  onMode={() => setMode((m) => (m === 'dark' ? 'light' : 'dark'))} onOpen={openSheet} registered={registered} />
 
-      <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <main className={`max-w-[1400px] mx-auto px-4 sm:px-6 ${capture ? 'pt-6 pb-6' : 'py-6 sm:py-8'}`}>
         <PageHeader
           gradient
           eyebrow={`${short} · CLUB DASHBOARD`}
@@ -356,7 +388,7 @@ export default function TeaserPreview() {
           }
         />
 
-        {registered && (
+        {registered && !capture && (
           <div className="mb-5 rounded-xl border px-4 py-3 text-sm" data-testid="teaser-registered"
                style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 40%, transparent)', background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' }}>
             {name} is already on BetterCricket. <Link className="font-semibold underline" to={`/${registered.slug}`}>Open the club's site</Link>.
@@ -422,7 +454,7 @@ export default function TeaserPreview() {
           )}
         </div>
 
-        {ladders?.length > 0 && (
+        {ladders?.length > 0 && !capture && (
           <Tap section="ladder" onTap={openSheet} className="block mb-6">
             <Card title="ON THE LADDER" action={<span className="text-2xs font-mono tracking-wide2 text-pb-faint">{seasonName.toUpperCase()}</span>}>
               <ul data-testid="teaser-ladders">
@@ -440,14 +472,14 @@ export default function TeaserPreview() {
           </Tap>
         )}
 
-        <p className="mt-8 text-xs text-pb-dim leading-relaxed">
+        {!capture && <p className="mt-8 text-xs text-pb-dim leading-relaxed">
           These figures are one season of Cricket Australia's public match data, so the club's own site will show more.{' '}
           Something not right?{' '}
           <a className="underline" href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`${name} teaser page`)}`}>Tell us</a>.
-        </p>
+        </p>}
       </main>
 
-      <div className="fixed bottom-0 inset-x-0 z-30 border-t pb-hairline backdrop-blur"
+      {!capture && <div className="fixed bottom-0 inset-x-0 z-30 border-t pb-hairline backdrop-blur"
            style={{ background: 'color-mix(in srgb, var(--pb-bg) 94%, transparent)' }}>
         <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-3 flex items-center gap-3">
           <p className="hidden sm:block flex-1 text-sm text-pb-dim">
@@ -459,9 +491,9 @@ export default function TeaserPreview() {
             {ctaLabel}
           </button>
         </div>
-      </div>
+      </div>}
 
-      {sheet && (
+      {sheet && !capture && (
         <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center" role="presentation">
           <div className="absolute inset-0 bg-black/60" onClick={closeSheet} data-testid="teaser-sheet-backdrop" />
           <div id={SHEET_ID} role="dialog" aria-modal="true" aria-labelledby="teaser-sheet-title" data-testid="teaser-sheet"
@@ -495,4 +527,9 @@ export default function TeaserPreview() {
       )}
     </div>
   )
+}
+
+// The route the picture renderer opens (see App.jsx and club_teaser_images.card_url).
+export function TeaserDashboardCapture() {
+  return <TeaserPreview capture />
 }

@@ -199,7 +199,7 @@ async def main() -> None:
           va["teaser_url"] == f"https://site.test/preview/{A['token']}", va["teaser_url"])
     check("and no picture address until one has been drawn", va["teaser_image_url"] == "")
     check("a drawn club gets the picture address with the draw number on it",
-          vb["teaser_image_url"] == f"https://site.test/api/public/teaser/{B['token']}/image/card.png?v=1", vb["teaser_image_url"])
+          vb["teaser_image_url"] == f"https://site.test/api/public/teaser/{B['token']}/image/dashboard.png?v=1", vb["teaser_image_url"])
     check("a club marked drawn whose file is gone gets NO picture address (no broken box in an email)",
           v[mcs["E"].id]["teaser_image_url"] == "" and v[mcs["E"].id]["teaser_url"] != "")
     check("a junior-only club and a club with no snapshot get both blank",
@@ -300,14 +300,14 @@ async def main() -> None:
           dry["due"] == 1 and dry["drawn"] == 0 and sorted(Path(TMP).rglob("*.png")) == before)
     stub = StubRenderer()
     out = await ti.render_pending(lambda: Session(), limit=10, renderer_factory=lambda: stub)
-    check("it draws the due club in all three formats at their sizes",
+    check("it draws the due club in every format at its size, the email dashboard picture included",
           out["drawn"] == 1 and sorted(w for _, w, _ in stub.shots) == sorted(f["width"] for f in ti.FORMATS.values())
           and all(ti.image_path(A["token"], f).is_file() for f in ti.FORMATS), str(out))
     async with Session() as s:
         iv = await s.scalar(text("SELECT image_version FROM club_teaser_snapshots WHERE token = :t"), {"t": A["token"]})
         v2 = await ti.vars_for_marketing_club(s, await s.get(MarketingClub, A["id"]))
     check("the club is marked drawn at the snapshot's version, and its email variable fills in",
-          iv == 1 and v2["teaser_image_url"].endswith("image/card.png?v=1"), f"{iv} {v2}")
+          iv == 1 and v2["teaser_image_url"].endswith("image/dashboard.png?v=1"), f"{iv} {v2}")
     check("a second run finds nothing to do", (await ti.render_pending(Session, limit=10, renderer_factory=lambda: StubRenderer()))["due"] == 0)
     check("no half-written temporary file is left behind", not list(Path(TMP).rglob(".*.tmp")))
 
@@ -466,10 +466,19 @@ async def main() -> None:
     m = re.search(r"export const CARD_FORMATS = \{(.*?)\n\}", jsx, re.S)
     front = {k: (int(w), int(h), n == "true") for k, w, h, n in
              re.findall(r"(\w+): \{ width: (\d+), height: (\d+), names: (true|false) \}", m.group(1))} if m else {}
-    check("the three formats, their sizes and the names flag are the same on both sides",
-          front == {k: (f["width"], f["height"], f["names"]) for k, f in ti.FORMATS.items()}, str(front))
-    check("only the email card may print a player's name; both ad sizes leave it off",
-          [k for k, f in ti.FORMATS.items() if f["names"]] == ["card"])
+    check("the card page's formats, their sizes and the names flag are the same on both sides (the dashboard is not a card)",
+          front == {k: (f["width"], f["height"], f["names"]) for k, f in ti.FORMATS.items() if k != "dashboard"}, str(front))
+    page = (Path(__file__).resolve().parents[2] / "frontend/src/pages/marketing/TeaserPreview.jsx").read_text()
+    wm = re.search(r"const CAPTURE_WIDTH = (\d+)", page)
+    check("the dashboard picture is drawn at the width the page lays out at in capture mode",
+          bool(wm) and int(wm.group(1)) == ti.FORMATS["dashboard"]["width"], str(wm and wm.group(1)))
+    check("only the email dashboard and the link-preview card may print a player's name; both ad sizes leave it off",
+          [k for k, f in ti.FORMATS.items() if f["names"]] == ["dashboard", "card"])
+    check("the email address is the dashboard picture and link previews stay on the card (their shape)",
+          ti.EMAIL_FORMAT == "dashboard" and "image/card.png" in (Path(__file__).resolve().parents[1] / "app/routers/og_preview.py").read_text())
+    check("the page the renderer opens for each format is the right one",
+          ti.card_url("tok12345", "dashboard", base="https://s").endswith("/preview/tok12345/dashboard")
+          and ti.card_url("tok12345", "feed", base="https://s").endswith("/preview/tok12345/card/feed"))
 
     # ---------------------------------------------------------------- Chromium
     print("drawing (real Chromium)")

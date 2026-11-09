@@ -2,10 +2,12 @@
 email merge variables that point at them.
 
 A snapshot is JSON; an email and an ad need a picture. The picture is NOT
-drawn here. It is a screenshot of the real card page (``/preview/{token}/card/
-{format}`` in the frontend), taken by headless Chromium, so the email image and
-the page it links to can never look like two different products and the design
-lives in one place.
+drawn here. It is a screenshot of a real page in the frontend, taken by headless
+Chromium, so the picture and the page it links to can never look like two
+different products and the design lives in one place: the email picture
+("dashboard") is the club's season page itself in capture mode
+(``/preview/{token}/dashboard``), and the card and the two ad sizes are
+``/preview/{token}/card/{format}``.
 
 Where the files live: ``settings.teaser_image_dir/<token>/<format>.png``, on the
 media volume and OUTSIDE the regular backup, like the instructional videos. Any
@@ -50,20 +52,27 @@ from app.services.club_teaser_link import FINISHED_WITH_TRIAL_SQL, NOT_A_CUSTOME
 
 logger = logging.getLogger(__name__)
 
-# The pictures drawn for every club. ``names`` is whether the card may print a
-# player's name. The email card and the share preview go to the club's own
+# The pictures drawn for every club. ``names`` is whether the picture may print a
+# player's name. The email dashboard and the share preview go to the club's own
 # people, who know who the top run-scorer is. An ad is shown to the public, and
 # putting a named individual into paid creative is a decision for the club, so
 # the two ad sizes leave the name off.
 FORMATS = {
+    # The club's season page itself (nav bar, header, tiles and the three top
+    # cards, in the club's own colours), as the email picture. It is a screenshot
+    # of /preview/<token>/dashboard, the real page in capture mode, at the width
+    # where the page shows its full desktop layout; the element is as tall as its
+    # content, so ``height`` is only the browser window.
+    "dashboard": {"width": 1280, "height": 900, "names": True,
+                  "use": "email image: the club's season dashboard"},
     "card": {"width": 1200, "height": 630, "names": True,
-             "use": "email image and link preview"},
+             "use": "link preview"},
     "feed": {"width": 1080, "height": 1350, "names": False,
              "use": "Facebook and Instagram feed ad"},
     "story": {"width": 1080, "height": 1920, "names": False,
               "use": "Story and Reel ad"},
 }
-EMAIL_FORMAT = "card"
+EMAIL_FORMAT = "dashboard"
 
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 RENDER_TIMEOUT_MS = 30_000
@@ -120,7 +129,10 @@ def is_render_key(value: Optional[str]) -> bool:
 
 def card_url(token: str, fmt: str, *, base: Optional[str] = None) -> str:
     """The page the screenshot is taken of."""
-    return f"{(base or render_base_url()).rstrip('/')}/preview/{token}/card/{fmt}"
+    root = (base or render_base_url()).rstrip("/")
+    if fmt == "dashboard":
+        return f"{root}/preview/{token}/dashboard"
+    return f"{root}/preview/{token}/card/{fmt}"
 
 
 def public_image_url(token: str, image_version: Optional[int], fmt: str = EMAIL_FORMAT) -> str:
@@ -247,7 +259,9 @@ async def due_clubs(session: AsyncSession, limit: int, *, club_id: Optional[str]
             "FROM club_teaser_snapshots t JOIN marketing_clubs mc ON mc.id = t.marketing_club_id "
             "WHERE t.status = 'ok' AND t.snapshot IS NOT NULL AND " + NOT_A_CUSTOMER_SQL + " "
             "AND t.image_version IS NOT NULL" + only + " ORDER BY t.changed_at NULLS LAST"))).mappings().all()
-        return [dict(r) for r in rows if not image_path(r["token"], EMAIL_FORMAT).is_file()][:limit]
+        left_alone = {str(t) for t in (skip or [])}
+        return [dict(r) for r in rows
+                if r["token"] not in left_alone and not image_path(r["token"], EMAIL_FORMAT).is_file()][:limit]
     where = _DUE_SQL if not force else """
     FROM club_teaser_snapshots t
     JOIN marketing_clubs mc ON mc.id = t.marketing_club_id
@@ -496,7 +510,14 @@ async def run_forever(*, session_maker=None, enabled_fn=None, renderer_factory=N
                     logger.warning("Teaser picture drawer: %s", out.get("error"))
                     wait = 900
                 elif out["due"] == 0:
-                    wait = 300
+                    # Nothing is out of date. Anything marked drawn whose email
+                    # picture is not on the volume (a restore, an unmounted
+                    # volume, or a picture format added since) is drawn now.
+                    out2 = await render_pending(session_maker, limit=batch, skip=set(failed_until),
+                                                missing_files=True, renderer_factory=renderer_factory)
+                    for f in out2.get("failed", []):
+                        failed_until[f["token"]] = clock() + FAIL_SKIP_SECONDS
+                    wait = 2 if out2.get("status") == "ok" and out2.get("drawn") else 300
                 elif out["drawn"] == 0:
                     wait = 600
                 else:

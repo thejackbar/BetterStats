@@ -163,6 +163,13 @@ async def main() -> None:
         await club("cust", "Customer CC", registered=True)
         await club("junior", "Junior CC", status="junior_only")
         await s.commit()
+    # "Already Drawn CC" really is drawn: every format's file is on the volume.
+    for _fmt, _f in ti.FORMATS.items():
+        _p = ti.image_path(K["drawn"]["token"], _fmt)
+        _p.parent.mkdir(parents=True, exist_ok=True)
+        _p.write_bytes(png(_f["width"], _f["height"]))
+    async with Session() as s:
+        pass
 
     # --------------------------------------------------- the /trial lookup
     print("the lookup /trial makes once a club is picked")
@@ -227,12 +234,12 @@ async def main() -> None:
           2 <= state["peak"] <= ti.PAGES_AT_ONCE, str(state))
     stub = Stub(hold=0.05)
     sizes = await ti.render_club(stub, K["cur0"]["token"], base="http://x")
-    check("one club's three formats are taken at the same time, not one after another", stub.peak == 3 and len(sizes) == 3, str(stub.peak))
+    check("all of one club's formats are taken at the same time, not one after another", stub.peak == len(ti.FORMATS) and len(sizes) == len(ti.FORMATS), str(stub.peak))
     stub = Stub(hold=0.05)
     out = await ti.render_pending(Session, limit=6, renderer_factory=lambda: stub)
     check("a batch draws several clubs at once, but only CLUBS_AT_ONCE of them",
-          out["drawn"] == 6 and 3 < stub.peak <= ti.CLUBS_AT_ONCE * 3, f"{out['drawn']} drawn, peak {stub.peak}")
-    check("every club got its three files", all(ti.image_path(K[f"cur{i}"]["token"], f).is_file() for i in range(6) for f in ti.FORMATS))
+          out["drawn"] == 6 and len(ti.FORMATS) < stub.peak <= ti.CLUBS_AT_ONCE * len(ti.FORMATS), f"{out['drawn']} drawn, peak {stub.peak}")
+    check("every club got a file for every format", all(ti.image_path(K[f"cur{i}"]["token"], f).is_file() for i in range(6) for f in ti.FORMATS))
     async with Session() as s:
         iv = (await s.execute(text("SELECT count(*) FROM club_teaser_snapshots WHERE image_version = version"))).scalar()
     check("and each is marked drawn at its version", iv == 7, str(iv))   # 6 + the one already drawn
@@ -286,10 +293,36 @@ async def main() -> None:
                          sleep=fake_sleep, max_cycles=3, batch=25, clock=lambda: next(times, FAIL_AFTER))
     tried = [st.shots.count(K["cur2"]["token"]) for st in stubs]
     check("a club that failed is tried in cycle 1, NOT in cycle 2 an hour later, and tried again in cycle 3 past the hold-off",
-          tried == [3, 3] and opened == [0, 2], f"{tried} opened in cycles {opened}")
+          tried == [len(ti.FORMATS)] * 2 and opened == [0, 2], f"{tried} opened in cycles {opened}")
     async with Session() as s:
         left = await ti.due_clubs(s, 100)
     check("and once it can be drawn it is: nothing is left due (all the state is in the database)", left == [], str(left))
+
+    # Self-healing: nothing is out of date, but a club marked drawn has lost its email
+    # picture (a restore, an unmounted volume, a format added since). The drawer
+    # draws it in the idle cycle, and a club that keeps failing is held off like any other.
+    tok = K["drawn"]["token"]
+    ti.image_path(tok, ti.EMAIL_FORMAT).unlink(missing_ok=True)
+    sleeps.clear()
+    heal = Stub()
+    await ti.run_forever(session_maker=Session, enabled_fn=enabled, renderer_factory=lambda: heal,
+                         sleep=fake_sleep, max_cycles=1, batch=25)
+    check("with nothing out of date, a club marked drawn whose email picture is missing is drawn in the idle cycle",
+          heal.shots.count(tok) == len(ti.FORMATS) and ti.image_path(tok, ti.EMAIL_FORMAT).is_file() and sleeps == [2],
+          f"{heal.shots} {sleeps}")
+    ti.image_path(tok, ti.EMAIL_FORMAT).unlink(missing_ok=True)
+    sleeps.clear()
+    opens: list = []
+    broken = Stub(fail={tok})
+
+    def broken_factory():
+        opens.append(len(sleeps))
+        return broken
+    times2 = iter([0.0, 0.0, 3600.0])
+    await ti.run_forever(session_maker=Session, enabled_fn=enabled, renderer_factory=broken_factory,
+                         sleep=fake_sleep, max_cycles=2, batch=25, clock=lambda: next(times2, 3600.0))
+    check("a missing-picture club that keeps failing is tried once and then left alone for the hold-off, not every cycle",
+          opens == [0] and broken.shots.count(tok) >= 1 and not ti.image_path(tok, ti.EMAIL_FORMAT).is_file(), f"{opens} {broken.shots}")
 
     calls = {"n": 0}
 

@@ -1,11 +1,11 @@
-"""Draw the teaser pictures (the club season card for emails, share previews and
-ads) for clubs whose picture is missing or out of date.
+"""Draw the teaser pictures (the club dashboard for emails, the card for share
+previews, and the two ad sizes) for clubs whose picture is missing or out of date.
 
     python -m app.scripts.render_club_teasers [--limit N] [--club TEXT]
         [--returning-only] [--force | --missing] [--base-url URL] [--apply]
 
 Dry run by default: lists the clubs that would be drawn and writes nothing.
-``--apply`` opens headless Chromium on the site, takes the three pictures per
+``--apply`` opens headless Chromium on the site, takes the four pictures per
 club and writes them to ``TEASER_IMAGE_DIR`` (default
 ``/mnt/media/bettercricket/internal/teasers``). Only clubs with a good snapshot
 that have not registered are drawn; a registered club is left alone.
