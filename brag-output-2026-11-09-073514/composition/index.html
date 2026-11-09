@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=1920, height=1080">
+<title>BetterSocials in one click</title>
+<script src="assets/gsap.min.js"></script>
+<style>@font-face{font-family:'AC';src:url('assets/fonts/applecross-display.ttf') format('truetype');font-weight:100 900;font-style:normal}
+:root{--acc:#ec4899;--hot:#f472b6;--soft:#f9a8d4}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#04070b;font-family:'Inter',sans-serif;color:#fff}
+#root{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden}
+#bg{position:absolute;inset:0;background:#04070b}
+#wm{display:none;position:absolute;left:-150px;top:520px;width:760px;opacity:.05;filter:grayscale(1) brightness(2)}
+#bug{position:absolute;right:64px;top:40px;display:flex;align-items:center;gap:16px;opacity:0;z-index:50}
+#bug img{width:60px;height:51px;object-fit:contain}
+#bug span{font:800 italic 30px/1 'AC',sans-serif;text-transform:uppercase;letter-spacing:.5px;padding-right:.16em}
+#prog{position:absolute;left:0;bottom:0;width:1920px;height:8px;background:rgba(255,255,255,.07);z-index:60}
+#prog i{position:absolute;left:0;top:0;width:1920px;height:8px;background:#ec4899;transform-origin:0 0;transform:scaleX(0)}
+.scene{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;opacity:0}
+#s0{opacity:1}
+.kick{font:700 28px 'JetBrains Mono',monospace;letter-spacing:7px;text-transform:uppercase;color:var(--soft)}
+.ttl{font:800 italic 96px/1.0 'AC','Montserrat',sans-serif;text-transform:uppercase;letter-spacing:-1px;padding-right:.16em}
+.ttl em{font-style:italic;color:var(--hot)}
+.sub{font:500 42px/1.3 'Inter',sans-serif;color:#e5e7eb}
+.col{position:absolute;left:110px;width:960px}
+/* phone */
+#phone{position:absolute;left:0;top:0;width:438px;height:915px;opacity:0}
+#ph-body{position:absolute;inset:0;border-radius:68px;background:linear-gradient(145deg,#2b2f38,#0b0c10 40%,#1c1f26);box-shadow:0 40px 90px rgba(0,0,0,.65),0 0 0 2px rgba(236,72,153,.55) inset,0 0 0 3px rgba(236,72,153,.18)}
+#ph-screen{position:absolute;left:14px;top:14px;width:410px;height:887px;border-radius:54px;overflow:hidden;background:#0a0d14}
+.ly{position:absolute;left:0;top:0;width:410px;height:887px;overflow:hidden;opacity:0}
+.ly img.full{position:absolute;left:0;top:0;width:410px;height:887px;opacity:0}
+#dash-scroll{position:absolute;left:0;top:0;width:410px}
+#dash-scroll img{position:absolute;left:0;top:0;width:410px}
+#ph-status{position:absolute;left:0;top:0;width:410px;height:46px;background:linear-gradient(#0a0d14 40%,rgba(10,13,20,0));z-index:30;font:700 15px 'Inter',sans-serif;color:#fff}
+#ph-status .tm{position:absolute;left:34px;top:15px}
+#ph-status .ic{position:absolute;right:30px;top:17px;display:flex;gap:6px;align-items:center}
+#ph-status .ic i{display:block;background:#fff;border-radius:2px}
+#ph-cam{position:absolute;left:50%;top:12px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:#000;z-index:31;box-shadow:0 0 0 2px #15171c}
+#tap{position:absolute;left:0;top:0;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;border:4px solid rgba(255,255,255,.9);background:rgba(255,255,255,.25);opacity:0;z-index:40}
+/* chat mocks */
+.ly.chat{background:#0b141a}
+.ch-h{position:absolute;left:0;top:0;width:410px;height:112px;background:#1f2c34;padding:50px 20px 0;display:flex;align-items:center;gap:12px;z-index:3}
+.ch-h .av{width:44px;height:44px;border-radius:50%;background:#2d6a5a;display:grid;place-items:center;font:700 16px 'Inter',sans-serif}
+.ch-h b{font:700 18px 'Inter',sans-serif}.ch-h span{display:block;font:500 12px 'Inter',sans-serif;color:#9bb0b8;margin-top:2px}
+.ch-body{position:absolute;left:0;top:112px;width:410px;height:775px;padding:14px 14px;overflow:hidden}
+.msg{max-width:300px;border-radius:14px;padding:8px 12px 9px;margin-bottom:10px;font:500 16px/1.3 'Inter',sans-serif;background:#1f2c34;color:#e9edef;opacity:0}
+.msg b{display:block;font:700 12px 'Inter',sans-serif;margin-bottom:2px}
+.msg.me{margin-left:auto;background:#0b5a4b}
+.msg.link{padding:6px;width:310px}
+.msg .lk{display:flex;gap:12px;align-items:center;background:rgba(0,0,0,.28);border-radius:10px;padding:10px}
+.msg .lk img{width:50px;height:50px;object-fit:contain;background:#0f1218;border-radius:10px;padding:5px}
+.msg .lk div{font:700 15px 'Inter',sans-serif}.msg .lk span{display:block;font:500 12px 'Inter',sans-serif;color:#9bb0b8;margin-top:2px}
+.unread{position:absolute;right:16px;top:60px;min-width:44px;height:30px;border-radius:15px;background:#e5484d;font:700 15px 'Inter',sans-serif;display:grid;place-items:center;z-index:4;opacity:0}
+
+/* strip above the whiteboard */
+.strip{position:absolute;left:160px;top:34px;width:1300px}
+.strip .kick{font-size:24px;letter-spacing:6px}
+.strip .ttl{font-size:56px;margin-top:8px;white-space:nowrap}
+.strip .ttl.alt{position:absolute;left:0;top:30px;margin-top:0}
+/* whiteboard window */
+#wb{position:absolute;left:160px;top:150px;width:1600px;height:900px;transform-origin:0 0;opacity:0;border-radius:14px;overflow:hidden;background:#0a0d14;box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 0 2px rgba(236,72,153,.55)}
+#wbi{position:absolute;left:0;top:0;width:1600px;height:900px;transform-origin:0 0}
+#wbi img.s,#wbi video{position:absolute;left:0;top:0;width:1600px;height:900px;display:block}
+#wbi img.s{opacity:0}
+.cap{position:absolute;left:0;right:0;bottom:34px;text-align:center;opacity:0;z-index:20}
+.cap span{display:inline-block;padding:12px 30px;border-radius:999px;font:700 32px/1.15 'Inter',sans-serif;background:#db2777;color:#fff;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.wr{position:absolute;border:4px solid #f472b6;border-radius:12px;box-shadow:0 0 0 6px rgba(236,72,153,.16);opacity:0;z-index:6}
+.wtag{position:absolute;z-index:8;padding:10px 24px;border-radius:999px;font:700 30px/1.15 'Inter',sans-serif;background:#ec4899;color:#04130d;opacity:0;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.wtag.amber{background:#f5a524}.wtag.blue{background:#4cc2ff}.wtag.dark{background:#101a17;color:#fff;border:2px solid #ec4899}
+#wdim{position:absolute;left:0;top:0;width:1600px;height:900px;background:rgba(4,7,11,.78);opacity:0;z-index:4}
+.zi{position:absolute;opacity:0;z-index:5;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+#toast{position:absolute;z-index:21;right:34px;top:34px;display:flex;align-items:center;gap:16px;padding:14px 26px 14px 16px;border-radius:18px;background:#101a17;border:2px solid #ec4899;font:600 30px 'Inter',sans-serif;color:#fff;opacity:0;box-shadow:0 14px 40px rgba(0,0,0,.55)}
+#toast i{width:46px;height:46px;border-radius:50%;background:#db2777;display:grid;place-items:center;font:800 28px 'Inter',sans-serif;font-style:normal;color:#fff}
+/* scenes: left column steps */
+.pt{display:flex;gap:26px;align-items:center;margin-top:30px;opacity:0}
+.pt i{flex:none;width:64px;height:64px;border-radius:50%;background:rgba(236,72,153,.16);border:2px solid #ec4899;font:800 30px 'Inter',sans-serif;font-style:normal;display:grid;place-items:center;color:#fff}
+.pt span{font:600 44px/1.15 'Inter',sans-serif}
+.pt span small{display:block;font:500 28px 'Inter',sans-serif;color:#cbd5e1;margin-top:6px}
+.ben{display:flex;align-items:center;gap:26px;margin-top:34px;opacity:0}
+.ben i{flex:none;width:70px;height:70px;border-radius:50%;background:#db2777;display:grid;place-items:center;font:800 40px 'Inter',sans-serif;font-style:normal;color:#fff}
+.ben span{font:600 52px/1.15 'Inter',sans-serif}
+#end-logo{position:absolute;left:110px;top:150px;width:200px;height:170px;object-fit:contain;opacity:0}
+#end-w{position:absolute;left:340px;top:205px;font:800 italic 66px/1 'AC',sans-serif;text-transform:uppercase;padding-right:.16em;opacity:0}
+#end-t{position:absolute;left:110px;top:380px;opacity:0}
+#end-t .ttl{font-size:118px}
+#end-s{position:absolute;left:110px;top:740px;font:500 52px 'Inter',sans-serif;color:#e5e7eb;opacity:0}
+#end-u{position:absolute;left:110px;top:850px;font:700 30px 'JetBrains Mono',monospace;letter-spacing:6px;text-transform:uppercase;color:var(--soft);opacity:0}
+.col{position:absolute;left:110px;width:960px}
+
+#ly-dash{opacity:0}
+
+
+/* aurora (BetterSocials pink, violet, rose) */
+#aur{position:absolute;inset:0;overflow:hidden}
+.ab{position:absolute;border-radius:50%}
+#ab1{width:1200px;height:1200px;left:-380px;top:-480px;background:radial-gradient(circle,rgba(236,72,153,.5),rgba(236,72,153,0) 66%)}
+#ab2{width:1000px;height:1000px;left:1100px;top:-200px;background:radial-gradient(circle,rgba(139,92,246,.38),rgba(139,92,246,0) 66%)}
+#ab3{width:1100px;height:1100px;left:380px;top:520px;background:radial-gradient(circle,rgba(251,113,133,.30),rgba(251,113,133,0) 66%)}
+#ab4{width:900px;height:900px;left:1250px;top:480px;background:radial-gradient(circle,rgba(192,38,211,.34),rgba(192,38,211,0) 66%)}
+.col .ttl{white-space:nowrap}
+#fan{position:absolute;left:0;top:0;width:1920px;height:1080px;pointer-events:none}
+.fp{position:absolute;width:400px;height:400px;border-radius:14px;overflow:hidden;box-shadow:0 28px 70px rgba(0,0,0,.6),0 0 0 2px rgba(255,255,255,.1);opacity:0}
+.fp img{width:400px;height:400px;display:block}
+#gal,#ts{position:absolute;left:160px;top:150px;width:1600px;height:900px;border-radius:14px;background:rgba(10,13,20,.8);box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 0 2px rgba(244,114,182,.5);opacity:0;overflow:hidden}
+.gp{position:absolute;width:232px;height:232px;opacity:0}
+.gp img{width:232px;height:232px;border-radius:10px;display:block;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.nw{position:absolute;top:10px;right:10px;padding:4px 14px;border-radius:999px;background:#ec4899;color:#fff;font:800 22px 'Inter',sans-serif;letter-spacing:1px;opacity:0}
+#ts h3{position:absolute;margin:0;font:800 italic 50px/1 'AC',sans-serif;text-transform:uppercase;padding-right:.16em;color:#fff;opacity:0}
+#ts h3 em{font-style:italic;color:#f472b6}
+.chip{position:absolute;left:80px;width:660px;height:78px;border-radius:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;padding-left:28px;font:600 34px 'Inter',sans-serif;color:#e5e7eb;opacity:0}
+.chip i{font-style:normal;margin-right:18px;color:#94a3b8;font-size:30px}
+.bar{position:absolute;height:26px;border-radius:13px;transform-origin:0 50%}
+.blab{position:absolute;font:600 32px 'Inter',sans-serif;color:#cbd5e1;opacity:0}
+#bigbtn{position:absolute;left:860px;top:150px;width:660px;height:120px;border-radius:60px;background:#ec4899;color:#fff;font:800 42px 'Inter',sans-serif;display:grid;place-items:center;box-shadow:0 0 60px rgba(236,72,153,.55);opacity:0}
+#minip{position:absolute;left:1000px;top:310px;width:380px;height:380px;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.6);opacity:0}
+#okc{position:absolute;left:1340px;top:280px;width:96px;height:96px;border-radius:50%;background:#16c784;color:#04130d;display:grid;place-items:center;font:800 60px 'Inter',sans-serif;opacity:0;z-index:3}
+</style></head><body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="118.11" data-width="1920" data-height="1080">
+<div id="bg"></div>
+<div id="aur"><div class="ab" id="ab1"></div><div class="ab" id="ab2"></div><div class="ab" id="ab3"></div><div class="ab" id="ab4"></div></div>
+<div id="bug"><img src="assets/img/bettercricket-logo.png" alt=""><span>BetterCricket</span></div>
+<div id="prog"><i></i></div>
+
+<div id="fan"><div class="fp" id="fp0" style="left:1030px;top:250px;transform:rotate(-8deg)"><img src="assets/sc/lineup_T11.jpg" alt=""></div><div class="fp" id="fp1" style="left:1210px;top:90px;transform:rotate(5deg)"><img src="assets/sc/fixtures_FX2.jpg" alt=""></div><div class="fp" id="fp2" style="left:1420px;top:300px;transform:rotate(-4deg)"><img src="assets/sc/milestones_MS1.jpg" alt=""></div><div class="fp" id="fp3" style="left:1120px;top:520px;transform:rotate(6deg)"><img src="assets/sc/results_RR2.jpg" alt=""></div><div class="fp" id="fp4" style="left:1440px;top:560px;transform:rotate(-7deg)"><img src="assets/sc/totw_TW1.jpg" alt=""></div></div>
+
+<!-- editor window, persistent. #wbi is the camera -->
+<div id="wb">
+  <div id="wbi">
+    <img class="s" id="st" src="assets/sc/start.jpg" alt="">
+    <video id="v-fixtures" class="clip" muted playsinline data-start="17.9" data-duration="5.27" data-track-index="3" src="assets/clips/fixtures.mp4"></video><video id="v-results" class="clip" muted playsinline data-start="23.72" data-duration="5.27" data-track-index="3" src="assets/clips/results.mp4"></video><video id="v-lineup" class="clip" muted playsinline data-start="29.54" data-duration="5.47" data-track-index="3" src="assets/clips/lineup.mp4"></video><video id="v-motm" class="clip" muted playsinline data-start="35.56" data-duration="6.07" data-track-index="3" src="assets/clips/motm.mp4"></video><video id="v-milestones" class="clip" muted playsinline data-start="42.18" data-duration="7.63" data-track-index="3" src="assets/clips/milestones.mp4"></video><video id="v-totw" class="clip" muted playsinline data-start="50.36" data-duration="5.27" data-track-index="3" src="assets/clips/totw.mp4"></video><video id="v-custom" class="clip" muted playsinline data-start="69.58" data-duration="20.53" data-track-index="3" src="assets/clips/custom.mp4"></video>
+    <div class="wr" id="r-t0" style="left:172.8px;top:196.1px;width:250.0px;height:158.3px"></div><div class="wr" id="r-t1" style="left:423.9px;top:196.1px;width:250.0px;height:158.3px"></div><div class="wr" id="r-t2" style="left:675.0px;top:196.1px;width:250.0px;height:158.3px"></div><div class="wr" id="r-t3" style="left:926.1px;top:196.1px;width:250.0px;height:158.3px"></div><div class="wr" id="r-t4" style="left:1177.2px;top:196.1px;width:250.0px;height:158.3px"></div><div class="wr" id="r-pre" style="left:1053.8px;top:149.6px;width:376.4px;height:31.0px"></div><div class="wr" id="r-grid" style="left:171.8px;top:195.1px;width:1256.4px;height:479.2px"></div>
+  </div>
+  <div class="cap" id="cap-pre"><span>Every layout arrives pre-filled with your club's data</span></div><div class="cap" id="cap-fx"><span>Every grade's fixtures, in one click</span></div><div class="cap" id="cap-res"><span>The latest round's results, in one click</span></div><div class="cap" id="cap-lin"><span>Your XI, straight from BetterSelect</span></div><div class="cap" id="cap-motm"><span>Paste a match link. Done.</span></div><div class="cap" id="cap-mile"><span>Every milestone, in one click</span></div><div class="cap" id="cap-totw"><span>The best performers, picked for you</span></div><div class="cap" id="cap-pal"><span>Pick a palette</span></div><div class="cap" id="cap-bg"><span>Change the background</span></div><div class="cap" id="cap-col"><span>Fine tune every colour</span></div><div class="cap" id="cap-font"><span>Choose your font</span></div>
+</div>
+<div id="ts"><h3 id="tsh1" style="left:80px;top:60px">By hand</h3><div class="chip" id="chip0" style="top:150px"><i>&#9201;</i>Copy the lineup</div><div class="chip" id="chip1" style="top:238px"><i>&#9201;</i>Type in the scores</div><div class="chip" id="chip2" style="top:326px"><i>&#9201;</i>Find the photos</div><div class="chip" id="chip3" style="top:414px"><i>&#9201;</i>Match the club colours</div><div class="chip" id="chip4" style="top:502px"><i>&#9201;</i>Line everything up</div><div class="chip" id="chip5" style="top:590px"><i>&#9201;</i>Export and resize</div><div class="bar" id="bar1" style="left:80px;top:700px;width:660px;background:#64748b"></div><div class="blab" id="bl1" style="left:80px;top:738px">Hours of volunteer time</div><h3 id="tsh2" style="left:860px;top:60px">Better<em>Socials</em></h3><div id="bigbtn">Pull latest round</div><img id="minip" src="assets/sc/results_RR2.jpg" alt=""><div id="okc">&#10003;</div><div class="bar" id="bar2" style="left:860px;top:700px;width:64px;background:#ec4899"></div><div class="blab" id="bl2" style="left:860px;top:738px">One click</div><div class="cap" id="cap-min"><span>Minutes, not hours</span></div></div>
+<div id="gal"><div class="cap" id="cap-lay"><span>70+ layouts, and new ones added all the time</span></div><div class="gp" id="g0" style="left:54px;top:82px"><img src="assets/sc/fixtures_FX2.jpg" alt=""><span class="nw" id="nw0">NEW</span></div><div class="gp" id="g1" style="left:306px;top:82px"><img src="assets/sc/lineup_T11.jpg" alt=""><span class="nw" id="nw1">NEW</span></div><div class="gp" id="g2" style="left:558px;top:82px"><img src="assets/sc/milestones_MS1.jpg" alt=""><span class="nw" id="nw2">NEW</span></div><div class="gp" id="g3" style="left:810px;top:82px"><img src="assets/sc/results_RR2.jpg" alt=""><span class="nw" id="nw3">NEW</span></div><div class="gp" id="g4" style="left:1062px;top:82px"><img src="assets/sc/totw_TW1.jpg" alt=""><span class="nw" id="nw4">NEW</span></div><div class="gp" id="g5" style="left:1314px;top:82px"><img src="assets/sc/fixtures_FX3.jpg" alt=""><span class="nw" id="nw5">NEW</span></div><div class="gp" id="g6" style="left:54px;top:334px"><img src="assets/sc/result_RS1.jpg" alt=""><span class="nw" id="nw6">NEW</span></div><div class="gp" id="g7" style="left:306px;top:334px"><img src="assets/sc/lineup_T12.jpg" alt=""><span class="nw" id="nw7">NEW</span></div><div class="gp" id="g8" style="left:558px;top:334px"><img src="assets/sc/results_RR6.jpg" alt=""><span class="nw" id="nw8">NEW</span></div><div class="gp" id="g9" style="left:810px;top:334px"><img src="assets/sc/milestones_MS2.jpg" alt=""><span class="nw" id="nw9">NEW</span></div><div class="gp" id="g10" style="left:1062px;top:334px"><img src="assets/sc/fixtures_FX5.jpg" alt=""><span class="nw" id="nw10">NEW</span></div><div class="gp" id="g11" style="left:1314px;top:334px"><img src="assets/sc/lineup_T4.jpg" alt=""><span class="nw" id="nw11">NEW</span></div><div class="gp" id="g12" style="left:54px;top:586px"><img src="assets/sc/result_RS4.jpg" alt=""><span class="nw" id="nw12">NEW</span></div><div class="gp" id="g13" style="left:306px;top:586px"><img src="assets/sc/results_RR1.jpg" alt=""><span class="nw" id="nw13">NEW</span></div><div class="gp" id="g14" style="left:558px;top:586px"><img src="assets/sc/totw_TW2.jpg" alt=""><span class="nw" id="nw14">NEW</span></div><div class="gp" id="g15" style="left:810px;top:586px"><img src="assets/sc/lineup_T9.jpg" alt=""><span class="nw" id="nw15">NEW</span></div><div class="gp" id="g16" style="left:1062px;top:586px"><img src="assets/sc/result_RS3.jpg" alt=""><span class="nw" id="nw16">NEW</span></div><div class="gp" id="g17" style="left:1314px;top:586px"><img src="assets/sc/results_RR3.jpg" alt=""><span class="nw" id="nw17">NEW</span></div></div>
+
+<!-- S0 intro -->
+<div id="s0" class="clip scene" data-start="0.0" data-duration="7.0" data-track-index="1">
+  <div class="col" style="top:170px;width:900px">
+    <div id="i-kick" class="kick" style="opacity:0">Introducing</div>
+    <div id="i-brand" style="display:flex;align-items:center;gap:26px;margin-top:34px;opacity:0"><img src="assets/img/bettersocials.svg" style="width:112px;height:112px" alt=""><span style="font:800 italic 84px/1 'AC',sans-serif;text-transform:uppercase;padding-right:.16em">Better<span style="color:#f472b6">Socials</span></span></div>
+    <div id="i-title" style="margin-top:34px"><div class="ttl i-a" style="font-size:120px;opacity:0">Posts in</div><div class="ttl i-b" style="font-size:120px;color:var(--hot);opacity:0">one click.</div></div>
+    <div id="i-sub" class="sub" style="margin-top:50px;opacity:0">Lineups, fixtures, results<br>and milestones, ready to share.</div>
+  </div>
+</div>
+
+<!-- S1 start screen -->
+<div id="s1" class="clip scene" data-start="7.0" data-duration="10.0" data-track-index="1">
+  <div class="strip"><div class="kick">BetterPosts</div><div class="ttl">Pick a post. Pull your data.</div></div>
+</div>
+
+<!-- S2 one-click pulls -->
+<div id="s2" class="clip scene" data-start="17.0" data-duration="39.78" data-track-index="1">
+  <div class="strip"><div class="kick">One click</div><div class="ttl alt" id="dt-fixtures" style="opacity:0">Latest fixtures.</div><div class="ttl alt" id="dt-results" style="opacity:0">Latest results.</div><div class="ttl alt" id="dt-lineup" style="opacity:0">Your lineup.</div><div class="ttl alt" id="dt-motm" style="opacity:0">Player of the match.</div><div class="ttl alt" id="dt-milestones" style="opacity:0">Milestones.</div><div class="ttl alt" id="dt-totw" style="opacity:0">Team of the week.</div></div>
+</div>
+
+<!-- S3 time saved -->
+<div id="s3" class="clip scene" data-start="56.78" data-duration="12.0" data-track-index="1">
+  <div class="strip"><div class="kick">Save hours</div><div class="ttl">Hours back for volunteers.</div></div>
+</div>
+
+<!-- S4 customise -->
+<div id="s4" class="clip scene" data-start="68.78" data-duration="22.33" data-track-index="1">
+  <div class="strip"><div class="kick">Customise</div><div class="ttl">Every colour, your way.</div></div>
+</div>
+
+<!-- S5 templates -->
+<div id="s5" class="clip scene" data-start="91.11" data-duration="12.5" data-track-index="1">
+  <div class="strip"><div class="kick">Templates</div><div class="ttl">New layouts, all the time.</div></div>
+</div>
+
+<!-- S6 benefits -->
+<div id="s6" class="clip scene" data-start="103.61" data-duration="9.0" data-track-index="1">
+  <div class="col" style="top:170px;width:880px">
+    <div id="b-kick" class="kick" style="opacity:0">BetterSocials</div>
+    <div id="b-ttl" class="ttl" style="margin-top:22px;opacity:0">Great posts,<br><em>in minutes.</em></div>
+    <div id="bn1" class="ben"><i>&#10003;</i><span>One click pulls the latest</span></div>
+    <div id="bn2" class="ben"><i>&#10003;</i><span>Every colour, your way</span></div>
+    <div id="bn3" class="ben"><i>&#10003;</i><span>New templates all the time</span></div>
+  </div>
+</div>
+
+<!-- S7 end -->
+<div id="s7" class="clip scene" data-start="112.61" data-duration="5.5" data-track-index="1">
+  <img id="end-logo" src="assets/img/bettersocials.svg" alt=""><div id="end-w">Better<span style="color:#f472b6">Socials</span></div>
+  <div id="end-t"><div class="ttl">Post it<br><em>in one click.</em></div></div>
+  <div id="end-s">Hours back for your volunteers.</div>
+  <div id="end-u">betterat.cricket</div>
+</div>
+<audio id="music" data-timeline-role="music" data-start="0" data-duration="118.11" data-media-start="3" data-track-index="2" data-volume="0.55" data-fade-out="3" src="assets/music/bed.mp3"></audio>
+<audio id="sfx0" data-start="1.2" data-duration="0.12" data-track-index="4" data-volume="0.45" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx1" data-start="2.5" data-duration="0.18" data-track-index="4" data-volume="0.5" src="assets/sfx/impact/impactSoft_medium_001.ogg"></audio>
+<audio id="sfx2" data-start="5.0" data-duration="0.69" data-track-index="4" data-volume="0.4" src="assets/sfx/casino/card-place-1.ogg"></audio>
+<audio id="sfx3" data-start="7.3" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx4" data-start="9.6" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx5" data-start="10.2" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx6" data-start="10.8" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx7" data-start="11.4" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx8" data-start="12.0" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx9" data-start="17.3" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx10" data-start="20.17" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx11" data-start="20.67" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx12" data-start="25.99" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx13" data-start="26.49" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx14" data-start="31.81" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx15" data-start="32.31" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx16" data-start="38.43" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx17" data-start="38.93" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx18" data-start="44.35" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx19" data-start="46.81" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx20" data-start="47.31" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx21" data-start="52.63" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx22" data-start="53.13" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx23" data-start="57.08" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx24" data-start="57.78" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx25" data-start="58.33" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx26" data-start="58.88" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx27" data-start="59.43" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx28" data-start="59.98" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx29" data-start="60.53" data-duration="0.06" data-track-index="4" data-volume="0.3" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx30" data-start="64.58" data-duration="0.01" data-track-index="4" data-volume="0.6" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx31" data-start="65.18" data-duration="0.12" data-track-index="4" data-volume="0.5" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx32" data-start="69.08" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx33" data-start="72.4" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx34" data-start="74.91" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx35" data-start="77.5" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx36" data-start="80.02" data-duration="0.01" data-track-index="4" data-volume="0.55" src="assets/sfx/interface/click_003.ogg"></audio>
+<audio id="sfx37" data-start="91.41" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx38" data-start="92.11" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx39" data-start="92.31" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx40" data-start="92.51" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx41" data-start="92.71" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx42" data-start="92.91" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx43" data-start="93.11" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx44" data-start="93.31" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx45" data-start="93.51" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx46" data-start="93.71" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx47" data-start="93.91" data-duration="0.06" data-track-index="4" data-volume="0.25" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx48" data-start="95.31" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx49" data-start="96.31" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx50" data-start="97.31" data-duration="0.12" data-track-index="4" data-volume="0.4" src="assets/sfx/interface/bong_001.ogg"></audio>
+<audio id="sfx51" data-start="103.91" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx52" data-start="104.11" data-duration="0.72" data-track-index="5" data-volume="0.4" src="assets/sfx/casino/card-fan-1.ogg"></audio>
+<audio id="sfx53" data-start="106.21" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx54" data-start="107.41" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx55" data-start="108.61" data-duration="0.06" data-track-index="4" data-volume="0.4" src="assets/sfx/ui/rollover2.ogg"></audio>
+<audio id="sfx56" data-start="112.91" data-duration="0.6" data-track-index="4" data-volume="0.3" src="assets/sfx/casino/card-slide-1.ogg"></audio>
+<audio id="sfx57" data-start="113.61" data-duration="1.48" data-track-index="4" data-volume="0.6" src="assets/sfx/impact/impactBell_heavy_000.ogg"></audio>
+
+
+</div>
+<script>const raw = gsap.timeline({ paused: true });
+const S = {"s0": 0.0, "s1": 7.0, "s2": 17.0, "s3": 56.78, "s4": 68.78, "s5": 91.11, "s6": 103.61, "s7": 112.61}, CS = {"fixtures": 17.9, "results": 23.72, "lineup": 29.54, "motm": 35.56, "milestones": 42.18, "totw": 50.36, "custom": 69.58}, D = {"fixtures": 5.27, "results": 5.27, "lineup": 5.47, "motm": 6.07, "milestones": 7.63, "totw": 5.27, "custom": 20.53}, MK = {"fixtures": {"start": 0, "click": 2.27, "end": 5.27}, "results": {"start": 0, "click": 2.27, "end": 5.27}, "totw": {"start": 0, "click": 2.27, "end": 5.27}, "lineup": {"start": 0, "click": 2.27, "end": 5.47}, "motm": {"start": 0, "click": 2.87, "end": 6.07}, "milestones": {"start": 0, "click1": 2.17, "click": 4.63, "end": 7.63}}, MC = {"start": 0, "cobalt": 3.67, "forest": 6.93, "texture": 10.3, "rust": 13.57, "accent_t": 16.47, "primary_t": 18.87, "font_t": 21.37, "light": 24.23, "end": 26.63}, TOTAL = 118.11;
+const F = (s, a, b, t) => raw.fromTo(s, a, { ...b, immediateRender: false }, t);
+const INIT = (s, v) => raw.set(s, v, 0);
+const show = (s, t, d = 0.5) => F(s, { opacity: 0 }, { opacity: 1, duration: d, ease: 'sine.out' }, t);
+const hide = (s, t, d = 0.45) => F(s, { opacity: 1 }, { opacity: 0, duration: d, ease: 'sine.in' }, t);
+const rise = (s, t, d = 0.8, y = 36) => F(s, { opacity: 0, y }, { opacity: 1, y: 0, duration: d, ease: 'power3.out' }, t);
+const slideIn = (s, t) => F(s, { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: 0.8, ease: 'power3.out' }, t);
+const ring = (id, t, dur) => { F('#' + id, { opacity: 0, scale: 0.98 }, { opacity: 1, scale: 1, duration: 0.45, ease: 'power2.out' }, t); F('#' + id, { opacity: 1 }, { opacity: 0, duration: 0.45 }, t + dur); };
+const cap = (id, t, dur) => { F('#' + id, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power3.out' }, t); F('#' + id, { opacity: 1 }, { opacity: 0, duration: 0.4 }, t + dur); };
+const sceneIn = (id, st) => show(id, st + 0.25, 0.7);
+const sceneOut = (id, en) => hide(id, en - 0.9, 0.7);
+let cx = 0, cy = 0, cs = 1;
+const cam = (t, fx, fy, s, d = 1.3, ease = 'power2.inOut') => {
+  const x = Math.min(0, Math.max(1600 * (1 - s), 800 - fx * s)), y = Math.min(0, Math.max(900 * (1 - s), 450 - fy * s));
+  F('#wbi', { x: cx, y: cy, scale: cs }, { x, y, scale: s, duration: d, ease }, t); cx = x; cy = y; cs = s;
+};
+const drift = (id, pts) => { let t = 0, px = 0, py = 0, ps = 1; pts.forEach(([x, y, s, d]) => { F(id, { x: px, y: py, scale: ps }, { x, y, scale: s, duration: d, ease: 'sine.inOut' }, t); t += d; px = x; py = y; ps = s; }); };
+drift('#ab1', [[260, 160, 1.12, 18], [-120, 260, 0.95, 20], [200, -60, 1.1, 20], [-160, 120, 1.0, 20], [240, 200, 1.12, 20], [0, 0, 1, 20]]);
+drift('#ab2', [[-300, 200, 1.1, 20], [-120, -80, 0.92, 20], [-360, 120, 1.15, 20], [-80, 240, 1.0, 20], [-260, 40, 1.1, 20], [0, 0, 1, 20]]);
+drift('#ab3', [[240, -200, 1.1, 20], [-240, -120, 1.2, 20], [160, -260, 0.95, 20], [-120, -80, 1.1, 20], [220, -180, 1.0, 20], [0, 0, 1, 20]]);
+drift('#ab4', [[-260, -160, 1.1, 20], [-60, 120, 0.9, 20], [-300, -40, 1.15, 20], [-120, -200, 1.0, 20], [-240, 80, 1.1, 20], [0, 0, 1, 20]]);
+F('#prog i', { scaleX: 0 }, { scaleX: 1, duration: TOTAL, ease: 'none' }, 0);
+show('#bug', 0.8, 0.7); hide('#bug', S.s7 - 0.6, 0.6);
+INIT('#wb', { opacity: 0 }); INIT('#st', { opacity: 1 }); INIT('#bar1', { scaleX: 0 }); INIT('#bar2', { scaleX: 0 });
+const fanIn = (t) => [0, 1, 2, 3, 4].forEach((i) => F('#fp' + i, { opacity: 0, y: 70, scale: 0.92 }, { opacity: 1, y: 0, scale: 1, duration: 0.9, ease: 'power3.out' }, t + 0.2 * i));
+
+// ---- S0 intro with a fan of real posts
+let t0 = S.s0;
+sceneOut('#s0', S.s1);
+rise('#i-kick', t0 + 0.6, 0.8, -18);
+F('#i-brand', { opacity: 0, x: -50 }, { opacity: 1, x: 0, duration: 0.9, ease: 'power3.out' }, t0 + 1.2);
+F('.i-a', { opacity: 0, y: 70 }, { opacity: 1, y: 0, duration: 0.9, ease: 'power3.out' }, t0 + 2.0);
+F('.i-b', { opacity: 0, y: 70 }, { opacity: 1, y: 0, duration: 0.9, ease: 'power3.out' }, t0 + 2.5);
+rise('#i-sub', t0 + 3.6, 0.8, 24);
+fanIn(t0 + 0.9);
+[0, 1, 2, 3, 4].forEach((i) => hide('#fp' + i, S.s1 - 0.5, 0.5));
+
+// ---- S1 pick a post (the real start screen)
+t0 = S.s1;
+sceneIn('#s1', t0); sceneOut('#s1', S.s2);
+F('#wb', { opacity: 0, y: 60 }, { opacity: 1, y: 0, duration: 1.0, ease: 'power3.out' }, t0 + 0.4);
+cam(t0 + 1.2, 800, 360, 1.25, 1.3);
+[0, 1, 2, 3, 4].forEach((i) => ring('r-t' + i, t0 + 2.8 + 0.6 * i, 0.9));
+ring('r-pre', t0 + 6.0, 2.8); cap('cap-pre', t0 + 6.2, 2.7);
+
+// ---- S2 one click pulls
+t0 = S.s2;
+sceneIn('#s2', t0); sceneOut('#s2', S.s3);
+const order = [['fixtures', 'fx', [260, 430]], ['results', 'res', [260, 430]], ['lineup', 'lin', [260, 430]], ['motm', 'motm', [260, 430]], ['milestones', 'mile', [260, 470]], ['totw', 'totw', [260, 640]]];
+F('#st', { opacity: 1 }, { opacity: 0, duration: 0.01 }, CS.fixtures - 0.3);
+order.forEach(([n, capId, focus]) => {
+  const c = CS[n], m = MK[n], d = D[n];
+  F('#wbi', { opacity: 0 }, { opacity: 1, duration: 0.3 }, c - 0.15); F('#wbi', { opacity: 1 }, { opacity: 0, duration: 0.25 }, c + d - 0.3);
+  cam(c - 0.2, 800, 450, 1, 0.01);
+  cam(c + 0.3, focus[0], focus[1], 1.9, 1.0);
+  cam(c + m.click + 0.6, 1011, 492, 1.3, 1.2);
+  cam(c + d - 1.1, 800, 450, 1, 0.8);
+  slideIn('#dt-' + n, c + 0.1); hide('#dt-' + n, c + d - 0.3, 0.3);
+  cap('cap-' + capId, c + m.click + 0.5, 2.5);
+});
+
+// ---- S3 hours back for volunteers (stylised)
+t0 = S.s3;
+sceneIn('#s3', t0); sceneOut('#s3', S.s4);
+hide('#wb', t0 + 0.1, 0.5); show('#ts', t0 + 0.4, 0.7);
+F('#tsh1', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6 }, t0 + 0.9);
+for (let i = 0; i < 6; i++) F('#chip' + i, { opacity: 0, x: -40 }, { opacity: 1, x: 0, duration: 0.5, ease: 'power3.out' }, t0 + 1.2 + 0.55 * i);
+F('#bar1', { scaleX: 0 }, { scaleX: 1, duration: 1.8, ease: 'power2.out' }, t0 + 4.7); show('#bl1', t0 + 5.0, 0.5);
+F('#tsh2', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6 }, t0 + 6.0);
+F('#bigbtn', { opacity: 0, scale: 0.9 }, { opacity: 1, scale: 1, duration: 0.6, ease: 'back.out(1.5)' }, t0 + 6.6);
+F('#bigbtn', { scale: 1 }, { scale: 0.95, duration: 0.15 }, t0 + 7.7); F('#bigbtn', { scale: 0.95 }, { scale: 1, duration: 0.25, ease: 'back.out(2)' }, t0 + 7.85);
+F('#minip', { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.7, ease: 'power3.out' }, t0 + 8.1);
+F('#okc', { opacity: 0, scale: 0.3 }, { opacity: 1, scale: 1, duration: 0.5, ease: 'back.out(2)' }, t0 + 8.5);
+F('#bar2', { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: 'power2.out' }, t0 + 8.6); show('#bl2', t0 + 8.8, 0.5);
+cap('cap-min', t0 + 9.0, 1.9);
+
+// ---- S4 customise (real brand panel)
+t0 = S.s4; const cc = CS.custom, K = 1.3;
+sceneIn('#s4', t0); sceneOut('#s4', S.s5);
+hide('#ts', t0 + 0.1, 0.5);
+F('#wb', { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.7 }, t0 + 0.2);
+F('#wbi', { opacity: 0 }, { opacity: 1, duration: 0.3 }, cc - 0.15);
+cam(cc - 0.2, 800, 450, 1, 0.01);
+cam(cc + 0.2, 700, 450, 1.25, 1.2);
+cap('cap-pal', cc + MC.cobalt / K - 1.1, 2.0);
+cap('cap-bg', cc + MC.texture / K - 1.1, 2.2);
+cam(cc + MC.accent_t / K - 1.2, 300, 500, 2.0, 1.2);
+cap('cap-col', cc + MC.accent_t / K - 0.6, 3.8);
+cam(cc + MC.font_t / K - 1.4, 300, 340, 2.0, 1.0);
+cap('cap-font', cc + MC.font_t / K - 0.6, 2.0);
+F('#wbi', { opacity: 1 }, { opacity: 0, duration: 0.3 }, cc + D.custom - 0.3);
+
+// ---- S5 templates gallery
+t0 = S.s5;
+sceneIn('#s5', t0); sceneOut('#s5', S.s6);
+hide('#wb', t0 + 0.1, 0.4); show('#gal', t0 + 0.4, 0.7);
+for (let i = 0; i < 18; i++) F('#g' + i, { opacity: 0, y: 30, scale: 0.9 }, { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: 'power3.out' }, t0 + 0.9 + 0.12 * i);
+[1, 8, 14].forEach((i, j) => F('#nw' + i, { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(2)' }, t0 + 4.2 + j));
+cap('cap-lay', t0 + 6.6, 3.4);
+
+// ---- S6 benefits
+t0 = S.s6;
+sceneIn('#s6', t0); sceneOut('#s6', S.s7);
+hide('#gal', t0 + 0.1, 0.5); fanIn(t0 + 0.7);
+rise('#b-kick', t0 + 0.9, 0.7, -16); rise('#b-ttl', t0 + 1.2, 0.9, 36);
+rise('#bn1', t0 + 2.6, 0.8, 26); rise('#bn2', t0 + 3.8, 0.8, 26); rise('#bn3', t0 + 5.0, 0.8, 26);
+
+// ---- S7 end
+t0 = S.s7;
+sceneIn('#s7', t0);
+F('#end-logo', { opacity: 0, scale: 0.7 }, { opacity: 1, scale: 1, duration: 0.8, ease: 'power3.out' }, t0 + 0.5);
+F('#end-w', { opacity: 0, x: -30 }, { opacity: 1, x: 0, duration: 0.8, ease: 'power3.out' }, t0 + 0.8);
+F('#end-t', { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.9, ease: 'power3.out' }, t0 + 1.2);
+rise('#end-s', t0 + 2.0, 0.8, 24); rise('#end-u', t0 + 2.5, 0.7, 18);
+window.__timelines = window.__timelines || {};
+window.__timelines['main'] = raw;
+raw.seek(0);
+</script></body></html>
