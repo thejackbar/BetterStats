@@ -29,7 +29,7 @@ export default function PricingCalculator() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Picker */}
         <div className="col-span-1 lg:col-span-7">
-          <p className="text-xs uppercase tracking-wide3 font-mono text-pb-faint mb-1">Build your plan</p>
+          <p className="text-xs uppercase tracking-wide3 text-pb-faint mb-1">Build your plan</p>
           <h3 className="text-2xl font-bold mb-1.5">Pick the modules you want.</h3>
           <p className="text-sm text-pb-dim mb-6">
             BetterStats is always included. Add any modules and the price updates as you go.
@@ -45,7 +45,7 @@ export default function PricingCalculator() {
                 <p className="text-xs text-pb-dim">{CORE.blurb}</p>
               </div>
               <span className="text-sm font-semibold tabular-nums mr-1">${CORE.price}</span>
-              <span className="text-[11px] font-mono text-accent uppercase tracking-wide3">In</span>
+              <span className="text-xs text-accent uppercase tracking-wide3">In</span>
             </div>
 
             {PRICED_MODULES.map((m) => {
@@ -82,7 +82,7 @@ export default function PricingCalculator() {
         {/* Result */}
         <div className="col-span-1 lg:col-span-5">
           <div className="lg:sticky lg:top-24 surface-strong p-6">
-            <p className="text-xs uppercase tracking-wide3 font-mono text-pb-faint mb-2 text-center">Your plan</p>
+            <p className="text-xs uppercase tracking-wide3 text-pb-faint mb-2 text-center">Your plan</p>
             <div className="flex items-baseline justify-center gap-1.5 mb-1">
               <span className="text-5xl font-bold tabular-nums">${total}</span>
               <span className="text-sm text-pb-faint">/ year</span>
@@ -122,7 +122,7 @@ export default function PricingCalculator() {
               <p className="text-[11px] text-accent text-center mb-4">Everything in, $146 off the lot.</p>
             )}
 
-            <button type="button" onClick={triggerTrial} className="cta-primary w-full justify-center">Get Your Club on BetterCricket today!</button>
+            <button type="button" onClick={triggerTrial} className="cta-primary w-full justify-center">Get your club on BetterCricket</button>
           </div>
         </div>
       </div>

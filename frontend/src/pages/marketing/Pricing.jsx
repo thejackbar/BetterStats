@@ -100,7 +100,7 @@ function PriceList() {
                       {m.icon}
                     </span>}
                 <p className="text-sm font-semibold"><ModuleWordmark name={m.name} accent={m.accent} /></p>
-                {m.key === 'core' && <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent mb-1">Core</p>}
+                {m.key === 'core' && <p className="text-xs uppercase tracking-wide3 text-accent mb-1">Core</p>}
                 <p className="text-2xl font-bold tabular-nums mt-1">${m.price}</p>
                 <p className="text-[11px] text-pb-faint">/ year</p>
               </div>
@@ -173,7 +173,7 @@ function ReplacesStack() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
             {/* The usual stack of separate subscriptions */}
             <div className="surface p-6 lg:p-7 flex flex-col">
-              <p className="text-[10px] uppercase tracking-wide3 font-mono text-pb-faint mb-4">The usual stack</p>
+              <p className="text-xs uppercase tracking-wide3 text-pb-faint mb-4">The usual stack</p>
               <div className="flex-1">
                 {COMPETITOR_STACK.map((c) => (
                   <div key={c.tool} className="flex items-start justify-between gap-4 py-3 border-b pb-hairline">
@@ -194,7 +194,7 @@ function ReplacesStack() {
 
             {/* BetterCricket — one price + the saving */}
             <div className="surface-strong p-6 lg:p-7 border-accent/40 bg-gradient-to-b from-accent/[0.07] to-transparent flex flex-col">
-              <p className="text-[10px] uppercase tracking-wide3 font-mono text-accent mb-4">BetterCricket, all in</p>
+              <p className="text-xs uppercase tracking-wide3 text-accent mb-4">BetterCricket, all in</p>
               <div className="flex-1 flex flex-col justify-center text-center py-4">
                 <div className="flex items-baseline justify-center gap-1.5">
                   <span className="text-6xl font-bold tabular-nums">${ALL_IN}</span>
@@ -205,7 +205,7 @@ function ReplacesStack() {
                 </p>
               </div>
               <div className="mt-4 rounded-xl bg-accent/10 border border-accent/30 px-5 py-4 text-center">
-                <p className="text-[10px] uppercase tracking-wide3 font-mono text-accent mb-1">Switch and save</p>
+                <p className="text-xs uppercase tracking-wide3 text-accent mb-1">Switch and save</p>
                 <p className="text-3xl font-bold tabular-nums text-accent">${SAVING}<span className="text-sm font-normal text-pb-dim"> / year</span></p>
               </div>
             </div>

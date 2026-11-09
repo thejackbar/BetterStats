@@ -59,7 +59,7 @@ function Hero({ onCta }) {
 
           <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 mb-4">
             <button type="button" onClick={onCta} className="cta-primary">
-              Get Your Club on BetterCricket today!
+              Get your club on BetterCricket
             </button>
             <a href="#showcase" className="cta-secondary">See it in action</a>
           </div>
@@ -234,7 +234,6 @@ function ModulesTeaser() {
       <div className="max-w-[1200px] mx-auto">
         <Reveal>
           <div className="text-center mb-12">
-            <p className="pill-neutral inline-flex mb-5">The Better platform</p>
             <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
               Then run the <span className="gradient-text">whole club.</span>
             </h2>
@@ -280,7 +279,6 @@ function Testimonials() {
       <div className="max-w-[1000px] mx-auto">
         <Reveal>
           <div className="text-center mb-10">
-            <p className="pill-neutral inline-flex mb-5">From the clubs</p>
             <h2 className="font-display font-bold text-4xl md:text-6xl tracking-tight leading-[1.05]">What clubs are saying.</h2>
           </div>
         </Reveal>
@@ -317,7 +315,6 @@ function HowItWorks() {
       <div className="max-w-[1200px] mx-auto">
         <Reveal>
           <div className="text-center mb-14">
-            <p className="pill-neutral inline-flex mb-5">How it works</p>
             <h2 className="font-display font-bold text-4xl md:text-6xl mb-4 tracking-tight leading-[1.05]">
               Live in under an hour. <span className="gradient-text">No data entry.</span>
             </h2>
@@ -330,7 +327,7 @@ function HowItWorks() {
               <div className="relative surface p-7 h-full">
                 <div className="flex items-center gap-3 mb-5">
                   <div className="w-10 h-10 rounded-xl bg-accent/15 border border-accent/40 flex items-center justify-center text-accent font-bold">{s.n}</div>
-                  <span className="text-xs font-mono text-pb-faint">{s.mins}</span>
+                  <span className="text-xs tabular-nums text-pb-dim">{s.mins}</span>
                 </div>
                 <h3 className="text-xl font-semibold mb-2">{s.title}</h3>
                 <p className="text-sm text-pb-dim leading-relaxed">{s.desc}</p>
@@ -352,7 +349,6 @@ function FinalCTA({ onCta }) {
         <div className="surface-strong p-10 lg:p-14 text-center relative overflow-hidden">
           <div className="absolute inset-0 dot-grid opacity-30 pointer-events-none" />
           <div className="relative">
-            <p className="pill mb-6 mx-auto"><span className="dot" />Limited onboarding spots</p>
             <h2 className="font-display font-bold text-4xl md:text-6xl mb-5 tracking-tight leading-[1.05]">
               Your club's history is <br className="hidden md:block" /><span className="gradient-text">waiting to be told.</span>
             </h2>

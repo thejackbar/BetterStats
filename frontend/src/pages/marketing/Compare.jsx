@@ -137,7 +137,7 @@ export default function Compare() {
                 Stop stitching five tools together every weekend. We bring your history across,
                 set it all up and have your club live in under an hour.
               </p>
-              <button type="button" onClick={triggerTrial} className="cta-primary">Get Your Club on BetterCricket today!</button>
+              <button type="button" onClick={triggerTrial} className="cta-primary">Get your club on BetterCricket</button>
             </Reveal>
           </div>
         </section>

@@ -46,7 +46,7 @@ export function DemoPoster({ className = '', eager = false }) {
           <PlayIcon className="w-7 h-7 ml-1" />
         </span>
       </span>
-      <span className="absolute left-3 bottom-3 font-mono text-[11px] tracking-wide text-white/90 bg-black/50 rounded px-2 py-1">
+      <span className="absolute left-3 bottom-3 text-xs tracking-wide text-white/90 bg-black/50 rounded px-2 py-1">
         RECORDING · {DEMO.length.toUpperCase()}
       </span>
     </div>
@@ -100,7 +100,7 @@ export function DemoFeatureCard() {
     >
       <DemoPoster className="sm:col-span-5" />
       <div className="sm:col-span-7">
-        <p className="font-mono text-[10px] tracking-wide3 text-accent uppercase mb-2">Start here</p>
+        <p className="text-xs tracking-wide3 text-accent uppercase mb-2">Start here</p>
         <h2 className="font-display font-bold text-2xl text-pb-text leading-snug mb-2 group-hover:text-accent transition-colors">
           The full platform demo
         </h2>
@@ -108,7 +108,7 @@ export function DemoFeatureCard() {
           Every module in one session, with the questions clubs asked on the night.
           The videos below then go deeper into one job at a time.
         </p>
-        <p className="font-mono text-[11px] text-pb-faint">{DEMO.recordedLabel} · {DEMO.length}</p>
+        <p className="text-xs text-pb-faint">{DEMO.recordedLabel} · {DEMO.length}</p>
       </div>
     </Link>
   )

@@ -19,7 +19,7 @@ function VideoCard({ video, canManage, reordering, onEdit, onDeleted, onError, d
       <VideoThumb poster={video.poster} title={video.title} />
       <div className="pt-4">
         {video.module_label && (
-          <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">{video.module_label}</p>
+          <p className="text-xs tracking-wide3 text-pb-faint uppercase mb-2">{video.module_label}</p>
         )}
         {/* Length sits at the right of the title line, at normal size, so it
             reads as a property of the video rather than part of its name.
@@ -30,7 +30,7 @@ function VideoCard({ video, canManage, reordering, onEdit, onDeleted, onError, d
             {video.title}
           </h2>
           {video.duration && (
-            <span className="ml-auto shrink-0 font-mono text-[11px] text-pb-faint tabular-nums">
+            <span className="ml-auto shrink-0 text-xs text-pb-faint tabular-nums">
               {video.duration}
             </span>
           )}
@@ -70,7 +70,7 @@ function VideoCard({ video, canManage, reordering, onEdit, onDeleted, onError, d
 
       {!reordering && (
         <div className="mt-3 flex items-center gap-4">
-          <Link to={`/videos/${video.slug}`} className="font-mono text-[10px] tracking-wide2 font-semibold"
+          <Link to={`/videos/${video.slug}`} className="text-xs tracking-wide2 font-semibold"
                 style={{ color: 'var(--pb-accent)' }}>
             WATCH →
           </Link>
@@ -80,12 +80,12 @@ function VideoCard({ video, canManage, reordering, onEdit, onDeleted, onError, d
               legitimately reaches this state. */}
           {video.file_present !== false && (
             <a href={`${video.src}?download=1`} download
-               className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">
+               className="text-xs tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">
               DOWNLOAD
             </a>
           )}
           {video.file_present === false && canManage && (
-            <span className="font-mono text-[10px] tracking-wide2 text-pb-faint">FILE MISSING</span>
+            <span className="text-xs tracking-wide2 text-pb-faint">FILE MISSING</span>
           )}
         </div>
       )}
@@ -172,7 +172,7 @@ export default function Videos() {
       <MarketingNav />
 
       <div id="main-content" tabIndex="-1" className="max-w-5xl mx-auto px-4 py-16 pt-28">
-        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">{VIDEO_INTRO.eyebrow}</p>
+        <p className="text-xs tracking-wide3 text-pb-faint mb-4 uppercase">{VIDEO_INTRO.eyebrow}</p>
         <h1 className="font-display font-bold text-[48px] md:text-[60px] tracking-tight text-pb-text mb-4 leading-tight">
           {VIDEO_INTRO.heading}
         </h1>

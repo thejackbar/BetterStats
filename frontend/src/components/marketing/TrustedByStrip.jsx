@@ -34,7 +34,7 @@ function StripLogo({ club, className }) {
   if (!ok || !club.logo) {
     const initials = club.name.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()
     return (
-      <span aria-hidden="true" className={`${className} rounded-md border pb-hairline flex items-center justify-center text-[10px] font-mono text-pb-dim`}>
+      <span aria-hidden="true" className={`${className} rounded-md border pb-hairline flex items-center justify-center text-xs text-pb-dim`}>
         {initials}
       </span>
     )
@@ -55,7 +55,7 @@ export default function TrustedByStrip({ compact = false }) {
   return (
     <section className={`px-4 sm:px-6 lg:px-10 border-y pb-hairline ${compact ? 'py-6' : 'py-12'}`}>
       <div className="max-w-[1200px] mx-auto flex flex-col sm:flex-row sm:items-center gap-x-10 gap-y-3">
-        <p className={`font-mono uppercase tracking-wide3 font-medium shrink-0 text-pb-faint ${compact ? 'text-[10px]' : 'text-xs'}`}>
+        <p className="uppercase tracking-wide3 font-medium shrink-0 text-pb-faint text-xs">
           Trusted by clubs at
         </p>
         <div className="logo-marquee">

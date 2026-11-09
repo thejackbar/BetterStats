@@ -104,6 +104,28 @@
   --pb-faintest: #b6bac6;
 }
 
+/* Marketing site only. ThemeContext sets data-surface="marketing" on <html>
+   for the public BetterCricket pages (and /trial, /demo, /preview), never for
+   a club page. The default muted greys sit at about 3:1 (faint) and 1.9:1
+   (faintest) on the dark marketing background, which fails WCAG AA for the
+   small copy those pages carry. These values keep three distinct steps and
+   clear 4.5:1 for dim and faint on bg, surface and surface2. Club pages keep
+   the default tokens above.
+   The light selectors cover /demo, which wraps itself in data-theme="light",
+   and an <html> that is light because of a visitor override. */
+html[data-surface="marketing"],
+html[data-surface="marketing"] [data-theme="dark"] {
+  --pb-dim:      #9ba1b3;
+  --pb-faint:    #80869a;
+  --pb-faintest: #656b7e;
+}
+html[data-surface="marketing"][data-theme="light"],
+html[data-surface="marketing"] [data-theme="light"] {
+  --pb-dim:      #4d5263;
+  --pb-faint:    #636a7d;
+  --pb-faintest: #8e93a4;
+}
+
 /* Ink tokens — the accent/positive/red as *text*, which needs darkening on a
    white background to stay legible. `--pb-accent-ink` is derived from whatever
    --pb-accent resolves to on the element it's computed on, so a module surface

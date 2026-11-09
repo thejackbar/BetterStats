@@ -112,7 +112,7 @@ function SuccessState({ state, recordingPending, watchUrl }) {
   return (
     <div className="text-left" data-testid="demo-success">
       <div className="pb-card p-6 bg-pb-surface">
-        <p className="font-mono text-[11px] tracking-wide text-emerald-600 mb-2">
+        <p className="text-xs tracking-wide text-emerald-600 mb-2">
           {state.past ? 'YOU’RE ON THE LIST' : 'YOU’RE REGISTERED'}
         </p>
         <h2 className="font-display font-bold text-xl leading-tight mb-3">
@@ -154,7 +154,7 @@ function SuccessState({ state, recordingPending, watchUrl }) {
 
         {!state.past && (
           <div className="mt-5 pt-5 border-t pb-hairline">
-            <p className="font-mono text-[11px] tracking-wide text-pb-faint mb-2">ADD TO CALENDAR</p>
+            <p className="text-xs tracking-wide text-pb-faint mb-2">ADD TO CALENDAR</p>
             <div className="flex flex-wrap gap-2">
               <a
                 href={calendarUrl}
@@ -228,7 +228,7 @@ function RecordingState() {
       </div>
 
       <div className="pb-card p-6 mt-4 bg-pb-surface">
-        <p className="font-mono text-[11px] tracking-wide text-pb-faint mb-2">ABOUT THIS SESSION</p>
+        <p className="text-xs tracking-wide text-pb-faint mb-2">ABOUT THIS SESSION</p>
         <p className="text-sm text-pb-dim leading-relaxed mb-4">
           A walk through the whole of BetterCricket: how every season your club
           has played imports itself, running selection and availability without
@@ -238,7 +238,7 @@ function RecordingState() {
           scorecards you already have. It finishes with the questions clubs
           asked on the night.
         </p>
-        <p className="font-mono text-[11px] tracking-wide text-pb-faintest">
+        <p className="text-xs tracking-wide text-pb-faint">
           {WEBINAR.recordedLabel} · about {WEBINAR.durationMinutes} minutes
         </p>
       </div>
@@ -401,7 +401,7 @@ function RegistrationForm({ state, onSuccess }) {
         <button
           type="button"
           onClick={() => setFormError('')}
-          className="mt-3 font-mono text-[11px] text-pb-faint underline hover:text-pb-text"
+          className="mt-3 text-xs text-pb-faint underline hover:text-pb-text"
         >
           ← Try registering again
         </button>
@@ -417,7 +417,7 @@ function RegistrationForm({ state, onSuccess }) {
             half-width text input is too narrow to read what you typed. */}
         <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="demo-first-name" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
+            <label htmlFor="demo-first-name" className="block text-xs tracking-wide text-pb-faint mb-1.5">
               FIRST NAME
             </label>
             <input
@@ -433,7 +433,7 @@ function RegistrationForm({ state, onSuccess }) {
             {err('firstName')}
           </div>
           <div>
-            <label htmlFor="demo-last-name" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
+            <label htmlFor="demo-last-name" className="block text-xs tracking-wide text-pb-faint mb-1.5">
               LAST NAME
             </label>
             <input
@@ -450,7 +450,7 @@ function RegistrationForm({ state, onSuccess }) {
           </div>
         </div>
         <div>
-          <label htmlFor="demo-email" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
+          <label htmlFor="demo-email" className="block text-xs tracking-wide text-pb-faint mb-1.5">
             EMAIL
           </label>
           <input
@@ -468,7 +468,7 @@ function RegistrationForm({ state, onSuccess }) {
           {err('email')}
         </div>
         <div>
-          <label htmlFor="demo-club" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
+          <label htmlFor="demo-club" className="block text-xs tracking-wide text-pb-faint mb-1.5">
             YOUR CLUB
           </label>
           <input
@@ -494,8 +494,8 @@ function RegistrationForm({ state, onSuccess }) {
             `inputMode="tel"` is what puts a phone keypad in front of the ~all
             of this traffic that is on a phone. */}
         <div>
-          <label htmlFor="demo-phone" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
-            PHONE <span className="text-pb-faintest">(OPTIONAL)</span>
+          <label htmlFor="demo-phone" className="block text-xs tracking-wide text-pb-faint mb-1.5">
+            PHONE <span className="text-pb-faint">(OPTIONAL)</span>
           </label>
           <input
             id="demo-phone"
@@ -516,8 +516,8 @@ function RegistrationForm({ state, onSuccess }) {
             there looking required. */}
         {showRole ? (
           <div>
-            <label htmlFor="demo-role" className="block font-mono text-[11px] tracking-wide text-pb-faint mb-1.5">
-              YOUR ROLE AT THE CLUB <span className="text-pb-faintest">(OPTIONAL)</span>
+            <label htmlFor="demo-role" className="block text-xs tracking-wide text-pb-faint mb-1.5">
+              YOUR ROLE AT THE CLUB <span className="text-pb-faint">(OPTIONAL)</span>
             </label>
             <select
               id="demo-role"
@@ -534,7 +534,7 @@ function RegistrationForm({ state, onSuccess }) {
             type="button"
             onClick={() => setShowRole(true)}
             data-testid="demo-role-toggle"
-            className="font-mono text-[11px] text-pb-faint underline hover:text-pb-text"
+            className="text-xs text-pb-faint underline hover:text-pb-text"
           >
             + Add your role at the club (optional)
           </button>
@@ -594,11 +594,11 @@ function GoDeeper() {
             <VideoThumb poster={v.poster} title={v.title} />
             <div className="pt-3">
               {v.module_label && (
-                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">{v.module_label}</p>
+                <p className="text-xs tracking-wide3 text-pb-faint uppercase mb-1">{v.module_label}</p>
               )}
               <div className="flex items-baseline gap-3">
                 <p className="font-display font-semibold text-base leading-snug group-hover:text-accent transition-colors">{v.title}</p>
-                {v.duration && <span className="ml-auto shrink-0 font-mono text-[11px] text-pb-faint tabular-nums">{v.duration}</span>}
+                {v.duration && <span className="ml-auto shrink-0 text-xs text-pb-faint tabular-nums">{v.duration}</span>}
               </div>
             </div>
           </Link>
@@ -687,7 +687,7 @@ export default function Demo() {
               </p>
               <p
                 data-testid="demo-when"
-                className="inline-flex items-center gap-2 px-4 py-2 mb-6 rounded-full border pb-hairline bg-pb-surface font-mono text-[12px] sm:text-[13px] tracking-wide"
+                className="inline-flex items-center gap-2 px-4 py-2 mb-6 rounded-full border pb-hairline bg-pb-surface text-[12px] sm:text-[13px] tracking-wide"
               >
                 {!state.past && <span aria-hidden="true">🔴</span>}
                 {state.whenLabel}
@@ -744,13 +744,13 @@ export default function Demo() {
                 decoding="async"
                 className="w-full rounded-xl border pb-hairline"
               />
-              <figcaption className="font-mono text-[11px] text-pb-faintest mt-2 text-center">
+              <figcaption className="text-xs text-pb-faint mt-2 text-center">
                 Every figure on a BetterCricket page comes from your club&rsquo;s own scorecards.
               </figcaption>
             </figure>
 
             <div className="mt-10 text-center">
-              <p className="font-mono text-[11px] tracking-wide text-pb-faint mb-3">WHO IT&rsquo;S FOR</p>
+              <p className="text-xs tracking-wide text-pb-faint mb-3">WHO IT&rsquo;S FOR</p>
               <div className="flex flex-wrap justify-center gap-2">
                 {AUDIENCE.map((who) => (
                   <span key={who} className="px-3.5 py-1.5 rounded-full border pb-hairline bg-pb-surface text-sm">
@@ -775,7 +775,7 @@ export default function Demo() {
               ))}
             </div>
 
-            <p className="text-center font-mono text-[11px] text-pb-faintest mt-8">
+            <p className="text-center text-xs text-pb-faint mt-8">
               Questions before the demo? <a href={`mailto:${SUPPORT_EMAIL}`} className="underline hover:text-pb-text">{SUPPORT_EMAIL}</a>
             </p>
           </div>

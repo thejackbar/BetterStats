@@ -58,7 +58,7 @@ export default function Blog() {
       <MarketingNav />
 
       <div id="main-content" tabIndex="-1" className="max-w-3xl mx-auto px-4 py-16 pt-28">
-        <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-4 uppercase">Stats guides & club tips</p>
+        <p className="text-xs tracking-wide3 text-pb-faint mb-4 uppercase">Stats guides & club tips</p>
         <h1 className="font-display font-bold text-[48px] md:text-[60px] tracking-tight text-pb-text mb-4 leading-tight">Blog.</h1>
         <p className="text-pb-dim text-lg mb-12">Cricket statistics explained, for club players, captains and committee members.</p>
 
@@ -72,14 +72,14 @@ export default function Blog() {
               <PostThumb src={post.image} title={post.title} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-4 mb-2">
-                  <p className="font-mono text-[10px] tracking-wide3 text-pb-faint">{formatDate(post.date)}</p>
-                  <p className="font-mono text-[10px] tracking-wide3 text-pb-faintest">{post.readTime}</p>
+                  <p className="text-xs tracking-wide3 text-pb-faint">{formatDate(post.date)}</p>
+                  <p className="text-xs tracking-wide3 text-pb-faint">{post.readTime}</p>
                 </div>
                 <h2 className="font-display font-bold text-[18px] md:text-[20px] text-pb-text leading-snug mb-1.5 group-hover:text-accent transition-colors">
                   {post.title}
                 </h2>
                 <p className="text-pb-dim text-sm leading-relaxed line-clamp-2">{post.description}</p>
-                <p className="mt-2.5 font-mono text-[10px] tracking-wide2 transition-colors" style={{ color: 'var(--pb-accent)' }}>
+                <p className="mt-2.5 text-xs tracking-wide2 transition-colors" style={{ color: 'var(--pb-accent)' }}>
                   READ →
                 </p>
               </div>

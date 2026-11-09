@@ -15,7 +15,7 @@ export default function Terms() {
 
       <div id="main-content" tabIndex="-1" className="max-w-3xl mx-auto px-4 py-16 pt-28">
         <h1 className="font-display font-bold text-4xl mb-2">Terms of Service</h1>
-        <p className="font-mono text-[10px] text-pb-faint mb-10">Last updated: 9 June 2026</p>
+        <p className="text-xs text-pb-faint mb-10">Last updated: 9 June 2026</p>
 
         <div className="space-y-8 text-pb-dim leading-relaxed">
           <section>

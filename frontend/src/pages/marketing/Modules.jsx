@@ -111,7 +111,7 @@ function PricingStrip() {
           {[CORE, ...PRICED_MODULES].map((m) => (
             <div key={m.key} className={`surface p-5 ${m.key === 'core' ? 'border-accent/40' : ''}`}>
               <p className="font-display font-bold text-sm mb-1"><ModuleWordmark name={m.name} accent={m.accent} /></p>
-              {m.key === 'core' && <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent mb-1">Core</p>}
+              {m.key === 'core' && <p className="text-xs uppercase tracking-wide3 text-accent mb-1">Core</p>}
               <p className="text-2xl font-bold tabular-nums mt-1">${m.price}<span className="text-xs text-pb-faint font-normal">/yr</span></p>
             </div>
           ))}

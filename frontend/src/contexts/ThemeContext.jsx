@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
-import { isMarketingPath } from '../lib/marketingPaths'
+import { isMarketingPath, rendersOwnMarketingNav } from '../lib/marketingPaths'
 
 /**
  * Light/dark theme state.
@@ -25,6 +25,9 @@ const systemTheme = () =>
 export function ThemeProvider({ children }) {
   const { pathname } = useLocation()
   const onMarketingPath = isMarketingPath(pathname)
+  // Wider than onMarketingPath: /trial, /demo and /preview/* are marketing
+  // pages too (they pick their own theme) and want the marketing contrast.
+  const onMarketingSurface = onMarketingPath || rendersOwnMarketingNav(pathname)
   const [override, setOverride] = useState(() => {
     const v = localStorage.getItem(STORAGE_KEY)
     return v === 'light' || v === 'dark' ? v : null
@@ -41,6 +44,12 @@ export function ThemeProvider({ children }) {
   useEffect(() => {
     document.documentElement.dataset.theme = resolved
   }, [resolved])
+
+  // Marker for the marketing-only text-contrast tokens in styles/theme.css.
+  useEffect(() => {
+    if (onMarketingSurface) document.documentElement.dataset.surface = 'marketing'
+    else delete document.documentElement.dataset.surface
+  }, [onMarketingSurface])
 
   // Track the OS preference while following 'auto' with no visitor override
   // and off the (always-dark) marketing site.

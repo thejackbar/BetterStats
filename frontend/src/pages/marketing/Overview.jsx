@@ -32,7 +32,7 @@ function Placeholder({ icon, accent, label }) {
   return (
     <div className="rounded-2xl border pb-hairline bg-pb-surface2/40 aspect-[16/10] flex flex-col items-center justify-center gap-3">
       <span className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl text-navy-950" style={{ background: accent }}>{icon}</span>
-      <p className="text-sm text-pb-faint font-mono">{label}</p>
+      <p className="text-sm text-pb-faint">{label}</p>
     </div>
   )
 }
@@ -105,7 +105,7 @@ function Showcase() {
                 <div className="product-shadow rounded-2xl overflow-hidden">
                   <ScreenshotOrMock src={s.src} alt={s.alt} fallback={s.mock} />
                 </div>
-                <figcaption className="mt-3 text-center text-xs font-mono uppercase tracking-wide3 text-pb-faint group-hover:text-accent transition-colors">{s.label}</figcaption>
+                <figcaption className="mt-3 text-center text-xs uppercase tracking-wide3 text-pb-faint group-hover:text-accent transition-colors">{s.label}</figcaption>
               </figure>
             </Reveal>
           ))}
@@ -136,7 +136,7 @@ function Core() {
                   <img src={CORE_MARKETING.logo} alt="" className="w-11 h-11 rounded-xl" />
                   <div>
                     <p className="text-xl font-bold"><ModuleWordmark name="BetterStats" accent={CORE_MARKETING.accent} /></p>
-                    <p className="text-[11px] font-mono uppercase tracking-wide3 text-accent">In every plan</p>
+                    <p className="text-xs uppercase tracking-wide3 text-accent">In every plan</p>
                   </div>
                 </div>
                 <p className="text-pb-dim leading-relaxed mb-5">
@@ -222,7 +222,7 @@ function HowItWorks() {
               <div className="relative surface p-7 h-full">
                 <div className="flex items-center gap-3 mb-5">
                   <div className="w-10 h-10 rounded-xl bg-accent/15 border border-accent/40 flex items-center justify-center text-accent font-bold">{s.n}</div>
-                  <span className="text-xs font-mono text-pb-faint">{s.mins}</span>
+                  <span className="text-xs text-pb-faint">{s.mins}</span>
                 </div>
                 <h3 className="text-xl font-semibold mb-2">{s.title}</h3>
                 <p className="text-sm text-pb-dim leading-relaxed">{s.desc}</p>
@@ -264,7 +264,7 @@ function PricingSnapshot() {
                   {m.icon}
                 </span>
                 <p className="text-sm font-semibold">{m.name}</p>
-                {m.key === 'core' && <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent">Core</p>}
+                {m.key === 'core' && <p className="text-xs uppercase tracking-wide3 text-accent">Core</p>}
                 <p className="text-2xl font-bold tabular-nums mt-1">${m.price}<span className="text-xs text-pb-faint font-normal">/yr</span></p>
               </div>
             ))}
@@ -314,7 +314,6 @@ function FinalCTA({ onCta }) {
         <div className="surface-strong p-10 lg:p-14 text-center relative overflow-hidden">
           <div className="absolute inset-0 dot-grid opacity-30 pointer-events-none" />
           <div className="relative">
-            <p className="pill mb-6 mx-auto"><span className="dot" />Limited onboarding spots</p>
             <h2 className="font-display font-bold text-4xl md:text-6xl mb-5 tracking-tight leading-[1.05]">
               One platform. <span className="gradient-text">Your whole club.</span>
             </h2>

@@ -34,7 +34,7 @@ function ModuleMock({ m }) {
           <img src={m.logo} alt="" className="w-9 h-9 rounded-lg" />
           <div>
             <p className="font-bold text-sm"><ModuleWordmark name={m.name} accent={m.accent} /></p>
-            <p className="text-[10px] font-mono uppercase tracking-wide3 text-pb-faint">{m.audience}</p>
+            <p className="text-xs uppercase tracking-wide3 text-pb-faint">{m.audience}</p>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2.5">
@@ -127,7 +127,7 @@ export default function ModuleDetail() {
                 <img src={m.logo} alt="" className="w-12 h-12 rounded-xl" />
                 <div className="flex flex-col items-start gap-1">
                   <span className="text-xl font-bold leading-none"><ModuleWordmark name={m.name} accent={m.accent} /></span>
-                  <span className="text-[11px] font-mono uppercase tracking-wide3 text-pb-dim">{m.audience}</span>
+                  <span className="text-xs uppercase tracking-wide3 text-pb-dim">{m.audience}</span>
                 </div>
               </div>
               <h1 className="font-display font-bold text-[34px] sm:text-[44px] lg:text-[54px] tracking-tight leading-[1.02] mb-5">
@@ -135,7 +135,7 @@ export default function ModuleDetail() {
               </h1>
               <p className="text-lg text-pb-dim leading-relaxed mb-8 max-w-xl">{m.summary}</p>
               <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3">
-                <button type="button" onClick={triggerTrial} className="cta-primary">Get Your Club on BetterCricket today!</button>
+                <button type="button" onClick={triggerTrial} className="cta-primary">Get your club on BetterCricket</button>
                 {m.deepTour
                   ? <Link to={m.deepTour} className="cta-secondary">Full feature tour →</Link>
                   : <Link to="/pricing" className="cta-secondary">See pricing</Link>}
@@ -234,7 +234,7 @@ export default function ModuleDetail() {
             )}
             {m.comingSoon && (
               <div className="surface p-5 mt-6 border-dashed">
-                <p className="text-[10px] font-mono uppercase tracking-wide3 text-pb-faint mb-3">On the roadmap</p>
+                <p className="text-xs uppercase tracking-wide3 text-pb-faint mb-3">On the roadmap</p>
                 <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {m.comingSoon.map((c) => (
                     <li key={c} className="flex items-center gap-2.5 text-sm text-pb-dim"><span className="pill-neutral text-[10px]">Soon</span>{c}</li>
@@ -280,7 +280,7 @@ export default function ModuleDetail() {
         {/* Pricing band */}
         <section className="px-4 sm:px-6 lg:px-10 py-16 border-t pb-hairline bg-black/20">
           <div className="max-w-[900px] mx-auto surface-strong p-8 lg:p-10 text-center">
-            <p className="text-[10px] font-mono uppercase tracking-wide3 text-accent mb-3">Pricing</p>
+            <p className="text-xs uppercase tracking-wide3 text-accent mb-3">Pricing</p>
             <h2 className="font-display font-bold text-2xl md:text-3xl mb-3 tracking-tight">{modulePrice(m) || 'Included in every plan.'}</h2>
             <p className="text-pb-dim max-w-xl mx-auto mb-7">
               {m.isCore
